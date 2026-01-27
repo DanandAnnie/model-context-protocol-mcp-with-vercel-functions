@@ -1,0 +1,542 @@
+{
+  "name": "Email Management Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false
+      },
+      "id": "gmail-trigger",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-credentials",
+          "name": "Gmail Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "condition-urgent",
+              "leftValue": "={{ $json.labelIds }}",
+              "rightValue": "IMPORTANT",
+              "operator": {
+                "type": "array",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "check-important",
+      "name": "Check If Important",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "condition-newsletter",
+              "leftValue": "={{ $json.payload.headers.find(h => h.name === 'From').value }}",
+              "rightValue": "newsletter|updates|digest|weekly|monthly",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            },
+            {
+              "id": "condition-unsubscribe",
+              "leftValue": "={{ $json.payload.headers.find(h => h.name === 'List-Unsubscribe') }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "check-newsletter",
+      "name": "Check If Newsletter",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [500, 550]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "condition-meeting",
+              "leftValue": "={{ $json.payload.headers.find(h => h.name === 'Subject').value }}",
+              "rightValue": "meeting|calendar|invite|schedule|appointment",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            },
+            {
+              "id": "condition-calendar-invite",
+              "leftValue": "={{ $json.payload.mimeType }}",
+              "rightValue": "text/calendar",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "check-meeting-request",
+      "name": "Check If Meeting Request",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [500, 800]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $env.NOTIFICATION_EMAIL }}",
+        "subject": "=Urgent Email: {{ $json.payload.headers.find(h => h.name === 'Subject').value }}",
+        "emailType": "text",
+        "message": "=You have received an important email.\n\nFrom: {{ $json.payload.headers.find(h => h.name === 'From').value }}\nSubject: {{ $json.payload.headers.find(h => h.name === 'Subject').value }}\nDate: {{ $json.payload.headers.find(h => h.name === 'Date').value }}\n\nPlease review this email as soon as possible.",
+        "options": {}
+      },
+      "id": "notify-important",
+      "name": "Send Notification for Important Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [750, 200],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-credentials",
+          "name": "Gmail Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "messageId": "={{ $json.id }}",
+        "labelIds": ["Label_Important_Processed"]
+      },
+      "id": "label-important",
+      "name": "Label as Important Processed",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1000, 200],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-credentials",
+          "name": "Gmail Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "messageId": "={{ $json.id }}",
+        "labelIds": ["Label_Newsletters"],
+        "options": {
+          "addLabelIds": ["Label_Newsletters"]
+        }
+      },
+      "id": "label-newsletter",
+      "name": "Label as Newsletter",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [750, 450],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-credentials",
+          "name": "Gmail Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "messageId": "={{ $json.id }}",
+        "options": {}
+      },
+      "id": "archive-newsletter",
+      "name": "Archive Newsletter",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1000, 450],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-credentials",
+          "name": "Gmail Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "event",
+        "operation": "create",
+        "calendarId": "primary",
+        "summary": "=Meeting Request: {{ $json.payload.headers.find(h => h.name === 'Subject').value }}",
+        "description": "=Auto-created from email\n\nFrom: {{ $json.payload.headers.find(h => h.name === 'From').value }}\n\nOriginal email ID: {{ $json.id }}",
+        "start": "={{ $now.plus({days: 1}).toISO() }}",
+        "end": "={{ $now.plus({days: 1, hours: 1}).toISO() }}",
+        "options": {
+          "sendUpdates": "all"
+        }
+      },
+      "id": "create-calendar-event",
+      "name": "Create Calendar Reminder",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.2,
+      "position": [750, 700],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "google-calendar-credentials",
+          "name": "Google Calendar Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "messageId": "={{ $json.id }}",
+        "labelIds": ["Label_Meeting_Requests"]
+      },
+      "id": "label-meeting",
+      "name": "Label as Meeting Request",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1000, 700],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-credentials",
+          "name": "Gmail Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "messageId": "={{ $json.id }}",
+        "labelIds": ["Label_General"]
+      },
+      "id": "label-general",
+      "name": "Label as General",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [750, 950],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-credentials",
+          "name": "Gmail Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract email statistics for logging\nconst email = $input.first().json;\n\nconst from = email.payload?.headers?.find(h => h.name === 'From')?.value || 'Unknown';\nconst subject = email.payload?.headers?.find(h => h.name === 'Subject')?.value || 'No Subject';\nconst date = email.payload?.headers?.find(h => h.name === 'Date')?.value || 'Unknown Date';\n\nreturn {\n  json: {\n    emailId: email.id,\n    from: from,\n    subject: subject,\n    date: date,\n    processedAt: new Date().toISOString(),\n    labels: email.labelIds || []\n  }\n};"
+      },
+      "id": "log-processing",
+      "name": "Log Email Processing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.GOOGLE_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Email Log"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "id": "log-to-sheets",
+      "name": "Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1500, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets-credentials",
+          "name": "Google Sheets Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "={{ $env.SLACK_CHANNEL }}",
+        "text": "=:email: *New Important Email*\n\n*From:* {{ $json.from }}\n*Subject:* {{ $json.subject }}\n*Date:* {{ $json.date }}\n\n_Processed at: {{ $json.processedAt }}_",
+        "otherOptions": {}
+      },
+      "id": "slack-notify",
+      "name": "Slack Notification",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1500, 100],
+      "credentials": {
+        "slackApi": {
+          "id": "slack-credentials",
+          "name": "Slack Account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "no-op-end",
+      "name": "End",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1750, 300]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Check If Important",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check If Important": {
+      "main": [
+        [
+          {
+            "node": "Send Notification for Important Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check If Newsletter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Notification for Important Email": {
+      "main": [
+        [
+          {
+            "node": "Label as Important Processed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label as Important Processed": {
+      "main": [
+        [
+          {
+            "node": "Log Email Processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check If Newsletter": {
+      "main": [
+        [
+          {
+            "node": "Label as Newsletter",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check If Meeting Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label as Newsletter": {
+      "main": [
+        [
+          {
+            "node": "Archive Newsletter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Archive Newsletter": {
+      "main": [
+        [
+          {
+            "node": "Log Email Processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check If Meeting Request": {
+      "main": [
+        [
+          {
+            "node": "Create Calendar Reminder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Label as General",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Calendar Reminder": {
+      "main": [
+        [
+          {
+            "node": "Label as Meeting Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label as Meeting Request": {
+      "main": [
+        [
+          {
+            "node": "Log Email Processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label as General": {
+      "main": [
+        [
+          {
+            "node": "Log Email Processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Email Processing": {
+      "main": [
+        [
+          {
+            "node": "Log to Google Sheets",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Slack Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Notification": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "email",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    },
+    {
+      "name": "automation",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    },
+    {
+      "name": "productivity",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "versionId": "1"
+}

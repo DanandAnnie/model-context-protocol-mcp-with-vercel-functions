@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n-email-workflows
+    restart: unless-stopped
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      # Basic Settings
+      - N8N_HOST=${N8N_HOST:-localhost}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=${N8N_PROTOCOL:-http}
+      - N8N_EDITOR_BASE_URL=${N8N_EDITOR_BASE_URL:-http://localhost:5678}
+      - WEBHOOK_URL=${WEBHOOK_URL:-http://localhost:5678}
+
+      # Security
+      - N8N_BASIC_AUTH_ACTIVE=${N8N_BASIC_AUTH_ACTIVE:-true}
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD:-changeme}
+
+      # Database
+      - DB_TYPE=sqlite
+      - DB_SQLITE_DATABASE=/home/node/.n8n/database.sqlite
+
+      # Execution Settings
+      - EXECUTIONS_DATA_SAVE_ON_ERROR=all
+      - EXECUTIONS_DATA_SAVE_ON_SUCCESS=all
+      - EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS=true
+
+      # Timezone
+      - GENERIC_TIMEZONE=${TIMEZONE:-UTC}
+      - TZ=${TIMEZONE:-UTC}
+
+      # Email Workflow Settings
+      - NOTIFICATION_EMAIL=${NOTIFICATION_EMAIL:-}
+      - GOOGLE_SHEET_ID=${GOOGLE_SHEET_ID:-}
+      - SLACK_CHANNEL=${SLACK_CHANNEL:-}
+      - AUTO_REPLY_ENABLED=${AUTO_REPLY_ENABLED:-false}
+      - AUTO_REPLY_MESSAGE=${AUTO_REPLY_MESSAGE:-Thank you for your email. I will respond as soon as possible.}
+      - SENDER_NAME=${SENDER_NAME:-}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./workflows:/home/node/workflows:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:5678/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  n8n_data:
+    driver: local

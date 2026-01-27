@@ -2,6 +2,42 @@
 
 This directory contains n8n workflow configurations for automated email management. These workflows help you organize, categorize, auto-reply, and clean up your emails automatically.
 
+## Quick Start
+
+### Option 1: Docker (Recommended)
+
+```bash
+# Start n8n with Docker
+docker-compose up -d
+
+# Open n8n in browser
+open http://localhost:5678
+
+# Default credentials: admin / changeme
+```
+
+### Option 2: Local Installation
+
+```bash
+# Install dependencies
+pnpm install
+
+# Setup n8n configuration
+pnpm run n8n:setup
+
+# Start n8n
+pnpm run n8n:start
+
+# In another terminal, import workflows
+pnpm run n8n:import
+```
+
+### Option 3: Manual Import
+
+1. Start your existing n8n instance
+2. Go to **Workflows** → **Import from File**
+3. Import the JSON files from this directory
+
 ## Workflows Overview
 
 ### 1. Email Management Workflow (`email-management.json`)

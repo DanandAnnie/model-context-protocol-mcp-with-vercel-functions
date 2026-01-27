@@ -1,2 +1,14 @@
 .vercel
 node_modules
+
+# n8n
+.n8n/
+*.sqlite
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Docker
+docker-compose.override.yml

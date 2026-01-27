@@ -1,18 +1,23 @@
 {
   "name": "mcp-on-vercel",
   "version": "1.0.0",
-  "description": "",
+  "description": "MCP server with n8n email management workflows",
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "n8n:start": "n8n start",
+    "n8n:dev": "N8N_LOG_LEVEL=debug n8n start",
+    "n8n:import": "node scripts/import-workflows.mjs",
+    "n8n:setup": "node scripts/setup-n8n.mjs"
   },
-  "keywords": [],
+  "keywords": ["n8n", "email", "automation", "mcp"],
   "author": "",
   "license": "ISC",
   "packageManager": "pnpm@9.4.0",
   "dependencies": {
     "mcp-handler": "^1.0.1",
+    "n8n": "^1.70.0",
     "zod": "^3.24.2"
   },
   "devDependencies": {

@@ -1,5 +1,33 @@
 # Run an MCP Server on Vercel
 
+## n8n Email Management Workflows
+
+This project includes n8n workflows for automated email management. See [`workflows/README.md`](./workflows/README.md) for details.
+
+### Quick Start with n8n
+
+```bash
+# Option 1: Docker (recommended)
+docker-compose up -d
+# Open http://localhost:5678 (credentials: admin / changeme)
+
+# Option 2: Local
+pnpm install
+pnpm run n8n:setup
+pnpm run n8n:start
+pnpm run n8n:import  # in another terminal
+```
+
+### Available Workflows
+
+| Workflow | Description |
+|----------|-------------|
+| **Email Management** | Categorizes emails, applies labels, sends notifications, creates calendar events |
+| **Email Auto-Reply** | Automated out-of-office responses with smart filtering |
+| **Email Cleanup** | Daily archiving of old emails and spam deletion |
+
+---
+
 ## Usage
 
 Update `api/server.ts` with your tools, prompts, and resources following the [MCP TypeScript SDK documentation](https://github.com/modelcontextprotocol/typescript-sdk/tree/main?tab=readme-ov-file#server).

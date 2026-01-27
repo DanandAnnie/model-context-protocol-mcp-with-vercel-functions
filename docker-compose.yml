@@ -3,7 +3,7 @@ version: '3.8'
 services:
   n8n:
     image: n8nio/n8n:latest
-    container_name: n8n-email-workflows
+    container_name: n8n-automation-workflows
     restart: unless-stopped
     ports:
       - "${N8N_PORT:-5678}:5678"
@@ -40,6 +40,18 @@ services:
       - AUTO_REPLY_ENABLED=${AUTO_REPLY_ENABLED:-false}
       - AUTO_REPLY_MESSAGE=${AUTO_REPLY_MESSAGE:-Thank you for your email. I will respond as soon as possible.}
       - SENDER_NAME=${SENDER_NAME:-}
+
+      # HeyGen Video Settings
+      - HEYGEN_API_KEY=${HEYGEN_API_KEY:-}
+
+      # Cloudinary Video Processing
+      - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME:-}
+      - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY:-}
+      - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET:-}
+
+      # Shotstack Video Processing
+      - SHOTSTACK_API_KEY=${SHOTSTACK_API_KEY:-}
+      - SHOTSTACK_STAGE=${SHOTSTACK_STAGE:-sandbox}
     volumes:
       - n8n_data:/home/node/.n8n
       - ./workflows:/home/node/workflows:ro

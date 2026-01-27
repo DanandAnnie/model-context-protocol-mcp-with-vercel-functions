@@ -1,0 +1,515 @@
+{
+  "name": "HeyGen Video Generation with Overlays",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "heygen-video",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "heygen-video-webhook"
+    },
+    {
+      "parameters": {
+        "content": "## HeyGen Video Generation with Overlays\n\nThis workflow:\n1. Receives a request to generate a video\n2. Creates a video using HeyGen API\n3. Polls for completion\n4. Downloads the video\n5. Adds text/image overlays via Cloudinary\n6. Returns the final video URL\n\n**Required Environment Variables:**\n- HEYGEN_API_KEY\n- CLOUDINARY_CLOUD_NAME\n- CLOUDINARY_API_KEY\n- CLOUDINARY_API_SECRET",
+        "height": 280,
+        "width": 400
+      },
+      "id": "workflow-note",
+      "name": "Workflow Documentation",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate and prepare HeyGen request\nconst input = $input.first().json;\n\n// Default avatar and voice settings\nconst avatarId = input.avatar_id || 'Kristin_pubblic_2_20240108';\nconst voiceId = input.voice_id || '1bd001e7e50f421d891986aad5158bc8';\n\n// Script/content to speak\nconst script = input.script || input.text || 'Hello, this is a test video.';\n\n// Overlay configuration (for later processing)\nconst overlays = input.overlays || [];\n\n// Video dimensions\nconst width = input.width || 1920;\nconst height = input.height || 1080;\n\nreturn {\n  json: {\n    avatarId,\n    voiceId,\n    script,\n    overlays,\n    width,\n    height,\n    originalRequest: input\n  }\n};"
+      },
+      "id": "prepare-request",
+      "name": "Prepare HeyGen Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.heygen.com/v2/video/generate",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"video_inputs\": [\n    {\n      \"character\": {\n        \"type\": \"avatar\",\n        \"avatar_id\": \"{{ $json.avatarId }}\",\n        \"avatar_style\": \"normal\"\n      },\n      \"voice\": {\n        \"type\": \"text\",\n        \"input_text\": \"{{ $json.script }}\",\n        \"voice_id\": \"{{ $json.voiceId }}\"\n      }\n    }\n  ],\n  \"dimension\": {\n    \"width\": {{ $json.width }},\n    \"height\": {{ $json.height }}\n  }\n}",
+        "options": {}
+      },
+      "id": "create-heygen-video",
+      "name": "Create HeyGen Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [750, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "heygen-api-key",
+          "name": "HeyGen API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Store video ID and overlay config for polling\nconst response = $input.first().json;\nconst previousData = $('Prepare HeyGen Request').first().json;\n\nif (response.error) {\n  throw new Error(`HeyGen API Error: ${response.error.message || JSON.stringify(response.error)}`);\n}\n\nconst videoId = response.data?.video_id;\n\nif (!videoId) {\n  throw new Error('No video_id returned from HeyGen API');\n}\n\nreturn {\n  json: {\n    videoId,\n    overlays: previousData.overlays,\n    pollCount: 0,\n    maxPolls: 60,\n    status: 'processing'\n  }\n};"
+      },
+      "id": "extract-video-id",
+      "name": "Extract Video ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "amount": 10,
+        "unit": "seconds"
+      },
+      "id": "wait-for-processing",
+      "name": "Wait 10 Seconds",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.heygen.com/v1/video_status.get?video_id={{ $json.videoId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "check-video-status",
+      "name": "Check Video Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1500, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "heygen-api-key",
+          "name": "HeyGen API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check video status and decide next action\nconst statusResponse = $input.first().json;\nconst previousData = $('Extract Video ID').first().json;\n\nconst status = statusResponse.data?.status;\nconst videoUrl = statusResponse.data?.video_url;\nconst pollCount = previousData.pollCount + 1;\n\nreturn {\n  json: {\n    videoId: previousData.videoId,\n    overlays: previousData.overlays,\n    pollCount,\n    maxPolls: previousData.maxPolls,\n    status,\n    videoUrl,\n    isComplete: status === 'completed',\n    isFailed: status === 'failed',\n    shouldContinuePolling: status === 'processing' && pollCount < previousData.maxPolls\n  }\n};"
+      },
+      "id": "process-status",
+      "name": "Process Status Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1750, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "is-complete",
+              "leftValue": "={{ $json.isComplete }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-if-complete",
+      "name": "Video Complete?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2000, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "should-poll",
+              "leftValue": "={{ $json.shouldContinuePolling }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-continue-polling",
+      "name": "Continue Polling?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2000, 550]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-overlays",
+              "leftValue": "={{ $json.overlays.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-has-overlays",
+      "name": "Has Overlays?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2250, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Cloudinary transformation URL for video overlays\nconst input = $input.first().json;\nconst cloudName = $env.CLOUDINARY_CLOUD_NAME;\nconst videoUrl = input.videoUrl;\n\n// Parse overlays configuration\nconst overlays = input.overlays || [];\n\n// Build transformation string\nlet transformations = [];\n\nfor (const overlay of overlays) {\n  if (overlay.type === 'text') {\n    // Text overlay transformation\n    const text = encodeURIComponent(overlay.text || 'Sample Text');\n    const fontFamily = overlay.fontFamily || 'Arial';\n    const fontSize = overlay.fontSize || 48;\n    const fontColor = overlay.color || 'white';\n    const position = overlay.position || 'south';\n    const yOffset = overlay.yOffset || 50;\n    const xOffset = overlay.xOffset || 0;\n    \n    // Cloudinary text overlay format\n    let textOverlay = `l_text:${fontFamily}_${fontSize}:${text}`;\n    textOverlay += `,co_rgb:${fontColor.replace('#', '')}`;\n    textOverlay += `,g_${position}`;\n    if (yOffset) textOverlay += `,y_${yOffset}`;\n    if (xOffset) textOverlay += `,x_${xOffset}`;\n    \n    // Add timing if specified (start/end in seconds)\n    if (overlay.startTime !== undefined || overlay.endTime !== undefined) {\n      const start = overlay.startTime || 0;\n      const end = overlay.endTime || 'end';\n      textOverlay += `,so_${start}`;\n      if (end !== 'end') textOverlay += `,eo_${end}`;\n    }\n    \n    transformations.push(textOverlay);\n    \n  } else if (overlay.type === 'image') {\n    // Image overlay transformation\n    const imagePublicId = overlay.publicId || overlay.imageUrl;\n    const width = overlay.width || 200;\n    const position = overlay.position || 'north_east';\n    const yOffset = overlay.yOffset || 20;\n    const xOffset = overlay.xOffset || 20;\n    const opacity = overlay.opacity || 100;\n    \n    let imageOverlay = `l_${imagePublicId.replace('/', ':')}`;\n    imageOverlay += `,w_${width}`;\n    imageOverlay += `,o_${opacity}`;\n    imageOverlay += `,g_${position}`;\n    if (yOffset) imageOverlay += `,y_${yOffset}`;\n    if (xOffset) imageOverlay += `,x_${xOffset}`;\n    \n    transformations.push(imageOverlay);\n    \n  } else if (overlay.type === 'watermark') {\n    // Watermark (repeating pattern)\n    const imagePublicId = overlay.publicId;\n    const opacity = overlay.opacity || 30;\n    \n    let watermark = `l_${imagePublicId.replace('/', ':')}`;\n    watermark += `,o_${opacity}`;\n    watermark += `,fl_tiled`;\n    \n    transformations.push(watermark);\n  }\n}\n\n// Build the final transformation string\nconst transformationString = transformations.join('/');\n\nreturn {\n  json: {\n    videoId: input.videoId,\n    originalVideoUrl: videoUrl,\n    overlays: input.overlays,\n    transformationString,\n    cloudName\n  }\n};"
+      },
+      "id": "build-cloudinary-transform",
+      "name": "Build Cloudinary Transformations",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2500, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.cloudinary.com/v1_1/{{ $json.cloudName }}/video/upload",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"file\": \"{{ $json.originalVideoUrl }}\",\n  \"upload_preset\": \"ml_default\",\n  \"resource_type\": \"video\",\n  \"eager\": \"{{ $json.transformationString }}\",\n  \"eager_async\": false\n}",
+        "options": {}
+      },
+      "id": "upload-to-cloudinary",
+      "name": "Upload & Transform with Cloudinary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2750, 100],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "cloudinary-credentials",
+          "name": "Cloudinary API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract the transformed video URL\nconst cloudinaryResponse = $input.first().json;\nconst previousData = $('Build Cloudinary Transformations').first().json;\n\n// Get the eager transformation result or the main URL\nlet finalVideoUrl = cloudinaryResponse.secure_url;\n\nif (cloudinaryResponse.eager && cloudinaryResponse.eager.length > 0) {\n  finalVideoUrl = cloudinaryResponse.eager[0].secure_url;\n}\n\nreturn {\n  json: {\n    success: true,\n    videoId: previousData.videoId,\n    originalVideoUrl: previousData.originalVideoUrl,\n    processedVideoUrl: finalVideoUrl,\n    cloudinaryPublicId: cloudinaryResponse.public_id,\n    duration: cloudinaryResponse.duration,\n    format: cloudinaryResponse.format,\n    overlaysApplied: previousData.overlays\n  }\n};"
+      },
+      "id": "extract-cloudinary-url",
+      "name": "Extract Processed Video URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3000, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Return original video without overlays\nconst input = $input.first().json;\n\nreturn {\n  json: {\n    success: true,\n    videoId: input.videoId,\n    originalVideoUrl: input.videoUrl,\n    processedVideoUrl: input.videoUrl,\n    overlaysApplied: [],\n    message: 'No overlays requested - returning original video'\n  }\n};"
+      },
+      "id": "return-original",
+      "name": "Return Original Video",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2500, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Return error for failed video generation\nconst input = $input.first().json;\n\nreturn {\n  json: {\n    success: false,\n    error: `Video generation failed with status: ${input.status}`,\n    videoId: input.videoId,\n    pollCount: input.pollCount\n  }\n};"
+      },
+      "id": "handle-failure",
+      "name": "Handle Failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2250, 700]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "respond-success",
+      "name": "Respond with Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [3250, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 500
+        }
+      },
+      "id": "respond-error",
+      "name": "Respond with Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2500, 700]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Prepare HeyGen Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare HeyGen Request": {
+      "main": [
+        [
+          {
+            "node": "Create HeyGen Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create HeyGen Video": {
+      "main": [
+        [
+          {
+            "node": "Extract Video ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Video ID": {
+      "main": [
+        [
+          {
+            "node": "Wait 10 Seconds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 10 Seconds": {
+      "main": [
+        [
+          {
+            "node": "Check Video Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Video Status": {
+      "main": [
+        [
+          {
+            "node": "Process Status Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Status Response": {
+      "main": [
+        [
+          {
+            "node": "Video Complete?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Video Complete?": {
+      "main": [
+        [
+          {
+            "node": "Has Overlays?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Continue Polling?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Polling?": {
+      "main": [
+        [
+          {
+            "node": "Wait 10 Seconds",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Overlays?": {
+      "main": [
+        [
+          {
+            "node": "Build Cloudinary Transformations",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Original Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Cloudinary Transformations": {
+      "main": [
+        [
+          {
+            "node": "Upload & Transform with Cloudinary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload & Transform with Cloudinary": {
+      "main": [
+        [
+          {
+            "node": "Extract Processed Video URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Processed Video URL": {
+      "main": [
+        [
+          {
+            "node": "Respond with Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Return Original Video": {
+      "main": [
+        [
+          {
+            "node": "Respond with Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Failure": {
+      "main": [
+        [
+          {
+            "node": "Respond with Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "heygen",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    },
+    {
+      "name": "video",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    },
+    {
+      "name": "overlay",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "versionId": "1"
+}

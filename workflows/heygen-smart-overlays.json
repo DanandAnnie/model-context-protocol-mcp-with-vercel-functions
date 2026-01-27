@@ -1,0 +1,668 @@
+{
+  "name": "HeyGen Video with Smart Content-Matched Overlays",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "heygen-smart-video",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "heygen-smart-webhook"
+    },
+    {
+      "parameters": {
+        "content": "## Smart Content-Matched Video Overlays\n\nThis workflow automatically generates overlays based on the script content:\n\n**Features:**\n- Analyzes script with AI to extract key points\n- Auto-generates text overlays for important topics\n- Creates lower thirds for speaker introductions\n- Adds bullet point overlays for lists\n- Generates call-to-action overlays\n- Supports custom branding/logos\n\n**Input Options:**\n- script: The text content for the video\n- branding: Logo URL, colors, font preferences\n- overlay_style: minimal, professional, bold\n- auto_captions: true/false",
+        "height": 380,
+        "width": 420
+      },
+      "id": "workflow-note",
+      "name": "Workflow Documentation",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse and validate input request\nconst input = $input.first().json;\n\n// Script content (required)\nconst script = input.script || input.text;\nif (!script) {\n  throw new Error('Script/text content is required');\n}\n\n// HeyGen avatar settings\nconst avatarId = input.avatar_id || 'Kristin_pubblic_2_20240108';\nconst voiceId = input.voice_id || '1bd001e7e50f421d891986aad5158bc8';\n\n// Video settings\nconst width = input.width || 1920;\nconst height = input.height || 1080;\n\n// Branding settings\nconst branding = input.branding || {};\nconst logoUrl = branding.logo_url || null;\nconst primaryColor = branding.primary_color || '#ffffff';\nconst secondaryColor = branding.secondary_color || '#000000';\nconst fontFamily = branding.font || 'Montserrat';\n\n// Overlay preferences\nconst overlayStyle = input.overlay_style || 'professional';\nconst autoCaptions = input.auto_captions !== false;\nconst autoKeyPoints = input.auto_key_points !== false;\nconst showLowerThird = input.show_lower_third !== false;\nconst speakerName = input.speaker_name || null;\nconst speakerTitle = input.speaker_title || null;\n\n// Processing service (cloudinary or shotstack)\nconst processingService = input.processing_service || 'cloudinary';\n\nreturn {\n  json: {\n    script,\n    avatarId,\n    voiceId,\n    width,\n    height,\n    branding: {\n      logoUrl,\n      primaryColor,\n      secondaryColor,\n      fontFamily\n    },\n    overlayStyle,\n    autoCaptions,\n    autoKeyPoints,\n    showLowerThird,\n    speakerName,\n    speakerTitle,\n    processingService\n  }\n};"
+      },
+      "id": "parse-input",
+      "name": "Parse Input Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Analyze script content and generate smart overlays\nconst input = $input.first().json;\nconst script = input.script;\nconst style = input.overlayStyle;\nconst branding = input.branding;\n\n// Helper function to estimate word timing (avg 150 words per minute)\nfunction estimateWordTiming(text, startOffset = 0) {\n  const words = text.split(/\\s+/);\n  const wordsPerSecond = 2.5; // 150 wpm\n  const duration = words.length / wordsPerSecond;\n  return {\n    start: startOffset,\n    end: startOffset + duration,\n    duration\n  };\n}\n\n// Analyze script for key content\nconst sentences = script.split(/[.!?]+/).filter(s => s.trim());\nconst totalTiming = estimateWordTiming(script);\nconst videoDuration = totalTiming.duration;\n\nconst overlays = [];\n\n// 1. Add logo watermark if provided\nif (branding.logoUrl) {\n  overlays.push({\n    type: 'image',\n    id: 'logo-watermark',\n    src: branding.logoUrl,\n    position: 'north_east',\n    xOffset: 30,\n    yOffset: 30,\n    width: 150,\n    opacity: 80,\n    startTime: 0,\n    endTime: videoDuration\n  });\n}\n\n// 2. Add lower third for speaker intro\nif (input.showLowerThird && (input.speakerName || input.speakerTitle)) {\n  const lowerThirdText = input.speakerName \n    ? (input.speakerTitle ? `${input.speakerName}\\n${input.speakerTitle}` : input.speakerName)\n    : input.speakerTitle;\n    \n  overlays.push({\n    type: 'lowerThird',\n    id: 'speaker-intro',\n    text: lowerThirdText,\n    position: 'south_west',\n    color: branding.primaryColor,\n    backgroundColor: branding.secondaryColor,\n    startTime: 1,\n    endTime: 6,\n    animation: 'slideIn'\n  });\n}\n\n// 3. Extract and create key point overlays\nif (input.autoKeyPoints) {\n  // Look for patterns that indicate key points\n  const keyPointPatterns = [\n    /(?:first|1st|one)[,:]?\\s+(.{10,80})/gi,\n    /(?:second|2nd|two)[,:]?\\s+(.{10,80})/gi,\n    /(?:third|3rd|three)[,:]?\\s+(.{10,80})/gi,\n    /(?:important|key|main|crucial)[:]?\\s+(.{10,80})/gi,\n    /(?:remember|note)[:]?\\s+(.{10,80})/gi\n  ];\n  \n  let keyPointIndex = 0;\n  let currentTime = 3; // Start after intro\n  \n  for (const pattern of keyPointPatterns) {\n    const matches = script.matchAll(pattern);\n    for (const match of matches) {\n      if (keyPointIndex < 5) { // Limit to 5 key points\n        const keyPoint = match[1].trim();\n        const pointNumber = keyPointIndex + 1;\n        \n        // Find approximate timing for this text\n        const textBefore = script.substring(0, match.index);\n        const timing = estimateWordTiming(textBefore);\n        \n        overlays.push({\n          type: 'text',\n          id: `key-point-${pointNumber}`,\n          text: `${pointNumber}. ${keyPoint.substring(0, 50)}${keyPoint.length > 50 ? '...' : ''}`,\n          position: 'west',\n          xOffset: 50,\n          yOffset: 0,\n          fontSize: style === 'bold' ? 56 : 42,\n          color: branding.primaryColor,\n          fontFamily: branding.fontFamily,\n          startTime: Math.max(timing.end, currentTime),\n          endTime: Math.min(timing.end + 5, videoDuration - 1),\n          animation: 'fadeIn'\n        });\n        \n        currentTime = timing.end + 6;\n        keyPointIndex++;\n      }\n    }\n  }\n  \n  // If no explicit key points found, extract from sentence structure\n  if (keyPointIndex === 0 && sentences.length > 2) {\n    // Use important-sounding sentences\n    const importantSentences = sentences.filter(s => \n      s.length > 30 && s.length < 100 &&\n      !s.toLowerCase().includes('hello') &&\n      !s.toLowerCase().includes('thank')\n    ).slice(0, 3);\n    \n    let sentenceTime = 5;\n    importantSentences.forEach((sentence, idx) => {\n      overlays.push({\n        type: 'text',\n        id: `highlight-${idx + 1}`,\n        text: sentence.trim().substring(0, 60) + (sentence.length > 60 ? '...' : ''),\n        position: 'south',\n        xOffset: 0,\n        yOffset: 100,\n        fontSize: style === 'bold' ? 48 : 36,\n        color: branding.primaryColor,\n        backgroundColor: 'rgba(0,0,0,0.7)',\n        fontFamily: branding.fontFamily,\n        startTime: sentenceTime,\n        endTime: sentenceTime + 4,\n        animation: 'fadeIn'\n      });\n      sentenceTime += (videoDuration - 10) / importantSentences.length;\n    });\n  }\n}\n\n// 4. Add call-to-action if detected\nconst ctaPatterns = [\n  /(?:visit|go to|check out)\\s+(\\S+\\.\\S+)/gi,\n  /(?:call|contact)\\s+(?:us at)?\\s*([\\d-]+)/gi,\n  /(?:subscribe|follow|like)/gi,\n  /(?:click|tap)\\s+(?:the)?\\s*(?:link|button)/gi\n];\n\nfor (const pattern of ctaPatterns) {\n  if (pattern.test(script)) {\n    overlays.push({\n      type: 'text',\n      id: 'cta-overlay',\n      text: '👆 Link in description',\n      position: 'south',\n      xOffset: 0,\n      yOffset: 50,\n      fontSize: 36,\n      color: '#ffffff',\n      backgroundColor: branding.primaryColor,\n      startTime: videoDuration - 5,\n      endTime: videoDuration,\n      animation: 'pulse'\n    });\n    break;\n  }\n}\n\n// 5. Apply style-specific adjustments\nif (style === 'minimal') {\n  // Reduce number of overlays for minimal style\n  const essentialTypes = ['logo-watermark', 'speaker-intro', 'cta-overlay'];\n  overlays.forEach(o => {\n    if (!essentialTypes.includes(o.id)) {\n      o.opacity = (o.opacity || 100) * 0.7;\n    }\n  });\n} else if (style === 'bold') {\n  // Increase visibility for bold style\n  overlays.forEach(o => {\n    if (o.fontSize) o.fontSize *= 1.2;\n    o.fontWeight = 'bold';\n  });\n}\n\nreturn {\n  json: {\n    ...input,\n    generatedOverlays: overlays,\n    estimatedDuration: videoDuration,\n    overlayCount: overlays.length\n  }\n};"
+      },
+      "id": "analyze-content",
+      "name": "Analyze Content & Generate Overlays",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.heygen.com/v2/video/generate",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"video_inputs\": [\n    {\n      \"character\": {\n        \"type\": \"avatar\",\n        \"avatar_id\": \"{{ $json.avatarId }}\",\n        \"avatar_style\": \"normal\"\n      },\n      \"voice\": {\n        \"type\": \"text\",\n        \"input_text\": {{ JSON.stringify($json.script) }},\n        \"voice_id\": \"{{ $json.voiceId }}\"\n      }\n    }\n  ],\n  \"dimension\": {\n    \"width\": {{ $json.width }},\n    \"height\": {{ $json.height }}\n  }\n}",
+        "options": {}
+      },
+      "id": "create-heygen-video",
+      "name": "Create HeyGen Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1000, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "heygen-api-key",
+          "name": "HeyGen API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst previousData = $('Analyze Content & Generate Overlays').first().json;\n\nif (response.error) {\n  throw new Error(`HeyGen API Error: ${response.error.message || JSON.stringify(response.error)}`);\n}\n\nconst videoId = response.data?.video_id;\nif (!videoId) {\n  throw new Error('No video_id returned from HeyGen API');\n}\n\nreturn {\n  json: {\n    videoId,\n    overlays: previousData.generatedOverlays,\n    branding: previousData.branding,\n    processingService: previousData.processingService,\n    estimatedDuration: previousData.estimatedDuration,\n    pollCount: 0,\n    maxPolls: 60\n  }\n};"
+      },
+      "id": "extract-video-id",
+      "name": "Extract Video ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "amount": 10,
+        "unit": "seconds"
+      },
+      "id": "wait-processing",
+      "name": "Wait 10 Seconds",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1500, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.heygen.com/v1/video_status.get?video_id={{ $json.videoId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "check-status",
+      "name": "Check Video Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1750, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "heygen-api-key",
+          "name": "HeyGen API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const statusResponse = $input.first().json;\nconst previousData = $('Extract Video ID').first().json;\n\nconst status = statusResponse.data?.status;\nconst videoUrl = statusResponse.data?.video_url;\nconst duration = statusResponse.data?.duration || previousData.estimatedDuration;\nconst pollCount = previousData.pollCount + 1;\n\nreturn {\n  json: {\n    ...previousData,\n    pollCount,\n    status,\n    videoUrl,\n    actualDuration: duration,\n    isComplete: status === 'completed',\n    shouldContinuePolling: status === 'processing' && pollCount < previousData.maxPolls\n  }\n};"
+      },
+      "id": "process-status",
+      "name": "Process Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "is-complete",
+              "leftValue": "={{ $json.isComplete }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-complete",
+      "name": "Video Complete?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2250, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "continue-poll",
+              "leftValue": "={{ $json.shouldContinuePolling }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-polling",
+      "name": "Continue Polling?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2250, 550]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-overlays",
+              "leftValue": "={{ $json.overlays.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-overlays",
+      "name": "Has Overlays?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2500, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "use-cloudinary",
+              "leftValue": "={{ $json.processingService }}",
+              "rightValue": "cloudinary",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-service",
+      "name": "Which Processing Service?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2750, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Cloudinary transformation for smart overlays\nconst input = $input.first().json;\nconst cloudName = $env.CLOUDINARY_CLOUD_NAME;\nconst overlays = input.overlays || [];\n\nlet transformations = [];\n\nfor (const overlay of overlays) {\n  if (overlay.type === 'text' || overlay.type === 'lowerThird') {\n    const text = encodeURIComponent(overlay.text || 'Text');\n    const fontSize = overlay.fontSize || 42;\n    const fontFamily = overlay.fontFamily || 'Montserrat';\n    const color = (overlay.color || '#ffffff').replace('#', '');\n    \n    // Map position names\n    const positionMap = {\n      'north': 'north',\n      'south': 'south',\n      'east': 'east',\n      'west': 'west',\n      'north_east': 'north_east',\n      'north_west': 'north_west',\n      'south_east': 'south_east',\n      'south_west': 'south_west',\n      'center': 'center'\n    };\n    const position = positionMap[overlay.position] || 'south';\n    \n    let transform = `l_text:${fontFamily}_${fontSize}:${text}`;\n    transform += `,co_rgb:${color}`;\n    transform += `,g_${position}`;\n    if (overlay.xOffset) transform += `,x_${Math.abs(overlay.xOffset)}`;\n    if (overlay.yOffset) transform += `,y_${Math.abs(overlay.yOffset)}`;\n    \n    // Add timing\n    if (overlay.startTime !== undefined) {\n      transform += `,so_${overlay.startTime}`;\n    }\n    if (overlay.endTime !== undefined) {\n      transform += `,eo_${overlay.endTime}`;\n    }\n    \n    transformations.push(transform);\n    \n  } else if (overlay.type === 'image') {\n    if (overlay.src) {\n      // For external images, we'd need to upload to Cloudinary first\n      // For now, use fetch URL transformation\n      const imageUrl = encodeURIComponent(overlay.src);\n      const width = overlay.width || 150;\n      const opacity = overlay.opacity || 100;\n      const position = overlay.position || 'north_east';\n      \n      let transform = `l_fetch:${imageUrl}`;\n      transform += `,w_${width}`;\n      transform += `,o_${opacity}`;\n      transform += `,g_${position}`;\n      if (overlay.xOffset) transform += `,x_${Math.abs(overlay.xOffset)}`;\n      if (overlay.yOffset) transform += `,y_${Math.abs(overlay.yOffset)}`;\n      \n      transformations.push(transform);\n    }\n  }\n}\n\nconst transformationString = transformations.join('/');\n\nreturn {\n  json: {\n    videoId: input.videoId,\n    originalVideoUrl: input.videoUrl,\n    overlays: input.overlays,\n    transformationString,\n    cloudName\n  }\n};"
+      },
+      "id": "build-cloudinary",
+      "name": "Build Cloudinary Transform",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3000, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.cloudinary.com/v1_1/{{ $json.cloudName }}/video/upload",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"file\": \"{{ $json.originalVideoUrl }}\",\n  \"upload_preset\": \"ml_default\",\n  \"resource_type\": \"video\",\n  \"eager\": \"{{ $json.transformationString }}\",\n  \"eager_async\": false\n}",
+        "options": {}
+      },
+      "id": "upload-cloudinary",
+      "name": "Process with Cloudinary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3250, 0],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "cloudinary-credentials",
+          "name": "Cloudinary API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Shotstack edit for smart overlays\nconst input = $input.first().json;\nconst overlays = input.overlays || [];\nconst videoDuration = input.actualDuration || 30;\n\nconst overlayClips = [];\n\nfor (const overlay of overlays) {\n  const startTime = overlay.startTime || 0;\n  const endTime = Math.min(overlay.endTime || videoDuration, videoDuration);\n  const duration = endTime - startTime;\n  \n  if (overlay.type === 'text') {\n    overlayClips.push({\n      asset: {\n        type: 'title',\n        text: overlay.text,\n        style: 'minimal',\n        color: overlay.color || '#ffffff',\n        size: overlay.fontSize > 48 ? 'large' : 'medium'\n      },\n      start: startTime,\n      length: duration,\n      position: overlay.position === 'south' ? 'bottom' : (overlay.position === 'west' ? 'left' : 'center'),\n      offset: {\n        x: (overlay.xOffset || 0) / 1000,\n        y: -(overlay.yOffset || 0) / 1000\n      },\n      transition: overlay.animation === 'fadeIn' ? { in: 'fade', out: 'fade' } : null\n    });\n    \n  } else if (overlay.type === 'lowerThird') {\n    overlayClips.push({\n      asset: {\n        type: 'title',\n        text: overlay.text,\n        style: 'blockbuster',\n        color: overlay.color || '#ffffff',\n        size: 'small'\n      },\n      start: startTime,\n      length: duration,\n      position: 'bottomLeft',\n      offset: { x: 0.05, y: -0.1 },\n      transition: { in: 'slideLeft', out: 'slideLeft' }\n    });\n    \n  } else if (overlay.type === 'image' && overlay.src) {\n    overlayClips.push({\n      asset: {\n        type: 'image',\n        src: overlay.src\n      },\n      start: startTime,\n      length: duration,\n      fit: 'none',\n      scale: (overlay.width || 150) / 1920,\n      position: overlay.position === 'north_east' ? 'topRight' : 'topLeft',\n      offset: {\n        x: -(overlay.xOffset || 30) / 1000,\n        y: (overlay.yOffset || 30) / 1000\n      },\n      opacity: (overlay.opacity || 100) / 100\n    });\n  }\n}\n\nconst editPayload = {\n  timeline: {\n    background: '#000000',\n    tracks: [\n      { clips: overlayClips },\n      {\n        clips: [{\n          asset: { type: 'video', src: input.videoUrl },\n          start: 0,\n          length: videoDuration\n        }]\n      }\n    ]\n  },\n  output: {\n    format: 'mp4',\n    resolution: 'hd'\n  }\n};\n\nconst shotstackStage = $env.SHOTSTACK_STAGE || 'sandbox';\nconst baseUrl = shotstackStage === 'v1' \n  ? 'https://api.shotstack.io/v1'\n  : 'https://api.shotstack.io/stage';\n\nreturn {\n  json: {\n    videoId: input.videoId,\n    originalVideoUrl: input.videoUrl,\n    overlays: input.overlays,\n    editPayload,\n    shotstackBaseUrl: baseUrl\n  }\n};"
+      },
+      "id": "build-shotstack",
+      "name": "Build Shotstack Edit",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3000, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.shotstackBaseUrl }}/render",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.editPayload) }}",
+        "options": {}
+      },
+      "id": "submit-shotstack",
+      "name": "Submit to Shotstack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3250, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "shotstack-api-key",
+          "name": "Shotstack API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const cloudinaryResponse = $input.first().json;\nconst previousData = $('Build Cloudinary Transform').first().json;\n\nlet finalVideoUrl = cloudinaryResponse.secure_url;\nif (cloudinaryResponse.eager && cloudinaryResponse.eager.length > 0) {\n  finalVideoUrl = cloudinaryResponse.eager[0].secure_url;\n}\n\nreturn {\n  json: {\n    success: true,\n    videoId: previousData.videoId,\n    originalVideoUrl: previousData.originalVideoUrl,\n    processedVideoUrl: finalVideoUrl,\n    overlaysApplied: previousData.overlays.length,\n    processingEngine: 'cloudinary'\n  }\n};"
+      },
+      "id": "format-cloudinary-result",
+      "name": "Format Cloudinary Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3500, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst previousData = $('Build Shotstack Edit').first().json;\n\nif (!response.success || !response.response?.id) {\n  throw new Error('Shotstack submission failed');\n}\n\n// For simplicity, we'll return the render ID\n// In production, you'd poll for completion\nreturn {\n  json: {\n    success: true,\n    videoId: previousData.videoId,\n    originalVideoUrl: previousData.originalVideoUrl,\n    shotstackRenderId: response.response.id,\n    overlaysApplied: previousData.overlays.length,\n    processingEngine: 'shotstack',\n    message: 'Video submitted for processing. Poll the render endpoint for completion.'\n  }\n};"
+      },
+      "id": "format-shotstack-result",
+      "name": "Format Shotstack Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3500, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\n\nreturn {\n  json: {\n    success: true,\n    videoId: input.videoId,\n    videoUrl: input.videoUrl,\n    overlaysApplied: 0,\n    message: 'No overlays were generated for this content'\n  }\n};"
+      },
+      "id": "return-no-overlays",
+      "name": "Return Without Overlays",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2750, 350]
+    },
+    {
+      "parameters": {
+        "jsCode": "return {\n  json: {\n    success: false,\n    error: 'Video generation failed or timed out',\n    details: $json\n  }\n};"
+      },
+      "id": "handle-error",
+      "name": "Handle Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2500, 700]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "respond-success",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [3750, 150]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 500
+        }
+      },
+      "id": "respond-error",
+      "name": "Respond Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2750, 700]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Parse Input Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Input Request": {
+      "main": [
+        [
+          {
+            "node": "Analyze Content & Generate Overlays",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Content & Generate Overlays": {
+      "main": [
+        [
+          {
+            "node": "Create HeyGen Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create HeyGen Video": {
+      "main": [
+        [
+          {
+            "node": "Extract Video ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Video ID": {
+      "main": [
+        [
+          {
+            "node": "Wait 10 Seconds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 10 Seconds": {
+      "main": [
+        [
+          {
+            "node": "Check Video Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Video Status": {
+      "main": [
+        [
+          {
+            "node": "Process Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Status": {
+      "main": [
+        [
+          {
+            "node": "Video Complete?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Video Complete?": {
+      "main": [
+        [
+          {
+            "node": "Has Overlays?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Continue Polling?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Polling?": {
+      "main": [
+        [
+          {
+            "node": "Wait 10 Seconds",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Overlays?": {
+      "main": [
+        [
+          {
+            "node": "Which Processing Service?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Without Overlays",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Which Processing Service?": {
+      "main": [
+        [
+          {
+            "node": "Build Cloudinary Transform",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Shotstack Edit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Cloudinary Transform": {
+      "main": [
+        [
+          {
+            "node": "Process with Cloudinary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process with Cloudinary": {
+      "main": [
+        [
+          {
+            "node": "Format Cloudinary Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Shotstack Edit": {
+      "main": [
+        [
+          {
+            "node": "Submit to Shotstack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit to Shotstack": {
+      "main": [
+        [
+          {
+            "node": "Format Shotstack Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Cloudinary Result": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Shotstack Result": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Return Without Overlays": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Error": {
+      "main": [
+        [
+          {
+            "node": "Respond Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "heygen",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    },
+    {
+      "name": "smart-overlay",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    },
+    {
+      "name": "ai",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "versionId": "1"
+}

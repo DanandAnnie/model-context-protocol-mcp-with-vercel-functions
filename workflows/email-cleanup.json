@@ -1,0 +1,494 @@
+{
+  "name": "Email Cleanup & Archiving Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Daily Cleanup Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "returnAll": false,
+        "limit": 100,
+        "filters": {
+          "labelIds": ["INBOX"],
+          "readStatus": "read",
+          "receivedBefore": "={{ $now.minus({days: 30}).toISO() }}"
+        },
+        "options": {}
+      },
+      "id": "get-old-emails",
+      "name": "Get Old Read Emails",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [500, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-credentials",
+          "name": "Gmail Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "batchSize": 10,
+        "options": {}
+      },
+      "id": "batch-emails",
+      "name": "Batch Emails",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "check-important",
+              "leftValue": "={{ $json.labelIds }}",
+              "rightValue": "IMPORTANT",
+              "operator": {
+                "type": "array",
+                "operation": "notContains"
+              }
+            },
+            {
+              "id": "check-starred",
+              "leftValue": "={{ $json.labelIds }}",
+              "rightValue": "STARRED",
+              "operator": {
+                "type": "array",
+                "operation": "notContains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-not-important",
+      "name": "Filter Non-Important",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "messageId": "={{ $json.id }}",
+        "labelIds": ["Label_Archived"],
+        "options": {
+          "removeLabelIds": ["INBOX"]
+        }
+      },
+      "id": "archive-email",
+      "name": "Archive Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1250, 200],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-credentials",
+          "name": "Gmail Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Count archived emails\nconst items = $input.all();\nconst count = items.length;\n\nreturn {\n  json: {\n    archivedCount: count,\n    processedAt: new Date().toISOString(),\n    date: new Date().toLocaleDateString()\n  }\n};"
+      },
+      "id": "count-archived",
+      "name": "Count Archived",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1500, 200]
+    },
+    {
+      "parameters": {},
+      "id": "skip-important",
+      "name": "Keep Important Emails",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1250, 400]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "returnAll": false,
+        "limit": 50,
+        "filters": {
+          "labelIds": ["SPAM"]
+        },
+        "options": {}
+      },
+      "id": "get-spam",
+      "name": "Get Spam Emails",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [500, 550],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-credentials",
+          "name": "Gmail Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "messageId": "={{ $json.id }}",
+        "options": {}
+      },
+      "id": "delete-spam",
+      "name": "Delete Spam",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [750, 550],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-credentials",
+          "name": "Gmail Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Count deleted spam\nconst items = $input.all();\nconst count = items.length;\n\nreturn {\n  json: {\n    deletedSpamCount: count,\n    processedAt: new Date().toISOString()\n  }\n};"
+      },
+      "id": "count-spam-deleted",
+      "name": "Count Spam Deleted",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 550]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "mergeByFields": {
+          "values": []
+        },
+        "options": {}
+      },
+      "id": "merge-stats",
+      "name": "Merge Statistics",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [1750, 350]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.GOOGLE_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Cleanup Log"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "id": "log-cleanup",
+      "name": "Log Cleanup Stats",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [2000, 350],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets-credentials",
+          "name": "Google Sheets Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "check-significant-cleanup",
+              "leftValue": "={{ $json.archivedCount + $json.deletedSpamCount }}",
+              "rightValue": "10",
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-notify",
+      "name": "Significant Cleanup?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2250, 350]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $env.NOTIFICATION_EMAIL }}",
+        "subject": "=Daily Email Cleanup Report - {{ $now.toFormat('yyyy-MM-dd') }}",
+        "emailType": "html",
+        "message": "=<html>\n<body style=\"font-family: Arial, sans-serif; padding: 20px;\">\n<h2>Daily Email Cleanup Report</h2>\n<p>Your inbox has been automatically cleaned up.</p>\n\n<table style=\"border-collapse: collapse; width: 100%; max-width: 400px;\">\n<tr style=\"background-color: #f2f2f2;\">\n<td style=\"padding: 10px; border: 1px solid #ddd;\"><strong>Emails Archived</strong></td>\n<td style=\"padding: 10px; border: 1px solid #ddd;\">{{ $json.archivedCount || 0 }}</td>\n</tr>\n<tr>\n<td style=\"padding: 10px; border: 1px solid #ddd;\"><strong>Spam Deleted</strong></td>\n<td style=\"padding: 10px; border: 1px solid #ddd;\">{{ $json.deletedSpamCount || 0 }}</td>\n</tr>\n<tr style=\"background-color: #f2f2f2;\">\n<td style=\"padding: 10px; border: 1px solid #ddd;\"><strong>Processed At</strong></td>\n<td style=\"padding: 10px; border: 1px solid #ddd;\">{{ $json.processedAt }}</td>\n</tr>\n</table>\n\n<p style=\"color: #666; font-size: 12px; margin-top: 20px;\">This is an automated report from your Email Management System.</p>\n</body>\n</html>",
+        "options": {}
+      },
+      "id": "send-cleanup-report",
+      "name": "Send Cleanup Report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2500, 250],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-credentials",
+          "name": "Gmail Account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "end-no-notify",
+      "name": "End - No Report Needed",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [2500, 450]
+    },
+    {
+      "parameters": {},
+      "id": "workflow-end",
+      "name": "End",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [2750, 350]
+    }
+  ],
+  "connections": {
+    "Daily Cleanup Schedule": {
+      "main": [
+        [
+          {
+            "node": "Get Old Read Emails",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Spam Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Old Read Emails": {
+      "main": [
+        [
+          {
+            "node": "Batch Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch Emails": {
+      "main": [
+        [
+          {
+            "node": "Filter Non-Important",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Non-Important": {
+      "main": [
+        [
+          {
+            "node": "Archive Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Keep Important Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Archive Email": {
+      "main": [
+        [
+          {
+            "node": "Count Archived",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count Archived": {
+      "main": [
+        [
+          {
+            "node": "Merge Statistics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Spam Emails": {
+      "main": [
+        [
+          {
+            "node": "Delete Spam",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Spam": {
+      "main": [
+        [
+          {
+            "node": "Count Spam Deleted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count Spam Deleted": {
+      "main": [
+        [
+          {
+            "node": "Merge Statistics",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Statistics": {
+      "main": [
+        [
+          {
+            "node": "Log Cleanup Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Cleanup Stats": {
+      "main": [
+        [
+          {
+            "node": "Significant Cleanup?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Significant Cleanup?": {
+      "main": [
+        [
+          {
+            "node": "Send Cleanup Report",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "End - No Report Needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Cleanup Report": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "End - No Report Needed": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "email",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    },
+    {
+      "name": "cleanup",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    },
+    {
+      "name": "scheduled",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "versionId": "1"
+}

@@ -1,0 +1,460 @@
+{
+  "name": "Email Auto-Reply Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "readStatus": "unread",
+          "receivedAfter": "={{ $now.minus({hours: 1}).toISO() }}"
+        }
+      },
+      "id": "gmail-trigger-auto",
+      "name": "Gmail Trigger - New Emails",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-credentials",
+          "name": "Gmail Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "check-auto-reply-enabled",
+              "leftValue": "={{ $env.AUTO_REPLY_ENABLED }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-auto-reply-enabled",
+      "name": "Auto-Reply Enabled?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "check-not-noreply",
+              "leftValue": "={{ $json.payload.headers.find(h => h.name === 'From').value }}",
+              "rightValue": "noreply|no-reply|donotreply|mailer-daemon|postmaster",
+              "operator": {
+                "type": "string",
+                "operation": "notRegex"
+              }
+            },
+            {
+              "id": "check-not-auto-generated",
+              "leftValue": "={{ $json.payload.headers.find(h => h.name === 'Auto-Submitted') }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-auto-emails",
+      "name": "Filter Auto-Generated Emails",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check if we've already replied to this sender recently\nconst email = $input.first().json;\nconst fromHeader = email.payload?.headers?.find(h => h.name === 'From')?.value || '';\n\n// Extract email address from \"Name <email@example.com>\" format\nconst emailMatch = fromHeader.match(/<([^>]+)>/) || [null, fromHeader];\nconst senderEmail = emailMatch[1]?.toLowerCase().trim();\n\n// Get message ID for threading\nconst messageId = email.payload?.headers?.find(h => h.name === 'Message-ID')?.value || '';\nconst subject = email.payload?.headers?.find(h => h.name === 'Subject')?.value || 'No Subject';\n\nreturn {\n  json: {\n    originalEmailId: email.id,\n    senderEmail: senderEmail,\n    senderName: fromHeader.replace(/<[^>]+>/, '').trim() || senderEmail,\n    subject: subject,\n    messageId: messageId,\n    replySubject: subject.startsWith('Re:') ? subject : `Re: ${subject}`,\n    threadId: email.threadId\n  }\n};"
+      },
+      "id": "extract-sender-info",
+      "name": "Extract Sender Info",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "operation": "lookup",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.GOOGLE_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Auto-Reply Log"
+        },
+        "lookupColumn": "senderEmail",
+        "lookupValue": "={{ $json.senderEmail }}",
+        "options": {
+          "returnAllMatches": false
+        }
+      },
+      "id": "check-recent-reply",
+      "name": "Check Recent Auto-Reply",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1250, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets-credentials",
+          "name": "Google Sheets Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "check-no-recent-reply",
+              "leftValue": "={{ $json.senderEmail }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "should-send-reply",
+      "name": "Should Send Reply?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1500, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Extract Sender Info').item.json.senderEmail }}",
+        "subject": "={{ $('Extract Sender Info').item.json.replySubject }}",
+        "emailType": "html",
+        "message": "=<html>\n<body style=\"font-family: Arial, sans-serif; line-height: 1.6; color: #333;\">\n<p>Hi {{ $('Extract Sender Info').item.json.senderName }},</p>\n\n<p>Thank you for your email. This is an automated response to let you know that I have received your message.</p>\n\n<p>{{ $env.AUTO_REPLY_MESSAGE || 'I am currently away from my inbox and will respond to your email as soon as possible. If this is urgent, please contact me through alternative means.' }}</p>\n\n<p>Best regards,<br>\n{{ $env.SENDER_NAME || 'Email Management System' }}</p>\n\n<hr style=\"border: none; border-top: 1px solid #eee; margin: 20px 0;\">\n<p style=\"font-size: 12px; color: #666;\"><em>This is an automated message. Please do not reply to this email.</em></p>\n</body>\n</html>",
+        "options": {
+          "replyToSenderOnly": true,
+          "appendAttributionToBody": false
+        }
+      },
+      "id": "send-auto-reply",
+      "name": "Send Auto-Reply",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1750, 200],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-credentials",
+          "name": "Gmail Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.GOOGLE_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Auto-Reply Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "senderEmail": "={{ $('Extract Sender Info').item.json.senderEmail }}",
+            "senderName": "={{ $('Extract Sender Info').item.json.senderName }}",
+            "originalSubject": "={{ $('Extract Sender Info').item.json.subject }}",
+            "repliedAt": "={{ $now.toISO() }}",
+            "originalEmailId": "={{ $('Extract Sender Info').item.json.originalEmailId }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "log-auto-reply",
+      "name": "Log Auto-Reply Sent",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [2000, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets-credentials",
+          "name": "Google Sheets Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "messageId": "={{ $('Extract Sender Info').item.json.originalEmailId }}",
+        "labelIds": ["Label_Auto_Replied"]
+      },
+      "id": "label-auto-replied",
+      "name": "Label as Auto-Replied",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2250, 200],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-credentials",
+          "name": "Gmail Account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "skip-reply",
+      "name": "Skip - Already Replied",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1750, 400]
+    },
+    {
+      "parameters": {},
+      "id": "skip-auto-email",
+      "name": "Skip - Auto Email",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1000, 500]
+    },
+    {
+      "parameters": {},
+      "id": "skip-disabled",
+      "name": "Skip - Auto-Reply Disabled",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [750, 500]
+    },
+    {
+      "parameters": {},
+      "id": "workflow-end",
+      "name": "End",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [2500, 300]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger - New Emails": {
+      "main": [
+        [
+          {
+            "node": "Auto-Reply Enabled?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto-Reply Enabled?": {
+      "main": [
+        [
+          {
+            "node": "Filter Auto-Generated Emails",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip - Auto-Reply Disabled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Auto-Generated Emails": {
+      "main": [
+        [
+          {
+            "node": "Extract Sender Info",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip - Auto Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Sender Info": {
+      "main": [
+        [
+          {
+            "node": "Check Recent Auto-Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Recent Auto-Reply": {
+      "main": [
+        [
+          {
+            "node": "Should Send Reply?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Send Reply?": {
+      "main": [
+        [
+          {
+            "node": "Send Auto-Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip - Already Replied",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Auto-Reply": {
+      "main": [
+        [
+          {
+            "node": "Log Auto-Reply Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Auto-Reply Sent": {
+      "main": [
+        [
+          {
+            "node": "Label as Auto-Replied",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label as Auto-Replied": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip - Already Replied": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip - Auto Email": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip - Disabled": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "email",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    },
+    {
+      "name": "auto-reply",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    },
+    {
+      "name": "automation",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "versionId": "1"
+}

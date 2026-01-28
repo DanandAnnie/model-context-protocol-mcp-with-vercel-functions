@@ -1,0 +1,327 @@
+{
+  "name": "Annual Home Equity Report Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "months",
+              "monthsInterval": 12,
+              "triggerAtMonth": 1,
+              "triggerAtDayOfMonth": 5,
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Yearly Trigger (Jan 5)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "YOUR_GOOGLE_SHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Clients"
+        },
+        "options": {
+          "filters": {
+            "values": [
+              {
+                "lookupColumn": "tags",
+                "lookupValue": "Annual Equity Report"
+              }
+            ]
+          }
+        }
+      },
+      "id": "google-sheets",
+      "name": "Get Clients from Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [220, 0],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.MCP_SERVER_URL }}/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"jsonrpc\": \"2.0\",\n  \"id\": {{ $runIndex }},\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"process_client_for_report\",\n    \"arguments\": {\n      \"firstName\": \"{{ $json.first_name }}\",\n      \"email\": \"{{ $json.email }}\",\n      \"phone\": \"{{ $json.phone }}\",\n      \"propertyAddress\": \"{{ $json.property_address }}\",\n      \"purchasePrice\": {{ $json.purchase_price }},\n      \"purchaseDate\": \"{{ $json.purchase_date }}\",\n      \"downPaymentPercent\": {{ $json.down_payment_percent || 20 }},\n      \"interestRate\": {{ $json.interest_rate || 3.0 }},\n      \"loanTermYears\": {{ $json.loan_term_years || 30 }},\n      \"valueLow\": {{ $json.value_low }},\n      \"valueHigh\": {{ $json.value_high }},\n      \"personalInsight\": \"{{ $json.personal_insight }}\",\n      \"marketYoYChange\": {{ $json.market_yoy_change || 0 }}\n    }\n  }\n}"
+      },
+      "id": "mcp-process-client",
+      "name": "Process Client via MCP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse MCP response and extract report content\nconst response = $input.first().json;\nconst result = JSON.parse(response.result.content[0].text);\n\nreturn [{\n  json: {\n    firstName: result.metadata.client.firstName,\n    email: result.metadata.client.email,\n    phone: result.metadata.client.phone,\n    address: result.metadata.client.propertyAddress,\n    reportYear: result.metadata.reportYear,\n    equityLow: result.calculations.equity.equityLow,\n    equityHigh: result.calculations.equity.equityHigh,\n    report: result.content.report,\n    emailSubject: result.content.emailCopy.split('\\n')[0].replace('Subject: ', ''),\n    emailBody: result.content.emailCopy.split('\\n').slice(2).join('\\n'),\n    loomScript: result.content.loomScript,\n    smsFollowUp: result.content.smsFollowUp\n  }\n}];"
+      },
+      "id": "parse-mcp-response",
+      "name": "Parse MCP Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "operation": "toJson",
+        "options": {
+          "fileName": "={{ $json.firstName }}_{{ $json.reportYear }}_Equity_Report.txt"
+        }
+      },
+      "id": "create-report-file",
+      "name": "Create Report File",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [880, -100]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "={{ $json.emailSubject }}",
+        "emailType": "text",
+        "message": "={{ $json.emailBody }}",
+        "options": {
+          "attachments": "data"
+        }
+      },
+      "id": "send-email",
+      "name": "Send Email with Report",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1100, -100],
+      "credentials": {
+        "smtp": {
+          "id": "YOUR_SMTP_CREDENTIAL_ID",
+          "name": "SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 48,
+        "unit": "hours"
+      },
+      "id": "wait-48-hours",
+      "name": "Wait 48 Hours",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [880, 100],
+      "webhookId": "equity-report-followup"
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "from": "={{ $vars.TWILIO_PHONE_NUMBER }}",
+        "to": "={{ $json.phone }}",
+        "message": "={{ $json.smsFollowUp }}"
+      },
+      "id": "send-sms-followup",
+      "name": "Send SMS Follow-up",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [1100, 100],
+      "credentials": {
+        "twilioApi": {
+          "id": "YOUR_TWILIO_CREDENTIAL_ID",
+          "name": "Twilio API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "YOUR_GOOGLE_SHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Clients"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "last_report_sent": "={{ $now.format('yyyy-MM-dd') }}"
+          }
+        },
+        "options": {
+          "matchingColumns": ["email"]
+        }
+      },
+      "id": "update-sheet",
+      "name": "Update Last Report Sent",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1320, 0],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "Manual Trigger (for testing)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 200]
+    }
+  ],
+  "connections": {
+    "Yearly Trigger (Jan 5)": {
+      "main": [
+        [
+          {
+            "node": "Get Clients from Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger (for testing)": {
+      "main": [
+        [
+          {
+            "node": "Get Clients from Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Clients from Sheet": {
+      "main": [
+        [
+          {
+            "node": "Process Client via MCP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Client via MCP": {
+      "main": [
+        [
+          {
+            "node": "Parse MCP Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse MCP Response": {
+      "main": [
+        [
+          {
+            "node": "Create Report File",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Wait 48 Hours",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Report File": {
+      "main": [
+        [
+          {
+            "node": "Send Email with Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email with Report": {
+      "main": [
+        [
+          {
+            "node": "Update Last Report Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 48 Hours": {
+      "main": [
+        [
+          {
+            "node": "Send SMS Follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "Real Estate",
+      "createdAt": "2025-01-28T00:00:00.000Z",
+      "updatedAt": "2025-01-28T00:00:00.000Z"
+    },
+    {
+      "name": "Equity Reports",
+      "createdAt": "2025-01-28T00:00:00.000Z",
+      "updatedAt": "2025-01-28T00:00:00.000Z"
+    }
+  ],
+  "triggerCount": 2,
+  "variables": [
+    {
+      "key": "MCP_SERVER_URL",
+      "value": "https://your-vercel-deployment.vercel.app",
+      "type": "string"
+    },
+    {
+      "key": "TWILIO_PHONE_NUMBER",
+      "value": "+1234567890",
+      "type": "string"
+    }
+  ]
+}

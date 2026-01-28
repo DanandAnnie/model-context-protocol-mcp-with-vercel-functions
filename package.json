@@ -1,7 +1,7 @@
 {
-  "name": "mcp-on-vercel",
+  "name": "equity-report-mcp-server",
   "version": "1.0.0",
-  "description": "",
+  "description": "MCP server for automated annual home equity report generation - calculates mortgage balances, equity positions, and generates personalized reports, emails, Loom scripts, and SMS follow-ups",
   "main": "index.js",
   "type": "module",
   "scripts": {

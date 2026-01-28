@@ -1,0 +1,530 @@
+{
+  "name": "Annual Home Equity Report Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "months",
+              "monthsInterval": 12,
+              "triggerAtMonth": 1,
+              "triggerAtDayOfMonth": 5,
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000001",
+      "name": "Annual Trigger (Jan 5)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {},
+      "id": "a1b2c3d4-0001-0001-0001-000000000002",
+      "name": "Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 500]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $vars.GOOGLE_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Clients"
+        }
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000003",
+      "name": "Get All Clients",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [240, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-filter-ready",
+              "leftValue": "={{ $json.value_low }}",
+              "rightValue": "0",
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            },
+            {
+              "id": "condition-filter-has-email",
+              "leftValue": "={{ $json.email }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000004",
+      "name": "Filter Ready Clients",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [460, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.MCP_SERVER_URL }}/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"jsonrpc\": \"2.0\",\n  \"id\": {{ $runIndex + 1 }},\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"process_client_for_report\",\n    \"arguments\": {\n      \"firstName\": {{ JSON.stringify($json.first_name) }},\n      \"email\": {{ JSON.stringify($json.email) }},\n      \"phone\": {{ JSON.stringify($json.phone || '') }},\n      \"propertyAddress\": {{ JSON.stringify($json.property_address) }},\n      \"purchasePrice\": {{ parseFloat($json.purchase_price) || 0 }},\n      \"purchaseDate\": {{ JSON.stringify($json.purchase_date) }},\n      \"downPaymentPercent\": {{ parseFloat($json.down_payment_percent) || 20 }},\n      \"interestRate\": {{ parseFloat($json.interest_rate) || 3.0 }},\n      \"loanTermYears\": {{ parseInt($json.loan_term_years) || 30 }},\n      \"valueLow\": {{ parseFloat($json.value_low) || 0 }},\n      \"valueHigh\": {{ parseFloat($json.value_high) || 0 }},\n      \"personalInsight\": {{ JSON.stringify($json.personal_insight || 'Your property continues to be a strong asset in the local market.') }},\n      \"marketYoYChange\": {{ parseFloat($json.market_yoy_change) || 0 }}\n    }\n  }\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000005",
+      "name": "Generate Report via MCP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the MCP server response\nconst mcpResponse = $input.first().json;\n\n// Check for errors\nif (mcpResponse.error) {\n  throw new Error(`MCP Error: ${mcpResponse.error.message}`);\n}\n\n// Parse the result content\nconst resultText = mcpResponse.result?.content?.[0]?.text;\nif (!resultText) {\n  throw new Error('No content in MCP response');\n}\n\nconst data = JSON.parse(resultText);\n\n// Extract email subject from email copy\nconst emailLines = data.content.emailCopy.split('\\n');\nconst subjectLine = emailLines.find(line => line.startsWith('Subject:'));\nconst emailSubject = subjectLine ? subjectLine.replace('Subject: ', '') : `Your ${data.metadata.reportYear} Home Equity Report`;\nconst emailBody = emailLines.filter(line => !line.startsWith('Subject:')).join('\\n').trim();\n\nreturn [{\n  json: {\n    // Client info\n    firstName: data.metadata.client.firstName,\n    email: data.metadata.client.email,\n    phone: data.metadata.client.phone,\n    propertyAddress: data.metadata.client.propertyAddress,\n    \n    // Report metadata\n    reportYear: data.metadata.reportYear,\n    processedAt: data.metadata.processedAt,\n    \n    // Calculations\n    mortgageBalance: data.calculations.mortgage.estimatedBalance,\n    equityLow: data.calculations.equity.equityLow,\n    equityHigh: data.calculations.equity.equityHigh,\n    equityGainLow: data.calculations.equity.equityGainLow,\n    equityGainHigh: data.calculations.equity.equityGainHigh,\n    \n    // Content for delivery\n    reportText: data.content.report,\n    emailSubject: emailSubject,\n    emailBody: emailBody,\n    loomScript: data.content.loomScript,\n    smsFollowUp: data.content.smsFollowUp,\n    \n    // Delivery flags\n    emailReady: data.delivery.emailReady,\n    manualSteps: data.delivery.manualSteps\n  }\n}];"
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000006",
+      "name": "Parse Report Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 400]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"reportContent\": {{ JSON.stringify($json.reportText) }},\n  \"loomScript\": {{ JSON.stringify($json.loomScript) }},\n  \"client\": {\n    \"name\": {{ JSON.stringify($json.firstName) }},\n    \"email\": {{ JSON.stringify($json.email) }},\n    \"address\": {{ JSON.stringify($json.propertyAddress) }}\n  },\n  \"equity\": {\n    \"low\": {{ $json.equityLow }},\n    \"high\": {{ $json.equityHigh }}\n  }\n}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000007",
+      "name": "Prepare Report File",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "sourceProperty": "reportContent",
+        "options": {
+          "mimeType": "text/plain",
+          "fileName": "={{ $json.client.name }}_{{ $now.format('yyyy') }}_Equity_Report.txt"
+        }
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000008",
+      "name": "Convert to File",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Parse Report Data').item.json.email }}",
+        "subject": "={{ $('Parse Report Data').item.json.emailSubject }}",
+        "emailType": "text",
+        "message": "={{ $('Parse Report Data').item.json.emailBody }}\n\n---\nNote: A personalized video walkthrough will be sent separately.",
+        "options": {
+          "attachmentsUi": {
+            "attachmentsBinary": [
+              {
+                "property": "data"
+              }
+            ]
+          }
+        }
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000009",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1560, 200]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $vars.GOOGLE_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Report Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $now.toISO() }}",
+            "client_name": "={{ $('Parse Report Data').item.json.firstName }}",
+            "client_email": "={{ $('Parse Report Data').item.json.email }}",
+            "property_address": "={{ $('Parse Report Data').item.json.propertyAddress }}",
+            "equity_low": "={{ $('Parse Report Data').item.json.equityLow }}",
+            "equity_high": "={{ $('Parse Report Data').item.json.equityHigh }}",
+            "status": "email_sent"
+          },
+          "matchingColumns": []
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000010",
+      "name": "Log Report Sent",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1780, 200]
+    },
+    {
+      "parameters": {
+        "amount": 48,
+        "unit": "hours"
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000011",
+      "name": "Wait 48 Hours",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1120, 600],
+      "webhookId": "equity-sms-followup"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-phone",
+              "leftValue": "={{ $json.phone }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000012",
+      "name": "Has Phone Number?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1340, 600]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "from": "={{ $vars.TWILIO_PHONE_NUMBER }}",
+        "to": "={{ $json.phone }}",
+        "body": "={{ $json.smsFollowUp }}"
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000013",
+      "name": "Send SMS Follow-up",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [1560, 500]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $vars.GOOGLE_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Report Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $now.toISO() }}",
+            "client_name": "={{ $json.firstName }}",
+            "client_email": "={{ $json.email }}",
+            "property_address": "={{ $json.propertyAddress }}",
+            "status": "sms_sent"
+          },
+          "matchingColumns": []
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000014",
+      "name": "Log SMS Sent",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1780, 500]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $vars.GOOGLE_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Report Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $now.toISO() }}",
+            "client_name": "={{ $json.firstName }}",
+            "client_email": "={{ $json.email }}",
+            "property_address": "={{ $json.propertyAddress }}",
+            "status": "sms_skipped_no_phone"
+          },
+          "matchingColumns": []
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000015",
+      "name": "Log No Phone",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1560, 700]
+    },
+    {
+      "parameters": {
+        "content": "## Annual Home Equity Report Workflow\n\n### Setup Required:\n1. **Variables** (Settings > Variables):\n   - `MCP_SERVER_URL` - Your Vercel deployment URL\n   - `GOOGLE_SHEET_ID` - Your client data spreadsheet ID\n   - `TWILIO_PHONE_NUMBER` - Your Twilio number for SMS\n\n2. **Credentials**:\n   - Google Sheets OAuth2\n   - SMTP (for email)\n   - Twilio API (for SMS)\n\n3. **Google Sheet Tabs**:\n   - `Clients` - Client data (see README for schema)\n   - `Report Log` - Automatic logging of sent reports\n\n### Flow:\n1. Trigger annually on Jan 5 (or manually)\n2. Fetch clients from Google Sheets\n3. Filter clients with comp values set\n4. Generate reports via MCP server\n5. Send email with report attachment\n6. Wait 48 hours\n7. Send SMS follow-up",
+        "height": 438,
+        "width": 364,
+        "color": 5
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000016",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-300, 180]
+    },
+    {
+      "parameters": {
+        "content": "## Email Branch\nSends report immediately after generation",
+        "height": 80,
+        "width": 300,
+        "color": 4
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000017",
+      "name": "Sticky Note - Email",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [1120, 100]
+    },
+    {
+      "parameters": {
+        "content": "## SMS Follow-up Branch\nWaits 48 hours, then sends follow-up text",
+        "height": 80,
+        "width": 340,
+        "color": 6
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000018",
+      "name": "Sticky Note - SMS",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [1120, 480]
+    }
+  ],
+  "connections": {
+    "Annual Trigger (Jan 5)": {
+      "main": [
+        [
+          {
+            "node": "Get All Clients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Test Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get All Clients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get All Clients": {
+      "main": [
+        [
+          {
+            "node": "Filter Ready Clients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Ready Clients": {
+      "main": [
+        [
+          {
+            "node": "Generate Report via MCP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Report via MCP": {
+      "main": [
+        [
+          {
+            "node": "Parse Report Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Report Data": {
+      "main": [
+        [
+          {
+            "node": "Prepare Report File",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Wait 48 Hours",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Report File": {
+      "main": [
+        [
+          {
+            "node": "Convert to File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to File": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email": {
+      "main": [
+        [
+          {
+            "node": "Log Report Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 48 Hours": {
+      "main": [
+        [
+          {
+            "node": "Has Phone Number?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Phone Number?": {
+      "main": [
+        [
+          {
+            "node": "Send SMS Follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log No Phone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send SMS Follow-up": {
+      "main": [
+        [
+          {
+            "node": "Log SMS Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "Real Estate"
+    },
+    {
+      "name": "Automation"
+    },
+    {
+      "name": "Equity Reports"
+    }
+  ],
+  "pinData": {}
+}

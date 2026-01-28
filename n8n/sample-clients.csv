@@ -1,0 +1,6 @@
+first_name,email,phone,property_address,purchase_price,purchase_date,down_payment_percent,interest_rate,loan_term_years,value_low,value_high,personal_insight,market_yoy_change
+Sarah,sarah.johnson@email.com,+15551234567,"123 Oak Street, Austin, TX 78701",425000,2020-03-15,20,3.25,30,515000,555000,"Corner lot with mature trees. Kitchen was fully remodeled in 2022 which adds value above standard comps.",4.2
+Michael,michael.chen@email.com,+15559876543,"456 Maple Avenue, Austin, TX 78704",385000,2019-07-22,15,3.5,30,485000,520000,"Backs to greenbelt with no rear neighbors. Original hardwood floors throughout add character and value.",3.8
+Jennifer,jennifer.wilson@email.com,+15555551234,"789 Pine Road, Round Rock, TX 78664",295000,2021-01-10,20,2.875,30,365000,395000,"Updated HVAC system in 2023. Walking distance to new elementary school increases family appeal.",5.1
+Robert,robert.martinez@email.com,,"1234 Cedar Lane, Pflugerville, TX 78660",340000,2020-11-05,25,3.0,30,425000,460000,"Solar panels installed 2022 with transferable warranty. Lower utility costs add to buyer appeal.",4.5
+Amanda,amanda.thompson@email.com,+15558889999,"567 Birch Court, Georgetown, TX 78626",520000,2018-05-20,20,4.25,30,685000,735000,"Pool and outdoor kitchen added in 2021. Premium lot at end of cul-de-sac with extra side yard.",6.2

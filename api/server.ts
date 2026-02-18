@@ -428,7 +428,241 @@ const handler = createMcpHandler((server) => {
     },
   );
 
-  // ── 5. Parse Chamber of Commerce Email ───────────────────────────────────
+  // ── 5. Fetch Chamber Events (ChamberMaster / RSS / iCal) ─────────────────
+  server.tool(
+    "fetch_chamber_events",
+    "Fetch events directly from a Chamber of Commerce website. Works with ChamberMaster-powered " +
+      "chambers (like St. George Area Chamber) via their RSS feed, or any chamber that " +
+      "publishes an RSS or iCal (.ics) events feed. " +
+      "For St. George: use chamber_url 'https://business.stgeorgechamber.com' " +
+      "or provide any direct RSS/iCal feed URL.",
+    {
+      chamber_url: z
+        .string()
+        .describe(
+          "The chamber's ChamberMaster base URL (e.g. 'https://business.stgeorgechamber.com') " +
+            "or a direct RSS/iCal feed URL. The tool will auto-detect the feed format.",
+        ),
+      category: z
+        .enum([
+          "all",
+          "ribbon_cuttings",
+          "networking",
+          "luncheons",
+          "workshops",
+        ])
+        .optional()
+        .describe("Filter by event category (default: 'all')"),
+      max_results: z.number().int().min(1).max(30).optional(),
+    },
+    async ({ chamber_url, category, max_results }) => {
+      const limit = max_results ?? 15;
+      const cat = category ?? "all";
+
+      // Build possible feed URLs to try
+      const feedUrls: string[] = [];
+
+      if (chamber_url.endsWith(".rss") || chamber_url.endsWith(".xml") || chamber_url.includes("/rss")) {
+        feedUrls.push(chamber_url);
+      } else if (chamber_url.endsWith(".ics") || chamber_url.includes("/ical")) {
+        feedUrls.push(chamber_url);
+      } else {
+        // ChamberMaster standard feed paths
+        const base = chamber_url.replace(/\/$/, "");
+        feedUrls.push(`${base}/events/rss`);
+        feedUrls.push(`${base}/events/rss/`);
+        feedUrls.push(`${base}/events.rss`);
+        feedUrls.push(`${base}/events/ical`);
+        // Also try Google News as fallback
+        const chamberName = base
+          .replace(/https?:\/\//, "")
+          .replace(/business\./, "")
+          .replace(/\.chambermaster\.com.*/, "")
+          .replace(/\.com.*/, "")
+          .replace(/[^a-z]/gi, " ")
+          .trim();
+        if (chamberName) {
+          const catQuery = cat !== "all" ? ` ${cat.replace(/_/g, " ")}` : "";
+          feedUrls.push(
+            `https://news.google.com/rss/search?q=${encodeURIComponent(chamberName + " chamber of commerce" + catQuery)}&hl=en-US&gl=US&ceid=US:en`,
+          );
+        }
+      }
+
+      // Category filter keywords
+      const catKeywords: Record<string, RegExp> = {
+        ribbon_cuttings: /ribbon.?cut|grand open|official open|unveil|groundbreak/i,
+        networking: /network|mixer|happy hour|after hours|social hour|meet.*greet/i,
+        luncheons: /lunch|breakfast|dinner|gala|banquet/i,
+        workshops: /workshop|seminar|training|class|learn|education/i,
+      };
+
+      interface EventItem {
+        title: string;
+        date: string;
+        time: string;
+        location: string;
+        description: string;
+        link: string;
+        category: string;
+      }
+
+      let allEvents: EventItem[] = [];
+      let feedSource = "";
+
+      for (const feedUrl of feedUrls) {
+        try {
+          const res = await fetch(feedUrl, {
+            headers: { "User-Agent": "MCP-VideoScript/1.0" },
+          });
+          if (!res.ok) continue;
+
+          const text = await res.text();
+          feedSource = feedUrl;
+
+          // Detect format: iCal vs RSS
+          if (text.includes("BEGIN:VCALENDAR") || text.includes("BEGIN:VEVENT")) {
+            // Parse iCal
+            const eventBlocks = text.split("BEGIN:VEVENT").slice(1);
+            for (const block of eventBlocks) {
+              const getField = (field: string) => {
+                const match = block.match(new RegExp(`${field}[^:]*:(.+?)(?:\\r?\\n|$)`));
+                return match?.[1]?.trim() ?? "";
+              };
+              const dtStart = getField("DTSTART");
+              const summary = getField("SUMMARY");
+              const desc = getField("DESCRIPTION")
+                .replace(/\\n/g, " ")
+                .replace(/\\,/g, ",");
+              const loc = getField("LOCATION").replace(/\\,/g, ",");
+              const url = getField("URL");
+
+              // Format date from iCal format
+              let dateStr = dtStart;
+              if (/^\d{8}T?\d{0,6}/.test(dtStart)) {
+                const y = dtStart.substring(0, 4);
+                const mo = dtStart.substring(4, 6);
+                const d = dtStart.substring(6, 8);
+                dateStr = `${y}-${mo}-${d}`;
+                if (dtStart.length >= 13) {
+                  const h = dtStart.substring(9, 11);
+                  const mi = dtStart.substring(11, 13);
+                  dateStr += ` ${h}:${mi}`;
+                }
+              }
+
+              allEvents.push({
+                title: summary,
+                date: dateStr,
+                time: "",
+                location: loc,
+                description: desc.substring(0, 200),
+                link: url,
+                category: "event",
+              });
+            }
+          } else if (text.includes("<rss") || text.includes("<feed") || text.includes("<item")) {
+            // Parse RSS/Atom
+            const titles = extractTagContent(text, "title").slice(1);
+            const links = extractTagContent(text, "link").slice(1);
+            const pubDates = extractTagContent(text, "pubDate");
+            const descriptions = extractTagContent(text, "description");
+
+            for (let i = 0; i < titles.length; i++) {
+              const title = stripHtml(titles[i]);
+              const desc = stripHtml(descriptions[i] ?? "");
+
+              allEvents.push({
+                title,
+                date: pubDates[i] ?? "",
+                time: "",
+                location: "",
+                description: desc.substring(0, 200),
+                link: links[i] ?? "",
+                category: "event",
+              });
+            }
+          }
+
+          if (allEvents.length > 0) break; // Got results, stop trying other URLs
+        } catch {
+          continue;
+        }
+      }
+
+      // Apply category filter
+      if (cat !== "all" && catKeywords[cat]) {
+        const regex = catKeywords[cat];
+        allEvents = allEvents.filter(
+          (e) => regex.test(e.title) || regex.test(e.description),
+        );
+      }
+
+      // Categorize events for labeling
+      for (const event of allEvents) {
+        if (/ribbon.?cut|grand open/i.test(event.title)) {
+          event.category = "Ribbon Cutting";
+        } else if (/network|mixer|happy hour|after hours/i.test(event.title)) {
+          event.category = "Networking";
+        } else if (/lunch|breakfast|dinner/i.test(event.title)) {
+          event.category = "Luncheon/Meal";
+        } else if (/workshop|seminar|training|class/i.test(event.title)) {
+          event.category = "Workshop";
+        } else {
+          event.category = "Event";
+        }
+      }
+
+      const items = allEvents.slice(0, limit);
+
+      if (items.length === 0) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text:
+                `No events found from chamber feed.\n\n` +
+                `Tried URLs:\n${feedUrls.map((u) => `  • ${u}`).join("\n")}\n\n` +
+                `💡 Tips:\n` +
+                `  • Ask your chamber for their RSS or iCal feed URL\n` +
+                `  • Check if they have a ChamberMaster portal (look for 'business.yourchamber.com')\n` +
+                `  • Use parse_chamber_email instead — paste the email you receive from them\n` +
+                `  • Many chambers list feeds at: yourchamber.com/events/rss`,
+            },
+          ],
+        };
+      }
+
+      const formatted = items
+        .map((e, i) => {
+          const parts = [`${i + 1}. **${e.title}**`];
+          parts.push(`   Type: ${e.category}`);
+          if (e.date) parts.push(`   Date: ${e.date}`);
+          if (e.location) parts.push(`   Location: ${e.location}`);
+          if (e.description) parts.push(`   Details: ${e.description}`);
+          if (e.link) parts.push(`   Link: ${e.link}`);
+          return parts.join("\n");
+        })
+        .join("\n\n");
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text:
+              `🏛️ Chamber Events (${todayDate()})\n` +
+              `   Source: ${feedSource}\n` +
+              `${"─".repeat(50)}\n\n` +
+              `${formatted}\n\n` +
+              `${"─".repeat(50)}\n` +
+              `Found ${items.length} events${cat !== "all" ? ` (filtered: ${cat})` : ""}.`,
+          },
+        ],
+      };
+    },
+  );
+
+  // ── 6. Parse Chamber of Commerce Email ──────────────────────────────────
   server.tool(
     "parse_chamber_email",
     "Parse a Chamber of Commerce email (or any newsletter / community email) and extract " +
@@ -588,7 +822,7 @@ const handler = createMcpHandler((server) => {
     },
   );
 
-  // ── 6. Generate Daily Video Script ──────────────────────────────────────
+  // ── 7. Generate Daily Video Script ──────────────────────────────────────
   server.tool(
     "generate_daily_video_script",
     "Generate a structured daily video script for local content creators. " +
@@ -893,7 +1127,7 @@ ${"═".repeat(60)}
     },
   );
 
-  // ── 7. Get Weather (kept from original) ─────────────────────────────────
+  // ── 8. Get Weather (kept from original) ─────────────────────────────────
   server.tool(
     "get_weather",
     "Get the current weather at a location — useful for video intros and local context.",

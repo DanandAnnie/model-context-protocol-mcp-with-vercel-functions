@@ -666,10 +666,10 @@ const handler = createMcpHandler((server) => {
   server.tool(
     "parse_chamber_email",
     "Parse a Chamber of Commerce email (or any newsletter / community email) and extract " +
-      "events, business openings, announcements, networking opportunities, and other content. " +
-      "Paste the full email body — HTML or plain text — and get back structured, categorized items " +
-      "ready to feed into generate_daily_video_script. " +
-      "Works with any chamber, city newsletter, BNI, Rotary, or community organization email.",
+      "events, business openings, news articles, honorees, announcements, and more. " +
+      "Paste the full email body — HTML or plain text. " +
+      "Optimized for St. George Area Chamber (Constant Contact) format but works with " +
+      "any chamber, city newsletter, BNI, Rotary, or community organization email.",
     {
       email_body: z
         .string()
@@ -680,7 +680,7 @@ const handler = createMcpHandler((server) => {
         .string()
         .optional()
         .describe(
-          "Who sent the email, e.g. 'Springfield Chamber of Commerce', 'Downtown Business Alliance'",
+          "Who sent the email, e.g. 'St. George Area Chamber', 'Downtown Business Alliance'",
         ),
       city: z
         .string()
@@ -691,121 +691,326 @@ const handler = createMcpHandler((server) => {
       const source = sender_name ?? "Chamber Email";
       const location = city ?? "";
 
-      // Clean the email: strip HTML if present, normalize whitespace
-      const cleanText = stripHtml(email_body);
+      // Clean: strip HTML if present, normalize Constant Contact formatting
+      let cleanText = stripHtml(email_body);
+      // Normalize __ markers (Constant Contact bold/link wrappers)
+      cleanText = cleanText.replace(/__/g, "");
 
-      // ── Pattern-based extraction ──────────────────────────────────────
-      // We look for common patterns in chamber / community emails
+      // ── Structured extraction for SGACC / Constant Contact style ──────
 
-      const events: Array<{ title: string; details: string }> = [];
-      const businesses: Array<{ title: string; details: string }> = [];
-      const announcements: Array<{ title: string; details: string }> = [];
-      const networking: Array<{ title: string; details: string }> = [];
-      const ribbonCuttings: Array<{ title: string; details: string }> = [];
+      interface ExtractedItem {
+        title: string;
+        details: string;
+        source?: string;
+        author?: string;
+        date?: string;
+        time?: string;
+        venue?: string;
+      }
 
-      // Split into logical chunks — paragraphs or sections
-      const sections = cleanText.split(/\n{2,}|\. {2,}/).filter((s) => s.trim().length > 15);
+      const featuredStories: ExtractedItem[] = [];
+      const newsArticles: ExtractedItem[] = [];
+      const events: ExtractedItem[] = [];
+      const honorees: ExtractedItem[] = [];
+      const businesses: ExtractedItem[] = [];
+      const announcements: ExtractedItem[] = [];
+      const networking: ExtractedItem[] = [];
+      const ribbonCuttings: ExtractedItem[] = [];
 
-      // Date pattern: matches various date formats
-      const datePattern =
+      // ── Detect major sections ──────────────────────────────────────────
+      // SGACC emails use clear section headers like:
+      //   "WHAT'S IN THE NEWS"
+      //   "EVENTS COMING UP!"
+      //   "IN CASE YOU MISSED IT!"
+
+      const sectionPattern =
+        /(?:WHAT'?S\s+IN\s+THE\s+NEWS|EVENTS?\s+COMING\s+UP|IN\s+CASE\s+YOU\s+MISSED\s+IT|UPCOMING\s+EVENTS?|MEMBER\s+(?:NEWS|SPOTLIGHT)|NEW\s+MEMBERS?|RIBBON\s+CUTTINGS?)/gi;
+
+      const sectionHeaders = [...cleanText.matchAll(sectionPattern)];
+      const sectionMap = new Map<string, string>();
+
+      for (let i = 0; i < sectionHeaders.length; i++) {
+        const header = sectionHeaders[i][0].toUpperCase();
+        const startIdx = sectionHeaders[i].index! + header.length;
+        const endIdx =
+          i + 1 < sectionHeaders.length
+            ? sectionHeaders[i + 1].index!
+            : cleanText.length;
+        sectionMap.set(header, cleanText.substring(startIdx, endIdx).trim());
+      }
+
+      // Content before the first section header is the "featured" / lead story
+      const firstSectionStart =
+        sectionHeaders.length > 0 ? sectionHeaders[0].index! : cleanText.length;
+      const leadContent = cleanText.substring(0, firstSectionStart).trim();
+
+      // ── Parse featured / lead content ──────────────────────────────────
+      // Look for honoree profiles: "Name (Organization): description"
+      // SGACC pattern: "* Carol Hollowell (Switchpoint): Carol has..."
+      const honoreePattern =
+        /\*\s*([^(]+?)\s*\(([^)]+)\)\s*[:\-–]\s*([\s\S]*?)(?=\*\s*[A-Z]|\n\n|$)/g;
+      let honoreeMatch;
+      while ((honoreeMatch = honoreePattern.exec(leadContent)) !== null) {
+        const name = honoreeMatch[1].trim();
+        const org = honoreeMatch[2].trim();
+        const bio = honoreeMatch[3].trim();
+        honorees.push({
+          title: `${name} — ${org}`,
+          details: bio.length > 200 ? bio.substring(0, 197) + "..." : bio,
+        });
+      }
+
+      // Look for event registrations in lead: "join us on [Date] at [Venue]"
+      const joinUsPattern =
+        /(?:join us|please join|you'?re invited)\s+(?:on\s+)?([A-Z][a-z]+\s+\d{1,2}(?:st|nd|rd|th)?(?:\s*,?\s*\d{4})?)\s+(?:at\s+)?(?:the\s+)?([^.!]+)/gi;
+      let joinMatch;
+      while ((joinMatch = joinUsPattern.exec(leadContent)) !== null) {
+        events.push({
+          title: joinMatch[0].substring(0, 150).trim(),
+          details: "",
+          date: joinMatch[1],
+          venue: joinMatch[2].trim(),
+        });
+      }
+
+      // Extract the main featured story title from lead
+      // Look for award/event names wrapped in emphasis or at the start
+      const awardPattern =
+        /(?:announce|celebrate|honor|present|proud)\w*\s+(?:the\s+)?(?:honorees?\s+for\s+(?:the\s+)?)?(.+?(?:Awards?|Gala|Luncheon|Summit|Event|Celebration|Ceremony)(?:\s*,\s*presented\s+by\s+[^.]+)?)/gi;
+      let awardMatch;
+      while ((awardMatch = awardPattern.exec(leadContent)) !== null) {
+        featuredStories.push({
+          title: awardMatch[1].trim(),
+          details: "",
+        });
+      }
+
+      // ── Parse "WHAT'S IN THE NEWS" section ─────────────────────────────
+      // SGACC format: Article Title \n Source \n Author \n Summary \n "Read More"
+      for (const [header, content] of sectionMap) {
+        if (/NEWS/i.test(header)) {
+          // Split by "Read More" which is the article delimiter
+          const articles = content.split(/Read\s+More/i).filter((a) => a.trim().length > 30);
+
+          for (const article of articles) {
+            const lines = article
+              .split(/\n/)
+              .map((l) => l.trim())
+              .filter((l) => l.length > 0);
+
+            if (lines.length >= 2) {
+              // First substantial line is the title
+              const titleLine = lines.find((l) => l.length > 20) ?? lines[0];
+              // Look for source attribution (short lines like "St George News", "Deseret News")
+              const sourceLine = lines.find(
+                (l) =>
+                  l.length < 40 &&
+                  /news|times|tribune|post|herald|press|media|journal|magazine|report/i.test(l),
+              );
+              // Look for author (short line, often just a name)
+              const authorLine = lines.find(
+                (l) =>
+                  l !== titleLine &&
+                  l !== sourceLine &&
+                  l.length < 30 &&
+                  /^[A-Z][a-z]+ [A-Z][a-z]+/.test(l),
+              );
+              // Summary is the longest remaining content
+              const summaryLines = lines.filter(
+                (l) =>
+                  l !== titleLine &&
+                  l !== sourceLine &&
+                  l !== authorLine &&
+                  l.length > 30 &&
+                  !/register|rsvp|sign up|click here/i.test(l),
+              );
+              const summary = summaryLines.join(" ").substring(0, 250);
+
+              newsArticles.push({
+                title: titleLine.substring(0, 150),
+                details: summary,
+                source: sourceLine ?? "",
+                author: authorLine ?? "",
+              });
+            }
+          }
+        }
+      }
+
+      // ── Parse "EVENTS COMING UP" section ───────────────────────────────
+      for (const [header, content] of sectionMap) {
+        if (/EVENT/i.test(header) && /COMING|UPCOMING/i.test(header)) {
+          // Events section often has registration CTAs as delimiters
+          const eventBlocks = content
+            .split(/(?:Register\s+(?:here|now)|RSVP\s+Now|Sign\s+Up)/i)
+            .filter((b) => b.trim().length > 15);
+
+          for (const block of eventBlocks) {
+            const text = block.trim();
+            if (text.length < 20) continue;
+
+            // Extract dates and times
+            const datePattern2 =
+              /(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?(?:\s*[-–]\s*\d{1,2}(?:st|nd|rd|th)?)?(?:\s*,?\s*\d{4})?/gi;
+            const timePattern2 = /\d{1,2}:\d{2}\s*(?:am|pm|AM|PM)/gi;
+            const dates = text.match(datePattern2) ?? [];
+            const times = text.match(timePattern2) ?? [];
+
+            // First line or substantial phrase as title
+            const lines = text
+              .split(/\n/)
+              .map((l) => l.trim())
+              .filter((l) => l.length > 5);
+            const title = lines[0]?.substring(0, 150) ?? text.substring(0, 150);
+
+            events.push({
+              title,
+              details: lines.slice(1).join(" ").substring(0, 200),
+              date: dates[0] ?? "",
+              time: times[0] ?? "",
+            });
+          }
+        }
+      }
+
+      // ── Parse "RIBBON CUTTINGS" section if separate ────────────────────
+      for (const [header, content] of sectionMap) {
+        if (/RIBBON/i.test(header)) {
+          const blocks = content
+            .split(/\n{2,}/)
+            .filter((b) => b.trim().length > 15);
+          for (const block of blocks) {
+            ribbonCuttings.push({
+              title: block.trim().substring(0, 150),
+              details: "",
+            });
+          }
+        }
+      }
+
+      // ── Fallback: general keyword scan on full text ────────────────────
+      // Catches anything the section-based parser missed
+      const datePatternGlobal =
         /(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:\s*[-–,]\s*\d{1,2})?(?:\s*,?\s*\d{4})?|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?/gi;
-
-      // Time pattern
-      const timePattern =
-        /\d{1,2}:\d{2}\s*(?:am|pm|AM|PM)|(?:noon|midnight)/gi;
-
-      // Address-like pattern
+      const timePatternGlobal = /\d{1,2}:\d{2}\s*(?:am|pm|AM|PM)|(?:noon|midnight)/gi;
       const addressPattern =
         /\d+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:St(?:reet)?|Ave(?:nue)?|Blvd|Dr(?:ive)?|Rd|Road|Ln|Lane|Way|Ct|Court|Pl(?:ace)?|Pkwy|Hwy)/gi;
 
-      // Keywords for categorization
-      const eventKeywords =
-        /\b(?:event|workshop|seminar|luncheon|breakfast|mixer|gala|fundraiser|meeting|summit|conference|class|training|tour|open house|celebration|ceremony|festival|fair|parade|concert|show)\b/i;
-      const businessKeywords =
-        /\b(?:new (?:business|member|opening)|grand opening|now open|coming soon|just opened|welcome|new to|joining|launched|startup|entrepreneur|small business)\b/i;
-      const ribbonKeywords =
-        /\b(?:ribbon.?cutting|ribbon.?ceremony|official opening|inaugural|dedication|unveiling|groundbreaking)\b/i;
-      const networkKeywords =
-        /\b(?:network(?:ing)?|mixer|happy hour|coffee chat|speed network|business after hours|after hours|connect|mingle|meet and greet|social hour)\b/i;
-      const announcementKeywords =
-        /\b(?:announce|update|reminder|notice|important|deadline|application|grant|award|scholarship|program|initiative|partnership|sponsor)\b/i;
+      // Only run fallback if we didn't find much from structured parsing
+      const structuredCount =
+        featuredStories.length +
+        newsArticles.length +
+        events.length +
+        honorees.length +
+        businesses.length +
+        ribbonCuttings.length;
 
-      for (const section of sections) {
-        const trimmed = section.trim();
-        if (trimmed.length < 20) continue;
+      if (structuredCount < 3) {
+        const paragraphs = cleanText
+          .split(/\n{2,}/)
+          .filter((s) => s.trim().length > 20);
 
-        // Extract any dates and times found in this section
-        const dates = trimmed.match(datePattern) ?? [];
-        const times = trimmed.match(timePattern) ?? [];
-        const addresses = trimmed.match(addressPattern) ?? [];
+        const ribbonKeywords =
+          /\b(?:ribbon.?cutting|ribbon.?ceremony|official opening|inaugural|dedication|unveiling|groundbreaking)\b/i;
+        const networkKeywords =
+          /\b(?:network(?:ing)?|mixer|happy hour|coffee chat|speed network|business after hours|after hours|mingle|meet and greet|social hour)\b/i;
+        const businessKeywords =
+          /\b(?:new (?:business|member|opening)|grand opening|now open|coming soon|just opened|welcome|new to|joining|launched|startup|entrepreneur|small business)\b/i;
+        const eventKeywords =
+          /\b(?:event|workshop|seminar|luncheon|breakfast|gala|fundraiser|meeting|summit|conference|class|training|tour|open house|celebration|ceremony|festival|fair|parade|concert|show)\b/i;
+        const announcementKeywords =
+          /\b(?:announce|update|reminder|notice|important|deadline|application|grant|award|scholarship|program|initiative|partnership|sponsor)\b/i;
 
-        // Build a details string with extracted metadata
-        const detailParts: string[] = [];
-        if (dates.length > 0) detailParts.push(`Date: ${dates[0]}`);
-        if (times.length > 0) detailParts.push(`Time: ${times[0]}`);
-        if (addresses.length > 0) detailParts.push(`Location: ${addresses[0]}`);
-        const meta = detailParts.length > 0 ? ` (${detailParts.join(" | ")})` : "";
+        for (const para of paragraphs) {
+          const trimmed = para.trim();
+          if (trimmed.length < 25) continue;
 
-        // Truncate long sections for a clean title
-        const title =
-          trimmed.length > 150 ? trimmed.substring(0, 147) + "..." : trimmed;
+          const dates = trimmed.match(datePatternGlobal) ?? [];
+          const times = trimmed.match(timePatternGlobal) ?? [];
+          const addresses = trimmed.match(addressPattern) ?? [];
 
-        const item = { title, details: meta };
+          const detailParts: string[] = [];
+          if (dates.length > 0) detailParts.push(`Date: ${dates[0]}`);
+          if (times.length > 0) detailParts.push(`Time: ${times[0]}`);
+          if (addresses.length > 0) detailParts.push(`Location: ${addresses[0]}`);
+          const meta = detailParts.length > 0 ? detailParts.join(" | ") : "";
 
-        // Categorize based on keywords (check most specific first)
-        if (ribbonKeywords.test(trimmed)) {
-          ribbonCuttings.push(item);
-        } else if (networkKeywords.test(trimmed)) {
-          networking.push(item);
-        } else if (businessKeywords.test(trimmed)) {
-          businesses.push(item);
-        } else if (eventKeywords.test(trimmed)) {
-          events.push(item);
-        } else if (announcementKeywords.test(trimmed)) {
-          announcements.push(item);
-        } else if (dates.length > 0 || times.length > 0) {
-          // Has a date/time? Likely an event
-          events.push(item);
+          const title =
+            trimmed.length > 150 ? trimmed.substring(0, 147) + "..." : trimmed;
+          const item: ExtractedItem = { title, details: meta };
+
+          if (ribbonKeywords.test(trimmed)) {
+            ribbonCuttings.push(item);
+          } else if (networkKeywords.test(trimmed)) {
+            networking.push(item);
+          } else if (businessKeywords.test(trimmed)) {
+            businesses.push(item);
+          } else if (eventKeywords.test(trimmed)) {
+            events.push(item);
+          } else if (announcementKeywords.test(trimmed)) {
+            announcements.push(item);
+          }
         }
       }
 
       // ── Format output ─────────────────────────────────────────────────
+      const formatItems = (items: ExtractedItem[]) =>
+        items
+          .map((item, i) => {
+            const parts = [`   ${i + 1}. ${item.title}`];
+            if (item.source) parts.push(`      Source: ${item.source}`);
+            if (item.author) parts.push(`      Author: ${item.author}`);
+            if (item.date) parts.push(`      Date: ${item.date}`);
+            if (item.time) parts.push(`      Time: ${item.time}`);
+            if (item.venue) parts.push(`      Venue: ${item.venue}`);
+            if (item.details) parts.push(`      ${item.details}`);
+            return parts.join("\n");
+          })
+          .join("\n\n");
+
+      const formatSection = (
+        label: string,
+        emoji: string,
+        items: ExtractedItem[],
+      ) => {
+        if (items.length === 0) return "";
+        return `${emoji} ${label} (${items.length})\n${formatItems(items)}\n`;
+      };
+
       const totalFound =
+        featuredStories.length +
+        honorees.length +
+        newsArticles.length +
         events.length +
         businesses.length +
         ribbonCuttings.length +
         networking.length +
         announcements.length;
 
-      const formatCategory = (
-        label: string,
-        emoji: string,
-        items: Array<{ title: string; details: string }>,
-      ) => {
-        if (items.length === 0) return "";
-        return `${emoji} ${label} (${items.length})\n${items.map((item, i) => `   ${i + 1}. ${item.title}${item.details}`).join("\n")}\n`;
-      };
-
       const output = [
         `📧 Parsed: ${source}${location ? ` — ${location}` : ""} (${todayDate()})`,
-        "─".repeat(50),
+        "─".repeat(55),
         "",
-        formatCategory("EVENTS & HAPPENINGS", "🎉", events),
-        formatCategory("NEW BUSINESSES & MEMBERS", "🏪", businesses),
-        formatCategory("RIBBON CUTTINGS & OPENINGS", "✂️", ribbonCuttings),
-        formatCategory("NETWORKING OPPORTUNITIES", "🤝", networking),
-        formatCategory("ANNOUNCEMENTS & UPDATES", "📢", announcements),
-        "─".repeat(50),
+        formatSection("FEATURED STORIES", "⭐", featuredStories),
+        formatSection("HONOREES & SPOTLIGHTS", "🏆", honorees),
+        formatSection("NEWS ARTICLES", "📰", newsArticles),
+        formatSection("EVENTS & HAPPENINGS", "🎉", events),
+        formatSection("NEW BUSINESSES & MEMBERS", "🏪", businesses),
+        formatSection("RIBBON CUTTINGS & OPENINGS", "✂️", ribbonCuttings),
+        formatSection("NETWORKING OPPORTUNITIES", "🤝", networking),
+        formatSection("ANNOUNCEMENTS & UPDATES", "📢", announcements),
+        "─".repeat(55),
         `📊 Total items extracted: ${totalFound}`,
         "",
         totalFound > 0
-          ? "✅ Ready to use! Pass these items into generate_daily_video_script:\n" +
-            "   • Events + Ribbon Cuttings → local_events parameter\n" +
-            "   • New Businesses → new_businesses parameter\n" +
-            "   • Announcements → local_news parameter\n" +
-            "   • Networking → local_events or custom_talking_points"
+          ? "✅ Ready to use! Feed these into generate_daily_video_script:\n" +
+            "   • Featured + Honorees → custom_talking_points (great personal stories!)\n" +
+            "   • News Articles → local_news\n" +
+            "   • Events + Ribbon Cuttings → local_events\n" +
+            "   • New Businesses → new_businesses\n" +
+            "   • Announcements → local_news or custom_talking_points"
           : "⚠️  No structured items detected. The email may use unusual formatting.\n" +
-            "   Try pasting just the main content section, or use the raw text as\n" +
+            "   Try pasting just the main content body, or use the raw text as\n" +
             "   custom_talking_points in generate_daily_video_script.",
       ]
         .filter(Boolean)

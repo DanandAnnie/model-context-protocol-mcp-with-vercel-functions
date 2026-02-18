@@ -16,6 +16,39 @@
 
 // ── Utility helpers (shared with server.ts) ────────────────────────────────
 
+function extractTagContent(xml: string, tag: string): string[] {
+  const regex = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "gi");
+  const matches: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = regex.exec(xml)) !== null) {
+    matches.push(m[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").trim());
+  }
+  return matches;
+}
+
+/** Fetch news items from Google News RSS for a search query. */
+async function fetchGoogleNews(query: string): Promise<Array<{ title: string; link: string; published: string; summary: string }>> {
+  try {
+    const encoded = encodeURIComponent(query);
+    const rssUrl = `https://news.google.com/rss/search?q=${encoded}&hl=en-US&gl=US&ceid=US:en`;
+    const res = await fetch(rssUrl);
+    if (!res.ok) return [];
+    const xml = await res.text();
+    const titles = extractTagContent(xml, "title").slice(1);
+    const links = extractTagContent(xml, "link").slice(1);
+    const pubDates = extractTagContent(xml, "pubDate");
+    const descriptions = extractTagContent(xml, "description");
+    return titles.slice(0, 8).map((title, i) => ({
+      title: stripHtml(title),
+      link: links[i] ?? "",
+      published: pubDates[i] ?? "",
+      summary: stripHtml(descriptions[i] ?? ""),
+    }));
+  } catch {
+    return [];
+  }
+}
+
 function stripHtml(html: string): string {
   return html
     .replace(/<[^>]*>/g, " ")
@@ -770,11 +803,46 @@ export async function POST(request: Request): Promise<Response> {
     // Parse the email
     const parsed = parseEmailContent(inbound.body);
 
-    // Generate daily tasks
+    // Generate daily tasks from email
     const tasks = generateDailyTasks(parsed, senderName, city, creatorName);
 
     // Format as readable text
     const tasksText = formatTasksAsText(tasks, senderName, city, creatorName);
+
+    // ── Also run the full search pipeline ─────────────────────────────
+    // This supplements the email content with live data from all sources
+    const runFullPipeline = url.searchParams.get("full") !== "false";
+    let pipelineData = null;
+
+    if (runFullPipeline) {
+      try {
+        const state = "Utah";
+        const searchLocation = `${city} ${state}`;
+
+        // Run all searches in parallel
+        const [liveNews, liveEvents, liveBiz, liveRE] = await Promise.all([
+          fetchGoogleNews(searchLocation),
+          fetchGoogleNews(`${searchLocation} events grand opening community`),
+          fetchGoogleNews(`${searchLocation} new business opening restaurant`),
+          fetchGoogleNews(`${searchLocation} real estate market home prices`),
+        ]);
+
+        pipelineData = {
+          liveNews: liveNews.length,
+          liveEvents: liveEvents.length,
+          liveBusinesses: liveBiz.length,
+          liveRealEstate: liveRE.length,
+          totalLiveItems: liveNews.length + liveEvents.length + liveBiz.length + liveRE.length,
+          news: liveNews,
+          events: liveEvents,
+          businesses: liveBiz,
+          realEstate: liveRE,
+        };
+      } catch {
+        // Pipeline is supplementary — don't fail the whole request
+        pipelineData = { error: "Live search pipeline failed, email tasks still generated" };
+      }
+    }
 
     // Send notification if webhook URL provided
     let notificationResult = null;
@@ -809,6 +877,7 @@ export async function POST(request: Request): Promise<Response> {
         },
         tasks,
         tasksText,
+        pipeline: pipelineData,
         notification: notificationResult,
       }),
       {

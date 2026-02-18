@@ -753,11 +753,11 @@ export async function POST(request: Request): Promise<Response> {
     const city =
       url.searchParams.get("city") ??
       (data.city as string) ??
-      "St. George";
+      "St. George area";
     const creatorName =
       url.searchParams.get("creator") ??
       (data.creator_name as string) ??
-      "Creator";
+      "Dan";
     const notifyUrl =
       url.searchParams.get("notify") ??
       (data.notification_webhook as string) ??

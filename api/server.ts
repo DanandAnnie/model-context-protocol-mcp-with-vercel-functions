@@ -1357,9 +1357,9 @@ ${"═".repeat(60)}
         .describe("Your name or channel name, e.g. 'Annie'"),
     },
     async ({ email_body, sender_name, city, creator_name }) => {
-      const source = sender_name ?? "Chamber Email";
-      const location = city ?? "St. George";
-      const creator = creator_name ?? "Creator";
+      const source = sender_name ?? "St. George Area Chamber";
+      const location = city ?? "St. George area";
+      const creator = creator_name ?? "Dan";
 
       // Clean the email
       let cleanText = stripHtml(email_body);

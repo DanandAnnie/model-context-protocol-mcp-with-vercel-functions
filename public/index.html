@@ -74,8 +74,21 @@
   <h1>Daily Video Script Generator</h1>
   <p class="subtitle">MCP Server for local content creators — powered by Vercel Functions</p>
 
+  <div class="workflow" style="border-color: #a78bfa;">
+    <h2 style="color: #a78bfa;">NEW: Auto Email-to-Tasks</h2>
+    <ol>
+      <li>Set up auto-forwarding from your email (Gmail, Outlook, Zapier, etc.)</li>
+      <li>Chamber emails are auto-sent to <code>/api/email-webhook</code></li>
+      <li>Daily tasks are generated and sent to your Slack/Discord</li>
+      <li>Call <code>setup_email_automation</code> for step-by-step setup guide</li>
+    </ol>
+    <p style="margin-top: 0.75rem; font-size: 0.85rem; color: #94a3b8;">
+      Or use <code>auto_daily_tasks_from_email</code> to paste an email and get tasks instantly.
+    </p>
+  </div>
+
   <div class="workflow">
-    <h2>Recommended Workflow</h2>
+    <h2>Manual Workflow</h2>
     <ol>
       <li>Call <code>fetch_chamber_events</code> or <code>parse_chamber_email</code> for chamber content</li>
       <li>Call <code>search_local_news</code> for your city</li>
@@ -124,6 +137,16 @@
     <p>Combine all gathered content into a structured video script — short-form (TikTok/Reels) and long-form (YouTube) — with hooks, segments, transitions, and CTAs.</p>
   </div>
 
+  <div class="tool" style="border-color: #a78bfa;">
+    <h3 style="color: #a78bfa;">auto_daily_tasks_from_email</h3>
+    <p>All-in-one: paste a chamber/community email and instantly get a prioritized daily task list. Extracts events, businesses, news, ribbon cuttings and generates actionable tasks with priorities and time estimates.</p>
+  </div>
+
+  <div class="tool" style="border-color: #a78bfa;">
+    <h3 style="color: #a78bfa;">setup_email_automation</h3>
+    <p>Get step-by-step instructions to set up automatic email-to-tasks processing. Supports Gmail, Outlook, Zapier, Make.com, SendGrid, Mailgun, and Postmark. Sends notifications to Slack, Discord, or any webhook.</p>
+  </div>
+
   <div class="tool">
     <h3>get_weather</h3>
     <p>Get current weather for any location — useful for video intros and local context.</p>
@@ -132,6 +155,11 @@
   <div class="connect">
     <p><strong>Connect via MCP:</strong> <code>https://your-deployment.vercel.app/mcp</code></p>
     <p style="margin-top: 0.5rem;">Works with Claude Desktop, Cursor, Windsurf, and any MCP-compatible client.</p>
+  </div>
+
+  <div class="connect" style="border-color: #a78bfa; margin-top: 1rem;">
+    <p><strong>Email Webhook:</strong> <code>https://your-deployment.vercel.app/api/email-webhook</code></p>
+    <p style="margin-top: 0.5rem;">POST chamber emails here to auto-generate daily tasks. Add <code>?city=St.+George&creator=YourName&notify=SLACK_URL</code> for full automation.</p>
   </div>
 
 </body>

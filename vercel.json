@@ -1,8 +1,14 @@
 {
-  "rewrites": [{ "source": "/(.+)", "destination": "/api/server" }],
+  "rewrites": [
+    { "source": "/api/email-webhook", "destination": "/api/email-webhook" },
+    { "source": "/(.+)", "destination": "/api/server" }
+  ],
   "functions": {
     "api/server.ts": {
       "maxDuration": 60
+    },
+    "api/email-webhook.ts": {
+      "maxDuration": 30
     }
   }
 }

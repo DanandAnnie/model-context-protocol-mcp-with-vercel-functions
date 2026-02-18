@@ -1332,7 +1332,674 @@ ${"═".repeat(60)}
     },
   );
 
-  // ── 8. Get Weather (kept from original) ─────────────────────────────────
+  // ── 8. Auto Daily Tasks from Email ─────────────────────────────────────
+  server.tool(
+    "auto_daily_tasks_from_email",
+    "All-in-one automation: paste a chamber/community email and instantly get a prioritized " +
+      "daily task list for your video content. Parses the email, extracts all items (events, " +
+      "businesses, news, ribbon cuttings), and generates actionable tasks with priorities and " +
+      "time estimates. No extra steps needed — just paste and go!",
+    {
+      email_body: z
+        .string()
+        .describe("The full email body content — HTML or plain text, just paste it in."),
+      sender_name: z
+        .string()
+        .optional()
+        .describe("Who sent the email, e.g. 'St. George Area Chamber'"),
+      city: z
+        .string()
+        .optional()
+        .describe("Your city for location context, e.g. 'St. George'"),
+      creator_name: z
+        .string()
+        .optional()
+        .describe("Your name or channel name, e.g. 'Annie'"),
+    },
+    async ({ email_body, sender_name, city, creator_name }) => {
+      const source = sender_name ?? "Chamber Email";
+      const location = city ?? "St. George";
+      const creator = creator_name ?? "Creator";
+
+      // Clean the email
+      let cleanText = stripHtml(email_body);
+      cleanText = cleanText.replace(/__/g, "");
+
+      // ── Parse email content (same logic as parse_chamber_email) ──────
+
+      interface ExtractedItem {
+        title: string;
+        details: string;
+        source?: string;
+        date?: string;
+        time?: string;
+        venue?: string;
+      }
+
+      const featuredStories: ExtractedItem[] = [];
+      const newsArticles: ExtractedItem[] = [];
+      const events: ExtractedItem[] = [];
+      const honorees: ExtractedItem[] = [];
+      const businesses: ExtractedItem[] = [];
+      const announcements: ExtractedItem[] = [];
+      const networking: ExtractedItem[] = [];
+      const ribbonCuttings: ExtractedItem[] = [];
+
+      const sectionPattern =
+        /(?:WHAT'?S\s+IN\s+THE\s+NEWS|EVENTS?\s+COMING\s+UP|IN\s+CASE\s+YOU\s+MISSED\s+IT|UPCOMING\s+EVENTS?|MEMBER\s+(?:NEWS|SPOTLIGHT)|NEW\s+MEMBERS?|RIBBON\s+CUTTINGS?)/gi;
+
+      const sectionHeaders = [...cleanText.matchAll(sectionPattern)];
+      const sectionMap = new Map<string, string>();
+
+      for (let i = 0; i < sectionHeaders.length; i++) {
+        const header = sectionHeaders[i][0].toUpperCase();
+        const startIdx = sectionHeaders[i].index! + header.length;
+        const endIdx =
+          i + 1 < sectionHeaders.length
+            ? sectionHeaders[i + 1].index!
+            : cleanText.length;
+        sectionMap.set(header, cleanText.substring(startIdx, endIdx).trim());
+      }
+
+      const firstSectionStart =
+        sectionHeaders.length > 0 ? sectionHeaders[0].index! : cleanText.length;
+      const leadContent = cleanText.substring(0, firstSectionStart).trim();
+
+      // Honorees
+      const honoreePattern =
+        /\*\s*([^(]+?)\s*\(([^)]+)\)\s*[:\-–]\s*([\s\S]*?)(?=\*\s*[A-Z]|\n\n|$)/g;
+      let hMatch;
+      while ((hMatch = honoreePattern.exec(leadContent)) !== null) {
+        honorees.push({
+          title: `${hMatch[1].trim()} — ${hMatch[2].trim()}`,
+          details: hMatch[3].trim().substring(0, 200),
+        });
+      }
+
+      // Event invitations
+      const joinPattern =
+        /(?:join us|please join|you'?re invited)\s+(?:on\s+)?([A-Z][a-z]+\s+\d{1,2}(?:st|nd|rd|th)?(?:\s*,?\s*\d{4})?)\s+(?:at\s+)?(?:the\s+)?([^.!]+)/gi;
+      let jMatch;
+      while ((jMatch = joinPattern.exec(leadContent)) !== null) {
+        events.push({
+          title: jMatch[0].substring(0, 150).trim(),
+          details: "",
+          date: jMatch[1],
+          venue: jMatch[2].trim(),
+        });
+      }
+
+      // Featured events/awards
+      const awardPattern =
+        /(?:announce|celebrate|honor|present|proud)\w*\s+(?:the\s+)?(?:honorees?\s+for\s+(?:the\s+)?)?(.+?(?:Awards?|Gala|Luncheon|Summit|Event|Celebration|Ceremony)(?:\s*,\s*presented\s+by\s+[^.]+)?)/gi;
+      let aMatch;
+      while ((aMatch = awardPattern.exec(leadContent)) !== null) {
+        featuredStories.push({ title: aMatch[1].trim(), details: "" });
+      }
+
+      // NEWS section
+      for (const [header, content] of sectionMap) {
+        if (/NEWS/i.test(header)) {
+          const articles = content.split(/Read\s+More/i).filter((a) => a.trim().length > 30);
+          for (const article of articles) {
+            const lines = article.split(/\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+            if (lines.length >= 2) {
+              const titleLine = lines.find((l) => l.length > 20) ?? lines[0];
+              const sourceLine = lines.find(
+                (l) => l.length < 40 && /news|times|tribune|post|herald|press|media/i.test(l),
+              );
+              const summaryLines = lines.filter(
+                (l) => l !== titleLine && l !== sourceLine && l.length > 30 && !/register|rsvp/i.test(l),
+              );
+              newsArticles.push({
+                title: titleLine.substring(0, 150),
+                details: summaryLines.join(" ").substring(0, 250),
+                source: sourceLine ?? "",
+              });
+            }
+          }
+        }
+      }
+
+      // EVENTS section
+      for (const [header, content] of sectionMap) {
+        if (/EVENT/i.test(header) && /COMING|UPCOMING/i.test(header)) {
+          const eventBlocks = content
+            .split(/(?:Register\s+(?:here|now)|RSVP\s+Now|Sign\s+Up)/i)
+            .filter((b) => b.trim().length > 15);
+          for (const block of eventBlocks) {
+            const text = block.trim();
+            if (text.length < 20) continue;
+            const dp = /(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?(?:\s*[-–]\s*\d{1,2})?(?:\s*,?\s*\d{4})?/gi;
+            const tp = /\d{1,2}:\d{2}\s*(?:am|pm|AM|PM)/gi;
+            const dates = text.match(dp) ?? [];
+            const times = text.match(tp) ?? [];
+            const lines = text.split(/\n/).map((l) => l.trim()).filter((l) => l.length > 5);
+            events.push({
+              title: (lines[0] ?? text).substring(0, 150),
+              details: lines.slice(1).join(" ").substring(0, 200),
+              date: dates[0] ?? "",
+              time: times[0] ?? "",
+            });
+          }
+        }
+      }
+
+      // RIBBON CUTTINGS section
+      for (const [header, content] of sectionMap) {
+        if (/RIBBON/i.test(header)) {
+          const blocks = content.split(/\n{2,}/).filter((b) => b.trim().length > 15);
+          for (const block of blocks) {
+            ribbonCuttings.push({ title: block.trim().substring(0, 150), details: "" });
+          }
+        }
+      }
+
+      // Fallback keyword scan
+      const structuredCount =
+        featuredStories.length + newsArticles.length + events.length +
+        honorees.length + businesses.length + ribbonCuttings.length;
+
+      if (structuredCount < 3) {
+        const paragraphs = cleanText.split(/\n{2,}/).filter((s) => s.trim().length > 20);
+        const ribbonKw = /\b(?:ribbon.?cutting|grand opening|official opening|groundbreaking)\b/i;
+        const networkKw = /\b(?:network(?:ing)?|mixer|happy hour|after hours|meet and greet)\b/i;
+        const businessKw = /\b(?:new (?:business|member)|grand opening|now open|coming soon)\b/i;
+        const eventKw = /\b(?:event|workshop|seminar|luncheon|gala|festival|class|training)\b/i;
+        const announceKw = /\b(?:announce|update|reminder|deadline|grant|award|program)\b/i;
+
+        for (const para of paragraphs) {
+          const trimmed = para.trim();
+          if (trimmed.length < 25) continue;
+          const title = trimmed.length > 150 ? trimmed.substring(0, 147) + "..." : trimmed;
+          const item: ExtractedItem = { title, details: "" };
+          if (ribbonKw.test(trimmed)) ribbonCuttings.push(item);
+          else if (networkKw.test(trimmed)) networking.push(item);
+          else if (businessKw.test(trimmed)) businesses.push(item);
+          else if (eventKw.test(trimmed)) events.push(item);
+          else if (announceKw.test(trimmed)) announcements.push(item);
+        }
+      }
+
+      // ── Generate daily tasks ───────────────────────────────────────────
+
+      interface DailyTask {
+        id: number;
+        priority: "high" | "medium" | "low";
+        category: string;
+        task: string;
+        details: string;
+        estimatedTime: string;
+      }
+
+      const tasks: DailyTask[] = [];
+      let taskId = 1;
+
+      const totalItems =
+        featuredStories.length + newsArticles.length + events.length +
+        honorees.length + businesses.length + ribbonCuttings.length +
+        networking.length + announcements.length;
+
+      // Always start with review
+      tasks.push({
+        id: taskId++,
+        priority: "high",
+        category: "PREP",
+        task: `Review today's ${source} digest (${totalItems} items extracted)`,
+        details: "Scan the parsed content and pick your top 3-5 talking points for today's video.",
+        estimatedTime: "10 min",
+      });
+
+      // Honorees -> feature stories
+      for (const h of honorees.slice(0, 3)) {
+        tasks.push({
+          id: taskId++, priority: "high", category: "FEATURE",
+          task: `Feature story: ${h.title}`,
+          details: h.details || "Reach out for a quick interview or quote.",
+          estimatedTime: "15 min",
+        });
+      }
+
+      // Featured stories
+      for (const f of featuredStories.slice(0, 2)) {
+        tasks.push({
+          id: taskId++, priority: "high", category: "FEATURE",
+          task: `Cover featured story: ${f.title}`,
+          details: "Great lead for today's video hook.",
+          estimatedTime: "10 min",
+        });
+      }
+
+      // News -> report
+      for (const n of newsArticles.slice(0, 3)) {
+        tasks.push({
+          id: taskId++, priority: "medium", category: "NEWS",
+          task: `Report on: ${n.title}`,
+          details: n.details || "Read the full article and summarize key points.",
+          estimatedTime: "5 min",
+        });
+      }
+
+      // Events -> promote
+      for (const e of events.slice(0, 4)) {
+        const dateInfo = e.date ? ` (${e.date}${e.time ? " at " + e.time : ""})` : "";
+        tasks.push({
+          id: taskId++, priority: "medium", category: "EVENT",
+          task: `Promote event: ${e.title}${dateInfo}`,
+          details: e.venue ? `Venue: ${e.venue}. Include in today's events segment.` : "Include in events roundup.",
+          estimatedTime: "3 min",
+        });
+      }
+
+      // Ribbon cuttings -> film
+      for (const r of ribbonCuttings.slice(0, 3)) {
+        tasks.push({
+          id: taskId++, priority: "high", category: "RIBBON CUTTING",
+          task: `Film ribbon cutting: ${r.title}`,
+          details: "Great B-roll opportunity! Try to attend and get footage.",
+          estimatedTime: "30 min",
+        });
+      }
+
+      // Businesses -> spotlight
+      for (const b of businesses.slice(0, 3)) {
+        tasks.push({
+          id: taskId++, priority: "medium", category: "BUSINESS",
+          task: `Spotlight new business: ${b.title}`,
+          details: b.details || "Visit the location, film a walkthrough or interview.",
+          estimatedTime: "20 min",
+        });
+      }
+
+      // Networking
+      for (const n of networking.slice(0, 2)) {
+        tasks.push({
+          id: taskId++, priority: "low", category: "NETWORKING",
+          task: `Attend/promote: ${n.title}`,
+          details: n.details || "Good networking opportunity — mention on social media.",
+          estimatedTime: "5 min",
+        });
+      }
+
+      // Announcements
+      for (const a of announcements.slice(0, 2)) {
+        tasks.push({
+          id: taskId++, priority: "low", category: "ANNOUNCEMENT",
+          task: `Share announcement: ${a.title}`,
+          details: a.details || "Quick mention in your video or social post.",
+          estimatedTime: "2 min",
+        });
+      }
+
+      // Final: produce the video
+      tasks.push({
+        id: taskId++,
+        priority: "high",
+        category: "PRODUCE",
+        task: `Film & publish today's ${location} local update video`,
+        details:
+          `Script outline: Hook -> Top headline -> Events -> New businesses -> CTA. ` +
+          `Aim for short-form (60-90s) AND long-form (5-10 min).`,
+        estimatedTime: "60 min",
+      });
+
+      // ── Format output ──────────────────────────────────────────────────
+
+      const priorityEmoji = { high: "🔴", medium: "🟡", low: "🟢" };
+      const high = tasks.filter((t) => t.priority === "high");
+      const medium = tasks.filter((t) => t.priority === "medium");
+      const low = tasks.filter((t) => t.priority === "low");
+
+      const formatGroup = (label: string, emoji: string, group: DailyTask[]) => {
+        if (group.length === 0) return "";
+        return `${emoji} ${label} (${group.length})\n${"─".repeat(40)}\n` +
+          group.map((t) =>
+            `  [ ] #${t.id} [${t.category}] ${t.task}\n      ${t.details}\n      ⏱ ${t.estimatedTime}`,
+          ).join("\n\n") + "\n";
+      };
+
+      const output = [
+        `${"═".repeat(60)}`,
+        `📋 AUTO-GENERATED DAILY TASKS — ${todayDate()}`,
+        `   Creator: ${creator} | City: ${location}`,
+        `   Source: ${source} (auto-processed from email)`,
+        `${"═".repeat(60)}`,
+        "",
+        formatGroup("HIGH PRIORITY", "🔴", high),
+        formatGroup("MEDIUM PRIORITY", "🟡", medium),
+        formatGroup("LOW PRIORITY", "🟢", low),
+        `${"═".repeat(60)}`,
+        `📊 Summary: ${tasks.length} tasks generated`,
+        `   🔴 ${high.length} high | 🟡 ${medium.length} medium | 🟢 ${low.length} low`,
+        "",
+        `💡 Next steps:`,
+        `   • Use these tasks as your daily content plan`,
+        `   • Feed the key items into generate_daily_video_script for a full script`,
+        `   • Set up auto-forwarding with setup_email_automation for hands-free daily tasks`,
+        "",
+        `📧 Parsed from email:`,
+        `   ⭐ ${featuredStories.length} featured | 🏆 ${honorees.length} honorees | 📰 ${newsArticles.length} news`,
+        `   🎉 ${events.length} events | 🏪 ${businesses.length} businesses | ✂️ ${ribbonCuttings.length} ribbon cuttings`,
+        `   🤝 ${networking.length} networking | 📢 ${announcements.length} announcements`,
+      ].filter(Boolean).join("\n");
+
+      return {
+        content: [{ type: "text" as const, text: output }],
+      };
+    },
+  );
+
+  // ── 9. Setup Email Automation ─────────────────────────────────────────
+  server.tool(
+    "setup_email_automation",
+    "Get step-by-step instructions to set up automatic email-to-daily-tasks processing. " +
+      "When configured, any chamber or community email forwarded to your webhook will " +
+      "automatically generate daily video tasks and send them to your Slack, Discord, or any webhook. " +
+      "Supports Gmail auto-forwarding, Zapier, Make.com, SendGrid, Mailgun, and Postmark.",
+    {
+      deployment_url: z
+        .string()
+        .optional()
+        .describe("Your Vercel deployment URL, e.g. 'https://my-mcp.vercel.app'"),
+      notification_service: z
+        .enum(["slack", "discord", "generic_webhook", "none"])
+        .optional()
+        .describe("Where to send task notifications (default: 'slack')"),
+      email_provider: z
+        .enum(["gmail", "outlook", "zapier", "make", "sendgrid", "mailgun", "postmark"])
+        .optional()
+        .describe("Your email provider for auto-forwarding setup (default: 'gmail')"),
+      city: z.string().optional().describe("Your city, e.g. 'St. George'"),
+      creator_name: z.string().optional().describe("Your name/channel name"),
+    },
+    async ({ deployment_url, notification_service, email_provider, city, creator_name }) => {
+      const baseUrl = deployment_url ?? "https://your-deployment.vercel.app";
+      const service = notification_service ?? "slack";
+      const provider = email_provider ?? "gmail";
+      const loc = city ?? "St. George";
+      const name = creator_name ?? "Creator";
+
+      const webhookUrl =
+        `${baseUrl}/api/email-webhook?city=${encodeURIComponent(loc)}&creator=${encodeURIComponent(name)}`;
+
+      // Build provider-specific instructions
+      let providerInstructions = "";
+
+      switch (provider) {
+        case "gmail":
+          providerInstructions = `
+📧 GMAIL AUTO-FORWARD SETUP (via Google Apps Script)
+${"─".repeat(50)}
+
+Since Gmail doesn't natively forward to webhooks, use Google Apps Script:
+
+1. Go to https://script.google.com and create a new project
+2. Paste this script:
+
+   function checkChamberEmails() {
+     var threads = GmailApp.search('from:(*chamber* OR *stgeorgechamber*) newer_than:1d', 0, 5);
+     for (var i = 0; i < threads.length; i++) {
+       var messages = threads[i].getMessages();
+       var msg = messages[messages.length - 1];
+
+       // Skip if already processed (labeled)
+       if (threads[i].getLabels().some(l => l.getName() === 'AutoProcessed')) continue;
+
+       var payload = {
+         from: msg.getFrom(),
+         subject: msg.getSubject(),
+         body: msg.getBody(),
+         text: msg.getPlainBody()
+       };
+
+       UrlFetchApp.fetch('${webhookUrl}', {
+         method: 'post',
+         contentType: 'application/json',
+         payload: JSON.stringify(payload)
+       });
+
+       // Label as processed
+       var label = GmailApp.getUserLabelByName('AutoProcessed')
+                   || GmailApp.createLabel('AutoProcessed');
+       threads[i].addLabel(label);
+     }
+   }
+
+3. Click the clock icon (Triggers) → Add Trigger:
+   • Function: checkChamberEmails
+   • Event source: Time-driven
+   • Type: Minutes timer → Every 15 minutes (or Hour timer for hourly)
+
+4. Authorize the script when prompted
+
+That's it! Every 15 minutes, new chamber emails will be auto-processed.`;
+          break;
+
+        case "outlook":
+          providerInstructions = `
+📧 OUTLOOK / MICROSOFT 365 AUTO-FORWARD SETUP (via Power Automate)
+${"─".repeat(50)}
+
+1. Go to https://flow.microsoft.com
+2. Create a new Automated Flow
+3. Trigger: "When a new email arrives (V3)"
+   • From: *chamber* (or specific chamber email address)
+   • Has Attachment: No (optional)
+4. Add action: "HTTP" (Premium connector)
+   • Method: POST
+   • URI: ${webhookUrl}
+   • Headers: Content-Type → application/json
+   • Body:
+     {
+       "from": "@{triggerOutputs()?['body/from']}",
+       "subject": "@{triggerOutputs()?['body/subject']}",
+       "body": "@{triggerOutputs()?['body/body']}"
+     }
+5. Save and turn on the flow
+
+Alternative (free): Use Zapier or Make.com (see those sections).`;
+          break;
+
+        case "zapier":
+          providerInstructions = `
+📧 ZAPIER SETUP (easiest option)
+${"─".repeat(50)}
+
+1. Create a new Zap at https://zapier.com
+2. Trigger: "Gmail" → "New Email Matching Search"
+   • Search string: from:(*chamber* OR *stgeorgechamber*)
+3. Action: "Webhooks by Zapier" → "POST"
+   • URL: ${webhookUrl}
+   • Payload Type: JSON
+   • Data:
+     - from → {{From}}
+     - subject → {{Subject}}
+     - body → {{Body HTML}} (or {{Body Plain}})
+4. Test and turn on!
+
+Free tier: 100 tasks/month (enough for daily emails).`;
+          break;
+
+        case "make":
+          providerInstructions = `
+📧 MAKE.COM (INTEGROMAT) SETUP
+${"─".repeat(50)}
+
+1. Create a new Scenario at https://make.com
+2. Add module: "Gmail" → "Watch Emails"
+   • Filter: from contains "chamber"
+3. Add module: "HTTP" → "Make a request"
+   • URL: ${webhookUrl}
+   • Method: POST
+   • Body type: JSON
+   • Request content:
+     {
+       "from": "{{1.from.text}}",
+       "subject": "{{1.subject}}",
+       "body": "{{1.htmlBody}}"
+     }
+4. Set scheduling: Every 15 minutes
+5. Activate the scenario
+
+Free tier: 1,000 operations/month.`;
+          break;
+
+        case "sendgrid":
+          providerInstructions = `
+📧 SENDGRID INBOUND PARSE SETUP
+${"─".repeat(50)}
+
+1. Go to SendGrid → Settings → Inbound Parse
+2. Add Host & URL:
+   • Domain: your-domain.com (you need a domain you control)
+   • URL: ${webhookUrl}
+3. Set up MX record for your domain:
+   • MX record: mx.sendgrid.net (priority 10)
+4. Forward chamber emails to: anything@your-domain.com
+5. SendGrid will POST the parsed email to your webhook
+
+This is the most robust option for high-volume processing.`;
+          break;
+
+        case "mailgun":
+          providerInstructions = `
+📧 MAILGUN INBOUND ROUTING SETUP
+${"─".repeat(50)}
+
+1. Go to Mailgun → Receiving → Create Route
+2. Expression type: Match Recipient
+   • Recipient: .*@your-domain.com
+3. Actions: Forward → ${webhookUrl}
+4. Set up MX records for your-domain.com pointing to Mailgun
+5. Forward chamber emails to: tasks@your-domain.com`;
+          break;
+
+        case "postmark":
+          providerInstructions = `
+📧 POSTMARK INBOUND SETUP
+${"─".repeat(50)}
+
+1. Go to Postmark → Servers → Your Server → Settings → Inbound
+2. Set webhook URL: ${webhookUrl}
+3. Set up MX record pointing to Postmark's inbound servers
+4. Forward chamber emails to your Postmark inbound address`;
+          break;
+      }
+
+      // Notification setup
+      let notificationInstructions = "";
+      switch (service) {
+        case "slack":
+          notificationInstructions = `
+🔔 SLACK NOTIFICATION SETUP
+${"─".repeat(50)}
+
+1. Go to https://api.slack.com/apps → Create New App
+2. Choose "From scratch" → name it "Daily Tasks Bot"
+3. Go to Incoming Webhooks → Activate
+4. Click "Add New Webhook to Workspace"
+5. Choose the channel (e.g. #daily-tasks)
+6. Copy the webhook URL
+7. Add it to your webhook URL:
+   ${webhookUrl}&notify=YOUR_SLACK_WEBHOOK_URL
+
+Your daily tasks will now auto-post to Slack!`;
+          break;
+
+        case "discord":
+          notificationInstructions = `
+🔔 DISCORD NOTIFICATION SETUP
+${"─".repeat(50)}
+
+1. Go to your Discord server → Channel Settings → Integrations
+2. Create a new Webhook → name it "Daily Tasks"
+3. Copy the webhook URL
+4. Add it to your webhook URL:
+   ${webhookUrl}&notify=YOUR_DISCORD_WEBHOOK_URL
+
+Your daily tasks will auto-post to Discord with rich embeds!`;
+          break;
+
+        case "generic_webhook":
+          notificationInstructions = `
+🔔 GENERIC WEBHOOK NOTIFICATION
+${"─".repeat(50)}
+
+Add any webhook URL to receive the full task data as JSON:
+   ${webhookUrl}&notify=YOUR_WEBHOOK_URL
+
+The webhook receives:
+{
+  "event": "daily_tasks_generated",
+  "date": "YYYY-MM-DD",
+  "creator": "${name}",
+  "city": "${loc}",
+  "tasks": [...],
+  "summary": "formatted text"
+}`;
+          break;
+
+        case "none":
+          notificationInstructions = `
+🔔 NO NOTIFICATIONS
+${"─".repeat(50)}
+
+Tasks will be generated and returned via the webhook response.
+You can check results by calling auto_daily_tasks_from_email manually
+or by checking your webhook endpoint's response logs in Vercel.`;
+          break;
+      }
+
+      const output = `
+${"═".repeat(60)}
+⚡ EMAIL AUTOMATION SETUP GUIDE
+   Auto-generate daily video tasks from chamber emails
+${"═".repeat(60)}
+
+📋 WHAT THIS DOES:
+   1. You receive a chamber/community email
+   2. It auto-forwards to your webhook endpoint
+   3. The email is parsed → events, news, businesses extracted
+   4. Daily tasks are generated with priorities
+   5. Tasks are sent to your ${service === "none" ? "webhook response" : service} notification
+
+🔗 YOUR WEBHOOK ENDPOINT:
+   ${webhookUrl}
+
+${providerInstructions}
+
+${notificationInstructions}
+
+${"═".repeat(60)}
+🧪 TEST IT FIRST
+${"═".repeat(60)}
+
+Test with curl:
+   curl -X POST '${webhookUrl}' \\
+     -H 'Content-Type: application/json' \\
+     -d '{"from":"test@chamber.com","subject":"Weekly Update","body":"EVENTS COMING UP! Annual Gala on March 15 at the Convention Center. Register here. RIBBON CUTTINGS New Coffee Shop Grand Opening on March 10."}'
+
+Expected: You'll get back a JSON response with parsed tasks.
+
+${"═".repeat(60)}
+💡 PRO TIPS
+${"═".repeat(60)}
+
+• Start with Zapier (easiest) or Gmail Apps Script (free)
+• The webhook auto-detects email format from SendGrid, Mailgun, Postmark
+• Add &notify=WEBHOOK_URL to get ${service} notifications
+• Filter emails by sender to only process chamber emails
+• Works with any community newsletter, not just chamber emails
+• Check Vercel logs for debugging: vercel logs --follow
+`;
+
+      return {
+        content: [{ type: "text" as const, text: output }],
+      };
+    },
+  );
+
+  // ── 10. Get Weather (kept from original) ────────────────────────────────
   server.tool(
     "get_weather",
     "Get the current weather at a location — useful for video intros and local context.",

@@ -1,10 +1,127 @@
-<h1>MCP on Vercel</h1>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Daily Video Script Generator — MCP Server</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      line-height: 1.6;
+      padding: 2rem;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    h1 {
+      font-size: 1.8rem;
+      margin-bottom: 0.5rem;
+      color: #f8fafc;
+    }
+    .subtitle {
+      color: #94a3b8;
+      margin-bottom: 2rem;
+      font-size: 1.1rem;
+    }
+    .tool {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+    }
+    .tool h3 {
+      color: #38bdf8;
+      font-size: 1rem;
+      margin-bottom: 0.4rem;
+      font-family: monospace;
+    }
+    .tool p {
+      color: #cbd5e1;
+      font-size: 0.9rem;
+    }
+    .workflow {
+      background: #1e293b;
+      border: 1px solid #22d3ee;
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin: 2rem 0;
+    }
+    .workflow h2 { color: #22d3ee; margin-bottom: 0.75rem; }
+    .workflow ol { padding-left: 1.5rem; }
+    .workflow li { margin-bottom: 0.5rem; color: #cbd5e1; }
+    code {
+      background: #334155;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+    }
+    .connect {
+      margin-top: 2rem;
+      padding: 1rem;
+      background: #1e293b;
+      border-radius: 8px;
+      border: 1px solid #334155;
+    }
+    .connect p { font-size: 0.9rem; }
+    a { color: #38bdf8; }
+  </style>
+</head>
+<body>
 
-<p>Protocol is mounted below /.</p>
+  <h1>Daily Video Script Generator</h1>
+  <p class="subtitle">MCP Server for local content creators — powered by Vercel Functions</p>
 
-<p>
-  <a
-    href="https://vercel.com/templates/other/model-context-protocol-mcp-with-vercel-functions"
-    >Clone template on Vercel</a
-  >
-</p>
+  <div class="workflow">
+    <h2>Recommended Workflow</h2>
+    <ol>
+      <li>Call <code>search_local_news</code> for your city</li>
+      <li>Call <code>search_local_events</code> for events and openings</li>
+      <li>Call <code>search_new_businesses</code> for up-and-coming spots</li>
+      <li>Call <code>fetch_real_estate_insights</code> for market data</li>
+      <li>Pass everything into <code>generate_daily_video_script</code></li>
+      <li>Film, edit, post!</li>
+    </ol>
+  </div>
+
+  <h2 style="margin-bottom: 1rem; color: #f8fafc;">Available Tools</h2>
+
+  <div class="tool">
+    <h3>search_local_news</h3>
+    <p>Pull local news, happenings, and stories for any city via Google News RSS. No API key required.</p>
+  </div>
+
+  <div class="tool">
+    <h3>search_local_events</h3>
+    <p>Find grand openings, ribbon cuttings, chamber of commerce events, festivals, and community gatherings.</p>
+  </div>
+
+  <div class="tool">
+    <h3>search_new_businesses</h3>
+    <p>Discover new and up-and-coming businesses, restaurants, and commercial developments in your area.</p>
+  </div>
+
+  <div class="tool">
+    <h3>fetch_real_estate_insights</h3>
+    <p>Get real estate market trends, home prices, new developments, and investment opportunity news.</p>
+  </div>
+
+  <div class="tool">
+    <h3>generate_daily_video_script</h3>
+    <p>Combine all gathered content into a structured video script — short-form (TikTok/Reels) and long-form (YouTube) — with hooks, segments, transitions, and CTAs.</p>
+  </div>
+
+  <div class="tool">
+    <h3>get_weather</h3>
+    <p>Get current weather for any location — useful for video intros and local context.</p>
+  </div>
+
+  <div class="connect">
+    <p><strong>Connect via MCP:</strong> <code>https://your-deployment.vercel.app/mcp</code></p>
+    <p style="margin-top: 0.5rem;">Works with Claude Desktop, Cursor, Windsurf, and any MCP-compatible client.</p>
+  </div>
+
+</body>
+</html>

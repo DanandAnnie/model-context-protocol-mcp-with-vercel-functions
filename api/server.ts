@@ -428,7 +428,167 @@ const handler = createMcpHandler((server) => {
     },
   );
 
-  // ── 5. Generate Daily Video Script ────────────────────────────────────────
+  // ── 5. Parse Chamber of Commerce Email ───────────────────────────────────
+  server.tool(
+    "parse_chamber_email",
+    "Parse a Chamber of Commerce email (or any newsletter / community email) and extract " +
+      "events, business openings, announcements, networking opportunities, and other content. " +
+      "Paste the full email body — HTML or plain text — and get back structured, categorized items " +
+      "ready to feed into generate_daily_video_script. " +
+      "Works with any chamber, city newsletter, BNI, Rotary, or community organization email.",
+    {
+      email_body: z
+        .string()
+        .describe(
+          "The full email body content. Can be HTML or plain text — just paste or forward it in.",
+        ),
+      sender_name: z
+        .string()
+        .optional()
+        .describe(
+          "Who sent the email, e.g. 'Springfield Chamber of Commerce', 'Downtown Business Alliance'",
+        ),
+      city: z
+        .string()
+        .optional()
+        .describe("Your city, for tagging extracted items with a location"),
+    },
+    async ({ email_body, sender_name, city }) => {
+      const source = sender_name ?? "Chamber Email";
+      const location = city ?? "";
+
+      // Clean the email: strip HTML if present, normalize whitespace
+      const cleanText = stripHtml(email_body);
+
+      // ── Pattern-based extraction ──────────────────────────────────────
+      // We look for common patterns in chamber / community emails
+
+      const events: Array<{ title: string; details: string }> = [];
+      const businesses: Array<{ title: string; details: string }> = [];
+      const announcements: Array<{ title: string; details: string }> = [];
+      const networking: Array<{ title: string; details: string }> = [];
+      const ribbonCuttings: Array<{ title: string; details: string }> = [];
+
+      // Split into logical chunks — paragraphs or sections
+      const sections = cleanText.split(/\n{2,}|\. {2,}/).filter((s) => s.trim().length > 15);
+
+      // Date pattern: matches various date formats
+      const datePattern =
+        /(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:\s*[-–,]\s*\d{1,2})?(?:\s*,?\s*\d{4})?|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?/gi;
+
+      // Time pattern
+      const timePattern =
+        /\d{1,2}:\d{2}\s*(?:am|pm|AM|PM)|(?:noon|midnight)/gi;
+
+      // Address-like pattern
+      const addressPattern =
+        /\d+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:St(?:reet)?|Ave(?:nue)?|Blvd|Dr(?:ive)?|Rd|Road|Ln|Lane|Way|Ct|Court|Pl(?:ace)?|Pkwy|Hwy)/gi;
+
+      // Keywords for categorization
+      const eventKeywords =
+        /\b(?:event|workshop|seminar|luncheon|breakfast|mixer|gala|fundraiser|meeting|summit|conference|class|training|tour|open house|celebration|ceremony|festival|fair|parade|concert|show)\b/i;
+      const businessKeywords =
+        /\b(?:new (?:business|member|opening)|grand opening|now open|coming soon|just opened|welcome|new to|joining|launched|startup|entrepreneur|small business)\b/i;
+      const ribbonKeywords =
+        /\b(?:ribbon.?cutting|ribbon.?ceremony|official opening|inaugural|dedication|unveiling|groundbreaking)\b/i;
+      const networkKeywords =
+        /\b(?:network(?:ing)?|mixer|happy hour|coffee chat|speed network|business after hours|after hours|connect|mingle|meet and greet|social hour)\b/i;
+      const announcementKeywords =
+        /\b(?:announce|update|reminder|notice|important|deadline|application|grant|award|scholarship|program|initiative|partnership|sponsor)\b/i;
+
+      for (const section of sections) {
+        const trimmed = section.trim();
+        if (trimmed.length < 20) continue;
+
+        // Extract any dates and times found in this section
+        const dates = trimmed.match(datePattern) ?? [];
+        const times = trimmed.match(timePattern) ?? [];
+        const addresses = trimmed.match(addressPattern) ?? [];
+
+        // Build a details string with extracted metadata
+        const detailParts: string[] = [];
+        if (dates.length > 0) detailParts.push(`Date: ${dates[0]}`);
+        if (times.length > 0) detailParts.push(`Time: ${times[0]}`);
+        if (addresses.length > 0) detailParts.push(`Location: ${addresses[0]}`);
+        const meta = detailParts.length > 0 ? ` (${detailParts.join(" | ")})` : "";
+
+        // Truncate long sections for a clean title
+        const title =
+          trimmed.length > 150 ? trimmed.substring(0, 147) + "..." : trimmed;
+
+        const item = { title, details: meta };
+
+        // Categorize based on keywords (check most specific first)
+        if (ribbonKeywords.test(trimmed)) {
+          ribbonCuttings.push(item);
+        } else if (networkKeywords.test(trimmed)) {
+          networking.push(item);
+        } else if (businessKeywords.test(trimmed)) {
+          businesses.push(item);
+        } else if (eventKeywords.test(trimmed)) {
+          events.push(item);
+        } else if (announcementKeywords.test(trimmed)) {
+          announcements.push(item);
+        } else if (dates.length > 0 || times.length > 0) {
+          // Has a date/time? Likely an event
+          events.push(item);
+        }
+      }
+
+      // ── Format output ─────────────────────────────────────────────────
+      const totalFound =
+        events.length +
+        businesses.length +
+        ribbonCuttings.length +
+        networking.length +
+        announcements.length;
+
+      const formatCategory = (
+        label: string,
+        emoji: string,
+        items: Array<{ title: string; details: string }>,
+      ) => {
+        if (items.length === 0) return "";
+        return `${emoji} ${label} (${items.length})\n${items.map((item, i) => `   ${i + 1}. ${item.title}${item.details}`).join("\n")}\n`;
+      };
+
+      const output = [
+        `📧 Parsed: ${source}${location ? ` — ${location}` : ""} (${todayDate()})`,
+        "─".repeat(50),
+        "",
+        formatCategory("EVENTS & HAPPENINGS", "🎉", events),
+        formatCategory("NEW BUSINESSES & MEMBERS", "🏪", businesses),
+        formatCategory("RIBBON CUTTINGS & OPENINGS", "✂️", ribbonCuttings),
+        formatCategory("NETWORKING OPPORTUNITIES", "🤝", networking),
+        formatCategory("ANNOUNCEMENTS & UPDATES", "📢", announcements),
+        "─".repeat(50),
+        `📊 Total items extracted: ${totalFound}`,
+        "",
+        totalFound > 0
+          ? "✅ Ready to use! Pass these items into generate_daily_video_script:\n" +
+            "   • Events + Ribbon Cuttings → local_events parameter\n" +
+            "   • New Businesses → new_businesses parameter\n" +
+            "   • Announcements → local_news parameter\n" +
+            "   • Networking → local_events or custom_talking_points"
+          : "⚠️  No structured items detected. The email may use unusual formatting.\n" +
+            "   Try pasting just the main content section, or use the raw text as\n" +
+            "   custom_talking_points in generate_daily_video_script.",
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: output,
+          },
+        ],
+      };
+    },
+  );
+
+  // ── 6. Generate Daily Video Script ──────────────────────────────────────
   server.tool(
     "generate_daily_video_script",
     "Generate a structured daily video script for local content creators. " +
@@ -733,7 +893,7 @@ ${"═".repeat(60)}
     },
   );
 
-  // ── 6. Get Weather (kept from original) ─────────────────────────────────
+  // ── 7. Get Weather (kept from original) ─────────────────────────────────
   server.tool(
     "get_weather",
     "Get the current weather at a location — useful for video intros and local context.",

@@ -1,8 +1,224 @@
-<h1>Let's Play Music St George — MCP Server</h1>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Let's Play Music St George</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
 
-<p>
-  MCP (Model Context Protocol) server for Let's Play Music St George.
-  Provides tools for browsing programs, class schedules, enrollment, and contact info.
-</p>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: #1a1a2e;
+      background: #fafafa;
+      line-height: 1.6;
+    }
 
-<p>Connect an MCP client to <code>/mcp</code> (HTTP) or <code>/sse</code> (SSE).</p>
+    .hero {
+      background: linear-gradient(135deg, #4a1a6b 0%, #6b3fa0 50%, #9b59b6 100%);
+      color: #fff;
+      text-align: center;
+      padding: 3rem 1.5rem 2.5rem;
+    }
+    .hero h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+    .hero .tagline {
+      font-size: 1.15rem;
+      opacity: 0.9;
+      margin-bottom: 1rem;
+    }
+    .hero .location {
+      font-size: 0.95rem;
+      opacity: 0.75;
+    }
+
+    .container {
+      max-width: 820px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 4rem;
+    }
+
+    h2 {
+      font-size: 1.35rem;
+      margin-bottom: 1rem;
+      color: #4a1a6b;
+    }
+
+    .programs {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2.5rem;
+    }
+    .program-card {
+      background: #fff;
+      border-radius: 10px;
+      padding: 1.25rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      border-left: 4px solid #9b59b6;
+    }
+    .program-card h3 {
+      font-size: 1.05rem;
+      margin-bottom: 0.25rem;
+    }
+    .program-card .ages {
+      font-size: 0.85rem;
+      color: #6b3fa0;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+    }
+    .program-card p {
+      font-size: 0.9rem;
+      color: #555;
+    }
+
+    .info-section {
+      margin-bottom: 2rem;
+    }
+    .info-section p, .info-section li {
+      font-size: 0.95rem;
+      color: #444;
+    }
+    .info-section ul {
+      list-style: none;
+      padding: 0;
+    }
+    .info-section li {
+      padding: 0.3rem 0;
+    }
+    .info-section li::before {
+      content: "\2022";
+      color: #9b59b6;
+      font-weight: bold;
+      display: inline-block;
+      width: 1em;
+    }
+
+    .cta-banner {
+      background: #f3e8ff;
+      border-radius: 10px;
+      padding: 1.5rem;
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+    .cta-banner p {
+      font-size: 1rem;
+      color: #4a1a6b;
+    }
+    .cta-banner strong {
+      font-size: 1.1rem;
+    }
+
+    .mcp-note {
+      font-size: 0.85rem;
+      color: #888;
+      text-align: center;
+      margin-top: 2rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid #e5e5e5;
+    }
+    .mcp-note code {
+      background: #f0f0f0;
+      padding: 0.15em 0.4em;
+      border-radius: 3px;
+      font-size: 0.85em;
+    }
+
+    @media (max-width: 480px) {
+      .hero h1 { font-size: 1.5rem; }
+      .programs { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="hero">
+    <h1>Let's Play Music St George</h1>
+    <p class="tagline">Music education for children ages 0&ndash;12+</p>
+    <p class="location">767 E Hayfield Dr, Washington, UT 84780</p>
+  </div>
+
+  <div class="container">
+    <div class="cta-banner">
+      <strong>Talk to our AI assistant!</strong>
+      <p>Click the button in the bottom-right corner to ask about programs, schedules, and enrollment.</p>
+    </div>
+
+    <h2>Our Programs</h2>
+    <div class="programs">
+      <div class="program-card">
+        <h3>Sound Beginnings</h3>
+        <div class="ages">Ages 0&ndash;4</div>
+        <p>Early childhood music with singing, movement, and instrument exploration. Flexible morning sessions.</p>
+      </div>
+      <div class="program-card">
+        <h3>Red Balloons</h3>
+        <div class="ages">Ages 4&ndash;6</div>
+        <p>Bridging early childhood into structured music education for pre-K and kindergarteners.</p>
+      </div>
+      <div class="program-card">
+        <h3>Presto</h3>
+        <div class="ages">Ages 7&ndash;12</div>
+        <p>Comprehensive music education covering piano, theory, and ensemble skills in group settings.</p>
+      </div>
+      <div class="program-card">
+        <h3>Guitar</h3>
+        <div class="ages">Ages 7&ndash;16</div>
+        <p>Group guitar classes learning chords, strumming, and songs in a supportive environment.</p>
+      </div>
+      <div class="program-card">
+        <h3>Ukulele</h3>
+        <div class="ages">Ages 5&ndash;12</div>
+        <p>A fun and accessible introduction to string instruments for younger musicians.</p>
+      </div>
+    </div>
+
+    <div class="info-section">
+      <h2>Our Team</h2>
+      <ul>
+        <li>Julie De Rurange &mdash; Curriculum Head, studio operations</li>
+        <li>Jessica Johnson &mdash; Curriculum Head, licensed teacher</li>
+        <li>Jessica Clayton &mdash; Curriculum Head, teaching and curriculum</li>
+      </ul>
+    </div>
+
+    <div class="info-section">
+      <h2>Classes</h2>
+      <p>We offer classes Monday through Saturday. Sound Beginnings runs mornings (9:30&ndash;11:00 AM), Presto and Red Balloons run afternoons, and Guitar/Ukulele are on Fridays.</p>
+      <p style="margin-top: 0.5rem;">Ask our AI assistant for the full schedule, or connect an MCP client for detailed class browsing.</p>
+    </div>
+
+    <div class="cta-banner">
+      <strong>Try a free class!</strong>
+      <p>Not sure if we're the right fit? Come try a class for free. Ask our assistant or contact us to schedule yours.</p>
+    </div>
+
+    <p class="mcp-note">
+      MCP server available at <code>/mcp</code> (HTTP) or <code>/sse</code> (SSE) for AI client integration.
+    </p>
+  </div>
+
+  <!-- VAPI Voice Widget -->
+  <!-- Replace YOUR_VAPI_PUBLIC_KEY and YOUR_VAPI_ASSISTANT_ID with real values from dashboard.vapi.ai -->
+  <script src="https://unpkg.com/@vapi-ai/client-sdk-react/dist/embed/widget.umd.js"></script>
+  <vapi-widget
+    public-key="YOUR_VAPI_PUBLIC_KEY"
+    assistant-id="YOUR_VAPI_ASSISTANT_ID"
+    mode="voice"
+    theme="light"
+    size="compact"
+    position="bottom-right"
+    accent-color="#6b3fa0"
+    title="Let's Play Music St George"
+    start-button-text="Start Talking"
+    end-button-text="End Call"
+    cta-title="Ask about classes!"
+    cta-subtitle="Talk with our AI assistant"
+    voice-show-transcript="true"
+    voice-empty-message="Click Start Talking to ask about our programs, class schedule, and enrollment."
+    voice-active-empty-message="Listening..."
+  ></vapi-widget>
+</body>
+</html>

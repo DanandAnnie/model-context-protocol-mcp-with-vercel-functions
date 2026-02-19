@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-MCP (Model Context Protocol) server template deployed as a Vercel Function. Exposes tools to AI/LLM clients (e.g., Claude) via the MCP protocol over HTTP and SSE transports. Built with TypeScript and the `mcp-handler` library.
+MCP (Model Context Protocol) server for **Let's Play Music St George**, a music education studio in Washington, UT. Exposes tools to AI/LLM clients (e.g., Claude) for browsing programs, class schedules, enrollment, contact info, and free trial booking. Built with TypeScript and the `mcp-handler` library, deployed as a Vercel Function.
 
 ## Repository Structure
 
@@ -104,8 +104,12 @@ server.tool(
 
 ### Existing Tools
 
-- **`roll_dice`** — rolls an N-sided die (param: `sides`, min 2)
-- **`get_weather`** — fetches current weather from Open-Meteo API (params: `latitude`, `longitude`, `city`)
+- **`get_programs`** — list all music programs, optionally filtered by child's age (param: `age?`)
+- **`browse_classes`** — search/filter the weekly class schedule (params: `program?`, `age?`, `day?`, `teacher?`)
+- **`get_class_details`** — full details for a specific class (param: `class_id`)
+- **`get_contact_and_location`** — studio address, phone, email, hours, team info (no params)
+- **`get_enrollment_link`** — enrollment URL and availability for a class (param: `class_id`)
+- **`get_free_trial_info`** — free trial class booking and email list signup (no params)
 
 ### MCP Client Endpoint
 
@@ -120,7 +124,7 @@ Clients connect to `/mcp` (HTTP transport) or `/sse` (SSE transport).
 
 ## Environment Variables
 
-No environment variables are currently required. The example tools use only public APIs (Open-Meteo). If you add tools that need secrets, configure them in Vercel project settings and reference via `process.env`.
+No environment variables are currently required. All data (programs, classes, contact info) is defined as constants in `api/server.ts`. If you add tools that need secrets, configure them in Vercel project settings and reference via `process.env`.
 
 ## Conventions
 

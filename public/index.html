@@ -953,6 +953,8 @@
     /* ------------------------------------------------------------------ */
     /* Mobile                                                              */
     /* ------------------------------------------------------------------ */
+
+    /* Tablet (≤ 900px) */
     @media (max-width: 900px) {
       .intro__grid { grid-template-columns: 1fr; gap: 2rem; }
       .intro__visual { display: none; }
@@ -961,8 +963,14 @@
       .intro__features { justify-items: center; }
       .team-grid { grid-template-columns: 1fr; max-width: 400px; margin: 0 auto; }
       .contact-grid { grid-template-columns: 1fr; }
+
+      /* Parallax fixed-attachment breaks on iOS/mobile — disable it */
+      .parallax-divider {
+        background-attachment: scroll;
+      }
     }
 
+    /* Mobile (≤ 768px) */
     @media (max-width: 768px) {
       .nav__links { display: none; }
       .nav__links.open {
@@ -978,11 +986,115 @@
         box-shadow: 0 8px 30px rgba(0,0,0,0.1);
         border-top: 1px solid #e0f0e5;
       }
+      .nav__links.open a {
+        padding: 0.5rem 0;
+        font-size: 0.95rem;
+      }
       .nav__toggle { display: block; }
-      .programs-grid { grid-template-columns: 1fr; }
-      .intro__features { grid-template-columns: 1fr; }
+
+      .hero { min-height: 100svh; padding: 5rem 1.25rem 3rem; }
       .hero h1 { font-size: 2rem; }
-      .section { padding: 3.5rem 1.5rem; }
+      .hero__tagline { font-size: 0.95rem; }
+      .hero__location { font-size: 0.82rem; margin-bottom: 2rem; }
+      .hero__buttons { flex-direction: column; align-items: center; }
+      .hero__buttons .btn { width: 100%; max-width: 280px; justify-content: center; }
+      .hero__label { font-size: 0.68rem; padding: 0.35rem 1rem; }
+      .hero::before { width: 250px; height: 250px; top: -80px; right: -60px; }
+      .hero::after { width: 150px; height: 150px; bottom: -40px; left: -30px; }
+
+      .section { padding: 3rem 1.25rem; }
+
+      .programs-grid { grid-template-columns: 1fr; }
+      .program-card { padding: 1.5rem; }
+
+      .intro__features { grid-template-columns: 1fr; }
+
+      /* Schedule: card layout on mobile instead of wide table */
+      .schedule-wrapper { overflow-x: visible; }
+      .schedule-table { min-width: 0; }
+      .schedule-table thead { display: none; }
+      .schedule-table tbody { display: flex; flex-direction: column; gap: 0.5rem; }
+      .schedule-table .day-header td {
+        display: block;
+        margin-top: 1rem;
+        padding: 0.5rem 0;
+        border-bottom: 2px solid #c8e6d0;
+        font-size: 1rem;
+      }
+      .schedule-table tbody tr:not(.day-header) {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.25rem 1rem;
+        background: #fff;
+        border: 1px solid #e0f0e5;
+        border-radius: 12px;
+        padding: 1rem;
+        box-shadow: 0 1px 6px rgba(0,0,0,0.04);
+      }
+      .schedule-table tbody tr:not(.day-header) td {
+        border-bottom: none;
+        padding: 0.15rem 0;
+      }
+      .schedule-table tbody tr:not(.day-header) td:nth-child(1) { display: none; /* hide day, shown in header */ }
+      .schedule-table tbody tr:not(.day-header) td:nth-child(2)::before { content: "Time: "; font-weight: 600; color: #1a472a; }
+      .schedule-table tbody tr:not(.day-header) td:nth-child(3)::before { content: ""; }
+      .schedule-table tbody tr:not(.day-header) td:nth-child(4)::before { content: "Ages "; font-weight: 600; color: #1a472a; }
+      .schedule-table tbody tr:not(.day-header) td:nth-child(5)::before { content: "Teacher: "; font-weight: 600; color: #1a472a; }
+      .schedule-table tbody tr:not(.day-header) td:nth-child(6) { grid-column: 1 / -1; }
+
+      .parallax-divider { padding: 3.5rem 1.25rem; }
+
+      .cta-section { padding: 4rem 1.25rem; }
+      .cta-section .btn { width: 100%; max-width: 280px; }
+
+      .contact__map { min-height: 240px; padding: 2rem 1.5rem; }
+
+      /* Footer stacks on mobile */
+      .footer__inner {
+        flex-direction: column;
+        text-align: center;
+      }
+      .footer__links {
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 1rem;
+      }
+
+      /* Touch-friendly tap targets */
+      .btn { min-height: 48px; padding: 0.85rem 1.75rem; }
+      .nav__toggle { min-width: 44px; min-height: 44px; }
+      .contact__item a { display: inline-block; padding: 0.25rem 0; }
+    }
+
+    /* Small phones (≤ 480px) */
+    @media (max-width: 480px) {
+      .hero { padding: 4.5rem 1rem 2.5rem; }
+      .hero h1 { font-size: 1.7rem; }
+      .hero__content { max-width: 100%; }
+
+      .section { padding: 2.5rem 1rem; }
+      .section-title { font-size: 1.5rem; }
+      .section-subtitle { font-size: 0.92rem; }
+
+      .program-card { padding: 1.25rem; }
+      .program-card h3 { font-size: 1.05rem; }
+      .program-card p { font-size: 0.85rem; }
+
+      .schedule-table tbody tr:not(.day-header) {
+        grid-template-columns: 1fr;
+      }
+
+      .team-card { padding: 1.75rem 1.25rem; }
+
+      .cta-section { padding: 3rem 1rem; }
+      .cta-section h2 { font-size: 1.5rem; }
+
+      .contact__info h3 { font-size: 1.1rem; }
+      .contact__item { gap: 0.75rem; }
+      .contact__item-icon { width: 38px; height: 38px; font-size: 1rem; }
+
+      .footer { padding: 2rem 1rem 1.5rem; }
+      .footer__links { gap: 0.75rem; }
     }
 
     /* ------------------------------------------------------------------ */

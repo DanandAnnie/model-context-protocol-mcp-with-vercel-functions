@@ -992,7 +992,16 @@
       }
       .nav__toggle { display: block; }
 
+      /* Hide video on mobile — saves bandwidth and looks better */
       .hero { min-height: 100svh; padding: 5rem 1.25rem 3rem; }
+      .hero__video { display: none; }
+      .hero__overlay { background: none; }
+      .hero {
+        background:
+          linear-gradient(135deg, #0d2818 0%, #1a472a 25%, #2d7a4a 50%, #1a5a38 75%, #0d2818 100%);
+        background-size: 400% 400%;
+        animation: heroGradient 12s ease infinite;
+      }
       .hero h1 { font-size: 2rem; }
       .hero__tagline { font-size: 0.95rem; }
       .hero__location { font-size: 0.82rem; margin-bottom: 2rem; }

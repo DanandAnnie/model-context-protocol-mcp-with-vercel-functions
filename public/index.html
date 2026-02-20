@@ -1039,6 +1039,7 @@
       loop
       playsinline
     >
+      <source src="/hero-bg.mp4" type="video/mp4" />
       <source src="/hero-bg.mov" type="video/quicktime" />
     </video>
     <div class="hero__overlay"></div>
@@ -1647,11 +1648,19 @@
     const heroVideo = document.querySelector('.hero__video');
     const heroSection = document.querySelector('.hero');
     if (heroVideo) {
-      heroVideo.addEventListener('error', () => {
-        heroSection.classList.add('hero--no-video');
+      // Listen for error on each <source> element (errors don't bubble from source to video)
+      const sources = heroVideo.querySelectorAll('source');
+      let sourceErrors = 0;
+      sources.forEach(source => {
+        source.addEventListener('error', () => {
+          sourceErrors++;
+          if (sourceErrors >= sources.length) {
+            heroSection.classList.add('hero--no-video');
+          }
+        });
       });
-      // Also check if video has no sources
-      if (!heroVideo.querySelector('source') && !heroVideo.src) {
+      // Also check if video has no sources at all
+      if (sources.length === 0 && !heroVideo.src) {
         heroSection.classList.add('hero--no-video');
       }
     }

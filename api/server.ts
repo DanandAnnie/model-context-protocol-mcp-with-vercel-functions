@@ -13,18 +13,19 @@ const handler = createMcpHandler((server) => {
       ageMin: 0,
       ageMax: 4,
       description:
-        "Early childhood music class for babies through preschoolers. " +
+        "Early childhood music class for babies through preschoolers (with caregiver). " +
         "Morning sessions with singing, movement, and instrument exploration. " +
         "Classes run back-to-back (9:30, 10:00, 10:30, 11:00) for flexible scheduling.",
     },
     {
-      id: "RB",
-      name: "Red Balloons",
+      id: "LPM",
+      name: "Let's Play Music",
       ageMin: 4,
       ageMax: 6,
       description:
-        "Transitional music program bridging early childhood into structured music education. " +
-        "Builds on Sound Beginnings foundations with more focused activities for pre-K and kindergarteners.",
+        "The core Let's Play Music program for ages 4-6. " +
+        "A comprehensive musical foundation covering ear training, chord theory, classical music appreciation, " +
+        "piano, note reading, and solfege — all in a fun group setting.",
     },
     {
       id: "PR",
@@ -32,9 +33,9 @@ const handler = createMcpHandler((server) => {
       ageMin: 7,
       ageMax: 12,
       description:
-        "Comprehensive music education for school-age children. " +
-        "Afternoon/after-school classes with multiple levels (L1, L2, L3). " +
-        "Covers piano, theory, and ensemble skills in a fun group setting.",
+        "An accelerated piano class for beginners ages 7-12. " +
+        "Students learn appealing repertoire from their very first lesson. Proper piano technique, " +
+        "ear training, chord theory, music history, solfege, and composition come together to produce rapid results.",
     },
     {
       id: "GT",
@@ -86,7 +87,7 @@ const handler = createMcpHandler((server) => {
     { id: "sb-tue-930", program: "SB", level: null, teacher: "TBD", day: "Tuesday", time: "9:30 AM", ageMin: 0, ageMax: 4, capacity: 12, spotsAvailable: 12, enrollmentUrl: "" },
     { id: "sb-tue-1000", program: "SB", level: null, teacher: "TBD", day: "Tuesday", time: "10:00 AM", ageMin: 0, ageMax: 4, capacity: 12, spotsAvailable: 12, enrollmentUrl: "" },
     { id: "sb-tue-1030", program: "SB", level: null, teacher: "TBD", day: "Tuesday", time: "10:30 AM", ageMin: 0, ageMax: 4, capacity: 12, spotsAvailable: 12, enrollmentUrl: "" },
-    { id: "rb-tue-1530", program: "RB", level: null, teacher: "Johnson", day: "Tuesday", time: "3:30 PM", ageMin: 4, ageMax: 6, capacity: 12, spotsAvailable: 12, enrollmentUrl: "" },
+    { id: "lpm-tue-1530", program: "LPM", level: null, teacher: "Johnson", day: "Tuesday", time: "3:30 PM", ageMin: 4, ageMax: 6, capacity: 12, spotsAvailable: 12, enrollmentUrl: "" },
     { id: "pr-tue-1600-l1", program: "PR", level: "L1", teacher: "Johnson", day: "Tuesday", time: "4:00 PM", ageMin: 7, ageMax: 12, capacity: 12, spotsAvailable: 12, enrollmentUrl: "" },
     { id: "pr-tue-1700-l3", program: "PR", level: "L3", teacher: "Johnson", day: "Tuesday", time: "5:00 PM", ageMin: 7, ageMax: 12, capacity: 12, spotsAvailable: 12, enrollmentUrl: "" },
 
@@ -102,7 +103,7 @@ const handler = createMcpHandler((server) => {
     { id: "sb-thu-930", program: "SB", level: null, teacher: "TBD", day: "Thursday", time: "9:30 AM", ageMin: 0, ageMax: 4, capacity: 12, spotsAvailable: 12, enrollmentUrl: "" },
     { id: "sb-thu-1000", program: "SB", level: null, teacher: "TBD", day: "Thursday", time: "10:00 AM", ageMin: 0, ageMax: 4, capacity: 12, spotsAvailable: 12, enrollmentUrl: "" },
     { id: "sb-thu-1030", program: "SB", level: null, teacher: "TBD", day: "Thursday", time: "10:30 AM", ageMin: 0, ageMax: 4, capacity: 12, spotsAvailable: 12, enrollmentUrl: "" },
-    { id: "rb-thu-1530", program: "RB", level: null, teacher: "Johnson", day: "Thursday", time: "3:30 PM", ageMin: 4, ageMax: 6, capacity: 12, spotsAvailable: 12, enrollmentUrl: "" },
+    { id: "lpm-thu-1530", program: "LPM", level: null, teacher: "Johnson", day: "Thursday", time: "3:30 PM", ageMin: 4, ageMax: 6, capacity: 12, spotsAvailable: 12, enrollmentUrl: "" },
     { id: "pr-thu-1600-l1", program: "PR", level: "L1", teacher: "Johnson", day: "Thursday", time: "4:00 PM", ageMin: 7, ageMax: 12, capacity: 12, spotsAvailable: 12, enrollmentUrl: "" },
     { id: "pr-thu-1700-l3", program: "PR", level: "L3", teacher: "Johnson", day: "Thursday", time: "5:00 PM", ageMin: 7, ageMax: 12, capacity: 12, spotsAvailable: 12, enrollmentUrl: "" },
 
@@ -199,9 +200,9 @@ const handler = createMcpHandler((server) => {
       "Filter by program, child's age, day of the week, or teacher name.",
     {
       program: z
-        .enum(["SB", "RB", "PR", "GT", "UK"])
+        .enum(["SB", "LPM", "PR", "GT", "UK"])
         .optional()
-        .describe("Program abbreviation: SB (Sound Beginnings), RB (Red Balloons), PR (Presto), GT (Guitar), UK (Ukulele)"),
+        .describe("Program abbreviation: SB (Sound Beginnings), LPM (Let's Play Music), PR (Presto), GT (Guitar), UK (Ukulele)"),
       age: z
         .number()
         .int()

@@ -46,7 +46,7 @@
       font-weight: 600;
       letter-spacing: 0.2em;
       text-transform: uppercase;
-      color: #9b59b6;
+      color: #3a9d5c;
       margin-bottom: 0.75rem;
     }
 
@@ -72,15 +72,15 @@
     }
 
     .section--alt {
-      background: #f9f6fc;
+      background: #f4faf6;
     }
 
     .section--dark {
-      background: linear-gradient(135deg, #2c1845 0%, #3d2060 50%, #4a2870 100%);
+      background: linear-gradient(135deg, #0d2818 0%, #154530 50%, #1a5a38 100%);
       color: #fff;
     }
 
-    .section--dark .section-label { color: #d4a5f0; }
+    .section--dark .section-label { color: #a5d4b0; }
     .section--dark .section-title { color: #fff; }
     .section--dark .section-subtitle { color: rgba(255,255,255,0.7); }
 
@@ -125,7 +125,7 @@
       font-family: 'Playfair Display', serif;
       font-size: 1.2rem;
       font-weight: 700;
-      color: #4a1a6b;
+      color: #1a472a;
     }
 
     .nav__links {
@@ -151,17 +151,17 @@
       left: 0;
       width: 0;
       height: 2px;
-      background: #9b59b6;
+      background: #3a9d5c;
       transition: width 0.3s;
     }
 
-    .nav__links a:hover { color: #4a1a6b; }
+    .nav__links a:hover { color: #1a472a; }
     .nav__links a:hover::after { width: 100%; }
 
     .nav__cta {
       display: inline-block;
       padding: 0.5rem 1.25rem;
-      background: #6b3fa0;
+      background: #2d7a4a;
       color: #fff !important;
       border-radius: 6px;
       font-size: 0.82rem;
@@ -172,7 +172,7 @@
     }
 
     .nav__cta::after { display: none !important; }
-    .nav__cta:hover { background: #552d88; transform: translateY(-1px); color: #fff; }
+    .nav__cta:hover { background: #1e6038; transform: translateY(-1px); color: #fff; }
 
     /* Mobile nav toggle */
     .nav__toggle {
@@ -187,7 +187,7 @@
       display: block;
       width: 22px;
       height: 2px;
-      background: #4a1a6b;
+      background: #1a472a;
       margin: 5px 0;
       transition: 0.3s;
     }
@@ -203,13 +203,40 @@
       justify-content: center;
       text-align: center;
       padding: 6rem 1.5rem 4rem;
-      background:
-        linear-gradient(135deg, rgba(74,26,107,0.92) 0%, rgba(107,63,160,0.88) 50%, rgba(155,89,182,0.85) 100%);
       color: #fff;
       overflow: hidden;
     }
 
-    /* Decorative musical note shapes */
+    /* Video background */
+    .hero__video {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      z-index: 0;
+    }
+
+    /* Dark overlay on top of video for text readability */
+    .hero__overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background:
+        linear-gradient(135deg, rgba(13,40,24,0.82) 0%, rgba(26,71,42,0.75) 50%, rgba(45,122,74,0.70) 100%);
+      z-index: 1;
+    }
+
+    /* Fallback background if video doesn't load */
+    .hero--no-video {
+      background:
+        linear-gradient(135deg, rgba(13,40,24,0.92) 0%, rgba(45,122,74,0.88) 50%, rgba(58,157,92,0.85) 100%);
+    }
+
+    /* Decorative shapes */
     .hero::before,
     .hero::after {
       content: '';
@@ -217,6 +244,7 @@
       border-radius: 50%;
       opacity: 0.08;
       background: #fff;
+      z-index: 2;
     }
     .hero::before {
       width: 500px;
@@ -233,7 +261,7 @@
 
     .hero__content {
       position: relative;
-      z-index: 1;
+      z-index: 3;
       max-width: 700px;
     }
 
@@ -295,10 +323,10 @@
 
     .btn--primary {
       background: #fff;
-      color: #4a1a6b;
+      color: #1a472a;
     }
     .btn--primary:hover {
-      background: #f3e8ff;
+      background: #e3f5e8;
       transform: translateY(-2px);
       box-shadow: 0 8px 25px rgba(0,0,0,0.15);
     }
@@ -314,14 +342,14 @@
       transform: translateY(-2px);
     }
 
-    .btn--purple {
-      background: #6b3fa0;
+    .btn--green {
+      background: #2d7a4a;
       color: #fff;
     }
-    .btn--purple:hover {
-      background: #552d88;
+    .btn--green:hover {
+      background: #1e6038;
       transform: translateY(-2px);
-      box-shadow: 0 8px 25px rgba(107,63,160,0.3);
+      box-shadow: 0 8px 25px rgba(45,122,74,0.3);
     }
 
     .btn--light {
@@ -340,7 +368,7 @@
       bottom: 2rem;
       left: 50%;
       transform: translateX(-50%);
-      z-index: 1;
+      z-index: 3;
     }
 
     .hero__scroll a {
@@ -403,7 +431,7 @@
       flex-shrink: 0;
       width: 40px;
       height: 40px;
-      background: #f3e8ff;
+      background: #e3f5e8;
       border-radius: 10px;
       display: flex;
       align-items: center;
@@ -431,7 +459,7 @@
     }
 
     .intro__card {
-      background: linear-gradient(135deg, #f3e8ff, #e8d5f5);
+      background: linear-gradient(135deg, #e3f5e8, #c8e6d0);
       border-radius: 16px;
       padding: 2rem 1.5rem;
       text-align: center;
@@ -446,7 +474,7 @@
       font-family: 'Playfair Display', serif;
       font-size: 2.5rem;
       font-weight: 700;
-      color: #6b3fa0;
+      color: #2d7a4a;
       line-height: 1;
       margin-bottom: 0.25rem;
     }
@@ -471,7 +499,7 @@
       border-radius: 16px;
       padding: 2rem;
       box-shadow: 0 2px 15px rgba(0,0,0,0.04);
-      border: 1px solid #f0eaf5;
+      border: 1px solid #e0f0e5;
       transition: transform 0.3s, box-shadow 0.3s;
       position: relative;
       overflow: hidden;
@@ -479,7 +507,7 @@
 
     .program-card:hover {
       transform: translateY(-6px);
-      box-shadow: 0 12px 35px rgba(107,63,160,0.1);
+      box-shadow: 0 12px 35px rgba(45,122,74,0.1);
     }
 
     .program-card::before {
@@ -489,7 +517,7 @@
       left: 0;
       right: 0;
       height: 4px;
-      background: linear-gradient(90deg, #6b3fa0, #9b59b6);
+      background: linear-gradient(90deg, #2d7a4a, #3a9d5c);
     }
 
     .program-card__icon {
@@ -519,8 +547,8 @@
       display: inline-block;
       font-size: 0.78rem;
       font-weight: 600;
-      color: #6b3fa0;
-      background: #f3e8ff;
+      color: #2d7a4a;
+      background: #e3f5e8;
       padding: 0.2rem 0.7rem;
       border-radius: 20px;
       margin-bottom: 0.75rem;
@@ -541,7 +569,7 @@
       text-align: center;
       color: #fff;
       background:
-        linear-gradient(135deg, rgba(74,26,107,0.9), rgba(107,63,160,0.85));
+        linear-gradient(135deg, rgba(13,40,24,0.9), rgba(45,122,74,0.85));
       background-attachment: fixed;
       background-size: cover;
     }
@@ -587,34 +615,34 @@
       font-weight: 600;
       letter-spacing: 0.1em;
       text-transform: uppercase;
-      color: #6b3fa0;
-      background: #f9f6fc;
+      color: #2d7a4a;
+      background: #f4faf6;
       padding: 1rem 0.75rem;
       text-align: left;
-      border-bottom: 2px solid #e8d5f5;
+      border-bottom: 2px solid #c8e6d0;
     }
 
     .schedule-table tbody td {
       padding: 0.85rem 0.75rem;
-      border-bottom: 1px solid #f0eaf5;
+      border-bottom: 1px solid #e0f0e5;
       vertical-align: top;
     }
 
     .schedule-table tbody tr:hover {
-      background: #fdf8ff;
+      background: #f8fdf9;
     }
 
     .schedule__program {
       font-weight: 600;
-      color: #4a1a6b;
+      color: #1a472a;
     }
 
     .schedule__level {
       display: inline-block;
       font-size: 0.7rem;
       font-weight: 600;
-      background: #e8d5f5;
-      color: #6b3fa0;
+      background: #c8e6d0;
+      color: #2d7a4a;
       padding: 0.1rem 0.45rem;
       border-radius: 4px;
       margin-left: 0.35rem;
@@ -646,10 +674,10 @@
       font-family: 'Playfair Display', serif;
       font-weight: 600;
       font-size: 0.95rem;
-      color: #4a1a6b;
-      background: #f9f6fc;
+      color: #1a472a;
+      background: #f4faf6;
       padding: 0.65rem 0.75rem;
-      border-bottom: 1px solid #e8d5f5;
+      border-bottom: 1px solid #c8e6d0;
     }
 
     /* ------------------------------------------------------------------ */
@@ -667,7 +695,7 @@
       background: #fff;
       border-radius: 16px;
       box-shadow: 0 2px 15px rgba(0,0,0,0.04);
-      border: 1px solid #f0eaf5;
+      border: 1px solid #e0f0e5;
       transition: transform 0.3s;
     }
 
@@ -688,9 +716,9 @@
       color: #fff;
     }
 
-    .team-card:nth-child(1) .team-card__avatar { background: linear-gradient(135deg, #6b3fa0, #9b59b6); }
-    .team-card:nth-child(2) .team-card__avatar { background: linear-gradient(135deg, #8b5cf6, #a78bfa); }
-    .team-card:nth-child(3) .team-card__avatar { background: linear-gradient(135deg, #7c3aed, #c084fc); }
+    .team-card:nth-child(1) .team-card__avatar { background: linear-gradient(135deg, #2d7a4a, #3a9d5c); }
+    .team-card:nth-child(2) .team-card__avatar { background: linear-gradient(135deg, #5cb670, #8bc0a8); }
+    .team-card:nth-child(3) .team-card__avatar { background: linear-gradient(135deg, #3aad6c, #84c0a0); }
 
     .team-card h3 {
       font-size: 1.1rem;
@@ -699,7 +727,7 @@
 
     .team-card__role {
       font-size: 0.85rem;
-      color: #6b3fa0;
+      color: #2d7a4a;
       font-weight: 500;
       margin-bottom: 0.5rem;
     }
@@ -717,7 +745,7 @@
       padding: 6rem 1.5rem;
       text-align: center;
       color: #fff;
-      background: linear-gradient(135deg, #4a1a6b 0%, #6b3fa0 50%, #8b5cf6 100%);
+      background: linear-gradient(135deg, #1a472a 0%, #2d7a4a 50%, #5cb670 100%);
       overflow: hidden;
     }
 
@@ -789,7 +817,7 @@
       flex-shrink: 0;
       width: 44px;
       height: 44px;
-      background: #f3e8ff;
+      background: #e3f5e8;
       border-radius: 12px;
       display: flex;
       align-items: center;
@@ -810,15 +838,15 @@
     }
 
     .contact__item a {
-      color: #6b3fa0;
+      color: #2d7a4a;
       font-weight: 500;
       transition: color 0.2s;
     }
 
-    .contact__item a:hover { color: #4a1a6b; }
+    .contact__item a:hover { color: #1a472a; }
 
     .contact__map {
-      background: linear-gradient(135deg, #f3e8ff, #e8d5f5);
+      background: linear-gradient(135deg, #e3f5e8, #c8e6d0);
       border-radius: 16px;
       display: flex;
       flex-direction: column;
@@ -854,7 +882,7 @@
     /* Footer                                                              */
     /* ------------------------------------------------------------------ */
     .footer {
-      background: #1a0e2e;
+      background: #0e1e14;
       color: rgba(255,255,255,0.6);
       padding: 3rem 1.5rem 2rem;
       font-size: 0.85rem;
@@ -887,7 +915,7 @@
       color: rgba(255,255,255,0.5);
       transition: color 0.2s;
     }
-    .footer__links a:hover { color: #d4a5f0; }
+    .footer__links a:hover { color: #a5d4b0; }
 
     .footer__mcp {
       width: 100%;
@@ -931,7 +959,7 @@
         padding: 1.5rem;
         gap: 1rem;
         box-shadow: 0 8px 30px rgba(0,0,0,0.1);
-        border-top: 1px solid #f0eaf5;
+        border-top: 1px solid #e0f0e5;
       }
       .nav__toggle { display: block; }
       .programs-grid { grid-template-columns: 1fr; }
@@ -978,9 +1006,28 @@
   </nav>
 
   <!-- ================================================================ -->
-  <!-- Hero                                                              -->
+  <!-- Hero with Background Video                                        -->
   <!-- ================================================================ -->
   <section class="hero" id="home">
+    <!--
+      BACKGROUND VIDEO:
+      Replace the src below with your own video URL (MP4 recommended).
+      The video plays silently, loops, and fills the hero background.
+      If no video is provided, the green gradient fallback is shown.
+    -->
+    <video
+      class="hero__video"
+      autoplay
+      muted
+      loop
+      playsinline
+      poster=""
+    >
+      <!-- Add your video source here, e.g.: -->
+      <!-- <source src="https://your-domain.com/your-video.mp4" type="video/mp4" /> -->
+    </video>
+    <div class="hero__overlay"></div>
+
     <div class="hero__content">
       <span class="hero__label">Washington, Utah</span>
       <h1>Let's Play Music<br>St George</h1>
@@ -1499,7 +1546,7 @@
           <div class="contact__map-pin">&#128205;</div>
           <h4>Find Us in Washington, Utah</h4>
           <p>767 E Hayfield Dr<br>Washington, UT 84780</p>
-          <a href="https://maps.google.com/?q=767+E+Hayfield+Dr+Washington+UT+84780" target="_blank" rel="noopener" class="btn btn--purple">Open in Google Maps</a>
+          <a href="https://maps.google.com/?q=767+E+Hayfield+Dr+Washington+UT+84780" target="_blank" rel="noopener" class="btn btn--green">Open in Google Maps</a>
         </div>
       </div>
     </div>
@@ -1535,7 +1582,7 @@
     theme="light"
     size="compact"
     position="bottom-right"
-    accent-color="#6b3fa0"
+    accent-color="#2d7a4a"
     title="Let's Play Music St George"
     start-button-text="Start Talking"
     end-button-text="End Call"
@@ -1580,6 +1627,19 @@
       });
     }, { threshold: 0.15 });
     fadeEls.forEach(el => observer.observe(el));
+
+    // Fallback: if hero video fails to load, apply gradient background
+    const heroVideo = document.querySelector('.hero__video');
+    const heroSection = document.querySelector('.hero');
+    if (heroVideo) {
+      heroVideo.addEventListener('error', () => {
+        heroSection.classList.add('hero--no-video');
+      });
+      // Also check if video has no sources
+      if (!heroVideo.querySelector('source') && !heroVideo.src) {
+        heroSection.classList.add('hero--no-video');
+      }
+    }
   </script>
 </body>
 </html>

@@ -230,10 +230,27 @@
       z-index: 1;
     }
 
-    /* Fallback background if video doesn't load */
+    /* Fallback / placeholder background when no video is loaded */
     .hero--no-video {
       background:
-        linear-gradient(135deg, rgba(13,40,24,0.92) 0%, rgba(45,122,74,0.88) 50%, rgba(58,157,92,0.85) 100%);
+        linear-gradient(135deg, #0d2818 0%, #1a472a 25%, #2d7a4a 50%, #1a5a38 75%, #0d2818 100%);
+      background-size: 400% 400%;
+      animation: heroGradient 12s ease infinite;
+    }
+
+    @keyframes heroGradient {
+      0%   { background-position: 0% 50%; }
+      50%  { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+
+    /* Hide overlay when using gradient fallback (not needed) */
+    .hero--no-video .hero__overlay {
+      background: none;
+    }
+
+    .hero--no-video .hero__video {
+      display: none;
     }
 
     /* Decorative shapes */

@@ -8,6 +8,15 @@ import PhotoCapture from '../components/PhotoCapture'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import type { ItemInsert, ItemCategory, ItemCondition, ItemStatus, LocationType } from '../lib/database.types'
 
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
 const CATEGORIES: ItemCategory[] = [
   'furniture', 'lighting', 'artwork', 'textiles', 'accessories',
   'rugs', 'outdoor', 'kitchen', 'bathroom', 'electronics', 'other',
@@ -41,14 +50,17 @@ export default function ItemDetail() {
       condition: item.condition,
       date_acquired: item.date_acquired,
       notes: item.notes,
+      photo_url: item.photo_url || '',
       current_location_type: item.current_location_type,
       current_storage_id: item.current_storage_id,
       current_property_id: item.current_property_id,
       status: item.status,
     })
 
-    // Try to load existing image
-    if (isSupabaseConfigured()) {
+    // Load existing image: prefer photo_url stored on item, fall back to Supabase item_images
+    if (item.photo_url) {
+      setCurrentImage(item.photo_url)
+    } else if (isSupabaseConfigured()) {
       supabase
         .from('item_images')
         .select('image_url')
@@ -76,14 +88,20 @@ export default function ItemDetail() {
     if (!form || !id) return
     setSaving(true)
     try {
-      await updateItem(id, form)
+      // Convert photo to base64 and store in photo_url
+      let updatedForm = { ...form }
+      if (photo) {
+        const base64 = await fileToBase64(photo)
+        updatedForm = { ...updatedForm, photo_url: base64 }
+      }
 
-      // Upload new photo if changed
+      await updateItem(id, updatedForm)
+
+      // Also upload to Supabase Storage if configured
       if (photo && isSupabaseConfigured()) {
         const ext = photo.name.split('.').pop()
         const path = `${id}/primary.${ext}`
 
-        // Remove old image first
         await supabase.storage.from('item-images').remove([path])
 
         const { error: uploadErr } = await supabase.storage
@@ -95,7 +113,6 @@ export default function ItemDetail() {
             .from('item-images')
             .getPublicUrl(path)
 
-          // Upsert image record
           const { data: existing } = await supabase
             .from('item_images')
             .select('id')

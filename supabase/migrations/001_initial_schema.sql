@@ -39,6 +39,7 @@ create table if not exists items (
   condition text not null default 'good',
   date_acquired date,
   notes text not null default '',
+  photo_url text not null default '',
   current_location_type text not null default 'storage',
   current_storage_id uuid references storage_units(id) on delete set null,
   current_property_id uuid references properties(id) on delete set null,

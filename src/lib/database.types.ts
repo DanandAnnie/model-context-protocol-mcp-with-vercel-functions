@@ -52,6 +52,7 @@ export interface Item {
   condition: ItemCondition
   date_acquired: string | null
   notes: string
+  photo_url: string
   current_location_type: LocationType
   current_storage_id: string | null
   current_property_id: string | null

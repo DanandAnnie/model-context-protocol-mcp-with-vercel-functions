@@ -8,6 +8,15 @@ import PhotoCapture from '../components/PhotoCapture'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import type { ItemInsert, ItemCategory, ItemCondition, ItemStatus, LocationType } from '../lib/database.types'
 
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
 const CATEGORIES: ItemCategory[] = [
   'furniture', 'lighting', 'artwork', 'textiles', 'accessories',
   'rugs', 'outdoor', 'kitchen', 'bathroom', 'electronics', 'other',
@@ -15,7 +24,7 @@ const CATEGORIES: ItemCategory[] = [
 
 const emptyForm: ItemInsert = {
   name: '', category: 'furniture', subcategory: '', value: 0,
-  condition: 'good', date_acquired: null, notes: '',
+  condition: 'good', date_acquired: null, notes: '', photo_url: '',
   current_location_type: 'storage', current_storage_id: null,
   current_property_id: null, status: 'available',
 }
@@ -46,9 +55,16 @@ export default function AddItem() {
     setSaving(true)
 
     try {
-      const item = await addItem(form)
+      // Convert photo to base64 and include in the item data
+      let formWithPhoto = { ...form }
+      if (photo) {
+        const base64 = await fileToBase64(photo)
+        formWithPhoto = { ...formWithPhoto, photo_url: base64 }
+      }
 
-      // Upload photo if available and Supabase is configured
+      const item = await addItem(formWithPhoto)
+
+      // Also upload to Supabase Storage if configured
       if (photo && isSupabaseConfigured() && item) {
         const ext = photo.name.split('.').pop()
         const path = `${item.id}/primary.${ext}`

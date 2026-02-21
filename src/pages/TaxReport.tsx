@@ -9,6 +9,7 @@ import { useProperties } from '../hooks/useProperties'
 import type { Item, PaymentMethod } from '../lib/database.types'
 
 const PAYMENT_LABELS: Record<PaymentMethod, string> = {
+  square: 'Square',
   cash: 'Cash',
   credit_card: 'Credit Card',
   debit_card: 'Debit Card',

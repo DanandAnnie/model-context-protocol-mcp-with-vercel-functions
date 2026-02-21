@@ -2,7 +2,7 @@ export type PropertyType = 'house' | 'condo' | 'townhouse' | 'apartment' | 'othe
 export type ItemCondition = 'excellent' | 'good' | 'fair' | 'poor'
 export type ItemStatus = 'available' | 'staged' | 'damaged' | 'retired'
 export type LocationType = 'storage' | 'property'
-export type PaymentMethod = 'cash' | 'credit_card' | 'debit_card' | 'venmo' | 'zelle' | 'paypal' | 'check' | 'other'
+export type PaymentMethod = 'cash' | 'credit_card' | 'debit_card' | 'venmo' | 'zelle' | 'paypal' | 'check' | 'square' | 'other'
 
 export type ItemCategory =
   | 'kitchen & dining'
@@ -22,6 +22,8 @@ export interface Property {
   bathrooms: number
   sqft: number
   property_type: PropertyType
+  monthly_fee: number
+  staging_start_date: string | null
   notes: string
   photo_url: string
   created_at: string
@@ -85,6 +87,19 @@ export interface StagingHistory {
   notes: string
 }
 
+export interface StagingPayment {
+  id: string
+  property_id: string
+  amount: number
+  payment_date: string
+  payment_method: PaymentMethod
+  month_covered: string // e.g. "2025-01"
+  square_transaction_id: string
+  notes: string
+  created_at: string
+}
+
+export type StagingPaymentInsert = Omit<StagingPayment, 'id' | 'created_at'>
 export type PropertyInsert = Omit<Property, 'id' | 'created_at' | 'updated_at'>
 export type StorageUnitInsert = Omit<StorageUnit, 'id' | 'created_at' | 'updated_at'>
 export type ItemInsert = Omit<Item, 'id' | 'created_at' | 'updated_at'>

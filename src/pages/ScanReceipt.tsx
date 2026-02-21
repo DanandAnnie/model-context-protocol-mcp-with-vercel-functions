@@ -11,6 +11,7 @@ import { useStorageUnits } from '../hooks/useStorageUnits'
 import type { ItemCategory, ItemInsert, PaymentMethod } from '../lib/database.types'
 
 const PAYMENT_METHODS: { key: PaymentMethod; label: string }[] = [
+  { key: 'square', label: 'Square' },
   { key: 'credit_card', label: 'Credit Card' },
   { key: 'debit_card', label: 'Debit Card' },
   { key: 'venmo', label: 'Venmo' },

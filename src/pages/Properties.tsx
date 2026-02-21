@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { Home, Plus, Bed, Bath, Maximize, Trash2, X, Check, AlertTriangle, Video, Camera, MapPin } from 'lucide-react'
+import { Home, Plus, Bed, Bath, Maximize, Trash2, X, Check, AlertTriangle, Video, Camera, MapPin, DollarSign } from 'lucide-react'
 import { useProperties } from '../hooks/useProperties'
 import { useItems } from '../hooks/useItems'
 import type { PropertyInsert, PropertyType } from '../lib/database.types'
 
 const emptyForm: PropertyInsert = {
   name: '', address: '', city: '', bedrooms: 0, bathrooms: 0,
-  sqft: 0, property_type: 'house', notes: '', photo_url: '',
+  sqft: 0, property_type: 'house', monthly_fee: 0, staging_start_date: null,
+  notes: '', photo_url: '',
 }
 
 export default function Properties() {
@@ -194,6 +195,27 @@ export default function Properties() {
               </div>
             </div>
             <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Monthly Fee ($)</label>
+              <input
+                type="number"
+                min={0}
+                step={0.01}
+                value={form.monthly_fee}
+                onChange={(e) => setForm({ ...form, monthly_fee: +e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="0.00"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Staging Start Date</label>
+              <input
+                type="date"
+                value={form.staging_start_date || ''}
+                onChange={(e) => setForm({ ...form, staging_start_date: e.target.value || null })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
               <input
                 value={form.notes}
@@ -242,6 +264,12 @@ export default function Properties() {
                   <span className="text-slate-500">{itemCount(prop.id)} items staged</span>
                   <span className="font-medium text-slate-700">${stagedValue(prop.id).toLocaleString()}</span>
                 </div>
+                {prop.monthly_fee > 0 && (
+                  <div className="mt-2 flex items-center gap-1 text-xs text-emerald-600">
+                    <DollarSign size={12} />
+                    <span className="font-medium">${prop.monthly_fee.toLocaleString()}/mo</span>
+                  </div>
+                )}
                 {(prop.address || prop.city) && (
                   <div className="mt-2 pt-2 border-t border-slate-100">
                     <span

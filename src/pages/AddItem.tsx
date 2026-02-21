@@ -23,6 +23,7 @@ const CATEGORIES: ItemCategory[] = [
 ]
 
 const PAYMENT_METHODS: { key: PaymentMethod; label: string }[] = [
+  { key: 'square', label: 'Square' },
   { key: 'credit_card', label: 'Credit Card' },
   { key: 'debit_card', label: 'Debit Card' },
   { key: 'venmo', label: 'Venmo' },

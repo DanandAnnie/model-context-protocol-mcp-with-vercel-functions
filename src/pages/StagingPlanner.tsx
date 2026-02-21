@@ -11,7 +11,8 @@ import {
   type DragOverEvent,
 } from '@dnd-kit/core'
 import { useDroppable, useDraggable } from '@dnd-kit/core'
-import { Package, Home, Warehouse, ArrowRightLeft, Search } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Package, Home, Warehouse, ArrowRightLeft, Search, Receipt } from 'lucide-react'
 import { useItems } from '../hooks/useItems'
 import { useProperties } from '../hooks/useProperties'
 import { useStorageUnits } from '../hooks/useStorageUnits'
@@ -178,14 +179,23 @@ export default function StagingPlanner() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <ArrowRightLeft size={24} />
-          Staging Planner
-        </h1>
-        <p className="text-slate-500 text-sm mt-1">
-          Drag items between available inventory and properties
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            <ArrowRightLeft size={24} />
+            Staging Planner
+          </h1>
+          <p className="text-slate-500 text-sm mt-1">
+            Drag items between available inventory and properties
+          </p>
+        </div>
+        <Link
+          to="/scan-receipt"
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
+        >
+          <Receipt size={16} />
+          Scan Receipt
+        </Link>
       </div>
 
       {/* Property selector */}

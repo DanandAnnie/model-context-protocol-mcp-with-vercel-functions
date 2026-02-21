@@ -96,3 +96,13 @@ export async function clearPendingSync(id: string) {
   const db = await getDB()
   await db.delete('pending_sync', id)
 }
+
+const INIT_KEY = 'staging-inventory-initialized'
+
+export function isStoreInitialized(store: string): boolean {
+  return localStorage.getItem(`${INIT_KEY}:${store}`) === 'true'
+}
+
+export function markStoreInitialized(store: string): void {
+  localStorage.setItem(`${INIT_KEY}:${store}`, 'true')
+}

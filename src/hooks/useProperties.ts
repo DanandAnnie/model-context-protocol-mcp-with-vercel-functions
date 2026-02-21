@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
-import { cacheData, getCachedData } from '../lib/offline'
+import { cacheData, getCachedData, isStoreInitialized, markStoreInitialized } from '../lib/offline'
 import type { Property, PropertyInsert } from '../lib/database.types'
 
 const DEMO_PROPERTIES: Property[] = [
@@ -24,9 +24,13 @@ export function useProperties() {
       const cached = await getCachedData('properties')
       if (cached.length > 0) {
         setProperties(cached)
-      } else {
+        markStoreInitialized('properties')
+      } else if (!isStoreInitialized('properties')) {
         await cacheData('properties', DEMO_PROPERTIES)
         setProperties(DEMO_PROPERTIES)
+        markStoreInitialized('properties')
+      } else {
+        setProperties([])
       }
       setLoading(false)
       return

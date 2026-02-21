@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
-import { cacheData, getCachedData } from '../lib/offline'
+import { cacheData, getCachedData, isStoreInitialized, markStoreInitialized } from '../lib/offline'
 import type { StorageUnit, StorageUnitInsert } from '../lib/database.types'
 
 const DEMO_UNITS: StorageUnit[] = [
@@ -22,9 +22,13 @@ export function useStorageUnits() {
       const cached = await getCachedData('storage_units')
       if (cached.length > 0) {
         setUnits(cached)
-      } else {
+        markStoreInitialized('storage_units')
+      } else if (!isStoreInitialized('storage_units')) {
         await cacheData('storage_units', DEMO_UNITS)
         setUnits(DEMO_UNITS)
+        markStoreInitialized('storage_units')
+      } else {
+        setUnits([])
       }
       setLoading(false)
       return

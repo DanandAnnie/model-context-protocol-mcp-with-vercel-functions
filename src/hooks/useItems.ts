@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
-import { cacheData, getCachedData } from '../lib/offline'
+import { cacheData, getCachedData, isStoreInitialized, markStoreInitialized } from '../lib/offline'
 import type { Item, ItemInsert } from '../lib/database.types'
 
 const DEMO_ITEMS: Item[] = [
@@ -31,9 +31,13 @@ export function useItems() {
       const cached = await getCachedData('items')
       if (cached.length > 0) {
         setItems(cached)
-      } else {
+        markStoreInitialized('items')
+      } else if (!isStoreInitialized('items')) {
         await cacheData('items', DEMO_ITEMS)
         setItems(DEMO_ITEMS)
+        markStoreInitialized('items')
+      } else {
+        setItems([])
       }
       setLoading(false)
       return

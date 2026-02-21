@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { PlusCircle, Check, Loader2, Sparkles } from 'lucide-react'
+import { PlusCircle, Check, Loader2, Sparkles, Brain } from 'lucide-react'
 import { useItems } from '../hooks/useItems'
 import { useProperties } from '../hooks/useProperties'
 import { useStorageUnits } from '../hooks/useStorageUnits'
@@ -55,14 +55,17 @@ export default function AddItem() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [aiIdentifying, setAiIdentifying] = useState(false)
-  const [aiResult, setAiResult] = useState<'success' | 'error' | null>(null)
+  const [aiResult, setAiResult] = useState<'success' | 'error' | 'no_key' | null>(null)
 
   const handlePhotoCapture = async (file: File) => {
     setPhoto(file)
     setAiResult(null)
 
     // Auto-identify with AI if configured
-    if (!isAIConfigured()) return
+    if (!isAIConfigured()) {
+      setAiResult('no_key')
+      return
+    }
 
     setAiIdentifying(true)
     try {
@@ -193,6 +196,22 @@ export default function AddItem() {
               AI couldn&apos;t identify this item. Fill in the details manually.
             </div>
           )}
+          {aiResult === 'no_key' && (
+            <div className="mt-3 flex items-center gap-2 text-purple-700 bg-purple-50 rounded-lg px-4 py-2.5">
+              <Brain size={16} />
+              <span className="text-sm">
+                Add your Anthropic API key in{' '}
+                <button
+                  type="button"
+                  onClick={() => navigate('/settings')}
+                  className="underline font-semibold"
+                >
+                  Settings
+                </button>
+                {' '}to auto-identify items from photos.
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Basic info */}
@@ -236,8 +255,9 @@ export default function AddItem() {
                 type="number"
                 min={0}
                 step={0.01}
-                value={form.value}
-                onChange={(e) => setForm({ ...form, value: +e.target.value })}
+                value={form.value || ''}
+                onChange={(e) => setForm({ ...form, value: e.target.value === '' ? 0 : +e.target.value })}
+                placeholder="0.00"
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
@@ -299,8 +319,9 @@ export default function AddItem() {
                 type="number"
                 min={0}
                 step={0.01}
-                value={form.purchase_price}
-                onChange={(e) => setForm({ ...form, purchase_price: +e.target.value })}
+                value={form.purchase_price || ''}
+                onChange={(e) => setForm({ ...form, purchase_price: e.target.value === '' ? 0 : +e.target.value })}
+                placeholder="0.00"
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>

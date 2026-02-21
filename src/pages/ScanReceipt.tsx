@@ -2,7 +2,7 @@ import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Receipt, Camera, Upload, Loader2, Check, X, PlusCircle,
-  Trash2, ChevronDown, ChevronUp, Image as ImageIcon,
+  Trash2, ChevronDown, ChevronUp, Image as ImageIcon, Split, Copy,
 } from 'lucide-react'
 import { createWorker } from 'tesseract.js'
 import { useItems } from '../hooks/useItems'
@@ -36,6 +36,7 @@ interface ParsedItem {
   id: string
   name: string
   price: number
+  quantity: number
   category: ItemCategory
   included: boolean
 }
@@ -61,16 +62,58 @@ function guessCategory(name: string): ItemCategory {
   return 'other'
 }
 
+// Extract quantity from an item name and return cleaned name + quantity
+function extractQuantity(name: string): { cleanName: string; quantity: number } {
+  // Patterns: "2x Towel", "3 x Pillow", "QTY 2 Towel", "Towel x2", "Towel (x3)", "2 - Towel", "Towel @2"
+  let qty = 1
+  let cleanName = name
+
+  // Leading quantity: "2x Towel", "3 x Towel", "2 Towel Set"
+  const leadingQty = cleanName.match(/^(\d{1,3})\s*[xX×]\s+(.+)/)
+    || cleanName.match(/^(\d{1,3})\s*[-–]\s+(.+)/)
+  if (leadingQty) {
+    qty = parseInt(leadingQty[1], 10)
+    cleanName = leadingQty[2]
+  }
+
+  // Trailing quantity: "Towel x2", "Towel (x3)", "Towel @2"
+  if (qty === 1) {
+    const trailingQty = cleanName.match(/^(.+?)\s*[xX×@]\s*(\d{1,3})\s*$/)
+      || cleanName.match(/^(.+?)\s*\(\s*[xX×]?\s*(\d{1,3})\s*\)\s*$/)
+    if (trailingQty) {
+      cleanName = trailingQty[1]
+      qty = parseInt(trailingQty[2], 10)
+    }
+  }
+
+  // "QTY 2 Towel" or "Qty: 3 Pillow"
+  if (qty === 1) {
+    const qtyPrefix = cleanName.match(/^QTY\s*:?\s*(\d{1,3})\s+(.+)/i)
+    if (qtyPrefix) {
+      qty = parseInt(qtyPrefix[1], 10)
+      cleanName = qtyPrefix[2]
+    }
+  }
+
+  if (qty < 1 || qty > 100) qty = 1
+  return { cleanName: cleanName.trim(), quantity: qty }
+}
+
 // Parse OCR text into line items with prices
 function parseReceipt(text: string): ParsedItem[] {
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean)
   const items: ParsedItem[] = []
   const seen = new Set<string>()
 
+  // Skip totals, tax, subtotals, etc.
+  const skipPattern = /^(sub\s*total|total|tax|sales\s*tax|discount|tender|change|cash|credit|debit|visa|mastercard|amex|balance|payment|tip|gratuity|amount|shipping|delivery|handling|reward|savings|coupon|member|card\s*#|transaction|ref|order|store|date|time|receipt|thank|welcome|return|exchange|warranty)/i
+
   for (const line of lines) {
     // Match lines with a price pattern: $12.99, 12.99, $1,234.56, etc.
+    // Also match prices mid-line with whitespace separation
     const priceMatch = line.match(/\$?\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2}))\s*$/)
       || line.match(/\$\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s*$/)
+      || line.match(/\s{2,}\$?\s*(\d{1,3}(?:,\d{3})*\.\d{2})\s*$/)
     if (!priceMatch) continue
 
     const priceStr = priceMatch[1].replace(/,/g, '')
@@ -79,24 +122,26 @@ function parseReceipt(text: string): ParsedItem[] {
 
     // Item name is the text before the price
     let name = line.slice(0, priceMatch.index).trim()
-    // Clean up common OCR artifacts
+    // Clean up common OCR artifacts and item codes (e.g., "001234 Towel Set")
     name = name.replace(/^[\-\.\*\#\s]+/, '').replace(/[\-\.\*\#\s]+$/, '').trim()
+    name = name.replace(/^\d{4,}\s+/, '') // Remove leading SKU/item codes
 
     if (!name || name.length < 2) continue
+    if (skipPattern.test(name)) continue
 
-    // Skip totals, tax, subtotals, etc.
-    const skip = /^(sub\s*total|total|tax|sales\s*tax|discount|tender|change|cash|credit|debit|visa|mastercard|amex|balance|payment|tip|gratuity|amount)/i
-    if (skip.test(name)) continue
+    // Extract quantity from the item name
+    const { cleanName, quantity } = extractQuantity(name)
 
-    const key = `${name.toLowerCase()}-${price}`
+    const key = `${cleanName.toLowerCase()}-${price}`
     if (seen.has(key)) continue
     seen.add(key)
 
     items.push({
       id: crypto.randomUUID(),
-      name,
+      name: cleanName,
       price,
-      category: guessCategory(name),
+      quantity,
+      category: guessCategory(cleanName),
       included: true,
     })
   }
@@ -196,10 +241,51 @@ export default function ScanReceipt() {
         id: crypto.randomUUID(),
         name: '',
         price: 0,
+        quantity: 1,
         category: 'other',
         included: true,
       },
     ])
+  }
+
+  // Split a multi-quantity item into individual items
+  const splitItem = (id: string) => {
+    setParsedItems((prev) => {
+      const idx = prev.findIndex((item) => item.id === id)
+      if (idx === -1) return prev
+      const item = prev[idx]
+      if (item.quantity <= 1) return prev
+
+      const priceEach = Math.round((item.price / item.quantity) * 100) / 100
+      const splitItems: ParsedItem[] = Array.from({ length: item.quantity }, (_, i) => ({
+        id: i === 0 ? item.id : crypto.randomUUID(),
+        name: item.name,
+        price: priceEach,
+        quantity: 1,
+        category: item.category,
+        included: item.included,
+      }))
+
+      const next = [...prev]
+      next.splice(idx, 1, ...splitItems)
+      return next
+    })
+  }
+
+  // Duplicate an item (add another copy right below)
+  const duplicateItem = (id: string) => {
+    setParsedItems((prev) => {
+      const idx = prev.findIndex((item) => item.id === id)
+      if (idx === -1) return prev
+      const item = prev[idx]
+      const copy: ParsedItem = {
+        ...item,
+        id: crypto.randomUUID(),
+      }
+      const next = [...prev]
+      next.splice(idx + 1, 0, copy)
+      return next
+    })
   }
 
   const handleSaveAll = async () => {
@@ -211,32 +297,38 @@ export default function ScanReceipt() {
     let count = 0
 
     for (const parsed of toSave) {
-      const newItem: ItemInsert = {
-        name: parsed.name,
-        category: parsed.category,
-        subcategory: '',
-        value: parsed.price,
-        purchase_price: parsed.price,
-        purchase_date: purchaseDate || null,
-        payment_method: paymentMethod,
-        receipt_url: receiptImage || '',
-        useful_life_years: 7,
-        condition: 'good',
-        date_acquired: purchaseDate || new Date().toISOString().split('T')[0],
-        notes: 'Added from receipt scan',
-        photo_url: '',
-        current_location_type: locationType,
-        current_storage_id: locationType === 'storage' ? selectedStorageId : null,
-        current_property_id: locationType === 'property' ? selectedPropertyId : null,
-        status: locationType === 'property' ? 'staged' : 'available',
-      }
+      // For items with quantity > 1, save each as a separate inventory item
+      const qty = Math.max(parsed.quantity, 1)
+      const priceEach = qty > 1 ? Math.round((parsed.price / qty) * 100) / 100 : parsed.price
 
-      try {
-        await addItem(newItem)
-        count++
-        setSavedCount(count)
-      } catch {
-        // continue with remaining items
+      for (let i = 0; i < qty; i++) {
+        const newItem: ItemInsert = {
+          name: qty > 1 ? `${parsed.name} (${i + 1}/${qty})` : parsed.name,
+          category: parsed.category,
+          subcategory: '',
+          value: priceEach,
+          purchase_price: priceEach,
+          purchase_date: purchaseDate || null,
+          payment_method: paymentMethod,
+          receipt_url: receiptImage || '',
+          useful_life_years: 7,
+          condition: 'good',
+          date_acquired: purchaseDate || new Date().toISOString().split('T')[0],
+          notes: `Added from receipt scan${qty > 1 ? ` (${qty} purchased)` : ''}`,
+          photo_url: '',
+          current_location_type: locationType,
+          current_storage_id: locationType === 'storage' ? selectedStorageId : null,
+          current_property_id: locationType === 'property' ? selectedPropertyId : null,
+          status: locationType === 'property' ? 'staged' : 'available',
+        }
+
+        try {
+          await addItem(newItem)
+          count++
+          setSavedCount(count)
+        } catch {
+          // continue with remaining items
+        }
       }
     }
 
@@ -244,10 +336,9 @@ export default function ScanReceipt() {
     setSaving(false)
   }
 
-  const includedCount = parsedItems.filter((i) => i.included && i.name.trim()).length
-  const includedTotal = parsedItems
-    .filter((i) => i.included && i.name.trim())
-    .reduce((sum, i) => sum + i.price, 0)
+  const includedItems = parsedItems.filter((i) => i.included && i.name.trim())
+  const includedCount = includedItems.reduce((sum, i) => sum + Math.max(i.quantity, 1), 0)
+  const includedTotal = includedItems.reduce((sum, i) => sum + i.price, 0)
 
   // Done screen
   if (step === 'done') {
@@ -550,7 +641,20 @@ export default function ScanReceipt() {
                           />
                         </div>
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 items-center">
+                        {/* Quantity */}
+                        <div className="flex items-center gap-1">
+                          <label className="text-xs text-slate-400">Qty:</label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={99}
+                            value={item.quantity}
+                            onChange={(e) => updateItem(item.id, { quantity: Math.max(1, +e.target.value) })}
+                            className="w-14 px-1.5 py-1 border border-slate-200 rounded text-xs text-center focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          />
+                        </div>
+                        {/* Category */}
                         <select
                           value={item.category}
                           onChange={(e) => updateItem(item.id, { category: e.target.value as ItemCategory })}
@@ -560,13 +664,38 @@ export default function ScanReceipt() {
                             <option key={c.key} value={c.key}>{c.label}</option>
                           ))}
                         </select>
+                        {/* Split: break multi-qty into individual rows */}
+                        {item.quantity > 1 && (
+                          <button
+                            onClick={() => splitItem(item.id)}
+                            className="p-1 text-blue-500 hover:text-blue-700"
+                            title={`Split into ${item.quantity} separate items`}
+                          >
+                            <Split size={14} />
+                          </button>
+                        )}
+                        {/* Duplicate */}
+                        <button
+                          onClick={() => duplicateItem(item.id)}
+                          className="p-1 text-slate-400 hover:text-blue-500"
+                          title="Duplicate this item"
+                        >
+                          <Copy size={14} />
+                        </button>
+                        {/* Delete */}
                         <button
                           onClick={() => removeItem(item.id)}
                           className="p-1 text-slate-400 hover:text-red-500"
+                          title="Remove"
                         >
                           <Trash2 size={14} />
                         </button>
                       </div>
+                      {item.quantity > 1 && (
+                        <p className="text-xs text-amber-600">
+                          {item.quantity} items @ ${(item.price / item.quantity).toFixed(2)} each — will save as {item.quantity} separate inventory items
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>

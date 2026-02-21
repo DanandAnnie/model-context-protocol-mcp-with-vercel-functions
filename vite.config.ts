@@ -8,7 +8,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg'],
+      includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
         name: 'Staging Inventory Manager',
         short_name: 'StageInv',
@@ -16,6 +16,8 @@ export default defineConfig({
         theme_color: '#1e40af',
         background_color: '#f8fafc',
         display: 'standalone',
+        start_url: '.',
+        scope: '.',
         icons: [
           {
             src: 'pwa-192x192.png',
@@ -26,6 +28,7 @@ export default defineConfig({
             src: 'pwa-512x512.png',
             sizes: '512x512',
             type: 'image/png',
+            purpose: 'any maskable',
           },
         ],
       },

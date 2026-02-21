@@ -11,6 +11,7 @@ create table if not exists properties (
   sqft integer not null default 0,
   property_type text not null default 'house',
   notes text not null default '',
+  photo_url text not null default '',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

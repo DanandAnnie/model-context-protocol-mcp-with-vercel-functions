@@ -1,0 +1,275 @@
+import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { PlusCircle, Check } from 'lucide-react'
+import { useItems } from '../hooks/useItems'
+import { useProperties } from '../hooks/useProperties'
+import { useStorageUnits } from '../hooks/useStorageUnits'
+import PhotoCapture from '../components/PhotoCapture'
+import { supabase, isSupabaseConfigured } from '../lib/supabase'
+import type { ItemInsert, ItemCategory, ItemCondition, ItemStatus, LocationType } from '../lib/database.types'
+
+const CATEGORIES: ItemCategory[] = [
+  'furniture', 'lighting', 'artwork', 'textiles', 'accessories',
+  'rugs', 'outdoor', 'kitchen', 'bathroom', 'electronics', 'other',
+]
+
+const emptyForm: ItemInsert = {
+  name: '', category: 'furniture', subcategory: '', value: 0,
+  condition: 'good', date_acquired: null, notes: '',
+  current_location_type: 'storage', current_storage_id: null,
+  current_property_id: null, status: 'available',
+}
+
+export default function AddItem() {
+  const navigate = useNavigate()
+  const { addItem } = useItems()
+  const { properties } = useProperties()
+  const { units } = useStorageUnits()
+
+  const [form, setForm] = useState<ItemInsert>(emptyForm)
+  const [photo, setPhoto] = useState<File | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  const handleLocationTypeChange = (locType: LocationType) => {
+    setForm({
+      ...form,
+      current_location_type: locType,
+      current_storage_id: locType === 'storage' ? (units[0]?.id ?? null) : null,
+      current_property_id: locType === 'property' ? (properties[0]?.id ?? null) : null,
+      status: locType === 'property' ? 'staged' : 'available',
+    })
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaving(true)
+
+    try {
+      const item = await addItem(form)
+
+      // Upload photo if available and Supabase is configured
+      if (photo && isSupabaseConfigured() && item) {
+        const ext = photo.name.split('.').pop()
+        const path = `${item.id}/primary.${ext}`
+        const { error: uploadErr } = await supabase.storage
+          .from('item-images')
+          .upload(path, photo)
+
+        if (!uploadErr) {
+          const { data: urlData } = supabase.storage
+            .from('item-images')
+            .getPublicUrl(path)
+
+          await supabase.from('item_images').insert({
+            item_id: item.id,
+            image_url: urlData.publicUrl,
+            is_primary: true,
+          })
+        }
+      }
+
+      setSaved(true)
+      setTimeout(() => {
+        navigate('/inventory')
+      }, 1200)
+    } catch {
+      alert('Failed to save item. Please try again.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (saved) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 text-green-600">
+        <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
+          <Check size={32} />
+        </div>
+        <p className="text-lg font-medium">Item Added!</p>
+        <p className="text-sm text-slate-500 mt-1">Redirecting to inventory...</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="max-w-2xl mx-auto space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold flex items-center gap-2">
+          <PlusCircle size={24} />
+          Add New Item
+        </h1>
+        <p className="text-slate-500 text-sm mt-1">Add an item to your staging inventory</p>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Photo capture */}
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-2">Photo</label>
+          <PhotoCapture onCapture={setPhoto} />
+        </div>
+
+        {/* Basic info */}
+        <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+          <h2 className="text-sm font-semibold text-slate-700">Item Details</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-slate-700 mb-1">Name</label>
+              <input
+                required
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="e.g. Mid-Century Sofa"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
+              <select
+                value={form.category}
+                onChange={(e) => setForm({ ...form, category: e.target.value as ItemCategory })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                {CATEGORIES.map((c) => (
+                  <option key={c} value={c} className="capitalize">{c}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Subcategory</label>
+              <input
+                value={form.subcategory}
+                onChange={(e) => setForm({ ...form, subcategory: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="e.g. seating, tables"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Value ($)</label>
+              <input
+                type="number"
+                min={0}
+                step={0.01}
+                value={form.value}
+                onChange={(e) => setForm({ ...form, value: +e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Condition</label>
+              <select
+                value={form.condition}
+                onChange={(e) => setForm({ ...form, condition: e.target.value as ItemCondition })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="excellent">Excellent</option>
+                <option value="good">Good</option>
+                <option value="fair">Fair</option>
+                <option value="poor">Poor</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Date Acquired</label>
+              <input
+                type="date"
+                value={form.date_acquired || ''}
+                onChange={(e) => setForm({ ...form, date_acquired: e.target.value || null })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Status</label>
+              <select
+                value={form.status}
+                onChange={(e) => setForm({ ...form, status: e.target.value as ItemStatus })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="available">Available</option>
+                <option value="staged">Staged</option>
+                <option value="damaged">Damaged</option>
+                <option value="retired">Retired</option>
+              </select>
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
+              <textarea
+                value={form.notes}
+                onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                rows={2}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="Description, dimensions, etc."
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Location */}
+        <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+          <h2 className="text-sm font-semibold text-slate-700">Current Location</h2>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => handleLocationTypeChange('storage')}
+              className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium border transition-colors ${
+                form.current_location_type === 'storage'
+                  ? 'bg-blue-50 border-blue-300 text-blue-700'
+                  : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              Storage Unit
+            </button>
+            <button
+              type="button"
+              onClick={() => handleLocationTypeChange('property')}
+              className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium border transition-colors ${
+                form.current_location_type === 'property'
+                  ? 'bg-blue-50 border-blue-300 text-blue-700'
+                  : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              Property
+            </button>
+          </div>
+
+          {form.current_location_type === 'storage' && (
+            <select
+              value={form.current_storage_id || ''}
+              onChange={(e) => setForm({ ...form, current_storage_id: e.target.value || null })}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="">Select storage unit...</option>
+              {units.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name} {u.unit_number ? `(${u.unit_number})` : ''}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {form.current_location_type === 'property' && (
+            <select
+              value={form.current_property_id || ''}
+              onChange={(e) => setForm({ ...form, current_property_id: e.target.value || null })}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="">Select property...</option>
+              {properties.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        <button
+          type="submit"
+          disabled={saving}
+          className="w-full py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {saving ? 'Saving...' : 'Add Item'}
+        </button>
+      </form>
+    </div>
+  )
+}

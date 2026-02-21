@@ -1,0 +1,158 @@
+import { useState, useEffect, useCallback } from 'react'
+import { supabase, isSupabaseConfigured } from '../lib/supabase'
+import { cacheData, getCachedData } from '../lib/offline'
+import type { Item, ItemInsert } from '../lib/database.types'
+
+const DEMO_ITEMS: Item[] = [
+  { id: 'i1', name: 'Mid-Century Sofa', category: 'furniture', subcategory: 'seating', value: 2400, condition: 'excellent', date_acquired: '2024-03-15', notes: 'Gray velvet, 3-seat', current_location_type: 'storage', current_storage_id: '1', current_property_id: null, status: 'available', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'i2', name: 'Abstract Canvas Print', category: 'artwork', subcategory: 'prints', value: 350, condition: 'excellent', date_acquired: '2024-05-01', notes: '48x36 framed', current_location_type: 'property', current_storage_id: null, current_property_id: '1', status: 'staged', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'i3', name: 'Brass Floor Lamp', category: 'lighting', subcategory: 'floor lamps', value: 450, condition: 'good', date_acquired: '2024-01-20', notes: 'Adjustable height', current_location_type: 'storage', current_storage_id: '1', current_property_id: null, status: 'available', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'i4', name: 'Wool Area Rug 8x10', category: 'rugs', subcategory: 'area rugs', value: 1800, condition: 'good', date_acquired: '2023-11-10', notes: 'Neutral tones, hand-knotted', current_location_type: 'property', current_storage_id: null, current_property_id: '2', status: 'staged', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'i5', name: 'Dining Table Set', category: 'furniture', subcategory: 'tables', value: 3200, condition: 'excellent', date_acquired: '2024-06-01', notes: 'Walnut, seats 8', current_location_type: 'storage', current_storage_id: '2', current_property_id: null, status: 'available', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'i6', name: 'Throw Pillow Set (4)', category: 'textiles', subcategory: 'pillows', value: 180, condition: 'good', date_acquired: '2024-04-10', notes: 'Mixed patterns, blue tones', current_location_type: 'property', current_storage_id: null, current_property_id: '1', status: 'staged', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'i7', name: 'Ceramic Vase Collection', category: 'accessories', subcategory: 'vases', value: 220, condition: 'excellent', date_acquired: '2024-02-14', notes: 'Set of 3, white matte', current_location_type: 'storage', current_storage_id: '3', current_property_id: null, status: 'available', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'i8', name: 'King Bed Frame', category: 'furniture', subcategory: 'bedroom', value: 1600, condition: 'good', date_acquired: '2024-01-05', notes: 'Upholstered, beige linen', current_location_type: 'property', current_storage_id: null, current_property_id: '3', status: 'staged', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'i9', name: 'Pendant Light Fixture', category: 'lighting', subcategory: 'pendants', value: 380, condition: 'excellent', date_acquired: '2024-07-01', notes: 'Globe glass, brass finish', current_location_type: 'storage', current_storage_id: '1', current_property_id: null, status: 'available', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'i10', name: 'Outdoor Lounge Chair', category: 'outdoor', subcategory: 'seating', value: 750, condition: 'fair', date_acquired: '2023-09-15', notes: 'Teak wood, needs re-oiling', current_location_type: 'storage', current_storage_id: '3', current_property_id: null, status: 'available', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'i11', name: 'Bathroom Mirror', category: 'bathroom', subcategory: 'mirrors', value: 290, condition: 'excellent', date_acquired: '2024-05-20', notes: 'Round, gold frame, 30"', current_location_type: 'property', current_storage_id: null, current_property_id: '4', status: 'staged', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'i12', name: 'Kitchen Bar Stools (3)', category: 'kitchen', subcategory: 'seating', value: 540, condition: 'good', date_acquired: '2024-03-01', notes: 'Swivel, counter height', current_location_type: 'property', current_storage_id: null, current_property_id: '5', status: 'staged', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+]
+
+export function useItems() {
+  const [items, setItems] = useState<Item[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const fetchItems = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+
+    if (!isSupabaseConfigured()) {
+      const cached = await getCachedData('items')
+      if (cached.length > 0) {
+        setItems(cached)
+      } else {
+        await cacheData('items', DEMO_ITEMS)
+        setItems(DEMO_ITEMS)
+      }
+      setLoading(false)
+      return
+    }
+
+    try {
+      const { data, error: err } = await supabase
+        .from('items')
+        .select('*')
+        .order('name')
+
+      if (err) throw err
+      setItems(data || [])
+      if (data) await cacheData('items', data)
+    } catch (err) {
+      const cached = await getCachedData('items')
+      if (cached.length > 0) {
+        setItems(cached)
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to fetch items')
+      }
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { fetchItems() }, [fetchItems])
+
+  const addItem = async (item: ItemInsert) => {
+    if (!isSupabaseConfigured()) {
+      const newItem: Item = {
+        ...item,
+        id: crypto.randomUUID(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+      const updated = [...items, newItem]
+      setItems(updated)
+      await cacheData('items', updated)
+      return newItem
+    }
+
+    const { data, error: err } = await supabase
+      .from('items')
+      .insert(item)
+      .select()
+      .single()
+
+    if (err) throw err
+    await fetchItems()
+    return data
+  }
+
+  const updateItem = async (id: string, updates: Partial<ItemInsert>) => {
+    if (!isSupabaseConfigured()) {
+      const updated = items.map((i) =>
+        i.id === id ? { ...i, ...updates, updated_at: new Date().toISOString() } : i,
+      )
+      setItems(updated)
+      await cacheData('items', updated)
+      return
+    }
+
+    const { error: err } = await supabase
+      .from('items')
+      .update(updates)
+      .eq('id', id)
+
+    if (err) throw err
+    await fetchItems()
+  }
+
+  const deleteItem = async (id: string) => {
+    if (!isSupabaseConfigured()) {
+      const updated = items.filter((i) => i.id !== id)
+      setItems(updated)
+      await cacheData('items', updated)
+      return
+    }
+
+    const { error: err } = await supabase
+      .from('items')
+      .delete()
+      .eq('id', id)
+
+    if (err) throw err
+    await fetchItems()
+  }
+
+  const moveItem = async (
+    itemId: string,
+    toLocationType: 'storage' | 'property',
+    toId: string,
+  ) => {
+    const item = items.find((i) => i.id === itemId)
+    if (!item) return
+
+    const updates: Partial<ItemInsert> = {
+      current_location_type: toLocationType,
+      current_storage_id: toLocationType === 'storage' ? toId : null,
+      current_property_id: toLocationType === 'property' ? toId : null,
+      status: toLocationType === 'property' ? 'staged' : 'available',
+    }
+
+    await updateItem(itemId, updates)
+
+    if (isSupabaseConfigured()) {
+      await supabase.from('staging_history').insert({
+        item_id: itemId,
+        from_location_type: item.current_location_type,
+        from_storage_id: item.current_storage_id,
+        from_property_id: item.current_property_id,
+        to_location_type: toLocationType,
+        to_storage_id: toLocationType === 'storage' ? toId : null,
+        to_property_id: toLocationType === 'property' ? toId : null,
+        notes: '',
+      })
+    }
+  }
+
+  return { items, loading, error, addItem, updateItem, deleteItem, moveItem, refetch: fetchItems }
+}

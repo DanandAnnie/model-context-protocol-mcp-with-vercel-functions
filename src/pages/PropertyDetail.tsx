@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Home, Package, Save, Trash2, Check, AlertTriangle, Camera, Upload, X, Image as ImageIcon } from 'lucide-react'
+import { ArrowLeft, Home, Package, Save, Trash2, Check, AlertTriangle, Camera, Upload, X, Image as ImageIcon, MapPin } from 'lucide-react'
 import { useProperties } from '../hooks/useProperties'
 import { useItems } from '../hooks/useItems'
 import ItemCard from '../components/ItemCard'
@@ -301,6 +301,37 @@ export default function PropertyDetail() {
           </>
         )}
       </button>
+
+      {/* Google Map */}
+      {(form.address || form.city) && (
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="flex items-center justify-between p-4 pb-0">
+            <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+              <MapPin size={16} className="text-red-500" />
+              Location
+            </h2>
+            <a
+              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([form.address, form.city].filter(Boolean).join(', '))}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-blue-600 hover:text-blue-700"
+            >
+              Open in Google Maps
+            </a>
+          </div>
+          <div className="p-4">
+            <iframe
+              title="Property location"
+              width="100%"
+              height="250"
+              style={{ border: 0, borderRadius: '0.75rem' }}
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+              src={`https://maps.google.com/maps?q=${encodeURIComponent([form.address, form.city].filter(Boolean).join(', '))}&t=&z=15&ie=UTF8&iwloc=&output=embed`}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Staged items */}
       <div>

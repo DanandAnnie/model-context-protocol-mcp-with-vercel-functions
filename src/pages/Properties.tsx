@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { Home, Plus, Bed, Bath, Maximize, Trash2, X, Check, AlertTriangle, Video, Camera } from 'lucide-react'
+import { Home, Plus, Bed, Bath, Maximize, Trash2, X, Check, AlertTriangle, Video, Camera, MapPin } from 'lucide-react'
 import { useProperties } from '../hooks/useProperties'
 import { useItems } from '../hooks/useItems'
 import type { PropertyInsert, PropertyType } from '../lib/database.types'
@@ -242,6 +242,24 @@ export default function Properties() {
                   <span className="text-slate-500">{itemCount(prop.id)} items staged</span>
                   <span className="font-medium text-slate-700">${stagedValue(prop.id).toLocaleString()}</span>
                 </div>
+                {(prop.address || prop.city) && (
+                  <div className="mt-2 pt-2 border-t border-slate-100">
+                    <span
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        window.open(
+                          `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([prop.address, prop.city].filter(Boolean).join(', '))}`,
+                          '_blank',
+                        )
+                      }}
+                      className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 cursor-pointer"
+                    >
+                      <MapPin size={12} />
+                      View on Map
+                    </span>
+                  </div>
+                )}
               </div>
             </Link>
             <button

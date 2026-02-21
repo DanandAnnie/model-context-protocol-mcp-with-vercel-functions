@@ -1,1 +1,0 @@
-if('serviceWorker' in navigator) {window.addEventListener('load', () => {navigator.serviceWorker.register('/model-context-protocol-mcp-with-vercel-functions/sw.js', { scope: '/model-context-protocol-mcp-with-vercel-functions/' })})}

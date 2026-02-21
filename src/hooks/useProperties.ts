@@ -59,6 +59,20 @@ export function useProperties() {
 
   useEffect(() => { fetchProperties() }, [fetchProperties])
 
+  // Realtime: subscribe to changes from other devices
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return
+
+    const channel = supabase
+      .channel('properties-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'properties' }, () => {
+        fetchProperties()
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [fetchProperties])
+
   const addProperty = async (property: PropertyInsert) => {
     if (!isSupabaseConfigured()) {
       const newProp: Property = {

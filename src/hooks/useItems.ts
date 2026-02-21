@@ -66,6 +66,20 @@ export function useItems() {
 
   useEffect(() => { fetchItems() }, [fetchItems])
 
+  // Realtime: subscribe to changes from other devices
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return
+
+    const channel = supabase
+      .channel('items-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'items' }, () => {
+        fetchItems()
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [fetchItems])
+
   const addItem = async (item: ItemInsert) => {
     if (!isSupabaseConfigured()) {
       const newItem: Item = {

@@ -57,6 +57,20 @@ export function useStorageUnits() {
 
   useEffect(() => { fetchUnits() }, [fetchUnits])
 
+  // Realtime: subscribe to changes from other devices
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return
+
+    const channel = supabase
+      .channel('storage-units-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'storage_units' }, () => {
+        fetchUnits()
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [fetchUnits])
+
   const addUnit = async (unit: StorageUnitInsert) => {
     if (!isSupabaseConfigured()) {
       const newUnit: StorageUnit = {

@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { PlusCircle, Check } from 'lucide-react'
+import { PlusCircle, Check, Loader2, Sparkles } from 'lucide-react'
 import { useItems } from '../hooks/useItems'
 import { useProperties } from '../hooks/useProperties'
 import { useStorageUnits } from '../hooks/useStorageUnits'
 import PhotoCapture from '../components/PhotoCapture'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
+import { isAIConfigured, identifyItemsFromImage } from '../lib/ai'
 import type { ItemInsert, ItemCategory, ItemCondition, ItemStatus, LocationType, PaymentMethod } from '../lib/database.types'
 
 function fileToBase64(file: File): Promise<string> {
@@ -53,6 +54,38 @@ export default function AddItem() {
   const [photo, setPhoto] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [aiIdentifying, setAiIdentifying] = useState(false)
+  const [aiResult, setAiResult] = useState<'success' | 'error' | null>(null)
+
+  const handlePhotoCapture = async (file: File) => {
+    setPhoto(file)
+    setAiResult(null)
+
+    // Auto-identify with AI if configured
+    if (!isAIConfigured()) return
+
+    setAiIdentifying(true)
+    try {
+      const base64 = await fileToBase64(file)
+      const items = await identifyItemsFromImage(base64)
+      if (items.length > 0) {
+        const item = items[0] // Use the first (primary) identified item
+        setForm((prev) => ({
+          ...prev,
+          name: item.name,
+          category: item.category,
+          value: item.estimated_value,
+          purchase_price: item.estimated_value,
+          condition: item.condition,
+        }))
+        setAiResult('success')
+      }
+    } catch {
+      setAiResult('error')
+    } finally {
+      setAiIdentifying(false)
+    }
+  }
 
   const handleLocationTypeChange = (locType: LocationType) => {
     setForm({
@@ -136,7 +169,24 @@ export default function AddItem() {
         {/* Photo capture */}
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-2">Photo</label>
-          <PhotoCapture onCapture={setPhoto} />
+          <PhotoCapture onCapture={handlePhotoCapture} />
+          {aiIdentifying && (
+            <div className="mt-3 flex items-center gap-2 text-purple-600 bg-purple-50 rounded-lg px-4 py-2.5">
+              <Loader2 size={16} className="animate-spin" />
+              <span className="text-sm font-medium">AI is identifying this item...</span>
+            </div>
+          )}
+          {aiResult === 'success' && !aiIdentifying && (
+            <div className="mt-3 flex items-center gap-2 text-green-700 bg-green-50 rounded-lg px-4 py-2.5">
+              <Sparkles size={16} />
+              <span className="text-sm font-medium">AI identified the item and filled in the details below. Review and adjust as needed.</span>
+            </div>
+          )}
+          {aiResult === 'error' && !aiIdentifying && (
+            <div className="mt-3 text-sm text-amber-700 bg-amber-50 rounded-lg px-4 py-2.5">
+              AI couldn&apos;t identify this item. Fill in the details manually.
+            </div>
+          )}
         </div>
 
         {/* Basic info */}

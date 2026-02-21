@@ -232,11 +232,15 @@ export default function Properties() {
               </div>
             </Link>
             <button
-              onClick={() => setDeleteTarget({ id: prop.id, name: prop.name })}
-              className="absolute top-3 right-3 p-1.5 rounded-lg hover:bg-red-50 text-slate-300 hover:text-red-500 transition-all"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                setDeleteTarget({ id: prop.id, name: prop.name })
+              }}
+              className="absolute top-3 right-3 z-10 p-2.5 rounded-lg bg-white/80 hover:bg-red-50 text-slate-400 hover:text-red-500 transition-all shadow-sm"
               title="Delete property"
             >
-              <Trash2 size={14} />
+              <Trash2 size={16} />
             </button>
           </div>
         ))}

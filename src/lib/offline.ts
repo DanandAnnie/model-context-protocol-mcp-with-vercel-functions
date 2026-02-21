@@ -58,8 +58,10 @@ export async function cacheData<T extends keyof OfflineDB>(
 ) {
   const db = await getDB()
   const tx = db.transaction(store, 'readwrite')
-  await tx.store.clear()
+  // Do NOT await clear separately — it auto-commits the transaction.
+  // Batch clear + puts + done in a single Promise.all.
   await Promise.all([
+    tx.store.clear(),
     ...data.map((item) => tx.store.put(item)),
     tx.done,
   ])

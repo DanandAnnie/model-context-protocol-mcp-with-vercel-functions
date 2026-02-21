@@ -1,4 +1,4 @@
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Warehouse, Package } from 'lucide-react'
 import { useStorageUnits } from '../hooks/useStorageUnits'
 import { useItems } from '../hooks/useItems'
@@ -6,6 +6,7 @@ import ItemCard from '../components/ItemCard'
 
 export default function StorageUnitDetail() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const { units, loading: unitsLoading } = useStorageUnits()
   const { items, loading: itemsLoading } = useItems()
 
@@ -77,7 +78,7 @@ export default function StorageUnitDetail() {
         {unitItems.length > 0 ? (
           <div className="space-y-2">
             {unitItems.map((item) => (
-              <ItemCard key={item.id} item={item} locationName={unit.name} />
+              <ItemCard key={item.id} item={item} locationName={unit.name} onClick={() => navigate(`/items/${item.id}`)} />
             ))}
           </div>
         ) : (

@@ -1,4 +1,4 @@
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Home, Package } from 'lucide-react'
 import { useProperties } from '../hooks/useProperties'
 import { useItems } from '../hooks/useItems'
@@ -6,6 +6,7 @@ import ItemCard from '../components/ItemCard'
 
 export default function PropertyDetail() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const { properties, loading: propsLoading } = useProperties()
   const { items, loading: itemsLoading } = useItems()
 
@@ -76,7 +77,7 @@ export default function PropertyDetail() {
         {propertyItems.length > 0 ? (
           <div className="space-y-2">
             {propertyItems.map((item) => (
-              <ItemCard key={item.id} item={item} locationName={property.name} />
+              <ItemCard key={item.id} item={item} locationName={property.name} onClick={() => navigate(`/items/${item.id}`)} />
             ))}
           </div>
         ) : (

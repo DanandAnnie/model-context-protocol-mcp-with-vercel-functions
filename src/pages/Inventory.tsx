@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Package, Search, Filter, PlusCircle } from 'lucide-react'
 import { useItems } from '../hooks/useItems'
 import { useProperties } from '../hooks/useProperties'
@@ -15,6 +15,7 @@ const STATUSES: ItemStatus[] = ['available', 'staged', 'damaged', 'retired']
 const CONDITIONS: ItemCondition[] = ['excellent', 'good', 'fair', 'poor']
 
 export default function Inventory() {
+  const navigate = useNavigate()
   const { items, loading, deleteItem } = useItems()
   const { properties } = useProperties()
   const { units } = useStorageUnits()
@@ -195,7 +196,7 @@ export default function Inventory() {
       <div className="space-y-2">
         {filtered.map((item) => (
           <div key={item.id} className="group relative">
-            <ItemCard item={item} locationName={locationName(item)} />
+            <ItemCard item={item} locationName={locationName(item)} onClick={() => navigate(`/items/${item.id}`)} />
             <button
               onClick={() => {
                 if (confirm(`Delete "${item.name}"?`)) deleteItem(item.id)

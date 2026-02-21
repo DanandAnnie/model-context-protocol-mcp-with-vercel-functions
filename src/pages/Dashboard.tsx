@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   Package,
   Home,
@@ -15,6 +15,7 @@ import { useProperties } from '../hooks/useProperties'
 import { useStorageUnits } from '../hooks/useStorageUnits'
 
 export default function Dashboard() {
+  const navigate = useNavigate()
   const { items, loading: itemsLoading } = useItems()
   const { properties, loading: propsLoading } = useProperties()
   const { units, loading: unitsLoading } = useStorageUnits()
@@ -140,6 +141,7 @@ export default function Dashboard() {
               key={item.id}
               item={item}
               locationName={locationName(item)}
+              onClick={() => navigate(`/items/${item.id}`)}
             />
           ))}
           {recentItems.length === 0 && (

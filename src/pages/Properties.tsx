@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { Home, Plus, Bed, Bath, Maximize, Trash2, X, Check, AlertTriangle } from 'lucide-react'
+import { Home, Plus, Bed, Bath, Maximize, Trash2, X, Check, AlertTriangle, Video, Camera } from 'lucide-react'
 import { useProperties } from '../hooks/useProperties'
 import { useItems } from '../hooks/useItems'
 import type { PropertyInsert, PropertyType } from '../lib/database.types'
@@ -19,7 +19,9 @@ export default function Properties() {
   const [saved, setSaved] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [showTimelapse, setShowTimelapse] = useState<string | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const videoInputRef = useRef<HTMLInputElement>(null)
 
   const itemCount = (propId: string) =>
     items.filter((i) => i.current_property_id === propId).length
@@ -38,10 +40,12 @@ export default function Properties() {
     try {
       await addProperty(formData)
       setSaved(true)
+      const propName = formData.name
       setTimeout(() => {
         setSaved(false)
         setForm(emptyForm)
         setShowForm(false)
+        setShowTimelapse(propName)
       }, 1200)
     } finally {
       setSaving(false)
@@ -250,6 +254,57 @@ export default function Properties() {
         <div className="text-center py-12 text-slate-400">
           <Home size={40} className="mx-auto mb-3 opacity-50" />
           <p>No properties yet. Add your first one above.</p>
+        </div>
+      )}
+
+      {/* Hidden video input for timelapse recording */}
+      <input
+        ref={videoInputRef}
+        type="file"
+        accept="video/*"
+        capture="environment"
+        className="hidden"
+        onChange={() => {
+          setShowTimelapse(null)
+        }}
+      />
+
+      {/* Timelapse reminder popup */}
+      {showTimelapse && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/40" onClick={() => setShowTimelapse(null)} />
+          <div className="relative bg-white rounded-2xl shadow-xl max-w-sm w-full p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-blue-50 rounded-full">
+                <Video size={24} className="text-blue-600" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-slate-900">Create a Timelapse?</h3>
+                <p className="text-sm text-slate-500 mt-0.5">
+                  <span className="font-medium">{showTimelapse}</span> was added!
+                </p>
+              </div>
+            </div>
+            <p className="text-sm text-slate-600">
+              Record a timelapse video of the staging setup at this property.
+              This helps track before/after transformations for your portfolio.
+            </p>
+            <div className="flex flex-col gap-2.5 pt-2">
+              <button
+                onClick={() => videoInputRef.current?.click()}
+                className="w-full px-4 py-3 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 flex items-center justify-center gap-2"
+              >
+                <Camera size={18} />
+                Open Camera for Timelapse
+              </button>
+              <button
+                onClick={() => setShowTimelapse(null)}
+                className="w-full px-4 py-2.5 text-sm font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+              >
+                Maybe Later
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

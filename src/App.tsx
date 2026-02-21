@@ -7,6 +7,7 @@ import StorageUnits from './pages/StorageUnits'
 import StorageUnitDetail from './pages/StorageUnitDetail'
 import Inventory from './pages/Inventory'
 import AddItem from './pages/AddItem'
+import ItemDetail from './pages/ItemDetail'
 import StagingPlanner from './pages/StagingPlanner'
 
 export default function App() {
@@ -19,6 +20,7 @@ export default function App() {
         <Route path="/storage" element={<StorageUnits />} />
         <Route path="/storage/:id" element={<StorageUnitDetail />} />
         <Route path="/inventory" element={<Inventory />} />
+        <Route path="/items/:id" element={<ItemDetail />} />
         <Route path="/add-item" element={<AddItem />} />
         <Route path="/staging-planner" element={<StagingPlanner />} />
       </Route>

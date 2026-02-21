@@ -1,7 +1,8 @@
 const STORAGE_KEY = 'staging-inv-anthropic-key'
 
 export function getAnthropicKey(): string {
-  return localStorage.getItem(STORAGE_KEY) || ''
+  // Check localStorage first, then fall back to env var from .env file
+  return localStorage.getItem(STORAGE_KEY) || import.meta.env.VITE_ANTHROPIC_API_KEY || ''
 }
 
 export function saveAnthropicKey(key: string) {

@@ -58,6 +58,7 @@ export async function cacheData<T extends keyof OfflineDB>(
 ) {
   const db = await getDB()
   const tx = db.transaction(store, 'readwrite')
+  await tx.store.clear()
   await Promise.all([
     ...data.map((item) => tx.store.put(item)),
     tx.done,

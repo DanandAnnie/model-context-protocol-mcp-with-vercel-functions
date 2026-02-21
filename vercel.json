@@ -1,7 +1,14 @@
 {
-  "rewrites": [{ "source": "/(.+)", "destination": "/api/server" }],
+  "rewrites": [
+    { "source": "/api/identify", "destination": "/api/identify" },
+    { "source": "/api/server", "destination": "/api/server" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ],
   "functions": {
     "api/server.ts": {
+      "maxDuration": 60
+    },
+    "api/identify.ts": {
       "maxDuration": 60
     }
   }

@@ -44,13 +44,12 @@ export async function identifyItemsFromImage(imageBase64: string): Promise<AIIde
   const mediaType = match[1]
   const base64Data = match[2]
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  // Use our API proxy to avoid CORS issues with direct browser calls
+  const response = await fetch('/api/identify', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',

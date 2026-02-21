@@ -4,6 +4,18 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
   base: '/model-context-protocol-mcp-with-vercel-functions/',
+  server: {
+    proxy: {
+      '/api/identify': {
+        target: 'https://api.anthropic.com',
+        changeOrigin: true,
+        rewrite: (path) => '/v1/messages',
+        headers: {
+          'anthropic-version': '2023-06-01',
+        },
+      },
+    },
+  },
   plugins: [
     react(),
     VitePWA({

@@ -9,6 +9,7 @@ import Inventory from './pages/Inventory'
 import AddItem from './pages/AddItem'
 import ItemDetail from './pages/ItemDetail'
 import StagingPlanner from './pages/StagingPlanner'
+import Settings from './pages/Settings'
 
 export default function App() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
         <Route path="/items/:id" element={<ItemDetail />} />
         <Route path="/add-item" element={<AddItem />} />
         <Route path="/staging-planner" element={<StagingPlanner />} />
+        <Route path="/settings" element={<Settings />} />
       </Route>
     </Routes>
   )

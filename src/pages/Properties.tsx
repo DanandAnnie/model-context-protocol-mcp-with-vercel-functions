@@ -7,7 +7,7 @@ import type { PropertyInsert, PropertyType } from '../lib/database.types'
 
 const emptyForm: PropertyInsert = {
   name: '', address: '', city: '', bedrooms: 0, bathrooms: 0,
-  sqft: 0, property_type: 'house', notes: '',
+  sqft: 0, property_type: 'house', notes: '', photo_url: '',
 }
 
 export default function Properties() {
@@ -208,31 +208,40 @@ export default function Properties() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {properties.map((prop) => (
-          <div key={prop.id} className="bg-white rounded-xl border border-slate-200 hover:shadow-md hover:border-blue-300 transition-all group relative">
+          <div key={prop.id} className="bg-white rounded-xl border border-slate-200 hover:shadow-md hover:border-blue-300 transition-all group relative overflow-hidden">
             <Link
               to={`/properties/${prop.id}`}
-              className="block p-5"
+              className="block"
             >
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 bg-blue-50 rounded-lg group-hover:bg-blue-100 transition-colors">
-                    <Home size={18} className="text-blue-700" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold">{prop.name}</h3>
-                    <p className="text-xs text-slate-500">{prop.address}</p>
-                    {prop.city && <p className="text-xs text-slate-400">{prop.city}</p>}
+              {prop.photo_url ? (
+                <div className="h-36 overflow-hidden">
+                  <img src={prop.photo_url} alt={prop.name} className="w-full h-full object-cover" />
+                </div>
+              ) : null}
+              <div className="p-5">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    {!prop.photo_url && (
+                      <div className="p-2.5 bg-blue-50 rounded-lg group-hover:bg-blue-100 transition-colors">
+                        <Home size={18} className="text-blue-700" />
+                      </div>
+                    )}
+                    <div>
+                      <h3 className="font-semibold">{prop.name}</h3>
+                      <p className="text-xs text-slate-500">{prop.address}</p>
+                      {prop.city && <p className="text-xs text-slate-400">{prop.city}</p>}
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div className="mt-4 flex items-center gap-4 text-xs text-slate-500">
-                <span className="flex items-center gap-1"><Bed size={12} />{prop.bedrooms} bd</span>
-                <span className="flex items-center gap-1"><Bath size={12} />{prop.bathrooms} ba</span>
-                <span className="flex items-center gap-1"><Maximize size={12} />{prop.sqft.toLocaleString()} sqft</span>
-              </div>
-              <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-                <span className="text-slate-500">{itemCount(prop.id)} items staged</span>
-                <span className="font-medium text-slate-700">${stagedValue(prop.id).toLocaleString()}</span>
+                <div className="mt-4 flex items-center gap-4 text-xs text-slate-500">
+                  <span className="flex items-center gap-1"><Bed size={12} />{prop.bedrooms} bd</span>
+                  <span className="flex items-center gap-1"><Bath size={12} />{prop.bathrooms} ba</span>
+                  <span className="flex items-center gap-1"><Maximize size={12} />{prop.sqft.toLocaleString()} sqft</span>
+                </div>
+                <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
+                  <span className="text-slate-500">{itemCount(prop.id)} items staged</span>
+                  <span className="font-medium text-slate-700">${stagedValue(prop.id).toLocaleString()}</span>
+                </div>
               </div>
             </Link>
             <button

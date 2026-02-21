@@ -7,6 +7,7 @@ import {
   Package,
   PlusCircle,
   ArrowRightLeft,
+  Settings,
   Menu,
   X,
 } from 'lucide-react'
@@ -18,6 +19,7 @@ const navItems = [
   { to: '/inventory', icon: Package, label: 'Inventory' },
   { to: '/add-item', icon: PlusCircle, label: 'Add Item' },
   { to: '/staging-planner', icon: ArrowRightLeft, label: 'Staging Planner' },
+  { to: '/settings', icon: Settings, label: 'Settings' },
 ]
 
 export default function Layout() {

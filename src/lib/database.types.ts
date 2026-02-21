@@ -26,6 +26,7 @@ export interface Property {
   sqft: number
   property_type: PropertyType
   notes: string
+  photo_url: string
   created_at: string
   updated_at: string
 }

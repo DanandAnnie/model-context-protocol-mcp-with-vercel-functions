@@ -1,7 +1,47 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { cacheData, getCachedData, isStoreInitialized, markStoreInitialized } from '../lib/offline'
-import type { Item, ItemInsert } from '../lib/database.types'
+import type { Item, ItemInsert, ItemCategory } from '../lib/database.types'
+
+const VALID_CATEGORIES: ItemCategory[] = [
+  'kitchen & dining', 'bedroom', 'living room', 'office',
+  'bathroom', 'outdoor', 'other',
+]
+
+// Migrate old category values to the new room-based categories
+function migrateCategory(category: string, subcategory: string): ItemCategory {
+  const cat = category.toLowerCase().trim()
+  const sub = subcategory.toLowerCase().trim()
+
+  // Already a valid category
+  if (VALID_CATEGORIES.includes(cat as ItemCategory)) return cat as ItemCategory
+
+  // Map old categories based on name + subcategory context
+  if (cat === 'kitchen' || cat === 'appliances' || cat === 'kitchen appliances') return 'kitchen & dining'
+  if (cat === 'dining') return 'kitchen & dining'
+  if (sub === 'bedroom' || sub === 'bed' || sub === 'bed frames' || sub === 'nightstand' || sub === 'dresser') return 'bedroom'
+  if (sub === 'bathroom' || sub === 'bath' || sub === 'mirror' || sub === 'mirrors') return 'bathroom'
+  if (sub === 'kitchen' || sub === 'dining' || sub === 'bar stools' || sub === 'seating' && cat === 'kitchen') return 'kitchen & dining'
+  if (sub === 'outdoor' || sub === 'patio' || sub === 'garden') return 'outdoor'
+  if (sub === 'desk' || sub === 'office' || sub === 'computer') return 'office'
+  if (cat === 'furniture' || cat === 'lighting' || cat === 'textiles' || cat === 'accessories' || cat === 'artwork' || cat === 'rugs') return 'living room'
+  if (cat === 'electronics') return 'office'
+
+  return 'other'
+}
+
+function migrateItems(items: Item[]): { migrated: Item[]; changed: boolean } {
+  let changed = false
+  const migrated = items.map((item) => {
+    const newCategory = migrateCategory(item.category, item.subcategory)
+    if (newCategory !== item.category) {
+      changed = true
+      return { ...item, category: newCategory, updated_at: new Date().toISOString() }
+    }
+    return item
+  })
+  return { migrated, changed }
+}
 
 const DEMO_ITEMS: Item[] = [
   { id: 'i1', name: 'Mid-Century Sofa', category: 'living room', subcategory: 'seating', value: 2400, condition: 'excellent', date_acquired: '2024-03-15', notes: 'Gray velvet, 3-seat', photo_url: '', current_location_type: 'storage', current_storage_id: '1', current_property_id: null, status: 'available', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
@@ -30,7 +70,9 @@ export function useItems() {
     if (!isSupabaseConfigured()) {
       const cached = await getCachedData('items')
       if (cached.length > 0) {
-        setItems(cached)
+        const { migrated, changed } = migrateItems(cached as Item[])
+        if (changed) await cacheData('items', migrated)
+        setItems(migrated)
         markStoreInitialized('items')
       } else if (!isStoreInitialized('items')) {
         await cacheData('items', DEMO_ITEMS)

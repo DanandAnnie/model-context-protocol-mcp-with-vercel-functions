@@ -25,6 +25,7 @@ create table if not exists storage_units (
   size text not null default '',
   monthly_cost numeric(10,2) not null default 0,
   notes text not null default '',
+  photo_url text not null default '',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

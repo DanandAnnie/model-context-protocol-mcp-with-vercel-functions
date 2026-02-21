@@ -4,9 +4,9 @@ import { cacheData, getCachedData, isStoreInitialized, markStoreInitialized } fr
 import type { StorageUnit, StorageUnitInsert } from '../lib/database.types'
 
 const DEMO_UNITS: StorageUnit[] = [
-  { id: '1', name: 'SecureStore North', address: '4500 N Lamar Blvd', unit_number: 'A-12', size: '10x20', monthly_cost: 185, notes: 'Climate controlled', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: '2', name: 'Downtown Mini Storage', address: '200 E 3rd St', unit_number: 'B-05', size: '10x10', monthly_cost: 120, notes: 'Easy access, ground floor', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: '3', name: 'South Austin Storage', address: '8800 S Congress Ave', unit_number: 'C-22', size: '10x30', monthly_cost: 250, notes: 'Large unit for furniture sets', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: '1', name: 'SecureStore North', address: '4500 N Lamar Blvd', unit_number: 'A-12', size: '10x20', monthly_cost: 185, notes: 'Climate controlled', photo_url: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: '2', name: 'Downtown Mini Storage', address: '200 E 3rd St', unit_number: 'B-05', size: '10x10', monthly_cost: 120, notes: 'Easy access, ground floor', photo_url: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: '3', name: 'South Austin Storage', address: '8800 S Congress Ave', unit_number: 'C-22', size: '10x30', monthly_cost: 250, notes: 'Large unit for furniture sets', photo_url: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
 ]
 
 export function useStorageUnits() {

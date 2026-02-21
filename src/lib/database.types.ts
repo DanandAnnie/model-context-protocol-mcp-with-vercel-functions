@@ -39,6 +39,7 @@ export interface StorageUnit {
   size: string
   monthly_cost: number
   notes: string
+  photo_url: string
   created_at: string
   updated_at: string
 }

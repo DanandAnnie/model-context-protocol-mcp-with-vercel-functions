@@ -2,13 +2,14 @@ import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Receipt, Camera, Upload, Loader2, Check, X, PlusCircle,
-  Trash2, ChevronDown, ChevronUp, Image as ImageIcon, Split, Copy,
+  Trash2, ChevronDown, ChevronUp, Image as ImageIcon, Split, Copy, Eye,
 } from 'lucide-react'
 import { createWorker } from 'tesseract.js'
 import { useItems } from '../hooks/useItems'
 import { useProperties } from '../hooks/useProperties'
 import { useStorageUnits } from '../hooks/useStorageUnits'
-import type { ItemCategory, ItemInsert, PaymentMethod } from '../lib/database.types'
+import { isAIConfigured, identifyItemsFromImage } from '../lib/ai'
+import type { ItemCategory, ItemCondition, ItemInsert, PaymentMethod } from '../lib/database.types'
 
 const PAYMENT_METHODS: { key: PaymentMethod; label: string }[] = [
   { key: 'square', label: 'Square' },
@@ -38,6 +39,7 @@ interface ParsedItem {
   price: number
   quantity: number
   category: ItemCategory
+  condition: ItemCondition
   included: boolean
 }
 
@@ -142,6 +144,7 @@ function parseReceipt(text: string): ParsedItem[] {
       price,
       quantity,
       category: guessCategory(cleanName),
+      condition: 'good',
       included: true,
     })
   }
@@ -172,6 +175,7 @@ export default function ScanReceipt() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('other')
   const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split('T')[0])
 
+  const [aiIdentifying, setAiIdentifying] = useState(false)
   const [saving, setSaving] = useState(false)
   const [savedCount, setSavedCount] = useState(0)
 
@@ -218,6 +222,32 @@ export default function ScanReceipt() {
     }
   }
 
+  const handleAIIdentify = async () => {
+    if (!receiptImage) return
+    setAiIdentifying(true)
+
+    try {
+      const identified = await identifyItemsFromImage(receiptImage)
+      const items: ParsedItem[] = identified.map((item) => ({
+        id: crypto.randomUUID(),
+        name: item.name,
+        price: item.estimated_value,
+        quantity: item.quantity,
+        category: item.category,
+        condition: item.condition,
+        included: true,
+      }))
+
+      setRawText('')
+      setParsedItems(items)
+      setStep('review')
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'AI identification failed. Please try again.')
+    } finally {
+      setAiIdentifying(false)
+    }
+  }
+
   const toggleItem = (id: string) => {
     setParsedItems((prev) =>
       prev.map((item) => item.id === id ? { ...item, included: !item.included } : item),
@@ -243,6 +273,7 @@ export default function ScanReceipt() {
         price: 0,
         quantity: 1,
         category: 'other',
+        condition: 'good',
         included: true,
       },
     ])
@@ -263,6 +294,7 @@ export default function ScanReceipt() {
         price: priceEach,
         quantity: 1,
         category: item.category,
+        condition: item.condition,
         included: item.included,
       }))
 
@@ -312,7 +344,7 @@ export default function ScanReceipt() {
           payment_method: paymentMethod,
           receipt_url: receiptImage || '',
           useful_life_years: 7,
-          condition: 'good',
+          condition: parsed.condition,
           date_acquired: purchaseDate || new Date().toISOString().split('T')[0],
           notes: `Added from receipt scan${qty > 1 ? ` (${qty} purchased)` : ''}`,
           photo_url: '',
@@ -377,10 +409,10 @@ export default function ScanReceipt() {
       <div>
         <h1 className="text-2xl font-bold flex items-center gap-2">
           <Receipt size={24} />
-          Scan Receipt
+          Scan & Identify
         </h1>
         <p className="text-slate-500 text-sm mt-1">
-          Upload a receipt to automatically extract items and prices
+          Upload a receipt or take a photo of items to identify and categorize them
         </p>
       </div>
 
@@ -421,7 +453,7 @@ export default function ScanReceipt() {
           ) : (
             <div className="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center">
               <ImageIcon size={40} className="mx-auto text-slate-300 mb-3" />
-              <p className="text-sm text-slate-500 mb-4">Take a photo or upload an image of your receipt</p>
+              <p className="text-sm text-slate-500 mb-4">Take a photo of items or a receipt to get started</p>
               <div className="flex justify-center gap-3">
                 <button
                   type="button"
@@ -528,24 +560,61 @@ export default function ScanReceipt() {
             </div>
           </div>
 
-          {/* Scan button */}
-          <button
-            onClick={handleScan}
-            disabled={!receiptImage || scanning}
-            className="w-full py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-          >
-            {scanning ? (
-              <>
-                <Loader2 size={18} className="animate-spin" />
-                Scanning... {scanProgress}%
-              </>
+          {/* Action buttons */}
+          <div className="space-y-3">
+            {/* AI Identify - primary action */}
+            {isAIConfigured() ? (
+              <button
+                onClick={handleAIIdentify}
+                disabled={!receiptImage || aiIdentifying || scanning}
+                className="w-full py-3 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {aiIdentifying ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" />
+                    AI Identifying Items...
+                  </>
+                ) : (
+                  <>
+                    <Eye size={18} />
+                    AI Identify Items
+                  </>
+                )}
+              </button>
             ) : (
-              <>
-                <Receipt size={18} />
-                Scan Receipt
-              </>
+              <div className="rounded-lg border border-dashed border-purple-300 bg-purple-50 p-3 text-center">
+                <p className="text-sm text-purple-700 font-medium">AI Item Identification</p>
+                <p className="text-xs text-purple-500 mt-1">
+                  Add your Anthropic API key in <a href="#/settings" onClick={(e) => { e.preventDefault(); navigate('/settings') }} className="underline font-medium">Settings</a> to auto-identify items from photos
+                </p>
+              </div>
             )}
-          </button>
+
+            <div className="flex items-center gap-3">
+              <div className="flex-1 h-px bg-slate-200" />
+              <span className="text-xs text-slate-400">or</span>
+              <div className="flex-1 h-px bg-slate-200" />
+            </div>
+
+            {/* OCR Scan - secondary action for receipts */}
+            <button
+              onClick={handleScan}
+              disabled={!receiptImage || scanning || aiIdentifying}
+              className="w-full py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {scanning ? (
+                <>
+                  <Loader2 size={18} className="animate-spin" />
+                  Scanning Text... {scanProgress}%
+                </>
+              ) : (
+                <>
+                  <Receipt size={18} />
+                  Scan Receipt Text (OCR)
+                </>
+              )}
+            </button>
+          </div>
         </>
       )}
 

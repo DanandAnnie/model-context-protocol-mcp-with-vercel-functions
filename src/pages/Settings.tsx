@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Settings as SettingsIcon, Cloud, CloudOff, Check, AlertTriangle, Smartphone } from 'lucide-react'
+import { Settings as SettingsIcon, Cloud, CloudOff, Check, AlertTriangle, Smartphone, Brain, Eye } from 'lucide-react'
 import { isSupabaseConfigured, saveSupabaseConfig, getSupabaseConfig, supabase } from '../lib/supabase'
+import { getAnthropicKey, saveAnthropicKey, isAIConfigured } from '../lib/ai'
 
 export default function Settings() {
   const existing = getSupabaseConfig()
@@ -9,6 +10,10 @@ export default function Settings() {
   const [testing, setTesting] = useState(false)
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const [errorMsg, setErrorMsg] = useState('')
+
+  // AI settings
+  const [aiKey, setAiKey] = useState(getAnthropicKey())
+  const [aiSaved, setAiSaved] = useState(false)
 
   const connected = isSupabaseConfigured()
 
@@ -180,6 +185,91 @@ export default function Settings() {
               className="px-4 py-2.5 border border-slate-200 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50"
             >
               Disconnect
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* AI Item Identification */}
+      <div className={`rounded-xl border p-4 flex items-center gap-3 ${
+        isAIConfigured()
+          ? 'bg-purple-50 border-purple-200'
+          : 'bg-slate-50 border-slate-200'
+      }`}>
+        {isAIConfigured() ? (
+          <>
+            <Eye size={20} className="text-purple-600" />
+            <div>
+              <p className="text-sm font-medium text-purple-800">AI Identification Active</p>
+              <p className="text-xs text-purple-600">Take photos to auto-identify and categorize items</p>
+            </div>
+          </>
+        ) : (
+          <>
+            <Brain size={20} className="text-slate-400" />
+            <div>
+              <p className="text-sm font-medium text-slate-700">AI Item Identification</p>
+              <p className="text-xs text-slate-500">Add an Anthropic API key to identify items from photos</p>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+        <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+          <Brain size={16} />
+          AI Configuration
+        </h2>
+        <div className="text-sm text-slate-600 space-y-2">
+          <p>
+            Connect your Anthropic API key to enable AI-powered item identification.
+            Take a photo of items and AI will automatically identify, name, categorize, and estimate the value of each item.
+          </p>
+          <p className="text-xs text-slate-400">
+            Your key is stored locally on this device only. Get a key at <strong>console.anthropic.com</strong>
+          </p>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Anthropic API Key</label>
+          <input
+            type="password"
+            value={aiKey}
+            onChange={(e) => { setAiKey(e.target.value); setAiSaved(false) }}
+            placeholder="sk-ant-..."
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 font-mono text-xs"
+          />
+        </div>
+
+        {aiSaved && (
+          <div className="flex items-center gap-2 text-sm text-green-600 bg-green-50 rounded-lg p-3">
+            <Check size={16} />
+            AI key saved! You can now use AI identification on the Scan Receipt page.
+          </div>
+        )}
+
+        <div className="flex gap-3">
+          <button
+            onClick={() => {
+              saveAnthropicKey(aiKey.trim())
+              setAiSaved(true)
+              setTimeout(() => setAiSaved(false), 3000)
+            }}
+            disabled={!aiKey.trim()}
+            className="flex-1 py-2.5 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            <Brain size={16} />
+            Save AI Key
+          </button>
+          {isAIConfigured() && (
+            <button
+              onClick={() => {
+                saveAnthropicKey('')
+                setAiKey('')
+                setAiSaved(false)
+              }}
+              className="px-4 py-2.5 border border-slate-200 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50"
+            >
+              Remove
             </button>
           )}
         </div>

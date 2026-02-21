@@ -70,13 +70,19 @@ export default function AddItem() {
       const items = await identifyItemsFromImage(base64)
       if (items.length > 0) {
         const item = items[0] // Use the first (primary) identified item
+        const today = new Date().toISOString().split('T')[0]
         setForm((prev) => ({
           ...prev,
           name: item.name,
           category: item.category,
+          subcategory: item.subcategory,
           value: item.estimated_value,
           purchase_price: item.estimated_value,
           condition: item.condition,
+          notes: item.description,
+          useful_life_years: item.useful_life_years,
+          date_acquired: today,
+          purchase_date: today,
         }))
         setAiResult('success')
       }

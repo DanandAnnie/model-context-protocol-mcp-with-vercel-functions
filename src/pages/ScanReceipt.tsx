@@ -39,7 +39,10 @@ interface ParsedItem {
   price: number
   quantity: number
   category: ItemCategory
+  subcategory: string
   condition: ItemCondition
+  description: string
+  useful_life_years: number
   included: boolean
 }
 
@@ -144,7 +147,10 @@ function parseReceipt(text: string): ParsedItem[] {
       price,
       quantity,
       category: guessCategory(cleanName),
+      subcategory: '',
       condition: 'good',
+      description: '',
+      useful_life_years: 7,
       included: true,
     })
   }
@@ -234,7 +240,10 @@ export default function ScanReceipt() {
         price: item.estimated_value,
         quantity: item.quantity,
         category: item.category,
+        subcategory: item.subcategory,
         condition: item.condition,
+        description: item.description,
+        useful_life_years: item.useful_life_years,
         included: true,
       }))
 
@@ -273,7 +282,10 @@ export default function ScanReceipt() {
         price: 0,
         quantity: 1,
         category: 'other',
+        subcategory: '',
         condition: 'good',
+        description: '',
+        useful_life_years: 7,
         included: true,
       },
     ])
@@ -294,7 +306,10 @@ export default function ScanReceipt() {
         price: priceEach,
         quantity: 1,
         category: item.category,
+        subcategory: item.subcategory,
         condition: item.condition,
+        description: item.description,
+        useful_life_years: item.useful_life_years,
         included: item.included,
       }))
 
@@ -334,19 +349,22 @@ export default function ScanReceipt() {
       const priceEach = qty > 1 ? Math.round((parsed.price / qty) * 100) / 100 : parsed.price
 
       for (let i = 0; i < qty; i++) {
+        const notes = parsed.description
+          ? `${parsed.description}${qty > 1 ? ` (${qty} purchased)` : ''}`
+          : `Added from scan${qty > 1 ? ` (${qty} purchased)` : ''}`
         const newItem: ItemInsert = {
           name: qty > 1 ? `${parsed.name} (${i + 1}/${qty})` : parsed.name,
           category: parsed.category,
-          subcategory: '',
+          subcategory: parsed.subcategory,
           value: priceEach,
           purchase_price: priceEach,
           purchase_date: purchaseDate || null,
           payment_method: paymentMethod,
           receipt_url: receiptImage || '',
-          useful_life_years: 7,
+          useful_life_years: parsed.useful_life_years,
           condition: parsed.condition,
           date_acquired: purchaseDate || new Date().toISOString().split('T')[0],
-          notes: `Added from receipt scan${qty > 1 ? ` (${qty} purchased)` : ''}`,
+          notes,
           photo_url: '',
           current_location_type: locationType,
           current_storage_id: locationType === 'storage' ? selectedStorageId : null,

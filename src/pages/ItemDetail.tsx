@@ -18,8 +18,8 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 const CATEGORIES: ItemCategory[] = [
-  'furniture', 'lighting', 'artwork', 'textiles', 'accessories',
-  'rugs', 'outdoor', 'kitchen', 'bathroom', 'electronics', 'other',
+  'kitchen & dining', 'bedroom', 'living room', 'office',
+  'bathroom', 'outdoor', 'other',
 ]
 
 export default function ItemDetail() {

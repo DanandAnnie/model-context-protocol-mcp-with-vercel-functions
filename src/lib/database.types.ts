@@ -4,16 +4,12 @@ export type ItemStatus = 'available' | 'staged' | 'damaged' | 'retired'
 export type LocationType = 'storage' | 'property'
 
 export type ItemCategory =
-  | 'furniture'
-  | 'lighting'
-  | 'artwork'
-  | 'textiles'
-  | 'accessories'
-  | 'rugs'
-  | 'outdoor'
-  | 'kitchen'
+  | 'kitchen & dining'
+  | 'bedroom'
+  | 'living room'
+  | 'office'
   | 'bathroom'
-  | 'electronics'
+  | 'outdoor'
   | 'other'
 
 export interface Property {

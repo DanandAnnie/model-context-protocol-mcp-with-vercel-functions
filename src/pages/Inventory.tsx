@@ -8,8 +8,8 @@ import ItemCard from '../components/ItemCard'
 import type { ItemCategory, ItemStatus, ItemCondition } from '../lib/database.types'
 
 const CATEGORIES: ItemCategory[] = [
-  'furniture', 'lighting', 'artwork', 'textiles', 'accessories',
-  'rugs', 'outdoor', 'kitchen', 'bathroom', 'electronics', 'other',
+  'kitchen & dining', 'bedroom', 'living room', 'office',
+  'bathroom', 'outdoor', 'other',
 ]
 const STATUSES: ItemStatus[] = ['available', 'staged', 'damaged', 'retired']
 const CONDITIONS: ItemCondition[] = ['excellent', 'good', 'fair', 'poor']

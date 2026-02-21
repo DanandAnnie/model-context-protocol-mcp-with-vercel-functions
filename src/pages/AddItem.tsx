@@ -18,12 +18,12 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 const CATEGORIES: ItemCategory[] = [
-  'furniture', 'lighting', 'artwork', 'textiles', 'accessories',
-  'rugs', 'outdoor', 'kitchen', 'bathroom', 'electronics', 'other',
+  'kitchen & dining', 'bedroom', 'living room', 'office',
+  'bathroom', 'outdoor', 'other',
 ]
 
 const emptyForm: ItemInsert = {
-  name: '', category: 'furniture', subcategory: '', value: 0,
+  name: '', category: 'living room', subcategory: '', value: 0,
   condition: 'good', date_acquired: null, notes: '', photo_url: '',
   current_location_type: 'storage', current_storage_id: null,
   current_property_id: null, status: 'available',

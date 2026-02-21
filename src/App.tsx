@@ -8,6 +8,7 @@ import StorageUnitDetail from './pages/StorageUnitDetail'
 import Inventory from './pages/Inventory'
 import AddItem from './pages/AddItem'
 import ItemDetail from './pages/ItemDetail'
+import ScanReceipt from './pages/ScanReceipt'
 import StagingPlanner from './pages/StagingPlanner'
 import Settings from './pages/Settings'
 
@@ -23,6 +24,7 @@ export default function App() {
         <Route path="/inventory" element={<Inventory />} />
         <Route path="/items/:id" element={<ItemDetail />} />
         <Route path="/add-item" element={<AddItem />} />
+        <Route path="/scan-receipt" element={<ScanReceipt />} />
         <Route path="/staging-planner" element={<StagingPlanner />} />
         <Route path="/settings" element={<Settings />} />
       </Route>

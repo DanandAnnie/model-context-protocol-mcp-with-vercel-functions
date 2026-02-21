@@ -6,6 +6,7 @@ import {
   Warehouse,
   Package,
   PlusCircle,
+  Receipt,
   ArrowRightLeft,
   Settings,
   Menu,
@@ -18,6 +19,7 @@ const navItems = [
   { to: '/storage', icon: Warehouse, label: 'Storage Units' },
   { to: '/inventory', icon: Package, label: 'Inventory' },
   { to: '/add-item', icon: PlusCircle, label: 'Add Item' },
+  { to: '/scan-receipt', icon: Receipt, label: 'Scan Receipt' },
   { to: '/staging-planner', icon: ArrowRightLeft, label: 'Staging Planner' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ]

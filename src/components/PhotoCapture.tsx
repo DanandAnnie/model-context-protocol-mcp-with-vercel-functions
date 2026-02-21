@@ -12,9 +12,18 @@ export default function PhotoCapture({ onCapture, currentImage }: PhotoCapturePr
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const cameraInputRef = useRef<HTMLInputElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
 
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+
   const startCamera = useCallback(async () => {
+    // On mobile, use native camera input (more reliable than getUserMedia)
+    if (isMobile) {
+      cameraInputRef.current?.click()
+      return
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
@@ -25,9 +34,10 @@ export default function PhotoCapture({ onCapture, currentImage }: PhotoCapturePr
       }
       setShowCamera(true)
     } catch {
-      alert('Camera access denied or not available. Please use file upload.')
+      // Fall back to native camera input if getUserMedia fails
+      cameraInputRef.current?.click()
     }
-  }, [])
+  }, [isMobile])
 
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
@@ -59,27 +69,40 @@ export default function PhotoCapture({ onCapture, currentImage }: PhotoCapturePr
     stopCamera()
   }, [onCapture, stopCamera])
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
     setPreview(URL.createObjectURL(file))
     onCapture(file)
+    // Reset so same file can be selected again
+    e.target.value = ''
   }
 
   const clearImage = () => {
     setPreview(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
+    if (cameraInputRef.current) cameraInputRef.current.value = ''
   }
 
   return (
     <div>
       <canvas ref={canvasRef} className="hidden" />
+      {/* File picker input (gallery/files) */}
       <input
         ref={fileInputRef}
         type="file"
         accept="image/*"
         className="hidden"
-        onChange={handleFileUpload}
+        onChange={handleFileSelect}
+      />
+      {/* Camera capture input (opens native camera on mobile) */}
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={handleFileSelect}
       />
 
       {showCamera ? (
@@ -130,7 +153,7 @@ export default function PhotoCapture({ onCapture, currentImage }: PhotoCapturePr
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
             >
               <Camera size={16} />
-              Camera
+              Take Photo
             </button>
             <button
               type="button"

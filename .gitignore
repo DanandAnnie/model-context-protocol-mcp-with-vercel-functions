@@ -1,6 +1,7 @@
 node_modules
 dist
 .vercel
+.vite
 .env
 .env.local
 *.local

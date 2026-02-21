@@ -33,29 +33,45 @@ function migrateCategory(category: string, subcategory: string): ItemCategory {
 function migrateItems(items: Item[]): { migrated: Item[]; changed: boolean } {
   let changed = false
   const migrated = items.map((item) => {
+    let updated = item
     const newCategory = migrateCategory(item.category, item.subcategory)
     if (newCategory !== item.category) {
       changed = true
-      return { ...item, category: newCategory, updated_at: new Date().toISOString() }
+      updated = { ...updated, category: newCategory, updated_at: new Date().toISOString() }
     }
-    return item
+    // Backfill new financial fields for items created before this feature
+    const raw = item as unknown as Record<string, unknown>
+    if (raw.purchase_price === undefined || raw.payment_method === undefined) {
+      changed = true
+      updated = {
+        ...updated,
+        purchase_price: (raw.purchase_price as number) ?? item.value,
+        purchase_date: (raw.purchase_date as string | null) ?? item.date_acquired,
+        payment_method: (raw.payment_method as Item['payment_method']) ?? 'other',
+        receipt_url: (raw.receipt_url as string) ?? '',
+        useful_life_years: (raw.useful_life_years as number) ?? 7,
+      }
+    }
+    return updated
   })
   return { migrated, changed }
 }
 
+const demoDefaults = { purchase_price: 0, purchase_date: null as string | null, payment_method: 'other' as const, receipt_url: '', useful_life_years: 7 }
+
 const DEMO_ITEMS: Item[] = [
-  { id: 'i1', name: 'Mid-Century Sofa', category: 'living room', subcategory: 'seating', value: 2400, condition: 'excellent', date_acquired: '2024-03-15', notes: 'Gray velvet, 3-seat', photo_url: '', current_location_type: 'storage', current_storage_id: '1', current_property_id: null, status: 'available', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'i2', name: 'Abstract Canvas Print', category: 'living room', subcategory: 'artwork', value: 350, condition: 'excellent', date_acquired: '2024-05-01', notes: '48x36 framed', photo_url: '', current_location_type: 'property', current_storage_id: null, current_property_id: '1', status: 'staged', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'i3', name: 'Brass Floor Lamp', category: 'living room', subcategory: 'lighting', value: 450, condition: 'good', date_acquired: '2024-01-20', notes: 'Adjustable height', photo_url: '', current_location_type: 'storage', current_storage_id: '1', current_property_id: null, status: 'available', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'i4', name: 'Wool Area Rug 8x10', category: 'living room', subcategory: 'rugs', value: 1800, condition: 'good', date_acquired: '2023-11-10', notes: 'Neutral tones, hand-knotted', photo_url: '', current_location_type: 'property', current_storage_id: null, current_property_id: '2', status: 'staged', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'i5', name: 'Dining Table Set', category: 'kitchen & dining', subcategory: 'tables', value: 3200, condition: 'excellent', date_acquired: '2024-06-01', notes: 'Walnut, seats 8', photo_url: '', current_location_type: 'storage', current_storage_id: '2', current_property_id: null, status: 'available', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'i6', name: 'Throw Pillow Set (4)', category: 'living room', subcategory: 'textiles', value: 180, condition: 'good', date_acquired: '2024-04-10', notes: 'Mixed patterns, blue tones', photo_url: '', current_location_type: 'property', current_storage_id: null, current_property_id: '1', status: 'staged', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'i7', name: 'Ceramic Vase Collection', category: 'living room', subcategory: 'accessories', value: 220, condition: 'excellent', date_acquired: '2024-02-14', notes: 'Set of 3, white matte', photo_url: '', current_location_type: 'storage', current_storage_id: '3', current_property_id: null, status: 'available', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'i8', name: 'King Bed Frame', category: 'bedroom', subcategory: 'bed frames', value: 1600, condition: 'good', date_acquired: '2024-01-05', notes: 'Upholstered, beige linen', photo_url: '', current_location_type: 'property', current_storage_id: null, current_property_id: '3', status: 'staged', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'i9', name: 'Pendant Light Fixture', category: 'kitchen & dining', subcategory: 'lighting', value: 380, condition: 'excellent', date_acquired: '2024-07-01', notes: 'Globe glass, brass finish', photo_url: '', current_location_type: 'storage', current_storage_id: '1', current_property_id: null, status: 'available', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'i10', name: 'Outdoor Lounge Chair', category: 'outdoor', subcategory: 'seating', value: 750, condition: 'fair', date_acquired: '2023-09-15', notes: 'Teak wood, needs re-oiling', photo_url: '', current_location_type: 'storage', current_storage_id: '3', current_property_id: null, status: 'available', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'i11', name: 'Bathroom Mirror', category: 'bathroom', subcategory: 'mirrors', value: 290, condition: 'excellent', date_acquired: '2024-05-20', notes: 'Round, gold frame, 30"', photo_url: '', current_location_type: 'property', current_storage_id: null, current_property_id: '4', status: 'staged', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'i12', name: 'Kitchen Bar Stools (3)', category: 'kitchen & dining', subcategory: 'seating', value: 540, condition: 'good', date_acquired: '2024-03-01', notes: 'Swivel, counter height', photo_url: '', current_location_type: 'property', current_storage_id: null, current_property_id: '5', status: 'staged', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { ...demoDefaults, id: 'i1', name: 'Mid-Century Sofa', category: 'living room', subcategory: 'seating', value: 2400, purchase_price: 2400, purchase_date: '2024-03-15', condition: 'excellent', date_acquired: '2024-03-15', notes: 'Gray velvet, 3-seat', photo_url: '', current_location_type: 'storage', current_storage_id: '1', current_property_id: null, status: 'available', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { ...demoDefaults, id: 'i2', name: 'Abstract Canvas Print', category: 'living room', subcategory: 'artwork', value: 350, purchase_price: 350, purchase_date: '2024-05-01', condition: 'excellent', date_acquired: '2024-05-01', notes: '48x36 framed', photo_url: '', current_location_type: 'property', current_storage_id: null, current_property_id: '1', status: 'staged', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { ...demoDefaults, id: 'i3', name: 'Brass Floor Lamp', category: 'living room', subcategory: 'lighting', value: 450, purchase_price: 450, purchase_date: '2024-01-20', condition: 'good', date_acquired: '2024-01-20', notes: 'Adjustable height', photo_url: '', current_location_type: 'storage', current_storage_id: '1', current_property_id: null, status: 'available', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { ...demoDefaults, id: 'i4', name: 'Wool Area Rug 8x10', category: 'living room', subcategory: 'rugs', value: 1800, purchase_price: 1800, purchase_date: '2023-11-10', condition: 'good', date_acquired: '2023-11-10', notes: 'Neutral tones, hand-knotted', photo_url: '', current_location_type: 'property', current_storage_id: null, current_property_id: '2', status: 'staged', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { ...demoDefaults, id: 'i5', name: 'Dining Table Set', category: 'kitchen & dining', subcategory: 'tables', value: 3200, purchase_price: 3200, purchase_date: '2024-06-01', condition: 'excellent', date_acquired: '2024-06-01', notes: 'Walnut, seats 8', photo_url: '', current_location_type: 'storage', current_storage_id: '2', current_property_id: null, status: 'available', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { ...demoDefaults, id: 'i6', name: 'Throw Pillow Set (4)', category: 'living room', subcategory: 'textiles', value: 180, purchase_price: 180, purchase_date: '2024-04-10', condition: 'good', date_acquired: '2024-04-10', notes: 'Mixed patterns, blue tones', photo_url: '', current_location_type: 'property', current_storage_id: null, current_property_id: '1', status: 'staged', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { ...demoDefaults, id: 'i7', name: 'Ceramic Vase Collection', category: 'living room', subcategory: 'accessories', value: 220, purchase_price: 220, purchase_date: '2024-02-14', condition: 'excellent', date_acquired: '2024-02-14', notes: 'Set of 3, white matte', photo_url: '', current_location_type: 'storage', current_storage_id: '3', current_property_id: null, status: 'available', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { ...demoDefaults, id: 'i8', name: 'King Bed Frame', category: 'bedroom', subcategory: 'bed frames', value: 1600, purchase_price: 1600, purchase_date: '2024-01-05', condition: 'good', date_acquired: '2024-01-05', notes: 'Upholstered, beige linen', photo_url: '', current_location_type: 'property', current_storage_id: null, current_property_id: '3', status: 'staged', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { ...demoDefaults, id: 'i9', name: 'Pendant Light Fixture', category: 'kitchen & dining', subcategory: 'lighting', value: 380, purchase_price: 380, purchase_date: '2024-07-01', condition: 'excellent', date_acquired: '2024-07-01', notes: 'Globe glass, brass finish', photo_url: '', current_location_type: 'storage', current_storage_id: '1', current_property_id: null, status: 'available', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { ...demoDefaults, id: 'i10', name: 'Outdoor Lounge Chair', category: 'outdoor', subcategory: 'seating', value: 750, purchase_price: 750, purchase_date: '2023-09-15', condition: 'fair', date_acquired: '2023-09-15', notes: 'Teak wood, needs re-oiling', photo_url: '', current_location_type: 'storage', current_storage_id: '3', current_property_id: null, status: 'available', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { ...demoDefaults, id: 'i11', name: 'Bathroom Mirror', category: 'bathroom', subcategory: 'mirrors', value: 290, purchase_price: 290, purchase_date: '2024-05-20', condition: 'excellent', date_acquired: '2024-05-20', notes: 'Round, gold frame, 30"', photo_url: '', current_location_type: 'property', current_storage_id: null, current_property_id: '4', status: 'staged', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { ...demoDefaults, id: 'i12', name: 'Kitchen Bar Stools (3)', category: 'kitchen & dining', subcategory: 'seating', value: 540, purchase_price: 540, purchase_date: '2024-03-01', condition: 'good', date_acquired: '2024-03-01', notes: 'Swivel, counter height', photo_url: '', current_location_type: 'property', current_storage_id: null, current_property_id: '5', status: 'staged', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
 ]
 
 export function useItems() {

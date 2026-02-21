@@ -2,6 +2,7 @@ export type PropertyType = 'house' | 'condo' | 'townhouse' | 'apartment' | 'othe
 export type ItemCondition = 'excellent' | 'good' | 'fair' | 'poor'
 export type ItemStatus = 'available' | 'staged' | 'damaged' | 'retired'
 export type LocationType = 'storage' | 'property'
+export type PaymentMethod = 'cash' | 'credit_card' | 'debit_card' | 'venmo' | 'zelle' | 'paypal' | 'check' | 'other'
 
 export type ItemCategory =
   | 'kitchen & dining'
@@ -46,6 +47,11 @@ export interface Item {
   category: ItemCategory
   subcategory: string
   value: number
+  purchase_price: number
+  purchase_date: string | null
+  payment_method: PaymentMethod
+  receipt_url: string
+  useful_life_years: number
   condition: ItemCondition
   date_acquired: string | null
   notes: string

@@ -8,7 +8,18 @@ import { createWorker } from 'tesseract.js'
 import { useItems } from '../hooks/useItems'
 import { useProperties } from '../hooks/useProperties'
 import { useStorageUnits } from '../hooks/useStorageUnits'
-import type { ItemCategory, ItemInsert } from '../lib/database.types'
+import type { ItemCategory, ItemInsert, PaymentMethod } from '../lib/database.types'
+
+const PAYMENT_METHODS: { key: PaymentMethod; label: string }[] = [
+  { key: 'credit_card', label: 'Credit Card' },
+  { key: 'debit_card', label: 'Debit Card' },
+  { key: 'venmo', label: 'Venmo' },
+  { key: 'zelle', label: 'Zelle' },
+  { key: 'paypal', label: 'PayPal' },
+  { key: 'cash', label: 'Cash' },
+  { key: 'check', label: 'Check' },
+  { key: 'other', label: 'Other' },
+]
 
 const CATEGORIES: { key: ItemCategory; label: string }[] = [
   { key: 'kitchen & dining', label: 'Kitchen & Dining' },
@@ -111,6 +122,10 @@ export default function ScanReceipt() {
   const [selectedPropertyId, setSelectedPropertyId] = useState(properties[0]?.id || '')
   const [selectedStorageId, setSelectedStorageId] = useState(units[0]?.id || '')
 
+  // Purchase info
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('other')
+  const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split('T')[0])
+
   const [saving, setSaving] = useState(false)
   const [savedCount, setSavedCount] = useState(0)
 
@@ -200,8 +215,13 @@ export default function ScanReceipt() {
         category: parsed.category,
         subcategory: '',
         value: parsed.price,
+        purchase_price: parsed.price,
+        purchase_date: purchaseDate || null,
+        payment_method: paymentMethod,
+        receipt_url: receiptImage || '',
+        useful_life_years: 7,
         condition: 'good',
-        date_acquired: new Date().toISOString().split('T')[0],
+        date_acquired: purchaseDate || new Date().toISOString().split('T')[0],
         notes: 'Added from receipt scan',
         photo_url: '',
         current_location_type: locationType,
@@ -386,6 +406,34 @@ export default function ScanReceipt() {
                 ))}
               </select>
             )}
+          </div>
+
+          {/* Payment & Date */}
+          <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+            <h2 className="text-sm font-semibold text-slate-700">Purchase Details</h2>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Payment Method</label>
+                <select
+                  value={paymentMethod}
+                  onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  {PAYMENT_METHODS.map((m) => (
+                    <option key={m.key} value={m.key}>{m.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Purchase Date</label>
+                <input
+                  type="date"
+                  value={purchaseDate}
+                  onChange={(e) => setPurchaseDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+            </div>
           </div>
 
           {/* Scan button */}

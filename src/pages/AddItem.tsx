@@ -6,7 +6,7 @@ import { useProperties } from '../hooks/useProperties'
 import { useStorageUnits } from '../hooks/useStorageUnits'
 import PhotoCapture from '../components/PhotoCapture'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
-import type { ItemInsert, ItemCategory, ItemCondition, ItemStatus, LocationType } from '../lib/database.types'
+import type { ItemInsert, ItemCategory, ItemCondition, ItemStatus, LocationType, PaymentMethod } from '../lib/database.types'
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -22,8 +22,21 @@ const CATEGORIES: ItemCategory[] = [
   'bathroom', 'outdoor', 'other',
 ]
 
+const PAYMENT_METHODS: { key: PaymentMethod; label: string }[] = [
+  { key: 'credit_card', label: 'Credit Card' },
+  { key: 'debit_card', label: 'Debit Card' },
+  { key: 'venmo', label: 'Venmo' },
+  { key: 'zelle', label: 'Zelle' },
+  { key: 'paypal', label: 'PayPal' },
+  { key: 'cash', label: 'Cash' },
+  { key: 'check', label: 'Check' },
+  { key: 'other', label: 'Other' },
+]
+
 const emptyForm: ItemInsert = {
   name: '', category: 'living room', subcategory: '', value: 0,
+  purchase_price: 0, purchase_date: null, payment_method: 'other',
+  receipt_url: '', useful_life_years: 7,
   condition: 'good', date_acquired: null, notes: '', photo_url: '',
   current_location_type: 'storage', current_storage_id: null,
   current_property_id: null, status: 'available',
@@ -215,6 +228,57 @@ export default function AddItem() {
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 placeholder="Description, dimensions, etc."
               />
+            </div>
+          </div>
+        </div>
+
+        {/* Purchase & Tax Info */}
+        <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+          <h2 className="text-sm font-semibold text-slate-700">Purchase & Tax Info</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Purchase Price ($)</label>
+              <input
+                type="number"
+                min={0}
+                step={0.01}
+                value={form.purchase_price}
+                onChange={(e) => setForm({ ...form, purchase_price: +e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Purchase Date</label>
+              <input
+                type="date"
+                value={form.purchase_date || ''}
+                onChange={(e) => setForm({ ...form, purchase_date: e.target.value || null })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Payment Method</label>
+              <select
+                value={form.payment_method}
+                onChange={(e) => setForm({ ...form, payment_method: e.target.value as PaymentMethod })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                {PAYMENT_METHODS.map((m) => (
+                  <option key={m.key} value={m.key}>{m.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Useful Life (years)</label>
+              <input
+                type="number"
+                min={1}
+                max={40}
+                value={form.useful_life_years}
+                onChange={(e) => setForm({ ...form, useful_life_years: +e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              <p className="text-xs text-slate-400 mt-1">For depreciation calculation (IRS default: 7 years)</p>
             </div>
           </div>
         </div>

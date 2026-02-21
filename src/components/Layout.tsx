@@ -8,6 +8,7 @@ import {
   PlusCircle,
   Receipt,
   ArrowRightLeft,
+  FileText,
   Settings,
   Menu,
   X,
@@ -21,6 +22,7 @@ const navItems = [
   { to: '/add-item', icon: PlusCircle, label: 'Add Item' },
   { to: '/scan-receipt', icon: Receipt, label: 'Scan Receipt' },
   { to: '/staging-planner', icon: ArrowRightLeft, label: 'Staging Planner' },
+  { to: '/tax-report', icon: FileText, label: 'Tax Report' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ]
 

@@ -1,7 +1,32 @@
 import { useState } from 'react'
-import { Settings as SettingsIcon, Cloud, CloudOff, Check, AlertTriangle, Smartphone, Brain, Eye } from 'lucide-react'
+import {
+  Settings as SettingsIcon, Cloud, CloudOff, Check, AlertTriangle,
+  Smartphone, Brain, Eye, Building2, Download, Upload,
+} from 'lucide-react'
 import { isSupabaseConfigured, saveSupabaseConfig, getSupabaseConfig, supabase } from '../lib/supabase'
 import { getAnthropicKey, saveAnthropicKey, isAIConfigured } from '../lib/ai'
+import { getCachedData, cacheData } from '../lib/offline'
+
+interface BusinessProfile {
+  businessName: string
+  ownerName: string
+  taxId: string
+  fiscalYearEnd: string // MM-DD format
+  phone: string
+  email: string
+}
+
+function getBusinessProfile(): BusinessProfile {
+  try {
+    const stored = localStorage.getItem('staging_business_profile')
+    if (stored) return JSON.parse(stored)
+  } catch { /* empty */ }
+  return { businessName: '', ownerName: '', taxId: '', fiscalYearEnd: '12-31', phone: '', email: '' }
+}
+
+function saveBusinessProfile(profile: BusinessProfile) {
+  localStorage.setItem('staging_business_profile', JSON.stringify(profile))
+}
 
 export default function Settings() {
   const existing = getSupabaseConfig()
@@ -15,11 +40,17 @@ export default function Settings() {
   const [aiKey, setAiKey] = useState(getAnthropicKey())
   const [aiSaved, setAiSaved] = useState(false)
 
+  // Business profile
+  const [profile, setProfile] = useState<BusinessProfile>(getBusinessProfile)
+  const [profileSaved, setProfileSaved] = useState(false)
+
+  // Data management
+  const [exportStatus, setExportStatus] = useState<string | null>(null)
+
   const connected = isSupabaseConfigured()
 
   const handleSave = async () => {
     if (!url.trim() || !key.trim()) {
-      // Disconnecting
       saveSupabaseConfig('', '')
       setStatus('idle')
       window.location.reload()
@@ -31,14 +62,10 @@ export default function Settings() {
     setErrorMsg('')
 
     try {
-      // Save config first so the client uses the new credentials
       saveSupabaseConfig(url.trim(), key.trim())
-
-      // Test the connection
       const { error } = await supabase.from('properties').select('id').limit(1)
 
       if (error) {
-        // If the table doesn't exist, that's OK — they just need to run the migration
         if (error.message.includes('does not exist')) {
           setStatus('error')
           setErrorMsg('Connected, but tables not found. Run the SQL migration in your Supabase SQL Editor (see supabase/migrations/001_initial_schema.sql).')
@@ -48,12 +75,10 @@ export default function Settings() {
       }
 
       setStatus('success')
-      // Reload to re-initialize all hooks with Supabase
       setTimeout(() => window.location.reload(), 1500)
     } catch (err) {
       setStatus('error')
       setErrorMsg(err instanceof Error ? err.message : 'Failed to connect. Check your URL and key.')
-      // Revert config on failure
       saveSupabaseConfig(existing.url, existing.key)
     } finally {
       setTesting(false)
@@ -68,6 +93,76 @@ export default function Settings() {
     window.location.reload()
   }
 
+  const handleSaveProfile = () => {
+    saveBusinessProfile(profile)
+    setProfileSaved(true)
+    setTimeout(() => setProfileSaved(false), 2000)
+  }
+
+  const handleExportData = async () => {
+    setExportStatus('Exporting...')
+    try {
+      const [properties, storageUnits, items, payments, expenses] = await Promise.all([
+        getCachedData('properties'),
+        getCachedData('storage_units'),
+        getCachedData('items'),
+        getCachedData('staging_payments'),
+        getCachedData('property_expenses'),
+      ])
+
+      const exportData = {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        businessProfile: getBusinessProfile(),
+        data: { properties, storageUnits, items, payments, expenses },
+      }
+
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
+      const downloadUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = downloadUrl
+      a.download = `staging-inventory-backup-${new Date().toISOString().split('T')[0]}.json`
+      a.click()
+      URL.revokeObjectURL(downloadUrl)
+      setExportStatus('Exported!')
+      setTimeout(() => setExportStatus(null), 2000)
+    } catch {
+      setExportStatus('Export failed')
+      setTimeout(() => setExportStatus(null), 3000)
+    }
+  }
+
+  const handleImportData = async (file: File) => {
+    setExportStatus('Importing...')
+    try {
+      const text = await file.text()
+      const importData = JSON.parse(text)
+
+      if (!importData.version || !importData.data) {
+        throw new Error('Invalid backup file format')
+      }
+
+      const { properties, storageUnits, items, payments, expenses } = importData.data
+
+      if (properties) await cacheData('properties', properties)
+      if (storageUnits) await cacheData('storage_units', storageUnits)
+      if (items) await cacheData('items', items)
+      if (payments) await cacheData('staging_payments', payments)
+      if (expenses) await cacheData('property_expenses', expenses)
+
+      if (importData.businessProfile) {
+        saveBusinessProfile(importData.businessProfile)
+        setProfile(importData.businessProfile)
+      }
+
+      setExportStatus('Imported! Reloading...')
+      setTimeout(() => window.location.reload(), 1500)
+    } catch {
+      setExportStatus('Import failed — invalid file')
+      setTimeout(() => setExportStatus(null), 3000)
+    }
+  }
+
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <div>
@@ -75,7 +170,136 @@ export default function Settings() {
           <SettingsIcon size={24} />
           Settings
         </h1>
-        <p className="text-slate-500 text-sm mt-1">Configure cloud sync for cross-device access</p>
+        <p className="text-slate-500 text-sm mt-1">Configure your staging business and sync settings</p>
+      </div>
+
+      {/* Business Profile */}
+      <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+        <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+          <Building2 size={16} />
+          Business Profile
+        </h2>
+        <p className="text-xs text-slate-500">
+          Used for tax reports and exported documents.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium text-slate-700 mb-1">Business Name</label>
+            <input
+              value={profile.businessName}
+              onChange={(e) => setProfile({ ...profile, businessName: e.target.value })}
+              placeholder="e.g. Elegant Staging Co."
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Owner Name</label>
+            <input
+              value={profile.ownerName}
+              onChange={(e) => setProfile({ ...profile, ownerName: e.target.value })}
+              placeholder="e.g. Jane Smith"
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Tax ID / EIN</label>
+            <input
+              value={profile.taxId}
+              onChange={(e) => setProfile({ ...profile, taxId: e.target.value })}
+              placeholder="e.g. 12-3456789"
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Phone</label>
+            <input
+              value={profile.phone}
+              onChange={(e) => setProfile({ ...profile, phone: e.target.value })}
+              placeholder="e.g. (555) 123-4567"
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+            <input
+              type="email"
+              value={profile.email}
+              onChange={(e) => setProfile({ ...profile, email: e.target.value })}
+              placeholder="e.g. jane@staging.com"
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Fiscal Year End</label>
+            <select
+              value={profile.fiscalYearEnd}
+              onChange={(e) => setProfile({ ...profile, fiscalYearEnd: e.target.value })}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="12-31">December 31 (Calendar Year)</option>
+              <option value="03-31">March 31</option>
+              <option value="06-30">June 30</option>
+              <option value="09-30">September 30</option>
+            </select>
+          </div>
+        </div>
+
+        {profileSaved && (
+          <div className="flex items-center gap-2 text-sm text-green-600 bg-green-50 rounded-lg p-3">
+            <Check size={16} />
+            Business profile saved!
+          </div>
+        )}
+
+        <button
+          onClick={handleSaveProfile}
+          className="w-full py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center justify-center gap-2"
+        >
+          <Building2 size={16} />
+          Save Profile
+        </button>
+      </div>
+
+      {/* Data Management */}
+      <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+        <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+          <Download size={16} />
+          Data Backup & Restore
+        </h2>
+        <p className="text-xs text-slate-500">
+          Export all your data as a JSON backup file, or restore from a previous backup.
+        </p>
+
+        {exportStatus && (
+          <div className="flex items-center gap-2 text-sm text-blue-600 bg-blue-50 rounded-lg p-3">
+            <Check size={16} />
+            {exportStatus}
+          </div>
+        )}
+
+        <div className="flex gap-3">
+          <button
+            onClick={handleExportData}
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-green-600 text-white text-sm rounded-lg font-medium hover:bg-green-700"
+          >
+            <Download size={16} />
+            Export Backup
+          </button>
+          <label className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-amber-600 text-white text-sm rounded-lg font-medium hover:bg-amber-700 cursor-pointer">
+            <Upload size={16} />
+            Import Backup
+            <input
+              type="file"
+              accept=".json"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (file) handleImportData(file)
+                e.target.value = ''
+              }}
+            />
+          </label>
+        </div>
       </div>
 
       {/* Sync status */}

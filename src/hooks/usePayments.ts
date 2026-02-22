@@ -86,5 +86,29 @@ export function usePayments(propertyId?: string) {
     await fetchPayments()
   }
 
-  return { payments, loading, addPayment, deletePayment, refetch: fetchPayments }
+  const updatePayment = async (id: string, updates: Partial<StagingPaymentInsert>) => {
+    if (!isSupabaseConfigured()) {
+      const allCached = await getCachedData('staging_payments')
+      const updated = allCached.map((p) =>
+        p.id === id ? { ...p, ...updates } : p,
+      )
+      await cacheData('staging_payments', updated)
+      setPayments((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, ...updates } : p)),
+      )
+      return
+    }
+
+    const { error } = await supabase
+      .from('staging_payments')
+      .update(updates)
+      .eq('id', id)
+
+    if (error) throw error
+    await fetchPayments()
+  }
+
+  const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0)
+
+  return { payments, loading, totalPaid, addPayment, updatePayment, deletePayment, refetch: fetchPayments }
 }

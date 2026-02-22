@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { ArrowLeft, Package, Save, Trash2, Check, AlertTriangle, ExternalLink, Copy, MapPin, DollarSign } from 'lucide-react'
+import { ArrowLeft, Package, Save, Trash2, Check, AlertTriangle, ExternalLink, Copy, MapPin, DollarSign, Plus, ChevronLeft, ChevronRight } from 'lucide-react'
 import { useItems } from '../hooks/useItems'
 import { useProperties } from '../hooks/useProperties'
 import { useStorageUnits } from '../hooks/useStorageUnits'
@@ -51,6 +51,78 @@ export default function ItemDetail() {
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [copiedToClipboard, setCopiedToClipboard] = useState(false)
+
+  // Multi-photo gallery
+  const [gallery, setGallery] = useState<{ id: string; image_url: string; is_primary: boolean }[]>([])
+  const [activeGalleryIndex, setActiveGalleryIndex] = useState(0)
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
+
+  const loadGallery = useCallback(async () => {
+    if (!id || !isSupabaseConfigured()) return
+    const { data } = await supabase
+      .from('item_images')
+      .select('id, image_url, is_primary')
+      .eq('item_id', id)
+      .order('is_primary', { ascending: false })
+      .order('uploaded_at', { ascending: true })
+    if (data) setGallery(data)
+  }, [id])
+
+  useEffect(() => { loadGallery() }, [loadGallery])
+
+  const handleAddGalleryPhoto = async (file: File) => {
+    if (!id || !isSupabaseConfigured()) return
+    setUploadingPhoto(true)
+    try {
+      const ext = file.name.split('.').pop()
+      const path = `${id}/${crypto.randomUUID()}.${ext}`
+
+      const { error: uploadErr } = await supabase.storage
+        .from('item-images')
+        .upload(path, file, { upsert: true })
+
+      if (uploadErr) throw uploadErr
+
+      const { data: urlData } = supabase.storage
+        .from('item-images')
+        .getPublicUrl(path)
+
+      await supabase.from('item_images').insert({
+        item_id: id,
+        image_url: urlData.publicUrl,
+        is_primary: gallery.length === 0,
+      })
+
+      await loadGallery()
+    } catch {
+      // Fall back: store as base64 in item_images
+      const base64 = await fileToBase64(file)
+      await supabase.from('item_images').insert({
+        item_id: id,
+        image_url: base64,
+        is_primary: gallery.length === 0,
+      })
+      await loadGallery()
+    } finally {
+      setUploadingPhoto(false)
+    }
+  }
+
+  const handleDeleteGalleryPhoto = async (imageId: string) => {
+    if (!confirm('Delete this photo?')) return
+    await supabase.from('item_images').delete().eq('id', imageId)
+    await loadGallery()
+    setActiveGalleryIndex(0)
+  }
+
+  const handleSetPrimary = async (imageId: string) => {
+    if (!id) return
+    // Clear all primary flags first
+    await supabase.from('item_images').update({ is_primary: false }).eq('item_id', id)
+    // Set new primary
+    await supabase.from('item_images').update({ is_primary: true }).eq('id', imageId)
+    await loadGallery()
+  }
 
   // Load item into form when found
   useEffect(() => {
@@ -261,10 +333,109 @@ export default function ItemDetail() {
         </div>
       </div>
 
-      {/* Photo */}
+      {/* Photo + Gallery */}
       <div>
-        <label className="block text-sm font-medium text-slate-700 mb-2">Photo</label>
+        <label className="block text-sm font-medium text-slate-700 mb-2">Photos</label>
         <PhotoCapture onCapture={setPhoto} currentImage={currentImage} />
+
+        {/* Multi-photo gallery (Supabase only) */}
+        {isSupabaseConfigured() && (
+          <div className="mt-3 space-y-2">
+            {gallery.length > 0 && (
+              <div className="relative">
+                {/* Main gallery image */}
+                <div className="aspect-video bg-slate-100 rounded-lg overflow-hidden relative">
+                  <img
+                    src={gallery[activeGalleryIndex]?.image_url}
+                    alt={`Photo ${activeGalleryIndex + 1}`}
+                    className="w-full h-full object-contain"
+                  />
+                  {/* Navigation arrows */}
+                  {gallery.length > 1 && (
+                    <>
+                      <button
+                        onClick={() => setActiveGalleryIndex((i) => (i - 1 + gallery.length) % gallery.length)}
+                        className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 bg-black/40 text-white rounded-full hover:bg-black/60"
+                      >
+                        <ChevronLeft size={16} />
+                      </button>
+                      <button
+                        onClick={() => setActiveGalleryIndex((i) => (i + 1) % gallery.length)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-black/40 text-white rounded-full hover:bg-black/60"
+                      >
+                        <ChevronRight size={16} />
+                      </button>
+                    </>
+                  )}
+                  {/* Counter + actions */}
+                  <div className="absolute top-2 right-2 flex gap-1">
+                    {!gallery[activeGalleryIndex]?.is_primary && (
+                      <button
+                        onClick={() => handleSetPrimary(gallery[activeGalleryIndex].id)}
+                        className="px-2 py-1 bg-blue-600/80 text-white text-xs rounded hover:bg-blue-600"
+                      >
+                        Set as Primary
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleDeleteGalleryPhoto(gallery[activeGalleryIndex].id)}
+                      className="p-1 bg-red-600/80 text-white rounded hover:bg-red-600"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                  <div className="absolute bottom-2 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-black/50 text-white text-xs rounded-full">
+                    {activeGalleryIndex + 1} / {gallery.length}
+                    {gallery[activeGalleryIndex]?.is_primary && ' (Primary)'}
+                  </div>
+                </div>
+
+                {/* Thumbnail strip */}
+                {gallery.length > 1 && (
+                  <div className="flex gap-1.5 mt-2 overflow-x-auto pb-1">
+                    {gallery.map((img, i) => (
+                      <button
+                        key={img.id}
+                        onClick={() => setActiveGalleryIndex(i)}
+                        className={`flex-shrink-0 w-14 h-14 rounded-lg overflow-hidden border-2 transition-colors ${
+                          i === activeGalleryIndex ? 'border-blue-500' : 'border-transparent hover:border-slate-300'
+                        }`}
+                      >
+                        <img src={img.image_url} alt="" className="w-full h-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Add more photos */}
+            <label className="flex items-center justify-center gap-2 px-3 py-2 border-2 border-dashed border-slate-300 rounded-lg text-sm text-slate-500 hover:border-blue-400 hover:text-blue-600 cursor-pointer transition-colors">
+              {uploadingPhoto ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600" />
+                  Uploading...
+                </>
+              ) : (
+                <>
+                  <Plus size={16} />
+                  Add Photo to Gallery
+                </>
+              )}
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                disabled={uploadingPhoto}
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) handleAddGalleryPhoto(file)
+                  e.target.value = ''
+                }}
+              />
+            </label>
+          </div>
+        )}
       </div>
 
       {/* Item details form */}

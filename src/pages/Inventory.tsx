@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import {
   Package, Search, Filter, PlusCircle, ArrowLeft, ChevronRight,
   UtensilsCrossed, Bed, Sofa, Monitor, Bath, TreePine, MoreHorizontal, LayoutGrid,
+  CheckSquare, Square, Trash2, ArrowRightLeft, XCircle,
 } from 'lucide-react'
 import { useItems } from '../hooks/useItems'
 import { useProperties } from '../hooks/useProperties'
@@ -25,7 +26,7 @@ const CONDITIONS: ItemCondition[] = ['excellent', 'good', 'fair', 'poor']
 
 export default function Inventory() {
   const navigate = useNavigate()
-  const { items, loading, deleteItem } = useItems()
+  const { items, loading, deleteItem, updateItem, moveItem } = useItems()
   const { properties } = useProperties()
   const { units } = useStorageUnits()
 
@@ -37,6 +38,59 @@ export default function Inventory() {
   const [locationFilter, setLocationFilter] = useState<string>('all')
   const [sortBy, setSortBy] = useState<'name' | 'value' | 'updated'>('name')
   const [showFilters, setShowFilters] = useState(false)
+
+  // Bulk selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkMoveTarget, setBulkMoveTarget] = useState<string>('')
+
+  const toggleSelection = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const selectAll = () => {
+    if (selectedIds.size === filtered.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(filtered.map((i) => i.id)))
+    }
+  }
+
+  const clearSelection = () => {
+    setSelectedIds(new Set())
+  }
+
+  const handleBulkDelete = async () => {
+    if (!confirm(`Delete ${selectedIds.size} item${selectedIds.size !== 1 ? 's' : ''}? This cannot be undone.`)) return
+    for (const id of selectedIds) {
+      await deleteItem(id)
+    }
+    clearSelection()
+  }
+
+  const handleBulkStatusChange = async (newStatus: ItemStatus) => {
+    for (const id of selectedIds) {
+      await updateItem(id, { status: newStatus })
+    }
+    clearSelection()
+  }
+
+  const handleBulkMove = async () => {
+    if (!bulkMoveTarget) return
+    const isProperty = properties.some((p) => p.id === bulkMoveTarget)
+    for (const id of selectedIds) {
+      if (isProperty) {
+        await moveItem(id, 'property', bulkMoveTarget)
+      } else {
+        await moveItem(id, 'storage', bulkMoveTarget)
+      }
+    }
+    clearSelection()
+  }
 
   const locationName = (item: typeof items[0]) => {
     if (item.current_location_type === 'property') {
@@ -225,11 +279,96 @@ export default function Inventory() {
           </div>
         )}
 
+        {/* Bulk action toolbar */}
+        {selectedIds.size > 0 && (
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-center justify-between gap-3 sticky top-0 z-10">
+            <div className="flex items-center gap-2">
+              <button onClick={selectAll} className="text-xs text-blue-600 hover:text-blue-700">
+                {selectedIds.size === filtered.length ? 'Deselect All' : 'Select All'}
+              </button>
+              <span className="text-sm font-medium text-blue-800">
+                {selectedIds.size} selected
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {/* Status change */}
+              <select
+                value=""
+                onChange={(e) => {
+                  if (e.target.value) handleBulkStatusChange(e.target.value as ItemStatus)
+                }}
+                className="px-2 py-1.5 border border-blue-300 rounded text-xs bg-white"
+              >
+                <option value="">Set Status...</option>
+                {STATUSES.map((s) => (
+                  <option key={s} value={s} className="capitalize">{s}</option>
+                ))}
+              </select>
+
+              {/* Move */}
+              <select
+                value={bulkMoveTarget}
+                onChange={(e) => setBulkMoveTarget(e.target.value)}
+                className="px-2 py-1.5 border border-blue-300 rounded text-xs bg-white max-w-[140px]"
+              >
+                <option value="">Move to...</option>
+                <optgroup label="Properties">
+                  {properties.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </optgroup>
+                <optgroup label="Storage Units">
+                  {units.map((u) => (
+                    <option key={u.id} value={u.id}>{u.name}</option>
+                  ))}
+                </optgroup>
+              </select>
+              {bulkMoveTarget && (
+                <button
+                  onClick={handleBulkMove}
+                  className="flex items-center gap-1 px-2 py-1.5 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
+                >
+                  <ArrowRightLeft size={12} />
+                  Move
+                </button>
+              )}
+
+              {/* Delete */}
+              <button
+                onClick={handleBulkDelete}
+                className="flex items-center gap-1 px-2 py-1.5 bg-red-600 text-white text-xs rounded hover:bg-red-700"
+              >
+                <Trash2 size={12} />
+                Delete
+              </button>
+
+              <button
+                onClick={clearSelection}
+                className="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded"
+              >
+                <XCircle size={16} />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Items list */}
         <div className="space-y-2">
           {filtered.map((item) => (
-            <div key={item.id} className="group relative">
-              <ItemCard item={item} locationName={locationName(item)} onClick={() => navigate(`/items/${item.id}`)} />
+            <div key={item.id} className="group relative flex items-start gap-2">
+              <button
+                onClick={(e) => { e.stopPropagation(); toggleSelection(item.id) }}
+                className="mt-4 flex-shrink-0 text-slate-400 hover:text-blue-600"
+              >
+                {selectedIds.has(item.id) ? (
+                  <CheckSquare size={18} className="text-blue-600" />
+                ) : (
+                  <Square size={18} />
+                )}
+              </button>
+              <div className="flex-1">
+                <ItemCard item={item} locationName={locationName(item)} onClick={() => navigate(`/items/${item.id}`)} />
+              </div>
               <button
                 onClick={() => {
                   if (confirm(`Delete "${item.name}"?`)) deleteItem(item.id)

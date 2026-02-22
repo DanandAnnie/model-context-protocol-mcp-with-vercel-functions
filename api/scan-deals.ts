@@ -74,7 +74,7 @@ const STAGING_KEYWORDS = [
   'bookshelf', 'console table', 'bar stool', 'ottoman', 'desk', 'armchair',
   'duvet', 'comforter', 'curtain', 'vase', 'planter', 'candle', 'towel set',
   'dinnerware', 'flatware', 'kitchen', 'bathroom', 'bedroom', 'living room',
-  'patio furniture', 'outdoor', 'staging',
+  'patio furniture', 'outdoor', 'staging', 'hayneedle',
 ]
 
 // Deal source scanners
@@ -82,8 +82,11 @@ async function scanSlickdeals(keywords: string[]): Promise<DealResult[]> {
   const results: DealResult[] = []
 
   try {
-    const searchTerms = keywords.length > 0 ? keywords : ['furniture', 'home decor']
-    for (const term of searchTerms.slice(0, 3)) {
+    // Always include hayneedle + furniture as base search terms
+    const baseTerms = ['furniture', 'home decor', 'hayneedle']
+    const userTerms = keywords.length > 0 ? keywords : []
+    const searchTerms = [...new Set([...userTerms, ...baseTerms])]
+    for (const term of searchTerms.slice(0, 5)) {
       const url = `https://slickdeals.net/newsearch.php?searcharea=deals&searchin=first&rss=1&q=${encodeURIComponent(term)}`
       const resp = await fetch(url, { headers: { 'User-Agent': 'StagingInventoryManager/1.0' } })
       if (!resp.ok) continue
@@ -153,6 +156,45 @@ async function scanDealNews(keywords: string[]): Promise<DealResult[]> {
   return results
 }
 
+async function scanBradsDeals(keywords: string[]): Promise<DealResult[]> {
+  const results: DealResult[] = []
+
+  try {
+    // Brad's Deals home category RSS
+    const url = 'https://www.bradsdeals.com/rss/home'
+    const resp = await fetch(url, { headers: { 'User-Agent': 'StagingInventoryManager/1.0' } })
+    if (!resp.ok) return results
+    const xml = await resp.text()
+    const items = parseRSSItems(xml)
+
+    const kw = keywords.length > 0 ? keywords : STAGING_KEYWORDS
+
+    for (const item of items) {
+      const text = `${item.title} ${item.description}`.toLowerCase()
+      if (!kw.some((k) => text.includes(k.toLowerCase()))) continue
+
+      const salePrice = extractPrice(item.description) || extractPrice(item.title)
+      const originalMatch = item.description.match(/(?:was|list|reg|originally|compare at)\s*\$([0-9,]+(?:\.[0-9]{2})?)/i)
+      const originalPrice = originalMatch ? parseFloat(originalMatch[1].replace(/,/g, '')) : 0
+
+      results.push({
+        title: item.title.replace(/<[^>]+>/g, ''),
+        description: item.description.replace(/<[^>]+>/g, '').slice(0, 300),
+        source: 'other',
+        source_url: item.link,
+        image_url: '',
+        original_price: originalPrice || salePrice * 1.3,
+        sale_price: salePrice,
+        discount_percent: originalPrice > 0 ? Math.round(((originalPrice - salePrice) / originalPrice) * 100) : 0,
+        category: categorizeItem(item.title),
+        retailer: extractRetailer(item.title + ' ' + item.description),
+      })
+    }
+  } catch { /* network error, skip */ }
+
+  return results
+}
+
 function categorizeItem(title: string): string {
   const t = title.toLowerCase()
   if (/sofa|couch|sectional|loveseat|ottoman|accent chair|armchair/i.test(t)) return 'living room'
@@ -172,6 +214,7 @@ function extractRetailer(text: string): string {
   if (t.includes('amazon')) return 'Amazon'
   if (t.includes('target')) return 'Target'
   if (t.includes('overstock')) return 'Overstock'
+  if (t.includes('hayneedle')) return 'Walmart / Hayneedle'
   if (t.includes('walmart')) return 'Walmart'
   if (t.includes('ikea')) return 'IKEA'
   if (t.includes('pottery barn')) return 'Pottery Barn'
@@ -206,12 +249,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const keywordList = allKeywords.size > 0 ? [...allKeywords] : ['furniture', 'home decor', 'staging']
 
     // Scan all sources in parallel
-    const [slickdeals, dealnews] = await Promise.all([
+    const [slickdeals, dealnews, bradsdeals] = await Promise.all([
       scanSlickdeals(keywordList),
       scanDealNews(keywordList),
+      scanBradsDeals(keywordList),
     ])
 
-    let allDeals = [...slickdeals, ...dealnews]
+    let allDeals = [...slickdeals, ...dealnews, ...bradsdeals]
 
     // Deduplicate by URL
     const seen = new Set<string>()
@@ -234,7 +278,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({
       deals: allDeals.slice(0, 50),
       scanned_at: new Date().toISOString(),
-      sources_checked: ['slickdeals', 'dealnews'],
+      sources_checked: ['slickdeals', 'dealnews', 'bradsdeals'],
     })
   } catch (err) {
     return res.status(500).json({

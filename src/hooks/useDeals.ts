@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { cacheData, getCachedData } from '../lib/offline'
+import { scanDealsClientSide } from '../lib/deal-scanner'
 import type { Deal, DealInsert, DealWatch, DealWatchInsert } from '../lib/database.types'
 
 const SCAN_API_URL = '/api/scan-deals'
@@ -110,6 +111,25 @@ export function useDeals() {
     await fetchDeals()
   }
 
+  // Fetch deals from sources — try API first, fall back to client-side scanning
+  const fetchFromSources = async (watchCriteria: { keywords: string; category: string; max_price: number; min_discount: number }[]) => {
+    // Try the Vercel API route first
+    try {
+      const resp = await fetch(SCAN_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ watches: watchCriteria }),
+        signal: AbortSignal.timeout(12000),
+      })
+      if (resp.ok) {
+        return await resp.json()
+      }
+    } catch { /* API unavailable, fall through to client-side */ }
+
+    // Fall back to client-side scanning (works everywhere, no server needed)
+    return scanDealsClientSide(watchCriteria)
+  }
+
   // Scan for new deals
   const scanDeals = async () => {
     setScanning(true)
@@ -121,18 +141,9 @@ export function useDeals() {
           category: w.category,
           max_price: w.max_price,
           min_discount: w.min_discount,
-          sources: w.sources,
         }))
 
-      const resp = await fetch(SCAN_API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ watches: watchCriteria }),
-      })
-
-      if (!resp.ok) throw new Error('Scan failed')
-
-      const { deals: newDeals, scanned_at } = await resp.json()
+      const { deals: newDeals, scanned_at } = await fetchFromSources(watchCriteria)
 
       // Process results
       const existingUrls = new Set(deals.map((d) => d.source_url))
@@ -145,7 +156,7 @@ export function useDeals() {
           id: crypto.randomUUID(),
           title: raw.title,
           description: raw.description,
-          source: raw.source,
+          source: raw.source || 'other',
           source_url: raw.source_url,
           image_url: raw.image_url || '',
           original_price: raw.original_price,

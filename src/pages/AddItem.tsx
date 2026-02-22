@@ -56,6 +56,7 @@ export default function AddItem() {
   const [saved, setSaved] = useState(false)
   const [aiIdentifying, setAiIdentifying] = useState(false)
   const [aiResult, setAiResult] = useState<'success' | 'error' | 'no_key' | null>(null)
+  const [aiErrorMsg, setAiErrorMsg] = useState('')
 
   const handlePhotoCapture = async (file: File) => {
     setPhoto(file)
@@ -89,8 +90,9 @@ export default function AddItem() {
         }))
         setAiResult('success')
       }
-    } catch {
+    } catch (err) {
       setAiResult('error')
+      setAiErrorMsg(err instanceof Error ? err.message : 'Unknown error')
     } finally {
       setAiIdentifying(false)
     }
@@ -193,7 +195,8 @@ export default function AddItem() {
           )}
           {aiResult === 'error' && !aiIdentifying && (
             <div className="mt-3 text-sm text-amber-700 bg-amber-50 rounded-lg px-4 py-2.5">
-              AI couldn&apos;t identify this item. Fill in the details manually.
+              <p>AI couldn&apos;t identify this item. Fill in the details manually.</p>
+              {aiErrorMsg && <p className="mt-1 text-xs text-amber-600">{aiErrorMsg}</p>}
             </div>
           )}
           {aiResult === 'no_key' && (

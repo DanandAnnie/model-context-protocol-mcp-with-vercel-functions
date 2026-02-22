@@ -30,7 +30,7 @@ export interface AIIdentifiedItem {
 
 /**
  * Send an image to Claude's vision API to identify staging items.
- * Calls our Vercel API proxy to avoid CORS issues.
+ * Calls the Anthropic API directly with browser access enabled.
  */
 export async function identifyItemsFromImage(imageBase64: string): Promise<AIIdentifiedItem[]> {
   const apiKey = getAnthropicKey()
@@ -47,12 +47,14 @@ export async function identifyItemsFromImage(imageBase64: string): Promise<AIIde
   const mediaType = match[1]
   const base64Data = match[2]
 
-  // Use our API proxy to avoid CORS issues with direct browser calls
-  const response = await fetch('/api/identify', {
+  // Call the Anthropic API directly (works on static hosts like GitHub Pages)
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',

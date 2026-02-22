@@ -5,6 +5,7 @@ import {
   ShoppingCart, Eye, EyeOff, Clock, Zap,
 } from 'lucide-react'
 import { useDeals } from '../hooks/useDeals'
+import FacebookMarketplace from '../components/FacebookMarketplace'
 import type { DealWatchInsert } from '../lib/database.types'
 
 const CATEGORIES: { key: string; label: string }[] = [
@@ -36,7 +37,7 @@ export default function DealFinder() {
   } = useDeals()
 
   // Tab state
-  const [activeTab, setActiveTab] = useState<'deals' | 'saved' | 'watches'>('deals')
+  const [activeTab, setActiveTab] = useState<'deals' | 'saved' | 'marketplace' | 'watches'>('deals')
 
   // Filter state
   const [search, setSearch] = useState('')
@@ -206,6 +207,7 @@ export default function DealFinder() {
           [
             { key: 'deals', label: 'All Deals', count: deals.length },
             { key: 'saved', label: 'Saved', count: savedDeals.length },
+            { key: 'marketplace', label: 'Marketplace', count: 0 },
             { key: 'watches', label: 'Watchlist', count: watches.length },
           ] as const
         ).map((tab) => (
@@ -398,6 +400,11 @@ export default function DealFinder() {
         </>
       )}
 
+      {/* Marketplace tab */}
+      {activeTab === 'marketplace' && (
+        <FacebookMarketplace watches={watches} />
+      )}
+
       {/* Watches tab */}
       {activeTab === 'watches' && (
         <div className="space-y-4">
@@ -582,7 +589,7 @@ export default function DealFinder() {
           <p><strong>4. Buy & track</strong> — When you purchase a deal, add it directly to your staging inventory.</p>
         </div>
         <p className="text-xs text-slate-400">
-          Sources: Slickdeals, DealNews. Scans sale/clearance listings for home staging furniture.
+          Sources: Slickdeals, DealNews, Facebook Marketplace (via Marketplace tab). Scans sale/clearance listings for home staging furniture.
         </p>
       </div>
     </div>

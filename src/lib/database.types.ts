@@ -116,7 +116,7 @@ export interface PropertyExpense {
 export type PropertyExpenseInsert = Omit<PropertyExpense, 'id' | 'created_at' | 'updated_at'>
 
 // Deal Finder types
-export type DealSource = 'wayfair' | 'home_depot' | 'overstock' | 'target' | 'amazon' | 'slickdeals' | 'other'
+export type DealSource = 'wayfair' | 'home_depot' | 'overstock' | 'target' | 'amazon' | 'slickdeals' | 'facebook_marketplace' | 'other'
 
 export interface Deal {
   id: string

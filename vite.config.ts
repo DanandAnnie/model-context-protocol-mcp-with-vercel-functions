@@ -14,6 +14,10 @@ export default defineConfig({
           'anthropic-version': '2023-06-01',
         },
       },
+      '/api/scan-deals': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
     },
   },
   plugins: [

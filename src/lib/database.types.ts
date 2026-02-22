@@ -114,6 +114,46 @@ export interface PropertyExpense {
 }
 
 export type PropertyExpenseInsert = Omit<PropertyExpense, 'id' | 'created_at' | 'updated_at'>
+
+// Deal Finder types
+export type DealSource = 'wayfair' | 'home_depot' | 'overstock' | 'target' | 'amazon' | 'slickdeals' | 'other'
+
+export interface Deal {
+  id: string
+  title: string
+  description: string
+  source: DealSource
+  source_url: string
+  image_url: string
+  original_price: number
+  sale_price: number
+  discount_percent: number
+  category: string
+  retailer: string
+  found_at: string
+  expires_at: string | null
+  is_saved: boolean
+  is_dismissed: boolean
+  added_to_inventory: boolean
+  created_at: string
+}
+
+export type DealInsert = Omit<Deal, 'id' | 'created_at'>
+
+export interface DealWatch {
+  id: string
+  keywords: string
+  category: string
+  max_price: number
+  min_discount: number
+  sources: DealSource[]
+  notify: boolean
+  active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type DealWatchInsert = Omit<DealWatch, 'id' | 'created_at' | 'updated_at'>
 export type StagingPaymentInsert = Omit<StagingPayment, 'id' | 'created_at'>
 export type PropertyInsert = Omit<Property, 'id' | 'created_at' | 'updated_at'>
 export type StorageUnitInsert = Omit<StorageUnit, 'id' | 'created_at' | 'updated_at'>

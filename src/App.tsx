@@ -12,6 +12,7 @@ import ScanReceipt from './pages/ScanReceipt'
 import StagingPlanner from './pages/StagingPlanner'
 import TaxReport from './pages/TaxReport'
 import YearEndTaxSummary from './pages/YearEndTaxSummary'
+import DealFinder from './pages/DealFinder'
 import Settings from './pages/Settings'
 
 export default function App() {
@@ -28,6 +29,7 @@ export default function App() {
         <Route path="/add-item" element={<AddItem />} />
         <Route path="/scan-receipt" element={<ScanReceipt />} />
         <Route path="/staging-planner" element={<StagingPlanner />} />
+        <Route path="/deals" element={<DealFinder />} />
         <Route path="/tax-report" element={<TaxReport />} />
         <Route path="/year-end-summary" element={<YearEndTaxSummary />} />
         <Route path="/settings" element={<Settings />} />

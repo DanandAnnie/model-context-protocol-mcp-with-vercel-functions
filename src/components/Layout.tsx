@@ -9,6 +9,7 @@ import {
   Receipt,
   ArrowRightLeft,
   FileText,
+  FileSpreadsheet,
   Settings,
   Menu,
   X,
@@ -23,6 +24,7 @@ const navItems = [
   { to: '/scan-receipt', icon: Receipt, label: 'Scan Receipt' },
   { to: '/staging-planner', icon: ArrowRightLeft, label: 'Staging Planner' },
   { to: '/tax-report', icon: FileText, label: 'Tax Report' },
+  { to: '/year-end-summary', icon: FileSpreadsheet, label: 'Year End Summary' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ]
 

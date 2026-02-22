@@ -115,19 +115,28 @@ export function useDeals() {
   const fetchFromSources = async (watchCriteria: { keywords: string; category: string; max_price: number; min_discount: number }[]) => {
     // Try the Vercel API route first
     try {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 10000)
       const resp = await fetch(SCAN_API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ watches: watchCriteria }),
-        signal: AbortSignal.timeout(12000),
+        signal: controller.signal,
       })
+      clearTimeout(timer)
       if (resp.ok) {
-        return await resp.json()
+        const data = await resp.json()
+        if (data && Array.isArray(data.deals)) return data
       }
     } catch { /* API unavailable, fall through to client-side */ }
 
     // Fall back to client-side scanning (works everywhere, no server needed)
-    return scanDealsClientSide(watchCriteria)
+    try {
+      return await scanDealsClientSide(watchCriteria)
+    } catch { /* client-side also failed */ }
+
+    // Everything failed — return empty result instead of throwing
+    return { deals: [], scanned_at: new Date().toISOString(), sources_checked: [] }
   }
 
   // Scan for new deals
@@ -143,27 +152,29 @@ export function useDeals() {
           min_discount: w.min_discount,
         }))
 
-      const { deals: newDeals, scanned_at } = await fetchFromSources(watchCriteria)
+      const result = await fetchFromSources(watchCriteria)
+      const newDeals = Array.isArray(result?.deals) ? result.deals : []
+      const scanned_at = result?.scanned_at || new Date().toISOString()
 
       // Process results
       const existingUrls = new Set(deals.map((d) => d.source_url))
       const freshDeals: Deal[] = []
 
       for (const raw of newDeals) {
-        if (existingUrls.has(raw.source_url)) continue
+        if (!raw?.source_url || existingUrls.has(raw.source_url)) continue
 
         const deal: Deal = {
           id: crypto.randomUUID(),
-          title: raw.title,
-          description: raw.description,
+          title: raw.title || '',
+          description: raw.description || '',
           source: raw.source || 'other',
           source_url: raw.source_url,
           image_url: raw.image_url || '',
-          original_price: raw.original_price,
-          sale_price: raw.sale_price,
-          discount_percent: raw.discount_percent,
-          category: raw.category,
-          retailer: raw.retailer,
+          original_price: raw.original_price || 0,
+          sale_price: raw.sale_price || 0,
+          discount_percent: raw.discount_percent || 0,
+          category: raw.category || 'other',
+          retailer: raw.retailer || 'Unknown',
           found_at: scanned_at,
           expires_at: null,
           is_saved: false,
@@ -179,7 +190,6 @@ export function useDeals() {
           const cached = await getCachedData('deals')
           await cacheData('deals', [...freshDeals, ...cached].slice(0, 500))
         } else {
-          // Insert in batches
           for (let i = 0; i < freshDeals.length; i += 20) {
             const batch = freshDeals.slice(i, i + 20).map(({ id: _id, created_at: _ca, ...rest }) => rest)
             await supabase.from('deals').insert(batch)
@@ -189,7 +199,7 @@ export function useDeals() {
         setDeals((prev) => [...freshDeals, ...prev])
 
         // Send browser notifications for matching deals
-        if ('Notification' in window && Notification.permission === 'granted' && freshDeals.length > 0) {
+        if ('Notification' in window && Notification.permission === 'granted') {
           const topDeal = freshDeals[0]
           new Notification('New Staging Deals Found!', {
             body: `${freshDeals.length} new deals — "${topDeal.title}" ${topDeal.sale_price > 0 ? `$${topDeal.sale_price}` : ''}`,
@@ -202,6 +212,9 @@ export function useDeals() {
       setLastScanAt(scanned_at)
 
       return { newCount: freshDeals.length, total: newDeals.length }
+    } catch {
+      // Never let scanning crash — return 0 results
+      return { newCount: 0, total: 0 }
     } finally {
       setScanning(false)
     }

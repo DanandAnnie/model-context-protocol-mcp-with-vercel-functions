@@ -74,14 +74,9 @@ export default function DealFinder() {
 
   const handleScan = async () => {
     setScanResult(null)
-    try {
-      const result = await scanDeals()
-      setScanResult(result)
-      setTimeout(() => setScanResult(null), 5000)
-    } catch {
-      setScanResult({ newCount: -1, total: 0 })
-      setTimeout(() => setScanResult(null), 5000)
-    }
+    const result = await scanDeals()
+    setScanResult(result)
+    setTimeout(() => setScanResult(null), 8000)
   }
 
   // Filtered deals
@@ -183,18 +178,16 @@ export default function DealFinder() {
       {/* Scan result banner */}
       {scanResult && (
         <div className={`rounded-lg p-3 text-sm flex items-center gap-2 ${
-          scanResult.newCount === -1
-            ? 'bg-red-50 text-red-700 border border-red-200'
-            : scanResult.newCount > 0
-              ? 'bg-green-50 text-green-700 border border-green-200'
-              : 'bg-slate-50 text-slate-600 border border-slate-200'
+          scanResult.newCount > 0
+            ? 'bg-green-50 text-green-700 border border-green-200'
+            : 'bg-slate-50 text-slate-600 border border-slate-200'
         }`}>
-          {scanResult.newCount === -1 ? (
-            <span>Scan failed. Make sure the API is configured and try again.</span>
-          ) : scanResult.newCount > 0 ? (
+          {scanResult.newCount > 0 ? (
             <span>Found <strong>{scanResult.newCount} new deals</strong> out of {scanResult.total} scanned!</span>
+          ) : scanResult.total > 0 ? (
+            <span>Scan complete — no new deals since last scan. Checked {scanResult.total} listings.</span>
           ) : (
-            <span>Scan complete — no new deals found. Checked {scanResult.total} listings.</span>
+            <span>Scan complete. Set up watches in the Watchlist tab to find targeted deals, or try again in a moment.</span>
           )}
         </div>
       )}

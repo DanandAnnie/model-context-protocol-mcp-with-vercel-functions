@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { ArrowLeft, Package, Save, Trash2, Check, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, Package, Save, Trash2, Check, AlertTriangle, ExternalLink, Copy, MapPin, DollarSign } from 'lucide-react'
 import { useItems } from '../hooks/useItems'
 import { useProperties } from '../hooks/useProperties'
 import { useStorageUnits } from '../hooks/useStorageUnits'
@@ -50,6 +50,7 @@ export default function ItemDetail() {
   const [saved, setSaved] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [copiedToClipboard, setCopiedToClipboard] = useState(false)
 
   // Load item into form when found
   useEffect(() => {
@@ -195,6 +196,38 @@ export default function ItemDetail() {
     item.current_location_type === 'property'
       ? properties.find((p) => p.id === item.current_property_id)?.name
       : units.find((u) => u.id === item.current_storage_id)?.name
+
+  // Marketplace listing helpers
+  const locationAddress = (() => {
+    if (item.current_location_type === 'property') {
+      const prop = properties.find((p) => p.id === item.current_property_id)
+      return prop ? [prop.address, prop.city].filter(Boolean).join(', ') : ''
+    }
+    const unit = units.find((u) => u.id === item.current_storage_id)
+    return unit?.address || ''
+  })()
+
+  const conditionMultiplier = { excellent: 0.8, good: 0.6, fair: 0.4, poor: 0.2 }
+  const recommendedPrice = Math.round(item.value * (conditionMultiplier[item.condition] || 0.6))
+
+  const marketplaceListing = [
+    `${item.name} - ${item.category}`,
+    '',
+    `Condition: ${item.condition}`,
+    item.subcategory ? `Type: ${item.subcategory}` : '',
+    item.notes || '',
+    '',
+    `Retail Value: $${item.value.toLocaleString()}`,
+    `Asking Price: $${recommendedPrice.toLocaleString()}`,
+    '',
+    locationAddress ? `Location: ${locationAddress}` : '',
+  ].filter(Boolean).join('\n')
+
+  const handleCopyListing = async () => {
+    await navigator.clipboard.writeText(marketplaceListing)
+    setCopiedToClipboard(true)
+    setTimeout(() => setCopiedToClipboard(false), 2000)
+  }
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -373,6 +406,77 @@ export default function ItemDetail() {
             <p className="text-xs text-slate-400 mt-1">For depreciation (IRS default: 7 years)</p>
           </div>
         </div>
+      </div>
+
+      {/* Sell on Marketplace */}
+      <div className="bg-white rounded-xl border border-purple-200 p-5 space-y-4">
+        <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+          <DollarSign size={16} className="text-purple-600" />
+          Sell on Marketplace
+        </h2>
+
+        {/* Price comparison */}
+        <div className="grid grid-cols-3 gap-3">
+          <div className="bg-slate-50 rounded-lg p-3">
+            <p className="text-xs text-slate-500">Your Cost</p>
+            <p className="text-lg font-bold text-slate-900">${(item.purchase_price || 0).toLocaleString()}</p>
+          </div>
+          <div className="bg-blue-50 rounded-lg p-3">
+            <p className="text-xs text-blue-600">Retail Value</p>
+            <p className="text-lg font-bold text-blue-700">${item.value.toLocaleString()}</p>
+          </div>
+          <div className="bg-green-50 rounded-lg p-3">
+            <p className="text-xs text-green-600">Recommended Price</p>
+            <p className="text-lg font-bold text-green-700">${recommendedPrice.toLocaleString()}</p>
+          </div>
+        </div>
+
+        {/* Location */}
+        {locationAddress && (
+          <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 rounded-lg text-sm">
+            <MapPin size={14} className="text-slate-400" />
+            <span className="text-slate-600">{locationAddress}</span>
+          </div>
+        )}
+
+        {/* Listing preview */}
+        <div className="bg-slate-50 rounded-lg p-3">
+          <p className="text-xs text-slate-500 mb-1">Listing Preview</p>
+          <pre className="text-xs text-slate-700 whitespace-pre-wrap font-sans">{marketplaceListing}</pre>
+        </div>
+
+        {/* Action buttons */}
+        <div className="flex gap-3">
+          <button
+            onClick={handleCopyListing}
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition-colors"
+          >
+            {copiedToClipboard ? (
+              <>
+                <Check size={16} />
+                Copied!
+              </>
+            ) : (
+              <>
+                <Copy size={16} />
+                Copy Listing
+              </>
+            )}
+          </button>
+          <a
+            href="https://www.facebook.com/marketplace/create/item"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <ExternalLink size={16} />
+            Open Facebook Marketplace
+          </a>
+        </div>
+
+        <p className="text-xs text-slate-400">
+          Copy the listing details above, then paste them into your Facebook Marketplace listing.
+        </p>
       </div>
 
       {/* Location */}

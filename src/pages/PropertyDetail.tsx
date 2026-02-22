@@ -4,12 +4,14 @@ import {
   ArrowLeft, Home, Package, Save, Trash2, Check, AlertTriangle,
   Camera, Upload, X, Image as ImageIcon, MapPin, DollarSign,
   PlusCircle, CreditCard, ChevronDown, ChevronUp,
+  BarChart3, TrendingUp, Edit2,
 } from 'lucide-react'
 import { useProperties } from '../hooks/useProperties'
 import { useItems } from '../hooks/useItems'
 import { usePayments } from '../hooks/usePayments'
+import { usePropertyExpenses } from '../hooks/usePropertyExpenses'
 import ItemCard from '../components/ItemCard'
-import type { PropertyInsert, PropertyType, PaymentMethod, StagingPaymentInsert } from '../lib/database.types'
+import type { PropertyInsert, PropertyType, PaymentMethod, StagingPaymentInsert, PropertyExpenseInsert, ExpenseCategory } from '../lib/database.types'
 
 const PAYMENT_METHODS: { key: PaymentMethod; label: string }[] = [
   { key: 'square', label: 'Square' },
@@ -20,6 +22,14 @@ const PAYMENT_METHODS: { key: PaymentMethod; label: string }[] = [
   { key: 'paypal', label: 'PayPal' },
   { key: 'cash', label: 'Cash' },
   { key: 'check', label: 'Check' },
+  { key: 'other', label: 'Other' },
+]
+
+const EXPENSE_CATEGORIES: { key: ExpenseCategory; label: string }[] = [
+  { key: 'design_fee', label: 'Design Fee' },
+  { key: 'movers', label: 'Movers' },
+  { key: 'travel', label: 'Travel' },
+  { key: 'supplies', label: 'Supplies' },
   { key: 'other', label: 'Other' },
 ]
 
@@ -40,6 +50,7 @@ export default function PropertyDetail() {
   const { properties, loading: propsLoading, updateProperty, deleteProperty } = useProperties()
   const { items, loading: itemsLoading } = useItems()
   const { payments, addPayment, deletePayment } = usePayments(id)
+  const { expenses, addExpense, updateExpense, deleteExpense } = usePropertyExpenses(id)
 
   const property = properties.find((p) => p.id === id)
   const propertyItems = items.filter((i) => i.current_property_id === id)
@@ -54,6 +65,15 @@ export default function PropertyDetail() {
   const [deleting, setDeleting] = useState(false)
   const [showAddPayment, setShowAddPayment] = useState(false)
   const [showPaymentHistory, setShowPaymentHistory] = useState(false)
+  const [showAddExpense, setShowAddExpense] = useState(false)
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null)
+  const [expenseForm, setExpenseForm] = useState({
+    category: 'design_fee' as ExpenseCategory,
+    description: '',
+    amount: 0,
+    expense_date: new Date().toISOString().split('T')[0],
+    notes: '',
+  })
   const [paymentForm, setPaymentForm] = useState({
     amount: 0,
     payment_date: new Date().toISOString().split('T')[0],
@@ -120,6 +140,68 @@ export default function PropertyDetail() {
 
   const totalOwed = monthlyBreakdown.length * (form?.monthly_fee || 0)
   const balance = totalOwed - totalPaid
+
+  // Cost Analysis calculations
+  const furnitureCost = propertyItems.reduce((sum, i) => sum + (i.purchase_price || 0), 0)
+  const furnitureRetailValue = propertyItems.reduce((sum, i) => sum + (i.value || 0), 0)
+  const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0)
+  const totalCosts = furnitureCost + totalExpenses
+  const totalRevenue = totalPaid
+  const profitLoss = totalRevenue - totalCosts
+  const breakEvenRemaining = Math.max(0, totalCosts - totalRevenue)
+  const monthlyFee = form?.monthly_fee || 0
+  const monthsToBreakEven = monthlyFee > 0 ? Math.ceil(breakEvenRemaining / monthlyFee) : null
+  const breakEvenReached = totalRevenue >= totalCosts
+
+  const expensesByCategory = useMemo(() => {
+    const grouped: Record<string, number> = {}
+    for (const exp of expenses) {
+      grouped[exp.category] = (grouped[exp.category] || 0) + exp.amount
+    }
+    return grouped
+  }, [expenses])
+
+  const handleAddExpense = async () => {
+    if (!id || !expenseForm.amount) return
+    const expense: PropertyExpenseInsert = {
+      property_id: id,
+      category: expenseForm.category,
+      description: expenseForm.description,
+      amount: expenseForm.amount,
+      expense_date: expenseForm.expense_date || null,
+      notes: expenseForm.notes,
+    }
+    await addExpense(expense)
+    setShowAddExpense(false)
+    setExpenseForm({ category: 'design_fee', description: '', amount: 0, expense_date: new Date().toISOString().split('T')[0], notes: '' })
+  }
+
+  const handleUpdateExpense = async () => {
+    if (!editingExpenseId) return
+    await updateExpense(editingExpenseId, {
+      property_id: id!,
+      category: expenseForm.category,
+      description: expenseForm.description,
+      amount: expenseForm.amount,
+      expense_date: expenseForm.expense_date || null,
+      notes: expenseForm.notes,
+    })
+    setEditingExpenseId(null)
+    setShowAddExpense(false)
+    setExpenseForm({ category: 'design_fee', description: '', amount: 0, expense_date: new Date().toISOString().split('T')[0], notes: '' })
+  }
+
+  const startEditExpense = (expense: typeof expenses[0]) => {
+    setEditingExpenseId(expense.id)
+    setExpenseForm({
+      category: expense.category as ExpenseCategory,
+      description: expense.description,
+      amount: expense.amount,
+      expense_date: expense.expense_date || new Date().toISOString().split('T')[0],
+      notes: expense.notes,
+    })
+    setShowAddExpense(true)
+  }
 
   const handleAddPayment = async () => {
     if (!id || !paymentForm.amount) return
@@ -640,6 +722,216 @@ export default function PropertyDetail() {
           </div>
         </div>
       )}
+
+      {/* Cost Analysis & Break-Even */}
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+              <BarChart3 size={16} className="text-purple-600" />
+              Cost Analysis & Break-Even
+            </h2>
+            <button
+              onClick={() => { setShowAddExpense(!showAddExpense); setEditingExpenseId(null) }}
+              className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
+            >
+              <PlusCircle size={14} />
+              Add Expense
+            </button>
+          </div>
+
+          {/* Break-even status banner */}
+          <div className={`rounded-lg p-4 ${breakEvenReached ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200'}`}>
+            <div className="flex items-center gap-2 mb-1">
+              <TrendingUp size={16} className={breakEvenReached ? 'text-green-600' : 'text-amber-600'} />
+              <span className={`text-sm font-semibold ${breakEvenReached ? 'text-green-700' : 'text-amber-700'}`}>
+                {breakEvenReached ? 'Break-Even Reached!' : 'Not Yet at Break-Even'}
+              </span>
+            </div>
+            {breakEvenReached ? (
+              <p className="text-sm text-green-600">
+                Profit: <span className="font-bold">${profitLoss.toLocaleString()}</span>
+              </p>
+            ) : (
+              <p className="text-sm text-amber-600">
+                ${breakEvenRemaining.toLocaleString()} more revenue needed
+                {monthsToBreakEven !== null && ` (~${monthsToBreakEven} month${monthsToBreakEven !== 1 ? 's' : ''} at $${monthlyFee.toLocaleString()}/mo)`}
+              </p>
+            )}
+          </div>
+
+          {/* Summary cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="bg-slate-50 rounded-lg p-3">
+              <p className="text-xs text-slate-500">Furniture Cost</p>
+              <p className="text-lg font-bold text-slate-900">${furnitureCost.toLocaleString()}</p>
+              <p className="text-xs text-slate-400">{propertyItems.length} items</p>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-3">
+              <p className="text-xs text-slate-500">Other Expenses</p>
+              <p className="text-lg font-bold text-slate-900">${totalExpenses.toLocaleString()}</p>
+              <p className="text-xs text-slate-400">{expenses.length} entries</p>
+            </div>
+            <div className="bg-red-50 rounded-lg p-3">
+              <p className="text-xs text-red-600">Total Costs</p>
+              <p className="text-lg font-bold text-red-700">${totalCosts.toLocaleString()}</p>
+            </div>
+            <div className="bg-green-50 rounded-lg p-3">
+              <p className="text-xs text-green-600">Total Revenue</p>
+              <p className="text-lg font-bold text-green-700">${totalRevenue.toLocaleString()}</p>
+            </div>
+          </div>
+
+          {/* Profit/Loss indicator */}
+          <div className={`flex items-center justify-between px-4 py-3 rounded-lg ${profitLoss >= 0 ? 'bg-green-50' : 'bg-red-50'}`}>
+            <span className="text-sm font-medium text-slate-700">Net Profit / Loss</span>
+            <span className={`text-lg font-bold ${profitLoss >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+              {profitLoss >= 0 ? '+' : '-'}${Math.abs(profitLoss).toLocaleString()}
+            </span>
+          </div>
+
+          {/* Furniture retail value */}
+          <div className="flex items-center justify-between px-4 py-2 bg-blue-50 rounded-lg">
+            <span className="text-xs text-blue-600">Furniture Retail/Replacement Value</span>
+            <span className="text-sm font-semibold text-blue-700">${furnitureRetailValue.toLocaleString()}</span>
+          </div>
+
+          {/* Expense category breakdown */}
+          {expenses.length > 0 && (
+            <div>
+              <h3 className="text-xs font-medium text-slate-500 mb-2">Expenses by Category</h3>
+              <div className="space-y-1">
+                {EXPENSE_CATEGORIES.filter((c) => expensesByCategory[c.key]).map((c) => (
+                  <div key={c.key} className="flex items-center justify-between px-3 py-2 bg-slate-50 rounded-lg text-sm">
+                    <span className="text-slate-700">{c.label}</span>
+                    <span className="font-medium text-slate-900">${(expensesByCategory[c.key] || 0).toLocaleString()}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Add/Edit expense form */}
+          {showAddExpense && (
+            <div className="border border-purple-200 bg-purple-50/50 rounded-lg p-4 space-y-3">
+              <h3 className="text-sm font-medium text-slate-700">
+                {editingExpenseId ? 'Edit Expense' : 'Add Expense'}
+              </h3>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Category</label>
+                  <select
+                    value={expenseForm.category}
+                    onChange={(e) => setExpenseForm({ ...expenseForm, category: e.target.value as ExpenseCategory })}
+                    className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-purple-500"
+                  >
+                    {EXPENSE_CATEGORIES.map((c) => (
+                      <option key={c.key} value={c.key}>{c.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Amount ($)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    value={expenseForm.amount}
+                    onChange={(e) => setExpenseForm({ ...expenseForm, amount: +e.target.value })}
+                    className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs text-slate-500 mb-1">Description</label>
+                  <input
+                    value={expenseForm.description}
+                    onChange={(e) => setExpenseForm({ ...expenseForm, description: e.target.value })}
+                    placeholder="e.g. ABC Moving Company - initial delivery"
+                    className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Date</label>
+                  <input
+                    type="date"
+                    value={expenseForm.expense_date}
+                    onChange={(e) => setExpenseForm({ ...expenseForm, expense_date: e.target.value })}
+                    className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Notes</label>
+                  <input
+                    value={expenseForm.notes}
+                    onChange={(e) => setExpenseForm({ ...expenseForm, notes: e.target.value })}
+                    placeholder="Optional notes"
+                    className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={editingExpenseId ? handleUpdateExpense : handleAddExpense}
+                  className="px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700"
+                >
+                  {editingExpenseId ? 'Update Expense' : 'Save Expense'}
+                </button>
+                <button
+                  onClick={() => { setShowAddExpense(false); setEditingExpenseId(null) }}
+                  className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Expense line items */}
+          {expenses.length > 0 && (
+            <div>
+              <h3 className="text-xs font-medium text-slate-500 mb-2">All Expenses</h3>
+              <div className="space-y-1">
+                {expenses.map((exp) => (
+                  <div key={exp.id} className="flex items-center justify-between px-3 py-2 bg-slate-50 rounded-lg text-sm group">
+                    <div>
+                      <span className="font-medium text-slate-700">${exp.amount.toLocaleString()}</span>
+                      <span className="text-slate-400 mx-2">&middot;</span>
+                      <span className="text-slate-500 text-xs">
+                        {EXPENSE_CATEGORIES.find((c) => c.key === exp.category)?.label}
+                      </span>
+                      {exp.description && (
+                        <>
+                          <span className="text-slate-400 mx-2">&middot;</span>
+                          <span className="text-slate-500 text-xs">{exp.description}</span>
+                        </>
+                      )}
+                      {exp.expense_date && (
+                        <span className="text-slate-400 text-xs ml-2">
+                          {new Date(exp.expense_date).toLocaleDateString()}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => startEditExpense(exp)}
+                        className="opacity-0 group-hover:opacity-100 text-blue-400 hover:text-blue-600 p-1"
+                      >
+                        <Edit2 size={12} />
+                      </button>
+                      <button
+                        onClick={() => { if (confirm('Delete this expense?')) deleteExpense(exp.id) }}
+                        className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 p-1"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Staged items */}
       <div>

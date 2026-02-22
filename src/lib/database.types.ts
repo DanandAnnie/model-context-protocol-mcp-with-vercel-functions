@@ -99,6 +99,21 @@ export interface StagingPayment {
   created_at: string
 }
 
+export type ExpenseCategory = 'design_fee' | 'movers' | 'travel' | 'supplies' | 'other'
+
+export interface PropertyExpense {
+  id: string
+  property_id: string
+  category: ExpenseCategory
+  description: string
+  amount: number
+  expense_date: string | null
+  notes: string
+  created_at: string
+  updated_at: string
+}
+
+export type PropertyExpenseInsert = Omit<PropertyExpense, 'id' | 'created_at' | 'updated_at'>
 export type StagingPaymentInsert = Omit<StagingPayment, 'id' | 'created_at'>
 export type PropertyInsert = Omit<Property, 'id' | 'created_at' | 'updated_at'>
 export type StorageUnitInsert = Omit<StorageUnit, 'id' | 'created_at' | 'updated_at'>

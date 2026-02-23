@@ -261,15 +261,21 @@ export function buildMarketplaceSearchUrl(
     radius?: number // miles
   },
 ): string {
+  // Facebook Marketplace uses these query params: query, minPrice, maxPrice, sortBy, daysSinceListed, exact
+  // "radius" is NOT a valid param — Facebook uses the user's own location
+  // City slug in the path (e.g. /marketplace/dallas/search) works for some cities but is unreliable
   const params = new URLSearchParams()
   params.set('query', keywords)
+  params.set('sortBy', 'creation_time_descend')
+  params.set('daysSinceListed', '7')
+  params.set('exact', 'false')
   if (options?.minPrice) params.set('minPrice', String(options.minPrice))
   if (options?.maxPrice) params.set('maxPrice', String(options.maxPrice))
-  if (options?.radius) params.set('radius', String(options.radius))
 
-  // Facebook Marketplace search URL format
-  const base = options?.city
-    ? `https://www.facebook.com/marketplace/${encodeURIComponent(options.city)}/search`
+  // Use city slug if provided (lowercase, no spaces) — falls back to user's FB location
+  const citySlug = options?.city?.trim().toLowerCase().replace(/[^a-z0-9]+/g, '') || ''
+  const base = citySlug
+    ? `https://www.facebook.com/marketplace/${citySlug}/search`
     : 'https://www.facebook.com/marketplace/search'
 
   return `${base}/?${params.toString()}`

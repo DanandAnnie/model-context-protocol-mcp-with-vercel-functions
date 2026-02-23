@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import {
   Search, Bell, BellOff, PlusCircle, Trash2, ExternalLink, Bookmark, BookmarkCheck,
   RefreshCw, Tag, DollarSign, Filter,
@@ -70,15 +70,40 @@ export default function DealFinder() {
     }
   }
 
+  // Refs for scrolling
+  const dealsListRef = useRef<HTMLDivElement>(null)
+
   // Scan handler
-  const [scanResult, setScanResult] = useState<{ newCount: number; total: number } | null>(null)
+  const [scanResult, setScanResult] = useState<{ newCount: number; total: number; newDealIds?: string[] } | null>(null)
+  const [highlightedIds, setHighlightedIds] = useState<Set<string>>(new Set())
 
   const handleScan = async () => {
     setScanResult(null)
+    setHighlightedIds(new Set())
     const result = await scanDeals()
     setScanResult(result)
-    setTimeout(() => setScanResult(null), 8000)
+
+    // If new deals found, switch to deals tab, highlight them, and scroll into view
+    if (result.newCount > 0) {
+      setActiveTab('deals')
+      if (result.newDealIds) {
+        setHighlightedIds(new Set(result.newDealIds))
+      }
+      // Scroll to deals list after a short delay for render
+      setTimeout(() => {
+        dealsListRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 150)
+      // Clear highlights after 15 seconds
+      setTimeout(() => setHighlightedIds(new Set()), 15000)
+    }
+
+    setTimeout(() => setScanResult(null), 12000)
   }
+
+  // Clear highlights when switching tabs
+  useEffect(() => {
+    if (activeTab !== 'deals') setHighlightedIds(new Set())
+  }, [activeTab])
 
   // Filtered deals
   const filtered = useMemo(() => {
@@ -178,13 +203,23 @@ export default function DealFinder() {
 
       {/* Scan result banner */}
       {scanResult && (
-        <div className={`rounded-lg p-3 text-sm flex items-center gap-2 ${
-          scanResult.newCount > 0
-            ? 'bg-green-50 text-green-700 border border-green-200'
-            : 'bg-slate-50 text-slate-600 border border-slate-200'
-        }`}>
+        <div
+          className={`rounded-lg p-3 text-sm flex items-center gap-2 ${
+            scanResult.newCount > 0
+              ? 'bg-green-50 text-green-700 border border-green-200 cursor-pointer hover:bg-green-100 transition-colors'
+              : 'bg-slate-50 text-slate-600 border border-slate-200'
+          }`}
+          onClick={scanResult.newCount > 0 ? () => {
+            setActiveTab('deals')
+            setTimeout(() => dealsListRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100)
+          } : undefined}
+        >
           {scanResult.newCount > 0 ? (
-            <span>Found <strong>{scanResult.newCount} new deals</strong> out of {scanResult.total} scanned!</span>
+            <span>
+              <Zap size={14} className="inline mr-1 text-amber-500" />
+              Found <strong>{scanResult.newCount} new deals</strong> out of {scanResult.total} scanned!
+              <span className="ml-2 text-green-600 underline text-xs font-medium">View deals &darr;</span>
+            </span>
           ) : scanResult.total > 0 ? (
             <span>Scan complete — no new deals since last scan. Checked {scanResult.total} listings.</span>
           ) : (
@@ -296,17 +331,26 @@ export default function DealFinder() {
           )}
 
           {/* Deal cards */}
-          <div className="space-y-3">
-            {filtered.map((deal) => (
+          <div ref={dealsListRef} className="space-y-3">
+            {filtered.map((deal) => {
+              const isNew = highlightedIds.has(deal.id)
+              return (
               <div
                 key={deal.id}
-                className={`bg-white rounded-xl border p-4 hover:shadow-sm transition-shadow ${
-                  deal.is_saved ? 'border-amber-300' : 'border-slate-200'
+                className={`bg-white rounded-xl border p-4 hover:shadow-sm transition-all duration-500 ${
+                  isNew
+                    ? 'border-green-400 ring-2 ring-green-200 shadow-md'
+                    : deal.is_saved ? 'border-amber-300' : 'border-slate-200'
                 }`}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
+                      {isNew && (
+                        <span className="px-1.5 py-0.5 bg-green-500 text-white text-xs font-bold rounded animate-pulse">
+                          NEW
+                        </span>
+                      )}
                       {deal.discount_percent >= 40 && (
                         <span className="px-1.5 py-0.5 bg-red-100 text-red-700 text-xs font-bold rounded">
                           HOT
@@ -351,15 +395,13 @@ export default function DealFinder() {
                 {/* Actions */}
                 <div className="flex items-center gap-2 mt-3 pt-3 border-t border-slate-100">
                   {deal.source_url && (
-                    <a
-                      href={deal.source_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700"
+                    <button
+                      onClick={() => window.open(deal.source_url, '_blank', 'noopener,noreferrer')}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 active:bg-blue-800 min-h-[44px]"
                     >
                       <ExternalLink size={12} />
                       View Deal
-                    </a>
+                    </button>
                   )}
                   <button
                     onClick={() => updateDeal(deal.id, { is_saved: !deal.is_saved })}
@@ -381,7 +423,8 @@ export default function DealFinder() {
                   </button>
                 </div>
               </div>
-            ))}
+              )
+            })}
 
             {filtered.length === 0 && (
               <div className="text-center py-12 bg-white rounded-xl border border-slate-200">

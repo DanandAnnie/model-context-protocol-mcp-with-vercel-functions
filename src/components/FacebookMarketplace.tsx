@@ -201,16 +201,14 @@ export default function FacebookMarketplace({ watches }: Props) {
                 <p className="text-xs text-slate-400 mb-2 uppercase tracking-wide font-medium">From Your Watches</p>
                 <div className="flex flex-wrap gap-2">
                   {watchSearches.map((s, i) => (
-                    <a
+                    <button
                       key={`w-${i}`}
-                      href={s.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-50 text-purple-700 text-xs font-medium rounded-full border border-purple-200 hover:bg-purple-100 transition-colors"
+                      onClick={() => window.open(s.url, '_blank', 'noopener,noreferrer')}
+                      className="flex items-center gap-1.5 px-4 py-2 bg-purple-50 text-purple-700 text-sm font-medium rounded-full border border-purple-200 hover:bg-purple-100 active:bg-purple-200 transition-colors min-h-[44px]"
                     >
-                      <ExternalLink size={11} />
+                      <Search size={14} />
                       {s.label}
-                    </a>
+                    </button>
                   ))}
                 </div>
               </div>
@@ -221,16 +219,14 @@ export default function FacebookMarketplace({ watches }: Props) {
               <p className="text-xs text-slate-400 mb-2 uppercase tracking-wide font-medium">Staging Essentials</p>
               <div className="flex flex-wrap gap-2">
                 {suggestionSearches.map((s, i) => (
-                  <a
+                  <button
                     key={`s-${i}`}
-                    href={s.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 text-slate-600 text-xs font-medium rounded-full border border-slate-200 hover:bg-slate-100 transition-colors"
+                    onClick={() => window.open(s.url, '_blank', 'noopener,noreferrer')}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-slate-50 text-slate-600 text-sm font-medium rounded-full border border-slate-200 hover:bg-slate-100 active:bg-slate-200 transition-colors min-h-[44px]"
                   >
-                    <ExternalLink size={11} />
+                    <Search size={14} />
                     {s.label}
-                  </a>
+                  </button>
                 ))}
               </div>
             </div>
@@ -429,15 +425,13 @@ export default function FacebookMarketplace({ watches }: Props) {
               {/* Actions */}
               <div className="flex items-center gap-2 mt-3 pt-3 border-t border-slate-100">
                 {deal.fb_url && (
-                  <a
-                    href={deal.fb_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700"
+                  <button
+                    onClick={() => window.open(deal.fb_url, '_blank', 'noopener,noreferrer')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 active:bg-blue-800 min-h-[44px]"
                   >
                     <ExternalLink size={12} />
                     View on Marketplace
-                  </a>
+                  </button>
                 )}
                 <span className="text-xs text-slate-400 ml-auto">
                   {new Date(deal.added_at).toLocaleDateString()}

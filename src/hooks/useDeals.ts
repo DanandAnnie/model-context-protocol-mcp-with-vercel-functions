@@ -211,10 +211,10 @@ export function useDeals() {
       localStorage.setItem('deals_last_scan', scanned_at)
       setLastScanAt(scanned_at)
 
-      return { newCount: freshDeals.length, total: newDeals.length }
+      return { newCount: freshDeals.length, total: newDeals.length, newDealIds: freshDeals.map((d) => d.id) }
     } catch {
       // Never let scanning crash — return 0 results
-      return { newCount: 0, total: 0 }
+      return { newCount: 0, total: 0, newDealIds: [] as string[] }
     } finally {
       setScanning(false)
     }

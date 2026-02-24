@@ -62,6 +62,9 @@ export interface Item {
   current_storage_id: string | null
   current_property_id: string | null
   status: ItemStatus
+  length_inches: number
+  width_inches: number
+  height_inches: number
   created_at: string
   updated_at: string
 }

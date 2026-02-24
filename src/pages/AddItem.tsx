@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { PlusCircle, Check, Loader2, Sparkles, Brain } from 'lucide-react'
+import { PlusCircle, Check, Loader2, Sparkles, Brain, Ruler } from 'lucide-react'
 import { useItems } from '../hooks/useItems'
 import { useProperties } from '../hooks/useProperties'
 import { useStorageUnits } from '../hooks/useStorageUnits'
@@ -42,6 +42,7 @@ const emptyForm: ItemInsert = {
   condition: 'good', date_acquired: null, notes: '', photo_url: '',
   current_location_type: 'storage', current_storage_id: null,
   current_property_id: null, status: 'available',
+  length_inches: 0, width_inches: 0, height_inches: 0,
 }
 
 export default function AddItem() {
@@ -306,10 +307,65 @@ export default function AddItem() {
                 onChange={(e) => setForm({ ...form, notes: e.target.value })}
                 rows={2}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Description, dimensions, etc."
+                placeholder="Description, brand, color, etc."
               />
             </div>
           </div>
+        </div>
+
+        {/* Dimensions */}
+        <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+          <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+            <Ruler size={16} className="text-teal-600" />
+            Dimensions (inches)
+          </h2>
+          <p className="text-xs text-slate-500">Measure the furniture to check if it fits in a room later.</p>
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Length</label>
+              <input
+                type="number"
+                min={0}
+                step={0.5}
+                value={form.length_inches || ''}
+                onChange={(e) => setForm({ ...form, length_inches: e.target.value === '' ? 0 : +e.target.value })}
+                placeholder="L"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Width</label>
+              <input
+                type="number"
+                min={0}
+                step={0.5}
+                value={form.width_inches || ''}
+                onChange={(e) => setForm({ ...form, width_inches: e.target.value === '' ? 0 : +e.target.value })}
+                placeholder="W"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Height</label>
+              <input
+                type="number"
+                min={0}
+                step={0.5}
+                value={form.height_inches || ''}
+                onChange={(e) => setForm({ ...form, height_inches: e.target.value === '' ? 0 : +e.target.value })}
+                placeholder="H"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+              />
+            </div>
+          </div>
+          {form.length_inches > 0 && form.width_inches > 0 && (
+            <p className="text-xs text-teal-600">
+              {form.length_inches}" x {form.width_inches}"
+              {form.height_inches > 0 && ` x ${form.height_inches}"`}
+              {' '}({(form.length_inches / 12).toFixed(1)}' x {(form.width_inches / 12).toFixed(1)}'
+              {form.height_inches > 0 && ` x ${(form.height_inches / 12).toFixed(1)}'`})
+            </p>
+          )}
         </div>
 
         {/* Purchase & Tax Info */}

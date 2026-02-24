@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { ArrowLeft, Package, Save, Trash2, Check, AlertTriangle, ExternalLink, Copy, MapPin, DollarSign, Plus, ChevronLeft, ChevronRight } from 'lucide-react'
+import { ArrowLeft, Package, Save, Trash2, Check, AlertTriangle, ExternalLink, Copy, MapPin, DollarSign, Plus, ChevronLeft, ChevronRight, Ruler } from 'lucide-react'
 import { useItems } from '../hooks/useItems'
 import { useProperties } from '../hooks/useProperties'
 import { useStorageUnits } from '../hooks/useStorageUnits'
@@ -145,6 +145,9 @@ export default function ItemDetail() {
       current_storage_id: item.current_storage_id,
       current_property_id: item.current_property_id,
       status: item.status,
+      length_inches: item.length_inches ?? 0,
+      width_inches: item.width_inches ?? 0,
+      height_inches: item.height_inches ?? 0,
     })
 
     // Load existing image: prefer photo_url stored on item, fall back to Supabase item_images
@@ -282,11 +285,17 @@ export default function ItemDetail() {
   const conditionMultiplier = { excellent: 0.8, good: 0.6, fair: 0.4, poor: 0.2 }
   const recommendedPrice = Math.round(item.value * (conditionMultiplier[item.condition] || 0.6))
 
+  const hasDimensions = item.length_inches > 0 && item.width_inches > 0
+  const dimensionStr = hasDimensions
+    ? `Dimensions: ${item.length_inches}" x ${item.width_inches}"${item.height_inches > 0 ? ` x ${item.height_inches}"` : ''} (${(item.length_inches / 12).toFixed(1)}' x ${(item.width_inches / 12).toFixed(1)}'${item.height_inches > 0 ? ` x ${(item.height_inches / 12).toFixed(1)}'` : ''})`
+    : ''
+
   const marketplaceListing = [
     `${item.name} - ${item.category}`,
     '',
     `Condition: ${item.condition}`,
     item.subcategory ? `Type: ${item.subcategory}` : '',
+    dimensionStr,
     item.notes || '',
     '',
     `Retail Value: $${item.value.toLocaleString()}`,
@@ -526,6 +535,60 @@ export default function ItemDetail() {
             />
           </div>
         </div>
+      </div>
+
+      {/* Dimensions */}
+      <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+        <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+          <Ruler size={16} className="text-teal-600" />
+          Dimensions (inches)
+        </h2>
+        <div className="grid grid-cols-3 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Length</label>
+            <input
+              type="number"
+              min={0}
+              step={0.5}
+              value={form.length_inches || ''}
+              onChange={(e) => setForm({ ...form, length_inches: e.target.value === '' ? 0 : +e.target.value })}
+              placeholder="L"
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Width</label>
+            <input
+              type="number"
+              min={0}
+              step={0.5}
+              value={form.width_inches || ''}
+              onChange={(e) => setForm({ ...form, width_inches: e.target.value === '' ? 0 : +e.target.value })}
+              placeholder="W"
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Height</label>
+            <input
+              type="number"
+              min={0}
+              step={0.5}
+              value={form.height_inches || ''}
+              onChange={(e) => setForm({ ...form, height_inches: e.target.value === '' ? 0 : +e.target.value })}
+              placeholder="H"
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+            />
+          </div>
+        </div>
+        {form.length_inches > 0 && form.width_inches > 0 && (
+          <p className="text-xs text-teal-600">
+            {form.length_inches}" x {form.width_inches}"
+            {form.height_inches > 0 && ` x ${form.height_inches}"`}
+            {' '}({(form.length_inches / 12).toFixed(1)}' x {(form.width_inches / 12).toFixed(1)}'
+            {form.height_inches > 0 && ` x ${(form.height_inches / 12).toFixed(1)}'`})
+          </p>
+        )}
       </div>
 
       {/* Purchase & Tax Info */}

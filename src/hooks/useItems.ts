@@ -57,7 +57,7 @@ function migrateItems(items: Item[]): { migrated: Item[]; changed: boolean } {
   return { migrated, changed }
 }
 
-const demoDefaults = { purchase_price: 0, purchase_date: null as string | null, payment_method: 'other' as const, receipt_url: '', useful_life_years: 7 }
+const demoDefaults = { purchase_price: 0, purchase_date: null as string | null, payment_method: 'other' as const, receipt_url: '', useful_life_years: 7, length_inches: 0, width_inches: 0, height_inches: 0 }
 
 const DEMO_ITEMS: Item[] = [
   { ...demoDefaults, id: 'i1', name: 'Mid-Century Sofa', category: 'living room', subcategory: 'seating', value: 2400, purchase_price: 2400, purchase_date: '2024-03-15', condition: 'excellent', date_acquired: '2024-03-15', notes: 'Gray velvet, 3-seat', photo_url: '', current_location_type: 'storage', current_storage_id: '1', current_property_id: null, status: 'available', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },

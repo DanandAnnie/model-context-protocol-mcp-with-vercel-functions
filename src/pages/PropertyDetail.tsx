@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Home, Package, Save, Trash2, Check, AlertTriangle,
   Camera, Upload, X, Image as ImageIcon, MapPin, DollarSign,
   PlusCircle, CreditCard, ChevronDown, ChevronUp,
-  BarChart3, TrendingUp, Edit2,
+  BarChart3, TrendingUp, Edit2, Ruler, CheckCircle2, XCircle,
 } from 'lucide-react'
 import { useProperties } from '../hooks/useProperties'
 import { useItems } from '../hooks/useItems'
@@ -34,6 +34,26 @@ const EXPENSE_CATEGORIES: { key: ExpenseCategory; label: string }[] = [
 ]
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+// Room measurement types
+interface Room {
+  id: string
+  name: string
+  length_ft: number
+  width_ft: number
+}
+
+function getRooms(propertyId: string): Room[] {
+  try {
+    const stored = localStorage.getItem(`property_rooms_${propertyId}`)
+    if (stored) return JSON.parse(stored)
+  } catch { /* empty */ }
+  return []
+}
+
+function saveRooms(propertyId: string, rooms: Room[]) {
+  localStorage.setItem(`property_rooms_${propertyId}`, JSON.stringify(rooms))
+}
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -82,6 +102,40 @@ export default function PropertyDetail() {
     square_transaction_id: '',
     notes: '',
   })
+  // Room measurements
+  const [rooms, setRooms] = useState<Room[]>([])
+  const [showAddRoom, setShowAddRoom] = useState(false)
+  const [roomForm, setRoomForm] = useState({ name: '', length_ft: 0, width_ft: 0 })
+  const [showFitChecker, setShowFitChecker] = useState(false)
+
+  const loadRooms = useCallback(() => {
+    if (id) setRooms(getRooms(id))
+  }, [id])
+
+  useEffect(() => { loadRooms() }, [loadRooms])
+
+  const handleAddRoom = () => {
+    if (!id || !roomForm.name || !roomForm.length_ft || !roomForm.width_ft) return
+    const newRoom: Room = { id: crypto.randomUUID(), ...roomForm }
+    const updated = [...rooms, newRoom]
+    saveRooms(id, updated)
+    setRooms(updated)
+    setRoomForm({ name: '', length_ft: 0, width_ft: 0 })
+    setShowAddRoom(false)
+  }
+
+  const handleDeleteRoom = (roomId: string) => {
+    if (!id) return
+    const updated = rooms.filter((r) => r.id !== roomId)
+    saveRooms(id, updated)
+    setRooms(updated)
+  }
+
+  // Items with dimensions for fit checking
+  const measuredItems = propertyItems.length > 0
+    ? items.filter((i) => i.length_inches > 0 && i.width_inches > 0)
+    : items.filter((i) => i.length_inches > 0 && i.width_inches > 0 && i.status === 'available')
+
   const fileInputRef = useRef<HTMLInputElement>(null)
   const cameraInputRef = useRef<HTMLInputElement>(null)
 
@@ -928,6 +982,183 @@ export default function PropertyDetail() {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Room Measurements & Fit Checker */}
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+              <Ruler size={16} className="text-teal-600" />
+              Room Measurements
+            </h2>
+            <button
+              onClick={() => setShowAddRoom(!showAddRoom)}
+              className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
+            >
+              <PlusCircle size={14} />
+              Add Room
+            </button>
+          </div>
+
+          <p className="text-xs text-slate-500">
+            Measure each room to check which furniture will fit before you move it.
+          </p>
+
+          {/* Add room form */}
+          {showAddRoom && (
+            <div className="border border-teal-200 bg-teal-50/50 rounded-lg p-4 space-y-3">
+              <h3 className="text-sm font-medium text-slate-700">Add Room</h3>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Room Name</label>
+                  <input
+                    value={roomForm.name}
+                    onChange={(e) => setRoomForm({ ...roomForm, name: e.target.value })}
+                    placeholder="e.g. Living Room"
+                    className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-teal-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Length (ft)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={roomForm.length_ft || ''}
+                    onChange={(e) => setRoomForm({ ...roomForm, length_ft: e.target.value === '' ? 0 : +e.target.value })}
+                    placeholder="ft"
+                    className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-teal-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Width (ft)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={roomForm.width_ft || ''}
+                    onChange={(e) => setRoomForm({ ...roomForm, width_ft: e.target.value === '' ? 0 : +e.target.value })}
+                    placeholder="ft"
+                    className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-teal-500"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleAddRoom}
+                  disabled={!roomForm.name || !roomForm.length_ft || !roomForm.width_ft}
+                  className="px-4 py-2 bg-teal-600 text-white text-sm rounded-lg hover:bg-teal-700 disabled:opacity-50"
+                >
+                  Save Room
+                </button>
+                <button
+                  onClick={() => setShowAddRoom(false)}
+                  className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Room list */}
+          {rooms.length > 0 ? (
+            <div className="space-y-2">
+              {rooms.map((room) => (
+                <div key={room.id} className="flex items-center justify-between px-4 py-3 bg-teal-50 rounded-lg group">
+                  <div>
+                    <span className="text-sm font-medium text-slate-700">{room.name}</span>
+                    <span className="text-xs text-teal-600 ml-2">
+                      {room.length_ft}' x {room.width_ft}' ({(room.length_ft * room.width_ft).toFixed(0)} sq ft)
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => handleDeleteRoom(room.id)}
+                    className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 p-1"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-6 bg-slate-50 rounded-lg">
+              <Ruler size={28} className="mx-auto text-slate-300 mb-2" />
+              <p className="text-xs text-slate-400">No rooms measured yet. Add a room to start checking furniture fit.</p>
+            </div>
+          )}
+
+          {/* Fit Checker */}
+          {rooms.length > 0 && (
+            <div className="border-t border-slate-100 pt-4">
+              <button
+                onClick={() => setShowFitChecker(!showFitChecker)}
+                className="flex items-center gap-2 text-sm font-medium text-teal-700 hover:text-teal-800 mb-3"
+              >
+                {showFitChecker ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                Fit Checker — Will It Fit?
+              </button>
+
+              {showFitChecker && (
+                <div className="space-y-3">
+                  {measuredItems.length === 0 ? (
+                    <p className="text-xs text-slate-400 bg-slate-50 rounded-lg p-4 text-center">
+                      No items have dimensions recorded. Add measurements to items in inventory to use the fit checker.
+                    </p>
+                  ) : (
+                    rooms.map((room) => {
+                      const roomLengthIn = room.length_ft * 12
+                      const roomWidthIn = room.width_ft * 12
+
+                      return (
+                        <div key={room.id} className="bg-slate-50 rounded-lg p-4">
+                          <h4 className="text-sm font-semibold text-slate-700 mb-2">
+                            {room.name} <span className="text-xs font-normal text-slate-500">({room.length_ft}' x {room.width_ft}')</span>
+                          </h4>
+                          <div className="space-y-1">
+                            {measuredItems.map((item) => {
+                              // Check both orientations (item can be rotated)
+                              const fitsNormal =
+                                item.length_inches <= roomLengthIn && item.width_inches <= roomWidthIn
+                              const fitsRotated =
+                                item.width_inches <= roomLengthIn && item.length_inches <= roomWidthIn
+                              const fits = fitsNormal || fitsRotated
+
+                              return (
+                                <div
+                                  key={item.id}
+                                  className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm ${
+                                    fits ? 'bg-green-50' : 'bg-red-50'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    {fits ? (
+                                      <CheckCircle2 size={14} className="text-green-500 flex-shrink-0" />
+                                    ) : (
+                                      <XCircle size={14} className="text-red-400 flex-shrink-0" />
+                                    )}
+                                    <span className={`truncate ${fits ? 'text-green-700' : 'text-red-600'}`}>
+                                      {item.name}
+                                    </span>
+                                  </div>
+                                  <span className="text-xs text-slate-500 flex-shrink-0 ml-2">
+                                    {item.length_inches}" x {item.width_inches}"
+                                    {item.height_inches > 0 && ` x ${item.height_inches}"`}
+                                  </span>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>

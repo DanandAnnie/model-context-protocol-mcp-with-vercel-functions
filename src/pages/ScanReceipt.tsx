@@ -370,6 +370,9 @@ export default function ScanReceipt() {
           current_storage_id: locationType === 'storage' ? selectedStorageId : null,
           current_property_id: locationType === 'property' ? selectedPropertyId : null,
           status: locationType === 'property' ? 'staged' : 'available',
+          length_inches: 0,
+          width_inches: 0,
+          height_inches: 0,
         }
 
         try {

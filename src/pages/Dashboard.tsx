@@ -12,6 +12,12 @@ import {
   CheckCircle2,
   Clock,
   CreditCard,
+  PlusCircle,
+  Receipt,
+  Zap,
+  FileText,
+  FileSpreadsheet,
+  Settings,
 } from 'lucide-react'
 import StatsCard from '../components/StatsCard'
 import ItemCard from '../components/ItemCard'
@@ -318,44 +324,131 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Quick links */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Link
-          to="/properties"
-          className="flex items-center gap-4 p-4 bg-white rounded-xl border border-slate-200 hover:border-blue-300 hover:shadow-sm transition-all"
-        >
-          <div className="p-3 bg-blue-50 rounded-lg">
-            <Home size={20} className="text-blue-700" />
-          </div>
-          <div>
-            <p className="font-medium">{properties.length} Properties</p>
-            <p className="text-xs text-slate-500">View and manage properties</p>
-          </div>
-        </Link>
-        <Link
-          to="/storage"
-          className="flex items-center gap-4 p-4 bg-white rounded-xl border border-slate-200 hover:border-blue-300 hover:shadow-sm transition-all"
-        >
-          <div className="p-3 bg-amber-50 rounded-lg">
-            <Warehouse size={20} className="text-amber-700" />
-          </div>
-          <div>
-            <p className="font-medium">{units.length} Storage Units</p>
-            <p className="text-xs text-slate-500">${units.reduce((s, u) => s + u.monthly_cost, 0).toLocaleString()}/mo</p>
-          </div>
-        </Link>
-        <Link
-          to="/staging-planner"
-          className="flex items-center gap-4 p-4 bg-white rounded-xl border border-slate-200 hover:border-blue-300 hover:shadow-sm transition-all"
-        >
-          <div className="p-3 bg-green-50 rounded-lg">
-            <TrendingUp size={20} className="text-green-700" />
-          </div>
-          <div>
-            <p className="font-medium">Staging Planner</p>
-            <p className="text-xs text-slate-500">Drag & drop items to stage</p>
-          </div>
-        </Link>
+      {/* Quick Access */}
+      <div>
+        <h2 className="text-lg font-semibold mb-3">Quick Access</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+          <Link
+            to="/properties"
+            className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-200 hover:border-blue-300 hover:shadow-sm transition-all min-h-[64px]"
+          >
+            <div className="p-2.5 bg-blue-50 rounded-lg flex-shrink-0">
+              <Home size={18} className="text-blue-700" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">Properties</p>
+              <p className="text-xs text-slate-500">{properties.length} active</p>
+            </div>
+          </Link>
+          <Link
+            to="/storage"
+            className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-200 hover:border-amber-300 hover:shadow-sm transition-all min-h-[64px]"
+          >
+            <div className="p-2.5 bg-amber-50 rounded-lg flex-shrink-0">
+              <Warehouse size={18} className="text-amber-700" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">Storage</p>
+              <p className="text-xs text-slate-500">{units.length} units</p>
+            </div>
+          </Link>
+          <Link
+            to="/inventory"
+            className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-200 hover:border-purple-300 hover:shadow-sm transition-all min-h-[64px]"
+          >
+            <div className="p-2.5 bg-purple-50 rounded-lg flex-shrink-0">
+              <Package size={18} className="text-purple-700" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">Inventory</p>
+              <p className="text-xs text-slate-500">{items.length} items</p>
+            </div>
+          </Link>
+          <Link
+            to="/add-item"
+            className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-200 hover:border-green-300 hover:shadow-sm transition-all min-h-[64px]"
+          >
+            <div className="p-2.5 bg-green-50 rounded-lg flex-shrink-0">
+              <PlusCircle size={18} className="text-green-700" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">Add Item</p>
+              <p className="text-xs text-slate-500">New to inventory</p>
+            </div>
+          </Link>
+          <Link
+            to="/scan-receipt"
+            className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-200 hover:border-rose-300 hover:shadow-sm transition-all min-h-[64px]"
+          >
+            <div className="p-2.5 bg-rose-50 rounded-lg flex-shrink-0">
+              <Receipt size={18} className="text-rose-700" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">Scan Receipt</p>
+              <p className="text-xs text-slate-500">OCR import</p>
+            </div>
+          </Link>
+          <Link
+            to="/staging-planner"
+            className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-200 hover:border-teal-300 hover:shadow-sm transition-all min-h-[64px]"
+          >
+            <div className="p-2.5 bg-teal-50 rounded-lg flex-shrink-0">
+              <ArrowRightLeft size={18} className="text-teal-700" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">Staging Planner</p>
+              <p className="text-xs text-slate-500">Move items</p>
+            </div>
+          </Link>
+          <Link
+            to="/deals"
+            className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-200 hover:border-orange-300 hover:shadow-sm transition-all min-h-[64px]"
+          >
+            <div className="p-2.5 bg-orange-50 rounded-lg flex-shrink-0">
+              <Zap size={18} className="text-orange-700" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">Deal Finder</p>
+              <p className="text-xs text-slate-500">Scan for deals</p>
+            </div>
+          </Link>
+          <Link
+            to="/tax-report"
+            className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-200 hover:border-indigo-300 hover:shadow-sm transition-all min-h-[64px]"
+          >
+            <div className="p-2.5 bg-indigo-50 rounded-lg flex-shrink-0">
+              <FileText size={18} className="text-indigo-700" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">Tax Report</p>
+              <p className="text-xs text-slate-500">Deductions</p>
+            </div>
+          </Link>
+          <Link
+            to="/year-end-summary"
+            className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-200 hover:border-cyan-300 hover:shadow-sm transition-all min-h-[64px]"
+          >
+            <div className="p-2.5 bg-cyan-50 rounded-lg flex-shrink-0">
+              <FileSpreadsheet size={18} className="text-cyan-700" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">Year End</p>
+              <p className="text-xs text-slate-500">Annual summary</p>
+            </div>
+          </Link>
+          <Link
+            to="/settings"
+            className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-200 hover:border-slate-400 hover:shadow-sm transition-all min-h-[64px]"
+          >
+            <div className="p-2.5 bg-slate-100 rounded-lg flex-shrink-0">
+              <Settings size={18} className="text-slate-600" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">Settings</p>
+              <p className="text-xs text-slate-500">Sync & team</p>
+            </div>
+          </Link>
+        </div>
       </div>
 
       {/* Recent activity */}

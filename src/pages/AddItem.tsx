@@ -237,25 +237,25 @@ export default function AddItem() {
           <label className="block text-sm font-medium text-slate-700 mb-2">Photo</label>
           <MultiPhotoCapture onPhotosChange={handlePhotosChange} label="Item Photos" />
           {aiIdentifying && (
-            <div className="mt-3 flex items-center gap-2 text-purple-600 bg-purple-50 rounded-lg px-4 py-2.5">
+            <div className="mt-3 flex items-center gap-2 text-purple-400 bg-purple-500/10 rounded-lg px-4 py-2.5">
               <Loader2 size={16} className="animate-spin" />
               <span className="text-sm font-medium">AI is identifying this item...</span>
             </div>
           )}
           {aiResult === 'success' && !aiIdentifying && (
-            <div className="mt-3 flex items-center gap-2 text-green-700 bg-green-50 rounded-lg px-4 py-2.5">
+            <div className="mt-3 flex items-center gap-2 text-green-400 bg-green-500/10 rounded-lg px-4 py-2.5">
               <Sparkles size={16} />
               <span className="text-sm font-medium">AI identified the item and filled in the details below. Review and adjust as needed.</span>
             </div>
           )}
           {aiResult === 'error' && !aiIdentifying && (
-            <div className="mt-3 text-sm text-amber-700 bg-amber-50 rounded-lg px-4 py-2.5">
+            <div className="mt-3 text-sm text-amber-400 bg-amber-500/10 rounded-lg px-4 py-2.5">
               <p>AI couldn&apos;t identify this item. Fill in the details manually.</p>
-              {aiErrorMsg && <p className="mt-1 text-xs text-amber-600">{aiErrorMsg}</p>}
+              {aiErrorMsg && <p className="mt-1 text-xs text-amber-300">{aiErrorMsg}</p>}
             </div>
           )}
           {aiResult === 'no_key' && (
-            <div className="mt-3 flex items-center gap-2 text-purple-700 bg-purple-50 rounded-lg px-4 py-2.5">
+            <div className="mt-3 flex items-center gap-2 text-purple-300 bg-purple-500/10 rounded-lg px-4 py-2.5">
               <Brain size={16} />
               <span className="text-sm">
                 Add your Anthropic API key in{' '}
@@ -452,16 +452,16 @@ export default function AddItem() {
                 : 'Measure the furniture or tap "MagicPlan" to use your phone\'s AR measurement.'}
           </p>
           {aiMeasureResult && (
-            <div className="flex items-start gap-2 text-xs bg-teal-50 text-teal-700 rounded-lg px-3 py-2">
+            <div className="flex items-start gap-2 text-xs bg-teal-500/10 text-teal-400 rounded-lg px-3 py-2">
               <Sparkles size={14} className="flex-shrink-0 mt-0.5" />
               <div>
                 <span className="font-medium">AI estimated ({aiMeasureResult.confidence} confidence)</span>
-                {aiMeasureResult.notes && <span className="text-teal-600"> — {aiMeasureResult.notes}</span>}
+                {aiMeasureResult.notes && <span className="text-teal-300"> — {aiMeasureResult.notes}</span>}
               </div>
             </div>
           )}
           {aiMeasureError && (
-            <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{aiMeasureError}</p>
+            <p className="text-xs text-red-400 bg-red-500/10 rounded-lg px-3 py-2">{aiMeasureError}</p>
           )}
           <div className="grid grid-cols-3 gap-4">
             <div>
@@ -572,8 +572,8 @@ export default function AddItem() {
               onClick={() => handleLocationTypeChange('storage')}
               className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium border transition-colors ${
                 form.current_location_type === 'storage'
-                  ? 'bg-blue-50 border-blue-300 text-blue-700'
-                  : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                  ? 'bg-violet-600/20 border-violet-500/40 text-violet-300'
+                  : 'border-slate-600 text-slate-400 hover:bg-slate-700'
               }`}
             >
               Storage Unit
@@ -583,8 +583,8 @@ export default function AddItem() {
               onClick={() => handleLocationTypeChange('property')}
               className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium border transition-colors ${
                 form.current_location_type === 'property'
-                  ? 'bg-blue-50 border-blue-300 text-blue-700'
-                  : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                  ? 'bg-violet-600/20 border-violet-500/40 text-violet-300'
+                  : 'border-slate-600 text-slate-400 hover:bg-slate-700'
               }`}
             >
               Property
@@ -651,8 +651,8 @@ export default function AddItem() {
 
             <div className="space-y-3">
               <div className="bg-violet-50 rounded-lg p-3 space-y-2">
-                <p className="text-sm font-medium text-violet-800">How to use:</p>
-                <ol className="text-xs text-violet-700 space-y-1 list-decimal list-inside">
+                <p className="text-sm font-medium text-violet-300">How to use:</p>
+                <ol className="text-xs text-violet-400 space-y-1 list-decimal list-inside">
                   <li>Open MagicPlan on your phone</li>
                   <li>Use AR measurement to measure the item</li>
                   <li>Copy the dimensions from the app</li>

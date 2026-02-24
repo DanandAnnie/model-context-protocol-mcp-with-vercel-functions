@@ -12,13 +12,13 @@ import ItemCard from '../components/ItemCard'
 import type { ItemCategory, ItemStatus, ItemCondition } from '../lib/database.types'
 
 const CATEGORIES: { key: ItemCategory; label: string; icon: typeof Package; color: string; bg: string }[] = [
-  { key: 'kitchen & dining', label: 'Kitchen & Dining', icon: UtensilsCrossed, color: 'text-orange-600', bg: 'bg-orange-50 border-orange-200' },
-  { key: 'bedroom', label: 'Bedroom', icon: Bed, color: 'text-indigo-600', bg: 'bg-indigo-50 border-indigo-200' },
-  { key: 'living room', label: 'Living Room', icon: Sofa, color: 'text-blue-600', bg: 'bg-blue-50 border-blue-200' },
-  { key: 'office', label: 'Office', icon: Monitor, color: 'text-slate-600', bg: 'bg-slate-50 border-slate-200' },
-  { key: 'bathroom', label: 'Bathroom', icon: Bath, color: 'text-cyan-600', bg: 'bg-cyan-50 border-cyan-200' },
-  { key: 'outdoor', label: 'Outdoor', icon: TreePine, color: 'text-green-600', bg: 'bg-green-50 border-green-200' },
-  { key: 'other', label: 'Other', icon: MoreHorizontal, color: 'text-gray-600', bg: 'bg-gray-50 border-gray-200' },
+  { key: 'kitchen & dining', label: 'Kitchen & Dining', icon: UtensilsCrossed, color: 'text-orange-400', bg: 'bg-orange-500/10 border-orange-500/30' },
+  { key: 'bedroom', label: 'Bedroom', icon: Bed, color: 'text-indigo-400', bg: 'bg-indigo-500/10 border-indigo-500/30' },
+  { key: 'living room', label: 'Living Room', icon: Sofa, color: 'text-blue-400', bg: 'bg-blue-500/10 border-blue-500/30' },
+  { key: 'office', label: 'Office', icon: Monitor, color: 'text-slate-400', bg: 'bg-slate-500/10 border-slate-500/30' },
+  { key: 'bathroom', label: 'Bathroom', icon: Bath, color: 'text-cyan-400', bg: 'bg-cyan-500/10 border-cyan-500/30' },
+  { key: 'outdoor', label: 'Outdoor', icon: TreePine, color: 'text-green-400', bg: 'bg-green-500/10 border-green-500/30' },
+  { key: 'other', label: 'Other', icon: MoreHorizontal, color: 'text-gray-400', bg: 'bg-gray-500/10 border-gray-500/30' },
 ]
 
 const STATUSES: ItemStatus[] = ['available', 'staged', 'damaged', 'retired']
@@ -215,8 +215,8 @@ export default function Inventory() {
             onClick={() => setShowFilters(!showFilters)}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm border transition-colors ${
               showFilters
-                ? 'bg-blue-50 border-blue-300 text-blue-700'
-                : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+                ? 'bg-violet-600/20 border-violet-500/40 text-violet-300'
+                : 'border-slate-600 text-slate-400 hover:bg-slate-700'
             }`}
           >
             <Filter size={16} />
@@ -281,12 +281,12 @@ export default function Inventory() {
 
         {/* Bulk action toolbar */}
         {selectedIds.size > 0 && (
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-center justify-between gap-3 sticky top-0 z-10">
+          <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-3 flex items-center justify-between gap-3 sticky top-0 z-10">
             <div className="flex items-center gap-2">
-              <button onClick={selectAll} className="text-xs text-blue-600 hover:text-blue-700">
+              <button onClick={selectAll} className="text-xs text-blue-400 hover:text-blue-300">
                 {selectedIds.size === filtered.length ? 'Deselect All' : 'Select All'}
               </button>
-              <span className="text-sm font-medium text-blue-800">
+              <span className="text-sm font-medium text-blue-300">
                 {selectedIds.size} selected
               </span>
             </div>
@@ -297,7 +297,7 @@ export default function Inventory() {
                 onChange={(e) => {
                   if (e.target.value) handleBulkStatusChange(e.target.value as ItemStatus)
                 }}
-                className="px-2 py-1.5 border border-blue-300 rounded text-xs bg-white"
+                className="px-2 py-1.5 border border-blue-500/40 rounded text-xs bg-slate-800"
               >
                 <option value="">Set Status...</option>
                 {STATUSES.map((s) => (
@@ -309,7 +309,7 @@ export default function Inventory() {
               <select
                 value={bulkMoveTarget}
                 onChange={(e) => setBulkMoveTarget(e.target.value)}
-                className="px-2 py-1.5 border border-blue-300 rounded text-xs bg-white max-w-[140px]"
+                className="px-2 py-1.5 border border-blue-500/40 rounded text-xs bg-slate-800 max-w-[140px]"
               >
                 <option value="">Move to...</option>
                 <optgroup label="Properties">
@@ -373,7 +373,7 @@ export default function Inventory() {
                 onClick={() => {
                   if (confirm(`Delete "${item.name}"?`)) deleteItem(item.id)
                 }}
-                className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 text-xs px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition-all"
+                className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 text-xs px-2 py-1 bg-red-500/15 text-red-400 rounded hover:bg-red-500/25 transition-all"
               >
                 Delete
               </button>
@@ -413,11 +413,11 @@ export default function Inventory() {
       {/* All Items button */}
       <button
         onClick={() => setActiveCategory('all')}
-        className="w-full flex items-center justify-between p-4 bg-white rounded-xl border border-slate-200 hover:border-blue-300 hover:shadow-sm transition-all"
+        className="w-full flex items-center justify-between p-4 bg-slate-800/60 rounded-xl border border-slate-700 hover:border-blue-500/50 hover:shadow-sm transition-all"
       >
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center">
-            <LayoutGrid size={20} className="text-blue-600" />
+          <div className="w-10 h-10 bg-blue-500/15 rounded-lg flex items-center justify-center">
+            <LayoutGrid size={20} className="text-blue-400" />
           </div>
           <div className="text-left">
             <p className="font-medium text-sm">All Items</p>

@@ -48,25 +48,25 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-amber-50 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-[#0c0c1d] flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         {/* Logo / Brand */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-900 rounded-2xl mb-4">
-            <Zap size={32} className="text-amber-400" />
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-violet-600/20 rounded-2xl mb-4">
+            <Zap size={32} className="text-violet-400" />
           </div>
-          <h1 className="text-2xl font-bold text-slate-900">Stage Manager</h1>
+          <h1 className="text-2xl font-bold text-white">Stage Manager</h1>
           <p className="text-slate-500 text-sm mt-1">Staging Inventory Manager</p>
         </div>
 
         {/* Auth card */}
-        <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
+        <div className="bg-[#141428] rounded-2xl shadow-lg border border-[#252545] p-6">
           {/* Tab toggle */}
-          <div className="flex bg-slate-100 rounded-lg p-1 mb-6">
+          <div className="flex bg-[#0c0c1d] rounded-lg p-1 mb-6">
             <button
               onClick={() => { setMode('login'); setError(''); setSuccess('') }}
               className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-colors ${
-                mode === 'login' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'
+                mode === 'login' ? 'bg-violet-600/20 text-violet-300 shadow-sm' : 'text-slate-500'
               }`}
             >
               <LogIn size={16} />
@@ -75,7 +75,7 @@ export default function Login() {
             <button
               onClick={() => { setMode('signup'); setError(''); setSuccess('') }}
               className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-colors ${
-                mode === 'signup' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'
+                mode === 'signup' ? 'bg-violet-600/20 text-violet-300 shadow-sm' : 'text-slate-500'
               }`}
             >
               <UserPlus size={16} />
@@ -149,7 +149,7 @@ export default function Login() {
             <button
               type="submit"
               disabled={submitting}
-              className="w-full py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              className="w-full py-2.5 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors"
             >
               {submitting ? 'Please wait...' : mode === 'login' ? 'Sign In' : 'Create Account'}
             </button>

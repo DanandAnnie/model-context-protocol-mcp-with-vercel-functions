@@ -49,14 +49,14 @@ export default function Layout() {
 
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-64 bg-blue-900 text-white transform transition-transform duration-200 ease-in-out lg:translate-x-0 lg:static lg:z-auto flex flex-col ${
+        className={`fixed inset-y-0 left-0 z-50 w-64 bg-[#0a0a18] text-white transform transition-transform duration-200 ease-in-out lg:translate-x-0 lg:static lg:z-auto flex flex-col ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        <div className="flex items-center justify-between h-16 px-4 border-b border-blue-800">
+        <div className="flex items-center justify-between h-16 px-4 border-b border-[#1a1a35]">
           <h1 className="text-lg font-bold tracking-tight">Stage Manager</h1>
           <button
-            className="lg:hidden p-1 rounded hover:bg-blue-800"
+            className="lg:hidden p-1 rounded hover:bg-[#1e1e3a]"
             onClick={() => setSidebarOpen(false)}
           >
             <X size={20} />
@@ -72,8 +72,8 @@ export default function Layout() {
               className={({ isActive }) =>
                 `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                   isActive
-                    ? 'bg-blue-800 text-white'
-                    : 'text-blue-200 hover:bg-blue-800/50 hover:text-white'
+                    ? 'bg-violet-600/20 text-violet-300 border-l-2 border-violet-500'
+                    : 'text-slate-500 hover:bg-[#151530] hover:text-white'
                 }`
               }
             >
@@ -85,23 +85,23 @@ export default function Layout() {
 
         {/* User footer */}
         {!isLocalMode && profile && (
-          <div className="border-t border-blue-800 p-3">
+          <div className="border-t border-[#1a1a35] p-3">
             <div className="flex items-center gap-2 mb-2">
-              <div className="w-8 h-8 bg-blue-700 rounded-full flex items-center justify-center flex-shrink-0">
-                <User size={14} className="text-blue-200" />
+              <div className="w-8 h-8 bg-violet-600/30 rounded-full flex items-center justify-center flex-shrink-0">
+                <User size={14} className="text-violet-300" />
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-white truncate">
                   {profile.display_name || profile.email.split('@')[0]}
                 </p>
                 {team && (
-                  <p className="text-xs text-blue-300 truncate">{team.name}</p>
+                  <p className="text-xs text-slate-500 truncate">{team.name}</p>
                 )}
               </div>
             </div>
             <button
               onClick={signOut}
-              className="flex items-center gap-2 w-full px-3 py-2 text-xs text-blue-300 hover:text-white hover:bg-blue-800 rounded-lg transition-colors"
+              className="flex items-center gap-2 w-full px-3 py-2 text-xs text-slate-500 hover:text-white hover:bg-[#1e1e3a] rounded-lg transition-colors"
             >
               <LogOut size={14} />
               Sign Out
@@ -112,9 +112,9 @@ export default function Layout() {
 
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center px-4 lg:px-6 sticky top-0 z-30">
+        <header className="h-16 bg-[#0a0a18] border-b border-[#1a1a35] flex items-center px-4 lg:px-6 sticky top-0 z-30">
           <button
-            className="lg:hidden p-2 -ml-2 rounded-lg hover:bg-slate-100"
+            className="lg:hidden p-2 -ml-2 rounded-lg hover:bg-[#1e1e3a] text-slate-500"
             onClick={() => setSidebarOpen(true)}
           >
             <Menu size={20} />

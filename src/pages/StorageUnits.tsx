@@ -143,7 +143,7 @@ export default function StorageUnits() {
                 <div className="flex items-center gap-3">
                   {!unit.photo_url && (
                     <div className="p-2.5 bg-amber-50 rounded-lg group-hover:bg-amber-100 transition-colors">
-                      <Warehouse size={18} className="text-amber-700" />
+                      <Warehouse size={18} className="text-amber-400" />
                     </div>
                   )}
                   <div>

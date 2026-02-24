@@ -9,10 +9,10 @@ interface StatsCardProps {
 }
 
 const colorMap = {
-  blue: 'bg-blue-50 text-blue-700',
-  green: 'bg-green-50 text-green-700',
-  amber: 'bg-amber-50 text-amber-700',
-  rose: 'bg-rose-50 text-rose-700',
+  blue: 'bg-blue-500/15 text-blue-400',
+  green: 'bg-green-500/15 text-green-400',
+  amber: 'bg-amber-500/15 text-amber-400',
+  rose: 'bg-rose-500/15 text-rose-400',
 }
 
 export default function StatsCard({ title, value, icon, subtitle, color = 'blue' }: StatsCardProps) {

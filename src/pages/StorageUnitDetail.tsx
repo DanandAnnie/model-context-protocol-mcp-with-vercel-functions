@@ -169,7 +169,7 @@ export default function StorageUnitDetail() {
       {/* Edit form */}
       <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
         <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-          <Warehouse size={16} className="text-amber-700" />
+          <Warehouse size={16} className="text-amber-400" />
           Unit Details
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -278,7 +278,7 @@ export default function StorageUnitDetail() {
             <p className="text-slate-400 text-sm">No items in this storage unit</p>
             <Link
               to="/add-item"
-              className="text-blue-600 text-sm mt-2 inline-block hover:text-blue-700"
+              className="text-blue-400 text-sm mt-2 inline-block hover:text-blue-300"
             >
               Add a new item
             </Link>

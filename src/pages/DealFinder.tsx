@@ -183,7 +183,7 @@ export default function DealFinder() {
               <span className="hidden sm:inline">Enable Alerts</span>
             </button>
           ) : (
-            <div className="flex items-center gap-1.5 px-3 py-2 text-sm text-green-600 bg-green-50 rounded-lg border border-green-200">
+            <div className="flex items-center gap-1.5 px-3 py-2 text-sm text-green-400 bg-green-500/10 rounded-lg border border-green-500/30">
               <Bell size={16} />
               <span className="hidden sm:inline">Alerts On</span>
             </div>
@@ -206,7 +206,7 @@ export default function DealFinder() {
         <div
           className={`rounded-lg p-3 text-sm flex items-center gap-2 ${
             scanResult.newCount > 0
-              ? 'bg-green-50 text-green-700 border border-green-200 cursor-pointer hover:bg-green-100 transition-colors'
+              ? 'bg-green-500/10 text-green-400 border border-green-500/30 cursor-pointer hover:bg-green-500/20 transition-colors'
               : 'bg-slate-50 text-slate-600 border border-slate-200'
           }`}
           onClick={scanResult.newCount > 0 ? () => {
@@ -251,7 +251,7 @@ export default function DealFinder() {
             onClick={() => setActiveTab(tab.key)}
             className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
               activeTab === tab.key
-                ? 'border-blue-600 text-blue-600'
+                ? 'border-violet-500 text-violet-300'
                 : 'border-transparent text-slate-500 hover:text-slate-700'
             }`}
           >
@@ -281,8 +281,10 @@ export default function DealFinder() {
             </div>
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm border ${
-                showFilters ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-slate-300 text-slate-600'
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm border transition-colors ${
+                showFilters
+                  ? 'bg-violet-600/20 border-violet-500/40 text-violet-300'
+                  : 'border-slate-600 text-slate-400 hover:bg-slate-700'
               }`}
             >
               <Filter size={16} />
@@ -352,12 +354,12 @@ export default function DealFinder() {
                         </span>
                       )}
                       {deal.discount_percent >= 40 && (
-                        <span className="px-1.5 py-0.5 bg-red-100 text-red-700 text-xs font-bold rounded">
+                        <span className="px-1.5 py-0.5 bg-red-500/20 text-red-400 text-xs font-bold rounded">
                           HOT
                         </span>
                       )}
                       {deal.discount_percent > 0 && (
-                        <span className="px-1.5 py-0.5 bg-green-100 text-green-700 text-xs font-semibold rounded">
+                        <span className="px-1.5 py-0.5 bg-green-500/20 text-green-400 text-xs font-semibold rounded">
                           -{deal.discount_percent}%
                         </span>
                       )}
@@ -371,7 +373,7 @@ export default function DealFinder() {
                     )}
                     <div className="flex items-center gap-3 mt-2">
                       {deal.sale_price > 0 && (
-                        <span className="text-lg font-bold text-green-700">${deal.sale_price.toLocaleString()}</span>
+                        <span className="text-lg font-bold text-green-400">${deal.sale_price.toLocaleString()}</span>
                       )}
                       {deal.original_price > 0 && deal.original_price !== deal.sale_price && (
                         <span className="text-sm text-slate-400 line-through">${deal.original_price.toLocaleString()}</span>
@@ -407,8 +409,8 @@ export default function DealFinder() {
                     onClick={() => updateDeal(deal.id, { is_saved: !deal.is_saved })}
                     className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border ${
                       deal.is_saved
-                        ? 'bg-amber-50 border-amber-300 text-amber-700'
-                        : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                        ? 'bg-amber-500/15 border-amber-500/40 text-amber-400'
+                        : 'border-slate-600 text-slate-400 hover:bg-slate-700'
                     }`}
                   >
                     {deal.is_saved ? <BookmarkCheck size={12} /> : <Bookmark size={12} />}
@@ -466,7 +468,7 @@ export default function DealFinder() {
 
           {/* Add watch form */}
           {showAddWatch && (
-            <div className="bg-amber-50/50 border border-amber-200 rounded-xl p-4 space-y-3">
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 space-y-3">
               <h3 className="text-sm font-medium text-slate-700">New Watch Alert</h3>
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2">
@@ -581,8 +583,8 @@ export default function DealFinder() {
                       onClick={() => updateWatch(watch.id, { active: !watch.active })}
                       className={`p-1.5 rounded ${
                         watch.active
-                          ? 'text-green-600 hover:bg-green-50'
-                          : 'text-slate-400 hover:bg-slate-50'
+                          ? 'text-green-400 hover:bg-green-500/10'
+                          : 'text-slate-400 hover:bg-slate-700'
                       }`}
                       title={watch.active ? 'Pause' : 'Resume'}
                     >
@@ -590,7 +592,7 @@ export default function DealFinder() {
                     </button>
                     <button
                       onClick={() => { if (confirm('Delete this watch?')) deleteWatch(watch.id) }}
-                      className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded"
+                      className="p-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded"
                     >
                       <Trash2 size={14} />
                     </button>
@@ -623,7 +625,7 @@ export default function DealFinder() {
       )}
 
       {/* How it works */}
-      <div className="bg-slate-50 rounded-xl border border-slate-200 p-5 space-y-3">
+      <div className="bg-slate-800/60 rounded-xl border border-slate-700 p-5 space-y-3">
         <h2 className="text-sm font-semibold text-slate-700">How Deal Finder Works</h2>
         <div className="text-xs text-slate-500 space-y-2">
           <p><strong>1. Set up watches</strong> — Tell us what furniture you're looking for (keywords, category, price range, minimum discount).</p>

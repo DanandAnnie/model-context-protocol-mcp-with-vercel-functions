@@ -222,7 +222,7 @@ export default function MultiPhotoCapture({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 text-sm rounded-lg hover:bg-slate-200"
+              className="flex items-center gap-2 px-4 py-2 bg-[#1a1a32] text-slate-700 text-sm rounded-lg hover:bg-[#252545]"
             >
               <Upload size={16} />
               Upload
@@ -245,7 +245,7 @@ export default function MultiPhotoCapture({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-700 text-xs font-medium rounded-lg hover:bg-slate-200"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1a1a32] text-slate-700 text-xs font-medium rounded-lg hover:bg-[#252545]"
           >
             <Upload size={14} />
             Upload

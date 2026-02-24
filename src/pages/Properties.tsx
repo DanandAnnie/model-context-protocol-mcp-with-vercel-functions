@@ -245,7 +245,7 @@ export default function Properties() {
                   <div className="flex items-center gap-3">
                     {!prop.photo_url && (
                       <div className="p-2.5 bg-blue-50 rounded-lg group-hover:bg-blue-100 transition-colors">
-                        <Home size={18} className="text-blue-700" />
+                        <Home size={18} className="text-blue-400" />
                       </div>
                     )}
                     <div>
@@ -296,7 +296,7 @@ export default function Properties() {
                 e.stopPropagation()
                 setDeleteTarget({ id: prop.id, name: prop.name })
               }}
-              className="absolute top-3 right-3 z-10 p-2.5 rounded-lg bg-white/80 hover:bg-red-50 text-slate-400 hover:text-red-500 transition-all shadow-sm"
+              className="absolute top-3 right-3 z-10 p-2.5 rounded-lg bg-slate-800/80 hover:bg-red-900/60 text-slate-400 hover:text-red-400 transition-all shadow-sm"
               title="Delete property"
             >
               <Trash2 size={16} />

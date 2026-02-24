@@ -9,17 +9,17 @@ interface ItemCardProps {
 }
 
 const statusColors: Record<string, string> = {
-  available: 'bg-green-100 text-green-800',
-  staged: 'bg-blue-100 text-blue-800',
-  damaged: 'bg-red-100 text-red-800',
-  retired: 'bg-slate-100 text-slate-800',
+  available: 'bg-green-500/20 text-green-400',
+  staged: 'bg-blue-500/20 text-blue-400',
+  damaged: 'bg-red-500/20 text-red-400',
+  retired: 'bg-slate-300/20 text-slate-500',
 }
 
 const conditionColors: Record<string, string> = {
-  excellent: 'text-green-600',
-  good: 'text-blue-600',
-  fair: 'text-amber-600',
-  poor: 'text-red-600',
+  excellent: 'text-green-400',
+  good: 'text-blue-400',
+  fair: 'text-amber-400',
+  poor: 'text-red-400',
 }
 
 export default function ItemCard({ item, locationName, compact, onClick }: ItemCardProps) {

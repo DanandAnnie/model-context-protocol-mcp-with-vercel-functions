@@ -505,8 +505,8 @@ export default function ScanReceipt() {
                 onClick={() => setLocationType('property')}
                 className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium border transition-colors ${
                   locationType === 'property'
-                    ? 'bg-blue-50 border-blue-300 text-blue-700'
-                    : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                    ? 'bg-violet-600/20 border-violet-500/40 text-violet-300'
+                    : 'border-slate-600 text-slate-400 hover:bg-slate-700'
                 }`}
               >
                 Property
@@ -516,8 +516,8 @@ export default function ScanReceipt() {
                 onClick={() => setLocationType('storage')}
                 className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium border transition-colors ${
                   locationType === 'storage'
-                    ? 'bg-blue-50 border-blue-300 text-blue-700'
-                    : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                    ? 'bg-violet-600/20 border-violet-500/40 text-violet-300'
+                    : 'border-slate-600 text-slate-400 hover:bg-slate-700'
                 }`}
               >
                 Storage Unit
@@ -604,8 +604,8 @@ export default function ScanReceipt() {
               </button>
             ) : (
               <div className="rounded-lg border border-dashed border-purple-300 bg-purple-50 p-3 text-center">
-                <p className="text-sm text-purple-700 font-medium">AI Item Identification</p>
-                <p className="text-xs text-purple-500 mt-1">
+                <p className="text-sm text-purple-300 font-medium">AI Item Identification</p>
+                <p className="text-xs text-purple-400 mt-1">
                   Add your Anthropic API key in <a href="#/settings" onClick={(e) => { e.preventDefault(); navigate('/settings') }} className="underline font-medium">Settings</a> to auto-identify items from photos
                 </p>
               </div>
@@ -796,7 +796,7 @@ export default function ScanReceipt() {
           {/* Summary and save */}
           <div className="bg-blue-50 rounded-xl border border-blue-200 p-4 flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-blue-900">
+              <p className="text-sm font-medium text-blue-300">
                 {includedCount} item{includedCount !== 1 ? 's' : ''} selected
               </p>
               <p className="text-xs text-blue-600">

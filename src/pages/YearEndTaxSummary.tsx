@@ -552,7 +552,7 @@ export default function YearEndTaxSummary() {
                 {depreciationData.map(({ item, dep }) => (
                   <tr key={item.id} className="border-t border-slate-100 hover:bg-slate-50">
                     <td className="px-3 py-2">
-                      <Link to={`/items/${item.id}`} className="font-medium text-blue-700 hover:underline no-print">{item.name}</Link>
+                      <Link to={`/items/${item.id}`} className="font-medium text-blue-400 hover:underline no-print">{item.name}</Link>
                       <span className="hidden print:inline font-medium">{item.name}</span>
                       <p className="text-xs text-slate-400 capitalize">{item.category}</p>
                     </td>
@@ -610,7 +610,7 @@ export default function YearEndTaxSummary() {
                   {newAcquisitions.map(item => (
                     <tr key={item.id} className="border-t border-slate-100 hover:bg-slate-50">
                       <td className="px-3 py-2">
-                        <Link to={`/items/${item.id}`} className="font-medium text-blue-700 hover:underline no-print">{item.name}</Link>
+                        <Link to={`/items/${item.id}`} className="font-medium text-blue-400 hover:underline no-print">{item.name}</Link>
                         <span className="hidden print:inline font-medium">{item.name}</span>
                         <p className="text-xs text-slate-400 capitalize">{item.category}</p>
                       </td>
@@ -683,7 +683,7 @@ export default function YearEndTaxSummary() {
                 </tbody>
               </table>
             </div>
-            <div className="mt-2 p-3 bg-amber-50 rounded-lg text-xs text-amber-700 flex items-start gap-2">
+            <div className="mt-2 p-3 bg-amber-500/10 rounded-lg text-xs text-amber-400 flex items-start gap-2">
               <Info size={14} className="mt-0.5 flex-shrink-0" />
               <span>Remaining book value on disposed assets may qualify as a deductible loss. Consult your tax professional for applicable treatment under IRS rules.</span>
             </div>
@@ -817,12 +817,12 @@ export default function YearEndTaxSummary() {
           )}
 
           {/* Expense Grand Total */}
-          <div className="p-4 bg-amber-50 rounded-lg">
+          <div className="p-4 bg-amber-500/10 rounded-lg">
             <div className="flex justify-between items-center">
-              <span className="text-sm font-semibold text-amber-800">Total Deductible Business Expenses</span>
-              <span className="text-lg font-bold text-amber-800">${fmt(totalBusinessExpenses)}</span>
+              <span className="text-sm font-semibold text-amber-300">Total Deductible Business Expenses</span>
+              <span className="text-lg font-bold text-amber-300">${fmt(totalBusinessExpenses)}</span>
             </div>
-            <p className="text-xs text-amber-600 mt-1">Storage rentals + property staging fees for the year</p>
+            <p className="text-xs text-amber-400 mt-1">Storage rentals + property staging fees for the year</p>
           </div>
         </CollapsibleSection>
 
@@ -878,18 +878,18 @@ export default function YearEndTaxSummary() {
           onToggle={() => toggleSection('section179')}
         >
           <div className="space-y-4">
-            <div className="p-4 bg-blue-50 rounded-lg text-sm text-blue-800">
+            <div className="p-4 bg-blue-500/10 rounded-lg text-sm text-blue-300">
               <p className="font-semibold mb-2">Section 179 Deduction</p>
               <p className="text-xs mb-2">
                 Under Section 179, businesses can deduct the full purchase price of qualifying equipment/furniture purchased during the tax year, instead of depreciating over time.
               </p>
               <div className="grid grid-cols-2 gap-4 mt-3 text-xs">
                 <div>
-                  <p className="text-blue-600 font-medium">IRS Deduction Limit</p>
+                  <p className="text-blue-400 font-medium">IRS Deduction Limit</p>
                   <p className="text-lg font-bold">${SECTION_179_LIMIT.toLocaleString()}</p>
                 </div>
                 <div>
-                  <p className="text-blue-600 font-medium">Phase-Out Threshold</p>
+                  <p className="text-blue-400 font-medium">Phase-Out Threshold</p>
                   <p className="text-lg font-bold">${SECTION_179_PHASE_OUT.toLocaleString()}</p>
                 </div>
               </div>
@@ -931,7 +931,7 @@ export default function YearEndTaxSummary() {
               <p className="text-sm text-slate-400 py-4 text-center">No eligible items for {selectedYear}</p>
             )}
 
-            <div className="p-3 bg-amber-50 rounded-lg text-xs text-amber-700 flex items-start gap-2">
+            <div className="p-3 bg-amber-500/10 rounded-lg text-xs text-amber-400 flex items-start gap-2">
               <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
               <div>
                 <p className="font-semibold">Important Tax Notes:</p>
@@ -1024,13 +1024,13 @@ function SummaryCard({
 
 function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
-    available: 'bg-green-100 text-green-700',
-    staged: 'bg-blue-100 text-blue-700',
-    damaged: 'bg-red-100 text-red-700',
-    retired: 'bg-slate-100 text-slate-500',
+    available: 'bg-green-500/20 text-green-400',
+    staged: 'bg-blue-500/20 text-blue-400',
+    damaged: 'bg-red-500/20 text-red-400',
+    retired: 'bg-slate-500/20 text-slate-400',
   }
   return (
-    <span className={`text-xs px-2 py-0.5 rounded-full capitalize ${styles[status] || 'bg-slate-100 text-slate-500'}`}>
+    <span className={`text-xs px-2 py-0.5 rounded-full capitalize ${styles[status] || 'bg-slate-500/20 text-slate-400'}`}>
       {status}
     </span>
   )

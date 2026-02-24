@@ -2,10 +2,14 @@ import { useState } from 'react'
 import {
   Settings as SettingsIcon, Cloud, CloudOff, Check, AlertTriangle,
   Smartphone, Brain, Eye, Building2, Download, Upload,
-  Users, Copy, UserPlus,
+  Users, Copy, UserPlus, FileSpreadsheet, HardDrive, Mail, Loader2, LogOut,
 } from 'lucide-react'
 import { isSupabaseConfigured, saveSupabaseConfig, getSupabaseConfig, supabase } from '../lib/supabase'
 import { getAnthropicKey, saveAnthropicKey, isAIConfigured } from '../lib/ai'
+import {
+  isGoogleConfigured, isGoogleClientIdSet, getGoogleClientId, saveGoogleClientId,
+  signInWithGoogle, clearGoogleToken, getGoogleEmail,
+} from '../lib/google'
 import { getCachedData, cacheData } from '../lib/offline'
 import { useAuth } from '../hooks/useAuth'
 
@@ -55,6 +59,32 @@ export default function Settings() {
   // Business profile
   const [profile, setProfile] = useState<BusinessProfile>(getBusinessProfile)
   const [profileSaved, setProfileSaved] = useState(false)
+
+  // Google integration
+  const [googleClientId, setGoogleClientId] = useState(getGoogleClientId())
+  const [googleConnecting, setGoogleConnecting] = useState(false)
+  const [googleError, setGoogleError] = useState('')
+  const [googleSaved, setGoogleSaved] = useState(false)
+  const googleConnected = isGoogleConfigured()
+  const googleEmail = getGoogleEmail()
+
+  const handleGoogleConnect = async () => {
+    setGoogleConnecting(true)
+    setGoogleError('')
+    try {
+      await signInWithGoogle()
+      window.location.reload()
+    } catch (err) {
+      setGoogleError(err instanceof Error ? err.message : 'Google sign-in failed')
+    } finally {
+      setGoogleConnecting(false)
+    }
+  }
+
+  const handleGoogleDisconnect = () => {
+    clearGoogleToken()
+    window.location.reload()
+  }
 
   // Data management
   const [exportStatus, setExportStatus] = useState<string | null>(null)
@@ -413,6 +443,134 @@ export default function Settings() {
               }}
             />
           </label>
+        </div>
+      </div>
+
+      {/* Google Integration */}
+      <div className={`rounded-xl border p-4 flex items-center gap-3 ${
+        googleConnected
+          ? 'bg-blue-50 border-blue-200'
+          : 'bg-slate-50 border-slate-200'
+      }`}>
+        {googleConnected ? (
+          <>
+            <div className="flex items-center gap-2">
+              <FileSpreadsheet size={20} className="text-blue-600" />
+              <div>
+                <p className="text-sm font-medium text-blue-800">Google Connected</p>
+                <p className="text-xs text-blue-600">{googleEmail || 'Sheets, Drive & Gmail enabled'}</p>
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <FileSpreadsheet size={20} className="text-slate-400" />
+            <div>
+              <p className="text-sm font-medium text-slate-700">Google Integration</p>
+              <p className="text-xs text-slate-500">Connect to export to Sheets, backup to Drive, and email reports</p>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+        <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+          <FileSpreadsheet size={16} />
+          Google Integration
+        </h2>
+        <div className="text-sm text-slate-600 space-y-2">
+          <p>Connect Google to enable these features:</p>
+          <ul className="text-xs text-slate-500 space-y-1.5 ml-1">
+            <li className="flex items-center gap-2">
+              <FileSpreadsheet size={12} className="text-green-600" />
+              <span><strong>Google Sheets</strong> — Export inventory, properties & financials to a spreadsheet</span>
+            </li>
+            <li className="flex items-center gap-2">
+              <HardDrive size={12} className="text-blue-600" />
+              <span><strong>Google Drive</strong> — Back up item & property photos to your Drive</span>
+            </li>
+            <li className="flex items-center gap-2">
+              <Mail size={12} className="text-red-500" />
+              <span><strong>Gmail</strong> — Email inventory reports and property summaries</span>
+            </li>
+          </ul>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Google OAuth Client ID</label>
+          <input
+            value={googleClientId}
+            onChange={(e) => { setGoogleClientId(e.target.value); setGoogleSaved(false) }}
+            placeholder="xxxxxxxxxxxx.apps.googleusercontent.com"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-xs"
+          />
+          <p className="text-xs text-slate-400 mt-1">
+            Create at <strong>console.cloud.google.com</strong> &gt; APIs &amp; Services &gt; Credentials &gt; OAuth 2.0 Client ID.
+            Enable Sheets, Drive, and Gmail APIs.
+          </p>
+        </div>
+
+        {googleSaved && (
+          <div className="flex items-center gap-2 text-sm text-green-600 bg-green-50 rounded-lg p-3">
+            <Check size={16} />
+            Client ID saved!
+          </div>
+        )}
+
+        {googleError && (
+          <div className="flex items-start gap-2 text-sm text-red-600 bg-red-50 rounded-lg p-3">
+            <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
+            <span>{googleError}</span>
+          </div>
+        )}
+
+        <div className="flex gap-3">
+          {!googleConnected ? (
+            <>
+              <button
+                onClick={() => {
+                  saveGoogleClientId(googleClientId.trim())
+                  setGoogleSaved(true)
+                  setTimeout(() => setGoogleSaved(false), 2000)
+                }}
+                disabled={!googleClientId.trim()}
+                className="px-4 py-2.5 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
+              >
+                Save Client ID
+              </button>
+              <button
+                onClick={handleGoogleConnect}
+                disabled={googleConnecting || !isGoogleClientIdSet()}
+                className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {googleConnecting ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    Connecting...
+                  </>
+                ) : (
+                  <>
+                    <FileSpreadsheet size={16} />
+                    Sign in with Google
+                  </>
+                )}
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="flex-1 flex items-center gap-2 text-sm text-blue-700 bg-blue-50 rounded-lg px-3 py-2.5">
+                <Check size={16} />
+                Connected as {googleEmail}
+              </div>
+              <button
+                onClick={handleGoogleDisconnect}
+                className="flex items-center gap-1.5 px-4 py-2.5 border border-slate-200 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50"
+              >
+                <LogOut size={14} />
+                Disconnect
+              </button>
+            </>
+          )}
         </div>
       </div>
 

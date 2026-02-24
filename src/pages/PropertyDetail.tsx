@@ -5,7 +5,7 @@ import {
   MapPin, DollarSign, Camera, X,
   PlusCircle, CreditCard, ChevronDown, ChevronUp,
   BarChart3, TrendingUp, Edit2, Ruler, CheckCircle2, XCircle,
-  Loader2, Sparkles,
+  Loader2, Sparkles, FileSpreadsheet, HardDrive, Mail,
 } from 'lucide-react'
 import { isAIConfigured, measureRoomFromImage } from '../lib/ai'
 import { useProperties } from '../hooks/useProperties'
@@ -15,6 +15,7 @@ import { usePropertyExpenses } from '../hooks/usePropertyExpenses'
 import ItemCard from '../components/ItemCard'
 import PhotoGallery from '../components/PhotoGallery'
 import { fileToBase64, getAllPhotos, addAdditionalPhoto, removeAdditionalPhoto, setAsPrimaryPhoto } from '../lib/photos'
+import { isGoogleConfigured, backupPhotosToGoogleDrive, exportToGoogleSheets, sendViaGmail, getGoogleEmail } from '../lib/google'
 import type { PropertyInsert, PropertyType, PaymentMethod, StagingPaymentInsert, PropertyExpenseInsert, ExpenseCategory } from '../lib/database.types'
 
 const PAYMENT_METHODS: { key: PaymentMethod; label: string }[] = [
@@ -107,6 +108,10 @@ export default function PropertyDetail() {
   const [aiRoomResult, setAiRoomResult] = useState<{ confidence: string; notes: string } | null>(null)
   const [aiRoomError, setAiRoomError] = useState('')
   const roomPhotoInputRef = useRef<HTMLInputElement>(null)
+  const [googleAction, setGoogleAction] = useState<'sheets' | 'drive' | 'email' | null>(null)
+  const [googleResult, setGoogleResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const [showEmailProperty, setShowEmailProperty] = useState(false)
+  const [emailPropertyTo, setEmailPropertyTo] = useState('')
 
   const handleAIRoomMeasure = async (file: File) => {
     setAiMeasuringRoom(true)
@@ -552,6 +557,160 @@ export default function PropertyDetail() {
           </>
         )}
       </button>
+
+      {/* Google Export Actions */}
+      {isGoogleConfigured() && (
+        <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
+          <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+            <FileSpreadsheet size={16} className="text-green-600" />
+            Google Tools
+          </h2>
+
+          {googleResult && (
+            <div className={`flex items-center gap-2 text-sm rounded-lg p-3 ${
+              googleResult.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
+            }`}>
+              <Check size={14} />
+              {googleResult.message}
+            </div>
+          )}
+
+          {showEmailProperty && (
+            <div className="flex items-end gap-2">
+              <div className="flex-1">
+                <label className="block text-xs text-slate-500 mb-1">Send property summary to</label>
+                <input
+                  type="email"
+                  value={emailPropertyTo}
+                  onChange={(e) => setEmailPropertyTo(e.target.value)}
+                  placeholder="recipient@example.com"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <button
+                onClick={async () => {
+                  if (!emailPropertyTo.trim()) return
+                  setGoogleAction('email')
+                  setGoogleResult(null)
+                  try {
+                    const html = `
+                      <div style="font-family: -apple-system, sans-serif; max-width: 600px; margin: 0 auto;">
+                        <h2 style="color: #1e40af;">${property.name} — Property Summary</h2>
+                        <p style="color: #64748b; font-size: 14px;">${[property.address, property.city].filter(Boolean).join(', ')}</p>
+                        <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 16px;">
+                          <tr><td style="padding: 8px; border-bottom: 1px solid #e2e8f0; color: #64748b;">Type</td><td style="padding: 8px; border-bottom: 1px solid #e2e8f0; font-weight: 600;">${property.property_type}</td></tr>
+                          <tr><td style="padding: 8px; border-bottom: 1px solid #e2e8f0; color: #64748b;">Beds / Baths</td><td style="padding: 8px; border-bottom: 1px solid #e2e8f0; font-weight: 600;">${property.bedrooms} / ${property.bathrooms}</td></tr>
+                          <tr><td style="padding: 8px; border-bottom: 1px solid #e2e8f0; color: #64748b;">Monthly Fee</td><td style="padding: 8px; border-bottom: 1px solid #e2e8f0; font-weight: 600;">$${monthlyFee.toLocaleString()}</td></tr>
+                          <tr><td style="padding: 8px; border-bottom: 1px solid #e2e8f0; color: #64748b;">Furniture Cost</td><td style="padding: 8px; border-bottom: 1px solid #e2e8f0; font-weight: 600;">$${furnitureCost.toLocaleString()}</td></tr>
+                          <tr><td style="padding: 8px; border-bottom: 1px solid #e2e8f0; color: #64748b;">Total Revenue</td><td style="padding: 8px; border-bottom: 1px solid #e2e8f0; font-weight: 600; color: #15803d;">$${totalRevenue.toLocaleString()}</td></tr>
+                          <tr><td style="padding: 8px; border-bottom: 1px solid #e2e8f0; color: #64748b;">Profit / Loss</td><td style="padding: 8px; border-bottom: 1px solid #e2e8f0; font-weight: 600; color: ${profitLoss >= 0 ? '#15803d' : '#dc2626'};">${profitLoss >= 0 ? '+' : '-'}$${Math.abs(profitLoss).toLocaleString()}</td></tr>
+                          <tr><td style="padding: 8px; border-bottom: 1px solid #e2e8f0; color: #64748b;">Staged Items</td><td style="padding: 8px; border-bottom: 1px solid #e2e8f0; font-weight: 600;">${propertyItems.length}</td></tr>
+                        </table>
+                        ${propertyItems.length > 0 ? `
+                          <h3 style="margin-top: 24px; color: #1e40af;">Staged Furniture</h3>
+                          <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px;">
+                            <tr style="background: #f1f5f9;"><th style="text-align: left; padding: 6px;">Item</th><th style="text-align: right; padding: 6px;">Value</th><th style="text-align: left; padding: 6px;">Condition</th></tr>
+                            ${propertyItems.map((i) => `<tr><td style="padding: 6px; border-bottom: 1px solid #e2e8f0;">${i.name}</td><td style="padding: 6px; border-bottom: 1px solid #e2e8f0; text-align: right;">$${i.value.toLocaleString()}</td><td style="padding: 6px; border-bottom: 1px solid #e2e8f0;">${i.condition}</td></tr>`).join('')}
+                          </table>
+                        ` : ''}
+                        <p style="color: #94a3b8; font-size: 12px; margin-top: 24px;">Sent from Staging Inventory Manager</p>
+                      </div>
+                    `
+                    await sendViaGmail(emailPropertyTo, `Property Summary: ${property.name}`, html)
+                    setGoogleResult({ type: 'success', message: `Summary emailed to ${emailPropertyTo}` })
+                    setShowEmailProperty(false)
+                    setEmailPropertyTo('')
+                  } catch (err) {
+                    setGoogleResult({ type: 'error', message: err instanceof Error ? err.message : 'Failed to send email' })
+                  } finally {
+                    setGoogleAction(null)
+                    setTimeout(() => setGoogleResult(null), 5000)
+                  }
+                }}
+                disabled={googleAction === 'email' || !emailPropertyTo.trim()}
+                className="px-4 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center gap-2"
+              >
+                {googleAction === 'email' ? <Loader2 size={14} className="animate-spin" /> : <Mail size={14} />}
+                Send
+              </button>
+              <button
+                onClick={() => setShowEmailProperty(false)}
+                className="px-3 py-2 text-sm text-slate-500 hover:bg-slate-100 rounded-lg"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <button
+              onClick={async () => {
+                setGoogleAction('sheets')
+                setGoogleResult(null)
+                try {
+                  const itemRows = propertyItems.map((i) => [i.name, i.category, i.condition, i.value, i.purchase_price || 0])
+                  const paymentRows = payments.map((p) => [p.amount, p.payment_date, p.payment_method, p.month_covered])
+                  const expenseRows = expenses.map((e) => [
+                    EXPENSE_CATEGORIES.find((c) => c.key === e.category)?.label || e.category,
+                    e.amount, e.description, e.expense_date || '',
+                  ])
+                  const url = await exportToGoogleSheets([
+                    { title: 'Staged Items', headers: ['Name', 'Category', 'Condition', 'Value', 'Purchase Price'], rows: itemRows },
+                    { title: 'Payments', headers: ['Amount', 'Date', 'Method', 'Month'], rows: paymentRows },
+                    { title: 'Expenses', headers: ['Category', 'Amount', 'Description', 'Date'], rows: expenseRows },
+                  ])
+                  setGoogleResult({ type: 'success', message: 'Spreadsheet created!' })
+                  window.open(url, '_blank')
+                } catch (err) {
+                  setGoogleResult({ type: 'error', message: err instanceof Error ? err.message : 'Export failed' })
+                } finally {
+                  setGoogleAction(null)
+                  setTimeout(() => setGoogleResult(null), 5000)
+                }
+              }}
+              disabled={googleAction !== null}
+              className="flex items-center justify-center gap-2 px-3 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+            >
+              {googleAction === 'sheets' ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
+              Export to Sheets
+            </button>
+            {allPhotos.length > 0 && (
+              <button
+                onClick={async () => {
+                  setGoogleAction('drive')
+                  setGoogleResult(null)
+                  try {
+                    const urls = await backupPhotosToGoogleDrive(property.name, allPhotos)
+                    setGoogleResult({ type: 'success', message: `${urls.length} photo${urls.length !== 1 ? 's' : ''} backed up` })
+                  } catch (err) {
+                    setGoogleResult({ type: 'error', message: err instanceof Error ? err.message : 'Backup failed' })
+                  } finally {
+                    setGoogleAction(null)
+                    setTimeout(() => setGoogleResult(null), 5000)
+                  }
+                }}
+                disabled={googleAction !== null}
+                className="flex items-center justify-center gap-2 px-3 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              >
+                {googleAction === 'drive' ? <Loader2 size={14} className="animate-spin" /> : <HardDrive size={14} />}
+                Backup Photos
+              </button>
+            )}
+            <button
+              onClick={() => {
+                setShowEmailProperty(true)
+                setEmailPropertyTo(getGoogleEmail())
+                setGoogleResult(null)
+              }}
+              disabled={googleAction !== null}
+              className="flex items-center justify-center gap-2 px-3 py-2.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
+            >
+              <Mail size={14} />
+              Email Summary
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Google Map */}
       {(form.address || form.city) && (

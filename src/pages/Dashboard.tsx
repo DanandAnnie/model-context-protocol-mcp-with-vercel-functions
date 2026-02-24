@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   Package,
@@ -19,6 +19,9 @@ import {
   FileSpreadsheet,
   Settings,
   Ruler,
+  Mail,
+  Loader2,
+  Check,
 } from 'lucide-react'
 import StatsCard from '../components/StatsCard'
 import ItemCard from '../components/ItemCard'
@@ -27,6 +30,7 @@ import { useProperties } from '../hooks/useProperties'
 import { useStorageUnits } from '../hooks/useStorageUnits'
 import { usePayments } from '../hooks/usePayments'
 import { usePropertyExpenses } from '../hooks/usePropertyExpenses'
+import { isGoogleConfigured, exportToGoogleSheets, emailInventoryReport, getGoogleEmail } from '../lib/google'
 
 export default function Dashboard() {
   const navigate = useNavigate()
@@ -35,6 +39,12 @@ export default function Dashboard() {
   const { units, loading: unitsLoading } = useStorageUnits()
   const { payments } = usePayments()
   const { expenses } = usePropertyExpenses()
+
+  // Google export state
+  const [exporting, setExporting] = useState<'sheets' | 'email' | null>(null)
+  const [exportResult, setExportResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const [emailTo, setEmailTo] = useState('')
+  const [showEmailInput, setShowEmailInput] = useState(false)
 
   const stats = useMemo(() => {
     const totalValue = items.reduce((sum, i) => sum + i.value, 0)
@@ -463,6 +473,150 @@ export default function Dashboard() {
           </Link>
         </div>
       </div>
+
+      {/* Google Export Tools */}
+      {isGoogleConfigured() && (
+        <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+          <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+            <FileSpreadsheet size={16} className="text-green-600" />
+            Google Export Tools
+          </h2>
+
+          {exportResult && (
+            <div className={`flex items-center gap-2 text-sm rounded-lg p-3 ${
+              exportResult.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
+            }`}>
+              {exportResult.type === 'success' ? <Check size={16} /> : <AlertCircle size={16} />}
+              <span>{exportResult.message}</span>
+            </div>
+          )}
+
+          {showEmailInput && (
+            <div className="flex items-end gap-2">
+              <div className="flex-1">
+                <label className="block text-xs text-slate-500 mb-1">Send report to email</label>
+                <input
+                  type="email"
+                  value={emailTo}
+                  onChange={(e) => setEmailTo(e.target.value)}
+                  placeholder="recipient@example.com"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <button
+                onClick={async () => {
+                  if (!emailTo.trim()) return
+                  setExporting('email')
+                  setExportResult(null)
+                  try {
+                    const reportItems = items.map((item) => ({
+                      name: item.name,
+                      category: item.category,
+                      value: item.value,
+                      condition: item.condition,
+                      location: item.current_location_type === 'property'
+                        ? properties.find((p) => p.id === item.current_property_id)?.name || 'Property'
+                        : units.find((u) => u.id === item.current_storage_id)?.name || 'Storage',
+                    }))
+                    await emailInventoryReport(emailTo, 'Staging Inventory Report', reportItems)
+                    setExportResult({ type: 'success', message: `Report emailed to ${emailTo}` })
+                    setShowEmailInput(false)
+                    setEmailTo('')
+                  } catch (err) {
+                    setExportResult({ type: 'error', message: err instanceof Error ? err.message : 'Failed to send email' })
+                  } finally {
+                    setExporting(null)
+                    setTimeout(() => setExportResult(null), 5000)
+                  }
+                }}
+                disabled={exporting === 'email' || !emailTo.trim()}
+                className="px-4 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center gap-2"
+              >
+                {exporting === 'email' ? <Loader2 size={14} className="animate-spin" /> : <Mail size={14} />}
+                Send
+              </button>
+              <button
+                onClick={() => setShowEmailInput(false)}
+                className="px-3 py-2 text-sm text-slate-500 hover:bg-slate-100 rounded-lg"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <button
+              onClick={async () => {
+                setExporting('sheets')
+                setExportResult(null)
+                try {
+                  const itemRows = items.map((i) => [
+                    i.name, i.category, i.subcategory, i.condition,
+                    i.value, i.purchase_price || 0, i.status,
+                    i.current_location_type === 'property'
+                      ? properties.find((p) => p.id === i.current_property_id)?.name || ''
+                      : units.find((u) => u.id === i.current_storage_id)?.name || '',
+                    i.date_acquired || '',
+                  ])
+                  const propRows = properties.map((p) => [
+                    p.name, p.address, p.city, p.property_type,
+                    p.bedrooms, p.bathrooms, p.sqft, p.monthly_fee,
+                    p.staging_start_date || '',
+                  ])
+                  const paymentRows = payments.map((p) => {
+                    const prop = properties.find((pr) => pr.id === p.property_id)
+                    return [prop?.name || '', p.amount, p.payment_date, p.payment_method, p.month_covered, p.notes]
+                  })
+                  const url = await exportToGoogleSheets([
+                    {
+                      title: 'Inventory',
+                      headers: ['Name', 'Category', 'Subcategory', 'Condition', 'Value', 'Purchase Price', 'Status', 'Location', 'Date Acquired'],
+                      rows: itemRows,
+                    },
+                    {
+                      title: 'Properties',
+                      headers: ['Name', 'Address', 'City', 'Type', 'Beds', 'Baths', 'Sq Ft', 'Monthly Fee', 'Start Date'],
+                      rows: propRows,
+                    },
+                    {
+                      title: 'Payments',
+                      headers: ['Property', 'Amount', 'Payment Date', 'Method', 'Month Covered', 'Notes'],
+                      rows: paymentRows,
+                    },
+                  ])
+                  setExportResult({ type: 'success', message: 'Spreadsheet created!' })
+                  window.open(url, '_blank')
+                } catch (err) {
+                  setExportResult({ type: 'error', message: err instanceof Error ? err.message : 'Export failed' })
+                } finally {
+                  setExporting(null)
+                  setTimeout(() => setExportResult(null), 5000)
+                }
+              }}
+              disabled={exporting !== null}
+              className="flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+            >
+              {exporting === 'sheets' ? (
+                <><Loader2 size={16} className="animate-spin" /> Exporting...</>
+              ) : (
+                <><FileSpreadsheet size={16} /> Export to Google Sheets</>
+              )}
+            </button>
+            <button
+              onClick={() => {
+                setShowEmailInput(true)
+                setEmailTo(getGoogleEmail())
+                setExportResult(null)
+              }}
+              disabled={exporting !== null}
+              className="flex items-center justify-center gap-2 px-4 py-3 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
+            >
+              <Mail size={16} />
+              Email Inventory Report
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Recent activity */}
       <div>

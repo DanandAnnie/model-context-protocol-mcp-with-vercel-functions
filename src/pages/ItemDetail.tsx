@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { ArrowLeft, Package, Save, Trash2, Check, AlertTriangle, ExternalLink, Copy, MapPin, DollarSign, Ruler, Camera, Loader2, Sparkles, Search, Smartphone, X } from 'lucide-react'
+import { ArrowLeft, Package, Save, Trash2, Check, AlertTriangle, ExternalLink, Copy, MapPin, DollarSign, Ruler, Camera, Loader2, Sparkles, Search, Smartphone, X, HardDrive } from 'lucide-react'
 import { useItems } from '../hooks/useItems'
 import { useProperties } from '../hooks/useProperties'
 import { useStorageUnits } from '../hooks/useStorageUnits'
@@ -8,6 +8,7 @@ import PhotoGallery from '../components/PhotoGallery'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { isAIConfigured, measureItemFromImage, lookupDimensions, getMagicPlanLink, parseDimensionText } from '../lib/ai'
 import { fileToBase64, getAllPhotos, addAdditionalPhoto, removeAdditionalPhoto, setAsPrimaryPhoto } from '../lib/photos'
+import { isGoogleConfigured, backupPhotosToGoogleDrive } from '../lib/google'
 import type { ItemInsert, ItemCategory, ItemCondition, ItemStatus, LocationType, PaymentMethod } from '../lib/database.types'
 
 const PAYMENT_METHODS: { key: PaymentMethod; label: string }[] = [
@@ -51,6 +52,8 @@ export default function ItemDetail() {
   const [showMagicPlanModal, setShowMagicPlanModal] = useState(false)
   const [magicPlanText, setMagicPlanText] = useState('')
   const [magicPlanError, setMagicPlanError] = useState('')
+  const [backingUpPhotos, setBackingUpPhotos] = useState(false)
+  const [backupResult, setBackupResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
   const handleMagicPlanImport = () => {
     setMagicPlanError('')
@@ -716,6 +719,43 @@ export default function ItemDetail() {
           Copy the listing details above, then paste them into your Facebook Marketplace listing.
         </p>
       </div>
+
+      {/* Google Actions */}
+      {isGoogleConfigured() && allPhotos.length > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          {backupResult && (
+            <div className={`flex items-center gap-2 text-sm rounded-lg p-3 mb-3 ${
+              backupResult.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
+            }`}>
+              <Check size={14} />
+              {backupResult.message}
+            </div>
+          )}
+          <button
+            onClick={async () => {
+              setBackingUpPhotos(true)
+              setBackupResult(null)
+              try {
+                const urls = await backupPhotosToGoogleDrive(item.name, allPhotos)
+                setBackupResult({ type: 'success', message: `${urls.length} photo${urls.length !== 1 ? 's' : ''} backed up to Google Drive` })
+              } catch (err) {
+                setBackupResult({ type: 'error', message: err instanceof Error ? err.message : 'Backup failed' })
+              } finally {
+                setBackingUpPhotos(false)
+                setTimeout(() => setBackupResult(null), 5000)
+              }
+            }}
+            disabled={backingUpPhotos}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+          >
+            {backingUpPhotos ? (
+              <><Loader2 size={16} className="animate-spin" /> Backing up photos...</>
+            ) : (
+              <><HardDrive size={16} /> Backup Photos to Google Drive</>
+            )}
+          </button>
+        </div>
+      )}
 
       {/* Location */}
       <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">

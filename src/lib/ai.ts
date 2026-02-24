@@ -224,6 +224,246 @@ Do NOT return 0 for any dimension.`,
   }
 }
 
+// ---- Fallback dimension lookup: web scraping + AI text + built-in table ----
+
+/**
+ * Built-in common furniture dimensions (inches).
+ * Used as ultimate fallback when no AI key and no internet.
+ */
+const COMMON_DIMENSIONS: Record<string, { l: number; w: number; h: number }> = {
+  // Living room
+  'sofa': { l: 84, w: 36, h: 34 },
+  'couch': { l: 84, w: 36, h: 34 },
+  'loveseat': { l: 60, w: 34, h: 34 },
+  'sectional': { l: 112, w: 84, h: 34 },
+  'recliner': { l: 38, w: 36, h: 40 },
+  'armchair': { l: 33, w: 32, h: 34 },
+  'accent chair': { l: 28, w: 30, h: 32 },
+  'coffee table': { l: 48, w: 24, h: 18 },
+  'end table': { l: 22, w: 22, h: 24 },
+  'side table': { l: 22, w: 22, h: 24 },
+  'console table': { l: 48, w: 14, h: 30 },
+  'tv stand': { l: 60, w: 18, h: 24 },
+  'media console': { l: 60, w: 18, h: 24 },
+  'bookshelf': { l: 36, w: 12, h: 72 },
+  'bookcase': { l: 36, w: 12, h: 72 },
+  'entertainment center': { l: 72, w: 20, h: 60 },
+  'ottoman': { l: 24, w: 24, h: 18 },
+  'floor lamp': { l: 15, w: 15, h: 62 },
+  'table lamp': { l: 12, w: 12, h: 26 },
+  // Bedroom
+  'king bed': { l: 80, w: 76, h: 50 },
+  'queen bed': { l: 80, w: 60, h: 50 },
+  'full bed': { l: 75, w: 54, h: 50 },
+  'twin bed': { l: 75, w: 38, h: 45 },
+  'dresser': { l: 60, w: 18, h: 34 },
+  'chest of drawers': { l: 36, w: 18, h: 50 },
+  'nightstand': { l: 24, w: 18, h: 26 },
+  'wardrobe': { l: 48, w: 24, h: 72 },
+  'vanity': { l: 42, w: 20, h: 30 },
+  'mirror': { l: 30, w: 2, h: 40 },
+  // Dining
+  'dining table': { l: 72, w: 36, h: 30 },
+  'kitchen table': { l: 48, w: 30, h: 30 },
+  'dining chair': { l: 20, w: 18, h: 38 },
+  'bar stool': { l: 16, w: 16, h: 30 },
+  'counter stool': { l: 16, w: 16, h: 26 },
+  'buffet': { l: 54, w: 18, h: 34 },
+  'sideboard': { l: 54, w: 18, h: 34 },
+  'china cabinet': { l: 42, w: 16, h: 72 },
+  'hutch': { l: 42, w: 18, h: 72 },
+  // Office
+  'desk': { l: 60, w: 30, h: 30 },
+  'office chair': { l: 24, w: 24, h: 42 },
+  'filing cabinet': { l: 18, w: 26, h: 29 },
+  'office desk': { l: 60, w: 30, h: 30 },
+  // Outdoor
+  'patio table': { l: 48, w: 48, h: 29 },
+  'patio chair': { l: 24, w: 22, h: 34 },
+  'outdoor sofa': { l: 72, w: 32, h: 32 },
+  'lounge chair': { l: 70, w: 28, h: 14 },
+  // Bathroom
+  'bathroom vanity': { l: 36, w: 21, h: 34 },
+  'linen cabinet': { l: 24, w: 16, h: 64 },
+  // General
+  'rug': { l: 96, w: 60, h: 1 },
+  'area rug': { l: 96, w: 60, h: 1 },
+  'shelf': { l: 36, w: 10, h: 36 },
+  'bench': { l: 48, w: 16, h: 18 },
+  'storage bench': { l: 42, w: 16, h: 18 },
+}
+
+/**
+ * Look up dimensions from built-in table by matching item name keywords.
+ */
+export function lookupCommonDimensions(name: string, category?: string): AIDimensions | null {
+  const lower = (name + ' ' + (category || '')).toLowerCase()
+
+  // Try exact match first, then partial match
+  for (const [key, dims] of Object.entries(COMMON_DIMENSIONS)) {
+    if (lower.includes(key)) {
+      return {
+        length_inches: dims.l,
+        width_inches: dims.w,
+        height_inches: dims.h,
+        confidence: 'low' as const,
+        notes: `Standard ${key} dimensions from built-in database`,
+      }
+    }
+  }
+
+  return null
+}
+
+/**
+ * Search the web for item dimensions via the Vercel API endpoint.
+ * Falls back gracefully if the API is unavailable.
+ */
+export async function lookupDimensionsFromWeb(itemName: string): Promise<AIDimensions | null> {
+  try {
+    const response = await fetch('/api/lookup-dimensions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: itemName }),
+    })
+
+    if (!response.ok) return null
+
+    const data = await response.json()
+    const results = data.results as Array<{
+      length_inches: number
+      width_inches: number
+      height_inches: number
+      product_name: string
+    }>
+
+    if (results && results.length > 0) {
+      const best = results[0]
+      return {
+        length_inches: best.length_inches,
+        width_inches: best.width_inches,
+        height_inches: best.height_inches || 0,
+        confidence: 'medium',
+        notes: `Found online: "${best.product_name}"`,
+      }
+    }
+  } catch {
+    // API not available (local dev, network error, etc.)
+  }
+  return null
+}
+
+/**
+ * Ask Claude (text only, no image) to estimate dimensions by item name.
+ * Cheaper than vision since no image is processed.
+ */
+export async function estimateDimensionsByName(
+  itemName: string,
+  category?: string,
+  subcategory?: string,
+): Promise<AIDimensions> {
+  const apiKey = getAnthropicKey()
+  if (!apiKey) {
+    throw new Error('Anthropic API key not configured.')
+  }
+
+  const context = [
+    itemName,
+    category ? `Category: ${category}` : '',
+    subcategory ? `Type: ${subcategory}` : '',
+  ].filter(Boolean).join('. ')
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 512,
+      messages: [
+        {
+          role: 'user',
+          content: `You are a furniture dimensions expert. Based on common manufacturer specifications and retail listings, estimate the typical dimensions of this item:
+
+"${context}"
+
+Search your knowledge of furniture catalogs, retailer product pages (Wayfair, IKEA, Ashley, Pottery Barn, Crate & Barrel, etc.), and standard furniture sizing.
+
+Return ONLY valid JSON:
+{"length_inches":0,"width_inches":0,"height_inches":0,"confidence":"medium","notes":"Source or reasoning"}
+
+- length_inches: Longest horizontal dimension
+- width_inches: Shorter horizontal dimension
+- height_inches: Vertical dimension
+- confidence: "high" if very standard item, "medium" if reasonable estimate, "low" if unusual item
+- notes: What standard/product you based this on
+
+Round to nearest inch. Do NOT return 0.`,
+        },
+      ],
+    }),
+  })
+
+  if (!response.ok) {
+    const err = await response.text()
+    throw new Error(`AI request failed: ${err}`)
+  }
+
+  const data = await response.json()
+  const text = data.content?.[0]?.text || '{}'
+
+  let jsonStr = text.trim()
+  if (jsonStr.startsWith('```')) {
+    jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
+  }
+
+  const result = JSON.parse(jsonStr)
+  return {
+    length_inches: Math.max(1, Math.round(Number(result.length_inches) || 0)),
+    width_inches: Math.max(1, Math.round(Number(result.width_inches) || 0)),
+    height_inches: Math.max(1, Math.round(Number(result.height_inches) || 0)),
+    confidence: ['high', 'medium', 'low'].includes(result.confidence) ? result.confidence : 'medium',
+    notes: typeof result.notes === 'string' ? result.notes : 'AI text-based estimate',
+  }
+}
+
+/**
+ * Smart dimension lookup with cascading fallbacks:
+ * 1. Web scraping (Vercel API)
+ * 2. AI text lookup (Claude, no image)
+ * 3. Built-in common dimensions table
+ */
+export async function lookupDimensions(
+  itemName: string,
+  category?: string,
+  subcategory?: string,
+): Promise<AIDimensions> {
+  // Try web scraping first (no API key needed, uses Vercel endpoint)
+  const webResult = await lookupDimensionsFromWeb(itemName)
+  if (webResult && webResult.length_inches > 0) {
+    return webResult
+  }
+
+  // Try AI text estimate (needs API key but no image)
+  if (isAIConfigured()) {
+    try {
+      return await estimateDimensionsByName(itemName, category, subcategory)
+    } catch {
+      // AI failed, fall through
+    }
+  }
+
+  // Fall back to built-in table
+  const builtIn = lookupCommonDimensions(itemName, category)
+  if (builtIn) return builtIn
+
+  throw new Error('Could not find dimensions. Try adding a photo for AI measurement, or enter dimensions manually.')
+}
+
 export interface AIIdentifiedItem {
   name: string
   category: 'kitchen & dining' | 'bedroom' | 'living room' | 'office' | 'bathroom' | 'outdoor' | 'other'

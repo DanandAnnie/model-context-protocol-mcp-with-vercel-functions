@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { ArrowLeft, Package, Save, Trash2, Check, AlertTriangle, ExternalLink, Copy, MapPin, DollarSign, Plus, ChevronLeft, ChevronRight, Ruler, Camera, Loader2, Sparkles } from 'lucide-react'
+import { ArrowLeft, Package, Save, Trash2, Check, AlertTriangle, ExternalLink, Copy, MapPin, DollarSign, Plus, ChevronLeft, ChevronRight, Ruler, Camera, Loader2, Sparkles, Search } from 'lucide-react'
 import { useItems } from '../hooks/useItems'
 import { useProperties } from '../hooks/useProperties'
 import { useStorageUnits } from '../hooks/useStorageUnits'
 import PhotoCapture from '../components/PhotoCapture'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
-import { isAIConfigured, measureItemFromImage } from '../lib/ai'
+import { isAIConfigured, measureItemFromImage, lookupDimensions } from '../lib/ai'
 import type { ItemInsert, ItemCategory, ItemCondition, ItemStatus, LocationType, PaymentMethod } from '../lib/database.types'
 
 const PAYMENT_METHODS: { key: PaymentMethod; label: string }[] = [
@@ -53,6 +53,7 @@ export default function ItemDetail() {
   const [deleting, setDeleting] = useState(false)
   const [copiedToClipboard, setCopiedToClipboard] = useState(false)
   const [aiMeasuring, setAiMeasuring] = useState(false)
+  const [aiLookingUp, setAiLookingUp] = useState(false)
   const [aiMeasureResult, setAiMeasureResult] = useState<{ confidence: string; notes: string } | null>(null)
   const [aiMeasureError, setAiMeasureError] = useState('')
 
@@ -548,21 +549,59 @@ export default function ItemDetail() {
             <Ruler size={16} className="text-teal-600" />
             Dimensions (inches)
           </h2>
-          {(currentImage || photo) && isAIConfigured() && (
+          <div className="flex items-center gap-2">
+            {(currentImage || photo) && isAIConfigured() && (
+              <button
+                type="button"
+                disabled={aiMeasuring || aiLookingUp}
+                onClick={async () => {
+                  setAiMeasuring(true)
+                  setAiMeasureResult(null)
+                  setAiMeasureError('')
+                  try {
+                    let base64 = currentImage || ''
+                    if (photo) {
+                      base64 = await fileToBase64(photo)
+                    }
+                    if (!base64) throw new Error('No photo available')
+                    const dims = await measureItemFromImage(base64, item.name)
+                    setForm((prev) => prev ? ({
+                      ...prev,
+                      length_inches: dims.length_inches,
+                      width_inches: dims.width_inches,
+                      height_inches: dims.height_inches,
+                    }) : prev)
+                    setAiMeasureResult({ confidence: dims.confidence, notes: dims.notes })
+                  } catch (err) {
+                    setAiMeasureError(err instanceof Error ? err.message : 'Measurement failed')
+                  } finally {
+                    setAiMeasuring(false)
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 text-white text-xs font-medium rounded-lg hover:bg-teal-700 disabled:opacity-50 transition-colors"
+              >
+                {aiMeasuring ? (
+                  <>
+                    <Loader2 size={12} className="animate-spin" />
+                    Measuring...
+                  </>
+                ) : (
+                  <>
+                    <Camera size={12} />
+                    AI Measure
+                  </>
+                )}
+              </button>
+            )}
             <button
               type="button"
-              disabled={aiMeasuring}
+              disabled={aiMeasuring || aiLookingUp}
               onClick={async () => {
-                setAiMeasuring(true)
+                setAiLookingUp(true)
                 setAiMeasureResult(null)
                 setAiMeasureError('')
                 try {
-                  let base64 = currentImage || ''
-                  if (photo) {
-                    base64 = await fileToBase64(photo)
-                  }
-                  if (!base64) throw new Error('No photo available')
-                  const dims = await measureItemFromImage(base64, item.name)
+                  const dims = await lookupDimensions(item.name, item.category, item.subcategory)
                   setForm((prev) => prev ? ({
                     ...prev,
                     length_inches: dims.length_inches,
@@ -571,26 +610,26 @@ export default function ItemDetail() {
                   }) : prev)
                   setAiMeasureResult({ confidence: dims.confidence, notes: dims.notes })
                 } catch (err) {
-                  setAiMeasureError(err instanceof Error ? err.message : 'Measurement failed')
+                  setAiMeasureError(err instanceof Error ? err.message : 'Lookup failed')
                 } finally {
-                  setAiMeasuring(false)
+                  setAiLookingUp(false)
                 }
               }}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 text-white text-xs font-medium rounded-lg hover:bg-teal-700 disabled:opacity-50 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
-              {aiMeasuring ? (
+              {aiLookingUp ? (
                 <>
                   <Loader2 size={12} className="animate-spin" />
-                  Measuring...
+                  Searching...
                 </>
               ) : (
                 <>
-                  <Camera size={12} />
-                  AI Measure
+                  <Search size={12} />
+                  Look Up
                 </>
               )}
             </button>
-          )}
+          </div>
         </div>
         {aiMeasureResult && (
           <div className="flex items-start gap-2 text-xs bg-teal-50 text-teal-700 rounded-lg px-3 py-2">

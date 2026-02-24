@@ -18,6 +18,7 @@ import {
   FileText,
   FileSpreadsheet,
   Settings,
+  Ruler,
 } from 'lucide-react'
 import StatsCard from '../components/StatsCard'
 import ItemCard from '../components/ItemCard'
@@ -398,6 +399,18 @@ export default function Dashboard() {
             <div className="min-w-0">
               <p className="text-sm font-medium truncate">Staging Planner</p>
               <p className="text-xs text-slate-500">Move items</p>
+            </div>
+          </Link>
+          <Link
+            to="/properties"
+            className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-200 hover:border-teal-300 hover:shadow-sm transition-all min-h-[64px]"
+          >
+            <div className="p-2.5 bg-teal-50 rounded-lg flex-shrink-0">
+              <Ruler size={18} className="text-teal-700" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">Room Fit</p>
+              <p className="text-xs text-slate-500">Measure rooms</p>
             </div>
           </Link>
           <Link

@@ -642,6 +642,37 @@ export default function ItemDetail() {
         </div>
       </div>
 
+      {/* Check Room Fit — link to property detail where room measurements live */}
+      {hasDimensions && (
+        <div className="bg-teal-50 border border-teal-200 rounded-xl p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Ruler size={18} className="text-teal-700" />
+            <div>
+              <p className="text-sm font-medium text-teal-900">Check Room Fit</p>
+              <p className="text-xs text-teal-600">
+                {form.length_inches}" x {form.width_inches}"
+                {form.height_inches > 0 && ` x ${form.height_inches}"`} — see if this fits in a room
+              </p>
+            </div>
+          </div>
+          {item.current_location_type === 'property' && item.current_property_id ? (
+            <Link
+              to={`/properties/${item.current_property_id}`}
+              className="px-3 py-1.5 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700 transition-colors whitespace-nowrap"
+            >
+              View Rooms
+            </Link>
+          ) : (
+            <Link
+              to="/properties"
+              className="px-3 py-1.5 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700 transition-colors whitespace-nowrap"
+            >
+              Go to Properties
+            </Link>
+          )}
+        </div>
+      )}
+
       {/* Sell on Marketplace */}
       <div className="bg-white rounded-xl border border-purple-200 p-5 space-y-4">
         <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-2">

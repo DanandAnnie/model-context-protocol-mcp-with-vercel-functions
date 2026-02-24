@@ -464,6 +464,91 @@ export async function lookupDimensions(
   throw new Error('Could not find dimensions. Try adding a photo for AI measurement, or enter dimensions manually.')
 }
 
+// ---- MagicPlan integration ----
+
+/**
+ * Get the appropriate MagicPlan link.
+ * On mobile it tries the app deep link; on desktop it opens the web app.
+ */
+export function getMagicPlanLink(): string {
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+  if (isMobile) {
+    // Universal link that opens the app or redirects to app store
+    return 'https://www.magicplan.app'
+  }
+  return 'https://www.magicplan.app'
+}
+
+/**
+ * Parse dimension text that a user copies from MagicPlan or any measurement app.
+ * Handles a wide variety of formats:
+ *   "84 x 36 x 30"        → { l: 84, w: 36, h: 30 }
+ *   "7' x 3' x 2.5'"      → { l: 84, w: 36, h: 30 }
+ *   "84" x 36" x 30""     → { l: 84, w: 36, h: 30 }
+ *   "L: 84  W: 36  H: 30" → { l: 84, w: 36, h: 30 }
+ *   "2.1m x 0.9m x 0.76m" → { l: 83, w: 35, h: 30 }  (metric conversion)
+ *   "213 x 91 x 76 cm"    → { l: 84, w: 36, h: 30 }
+ */
+export function parseDimensionText(text: string): AIDimensions | null {
+  if (!text || !text.trim()) return null
+
+  const cleaned = text.trim()
+
+  // Check if metric (cm or m)
+  const isCm = /cm/i.test(cleaned)
+  const isMeters = /\bm\b/i.test(cleaned) && !isCm
+  const isFeet = /['′ft]/i.test(cleaned)
+
+  // Extract all numbers from the text
+  const numbers: number[] = []
+  const numPattern = /(\d+(?:[.,]\d+)?)/g
+  let match: RegExpExecArray | null
+
+  while ((match = numPattern.exec(cleaned)) !== null) {
+    numbers.push(parseFloat(match[1].replace(',', '.')))
+  }
+
+  if (numbers.length < 2) return null
+
+  let dims: number[]
+
+  if (isCm) {
+    // Convert cm to inches (1 cm = 0.3937 in)
+    dims = numbers.slice(0, 3).map(n => Math.round(n * 0.3937))
+  } else if (isMeters) {
+    // Convert meters to inches (1 m = 39.37 in)
+    dims = numbers.slice(0, 3).map(n => Math.round(n * 39.37))
+  } else if (isFeet) {
+    // Check for feet'inches" pattern like 7'0" x 3'0"
+    const ftInPattern = /(\d+)[′']\s*(\d+)?[″"]?/g
+    const ftInNums: number[] = []
+    let ftMatch: RegExpExecArray | null
+    while ((ftMatch = ftInPattern.exec(cleaned)) !== null) {
+      const feet = parseFloat(ftMatch[1])
+      const inches = ftMatch[2] ? parseFloat(ftMatch[2]) : 0
+      ftInNums.push(feet * 12 + inches)
+    }
+    dims = ftInNums.length >= 2 ? ftInNums.slice(0, 3) : numbers.slice(0, 3).map(n => Math.round(n * 12))
+  } else {
+    // Assume inches
+    dims = numbers.slice(0, 3).map(n => Math.round(n))
+  }
+
+  // Sanity check: all dimensions should be 1-300 inches
+  if (!dims.every(d => d >= 1 && d <= 300)) return null
+
+  // Sort: longest = length, middle = width, shortest = height
+  dims.sort((a, b) => b - a)
+
+  return {
+    length_inches: dims[0],
+    width_inches: dims[1] || 0,
+    height_inches: dims[2] || 0,
+    confidence: 'high',
+    notes: 'Imported from measurement app',
+  }
+}
+
 export interface AIIdentifiedItem {
   name: string
   category: 'kitchen & dining' | 'bedroom' | 'living room' | 'office' | 'bathroom' | 'outdoor' | 'other'

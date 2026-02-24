@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { ArrowLeft, Package, Save, Trash2, Check, AlertTriangle, ExternalLink, Copy, MapPin, DollarSign, Plus, ChevronLeft, ChevronRight, Ruler, Camera, Loader2, Sparkles, Search } from 'lucide-react'
+import { ArrowLeft, Package, Save, Trash2, Check, AlertTriangle, ExternalLink, Copy, MapPin, DollarSign, Plus, ChevronLeft, ChevronRight, Ruler, Camera, Loader2, Sparkles, Search, Smartphone, X } from 'lucide-react'
 import { useItems } from '../hooks/useItems'
 import { useProperties } from '../hooks/useProperties'
 import { useStorageUnits } from '../hooks/useStorageUnits'
 import PhotoCapture from '../components/PhotoCapture'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
-import { isAIConfigured, measureItemFromImage, lookupDimensions } from '../lib/ai'
+import { isAIConfigured, measureItemFromImage, lookupDimensions, getMagicPlanLink, parseDimensionText } from '../lib/ai'
 import type { ItemInsert, ItemCategory, ItemCondition, ItemStatus, LocationType, PaymentMethod } from '../lib/database.types'
 
 const PAYMENT_METHODS: { key: PaymentMethod; label: string }[] = [
@@ -56,6 +56,27 @@ export default function ItemDetail() {
   const [aiLookingUp, setAiLookingUp] = useState(false)
   const [aiMeasureResult, setAiMeasureResult] = useState<{ confidence: string; notes: string } | null>(null)
   const [aiMeasureError, setAiMeasureError] = useState('')
+  const [showMagicPlanModal, setShowMagicPlanModal] = useState(false)
+  const [magicPlanText, setMagicPlanText] = useState('')
+  const [magicPlanError, setMagicPlanError] = useState('')
+
+  const handleMagicPlanImport = () => {
+    setMagicPlanError('')
+    const dims = parseDimensionText(magicPlanText)
+    if (!dims) {
+      setMagicPlanError('Could not parse dimensions. Try format: 84 x 36 x 30')
+      return
+    }
+    setForm((prev) => prev ? ({
+      ...prev,
+      length_inches: dims.length_inches,
+      width_inches: dims.width_inches,
+      height_inches: dims.height_inches,
+    }) : prev)
+    setAiMeasureResult({ confidence: dims.confidence, notes: dims.notes })
+    setShowMagicPlanModal(false)
+    setMagicPlanText('')
+  }
 
   // Multi-photo gallery
   const [gallery, setGallery] = useState<{ id: string; image_url: string; is_primary: boolean }[]>([])
@@ -629,6 +650,14 @@ export default function ItemDetail() {
                 </>
               )}
             </button>
+            <button
+              type="button"
+              onClick={() => setShowMagicPlanModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 text-white text-xs font-medium rounded-lg hover:bg-violet-700 transition-colors"
+            >
+              <Smartphone size={12} />
+              MagicPlan
+            </button>
           </div>
         </div>
         {aiMeasureResult && (
@@ -926,6 +955,77 @@ export default function ItemDetail() {
           </>
         )}
       </button>
+
+      {/* MagicPlan Import Modal */}
+      {showMagicPlanModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <Smartphone size={20} className="text-violet-600" />
+                MagicPlan Measurement
+              </h3>
+              <button
+                type="button"
+                onClick={() => { setShowMagicPlanModal(false); setMagicPlanError('') }}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="bg-violet-50 rounded-lg p-3 space-y-2">
+                <p className="text-sm font-medium text-violet-800">How to use:</p>
+                <ol className="text-xs text-violet-700 space-y-1 list-decimal list-inside">
+                  <li>Open MagicPlan on your phone</li>
+                  <li>Use AR measurement to measure the item</li>
+                  <li>Copy the dimensions from the app</li>
+                  <li>Paste them below</li>
+                </ol>
+              </div>
+
+              <a
+                href={getMagicPlanLink()}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center gap-2 w-full py-2.5 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 transition-colors"
+              >
+                <Smartphone size={16} />
+                Open MagicPlan App
+              </a>
+
+              <div className="border-t border-slate-200 pt-3">
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Paste dimensions from MagicPlan
+                </label>
+                <input
+                  type="text"
+                  value={magicPlanText}
+                  onChange={(e) => { setMagicPlanText(e.target.value); setMagicPlanError('') }}
+                  placeholder="e.g. 84 x 36 x 30 or 213cm x 91cm x 76cm"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+                />
+                <p className="text-xs text-slate-400 mt-1">
+                  Accepts inches, feet, cm, or meters (e.g. 213cm x 91cm x 76cm)
+                </p>
+                {magicPlanError && (
+                  <p className="text-xs text-red-600 mt-1">{magicPlanError}</p>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={handleMagicPlanImport}
+                disabled={!magicPlanText.trim()}
+                className="w-full py-2.5 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors"
+              >
+                Import Dimensions
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Delete confirmation modal */}
       {deleteConfirm && (

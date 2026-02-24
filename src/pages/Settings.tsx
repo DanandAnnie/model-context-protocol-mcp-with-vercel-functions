@@ -2,10 +2,12 @@ import { useState } from 'react'
 import {
   Settings as SettingsIcon, Cloud, CloudOff, Check, AlertTriangle,
   Smartphone, Brain, Eye, Building2, Download, Upload,
+  Users, Copy, UserPlus,
 } from 'lucide-react'
 import { isSupabaseConfigured, saveSupabaseConfig, getSupabaseConfig, supabase } from '../lib/supabase'
 import { getAnthropicKey, saveAnthropicKey, isAIConfigured } from '../lib/ai'
 import { getCachedData, cacheData } from '../lib/offline'
+import { useAuth } from '../hooks/useAuth'
 
 interface BusinessProfile {
   businessName: string
@@ -29,6 +31,8 @@ function saveBusinessProfile(profile: BusinessProfile) {
 }
 
 export default function Settings() {
+  const { profile: authProfile, team, isLocalMode, joinTeam, updateProfile } = useAuth()
+
   const existing = getSupabaseConfig()
   const [url, setUrl] = useState(existing.url)
   const [key, setKey] = useState(existing.key)
@@ -39,6 +43,14 @@ export default function Settings() {
   // AI settings
   const [aiKey, setAiKey] = useState(getAnthropicKey())
   const [aiSaved, setAiSaved] = useState(false)
+
+  // Team settings
+  const [inviteCode, setInviteCode] = useState('')
+  const [joinError, setJoinError] = useState('')
+  const [joinSuccess, setJoinSuccess] = useState('')
+  const [codeCopied, setCodeCopied] = useState(false)
+  const [editName, setEditName] = useState(authProfile?.display_name || '')
+  const [nameSaved, setNameSaved] = useState(false)
 
   // Business profile
   const [profile, setProfile] = useState<BusinessProfile>(getBusinessProfile)
@@ -259,6 +271,108 @@ export default function Settings() {
           Save Profile
         </button>
       </div>
+
+      {/* Team & Account */}
+      {!isLocalMode && authProfile && (
+        <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+          <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+            <Users size={16} />
+            Team & Account
+          </h2>
+          <p className="text-xs text-slate-500">
+            Share your invite code with Annie or anyone else so they can sign up and join your workspace.
+          </p>
+
+          {/* Display name */}
+          <div className="flex items-end gap-3">
+            <div className="flex-1">
+              <label className="block text-xs font-medium text-slate-500 mb-1">Display Name</label>
+              <input
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <button
+              onClick={async () => {
+                await updateProfile({ display_name: editName })
+                setNameSaved(true)
+                setTimeout(() => setNameSaved(false), 2000)
+              }}
+              className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
+            >
+              {nameSaved ? 'Saved!' : 'Update'}
+            </button>
+          </div>
+
+          {/* Team info */}
+          {team && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
+              <div>
+                <p className="text-xs text-blue-500 font-medium uppercase tracking-wide">Your Team</p>
+                <p className="text-sm font-semibold text-blue-900">{team.name}</p>
+              </div>
+              <div>
+                <p className="text-xs text-blue-500 font-medium uppercase tracking-wide mb-1">Invite Code</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 px-3 py-2 bg-white border border-blue-200 rounded-lg text-sm font-mono text-blue-800 tracking-widest">
+                    {team.invite_code}
+                  </code>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(team.invite_code)
+                      setCodeCopied(true)
+                      setTimeout(() => setCodeCopied(false), 2000)
+                    }}
+                    className="px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 flex items-center gap-1.5"
+                  >
+                    <Copy size={14} />
+                    {codeCopied ? 'Copied!' : 'Copy'}
+                  </button>
+                </div>
+              </div>
+              <p className="text-xs text-blue-500">
+                Anyone with this code can sign up and join your team to share inventory, properties, and deals.
+              </p>
+            </div>
+          )}
+
+          {/* Join a different team */}
+          <div className="border-t border-slate-100 pt-4">
+            <p className="text-xs font-medium text-slate-500 mb-2 flex items-center gap-1.5">
+              <UserPlus size={12} />
+              Join Another Team
+            </p>
+            <div className="flex items-end gap-2">
+              <input
+                value={inviteCode}
+                onChange={(e) => setInviteCode(e.target.value)}
+                placeholder="Paste invite code..."
+                className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                onClick={async () => {
+                  setJoinError('')
+                  setJoinSuccess('')
+                  const { error: err } = await joinTeam(inviteCode)
+                  if (err) {
+                    setJoinError(err)
+                  } else {
+                    setJoinSuccess('Joined! Reloading...')
+                    setTimeout(() => window.location.reload(), 1500)
+                  }
+                }}
+                disabled={!inviteCode.trim()}
+                className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50"
+              >
+                Join
+              </button>
+            </div>
+            {joinError && <p className="text-xs text-red-600 mt-1">{joinError}</p>}
+            {joinSuccess && <p className="text-xs text-green-600 mt-1">{joinSuccess}</p>}
+          </div>
+        </div>
+      )}
 
       {/* Data Management */}
       <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">

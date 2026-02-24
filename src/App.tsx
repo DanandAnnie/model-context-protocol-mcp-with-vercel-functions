@@ -1,5 +1,7 @@
 import { Routes, Route } from 'react-router-dom'
+import { useAuth } from './hooks/useAuth'
 import Layout from './components/Layout'
+import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Properties from './pages/Properties'
 import PropertyDetail from './pages/PropertyDetail'
@@ -16,6 +18,26 @@ import DealFinder from './pages/DealFinder'
 import Settings from './pages/Settings'
 
 export default function App() {
+  const { isAuthenticated, loading, isLocalMode } = useAuth()
+
+  // Show loading spinner while checking auth
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto" />
+          <p className="text-sm text-slate-500 mt-3">Loading...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // If Supabase is configured but user isn't logged in, show login page
+  if (!isLocalMode && !isAuthenticated) {
+    return <Login />
+  }
+
+  // Authenticated (or local mode) — show the app
   return (
     <Routes>
       <Route element={<Layout />}>

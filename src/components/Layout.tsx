@@ -14,7 +14,10 @@ import {
   Settings,
   Menu,
   X,
+  LogOut,
+  User,
 } from 'lucide-react'
+import { useAuth } from '../hooks/useAuth'
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -32,6 +35,7 @@ const navItems = [
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const { profile, team, isLocalMode, signOut } = useAuth()
 
   return (
     <div className="min-h-screen flex">
@@ -45,7 +49,7 @@ export default function Layout() {
 
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-64 bg-blue-900 text-white transform transition-transform duration-200 ease-in-out lg:translate-x-0 lg:static lg:z-auto ${
+        className={`fixed inset-y-0 left-0 z-50 w-64 bg-blue-900 text-white transform transition-transform duration-200 ease-in-out lg:translate-x-0 lg:static lg:z-auto flex flex-col ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -58,7 +62,7 @@ export default function Layout() {
             <X size={20} />
           </button>
         </div>
-        <nav className="mt-4 px-2 space-y-1">
+        <nav className="flex-1 mt-4 px-2 space-y-1 overflow-y-auto">
           {navItems.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
@@ -78,6 +82,32 @@ export default function Layout() {
             </NavLink>
           ))}
         </nav>
+
+        {/* User footer */}
+        {!isLocalMode && profile && (
+          <div className="border-t border-blue-800 p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-8 h-8 bg-blue-700 rounded-full flex items-center justify-center flex-shrink-0">
+                <User size={14} className="text-blue-200" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-white truncate">
+                  {profile.display_name || profile.email.split('@')[0]}
+                </p>
+                {team && (
+                  <p className="text-xs text-blue-300 truncate">{team.name}</p>
+                )}
+              </div>
+            </div>
+            <button
+              onClick={signOut}
+              className="flex items-center gap-2 w-full px-3 py-2 text-xs text-blue-300 hover:text-white hover:bg-blue-800 rounded-lg transition-colors"
+            >
+              <LogOut size={14} />
+              Sign Out
+            </button>
+          </div>
+        )}
       </aside>
 
       {/* Main content */}

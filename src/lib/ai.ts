@@ -17,6 +17,213 @@ export function isAIConfigured(): boolean {
   return getAnthropicKey().length > 0
 }
 
+export interface AIDimensions {
+  length_inches: number
+  width_inches: number
+  height_inches: number
+  confidence: 'high' | 'medium' | 'low'
+  notes: string
+}
+
+export interface AIRoomDimensions {
+  name: string
+  length_ft: number
+  width_ft: number
+  confidence: 'high' | 'medium' | 'low'
+  notes: string
+}
+
+/**
+ * Send a furniture photo to Claude Vision to estimate dimensions.
+ */
+export async function measureItemFromImage(imageBase64: string, itemName?: string): Promise<AIDimensions> {
+  const apiKey = getAnthropicKey()
+  if (!apiKey) {
+    throw new Error('Anthropic API key not configured. Go to Settings to add your key.')
+  }
+
+  const match = imageBase64.match(/^data:(image\/\w+);base64,(.+)/)
+  if (!match) throw new Error('Invalid image format')
+
+  const mediaType = match[1]
+  const base64Data = match[2]
+
+  const itemContext = itemName ? `The item is: "${itemName}".` : ''
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1024,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: mediaType, data: base64Data },
+            },
+            {
+              type: 'text',
+              text: `You are an expert furniture dimensions estimator. ${itemContext}
+
+Analyze this image and estimate the dimensions of the main furniture item in inches.
+
+Use visual cues to estimate size:
+- Standard door height is 80 inches (6'8")
+- Standard ceiling is 96 inches (8')
+- Standard couch seat height is 17-19 inches
+- Standard dining table height is 28-30 inches
+- Standard bed sizes: Twin 38x75, Full 54x75, Queen 60x80, King 76x80
+- Standard doorknob height is ~36 inches
+- Floor tiles are usually 12x12 or 18x18 inches
+- If you see a person, average adult height is ~66 inches
+
+Provide your best estimate. Return ONLY valid JSON with this exact structure:
+{"length_inches":0,"width_inches":0,"height_inches":0,"confidence":"medium","notes":"Brief explanation of how you estimated"}
+
+- length_inches: The longest horizontal dimension (front to back or side to side)
+- width_inches: The shorter horizontal dimension
+- height_inches: The vertical dimension (floor to top)
+- confidence: "high" if clear reference objects visible, "medium" if reasonable estimate, "low" if very uncertain
+- notes: Brief note about what reference cues you used
+
+Round to the nearest whole inch. Do NOT return 0 for any dimension.`,
+            },
+          ],
+        },
+      ],
+    }),
+  })
+
+  if (!response.ok) {
+    const err = await response.text()
+    if (response.status === 401) throw new Error('Invalid Anthropic API key.')
+    throw new Error(`AI request failed: ${err}`)
+  }
+
+  const data = await response.json()
+  const text = data.content?.[0]?.text || '{}'
+
+  let jsonStr = text.trim()
+  if (jsonStr.startsWith('```')) {
+    jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
+  }
+
+  try {
+    const result = JSON.parse(jsonStr)
+    return {
+      length_inches: Math.max(1, Math.round(Number(result.length_inches) || 0)),
+      width_inches: Math.max(1, Math.round(Number(result.width_inches) || 0)),
+      height_inches: Math.max(1, Math.round(Number(result.height_inches) || 0)),
+      confidence: ['high', 'medium', 'low'].includes(result.confidence) ? result.confidence : 'low',
+      notes: typeof result.notes === 'string' ? result.notes : '',
+    }
+  } catch {
+    throw new Error('Failed to parse AI dimension estimate. Please try again.')
+  }
+}
+
+/**
+ * Send a room photo to Claude Vision to estimate room dimensions.
+ */
+export async function measureRoomFromImage(imageBase64: string): Promise<AIRoomDimensions> {
+  const apiKey = getAnthropicKey()
+  if (!apiKey) {
+    throw new Error('Anthropic API key not configured. Go to Settings to add your key.')
+  }
+
+  const match = imageBase64.match(/^data:(image\/\w+);base64,(.+)/)
+  if (!match) throw new Error('Invalid image format')
+
+  const mediaType = match[1]
+  const base64Data = match[2]
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1024,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: mediaType, data: base64Data },
+            },
+            {
+              type: 'text',
+              text: `You are an expert room measurement estimator for home staging. Analyze this photo and estimate the room dimensions in feet.
+
+Use visual cues to estimate the room size:
+- Standard interior door is 32-36 inches wide and 80 inches tall (6'8")
+- Standard ceiling height is 8 feet (96 inches)
+- Standard window width is 24-36 inches
+- Standard baseboard height is 3-5 inches
+- Standard floor tile is 12x12 or 18x18 inches
+- Standard light switch height is 48 inches from floor
+- Standard outlet height is 12-16 inches from floor
+- Typical furniture sizes for scale: sofa ~84-96 inches, dining table ~36x60 inches
+- If visible, count floor tiles or planks for measurements
+
+Return ONLY valid JSON with this exact structure:
+{"name":"Room type","length_ft":0,"width_ft":0,"confidence":"medium","notes":"Brief explanation"}
+
+- name: Your best guess of the room type (e.g., "Living Room", "Master Bedroom", "Dining Room", "Office")
+- length_ft: The longer wall dimension in feet (round to nearest 0.5)
+- width_ft: The shorter wall dimension in feet (round to nearest 0.5)
+- confidence: "high" if clear reference objects visible, "medium" if reasonable estimate, "low" if very uncertain
+- notes: Brief note about what reference cues you used
+
+Do NOT return 0 for any dimension.`,
+            },
+          ],
+        },
+      ],
+    }),
+  })
+
+  if (!response.ok) {
+    const err = await response.text()
+    if (response.status === 401) throw new Error('Invalid Anthropic API key.')
+    throw new Error(`AI request failed: ${err}`)
+  }
+
+  const data = await response.json()
+  const text = data.content?.[0]?.text || '{}'
+
+  let jsonStr = text.trim()
+  if (jsonStr.startsWith('```')) {
+    jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
+  }
+
+  try {
+    const result = JSON.parse(jsonStr)
+    return {
+      name: typeof result.name === 'string' ? result.name : 'Room',
+      length_ft: Math.max(1, Math.round((Number(result.length_ft) || 0) * 2) / 2),
+      width_ft: Math.max(1, Math.round((Number(result.width_ft) || 0) * 2) / 2),
+      confidence: ['high', 'medium', 'low'].includes(result.confidence) ? result.confidence : 'low',
+      notes: typeof result.notes === 'string' ? result.notes : '',
+    }
+  } catch {
+    throw new Error('Failed to parse AI room estimate. Please try again.')
+  }
+}
+
 export interface AIIdentifiedItem {
   name: string
   category: 'kitchen & dining' | 'bedroom' | 'living room' | 'office' | 'bathroom' | 'outdoor' | 'other'

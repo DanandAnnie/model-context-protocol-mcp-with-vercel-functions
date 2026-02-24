@@ -5,7 +5,9 @@ import {
   Camera, Upload, X, Image as ImageIcon, MapPin, DollarSign,
   PlusCircle, CreditCard, ChevronDown, ChevronUp,
   BarChart3, TrendingUp, Edit2, Ruler, CheckCircle2, XCircle,
+  Loader2, Sparkles,
 } from 'lucide-react'
+import { isAIConfigured, measureRoomFromImage } from '../lib/ai'
 import { useProperties } from '../hooks/useProperties'
 import { useItems } from '../hooks/useItems'
 import { usePayments } from '../hooks/usePayments'
@@ -107,6 +109,32 @@ export default function PropertyDetail() {
   const [showAddRoom, setShowAddRoom] = useState(false)
   const [roomForm, setRoomForm] = useState({ name: '', length_ft: 0, width_ft: 0 })
   const [showFitChecker, setShowFitChecker] = useState(false)
+  const [aiMeasuringRoom, setAiMeasuringRoom] = useState(false)
+  const [aiRoomResult, setAiRoomResult] = useState<{ confidence: string; notes: string } | null>(null)
+  const [aiRoomError, setAiRoomError] = useState('')
+  const roomPhotoInputRef = useRef<HTMLInputElement>(null)
+
+  const handleAIRoomMeasure = async (file: File) => {
+    setAiMeasuringRoom(true)
+    setAiRoomResult(null)
+    setAiRoomError('')
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })
+      const result = await measureRoomFromImage(base64)
+      setRoomForm({ name: result.name, length_ft: result.length_ft, width_ft: result.width_ft })
+      setAiRoomResult({ confidence: result.confidence, notes: result.notes })
+      setShowAddRoom(true)
+    } catch (err) {
+      setAiRoomError(err instanceof Error ? err.message : 'Room measurement failed')
+    } finally {
+      setAiMeasuringRoom(false)
+    }
+  }
 
   const loadRooms = useCallback(() => {
     if (id) setRooms(getRooms(id))
@@ -995,18 +1023,68 @@ export default function PropertyDetail() {
               <Ruler size={16} className="text-teal-600" />
               Room Measurements
             </h2>
-            <button
-              onClick={() => setShowAddRoom(!showAddRoom)}
-              className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
-            >
-              <PlusCircle size={14} />
-              Add Room
-            </button>
+            <div className="flex items-center gap-2">
+              {isAIConfigured() && (
+                <>
+                  <input
+                    ref={roomPhotoInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      if (file) handleAIRoomMeasure(file)
+                      e.target.value = ''
+                    }}
+                  />
+                  <button
+                    onClick={() => roomPhotoInputRef.current?.click()}
+                    disabled={aiMeasuringRoom}
+                    className="flex items-center gap-1 text-xs text-teal-600 hover:text-teal-700 disabled:opacity-50"
+                  >
+                    {aiMeasuringRoom ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" />
+                        Measuring...
+                      </>
+                    ) : (
+                      <>
+                        <Camera size={14} />
+                        AI Measure Room
+                      </>
+                    )}
+                  </button>
+                </>
+              )}
+              <button
+                onClick={() => setShowAddRoom(!showAddRoom)}
+                className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
+              >
+                <PlusCircle size={14} />
+                Add Room
+              </button>
+            </div>
           </div>
 
           <p className="text-xs text-slate-500">
             Measure each room to check which furniture will fit before you move it.
+            {isAIConfigured() && ' Tap "AI Measure Room" to snap a photo and auto-estimate dimensions.'}
           </p>
+
+          {aiRoomResult && (
+            <div className="flex items-start gap-2 text-xs bg-teal-50 text-teal-700 rounded-lg px-3 py-2">
+              <Sparkles size={14} className="flex-shrink-0 mt-0.5" />
+              <div>
+                <span className="font-medium">AI estimated room ({aiRoomResult.confidence} confidence)</span>
+                {aiRoomResult.notes && <span className="text-teal-600"> — {aiRoomResult.notes}</span>}
+                <span className="text-teal-600"> Review the values below and save.</span>
+              </div>
+            </div>
+          )}
+          {aiRoomError && (
+            <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{aiRoomError}</p>
+          )}
 
           {/* Add room form */}
           {showAddRoom && (

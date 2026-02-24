@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { PlusCircle, Check, Loader2, Sparkles, Brain, Ruler } from 'lucide-react'
+import { PlusCircle, Check, Loader2, Sparkles, Brain, Ruler, Camera } from 'lucide-react'
 import { useItems } from '../hooks/useItems'
 import { useProperties } from '../hooks/useProperties'
 import { useStorageUnits } from '../hooks/useStorageUnits'
 import PhotoCapture from '../components/PhotoCapture'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
-import { isAIConfigured, identifyItemsFromImage } from '../lib/ai'
+import { isAIConfigured, identifyItemsFromImage, measureItemFromImage } from '../lib/ai'
 import type { ItemInsert, ItemCategory, ItemCondition, ItemStatus, LocationType, PaymentMethod } from '../lib/database.types'
 
 function fileToBase64(file: File): Promise<string> {
@@ -58,6 +58,9 @@ export default function AddItem() {
   const [aiIdentifying, setAiIdentifying] = useState(false)
   const [aiResult, setAiResult] = useState<'success' | 'error' | 'no_key' | null>(null)
   const [aiErrorMsg, setAiErrorMsg] = useState('')
+  const [aiMeasuring, setAiMeasuring] = useState(false)
+  const [aiMeasureResult, setAiMeasureResult] = useState<{ confidence: string; notes: string } | null>(null)
+  const [aiMeasureError, setAiMeasureError] = useState('')
 
   const handlePhotoCapture = async (file: File) => {
     setPhoto(file)
@@ -315,11 +318,68 @@ export default function AddItem() {
 
         {/* Dimensions */}
         <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
-          <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-            <Ruler size={16} className="text-teal-600" />
-            Dimensions (inches)
-          </h2>
-          <p className="text-xs text-slate-500">Measure the furniture to check if it fits in a room later.</p>
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+              <Ruler size={16} className="text-teal-600" />
+              Dimensions (inches)
+            </h2>
+            {photo && isAIConfigured() && (
+              <button
+                type="button"
+                disabled={aiMeasuring}
+                onClick={async () => {
+                  setAiMeasuring(true)
+                  setAiMeasureResult(null)
+                  setAiMeasureError('')
+                  try {
+                    const base64 = await fileToBase64(photo)
+                    const dims = await measureItemFromImage(base64, form.name || undefined)
+                    setForm((prev) => ({
+                      ...prev,
+                      length_inches: dims.length_inches,
+                      width_inches: dims.width_inches,
+                      height_inches: dims.height_inches,
+                    }))
+                    setAiMeasureResult({ confidence: dims.confidence, notes: dims.notes })
+                  } catch (err) {
+                    setAiMeasureError(err instanceof Error ? err.message : 'Measurement failed')
+                  } finally {
+                    setAiMeasuring(false)
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 text-white text-xs font-medium rounded-lg hover:bg-teal-700 disabled:opacity-50 transition-colors"
+              >
+                {aiMeasuring ? (
+                  <>
+                    <Loader2 size={12} className="animate-spin" />
+                    Measuring...
+                  </>
+                ) : (
+                  <>
+                    <Camera size={12} />
+                    AI Measure
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+          <p className="text-xs text-slate-500">
+            {photo && isAIConfigured()
+              ? 'Enter manually or tap "AI Measure" to estimate from the photo.'
+              : 'Measure the furniture to check if it fits in a room later.'}
+          </p>
+          {aiMeasureResult && (
+            <div className="flex items-start gap-2 text-xs bg-teal-50 text-teal-700 rounded-lg px-3 py-2">
+              <Sparkles size={14} className="flex-shrink-0 mt-0.5" />
+              <div>
+                <span className="font-medium">AI estimated ({aiMeasureResult.confidence} confidence)</span>
+                {aiMeasureResult.notes && <span className="text-teal-600"> — {aiMeasureResult.notes}</span>}
+              </div>
+            </div>
+          )}
+          {aiMeasureError && (
+            <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{aiMeasureError}</p>
+          )}
           <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Length</label>

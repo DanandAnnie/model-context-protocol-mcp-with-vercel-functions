@@ -624,7 +624,7 @@ export default function YearEndTaxSummary() {
                       </td>
                       <td className="px-3 py-2 text-xs">
                         {item.receipt_url ? (
-                          <span className="text-green-600">On file</span>
+                          <span className="text-green-400">On file</span>
                         ) : (
                           <span className="text-amber-500">Missing</span>
                         )}

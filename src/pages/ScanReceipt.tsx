@@ -396,8 +396,8 @@ export default function ScanReceipt() {
   // Done screen
   if (step === 'done') {
     return (
-      <div className="flex flex-col items-center justify-center h-64 text-green-600">
-        <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
+      <div className="flex flex-col items-center justify-center h-64 text-green-400">
+        <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mb-4">
           <Check size={32} />
         </div>
         <p className="text-lg font-medium">{savedCount} Items Added!</p>
@@ -675,7 +675,7 @@ export default function ScanReceipt() {
               </h2>
               <button
                 onClick={addManualItem}
-                className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
+                className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300"
               >
                 <PlusCircle size={14} />
                 Add Item
@@ -758,7 +758,7 @@ export default function ScanReceipt() {
                         {item.quantity > 1 && (
                           <button
                             onClick={() => splitItem(item.id)}
-                            className="p-1 text-blue-500 hover:text-blue-700"
+                            className="p-1 text-blue-400 hover:text-blue-300"
                             title={`Split into ${item.quantity} separate items`}
                           >
                             <Split size={14} />

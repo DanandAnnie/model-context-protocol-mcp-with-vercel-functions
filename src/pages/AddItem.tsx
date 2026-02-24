@@ -211,8 +211,8 @@ export default function AddItem() {
 
   if (saved) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 text-green-600">
-        <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
+      <div className="flex flex-col items-center justify-center h-64 text-green-400">
+        <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mb-4">
           <Check size={32} />
         </div>
         <p className="text-lg font-medium">Item Added!</p>

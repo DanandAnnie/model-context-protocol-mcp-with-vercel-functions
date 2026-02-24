@@ -281,7 +281,7 @@ export default function Properties() {
                           '_blank',
                         )
                       }}
-                      className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 cursor-pointer"
+                      className="inline-flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 cursor-pointer"
                     >
                       <MapPin size={12} />
                       View on Map

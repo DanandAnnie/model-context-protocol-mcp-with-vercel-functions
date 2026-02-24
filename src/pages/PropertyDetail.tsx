@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Home, Package, Save, Trash2, Check, AlertTriangle,
-  Camera, Upload, X, Image as ImageIcon, MapPin, DollarSign,
+  MapPin, DollarSign, Camera, X,
   PlusCircle, CreditCard, ChevronDown, ChevronUp,
   BarChart3, TrendingUp, Edit2, Ruler, CheckCircle2, XCircle,
   Loader2, Sparkles,
@@ -13,6 +13,8 @@ import { useItems } from '../hooks/useItems'
 import { usePayments } from '../hooks/usePayments'
 import { usePropertyExpenses } from '../hooks/usePropertyExpenses'
 import ItemCard from '../components/ItemCard'
+import PhotoGallery from '../components/PhotoGallery'
+import { fileToBase64, getAllPhotos, addAdditionalPhoto, removeAdditionalPhoto, setAsPrimaryPhoto } from '../lib/photos'
 import type { PropertyInsert, PropertyType, PaymentMethod, StagingPaymentInsert, PropertyExpenseInsert, ExpenseCategory } from '../lib/database.types'
 
 const PAYMENT_METHODS: { key: PaymentMethod; label: string }[] = [
@@ -57,15 +59,6 @@ function saveRooms(propertyId: string, rooms: Room[]) {
   localStorage.setItem(`property_rooms_${propertyId}`, JSON.stringify(rooms))
 }
 
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result as string)
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
-}
-
 export default function PropertyDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -80,7 +73,8 @@ export default function PropertyDetail() {
   const loading = propsLoading || itemsLoading
 
   const [form, setForm] = useState<PropertyInsert | null>(null)
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null)
+  const [allPhotos, setAllPhotos] = useState<string[]>([])
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
@@ -164,9 +158,6 @@ export default function PropertyDetail() {
     ? items.filter((i) => i.length_inches > 0 && i.width_inches > 0)
     : items.filter((i) => i.length_inches > 0 && i.width_inches > 0 && i.status === 'available')
 
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const cameraInputRef = useRef<HTMLInputElement>(null)
-
   // Load property into form
   useEffect(() => {
     if (!property) return
@@ -183,9 +174,8 @@ export default function PropertyDetail() {
       notes: property.notes,
       photo_url: property.photo_url || '',
     })
-    if (property.photo_url) {
-      setPhotoPreview(property.photo_url)
-    }
+    // Load all photos (primary + additional)
+    setAllPhotos(getAllPhotos('property', property.id, property.photo_url))
     // Pre-fill payment amount
     if (property.monthly_fee) {
       setPaymentForm((prev) => ({ ...prev, amount: property.monthly_fee }))
@@ -301,19 +291,60 @@ export default function PropertyDetail() {
     setPaymentForm((prev) => ({ ...prev, square_transaction_id: '', notes: '' }))
   }
 
-  const handlePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file || !form) return
-    const base64 = await fileToBase64(file)
-    setPhotoPreview(base64)
-    setForm({ ...form, photo_url: base64 })
-    e.target.value = ''
+  const refreshPhotos = useCallback(() => {
+    if (!id || !form) return
+    setAllPhotos(getAllPhotos('property', id, form.photo_url))
+  }, [id, form?.photo_url])
+
+  useEffect(() => { refreshPhotos() }, [refreshPhotos])
+
+  const handleAddPropertyPhoto = async (file: File) => {
+    if (!id || !form) return
+    setUploadingPhoto(true)
+    try {
+      const base64 = await fileToBase64(file)
+      if (!form.photo_url) {
+        // No primary yet — set as primary
+        setForm({ ...form, photo_url: base64 })
+      } else {
+        addAdditionalPhoto('property', id, base64)
+      }
+      setAllPhotos(getAllPhotos('property', id, form.photo_url || base64))
+    } finally {
+      setUploadingPhoto(false)
+    }
   }
 
-  const clearPhoto = () => {
-    if (!form) return
-    setPhotoPreview(null)
-    setForm({ ...form, photo_url: '' })
+  const handleDeletePropertyPhoto = (index: number) => {
+    if (!id || !form) return
+    if (index === 0) {
+      // Deleting primary — promote first additional to primary
+      const remainingAdditional = getAllPhotos('property', id, undefined)
+      if (remainingAdditional.length > 0) {
+        // Promote first additional to primary
+        const newPrimary = remainingAdditional[0]
+        removeAdditionalPhoto('property', id, 0)
+        setForm({ ...form, photo_url: newPrimary })
+      } else {
+        setForm({ ...form, photo_url: '' })
+      }
+    } else {
+      removeAdditionalPhoto('property', id, index - 1)
+    }
+    setTimeout(refreshPhotos, 0)
+  }
+
+  const handleSetPropertyPrimary = (index: number) => {
+    if (!id || !form || index === 0) return
+    const result = setAsPrimaryPhoto('property', id, index)
+    if (result) {
+      // Old primary becomes additional
+      if (form.photo_url) {
+        addAdditionalPhoto('property', id, form.photo_url)
+      }
+      setForm({ ...form, photo_url: result.newPrimary })
+      setTimeout(refreshPhotos, 0)
+    }
   }
 
   const handleSave = async () => {
@@ -378,62 +409,15 @@ export default function PropertyDetail() {
         </button>
       </div>
 
-      {/* Hidden file inputs */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={handlePhotoSelect}
+      {/* Property Photos */}
+      <PhotoGallery
+        photos={allPhotos}
+        onAddPhoto={handleAddPropertyPhoto}
+        onDeletePhoto={handleDeletePropertyPhoto}
+        onSetPrimary={handleSetPropertyPrimary}
+        uploading={uploadingPhoto}
+        label="Property Photos"
       />
-      <input
-        ref={cameraInputRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={handlePhotoSelect}
-      />
-
-      {/* Property Photo */}
-      <div>
-        <label className="block text-sm font-medium text-slate-700 mb-2">Property Photo</label>
-        {photoPreview ? (
-          <div className="relative rounded-xl overflow-hidden">
-            <img src={photoPreview} alt="Property" className="w-full aspect-video object-cover" />
-            <button
-              type="button"
-              onClick={clearPhoto}
-              className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/60 text-white flex items-center justify-center hover:bg-black/80"
-            >
-              <X size={14} />
-            </button>
-          </div>
-        ) : (
-          <div className="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center">
-            <ImageIcon size={40} className="mx-auto text-slate-300 mb-3" />
-            <p className="text-sm text-slate-500 mb-4">Add a photo of this property</p>
-            <div className="flex justify-center gap-3">
-              <button
-                type="button"
-                onClick={() => cameraInputRef.current?.click()}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
-              >
-                <Camera size={16} />
-                Take Photo
-              </button>
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 text-sm rounded-lg hover:bg-slate-200"
-              >
-                <Upload size={16} />
-                Upload
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
 
       {/* Edit form */}
       <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">

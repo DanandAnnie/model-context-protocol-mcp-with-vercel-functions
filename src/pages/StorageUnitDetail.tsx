@@ -1,19 +1,12 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Warehouse, Package, Save, Trash2, Check, AlertTriangle, Camera, Upload, X, Image as ImageIcon } from 'lucide-react'
+import { ArrowLeft, Warehouse, Package, Save, Trash2, Check, AlertTriangle } from 'lucide-react'
 import { useStorageUnits } from '../hooks/useStorageUnits'
 import { useItems } from '../hooks/useItems'
 import ItemCard from '../components/ItemCard'
+import PhotoGallery from '../components/PhotoGallery'
+import { fileToBase64, getAllPhotos, addAdditionalPhoto, removeAdditionalPhoto, setAsPrimaryPhoto } from '../lib/photos'
 import type { StorageUnitInsert } from '../lib/database.types'
-
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result as string)
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
-}
 
 export default function StorageUnitDetail() {
   const { id } = useParams<{ id: string }>()
@@ -27,13 +20,12 @@ export default function StorageUnitDetail() {
   const loading = unitsLoading || itemsLoading
 
   const [form, setForm] = useState<StorageUnitInsert | null>(null)
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null)
+  const [allPhotos, setAllPhotos] = useState<string[]>([])
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const cameraInputRef = useRef<HTMLInputElement>(null)
 
   // Load unit into form
   useEffect(() => {
@@ -47,24 +39,59 @@ export default function StorageUnitDetail() {
       notes: unit.notes,
       photo_url: unit.photo_url || '',
     })
-    if (unit.photo_url) {
-      setPhotoPreview(unit.photo_url)
-    }
+    setAllPhotos(getAllPhotos('storage', unit.id, unit.photo_url))
   }, [unit])
 
-  const handlePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file || !form) return
-    const base64 = await fileToBase64(file)
-    setPhotoPreview(base64)
-    setForm({ ...form, photo_url: base64 })
-    e.target.value = ''
+  const refreshPhotos = useCallback(() => {
+    if (!id || !form) return
+    setAllPhotos(getAllPhotos('storage', id, form.photo_url))
+  }, [id, form?.photo_url])
+
+  useEffect(() => { refreshPhotos() }, [refreshPhotos])
+
+  const handleAddStoragePhoto = async (file: File) => {
+    if (!id || !form) return
+    setUploadingPhoto(true)
+    try {
+      const base64 = await fileToBase64(file)
+      if (!form.photo_url) {
+        setForm({ ...form, photo_url: base64 })
+      } else {
+        addAdditionalPhoto('storage', id, base64)
+      }
+      setAllPhotos(getAllPhotos('storage', id, form.photo_url || base64))
+    } finally {
+      setUploadingPhoto(false)
+    }
   }
 
-  const clearPhoto = () => {
-    if (!form) return
-    setPhotoPreview(null)
-    setForm({ ...form, photo_url: '' })
+  const handleDeleteStoragePhoto = (index: number) => {
+    if (!id || !form) return
+    if (index === 0) {
+      const remaining = getAllPhotos('storage', id, undefined)
+      if (remaining.length > 0) {
+        const newPrimary = remaining[0]
+        removeAdditionalPhoto('storage', id, 0)
+        setForm({ ...form, photo_url: newPrimary })
+      } else {
+        setForm({ ...form, photo_url: '' })
+      }
+    } else {
+      removeAdditionalPhoto('storage', id, index - 1)
+    }
+    setTimeout(refreshPhotos, 0)
+  }
+
+  const handleSetStoragePrimary = (index: number) => {
+    if (!id || !form || index === 0) return
+    const result = setAsPrimaryPhoto('storage', id, index)
+    if (result) {
+      if (form.photo_url) {
+        addAdditionalPhoto('storage', id, form.photo_url)
+      }
+      setForm({ ...form, photo_url: result.newPrimary })
+      setTimeout(refreshPhotos, 0)
+    }
   }
 
   const handleSave = async () => {
@@ -129,62 +156,15 @@ export default function StorageUnitDetail() {
         </button>
       </div>
 
-      {/* Hidden file inputs */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={handlePhotoSelect}
+      {/* Storage Unit Photos */}
+      <PhotoGallery
+        photos={allPhotos}
+        onAddPhoto={handleAddStoragePhoto}
+        onDeletePhoto={handleDeleteStoragePhoto}
+        onSetPrimary={handleSetStoragePrimary}
+        uploading={uploadingPhoto}
+        label="Unit Photos"
       />
-      <input
-        ref={cameraInputRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={handlePhotoSelect}
-      />
-
-      {/* Storage Unit Photo */}
-      <div>
-        <label className="block text-sm font-medium text-slate-700 mb-2">Unit Photo</label>
-        {photoPreview ? (
-          <div className="relative rounded-xl overflow-hidden">
-            <img src={photoPreview} alt="Storage unit" className="w-full aspect-video object-cover" />
-            <button
-              type="button"
-              onClick={clearPhoto}
-              className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/60 text-white flex items-center justify-center hover:bg-black/80"
-            >
-              <X size={14} />
-            </button>
-          </div>
-        ) : (
-          <div className="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center">
-            <ImageIcon size={40} className="mx-auto text-slate-300 mb-3" />
-            <p className="text-sm text-slate-500 mb-4">Add a photo of this storage unit</p>
-            <div className="flex justify-center gap-3">
-              <button
-                type="button"
-                onClick={() => cameraInputRef.current?.click()}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
-              >
-                <Camera size={16} />
-                Take Photo
-              </button>
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 text-sm rounded-lg hover:bg-slate-200"
-              >
-                <Upload size={16} />
-                Upload
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
 
       {/* Edit form */}
       <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">

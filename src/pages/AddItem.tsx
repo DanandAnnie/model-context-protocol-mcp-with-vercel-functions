@@ -4,19 +4,11 @@ import { PlusCircle, Check, Loader2, Sparkles, Brain, Ruler, Camera, Search, Sma
 import { useItems } from '../hooks/useItems'
 import { useProperties } from '../hooks/useProperties'
 import { useStorageUnits } from '../hooks/useStorageUnits'
-import PhotoCapture from '../components/PhotoCapture'
+import MultiPhotoCapture from '../components/MultiPhotoCapture'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { isAIConfigured, identifyItemsFromImage, measureItemFromImage, lookupDimensions, getMagicPlanLink, parseDimensionText } from '../lib/ai'
+import { fileToBase64, saveAdditionalPhotos } from '../lib/photos'
 import type { ItemInsert, ItemCategory, ItemCondition, ItemStatus, LocationType, PaymentMethod } from '../lib/database.types'
-
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result as string)
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
-}
 
 const CATEGORIES: ItemCategory[] = [
   'kitchen & dining', 'bedroom', 'living room', 'office',
@@ -52,7 +44,7 @@ export default function AddItem() {
   const { units } = useStorageUnits()
 
   const [form, setForm] = useState<ItemInsert>(emptyForm)
-  const [photo, setPhoto] = useState<File | null>(null)
+  const [photos, setPhotos] = useState<File[]>([])
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [aiIdentifying, setAiIdentifying] = useState(false)
@@ -105,43 +97,45 @@ export default function AddItem() {
     }
   }
 
-  const handlePhotoCapture = async (file: File) => {
-    setPhoto(file)
-    setAiResult(null)
+  const handlePhotosChange = async (files: File[]) => {
+    setPhotos(files)
 
-    // Auto-identify with AI if configured
-    if (!isAIConfigured()) {
-      setAiResult('no_key')
-      return
-    }
-
-    setAiIdentifying(true)
-    try {
-      const base64 = await fileToBase64(file)
-      const items = await identifyItemsFromImage(base64)
-      if (items.length > 0) {
-        const item = items[0] // Use the first (primary) identified item
-        const today = new Date().toISOString().split('T')[0]
-        setForm((prev) => ({
-          ...prev,
-          name: item.name,
-          category: item.category,
-          subcategory: item.subcategory,
-          value: item.estimated_value,
-          purchase_price: item.estimated_value,
-          condition: item.condition,
-          notes: item.description,
-          useful_life_years: item.useful_life_years,
-          date_acquired: today,
-          purchase_date: today,
-        }))
-        setAiResult('success')
+    // Auto-identify from first photo if this is the first photo added
+    if (files.length > 0 && photos.length === 0) {
+      setAiResult(null)
+      if (!isAIConfigured()) {
+        setAiResult('no_key')
+        return
       }
-    } catch (err) {
-      setAiResult('error')
-      setAiErrorMsg(err instanceof Error ? err.message : 'Unknown error')
-    } finally {
-      setAiIdentifying(false)
+
+      setAiIdentifying(true)
+      try {
+        const base64 = await fileToBase64(files[0])
+        const items = await identifyItemsFromImage(base64)
+        if (items.length > 0) {
+          const item = items[0]
+          const today = new Date().toISOString().split('T')[0]
+          setForm((prev) => ({
+            ...prev,
+            name: item.name,
+            category: item.category,
+            subcategory: item.subcategory,
+            value: item.estimated_value,
+            purchase_price: item.estimated_value,
+            condition: item.condition,
+            notes: item.description,
+            useful_life_years: item.useful_life_years,
+            date_acquired: today,
+            purchase_date: today,
+          }))
+          setAiResult('success')
+        }
+      } catch (err) {
+        setAiResult('error')
+        setAiErrorMsg(err instanceof Error ? err.message : 'Unknown error')
+      } finally {
+        setAiIdentifying(false)
+      }
     }
   }
 
@@ -160,33 +154,47 @@ export default function AddItem() {
     setSaving(true)
 
     try {
-      // Convert photo to base64 and include in the item data
+      // Convert primary photo to base64 and include in the item data
       let formWithPhoto = { ...form }
-      if (photo) {
-        const base64 = await fileToBase64(photo)
+      if (photos.length > 0) {
+        const base64 = await fileToBase64(photos[0])
         formWithPhoto = { ...formWithPhoto, photo_url: base64 }
       }
 
       const item = await addItem(formWithPhoto)
 
-      // Also upload to Supabase Storage if configured
-      if (photo && isSupabaseConfigured() && item) {
-        const ext = photo.name.split('.').pop()
-        const path = `${item.id}/primary.${ext}`
-        const { error: uploadErr } = await supabase.storage
-          .from('item-images')
-          .upload(path, photo)
+      if (item) {
+        // Save additional photos to localStorage
+        if (photos.length > 1) {
+          const additionalBase64 = await Promise.all(
+            photos.slice(1).map((f) => fileToBase64(f))
+          )
+          saveAdditionalPhotos('item', item.id, additionalBase64)
+        }
 
-        if (!uploadErr) {
-          const { data: urlData } = supabase.storage
-            .from('item-images')
-            .getPublicUrl(path)
+        // Also upload to Supabase Storage if configured
+        if (photos.length > 0 && isSupabaseConfigured()) {
+          for (let i = 0; i < photos.length; i++) {
+            const ext = photos[i].name.split('.').pop()
+            const path = i === 0
+              ? `${item.id}/primary.${ext}`
+              : `${item.id}/${crypto.randomUUID()}.${ext}`
+            const { error: uploadErr } = await supabase.storage
+              .from('item-images')
+              .upload(path, photos[i])
 
-          await supabase.from('item_images').insert({
-            item_id: item.id,
-            image_url: urlData.publicUrl,
-            is_primary: true,
-          })
+            if (!uploadErr) {
+              const { data: urlData } = supabase.storage
+                .from('item-images')
+                .getPublicUrl(path)
+
+              await supabase.from('item_images').insert({
+                item_id: item.id,
+                image_url: urlData.publicUrl,
+                is_primary: i === 0,
+              })
+            }
+          }
         }
       }
 
@@ -227,7 +235,7 @@ export default function AddItem() {
         {/* Photo capture */}
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-2">Photo</label>
-          <PhotoCapture onCapture={handlePhotoCapture} />
+          <MultiPhotoCapture onPhotosChange={handlePhotosChange} label="Item Photos" />
           {aiIdentifying && (
             <div className="mt-3 flex items-center gap-2 text-purple-600 bg-purple-50 rounded-lg px-4 py-2.5">
               <Loader2 size={16} className="animate-spin" />
@@ -367,7 +375,7 @@ export default function AddItem() {
               Dimensions (inches)
             </h2>
             <div className="flex items-center gap-2">
-              {photo && isAIConfigured() && (
+              {photos.length > 0 && isAIConfigured() && (
                 <button
                   type="button"
                   disabled={aiMeasuring || aiLookingUp}
@@ -376,7 +384,7 @@ export default function AddItem() {
                     setAiMeasureResult(null)
                     setAiMeasureError('')
                     try {
-                      const base64 = await fileToBase64(photo)
+                      const base64 = await fileToBase64(photos[0])
                       const dims = await measureItemFromImage(base64, form.name || undefined)
                       setForm((prev) => ({
                         ...prev,
@@ -437,7 +445,7 @@ export default function AddItem() {
             </div>
           </div>
           <p className="text-xs text-slate-500">
-            {photo && isAIConfigured()
+            {photos.length > 0 && isAIConfigured()
               ? 'Tap "AI Measure" for photo, "Look Up" to search online, or "MagicPlan" to import from the app.'
               : form.name
                 ? 'Enter manually, "Look Up" online, or tap "MagicPlan" to measure with your phone.'

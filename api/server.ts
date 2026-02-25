@@ -53,11 +53,11 @@ const handler = createMcpHandler((server) => {
       weatherUrl.searchParams.set("longitude", String(longitude));
       weatherUrl.searchParams.set(
         "current",
-        "temperature_2m,apparent_temperature,weathercode,relativehumidity_2m,windspeed_10m,uv_index",
+        "temperature_2m,apparent_temperature,weather_code,relative_humidity_2m,wind_speed_10m,uv_index",
       );
       weatherUrl.searchParams.set(
         "daily",
-        "temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_probability_max,weathercode",
+        "temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_probability_max,weather_code",
       );
       weatherUrl.searchParams.set("forecast_days", "3");
       weatherUrl.searchParams.set("timezone", "auto");
@@ -92,10 +92,10 @@ const handler = createMcpHandler((server) => {
       lines.push("");
 
       lines.push(`--- Current Weather in ${city} ---`);
-      lines.push(`Conditions: ${describeWeatherCode(current.weathercode)}`);
+      lines.push(`Conditions: ${describeWeatherCode(current.weather_code)}`);
       lines.push(`Temperature: ${current.temperature_2m}°C (feels like ${current.apparent_temperature}°C)`);
-      lines.push(`Humidity: ${current.relativehumidity_2m}%`);
-      lines.push(`Wind: ${current.windspeed_10m} km/h`);
+      lines.push(`Humidity: ${current.relative_humidity_2m}%`);
+      lines.push(`Wind: ${current.wind_speed_10m} km/h`);
       lines.push(`UV Index: ${current.uv_index}`);
 
       if (daily?.sunrise?.[0]) {
@@ -108,7 +108,7 @@ const handler = createMcpHandler((server) => {
       for (let i = 0; i < 3 && i < (daily?.time?.length ?? 0); i++) {
         const precip = daily.precipitation_probability_max[i];
         lines.push(
-          `${dayNames[i]} (${daily.time[i]}): ${describeWeatherCode(daily.weathercode[i])}, ` +
+          `${dayNames[i]} (${daily.time[i]}): ${describeWeatherCode(daily.weather_code[i])}, ` +
             `${daily.temperature_2m_min[i]}–${daily.temperature_2m_max[i]}°C, ` +
             `${precip}% chance of rain`,
         );
@@ -142,14 +142,14 @@ const handler = createMcpHandler((server) => {
     },
     async ({ latitude, longitude, city }) => {
       const response = await fetch(
-        `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weathercode,relativehumidity_2m&timezone=auto`,
+        `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code,relative_humidity_2m&timezone=auto`,
       );
       const weatherData = await response.json();
       return {
         content: [
           {
             type: "text",
-            text: `🌤️ Weather in ${city}: ${weatherData.current.temperature_2m}°C, Humidity: ${weatherData.current.relativehumidity_2m}%`,
+            text: `🌤️ Weather in ${city}: ${weatherData.current.temperature_2m}°C, Humidity: ${weatherData.current.relative_humidity_2m}%`,
           },
         ],
       };

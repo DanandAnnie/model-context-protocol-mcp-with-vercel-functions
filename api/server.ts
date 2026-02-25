@@ -38,7 +38,8 @@ function formatTime(isoString: string): string {
   });
 }
 
-const handler = createMcpHandler((server) => {
+const handler = createMcpHandler(
+  (server) => {
   server.tool(
     "morning_briefing",
     "Get a comprehensive morning briefing with weather, forecast, and day info for a given location",
@@ -155,6 +156,15 @@ const handler = createMcpHandler((server) => {
       };
     },
   );
-});
+  },
+  {},
+  {
+    redisUrl: process.env.REDIS_URL || process.env.KV_URL,
+    basePath: "",
+    maxDuration: 60,
+    verboseLogs: false,
+    disableSse: true,
+  },
+);
 
 export { handler as GET, handler as POST, handler as DELETE };

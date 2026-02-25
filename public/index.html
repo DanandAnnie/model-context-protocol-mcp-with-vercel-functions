@@ -283,8 +283,8 @@
   <p class="status" id="status">Ready</p>
 </div>
 
-<!-- VAPI Web SDK -->
-<script src="https://unpkg.com/@vapi-ai/web@latest/dist/vapi.umd.js"></script>
+<!-- VAPI Web SDK (UMD bundle — exposes global Vapi class) -->
+<script src="https://cdn.jsdelivr.net/gh/balacodeio/Vapi-Web-UMD@latest/dist/latest/vapi-web-bundle.min.js"></script>
 
 <script>
 (function () {
@@ -329,12 +329,27 @@
   });
 
   // ---- VAPI init ----
+  let sdkRetries = 0;
   function initVapi(publicKey) {
-    if (typeof Vapi === 'undefined') {
-      setStatus('SDK failed to load', 'error');
+    // The UMD bundle exposes Vapi as a global or under .default
+    const VapiClass = (typeof Vapi !== 'undefined' && typeof Vapi === 'function')
+      ? Vapi
+      : (typeof Vapi !== 'undefined' && Vapi.default)
+        ? Vapi.default
+        : undefined;
+
+    if (!VapiClass) {
+      sdkRetries++;
+      if (sdkRetries <= 3) {
+        setStatus('SDK loading...', 'active');
+        setTimeout(() => initVapi(publicKey), 1500);
+      } else {
+        setStatus('SDK failed to load — check network', 'error');
+      }
       return;
     }
-    vapi = new Vapi(publicKey);
+    sdkRetries = 0;
+    vapi = new VapiClass(publicKey);
 
     vapi.on('call-start', () => {
       callActive = true;

@@ -102,14 +102,38 @@ function extractFromVapi(message) {
   return { userQuery, toolCallId };
 }
 
+// --- Message types that contain tool/function calls we should process ---
+const ACTIONABLE_TYPES = new Set(['tool-calls', 'function-call']);
+
 // --- VAPI webhook endpoint ---
-app.post('/vapi', authenticate, async (req, res) => {
+// Auth via URL token: configure your VAPI Server URL as
+//   https://your-host/vapi/daniel-command-center-2026
+// Falls back to header-based auth if no token in URL.
+app.post('/vapi/:token?', (req, res, next) => {
+  const token = req.params.token;
+  const headerKey = req.headers['x-api-key'];
+  if (token === API_KEY || headerKey === API_KEY) return next();
+  console.warn('[VAPI] Auth failed — no valid token or x-api-key header');
+  return res.status(401).json({ error: 'Unauthorized' });
+}, async (req, res) => {
   const startTime = Date.now();
-  console.log('[VAPI] Webhook received:', JSON.stringify(req.body).substring(0, 200));
+  console.log('[VAPI] Webhook received:', JSON.stringify(req.body).substring(0, 300));
 
   const { message } = req.body;
   if (!message) {
     return res.status(400).json({ error: 'No message in request body' });
+  }
+
+  const msgType = message.type || 'unknown';
+  console.log(`[VAPI] Message type: ${msgType}`);
+
+  // Only process tool-calls and function-call messages through Claude.
+  // All other VAPI event types (status-update, end-of-call-report,
+  // transcript, conversation-update, assistant-request, hang, speech-update)
+  // just need a 200 acknowledgement.
+  if (!ACTIONABLE_TYPES.has(msgType)) {
+    console.log(`[VAPI] Acknowledging non-actionable message type: ${msgType}`);
+    return res.json({ ok: true });
   }
 
   const { userQuery, toolCallId } = extractFromVapi(message);
@@ -142,5 +166,5 @@ app.post('/vapi', authenticate, async (req, res) => {
 // --- Start server ---
 app.listen(PORT, () => {
   console.log(`Claude Bridge server running on http://localhost:${PORT}`);
-  console.log(`Endpoints: GET /health | POST /query | POST /vapi`);
+  console.log(`Endpoints: GET /health | POST /query | POST /vapi/${API_KEY}`);
 });

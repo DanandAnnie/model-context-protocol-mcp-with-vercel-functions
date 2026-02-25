@@ -1,10 +1,443 @@
-<h1>MCP on Vercel</h1>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0a0a1a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="/manifest.json">
+  <title>Daniel's Command Center</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
 
-<p>Protocol is mounted below /.</p>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: #0a0a1a;
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
 
-<p>
-  <a
-    href="https://vercel.com/templates/other/model-context-protocol-mcp-with-vercel-functions"
-    >Clone template on Vercel</a
-  >
-</p>
+    /* Animated background gradient */
+    .bg {
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(ellipse at 50% 0%, rgba(56, 189, 248, 0.08) 0%, transparent 60%),
+                  radial-gradient(ellipse at 80% 50%, rgba(139, 92, 246, 0.06) 0%, transparent 50%),
+                  radial-gradient(ellipse at 20% 80%, rgba(16, 185, 129, 0.06) 0%, transparent 50%);
+      z-index: 0;
+    }
+
+    .container {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2rem;
+      padding: 2rem;
+      text-align: center;
+    }
+
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: #f0f0f0;
+      letter-spacing: -0.02em;
+    }
+
+    .subtitle {
+      font-size: 0.9rem;
+      color: #888;
+      margin-top: -1rem;
+    }
+
+    /* Mic button */
+    .mic-wrap {
+      position: relative;
+      width: 160px;
+      height: 160px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Pulse rings when active */
+    .pulse-ring {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      border: 2px solid rgba(56, 189, 248, 0.3);
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .listening .pulse-ring {
+      animation: pulse 2s ease-out infinite;
+    }
+    .listening .pulse-ring:nth-child(2) { animation-delay: 0.5s; }
+    .listening .pulse-ring:nth-child(3) { animation-delay: 1s; }
+
+    @keyframes pulse {
+      0% { transform: scale(1); opacity: 0.6; }
+      100% { transform: scale(1.8); opacity: 0; }
+    }
+
+    .mic-btn {
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      border: none;
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.2),
+                  0 4px 24px rgba(0, 0, 0, 0.4),
+                  inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .mic-btn:hover {
+      box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.4),
+                  0 4px 32px rgba(56, 189, 248, 0.15),
+                  inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      transform: scale(1.03);
+    }
+
+    .mic-btn:active { transform: scale(0.97); }
+
+    .mic-btn.active {
+      background: linear-gradient(135deg, #0c4a6e 0%, #164e63 100%);
+      box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.5),
+                  0 0 40px rgba(56, 189, 248, 0.2),
+                  inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    }
+
+    .mic-btn svg {
+      width: 40px;
+      height: 40px;
+      fill: none;
+      stroke: #38bdf8;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      transition: stroke 0.3s;
+    }
+
+    .mic-btn.active svg { stroke: #7dd3fc; }
+
+    /* Status text */
+    .status {
+      font-size: 0.85rem;
+      color: #666;
+      min-height: 1.4em;
+      transition: color 0.3s;
+    }
+    .status.active { color: #38bdf8; }
+    .status.error { color: #f87171; }
+
+    /* Volume visualizer */
+    .visualizer {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+      height: 32px;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .visualizer.active { opacity: 1; }
+
+    .bar {
+      width: 4px;
+      height: 8px;
+      background: #38bdf8;
+      border-radius: 2px;
+      transition: height 0.1s ease;
+    }
+
+    /* Setup overlay */
+    .setup-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(10, 10, 26, 0.95);
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+    .setup-overlay.hidden { display: none; }
+
+    .setup-card {
+      background: #1e293b;
+      border-radius: 16px;
+      padding: 2rem;
+      max-width: 400px;
+      width: 100%;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .setup-card h2 {
+      font-size: 1.2rem;
+      margin-bottom: 1rem;
+      color: #f0f0f0;
+    }
+
+    .setup-card label {
+      display: block;
+      font-size: 0.8rem;
+      color: #888;
+      margin-bottom: 0.3rem;
+      margin-top: 1rem;
+    }
+
+    .setup-card input {
+      width: 100%;
+      padding: 0.7rem;
+      background: #0f172a;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      color: #e0e0e0;
+      font-size: 0.9rem;
+      outline: none;
+    }
+    .setup-card input:focus {
+      border-color: rgba(56, 189, 248, 0.5);
+    }
+
+    .setup-card button {
+      width: 100%;
+      margin-top: 1.5rem;
+      padding: 0.8rem;
+      background: linear-gradient(135deg, #0369a1, #0e7490);
+      border: none;
+      border-radius: 8px;
+      color: white;
+      font-size: 0.95rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .setup-card button:hover { opacity: 0.9; }
+
+    .setup-card .hint {
+      font-size: 0.75rem;
+      color: #555;
+      margin-top: 0.3rem;
+    }
+  </style>
+</head>
+<body>
+
+<div class="bg"></div>
+
+<!-- Setup overlay (shown if no config saved) -->
+<div class="setup-overlay hidden" id="setupOverlay">
+  <div class="setup-card">
+    <h2>Connect to VAPI</h2>
+    <label for="pubKey">VAPI Public Key</label>
+    <input type="text" id="pubKey" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+    <p class="hint">Dashboard → Organization → Public Key</p>
+
+    <label for="assistantId">Assistant ID</label>
+    <input type="text" id="assistantId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+    <p class="hint">Dashboard → Assistants → copy ID</p>
+
+    <button id="saveSetup">Save &amp; Connect</button>
+  </div>
+</div>
+
+<div class="container">
+  <h1>Daniel's Command Center</h1>
+  <p class="subtitle">Tap to talk to Claude</p>
+
+  <div class="mic-wrap" id="micWrap">
+    <div class="pulse-ring"></div>
+    <div class="pulse-ring"></div>
+    <div class="pulse-ring"></div>
+    <button class="mic-btn" id="micBtn" aria-label="Start voice call">
+      <!-- Mic icon -->
+      <svg viewBox="0 0 24 24">
+        <path d="M12 1a4 4 0 0 0-4 4v6a4 4 0 0 0 8 0V5a4 4 0 0 0-4-4z"/>
+        <path d="M19 10v1a7 7 0 0 1-14 0v-1"/>
+        <line x1="12" y1="19" x2="12" y2="23"/>
+        <line x1="8" y1="23" x2="16" y2="23"/>
+      </svg>
+    </button>
+  </div>
+
+  <div class="visualizer" id="visualizer">
+    <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+    <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+    <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+  </div>
+
+  <p class="status" id="status">Ready</p>
+</div>
+
+<!-- VAPI Web SDK -->
+<script src="https://unpkg.com/@vapi-ai/web@latest/dist/vapi.umd.js"></script>
+
+<script>
+(function () {
+  const STORAGE_KEY = 'daniel-cc-vapi';
+  const micBtn    = document.getElementById('micBtn');
+  const micWrap   = document.getElementById('micWrap');
+  const statusEl  = document.getElementById('status');
+  const vizEl     = document.getElementById('visualizer');
+  const bars      = vizEl.querySelectorAll('.bar');
+  const overlay   = document.getElementById('setupOverlay');
+
+  let vapi = null;
+  let callActive = false;
+
+  // ---- Persistence ----
+  function loadConfig() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); }
+    catch { return null; }
+  }
+
+  function saveConfig(pubKey, assistantId) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ pubKey, assistantId }));
+  }
+
+  // ---- Setup flow ----
+  function showSetup() {
+    overlay.classList.remove('hidden');
+    const config = loadConfig();
+    if (config) {
+      document.getElementById('pubKey').value = config.pubKey || '';
+      document.getElementById('assistantId').value = config.assistantId || '';
+    }
+  }
+
+  document.getElementById('saveSetup').addEventListener('click', () => {
+    const pubKey = document.getElementById('pubKey').value.trim();
+    const assistantId = document.getElementById('assistantId').value.trim();
+    if (!pubKey || !assistantId) return;
+    saveConfig(pubKey, assistantId);
+    overlay.classList.add('hidden');
+    initVapi(pubKey);
+  });
+
+  // ---- VAPI init ----
+  function initVapi(publicKey) {
+    if (typeof Vapi === 'undefined') {
+      setStatus('SDK failed to load', 'error');
+      return;
+    }
+    vapi = new Vapi(publicKey);
+
+    vapi.on('call-start', () => {
+      callActive = true;
+      micBtn.classList.add('active');
+      micWrap.classList.add('listening');
+      vizEl.classList.add('active');
+      setStatus('Listening...', 'active');
+    });
+
+    vapi.on('call-end', () => {
+      callActive = false;
+      micBtn.classList.remove('active');
+      micWrap.classList.remove('listening');
+      vizEl.classList.remove('active');
+      resetBars();
+      setStatus('Ready');
+    });
+
+    vapi.on('volume-level', (level) => {
+      animateBars(level);
+    });
+
+    vapi.on('speech-start', () => {
+      setStatus('Listening...', 'active');
+    });
+
+    vapi.on('speech-end', () => {
+      setStatus('Processing...', 'active');
+    });
+
+    vapi.on('error', (err) => {
+      console.error('[VAPI]', err);
+      setStatus('Error — tap to retry', 'error');
+      callActive = false;
+      micBtn.classList.remove('active');
+      micWrap.classList.remove('listening');
+      vizEl.classList.remove('active');
+      resetBars();
+    });
+
+    setStatus('Ready');
+  }
+
+  // ---- Call toggle ----
+  micBtn.addEventListener('click', async () => {
+    const config = loadConfig();
+    if (!config) { showSetup(); return; }
+    if (!vapi) { initVapi(config.pubKey); }
+
+    if (callActive) {
+      vapi.stop();
+    } else {
+      setStatus('Connecting...', 'active');
+      try {
+        await vapi.start(config.assistantId);
+      } catch (err) {
+        console.error('[VAPI] Start error:', err);
+        setStatus('Failed to connect', 'error');
+      }
+    }
+  });
+
+  // Long-press to reconfigure
+  let holdTimer;
+  micBtn.addEventListener('pointerdown', () => {
+    holdTimer = setTimeout(() => { showSetup(); }, 1500);
+  });
+  micBtn.addEventListener('pointerup',   () => clearTimeout(holdTimer));
+  micBtn.addEventListener('pointerleave', () => clearTimeout(holdTimer));
+
+  // ---- Visualizer ----
+  function animateBars(level) {
+    const clamped = Math.min(1, Math.max(0, level));
+    bars.forEach((bar, i) => {
+      const offset = Math.sin(Date.now() / 150 + i * 0.7) * 0.3 + 0.7;
+      const h = 8 + clamped * offset * 24;
+      bar.style.height = h + 'px';
+    });
+  }
+
+  function resetBars() {
+    bars.forEach(b => b.style.height = '8px');
+  }
+
+  // ---- Status ----
+  function setStatus(text, cls) {
+    statusEl.textContent = text;
+    statusEl.className = 'status' + (cls ? ' ' + cls : '');
+  }
+
+  // ---- Boot ----
+  const config = loadConfig();
+  if (config && config.pubKey) {
+    initVapi(config.pubKey);
+  } else {
+    showSetup();
+  }
+
+  // ---- Register service worker ----
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  }
+})();
+</script>
+</body>
+</html>

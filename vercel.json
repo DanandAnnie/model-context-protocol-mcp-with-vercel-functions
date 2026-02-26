@@ -1,8 +1,24 @@
 {
-  "rewrites": [{ "source": "/(.+)", "destination": "/api/server" }],
+  "rewrites": [
+    { "source": "/api/email-webhook", "destination": "/api/email-webhook" },
+    { "source": "/api/cron/daily-pipeline", "destination": "/api/cron/daily-pipeline" },
+    { "source": "/(.+)", "destination": "/api/server" }
+  ],
   "functions": {
     "api/server.ts": {
       "maxDuration": 60
+    },
+    "api/email-webhook.ts": {
+      "maxDuration": 60
+    },
+    "api/cron/daily-pipeline.ts": {
+      "maxDuration": 60
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/daily-pipeline",
+      "schedule": "0 14 * * *"
+    }
+  ]
 }

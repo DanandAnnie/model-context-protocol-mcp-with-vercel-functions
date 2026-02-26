@@ -797,8 +797,8 @@ export async function POST(request: Request): Promise<Response> {
       "";
     const senderName =
       inbound.from ||
-      url.searchParams.get("sender") ??
-      "Chamber Email";
+      (url.searchParams.get("sender") ??
+      "Chamber Email");
 
     // Parse the email
     const parsed = parseEmailContent(inbound.body);

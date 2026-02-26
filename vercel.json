@@ -2,6 +2,9 @@
   "functions": {
     "api/[transport].ts": {
       "maxDuration": 60
+    },
+    "api/vapi.ts": {
+      "maxDuration": 60
     }
   }
 }

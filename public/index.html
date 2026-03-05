@@ -1,10 +1,129 @@
-<h1>MCP on Vercel</h1>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Property Data MCP Server</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; line-height: 1.6; }
+    .container { max-width: 1000px; margin: 0 auto; padding: 2rem; }
+    h1 { font-size: 2rem; margin-bottom: 0.5rem; color: #38bdf8; }
+    h2 { font-size: 1.3rem; margin: 2rem 0 1rem; color: #7dd3fc; border-bottom: 1px solid #1e293b; padding-bottom: 0.5rem; }
+    .subtitle { color: #94a3b8; margin-bottom: 2rem; }
+    .badge { display: inline-block; background: #1e3a5f; color: #38bdf8; padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.8rem; margin: 0.2rem; }
+    .badge.free { background: #064e3b; color: #34d399; }
+    .tool-grid { display: grid; gap: 1rem; }
+    .tool { background: #1e293b; border-radius: 8px; padding: 1rem 1.2rem; border-left: 3px solid #38bdf8; }
+    .tool-name { font-weight: 600; color: #f1f5f9; font-family: monospace; font-size: 0.95rem; }
+    .tool-desc { color: #94a3b8; font-size: 0.85rem; margin-top: 0.3rem; }
+    .env-table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
+    .env-table td { padding: 0.4rem 0.8rem; border-bottom: 1px solid #1e293b; font-size: 0.85rem; }
+    .env-table td:first-child { font-family: monospace; color: #38bdf8; white-space: nowrap; }
+    .env-table td:last-child { color: #94a3b8; }
+    .setup { background: #1e293b; border-radius: 8px; padding: 1.2rem; margin-top: 1rem; }
+    code { background: #0f172a; padding: 0.15rem 0.4rem; border-radius: 3px; font-size: 0.85rem; color: #38bdf8; }
+    pre { background: #0f172a; padding: 1rem; border-radius: 6px; overflow-x: auto; margin: 0.5rem 0; font-size: 0.85rem; color: #e2e8f0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Property Data MCP Server</h1>
+    <p class="subtitle">A PropertyRadar-style property intelligence platform exposed as MCP tools. 27 tools for property lookup, owner research, mortgage analysis, foreclosure tracking, list building, and investment analysis.</p>
 
-<p>Protocol is mounted below /.</p>
+    <h2>MCP Tools (27 total)</h2>
 
-<p>
-  <a
-    href="https://vercel.com/templates/other/model-context-protocol-mcp-with-vercel-functions"
-    >Clone template on Vercel</a
-  >
-</p>
+    <h3 style="color:#7dd3fc;margin:1rem 0 0.5rem">Property Lookup &amp; Search</h3>
+    <div class="tool-grid">
+      <div class="tool"><span class="tool-name">property_lookup_by_address</span> <span class="badge free">Free data</span> <span class="badge">PR API</span><div class="tool-desc">Full property details by street address. Combines PropertyRadar, Zillow, ATTOM, flood zone, and school data.</div></div>
+      <div class="tool"><span class="tool-name">property_lookup_by_apn</span> <span class="badge">PR API</span><div class="tool-desc">Look up by Assessor Parcel Number with county assessor links.</div></div>
+      <div class="tool"><span class="tool-name">property_search</span> <span class="badge">PR API</span><div class="tool-desc">Search with filters: location, type, beds/baths, sqft, value, owner status, etc.</div></div>
+      <div class="tool"><span class="tool-name">property_comps</span> <span class="badge">PR API</span><div class="tool-desc">Comparable sales near a property for valuation.</div></div>
+    </div>
+
+    <h3 style="color:#7dd3fc;margin:1rem 0 0.5rem">Owner Information</h3>
+    <div class="tool-grid">
+      <div class="tool"><span class="tool-name">owner_lookup</span> <span class="badge">PR API</span><div class="tool-desc">Owner name, mailing address, ownership type, vesting.</div></div>
+      <div class="tool"><span class="tool-name">owner_search</span> <span class="badge">PR API</span><div class="tool-desc">Find all properties by owner name.</div></div>
+      <div class="tool"><span class="tool-name">find_absentee_owners</span> <span class="badge">PR API</span><div class="tool-desc">Properties where owner doesn't live at property.</div></div>
+      <div class="tool"><span class="tool-name">find_corporate_owned</span> <span class="badge">PR API</span><div class="tool-desc">Properties owned by corporations or LLCs.</div></div>
+      <div class="tool"><span class="tool-name">find_trust_owned</span> <span class="badge">PR API</span><div class="tool-desc">Properties held in trusts.</div></div>
+      <div class="tool"><span class="tool-name">find_out_of_state_owners</span> <span class="badge">PR API</span><div class="tool-desc">Properties with owners in a different state.</div></div>
+    </div>
+
+    <h3 style="color:#7dd3fc;margin:1rem 0 0.5rem">Mortgage &amp; Loan Data</h3>
+    <div class="tool-grid">
+      <div class="tool"><span class="tool-name">mortgage_details</span> <span class="badge">PR API</span><div class="tool-desc">Lender, amount, rate, type, term, estimated balance &amp; payment.</div></div>
+      <div class="tool"><span class="tool-name">find_high_equity_properties</span> <span class="badge">PR API</span><div class="tool-desc">Properties with high equity / low LTV.</div></div>
+      <div class="tool"><span class="tool-name">find_free_and_clear</span> <span class="badge">PR API</span><div class="tool-desc">Properties with no mortgage (100% equity).</div></div>
+      <div class="tool"><span class="tool-name">find_arm_loans</span> <span class="badge">PR API</span><div class="tool-desc">Properties with adjustable rate mortgages.</div></div>
+    </div>
+
+    <h3 style="color:#7dd3fc;margin:1rem 0 0.5rem">Foreclosure &amp; Distress</h3>
+    <div class="tool-grid">
+      <div class="tool"><span class="tool-name">foreclosure_details</span> <span class="badge">PR API</span><div class="tool-desc">NOD/NTS details, auction date, default amount, trustee info.</div></div>
+      <div class="tool"><span class="tool-name">find_preforeclosures</span> <span class="badge">PR API</span><div class="tool-desc">Properties with Notice of Default filed.</div></div>
+      <div class="tool"><span class="tool-name">find_auction_properties</span> <span class="badge">PR API</span><div class="tool-desc">Properties scheduled for trustee sale/auction.</div></div>
+      <div class="tool"><span class="tool-name">find_bank_owned</span> <span class="badge">PR API</span><div class="tool-desc">REO / bank-owned properties.</div></div>
+      <div class="tool"><span class="tool-name">find_tax_delinquent</span> <span class="badge">PR API</span><div class="tool-desc">Properties with unpaid property taxes.</div></div>
+    </div>
+
+    <h3 style="color:#7dd3fc;margin:1rem 0 0.5rem">Sales &amp; Transfers</h3>
+    <div class="tool-grid">
+      <div class="tool"><span class="tool-name">transfer_history</span> <span class="badge">PR API</span><div class="tool-desc">Full sale/transfer history with dates, prices, parties.</div></div>
+      <div class="tool"><span class="tool-name">find_recent_sales</span> <span class="badge">PR API</span><div class="tool-desc">Recently sold properties, cash buyer filter.</div></div>
+    </div>
+
+    <h3 style="color:#7dd3fc;margin:1rem 0 0.5rem">List Building</h3>
+    <div class="tool-grid">
+      <div class="tool"><span class="tool-name">build_property_list</span> <span class="badge">PR API</span><div class="tool-desc">Create targeted lists with 40+ filter criteria (like PropertyRadar's 285+ criteria list builder).</div></div>
+      <div class="tool"><span class="tool-name">get_property_lists</span> <span class="badge">PR API</span><div class="tool-desc">Retrieve all saved property lists.</div></div>
+    </div>
+
+    <h3 style="color:#7dd3fc;margin:1rem 0 0.5rem">Market &amp; Location Data</h3>
+    <div class="tool-grid">
+      <div class="tool"><span class="tool-name">market_demographics</span> <span class="badge free">Free data</span><div class="tool-desc">Census data: population, income, home values, rents, vacancy rates.</div></div>
+      <div class="tool"><span class="tool-name">flood_zone_check</span> <span class="badge free">Free data</span><div class="tool-desc">FEMA flood zone designation for any address.</div></div>
+      <div class="tool"><span class="tool-name">nearby_schools</span> <span class="badge free">Free data</span><div class="tool-desc">Schools near a property from OpenStreetMap.</div></div>
+      <div class="tool"><span class="tool-name">geocode_address</span> <span class="badge free">Free data</span><div class="tool-desc">Address-to-coordinates and reverse geocoding.</div></div>
+      <div class="tool"><span class="tool-name">county_assessor_lookup</span> <span class="badge free">Free data</span><div class="tool-desc">County assessor website lookup URLs by APN.</div></div>
+    </div>
+
+    <h3 style="color:#7dd3fc;margin:1rem 0 0.5rem">Valuation &amp; Investment</h3>
+    <div class="tool-grid">
+      <div class="tool"><span class="tool-name">property_valuation</span> <span class="badge free">Free data</span> <span class="badge">PR API</span><div class="tool-desc">Multi-source valuation: Zillow, ATTOM, PropertyRadar, assessor data.</div></div>
+      <div class="tool"><span class="tool-name">investment_analysis</span> <span class="badge free">Free data</span><div class="tool-desc">Cash flow, cap rate, cash-on-cash return, DSCR analysis.</div></div>
+    </div>
+
+    <h3 style="color:#7dd3fc;margin:1rem 0 0.5rem">Alerts &amp; Monitoring</h3>
+    <div class="tool-grid">
+      <div class="tool"><span class="tool-name">create_property_alert</span> <span class="badge">PR API</span><div class="tool-desc">Set up monitoring for new listings, price changes, foreclosures, sales.</div></div>
+      <div class="tool"><span class="tool-name">check_alerts</span> <span class="badge">PR API</span><div class="tool-desc">Manually check for properties matching alert criteria.</div></div>
+    </div>
+
+    <h2>Setup &amp; Environment Variables</h2>
+    <div class="setup">
+      <p style="margin-bottom:0.8rem">Configure these in your Vercel project settings or <code>.env</code> file:</p>
+      <table class="env-table">
+        <tr><td>PROPERTY_RADAR_API_TOKEN</td><td><strong>Required</strong> for PR API tools. Get from <a href="https://app.propertyradar.com/settings/api" style="color:#38bdf8">PropertyRadar Settings</a></td></tr>
+        <tr><td>RAPIDAPI_KEY</td><td>Optional. Enables Zillow Zestimate data via RapidAPI</td></tr>
+        <tr><td>ATTOM_API_KEY</td><td>Optional. Enables ATTOM property data</td></tr>
+        <tr><td>CENSUS_API_KEY</td><td>Optional. Census Bureau API (works without key at lower rate limits)</td></tr>
+        <tr><td>HUD_API_KEY</td><td>Optional. HUD Fair Market Rent data</td></tr>
+      </table>
+    </div>
+
+    <h2>Connect via MCP</h2>
+    <div class="setup">
+      <p>Add to your MCP client config (Claude Desktop, Cursor, etc.):</p>
+      <pre>{
+  "mcpServers": {
+    "property-data": {
+      "url": "https://YOUR-DEPLOYMENT.vercel.app/mcp"
+    }
+  }
+}</pre>
+    </div>
+  </div>
+</body>
+</html>

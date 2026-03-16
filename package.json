@@ -1,11 +1,14 @@
 {
-  "name": "mcp-on-vercel",
+  "name": "property-data-mcp-server",
   "version": "1.0.0",
-  "description": "",
+  "description": "PropertyRadar-style property intelligence MCP server with 27 tools for property lookup, owner research, mortgage analysis, foreclosure tracking, list building, and investment analysis",
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "typecheck": "tsc --noEmit",
+    "deploy": "vercel --prod",
+    "deploy:preview": "vercel"
   },
   "keywords": [],
   "author": "",

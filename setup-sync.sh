@@ -5,7 +5,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-MIGRATION_FILE="$SCRIPT_DIR/supabase/migrations/001_initial_schema.sql"
+MIGRATION_DIR="$SCRIPT_DIR/supabase/migrations"
 
 echo ""
 echo "==================================="
@@ -137,15 +137,23 @@ echo "  URL: $SUPABASE_URL"
 echo "  Key: ${ANON_KEY:0:20}..."
 echo ""
 
-# Step 6: Run migration
+# Step 6: Run all migrations in order
 echo "Step 5: Setting up database tables..."
 
-if [ -f "$MIGRATION_FILE" ]; then
-  npx supabase db execute --project-ref "$PROJECT_REF" -f "$MIGRATION_FILE" 2>&1 || true
-  echo "  Tables created!"
+MIGRATION_COUNT=0
+for MIGRATION_FILE in "$MIGRATION_DIR"/*.sql; do
+  if [ -f "$MIGRATION_FILE" ]; then
+    echo "  Running $(basename "$MIGRATION_FILE")..."
+    npx supabase db execute --project-ref "$PROJECT_REF" -f "$MIGRATION_FILE" 2>&1 || true
+    MIGRATION_COUNT=$((MIGRATION_COUNT + 1))
+  fi
+done
+
+if [ "$MIGRATION_COUNT" -gt 0 ]; then
+  echo "  $MIGRATION_COUNT migrations applied!"
 else
-  echo "  WARNING: Migration file not found at $MIGRATION_FILE"
-  echo "  You'll need to run it manually in the Supabase SQL Editor."
+  echo "  WARNING: No migration files found in $MIGRATION_DIR"
+  echo "  You'll need to run them manually in the Supabase SQL Editor."
 fi
 echo ""
 
@@ -178,5 +186,5 @@ echo "  4. Tap 'Connect' on each device"
 echo "  5. Done! Changes will sync in real-time."
 echo ""
 echo "NOTE: Go to supabase.com > Your Project > Database > Replication"
-echo "and enable Realtime for: properties, items, storage_units"
+echo "and enable Realtime for: properties, items, storage_units, property_rooms"
 echo ""

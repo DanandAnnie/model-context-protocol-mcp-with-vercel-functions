@@ -1,8 +1,8 @@
 import { openDB, type IDBPDatabase } from 'idb'
-import type { Property, StorageUnit, Item, ItemImage, StagingHistory, StagingPayment, PropertyExpense, Deal, DealWatch } from './database.types'
+import type { Property, StorageUnit, Item, ItemImage, StagingHistory, StagingPayment, PropertyExpense, Deal, DealWatch, Room } from './database.types'
 
 const DB_NAME = 'staging-inventory'
-const DB_VERSION = 4
+const DB_VERSION = 5
 
 interface OfflineDB {
   properties: { key: string; value: Property }
@@ -12,6 +12,7 @@ interface OfflineDB {
   staging_history: { key: string; value: StagingHistory }
   staging_payments: { key: string; value: StagingPayment }
   property_expenses: { key: string; value: PropertyExpense }
+  property_rooms: { key: string; value: Room }
   deals: { key: string; value: Deal }
   deal_watches: { key: string; value: DealWatch }
   pending_sync: {
@@ -52,6 +53,9 @@ export function getDB(): Promise<IDBPDatabase<OfflineDB>> {
         }
         if (!db.objectStoreNames.contains('property_expenses')) {
           db.createObjectStore('property_expenses', { keyPath: 'id' })
+        }
+        if (!db.objectStoreNames.contains('property_rooms')) {
+          db.createObjectStore('property_rooms', { keyPath: 'id' })
         }
         if (!db.objectStoreNames.contains('deals')) {
           db.createObjectStore('deals', { keyPath: 'id' })

@@ -11,6 +11,7 @@ import { isAIConfigured, measureRoomFromImage } from '../lib/ai'
 import { useProperties } from '../hooks/useProperties'
 import { useItems } from '../hooks/useItems'
 import { usePayments } from '../hooks/usePayments'
+import { useRooms } from '../hooks/useRooms'
 import { usePropertyExpenses } from '../hooks/usePropertyExpenses'
 import ItemCard from '../components/ItemCard'
 import PhotoGallery from '../components/PhotoGallery'
@@ -39,26 +40,6 @@ const EXPENSE_CATEGORIES: { key: ExpenseCategory; label: string }[] = [
 ]
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
-// Room measurement types
-interface Room {
-  id: string
-  name: string
-  length_ft: number
-  width_ft: number
-}
-
-function getRooms(propertyId: string): Room[] {
-  try {
-    const stored = localStorage.getItem(`property_rooms_${propertyId}`)
-    if (stored) return JSON.parse(stored)
-  } catch { /* empty */ }
-  return []
-}
-
-function saveRooms(propertyId: string, rooms: Room[]) {
-  localStorage.setItem(`property_rooms_${propertyId}`, JSON.stringify(rooms))
-}
 
 export default function PropertyDetail() {
   const { id } = useParams<{ id: string }>()
@@ -99,8 +80,8 @@ export default function PropertyDetail() {
     square_transaction_id: '',
     notes: '',
   })
-  // Room measurements
-  const [rooms, setRooms] = useState<Room[]>([])
+  // Room measurements — synced via Supabase + IndexedDB (not localStorage)
+  const { rooms, addRoom, deleteRoom: deleteRoomFromDb } = useRooms(id)
   const [showAddRoom, setShowAddRoom] = useState(false)
   const [roomForm, setRoomForm] = useState({ name: '', length_ft: 0, width_ft: 0 })
   const [showFitChecker, setShowFitChecker] = useState(false)
@@ -135,27 +116,16 @@ export default function PropertyDetail() {
     }
   }
 
-  const loadRooms = useCallback(() => {
-    if (id) setRooms(getRooms(id))
-  }, [id])
-
-  useEffect(() => { loadRooms() }, [loadRooms])
-
-  const handleAddRoom = () => {
+  const handleAddRoom = async () => {
     if (!id || !roomForm.name || !roomForm.length_ft || !roomForm.width_ft) return
-    const newRoom: Room = { id: crypto.randomUUID(), ...roomForm }
-    const updated = [...rooms, newRoom]
-    saveRooms(id, updated)
-    setRooms(updated)
+    await addRoom({ property_id: id, ...roomForm })
     setRoomForm({ name: '', length_ft: 0, width_ft: 0 })
     setShowAddRoom(false)
   }
 
-  const handleDeleteRoom = (roomId: string) => {
+  const handleDeleteRoom = async (roomId: string) => {
     if (!id) return
-    const updated = rooms.filter((r) => r.id !== roomId)
-    saveRooms(id, updated)
-    setRooms(updated)
+    await deleteRoomFromDb(roomId)
   }
 
   // Items with dimensions for fit checking

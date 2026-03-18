@@ -156,6 +156,18 @@ export interface DealWatch {
   updated_at: string
 }
 
+export interface Room {
+  id: string
+  property_id: string
+  name: string
+  length_ft: number
+  width_ft: number
+  created_at: string
+  updated_at: string
+}
+
+export type RoomInsert = Omit<Room, 'id' | 'created_at' | 'updated_at'>
+
 export type DealWatchInsert = Omit<DealWatch, 'id' | 'created_at' | 'updated_at'>
 export type StagingPaymentInsert = Omit<StagingPayment, 'id' | 'created_at'>
 export type PropertyInsert = Omit<Property, 'id' | 'created_at' | 'updated_at'>

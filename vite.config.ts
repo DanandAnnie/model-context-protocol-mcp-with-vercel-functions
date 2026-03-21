@@ -1,6 +1,22 @@
-import { defineConfig } from 'vite'
+import { defineConfig, Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+
+function versionPlugin(): Plugin {
+  return {
+    name: 'version-json',
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'version.json',
+        source: JSON.stringify({
+          version: `${Date.now()}`,
+          buildTime: new Date().toISOString(),
+        }),
+      })
+    },
+  }
+}
 
 export default defineConfig({
   base: '/model-context-protocol-mcp-with-vercel-functions/',
@@ -22,6 +38,7 @@ export default defineConfig({
   },
   plugins: [
     react(),
+    versionPlugin(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
@@ -52,7 +69,12 @@ export default defineConfig({
         skipWaiting: true,
         clientsClaim: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+        navigateFallbackDenylist: [/version\.json/],
         runtimeCaching: [
+          {
+            urlPattern: /version\.json/,
+            handler: 'NetworkOnly',
+          },
           {
             urlPattern: /^https:\/\/.*supabase\.co\/.*/i,
             handler: 'NetworkFirst',

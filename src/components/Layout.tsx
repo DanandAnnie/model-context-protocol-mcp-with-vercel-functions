@@ -18,6 +18,7 @@ import {
   User,
 } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
+import UpdateBanner from './UpdateBanner'
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -112,6 +113,7 @@ export default function Layout() {
 
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0">
+        <UpdateBanner />
         <header className="h-16 bg-[#0a0a18] border-b border-[#1a1a35] flex items-center px-4 lg:px-6 sticky top-0 z-30">
           <button
             className="lg:hidden p-2 -ml-2 rounded-lg hover:bg-[#1e1e3a] text-slate-500"

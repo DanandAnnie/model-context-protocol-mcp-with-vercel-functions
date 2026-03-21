@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { cacheData, getCachedData, isStoreInitialized, markStoreInitialized } from '../lib/offline'
-import { useVisibilityRefetch } from './useVisibilityRefetch'
+import { useRealtimeSync } from './useRealtimeSync'
 import type { Item, ItemInsert, ItemCategory } from '../lib/database.types'
 
 const VALID_CATEGORIES: ItemCategory[] = [
@@ -125,22 +125,8 @@ export function useItems() {
 
   useEffect(() => { fetchItems() }, [fetchItems])
 
-  // Refetch when app resumes from background (critical for iOS)
-  useVisibilityRefetch(fetchItems, isSupabaseConfigured())
-
-  // Realtime: subscribe to changes from other devices
-  useEffect(() => {
-    if (!isSupabaseConfigured()) return
-
-    const channel = supabase
-      .channel('items-sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'items' }, () => {
-        fetchItems()
-      })
-      .subscribe()
-
-    return () => { supabase.removeChannel(channel) }
-  }, [fetchItems])
+  // Realtime sync with auto-reconnect on iOS background resume + polling fallback
+  useRealtimeSync('items', 'items-sync', fetchItems)
 
   const addItem = async (item: ItemInsert) => {
     if (!isSupabaseConfigured()) {

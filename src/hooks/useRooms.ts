@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { cacheData, getCachedData } from '../lib/offline'
-import { useVisibilityRefetch } from './useVisibilityRefetch'
 import type { Room, RoomInsert } from '../lib/database.types'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 
 /**
  * Migrate rooms from localStorage (old format) into IndexedDB cache
@@ -93,17 +93,18 @@ export function useRooms(propertyId?: string) {
 
   useEffect(() => { fetchRooms() }, [fetchRooms])
 
-  // Refetch when app resumes from background (critical for iOS)
-  useVisibilityRefetch(fetchRooms, isSupabaseConfigured() && !!propertyId)
+  // Realtime sync with auto-reconnect for iOS background resume
+  const channelRef = useRef<RealtimeChannel | null>(null)
 
-  // Realtime sync — listen for changes from other devices
-  useEffect(() => {
+  const subscribeRoomChannel = useCallback(() => {
     if (!isSupabaseConfigured() || !propertyId) return
-
-    const channel = supabase
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current)
+      channelRef.current = null
+    }
+    channelRef.current = supabase
       .channel(`property-rooms-sync-${propertyId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'property_rooms' }, (payload) => {
-        // Only refetch if the change is for our property
         const row = payload.new as Room | undefined
         const oldRow = payload.old as Partial<Room> | undefined
         if (row?.property_id === propertyId || oldRow?.property_id === propertyId) {
@@ -111,8 +112,47 @@ export function useRooms(propertyId?: string) {
         }
       })
       .subscribe()
+  }, [fetchRooms, propertyId])
 
-    return () => { supabase.removeChannel(channel) }
+  useEffect(() => {
+    subscribeRoomChannel()
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current)
+        channelRef.current = null
+      }
+    }
+  }, [subscribeRoomChannel])
+
+  // Visibility change + online: re-subscribe and refetch (iOS kills WebSockets in background)
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !propertyId) return
+    let lastHidden = 0
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') lastHidden = Date.now()
+      if (document.visibilityState === 'visible') {
+        if (Date.now() - lastHidden > 3000 || lastHidden === 0) {
+          subscribeRoomChannel()
+          fetchRooms()
+        }
+      }
+    }
+    const onOnline = () => { subscribeRoomChannel(); fetchRooms() }
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('online', onOnline)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('online', onOnline)
+    }
+  }, [subscribeRoomChannel, fetchRooms, propertyId])
+
+  // Periodic polling fallback (every 30s when visible)
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !propertyId) return
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchRooms()
+    }, 30_000)
+    return () => clearInterval(interval)
   }, [fetchRooms, propertyId])
 
   const addRoom = async (room: RoomInsert) => {

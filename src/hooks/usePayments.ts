@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { cacheData, getCachedData } from '../lib/offline'
-import { useVisibilityRefetch } from './useVisibilityRefetch'
+import { useRealtimeSync } from './useRealtimeSync'
 import type { StagingPayment, StagingPaymentInsert } from '../lib/database.types'
 
 export function usePayments(propertyId?: string) {
@@ -49,22 +49,8 @@ export function usePayments(propertyId?: string) {
 
   useEffect(() => { fetchPayments() }, [fetchPayments])
 
-  // Refetch when app resumes from background (critical for iOS)
-  useVisibilityRefetch(fetchPayments, isSupabaseConfigured())
-
-  // Realtime: subscribe to changes from other devices
-  useEffect(() => {
-    if (!isSupabaseConfigured()) return
-
-    const channel = supabase
-      .channel('payments-sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'staging_payments' }, () => {
-        fetchPayments()
-      })
-      .subscribe()
-
-    return () => { supabase.removeChannel(channel) }
-  }, [fetchPayments])
+  // Realtime sync with auto-reconnect on iOS background resume + polling fallback
+  useRealtimeSync('staging_payments', 'payments-sync', fetchPayments)
 
   const addPayment = async (payment: StagingPaymentInsert) => {
     const newPayment: StagingPayment = {

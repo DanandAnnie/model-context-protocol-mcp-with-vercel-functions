@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { cacheData, getCachedData } from '../lib/offline'
-import { useVisibilityRefetch } from './useVisibilityRefetch'
+import { useRealtimeSync } from './useRealtimeSync'
 import type { PropertyExpense, PropertyExpenseInsert } from '../lib/database.types'
 
 export function usePropertyExpenses(propertyId?: string) {
@@ -51,22 +51,8 @@ export function usePropertyExpenses(propertyId?: string) {
 
   useEffect(() => { fetchExpenses() }, [fetchExpenses])
 
-  // Refetch when app resumes from background (critical for iOS)
-  useVisibilityRefetch(fetchExpenses, isSupabaseConfigured())
-
-  // Realtime: subscribe to changes from other devices
-  useEffect(() => {
-    if (!isSupabaseConfigured()) return
-
-    const channel = supabase
-      .channel('expenses-sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'property_expenses' }, () => {
-        fetchExpenses()
-      })
-      .subscribe()
-
-    return () => { supabase.removeChannel(channel) }
-  }, [fetchExpenses])
+  // Realtime sync with auto-reconnect on iOS background resume + polling fallback
+  useRealtimeSync('property_expenses', 'expenses-sync', fetchExpenses)
 
   const addExpense = async (expense: PropertyExpenseInsert) => {
     const newExpense: PropertyExpense = {

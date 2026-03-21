@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { cacheData, getCachedData } from '../lib/offline'
-import { useVisibilityRefetch } from './useVisibilityRefetch'
 import { scanDealsClientSide } from '../lib/deal-scanner'
 import type { Deal, DealInsert, DealWatch, DealWatchInsert } from '../lib/database.types'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 
 const SCAN_API_URL = '/api/scan-deals'
 const SCAN_INTERVAL_KEY = 'deals_scan_interval_ms'
@@ -57,14 +57,16 @@ export function useDeals() {
 
   useEffect(() => { fetchDeals() }, [fetchDeals])
 
-  // Refetch when app resumes from background (critical for iOS)
-  useVisibilityRefetch(fetchDeals, isSupabaseConfigured())
+  // Realtime sync with auto-reconnect for iOS background resume
+  const channelRef = useRef<RealtimeChannel | null>(null)
 
-  // Realtime: subscribe to changes from other devices
-  useEffect(() => {
+  const subscribeDealChannels = useCallback(() => {
     if (!isSupabaseConfigured()) return
-
-    const channel = supabase
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current)
+      channelRef.current = null
+    }
+    channelRef.current = supabase
       .channel('deals-sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'deals' }, () => {
         fetchDeals()
@@ -73,8 +75,47 @@ export function useDeals() {
         fetchDeals()
       })
       .subscribe()
+  }, [fetchDeals])
 
-    return () => { supabase.removeChannel(channel) }
+  useEffect(() => {
+    subscribeDealChannels()
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current)
+        channelRef.current = null
+      }
+    }
+  }, [subscribeDealChannels])
+
+  // Visibility change + online: re-subscribe and refetch (iOS kills WebSockets in background)
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return
+    let lastHidden = 0
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') lastHidden = Date.now()
+      if (document.visibilityState === 'visible') {
+        if (Date.now() - lastHidden > 3000 || lastHidden === 0) {
+          subscribeDealChannels()
+          fetchDeals()
+        }
+      }
+    }
+    const onOnline = () => { subscribeDealChannels(); fetchDeals() }
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('online', onOnline)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('online', onOnline)
+    }
+  }, [subscribeDealChannels, fetchDeals])
+
+  // Periodic polling fallback (every 30s when visible)
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchDeals()
+    }, 30_000)
+    return () => clearInterval(interval)
   }, [fetchDeals])
 
   // Add a watch

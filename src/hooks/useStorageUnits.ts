@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { cacheData, getCachedData, isStoreInitialized, markStoreInitialized } from '../lib/offline'
-import { useVisibilityRefetch } from './useVisibilityRefetch'
+import { useRealtimeSync } from './useRealtimeSync'
 import type { StorageUnit, StorageUnitInsert } from '../lib/database.types'
 
 const DEMO_UNITS: StorageUnit[] = [
@@ -58,22 +58,8 @@ export function useStorageUnits() {
 
   useEffect(() => { fetchUnits() }, [fetchUnits])
 
-  // Refetch when app resumes from background (critical for iOS)
-  useVisibilityRefetch(fetchUnits, isSupabaseConfigured())
-
-  // Realtime: subscribe to changes from other devices
-  useEffect(() => {
-    if (!isSupabaseConfigured()) return
-
-    const channel = supabase
-      .channel('storage-units-sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'storage_units' }, () => {
-        fetchUnits()
-      })
-      .subscribe()
-
-    return () => { supabase.removeChannel(channel) }
-  }, [fetchUnits])
+  // Realtime sync with auto-reconnect on iOS background resume + polling fallback
+  useRealtimeSync('storage_units', 'storage-units-sync', fetchUnits)
 
   const addUnit = async (unit: StorageUnitInsert) => {
     if (!isSupabaseConfigured()) {

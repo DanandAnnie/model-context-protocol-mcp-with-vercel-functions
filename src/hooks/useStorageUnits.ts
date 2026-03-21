@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { cacheData, getCachedData, isStoreInitialized, markStoreInitialized } from '../lib/offline'
+import { useVisibilityRefetch } from './useVisibilityRefetch'
 import type { StorageUnit, StorageUnitInsert } from '../lib/database.types'
 
 const DEMO_UNITS: StorageUnit[] = [
@@ -56,6 +57,9 @@ export function useStorageUnits() {
   }, [])
 
   useEffect(() => { fetchUnits() }, [fetchUnits])
+
+  // Refetch when app resumes from background (critical for iOS)
+  useVisibilityRefetch(fetchUnits, isSupabaseConfigured())
 
   // Realtime: subscribe to changes from other devices
   useEffect(() => {

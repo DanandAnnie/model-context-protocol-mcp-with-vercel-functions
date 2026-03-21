@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { cacheData, getCachedData, isStoreInitialized, markStoreInitialized } from '../lib/offline'
+import { useVisibilityRefetch } from './useVisibilityRefetch'
 import type { Item, ItemInsert, ItemCategory } from '../lib/database.types'
 
 const VALID_CATEGORIES: ItemCategory[] = [
@@ -123,6 +124,9 @@ export function useItems() {
   }, [])
 
   useEffect(() => { fetchItems() }, [fetchItems])
+
+  // Refetch when app resumes from background (critical for iOS)
+  useVisibilityRefetch(fetchItems, isSupabaseConfigured())
 
   // Realtime: subscribe to changes from other devices
   useEffect(() => {

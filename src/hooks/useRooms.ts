@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { cacheData, getCachedData } from '../lib/offline'
+import { useVisibilityRefetch } from './useVisibilityRefetch'
 import type { Room, RoomInsert } from '../lib/database.types'
 
 /**
@@ -91,6 +92,9 @@ export function useRooms(propertyId?: string) {
   }, [propertyId])
 
   useEffect(() => { fetchRooms() }, [fetchRooms])
+
+  // Refetch when app resumes from background (critical for iOS)
+  useVisibilityRefetch(fetchRooms, isSupabaseConfigured() && !!propertyId)
 
   // Realtime sync — listen for changes from other devices
   useEffect(() => {

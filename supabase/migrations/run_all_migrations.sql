@@ -374,3 +374,67 @@ create trigger property_rooms_updated_at before update on property_rooms
 
 -- Enable realtime for cross-device sync
 alter publication supabase_realtime add table property_rooms;
+
+-- ============================================================
+-- Migration 009: Enable Realtime on ALL tables for cross-device sync
+-- ============================================================
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND tablename = 'properties'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE properties;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND tablename = 'items'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE items;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND tablename = 'storage_units'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE storage_units;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND tablename = 'staging_payments'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE staging_payments;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND tablename = 'property_expenses'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE property_expenses;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND tablename = 'deals'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE deals;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND tablename = 'deal_watches'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE deal_watches;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND tablename = 'staging_history'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE staging_history;
+  END IF;
+END
+$$;

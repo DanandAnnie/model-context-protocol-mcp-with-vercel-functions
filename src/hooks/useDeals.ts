@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { cacheData, getCachedData } from '../lib/offline'
+import { useVisibilityRefetch } from './useVisibilityRefetch'
 import { scanDealsClientSide } from '../lib/deal-scanner'
 import type { Deal, DealInsert, DealWatch, DealWatchInsert } from '../lib/database.types'
 
@@ -55,6 +56,26 @@ export function useDeals() {
   }, [])
 
   useEffect(() => { fetchDeals() }, [fetchDeals])
+
+  // Refetch when app resumes from background (critical for iOS)
+  useVisibilityRefetch(fetchDeals, isSupabaseConfigured())
+
+  // Realtime: subscribe to changes from other devices
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return
+
+    const channel = supabase
+      .channel('deals-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'deals' }, () => {
+        fetchDeals()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'deal_watches' }, () => {
+        fetchDeals()
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [fetchDeals])
 
   // Add a watch
   const addWatch = async (watch: DealWatchInsert) => {

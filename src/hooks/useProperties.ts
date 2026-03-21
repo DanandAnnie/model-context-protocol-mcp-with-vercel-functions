@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { cacheData, getCachedData, isStoreInitialized, markStoreInitialized } from '../lib/offline'
+import { useVisibilityRefetch } from './useVisibilityRefetch'
 import type { Property, PropertyInsert } from '../lib/database.types'
 
 const propDefaults = { monthly_fee: 0, staging_start_date: null as string | null }
@@ -76,6 +77,9 @@ export function useProperties() {
   }, [])
 
   useEffect(() => { fetchProperties() }, [fetchProperties])
+
+  // Refetch when app resumes from background (critical for iOS)
+  useVisibilityRefetch(fetchProperties, isSupabaseConfigured())
 
   // Realtime: subscribe to changes from other devices
   useEffect(() => {

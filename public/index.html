@@ -1,10 +1,132 @@
-<h1>MCP on Vercel</h1>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="apple-touch-icon" href="/pwa-192x192.png" />
+  <title>Staging Inventory Manager</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1e1b4b;
+      color: #e2e8f0;
+      min-height: 100vh;
+      padding: 1rem;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 0;
+      border-bottom: 1px solid rgba(129, 140, 248, 0.15);
+      margin-bottom: 2rem;
+    }
+    .header h1 { font-size: 1.2rem; color: #c7d2fe; }
+    .share-btn {
+      display: flex; align-items: center; gap: 0.5rem;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: white;
+      border: none; border-radius: 0.625rem;
+      padding: 0.625rem 1rem;
+      font-size: 0.9rem; font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.1s;
+    }
+    .share-btn:active { transform: scale(0.96); }
+    .share-btn svg { width: 18px; height: 18px; }
+    .content { max-width: 600px; margin: 0 auto; }
+    .info-card {
+      background: rgba(30, 27, 75, 0.8);
+      border: 1px solid rgba(129, 140, 248, 0.2);
+      border-radius: 0.75rem;
+      padding: 1.5rem;
+      margin-bottom: 1rem;
+    }
+    .info-card h2 { font-size: 1rem; color: #a5b4fc; margin-bottom: 0.5rem; }
+    .info-card p { color: #94a3b8; font-size: 0.9rem; line-height: 1.5; }
+    a { color: #818cf8; }
+    .copied-toast {
+      position: fixed; bottom: 2rem; left: 50%; transform: translateX(-50%);
+      background: #22c55e; color: white;
+      padding: 0.75rem 1.5rem; border-radius: 0.75rem;
+      font-weight: 600; font-size: 0.9rem;
+      opacity: 0; transition: opacity 0.3s;
+      pointer-events: none;
+    }
+    .copied-toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div class="content">
+    <div class="header">
+      <h1>Staging Inventory Manager</h1>
+      <button class="share-btn" id="shareBtn" onclick="shareApp()">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+        Share
+      </button>
+    </div>
 
-<p>Protocol is mounted below /.</p>
+    <div class="info-card">
+      <h2>MCP Server</h2>
+      <p>Protocol is mounted at this URL. Connect your MCP client to this server.</p>
+    </div>
 
-<p>
-  <a
-    href="https://vercel.com/templates/other/model-context-protocol-mcp-with-vercel-functions"
-    >Clone template on Vercel</a
-  >
-</p>
+    <div class="info-card">
+      <h2>Share with Your Team</h2>
+      <p>Tap the <b>Share</b> button above to invite others to install the app on their iPhone or Android.</p>
+    </div>
+
+    <div class="info-card">
+      <p><a href="https://vercel.com/templates/other/model-context-protocol-mcp-with-vercel-functions">Clone template on Vercel</a></p>
+    </div>
+  </div>
+
+  <div class="copied-toast" id="toast">Link copied!</div>
+
+  <script>
+    function getShareUrl() {
+      return window.location.origin + '/share';
+    }
+
+    async function shareApp() {
+      // Try native Web Share API first (works on iOS Safari, Android Chrome)
+      if (navigator.share) {
+        try {
+          await navigator.share({
+            title: 'Staging Inventory Manager',
+            text: 'Install our staging inventory app to track furniture and manage properties together!',
+            url: getShareUrl(),
+          });
+          return;
+        } catch (err) {
+          if (err.name === 'AbortError') return; // user cancelled
+        }
+      }
+
+      // Fallback: copy to clipboard
+      try {
+        await navigator.clipboard.writeText(getShareUrl());
+        showToast('Share link copied!');
+      } catch {
+        const input = document.createElement('input');
+        input.value = getShareUrl();
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        document.body.removeChild(input);
+        showToast('Share link copied!');
+      }
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2000);
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Staging Inventory Manager</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4c1d95 100%);
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem;
+    }
+    .card {
+      background: rgba(30, 27, 75, 0.8);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(129, 140, 248, 0.2);
+      border-radius: 1rem;
+      padding: 2rem;
+      max-width: 400px;
+      width: 100%;
+      text-align: center;
+    }
+    .icon {
+      width: 80px; height: 80px;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      border-radius: 1rem;
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 1.5rem;
+      font-size: 2.5rem;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 0.5rem; color: #c7d2fe; }
+    .subtitle { color: #94a3b8; font-size: 0.9rem; margin-bottom: 2rem; }
+    .steps { text-align: left; margin: 1.5rem 0; }
+    .step {
+      display: flex; align-items: flex-start; gap: 0.75rem;
+      margin-bottom: 1.25rem; font-size: 0.95rem; line-height: 1.5;
+    }
+    .step-num {
+      background: #6366f1;
+      color: white;
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.8rem; font-weight: 700;
+      flex-shrink: 0;
+    }
+    .step-text b { color: #c7d2fe; }
+    .platform-badge {
+      display: inline-block;
+      background: rgba(99, 102, 241, 0.2);
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      border-radius: 0.5rem;
+      padding: 0.15rem 0.5rem;
+      font-size: 0.75rem;
+      color: #a5b4fc;
+    }
+    .btn {
+      display: block; width: 100%;
+      padding: 0.875rem;
+      border: none; border-radius: 0.75rem;
+      font-size: 1rem; font-weight: 600;
+      cursor: pointer;
+      margin-bottom: 0.75rem;
+      transition: transform 0.1s, opacity 0.2s;
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn-primary {
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: white;
+    }
+    .btn-secondary {
+      background: rgba(99, 102, 241, 0.15);
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      color: #c7d2fe;
+    }
+    .btn-share { display: none; }
+    .divider {
+      border: none;
+      border-top: 1px solid rgba(129, 140, 248, 0.15);
+      margin: 1.5rem 0;
+    }
+    .section-label {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #64748b;
+      margin-bottom: 1rem;
+    }
+    .copied-toast {
+      position: fixed; bottom: 2rem; left: 50%; transform: translateX(-50%);
+      background: #22c55e; color: white;
+      padding: 0.75rem 1.5rem; border-radius: 0.75rem;
+      font-weight: 600; font-size: 0.9rem;
+      opacity: 0; transition: opacity 0.3s;
+      pointer-events: none;
+    }
+    .copied-toast.show { opacity: 1; }
+    .ios-only, .android-only { display: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">🏠</div>
+    <h1>Staging Inventory Manager</h1>
+    <p class="subtitle">Track furniture, stage properties, and manage your inventory across all your devices.</p>
+
+    <!-- Share button (visible when Web Share API is available) -->
+    <button class="btn btn-primary btn-share" id="shareBtn" onclick="shareApp()">
+      Share with Team
+    </button>
+
+    <!-- Open app button -->
+    <button class="btn btn-primary" id="openBtn" onclick="openApp()">
+      Open App
+    </button>
+
+    <hr class="divider" />
+
+    <p class="section-label">Install on your device</p>
+
+    <!-- iOS instructions -->
+    <div class="ios-only" id="iosSteps">
+      <div class="steps">
+        <div class="step">
+          <span class="step-num">1</span>
+          <span class="step-text">Tap the <b>Share button</b> <span style="font-size:1.2em">&#xFEFF;&#x2B06;&#xFE0E;</span> at the bottom of Safari</span>
+        </div>
+        <div class="step">
+          <span class="step-num">2</span>
+          <span class="step-text">Scroll down and tap <b>"Add to Home Screen"</b></span>
+        </div>
+        <div class="step">
+          <span class="step-num">3</span>
+          <span class="step-text">Tap <b>"Add"</b> in the top right corner</span>
+        </div>
+      </div>
+      <p style="font-size:0.8rem; color:#94a3b8;">Must use Safari — other iOS browsers don't support app install.</p>
+    </div>
+
+    <!-- Android instructions -->
+    <div class="android-only" id="androidSteps">
+      <div class="steps">
+        <div class="step">
+          <span class="step-num">1</span>
+          <span class="step-text">Tap the <b>menu</b> (three dots) in Chrome</span>
+        </div>
+        <div class="step">
+          <span class="step-num">2</span>
+          <span class="step-text">Tap <b>"Install app"</b> or <b>"Add to Home screen"</b></span>
+        </div>
+        <div class="step">
+          <span class="step-num">3</span>
+          <span class="step-text">Tap <b>"Install"</b> to confirm</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Desktop / fallback instructions -->
+    <div id="desktopSteps">
+      <div class="steps">
+        <div class="step">
+          <span class="step-num">1</span>
+          <span class="step-text">Open this link on your <b>iPhone</b> or <b>Android</b> phone</span>
+        </div>
+        <div class="step">
+          <span class="step-num">2</span>
+          <span class="step-text">Follow the install prompts to add to your home screen</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider" />
+
+    <button class="btn btn-secondary" onclick="copyLink()">
+      Copy Link
+    </button>
+  </div>
+
+  <div class="copied-toast" id="toast">Link copied!</div>
+
+  <script>
+    // Detect platform
+    const ua = navigator.userAgent;
+    const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const isAndroid = /Android/.test(ua);
+
+    if (isIOS) {
+      document.getElementById('iosSteps').style.display = 'block';
+      document.getElementById('desktopSteps').style.display = 'none';
+    } else if (isAndroid) {
+      document.getElementById('androidSteps').style.display = 'block';
+      document.getElementById('desktopSteps').style.display = 'none';
+    }
+
+    // Show native share button if available
+    if (navigator.share) {
+      document.querySelector('.btn-share').style.display = 'block';
+    }
+
+    // Get the app's base URL (same origin, just the root)
+    function getAppUrl() {
+      return window.location.origin;
+    }
+
+    function getShareUrl() {
+      return window.location.origin + '/share';
+    }
+
+    function openApp() {
+      window.location.href = getAppUrl();
+    }
+
+    async function shareApp() {
+      try {
+        await navigator.share({
+          title: 'Staging Inventory Manager',
+          text: 'Install our staging inventory app to track furniture and manage properties together.',
+          url: getShareUrl(),
+        });
+      } catch (err) {
+        // User cancelled or share failed — fall back to copy
+        if (err.name !== 'AbortError') {
+          copyLink();
+        }
+      }
+    }
+
+    function copyLink() {
+      const url = getShareUrl();
+      navigator.clipboard.writeText(url).then(() => {
+        showToast('Link copied!');
+      }).catch(() => {
+        // Fallback for older browsers
+        const input = document.createElement('input');
+        input.value = url;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        document.body.removeChild(input);
+        showToast('Link copied!');
+      });
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2000);
+    }
+  </script>
+</body>
+</html>

@@ -7,3 +7,13 @@ dist
 *.local
 tsconfig.tsbuildinfo
 supabase/.temp/
+
+# Native build artifacts
+android/.gradle/
+android/app/build/
+android/build/
+android/.idea/
+ios/App/Pods/
+ios/DerivedData/
+*.keystore
+*.jks

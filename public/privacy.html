@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Privacy Policy — Staging Inventory Manager</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1e1b4b;
+      color: #e2e8f0;
+      padding: 2rem 1rem;
+      line-height: 1.7;
+    }
+    .container { max-width: 640px; margin: 0 auto; }
+    h1 { font-size: 1.5rem; color: #c7d2fe; margin-bottom: 0.5rem; }
+    h2 { font-size: 1.1rem; color: #a5b4fc; margin: 1.5rem 0 0.5rem; }
+    p { color: #cbd5e1; margin-bottom: 0.75rem; font-size: 0.95rem; }
+    .date { color: #64748b; font-size: 0.85rem; margin-bottom: 2rem; }
+    ul { margin: 0.5rem 0 0.75rem 1.5rem; color: #cbd5e1; font-size: 0.95rem; }
+    li { margin-bottom: 0.25rem; }
+    a { color: #818cf8; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Privacy Policy</h1>
+    <p class="date">Staging Inventory Manager &mdash; Last updated: March 2026</p>
+
+    <h2>What We Collect</h2>
+    <p>When you use Staging Inventory Manager, we collect only what's needed for the app to function:</p>
+    <ul>
+      <li><b>Account info:</b> Email address and password (for authentication)</li>
+      <li><b>Inventory data:</b> Items, properties, storage units, photos, and staging history you enter</li>
+      <li><b>Financial data:</b> Payment records and expenses you enter for tax tracking</li>
+    </ul>
+
+    <h2>How Data Is Stored</h2>
+    <p>Your data is stored in a Supabase-hosted PostgreSQL database with row-level security. Data is also cached locally on your device for offline access using IndexedDB.</p>
+
+    <h2>Data Sharing</h2>
+    <p>We do <b>not</b> sell, rent, or share your personal data with third parties. Your inventory and financial data is only accessible by you and team members you explicitly invite.</p>
+
+    <h2>Third-Party Services</h2>
+    <ul>
+      <li><b>Supabase</b> — database hosting, authentication, and real-time sync</li>
+      <li><b>Vercel</b> — app hosting</li>
+      <li><b>Anthropic (Claude API)</b> — optional AI features for item identification (photos are sent to the API only when you use AI features)</li>
+    </ul>
+
+    <h2>Your Rights</h2>
+    <p>You can export or delete all your data at any time from within the app. To request complete account deletion, contact us at the email below.</p>
+
+    <h2>Security</h2>
+    <p>All data is transmitted over HTTPS. Authentication uses Supabase Auth with bcrypt-hashed passwords. Row-level security policies ensure users can only access their own team's data.</p>
+
+    <h2>Contact</h2>
+    <p>Questions about this policy? Email <a href="mailto:privacy@stagingtools.com">privacy@stagingtools.com</a>.</p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2732 2732">
+  <rect width="2732" height="2732" fill="#1e1b4b"/>
+  <!-- Centered house icon -->
+  <g transform="translate(1016, 1016)">
+    <path d="M350 100 L650 280 L650 580 Q650 600 630 600 L70 600 Q50 600 50 580 L50 280 Z"
+          fill="#4c1d95" stroke="#6366f1" stroke-width="8"/>
+    <rect x="280" y="380" width="140" height="220" rx="10" fill="#6366f1"/>
+    <circle cx="394" cy="494" r="10" fill="#a5b4fc"/>
+    <rect x="100" y="310" width="110" height="90" rx="8" fill="#818cf8" opacity="0.6"/>
+    <rect x="490" y="310" width="110" height="90" rx="8" fill="#818cf8" opacity="0.6"/>
+  </g>
+  <!-- App name -->
+  <text x="1366" y="1780" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, sans-serif"
+        font-size="72" font-weight="700" fill="#c7d2fe">Staging Inventory</text>
+  <text x="1366" y="1860" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, sans-serif"
+        font-size="48" fill="#94a3b8">Manager</text>
+</svg>

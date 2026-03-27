@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>Calendar — Staging Inventory Manager</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1e1b4b; color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    /* Header */
+    .header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 1rem; border-bottom: 1px solid rgba(129,140,248,0.15);
+      position: sticky; top: 0; background: #1e1b4b; z-index: 10;
+    }
+    .header h1 { font-size: 1.2rem; color: #c7d2fe; }
+    .header-actions { display: flex; gap: 0.5rem; }
+    .back-link {
+      color: #818cf8; text-decoration: none; font-size: 0.9rem;
+      display: flex; align-items: center; gap: 0.25rem;
+    }
+
+    /* Buttons */
+    .btn {
+      padding: 0.5rem 1rem; border: none; border-radius: 0.5rem;
+      font-size: 0.85rem; font-weight: 600; cursor: pointer;
+      transition: transform 0.1s, opacity 0.2s;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn-primary { background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white; }
+    .btn-secondary { background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.3); color: #c7d2fe; }
+    .btn-danger { background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3); color: #fca5a5; }
+    .btn-sm { padding: 0.375rem 0.75rem; font-size: 0.8rem; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* Connect prompt */
+    .connect-card {
+      text-align: center; padding: 3rem 1.5rem; max-width: 400px; margin: 2rem auto;
+      background: rgba(30,27,75,0.8); border: 1px solid rgba(129,140,248,0.2);
+      border-radius: 1rem;
+    }
+    .connect-card .icon { font-size: 3rem; margin-bottom: 1rem; }
+    .connect-card h2 { color: #c7d2fe; margin-bottom: 0.5rem; }
+    .connect-card p { color: #94a3b8; font-size: 0.9rem; margin-bottom: 1.5rem; }
+
+    /* Calendar grid */
+    .calendar-nav {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.75rem 1rem;
+    }
+    .calendar-nav h2 { font-size: 1.1rem; color: #c7d2fe; }
+    .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; padding: 0 0.5rem; }
+    .cal-header { text-align: center; font-size: 0.7rem; color: #64748b; padding: 0.5rem 0; font-weight: 600; }
+    .cal-day {
+      min-height: 60px; padding: 0.25rem;
+      background: rgba(30,27,75,0.5); border-radius: 0.375rem;
+      cursor: pointer; transition: background 0.15s;
+      position: relative;
+    }
+    .cal-day:hover { background: rgba(99,102,241,0.15); }
+    .cal-day.today { border: 2px solid #6366f1; }
+    .cal-day.other-month { opacity: 0.3; }
+    .cal-day.selected { background: rgba(99,102,241,0.25); }
+    .cal-day-num { font-size: 0.8rem; color: #94a3b8; padding: 0.125rem; }
+    .cal-day.today .cal-day-num { color: #a5b4fc; font-weight: 700; }
+    .cal-dot {
+      width: 6px; height: 6px; border-radius: 50%; background: #6366f1;
+      position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
+    }
+    .cal-dot.busy { background: #ef4444; }
+
+    /* View tabs */
+    .view-tabs {
+      display: flex; gap: 0.25rem; padding: 0.5rem 1rem;
+      border-bottom: 1px solid rgba(129,140,248,0.1);
+    }
+    .view-tab {
+      padding: 0.375rem 0.75rem; border-radius: 0.375rem;
+      font-size: 0.8rem; color: #94a3b8; cursor: pointer;
+      background: transparent; border: none;
+    }
+    .view-tab.active { background: rgba(99,102,241,0.2); color: #a5b4fc; }
+
+    /* Events list */
+    .events-section { padding: 1rem; }
+    .events-section h3 { font-size: 0.9rem; color: #94a3b8; margin-bottom: 0.75rem; }
+    .event-card {
+      display: flex; gap: 0.75rem; padding: 0.75rem;
+      background: rgba(30,27,75,0.6); border: 1px solid rgba(129,140,248,0.15);
+      border-radius: 0.625rem; margin-bottom: 0.5rem;
+      cursor: pointer; transition: background 0.15s;
+    }
+    .event-card:hover { background: rgba(99,102,241,0.1); }
+    .event-time {
+      min-width: 60px; text-align: right;
+      font-size: 0.8rem; color: #818cf8; font-weight: 600;
+      padding-top: 0.125rem;
+    }
+    .event-info { flex: 1; }
+    .event-title { font-size: 0.9rem; color: #e2e8f0; margin-bottom: 0.125rem; }
+    .event-meta { font-size: 0.75rem; color: #64748b; }
+    .event-color {
+      width: 4px; border-radius: 2px; flex-shrink: 0;
+    }
+    .no-events { text-align: center; color: #64748b; padding: 2rem; font-size: 0.9rem; }
+
+    /* Availability slots */
+    .avail-section { padding: 1rem; }
+    .avail-slot {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 0.625rem 0.75rem;
+      background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.2);
+      border-radius: 0.5rem; margin-bottom: 0.375rem;
+    }
+    .avail-slot.busy {
+      background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.2);
+    }
+    .avail-time { font-size: 0.85rem; color: #e2e8f0; }
+    .avail-status { font-size: 0.75rem; font-weight: 600; }
+    .avail-status.free { color: #4ade80; }
+    .avail-status.busy { color: #f87171; }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+      display: flex; align-items: flex-end; justify-content: center;
+      z-index: 100; opacity: 0; pointer-events: none; transition: opacity 0.2s;
+    }
+    .modal-overlay.open { opacity: 1; pointer-events: auto; }
+    .modal {
+      background: #1e1b4b; border-top: 1px solid rgba(129,140,248,0.2);
+      border-radius: 1rem 1rem 0 0; width: 100%; max-width: 500px;
+      max-height: 85vh; overflow-y: auto; padding: 1.5rem;
+      transform: translateY(100%); transition: transform 0.3s;
+    }
+    .modal-overlay.open .modal { transform: translateY(0); }
+    .modal-handle {
+      width: 40px; height: 4px; background: #4c1d95; border-radius: 2px;
+      margin: 0 auto 1rem;
+    }
+    .modal h2 { font-size: 1.1rem; color: #c7d2fe; margin-bottom: 1rem; }
+    .form-group { margin-bottom: 1rem; }
+    .form-group label {
+      display: block; font-size: 0.8rem; color: #94a3b8;
+      margin-bottom: 0.375rem; font-weight: 500;
+    }
+    .form-group input, .form-group select, .form-group textarea {
+      width: 100%; padding: 0.625rem 0.75rem;
+      background: rgba(30,27,75,0.8); border: 1px solid rgba(129,140,248,0.2);
+      border-radius: 0.5rem; color: #e2e8f0; font-size: 0.9rem;
+      font-family: inherit;
+    }
+    .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+      outline: none; border-color: #6366f1;
+    }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+    .form-actions { display: flex; gap: 0.5rem; margin-top: 1.5rem; }
+    .form-actions .btn { flex: 1; }
+
+    /* Toast */
+    .toast {
+      position: fixed; bottom: 2rem; left: 50%; transform: translateX(-50%);
+      background: #22c55e; color: white;
+      padding: 0.75rem 1.5rem; border-radius: 0.75rem;
+      font-weight: 600; font-size: 0.9rem;
+      opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 200;
+    }
+    .toast.error { background: #ef4444; }
+    .toast.show { opacity: 1; }
+
+    /* Loading */
+    .spinner {
+      width: 24px; height: 24px; border: 3px solid rgba(129,140,248,0.2);
+      border-top-color: #6366f1; border-radius: 50%;
+      animation: spin 0.8s linear infinite; margin: 2rem auto;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @media (min-width: 640px) {
+      .cal-day { min-height: 80px; }
+      .modal { border-radius: 1rem; margin-bottom: 2rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div>
+      <a href="/" class="back-link">&larr; Home</a>
+      <h1>Staging Calendar</h1>
+    </div>
+    <div class="header-actions" id="headerActions"></div>
+  </div>
+
+  <!-- Main content -->
+  <div id="app"></div>
+
+  <!-- Event modal -->
+  <div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this)closeModal()">
+    <div class="modal" id="modal"></div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // ===================== STATE =====================
+    let tokens = null
+    let events = []
+    let busySlots = []
+    let currentMonth = new Date()
+    let selectedDate = new Date()
+    let currentView = 'month' // month | day | availability
+    let loading = false
+    let editingEvent = null
+
+    const EVENT_COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#3b82f6']
+    const STAGING_TYPES = [
+      'Property Walkthrough',
+      'Staging Setup',
+      'Staging Removal',
+      'Client Consultation',
+      'Furniture Delivery',
+      'Photography Session',
+      'Open House',
+      'Other',
+    ]
+
+    // ===================== AUTH =====================
+    function loadTokens() {
+      try {
+        const stored = localStorage.getItem('google_calendar_tokens')
+        if (stored) tokens = JSON.parse(stored)
+      } catch { tokens = null }
+    }
+
+    function saveTokens(t) {
+      tokens = t
+      localStorage.setItem('google_calendar_tokens', JSON.stringify(t))
+    }
+
+    function clearTokens() {
+      tokens = null
+      localStorage.removeItem('google_calendar_tokens')
+      render()
+    }
+
+    async function ensureValidToken() {
+      if (!tokens) return false
+      if (Date.now() < tokens.expires_at - 60000) return true
+
+      // Token expired — refresh it
+      if (!tokens.refresh_token) { clearTokens(); return false }
+      try {
+        const res = await fetch('/api/calendar-auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: tokens.refresh_token }),
+        })
+        if (!res.ok) { clearTokens(); return false }
+        const newTokens = await res.json()
+        saveTokens({ ...tokens, ...newTokens })
+        return true
+      } catch { clearTokens(); return false }
+    }
+
+    function connectCalendar() {
+      const w = window.open('/api/calendar-auth?action=login', 'google-auth', 'width=500,height=600')
+      window.addEventListener('message', function handler(e) {
+        if (e.data?.type === 'google-calendar-connected') {
+          saveTokens(e.data.tokens)
+          window.removeEventListener('message', handler)
+          fetchEvents()
+          render()
+        }
+      })
+    }
+
+    // ===================== API CALLS =====================
+    async function fetchEvents() {
+      if (!await ensureValidToken()) return
+      loading = true
+      render()
+
+      const start = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1)
+      const end = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0, 23, 59, 59)
+
+      try {
+        const params = new URLSearchParams({
+          action: 'list',
+          timeMin: start.toISOString(),
+          timeMax: end.toISOString(),
+          maxResults: '100',
+        })
+        const res = await fetch(`/api/calendar?${params}`, {
+          headers: { Authorization: `Bearer ${tokens.access_token}` },
+        })
+        if (!res.ok) throw new Error('Failed to fetch events')
+        const data = await res.json()
+        events = (data.items || []).map((e, i) => ({ ...e, _color: EVENT_COLORS[i % EVENT_COLORS.length] }))
+      } catch (err) {
+        showToast(err.message, true)
+        events = []
+      }
+      loading = false
+      render()
+    }
+
+    async function fetchAvailability(date) {
+      if (!await ensureValidToken()) return
+      loading = true
+      render()
+
+      const start = new Date(date)
+      start.setHours(8, 0, 0, 0)
+      const end = new Date(date)
+      end.setHours(20, 0, 0, 0)
+
+      try {
+        const params = new URLSearchParams({
+          action: 'freebusy',
+          timeMin: start.toISOString(),
+          timeMax: end.toISOString(),
+        })
+        const res = await fetch(`/api/calendar?${params}`, {
+          headers: { Authorization: `Bearer ${tokens.access_token}` },
+        })
+        if (!res.ok) throw new Error('Failed to check availability')
+        const data = await res.json()
+        busySlots = data.calendars?.primary?.busy || []
+      } catch (err) {
+        showToast(err.message, true)
+        busySlots = []
+      }
+      loading = false
+      render()
+    }
+
+    async function createEvent(eventData) {
+      if (!await ensureValidToken()) return
+      try {
+        const res = await fetch('/api/calendar', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${tokens.access_token}`,
+          },
+          body: JSON.stringify({ action: 'create', event: eventData }),
+        })
+        if (!res.ok) throw new Error('Failed to create event')
+        showToast('Appointment created!')
+        closeModal()
+        await fetchEvents()
+      } catch (err) { showToast(err.message, true) }
+    }
+
+    async function updateEvent(eventId, eventData) {
+      if (!await ensureValidToken()) return
+      try {
+        const res = await fetch('/api/calendar', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${tokens.access_token}`,
+          },
+          body: JSON.stringify({ action: 'update', eventId, event: eventData }),
+        })
+        if (!res.ok) throw new Error('Failed to update event')
+        showToast('Appointment updated!')
+        closeModal()
+        await fetchEvents()
+      } catch (err) { showToast(err.message, true) }
+    }
+
+    async function deleteEvent(eventId) {
+      if (!confirm('Delete this appointment?')) return
+      if (!await ensureValidToken()) return
+      try {
+        const res = await fetch('/api/calendar', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${tokens.access_token}`,
+          },
+          body: JSON.stringify({ action: 'delete', eventId }),
+        })
+        if (res.status !== 204 && !res.ok) throw new Error('Failed to delete')
+        showToast('Appointment deleted!')
+        closeModal()
+        await fetchEvents()
+      } catch (err) { showToast(err.message, true) }
+    }
+
+    // ===================== RENDERING =====================
+    function render() {
+      const app = document.getElementById('app')
+      const headerActions = document.getElementById('headerActions')
+
+      if (!tokens) {
+        headerActions.innerHTML = ''
+        app.innerHTML = renderConnectScreen()
+        return
+      }
+
+      headerActions.innerHTML = `
+        <button class="btn btn-primary btn-sm" onclick="openNewEventModal()">+ New</button>
+        <button class="btn btn-secondary btn-sm" onclick="clearTokens()">Disconnect</button>
+      `
+
+      app.innerHTML = `
+        ${renderViewTabs()}
+        ${renderCalendarNav()}
+        ${currentView === 'month' ? renderMonthView() : ''}
+        ${currentView === 'day' ? renderDayView() : ''}
+        ${currentView === 'availability' ? renderAvailabilityView() : ''}
+        ${loading ? '<div class="spinner"></div>' : ''}
+      `
+    }
+
+    function renderConnectScreen() {
+      return `
+        <div class="connect-card">
+          <div class="icon">📅</div>
+          <h2>Connect Google Calendar</h2>
+          <p>Schedule staging appointments, see your availability, and manage your calendar right from the app.</p>
+          <button class="btn btn-primary" onclick="connectCalendar()">Connect Calendar</button>
+        </div>
+      `
+    }
+
+    function renderViewTabs() {
+      return `
+        <div class="view-tabs">
+          <button class="view-tab ${currentView === 'month' ? 'active' : ''}" onclick="switchView('month')">Month</button>
+          <button class="view-tab ${currentView === 'day' ? 'active' : ''}" onclick="switchView('day')">Day</button>
+          <button class="view-tab ${currentView === 'availability' ? 'active' : ''}" onclick="switchView('availability')">Availability</button>
+        </div>
+      `
+    }
+
+    function renderCalendarNav() {
+      const label = currentView === 'month'
+        ? currentMonth.toLocaleString('default', { month: 'long', year: 'numeric' })
+        : selectedDate.toLocaleDateString('default', { weekday: 'long', month: 'long', day: 'numeric' })
+
+      return `
+        <div class="calendar-nav">
+          <button class="btn btn-secondary btn-sm" onclick="navigate(-1)">&larr;</button>
+          <h2>${label}</h2>
+          <button class="btn btn-secondary btn-sm" onclick="navigate(1)">&rarr;</button>
+        </div>
+      `
+    }
+
+    function renderMonthView() {
+      const year = currentMonth.getFullYear()
+      const month = currentMonth.getMonth()
+      const firstDay = new Date(year, month, 1).getDay()
+      const daysInMonth = new Date(year, month + 1, 0).getDate()
+      const today = new Date()
+
+      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+      let html = '<div class="cal-grid">'
+      html += days.map(d => `<div class="cal-header">${d}</div>`).join('')
+
+      // Previous month padding
+      const prevDays = new Date(year, month, 0).getDate()
+      for (let i = firstDay - 1; i >= 0; i--) {
+        html += `<div class="cal-day other-month"><span class="cal-day-num">${prevDays - i}</span></div>`
+      }
+
+      // Current month
+      for (let d = 1; d <= daysInMonth; d++) {
+        const date = new Date(year, month, d)
+        const isToday = date.toDateString() === today.toDateString()
+        const isSelected = date.toDateString() === selectedDate.toDateString()
+        const dayEvents = getEventsForDate(date)
+        const hasEvents = dayEvents.length > 0
+
+        html += `
+          <div class="cal-day ${isToday ? 'today' : ''} ${isSelected ? 'selected' : ''}"
+               onclick="selectDate(${year},${month},${d})">
+            <span class="cal-day-num">${d}</span>
+            ${hasEvents ? `<div class="cal-dot"></div>` : ''}
+          </div>
+        `
+      }
+
+      // Next month padding
+      const totalCells = firstDay + daysInMonth
+      const remaining = (7 - (totalCells % 7)) % 7
+      for (let d = 1; d <= remaining; d++) {
+        html += `<div class="cal-day other-month"><span class="cal-day-num">${d}</span></div>`
+      }
+
+      html += '</div>'
+
+      // Events for selected date
+      const dayEvents = getEventsForDate(selectedDate)
+      if (dayEvents.length > 0) {
+        html += '<div class="events-section">'
+        html += `<h3>${selectedDate.toLocaleDateString('default', { weekday: 'long', month: 'short', day: 'numeric' })}</h3>`
+        html += dayEvents.map(renderEventCard).join('')
+        html += '</div>'
+      }
+
+      return html
+    }
+
+    function renderDayView() {
+      const dayEvents = getEventsForDate(selectedDate)
+      let html = '<div class="events-section">'
+
+      if (dayEvents.length === 0) {
+        html += '<div class="no-events">No appointments this day</div>'
+      } else {
+        html += dayEvents.map(renderEventCard).join('')
+      }
+      html += '</div>'
+      return html
+    }
+
+    function renderAvailabilityView() {
+      let html = '<div class="avail-section">'
+      html += `<h3 style="font-size:0.85rem; color:#94a3b8; margin-bottom:0.75rem;">
+        Availability for ${selectedDate.toLocaleDateString('default', { weekday: 'long', month: 'short', day: 'numeric' })}
+      </h3>`
+
+      // Generate hourly slots from 8am to 7pm
+      const slots = []
+      for (let h = 8; h < 20; h++) {
+        const slotStart = new Date(selectedDate)
+        slotStart.setHours(h, 0, 0, 0)
+        const slotEnd = new Date(selectedDate)
+        slotEnd.setHours(h + 1, 0, 0, 0)
+
+        const isBusy = busySlots.some(b => {
+          const bStart = new Date(b.start)
+          const bEnd = new Date(b.end)
+          return slotStart < bEnd && slotEnd > bStart
+        })
+
+        const timeStr = slotStart.toLocaleTimeString('default', { hour: 'numeric', minute: '2-digit' })
+        const endStr = slotEnd.toLocaleTimeString('default', { hour: 'numeric', minute: '2-digit' })
+
+        html += `
+          <div class="avail-slot ${isBusy ? 'busy' : ''}" ${!isBusy ? `onclick="quickBook(${h})" style="cursor:pointer"` : ''}>
+            <span class="avail-time">${timeStr} — ${endStr}</span>
+            <span class="avail-status ${isBusy ? 'busy' : 'free'}">${isBusy ? 'Busy' : 'Available'}</span>
+          </div>
+        `
+      }
+
+      html += '</div>'
+      return html
+    }
+
+    function renderEventCard(event) {
+      const start = event.start?.dateTime ? new Date(event.start.dateTime) : null
+      const timeStr = start
+        ? start.toLocaleTimeString('default', { hour: 'numeric', minute: '2-digit' })
+        : 'All day'
+      const endTime = event.end?.dateTime
+        ? new Date(event.end.dateTime).toLocaleTimeString('default', { hour: 'numeric', minute: '2-digit' })
+        : ''
+
+      return `
+        <div class="event-card" onclick='openEditEventModal(${JSON.stringify(event.id)})'>
+          <div class="event-color" style="background:${event._color || '#6366f1'}"></div>
+          <div class="event-time">${timeStr}</div>
+          <div class="event-info">
+            <div class="event-title">${escapeHtml(event.summary || 'Untitled')}</div>
+            <div class="event-meta">
+              ${endTime ? `${timeStr} — ${endTime}` : ''}
+              ${event.location ? ` · ${escapeHtml(event.location)}` : ''}
+            </div>
+          </div>
+        </div>
+      `
+    }
+
+    // ===================== EVENT MODAL =====================
+    function openNewEventModal() {
+      editingEvent = null
+      const date = selectedDate.toISOString().split('T')[0]
+      const now = new Date()
+      const hour = Math.max(8, now.getHours() + 1)
+      const startTime = `${String(hour).padStart(2, '0')}:00`
+      const endTime = `${String(hour + 1).padStart(2, '0')}:00`
+
+      showModal(`
+        <div class="modal-handle"></div>
+        <h2>New Appointment</h2>
+        <form onsubmit="handleEventSubmit(event)">
+          <div class="form-group">
+            <label>Type</label>
+            <select id="eventType" onchange="updateSummaryFromType()">
+              ${STAGING_TYPES.map(t => `<option value="${t}">${t}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Title</label>
+            <input type="text" id="eventTitle" value="Property Walkthrough" required />
+          </div>
+          <div class="form-group">
+            <label>Date</label>
+            <input type="date" id="eventDate" value="${date}" required />
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Start Time</label>
+              <input type="time" id="eventStart" value="${startTime}" required />
+            </div>
+            <div class="form-group">
+              <label>End Time</label>
+              <input type="time" id="eventEnd" value="${endTime}" required />
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Property / Location</label>
+            <input type="text" id="eventLocation" placeholder="e.g. 142 Lakewood Dr, Austin" />
+          </div>
+          <div class="form-group">
+            <label>Notes</label>
+            <textarea id="eventNotes" rows="2" placeholder="Items to bring, client details..."></textarea>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button type="submit" class="btn btn-primary">Create</button>
+          </div>
+        </form>
+      `)
+    }
+
+    function openEditEventModal(eventId) {
+      const event = events.find(e => e.id === eventId)
+      if (!event) return
+      editingEvent = event
+
+      const startDT = event.start?.dateTime ? new Date(event.start.dateTime) : null
+      const endDT = event.end?.dateTime ? new Date(event.end.dateTime) : null
+      const date = startDT ? startDT.toISOString().split('T')[0] : selectedDate.toISOString().split('T')[0]
+      const startTime = startDT ? `${String(startDT.getHours()).padStart(2,'0')}:${String(startDT.getMinutes()).padStart(2,'0')}` : '09:00'
+      const endTime = endDT ? `${String(endDT.getHours()).padStart(2,'0')}:${String(endDT.getMinutes()).padStart(2,'0')}` : '10:00'
+
+      showModal(`
+        <div class="modal-handle"></div>
+        <h2>Edit Appointment</h2>
+        <form onsubmit="handleEventSubmit(event)">
+          <div class="form-group">
+            <label>Title</label>
+            <input type="text" id="eventTitle" value="${escapeHtml(event.summary || '')}" required />
+          </div>
+          <div class="form-group">
+            <label>Date</label>
+            <input type="date" id="eventDate" value="${date}" required />
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Start Time</label>
+              <input type="time" id="eventStart" value="${startTime}" required />
+            </div>
+            <div class="form-group">
+              <label>End Time</label>
+              <input type="time" id="eventEnd" value="${endTime}" required />
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Property / Location</label>
+            <input type="text" id="eventLocation" value="${escapeHtml(event.location || '')}" />
+          </div>
+          <div class="form-group">
+            <label>Notes</label>
+            <textarea id="eventNotes" rows="2">${escapeHtml(event.description || '')}</textarea>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn btn-danger" onclick="deleteEvent('${event.id}')">Delete</button>
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save</button>
+          </div>
+        </form>
+      `)
+    }
+
+    function handleEventSubmit(e) {
+      e.preventDefault()
+      const title = document.getElementById('eventTitle').value
+      const date = document.getElementById('eventDate').value
+      const start = document.getElementById('eventStart').value
+      const end = document.getElementById('eventEnd').value
+      const location = document.getElementById('eventLocation').value
+      const notes = document.getElementById('eventNotes').value
+
+      const eventData = {
+        summary: title,
+        location,
+        description: notes,
+        start: { dateTime: `${date}T${start}:00`, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+        end: { dateTime: `${date}T${end}:00`, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+      }
+
+      if (editingEvent) {
+        updateEvent(editingEvent.id, eventData)
+      } else {
+        createEvent(eventData)
+      }
+    }
+
+    function updateSummaryFromType() {
+      const type = document.getElementById('eventType')?.value
+      const title = document.getElementById('eventTitle')
+      if (type && title) title.value = type
+    }
+
+    function quickBook(hour) {
+      selectedDate.setHours(0, 0, 0, 0)
+      const date = selectedDate.toISOString().split('T')[0]
+      const startTime = `${String(hour).padStart(2, '0')}:00`
+      const endTime = `${String(hour + 1).padStart(2, '0')}:00`
+
+      // Pre-fill the new event modal with this time slot
+      openNewEventModal()
+
+      // Override the time fields after modal renders
+      setTimeout(() => {
+        const s = document.getElementById('eventStart')
+        const e = document.getElementById('eventEnd')
+        const d = document.getElementById('eventDate')
+        if (s) s.value = startTime
+        if (e) e.value = endTime
+        if (d) d.value = date
+      }, 50)
+    }
+
+    // ===================== NAVIGATION =====================
+    function switchView(view) {
+      currentView = view
+      if (view === 'availability') {
+        fetchAvailability(selectedDate)
+      }
+      render()
+    }
+
+    function navigate(dir) {
+      if (currentView === 'month') {
+        currentMonth.setMonth(currentMonth.getMonth() + dir)
+        fetchEvents()
+      } else {
+        selectedDate.setDate(selectedDate.getDate() + dir)
+        if (currentView === 'availability') fetchAvailability(selectedDate)
+        render()
+      }
+    }
+
+    function selectDate(y, m, d) {
+      selectedDate = new Date(y, m, d)
+      if (currentView === 'availability') fetchAvailability(selectedDate)
+      render()
+    }
+
+    // ===================== HELPERS =====================
+    function getEventsForDate(date) {
+      return events.filter(e => {
+        const eDate = e.start?.dateTime
+          ? new Date(e.start.dateTime).toDateString()
+          : e.start?.date
+        return eDate === date.toDateString() || eDate === date.toISOString().split('T')[0]
+      })
+    }
+
+    function showModal(html) {
+      document.getElementById('modal').innerHTML = html
+      document.getElementById('modalOverlay').classList.add('open')
+    }
+
+    function closeModal() {
+      document.getElementById('modalOverlay').classList.remove('open')
+      editingEvent = null
+    }
+
+    function showToast(msg, isError = false) {
+      const toast = document.getElementById('toast')
+      toast.textContent = msg
+      toast.className = `toast show ${isError ? 'error' : ''}`
+      setTimeout(() => toast.className = 'toast', 3000)
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div')
+      div.textContent = str
+      return div.innerHTML
+    }
+
+    // ===================== INIT =====================
+    loadTokens()
+
+    // Listen for OAuth popup callback
+    window.addEventListener('message', (e) => {
+      if (e.data?.type === 'google-calendar-connected') {
+        saveTokens(e.data.tokens)
+        fetchEvents()
+        render()
+      }
+    })
+
+    render()
+    if (tokens) fetchEvents()
+  </script>
+</body>
+</html>

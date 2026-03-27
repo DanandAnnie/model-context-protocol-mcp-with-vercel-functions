@@ -2,7 +2,10 @@
   "rewrites": [
     { "source": "/share", "destination": "/share.html" },
     { "source": "/privacy", "destination": "/privacy.html" },
+    { "source": "/calendar", "destination": "/calendar.html" },
     { "source": "/api/identify", "destination": "/api/identify" },
+    { "source": "/api/calendar-auth", "destination": "/api/calendar-auth" },
+    { "source": "/api/calendar", "destination": "/api/calendar" },
     { "source": "/api/server", "destination": "/api/server" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
@@ -12,6 +15,12 @@
     },
     "api/identify.ts": {
       "maxDuration": 60
+    },
+    "api/calendar-auth.ts": {
+      "maxDuration": 30
+    },
+    "api/calendar.ts": {
+      "maxDuration": 30
     }
   }
 }

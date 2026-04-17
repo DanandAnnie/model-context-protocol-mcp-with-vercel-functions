@@ -187,6 +187,67 @@
     ::-webkit-scrollbar { width: 8px; height: 8px; }
     ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
     ::-webkit-scrollbar-thumb:hover { background: #334155; }
+
+    /* Run button on tool card */
+    .tool-actions { margin-top: 0.6rem; display: flex; justify-content: flex-end; }
+    .btn-run {
+      all: unset; cursor: pointer; font-size: 0.75rem; padding: 0.25rem 0.55rem;
+      border-radius: 6px; background: rgba(56,189,248,0.1); color: var(--accent);
+      border: 1px solid rgba(56,189,248,0.25); transition: all 0.15s ease;
+    }
+    .btn-run:hover { background: rgba(56,189,248,0.2); }
+    .btn-run[disabled] { opacity: 0.4; cursor: not-allowed; }
+
+    /* Modal */
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(7,10,19,0.75);
+      backdrop-filter: blur(6px); z-index: 50;
+      display: none; align-items: flex-start; justify-content: center;
+      padding: 3rem 1rem; overflow-y: auto;
+    }
+    .modal-backdrop.open { display: flex; animation: fadein 0.15s ease; }
+    .modal {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+      width: 100%; max-width: 640px; box-shadow: 0 20px 60px -20px rgba(0,0,0,0.6);
+    }
+    .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); }
+    .modal-head h3 { font-size: 1.05rem; font-family: ui-monospace, monospace; color: var(--accent); }
+    .modal-head .x { all: unset; cursor: pointer; color: var(--muted); font-size: 1.4rem; line-height: 1; }
+    .modal-head .x:hover { color: var(--text); }
+    .modal-body { padding: 1rem 1.25rem; }
+    .modal-body .desc { color: var(--muted); font-size: 0.88rem; margin-bottom: 1rem; }
+    .field { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.85rem; }
+    .field label { font-size: 0.82rem; color: var(--text); display: flex; gap: 0.35rem; align-items: center; }
+    .field label .req { color: var(--bad); }
+    .field label .type { color: var(--muted); font-family: ui-monospace, monospace; font-size: 0.72rem; padding: 0.08rem 0.35rem; background: var(--panel-2); border-radius: 4px; }
+    .field .hint { color: var(--muted); font-size: 0.75rem; }
+    .field input[type="text"], .field input[type="number"], .field textarea {
+      background: var(--bg); color: var(--text); border: 1px solid var(--border);
+      border-radius: 6px; padding: 0.5rem 0.65rem; font-size: 0.88rem; font-family: inherit; outline: none;
+    }
+    .field input:focus, .field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(56,189,248,0.15); }
+    .field textarea { min-height: 80px; font-family: ui-monospace, monospace; font-size: 0.82rem; }
+    .field input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
+    .modal-foot { display: flex; justify-content: flex-end; gap: 0.5rem; padding: 0.9rem 1.25rem; border-top: 1px solid var(--border); }
+    .result {
+      margin-top: 1rem; background: #020617; border: 1px solid var(--border);
+      border-radius: 8px; padding: 0.8rem 0.9rem; max-height: 320px; overflow: auto;
+      font-family: ui-monospace, monospace; font-size: 0.8rem; white-space: pre-wrap;
+      color: #cbd5e1; line-height: 1.5;
+    }
+    .result.err { color: var(--bad); border-color: rgba(248,113,113,0.35); }
+    .result .meta { color: var(--muted); font-size: 0.72rem; margin-bottom: 0.5rem; display: block; }
+    .spinner {
+      width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent);
+      border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Activity controls */
+    .activity-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+    .activity-head .meta { color: var(--muted); font-size: 0.78rem; }
+    .activity-head button { all: unset; cursor: pointer; color: var(--muted); font-size: 0.78rem; }
+    .activity-head button:hover { color: var(--bad); }
   </style>
 </head>
 <body>
@@ -325,6 +386,10 @@
       <section class="panel" data-panel="activity">
         <div class="section" style="margin-top:0">
           <h2>Mission Log</h2>
+          <div class="activity-head">
+            <span class="meta" id="activity-meta">0 events · persisted locally</span>
+            <button id="btn-clear-log" title="Clear activity log">✕ Clear log</button>
+          </div>
           <div class="activity" id="activity-list"></div>
         </div>
       </section>
@@ -348,6 +413,25 @@
         </div>
       </section>
     </main>
+  </div>
+
+  <!-- RUN TOOL MODAL -->
+  <div class="modal-backdrop" id="run-modal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="run-modal-title">
+      <div class="modal-head">
+        <h3 id="run-modal-title">tool_name</h3>
+        <button class="x" id="run-modal-close" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="desc" id="run-modal-desc"></div>
+        <form id="run-form"></form>
+        <div id="run-result" style="display:none"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" id="run-modal-cancel">Cancel</button>
+        <button class="btn primary" id="run-modal-submit">▶ Run</button>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -414,7 +498,26 @@
     ];
 
     // ── State ────────────────────────────────────────────────────────
-    const state = { status: null, events: [] };
+    const LOG_KEY = 'openclaw.mission.log.v1';
+    const state = {
+      status: null,
+      events: loadEvents(),
+      schemas: null,        // cached { [toolName]: { description, inputSchema } }
+      schemasLoading: false,
+      schemasError: null,
+      runningTool: null,
+    };
+    function loadEvents() {
+      try {
+        const raw = localStorage.getItem(LOG_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed.slice(0, 200) : [];
+      } catch { return []; }
+    }
+    function persistEvents() {
+      try { localStorage.setItem(LOG_KEY, JSON.stringify(state.events.slice(0, 200))); } catch {}
+    }
 
     // ── Nav wiring ───────────────────────────────────────────────────
     function switchTab(tab) {
@@ -430,6 +533,7 @@
       const ts = new Date().toLocaleTimeString();
       state.events.unshift({ kind, msg, ts });
       if (state.events.length > 200) state.events.pop();
+      persistEvents();
       renderActivity();
     }
     function renderActivity() {
@@ -441,7 +545,15 @@
           <span class="tag">${e.kind.toUpperCase()}</span>
         </div>
       `).join('') || '<p style="color:var(--muted);font-size:0.85rem;padding:0.5rem">No events yet.</p>';
+      const meta = document.getElementById('activity-meta');
+      if (meta) meta.textContent = `${state.events.length} event${state.events.length === 1 ? '' : 's'} · persisted locally`;
     }
+    document.getElementById('btn-clear-log').addEventListener('click', () => {
+      state.events = [];
+      persistEvents();
+      renderActivity();
+      logEvent('info', 'log cleared');
+    });
 
     function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
@@ -466,6 +578,9 @@
                     ${t.b.includes('free') ? '<span class="badge free">Free data</span>' : ''}
                     ${t.b.includes('pr') ? '<span class="badge">PropertyRadar</span>' : ''}
                   </div>
+                  <div class="tool-actions">
+                    <button class="btn-run" data-run="${t.n}">▶ Run</button>
+                  </div>
                 </div>
               `).join('')}
             </div>
@@ -475,6 +590,213 @@
       document.getElementById('tools-count').textContent = `(${total})`;
     }
     document.getElementById('tool-filter').addEventListener('input', e => renderTools(e.target.value));
+
+    // Delegate Run button clicks
+    document.getElementById('tool-groups').addEventListener('click', e => {
+      const btn = e.target.closest('[data-run]');
+      if (!btn) return;
+      openRunModal(btn.dataset.run);
+    });
+
+    // ── Tool schemas ─────────────────────────────────────────────────
+    async function ensureSchemas() {
+      if (state.schemas) return state.schemas;
+      if (state.schemasLoading) {
+        while (state.schemasLoading) await new Promise(r => setTimeout(r, 50));
+        return state.schemas;
+      }
+      state.schemasLoading = true;
+      state.schemasError = null;
+      try {
+        const res = await fetch('/api/invoke', { cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const map = {};
+        for (const t of (data.tools || [])) {
+          map[t.name] = { description: t.description, inputSchema: t.inputSchema };
+        }
+        state.schemas = map;
+        logEvent('ok', `loaded schemas for ${Object.keys(map).length} tools`);
+        return map;
+      } catch (err) {
+        state.schemasError = err.message;
+        logEvent('err', `schema load failed: ${err.message}`);
+        throw err;
+      } finally {
+        state.schemasLoading = false;
+      }
+    }
+
+    // ── Run modal ────────────────────────────────────────────────────
+    const modal = document.getElementById('run-modal');
+    const modalTitle = document.getElementById('run-modal-title');
+    const modalDesc = document.getElementById('run-modal-desc');
+    const modalForm = document.getElementById('run-form');
+    const modalResult = document.getElementById('run-result');
+    const modalSubmit = document.getElementById('run-modal-submit');
+
+    function closeRunModal() {
+      modal.classList.remove('open');
+      state.runningTool = null;
+      modalForm.innerHTML = '';
+      modalResult.style.display = 'none';
+      modalResult.innerHTML = '';
+      modalSubmit.disabled = false;
+      modalSubmit.innerHTML = '▶ Run';
+    }
+    document.getElementById('run-modal-close').addEventListener('click', closeRunModal);
+    document.getElementById('run-modal-cancel').addEventListener('click', closeRunModal);
+    modal.addEventListener('click', e => { if (e.target === modal) closeRunModal(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && modal.classList.contains('open')) closeRunModal(); });
+
+    async function openRunModal(name) {
+      state.runningTool = name;
+      modalTitle.textContent = name;
+      modalDesc.innerHTML = '<span class="spinner"></span> Loading schema…';
+      modalForm.innerHTML = '';
+      modalResult.style.display = 'none';
+      modal.classList.add('open');
+      logEvent('info', `open run dialog · ${name}`);
+
+      try {
+        const schemas = await ensureSchemas();
+        const schema = schemas[name];
+        if (!schema) {
+          modalDesc.innerHTML = `<span style="color:var(--bad)">Tool not found in server registry.</span>`;
+          return;
+        }
+        modalDesc.textContent = schema.description || '';
+        renderForm(schema.inputSchema || { type: 'object', properties: {} });
+      } catch (err) {
+        modalDesc.innerHTML = `<span style="color:var(--bad)">Could not load tool schemas: ${escapeHtml(err.message)}</span>`;
+      }
+    }
+
+    function renderForm(schema) {
+      const props = schema.properties || {};
+      const required = new Set(schema.required || []);
+      const names = Object.keys(props);
+      if (!names.length) {
+        modalForm.innerHTML = '<p style="color:var(--muted);font-size:0.88rem">This tool takes no arguments. Just run it.</p>';
+        return;
+      }
+      modalForm.innerHTML = names.map(key => {
+        const p = props[key] || {};
+        const type = p.type || 'string';
+        const isRequired = required.has(key);
+        const descHtml = p.description ? `<span class="hint">${escapeHtml(p.description)}</span>` : '';
+        const typeLabel = Array.isArray(type) ? type.join('|') : type;
+        const labelRow = `
+          <label>
+            <span>${escapeHtml(key)}</span>
+            ${isRequired ? '<span class="req">*</span>' : ''}
+            <span class="type">${escapeHtml(typeLabel)}</span>
+          </label>`;
+        if (type === 'boolean') {
+          return `<div class="field">${labelRow}
+            <input type="checkbox" name="${escapeHtml(key)}" data-type="boolean" />
+            ${descHtml}
+          </div>`;
+        }
+        if (type === 'number' || type === 'integer') {
+          return `<div class="field">${labelRow}
+            <input type="number" name="${escapeHtml(key)}" data-type="${type}" ${isRequired ? 'required' : ''} />
+            ${descHtml}
+          </div>`;
+        }
+        if (type === 'object' || type === 'array') {
+          return `<div class="field">${labelRow}
+            <textarea name="${escapeHtml(key)}" data-type="${type}" placeholder='${type === 'array' ? '[]' : '{}'}'></textarea>
+            ${descHtml}
+          </div>`;
+        }
+        return `<div class="field">${labelRow}
+          <input type="text" name="${escapeHtml(key)}" data-type="string" ${isRequired ? 'required' : ''} />
+          ${descHtml}
+        </div>`;
+      }).join('');
+    }
+
+    modalSubmit.addEventListener('click', async () => {
+      if (!state.runningTool) return;
+      const name = state.runningTool;
+      const args = {};
+      let formError = null;
+
+      for (const el of modalForm.querySelectorAll('[name]')) {
+        const key = el.name;
+        const type = el.dataset.type;
+        if (type === 'boolean') {
+          if (el.checked) args[key] = true;
+        } else if (type === 'number' || type === 'integer') {
+          if (el.value !== '') {
+            const n = Number(el.value);
+            if (Number.isNaN(n)) { formError = `"${key}" must be a number`; break; }
+            args[key] = type === 'integer' ? Math.trunc(n) : n;
+          }
+        } else if (type === 'object' || type === 'array') {
+          const raw = el.value.trim();
+          if (raw) {
+            try { args[key] = JSON.parse(raw); }
+            catch { formError = `"${key}" must be valid JSON`; break; }
+          }
+        } else {
+          if (el.value !== '') args[key] = el.value;
+        }
+      }
+
+      if (formError) {
+        showResult({ error: formError }, true);
+        return;
+      }
+
+      modalSubmit.disabled = true;
+      modalSubmit.innerHTML = '<span class="spinner"></span> Running…';
+      logEvent('info', `invoke · ${name} ${JSON.stringify(args)}`.slice(0, 180));
+      const started = performance.now();
+
+      try {
+        const res = await fetch('/api/invoke', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name, arguments: args }),
+        });
+        const elapsed = Math.round(performance.now() - started);
+        const data = await res.json();
+        if (!res.ok) {
+          showResult({ error: data.error || `HTTP ${res.status}`, elapsedMs: elapsed }, true);
+          logEvent('err', `invoke failed · ${name} · ${data.error || res.status}`);
+          return;
+        }
+        showResult({ result: data.result, elapsedMs: elapsed, durationMs: data.durationMs }, false);
+        logEvent('ok', `invoke ok · ${name} · ${elapsed}ms`);
+      } catch (err) {
+        showResult({ error: err.message }, true);
+        logEvent('err', `invoke failed · ${name} · ${err.message}`);
+      } finally {
+        modalSubmit.disabled = false;
+        modalSubmit.innerHTML = '▶ Run';
+      }
+    });
+
+    function showResult(data, isErr) {
+      modalResult.style.display = 'block';
+      const elapsed = data.elapsedMs != null ? ` · ${data.elapsedMs}ms client` : '';
+      const server = data.durationMs != null ? ` · ${data.durationMs}ms server` : '';
+      const payload = data.error
+        ? data.error
+        : extractToolText(data.result);
+      modalResult.className = 'result' + (isErr ? ' err' : '');
+      modalResult.innerHTML = `<span class="meta">${isErr ? 'error' : 'success'}${elapsed}${server}</span>` +
+        escapeHtml(payload);
+    }
+    function extractToolText(result) {
+      if (!result) return '(no result)';
+      const content = result.content || [];
+      const text = content.filter(c => c.type === 'text').map(c => c.text).join('\n\n');
+      if (text) return text;
+      return JSON.stringify(result, null, 2);
+    }
 
     // ── Render env table ─────────────────────────────────────────────
     function renderEnv(envStatus = {}) {

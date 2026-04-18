@@ -5,9 +5,13 @@
 // Acts as an MCP client against this deployment's own /mcp endpoint so the
 // browser dashboard can invoke tools with a plain JSON fetch instead of
 // speaking the streamable-HTTP MCP protocol directly.
+//
+// If MISSION_CONTROL_TOKEN is set, requests must carry a valid mc_auth cookie
+// or Authorization: Bearer header (see api/services/auth.ts).
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { getAuthState } from "./services/auth.js";
 
 async function withClient<T>(origin: string, fn: (c: Client) => Promise<T>): Promise<T> {
   const client = new Client({ name: "mission-control", version: "1.0.0" });
@@ -32,6 +36,11 @@ function jsonResponse(status: number, body: unknown): Response {
 
 export default async function handler(req: Request): Promise<Response> {
   const origin = new URL(req.url).origin;
+
+  const auth = getAuthState(req);
+  if (auth.required && !auth.authenticated) {
+    return jsonResponse(401, { error: "authentication required" });
+  }
 
   try {
     if (req.method === "GET") {

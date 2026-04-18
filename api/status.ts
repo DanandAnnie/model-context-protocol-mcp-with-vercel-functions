@@ -2,6 +2,8 @@
 // Returns non-sensitive server metadata: name, version, tool count, env key presence.
 // Secret values are NEVER included — only booleans indicating whether each key is set.
 
+import { getAuthState } from "./services/auth.js";
+
 const START_TIME = Date.now();
 
 const TOOL_NAMES = [
@@ -24,9 +26,11 @@ const ENV_KEYS = [
   "HUD_API_KEY",
 ];
 
-export default function handler(_req: Request): Response {
+export default function handler(req: Request): Response {
   const env: Record<string, boolean> = {};
   for (const k of ENV_KEYS) env[k] = Boolean(process.env[k]);
+
+  const auth = getAuthState(req);
 
   const body = {
     name: "property-data-mcp-server",
@@ -38,6 +42,7 @@ export default function handler(_req: Request): Response {
     tools: TOOL_NAMES.length,
     env,
     mcpPath: "/mcp",
+    auth,
     generatedAt: new Date().toISOString(),
   };
 

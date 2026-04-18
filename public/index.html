@@ -243,6 +243,28 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
+    /* Login overlay */
+    .login-overlay {
+      position: fixed; inset: 0; background: rgba(7,10,19,0.92);
+      backdrop-filter: blur(10px); z-index: 100;
+      display: none; align-items: center; justify-content: center; padding: 1rem;
+    }
+    .login-overlay.open { display: flex; animation: fadein 0.2s ease; }
+    .login-box {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+      padding: 1.75rem 1.75rem 1.5rem; width: 100%; max-width: 380px;
+      box-shadow: 0 30px 80px -20px rgba(0,0,0,0.8);
+    }
+    .login-box h2 { font-size: 1.1rem; color: var(--accent); margin-bottom: 0.3rem; }
+    .login-box p { color: var(--muted); font-size: 0.85rem; margin-bottom: 1.2rem; }
+    .login-box input {
+      width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border);
+      border-radius: 8px; padding: 0.65rem 0.8rem; font-size: 0.92rem; font-family: ui-monospace, monospace; outline: none;
+    }
+    .login-box input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(56,189,248,0.15); }
+    .login-box .err { color: var(--bad); font-size: 0.82rem; margin-top: 0.6rem; min-height: 1em; }
+    .login-box .submit { margin-top: 1rem; width: 100%; justify-content: center; display: flex; }
+
     /* Activity controls */
     .activity-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
     .activity-head .meta { color: var(--muted); font-size: 0.78rem; }
@@ -251,6 +273,19 @@
   </style>
 </head>
 <body>
+  <!-- LOGIN OVERLAY (shown when MISSION_CONTROL_TOKEN is set and session is missing) -->
+  <div class="login-overlay" id="login-overlay">
+    <div class="login-box">
+      <h2>🔒 Mission Control</h2>
+      <p>This dashboard is locked. Enter the access token to continue.</p>
+      <form id="login-form">
+        <input type="password" id="login-token" placeholder="Access token" autocomplete="current-password" autofocus />
+        <div class="err" id="login-err"></div>
+        <button class="btn primary submit" type="submit" id="login-submit">Unlock</button>
+      </form>
+    </div>
+  </div>
+
   <div class="shell">
     <!-- SIDEBAR -->
     <aside class="sidebar">
@@ -285,6 +320,8 @@
           <div class="subtitle" id="project-desc">Loading project manifest…</div>
         </div>
         <div class="topbar-actions">
+          <span id="auth-pill" class="pill" style="display:none"><span class="dot"></span><span id="auth-pill-label">Locked</span></span>
+          <button class="btn" id="btn-logout" style="display:none" title="Clear session">⎋ Logout</button>
           <button class="btn" id="btn-refresh" title="Refresh status">↻ Refresh</button>
           <button class="btn primary" id="btn-copy-url">⎘ Copy MCP URL</button>
         </div>
@@ -899,7 +936,80 @@ console.log(await res.json());`;
         document.getElementById('live-status').textContent = 'offline';
         renderEnv({});
       }
+      applyAuth(data?.auth);
     }
+
+    // ── Auth ─────────────────────────────────────────────────────────
+    function applyAuth(auth) {
+      const overlay = document.getElementById('login-overlay');
+      const pill = document.getElementById('auth-pill');
+      const pillLabel = document.getElementById('auth-pill-label');
+      const logoutBtn = document.getElementById('btn-logout');
+      if (!auth || !auth.required) {
+        overlay.classList.remove('open');
+        pill.style.display = 'none';
+        logoutBtn.style.display = 'none';
+        return;
+      }
+      pill.style.display = 'inline-flex';
+      if (auth.authenticated) {
+        overlay.classList.remove('open');
+        pill.className = 'pill good';
+        pillLabel.textContent = 'Unlocked';
+        logoutBtn.style.display = 'inline-flex';
+      } else {
+        overlay.classList.add('open');
+        pill.className = 'pill bad';
+        pillLabel.textContent = 'Locked';
+        logoutBtn.style.display = 'none';
+        setTimeout(() => document.getElementById('login-token')?.focus(), 50);
+      }
+    }
+
+    document.getElementById('login-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const input = document.getElementById('login-token');
+      const err = document.getElementById('login-err');
+      const submit = document.getElementById('login-submit');
+      const token = input.value;
+      err.textContent = '';
+      submit.disabled = true;
+      submit.innerHTML = '<span class="spinner"></span> Checking…';
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ token }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          err.textContent = data.error || `Login failed (${res.status})`;
+          logEvent('err', `login failed: ${err.textContent}`);
+          input.select();
+          return;
+        }
+        input.value = '';
+        logEvent('ok', 'unlocked mission control');
+        // invalidate any cached schemas that were fetched while locked
+        state.schemas = null;
+        await fetchStatus();
+      } catch (e2) {
+        err.textContent = e2.message;
+        logEvent('err', `login error: ${e2.message}`);
+      } finally {
+        submit.disabled = false;
+        submit.innerHTML = 'Unlock';
+      }
+    });
+
+    document.getElementById('btn-logout').addEventListener('click', async () => {
+      try {
+        await fetch('/api/logout', { method: 'POST' });
+      } catch { /* ignore */ }
+      state.schemas = null;
+      logEvent('info', 'logged out');
+      await fetchStatus();
+    });
     function fmtUptime(s) {
       if (typeof s !== 'number') return '—';
       if (s < 60) return `${Math.round(s)}s`;

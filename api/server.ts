@@ -1,9 +1,28 @@
 import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
+import type { ZodRawShape } from "zod";
 import * as prApi from "./services/property-radar-api.js";
 import * as publicApi from "./services/public-data-api.js";
 
-const handler = createMcpHandler((server) => {
+type ToolContent = { type: "text"; text: string };
+type ToolResult = { content: ToolContent[] };
+type ToolHandler = (args: any) => Promise<ToolResult> | ToolResult;
+
+export interface ToolDef {
+  name: string;
+  description: string;
+  rawShape: ZodRawShape;
+  handler: ToolHandler;
+}
+
+// Single source of truth for the tool registry. Populated at module load
+// by running `registerTools` against a recorder; then `createMcpHandler`
+// re-runs it against the real McpServer to wire up the MCP endpoint.
+// `/api/invoke` uses `runTool` / `getToolList` to call handlers in-process
+// without a self-HTTP round-trip (which crashes on Vercel serverless).
+export const TOOL_DEFS: ToolDef[] = [];
+
+function registerTools(server: any) {
   // ================================================================
   // 1. PROPERTY LOOKUP & SEARCH
   // ================================================================
@@ -1242,6 +1261,80 @@ const handler = createMcpHandler((server) => {
       };
     }
   );
+}
+
+// Populate TOOL_DEFS at module load via a duck-typed recorder.
+registerTools({
+  tool(name: string, description: string, rawShape: ZodRawShape, handler: ToolHandler) {
+    TOOL_DEFS.push({ name, description, rawShape, handler });
+  },
 });
+
+/** Execute a tool by name, validating args with its Zod shape. */
+export async function runTool(name: string, args: unknown): Promise<ToolResult> {
+  const def = TOOL_DEFS.find((t) => t.name === name);
+  if (!def) throw new Error(`tool not found: ${name}`);
+  const schema = z.object(def.rawShape);
+  const parsed = schema.parse(args ?? {});
+  return def.handler(parsed);
+}
+
+/** JSON-schema-compatible tool catalog for dashboard form rendering. */
+export function getToolList() {
+  return TOOL_DEFS.map((t) => ({
+    name: t.name,
+    description: t.description,
+    inputSchema: rawShapeToJsonSchema(t.rawShape),
+  }));
+}
+
+function rawShapeToJsonSchema(shape: ZodRawShape) {
+  const properties: Record<string, any> = {};
+  const required: string[] = [];
+  for (const [key, raw] of Object.entries(shape)) {
+    const { inner, isOptional, description } = unwrap(raw as any);
+    const json = zodToJson(inner);
+    if (description && !json.description) json.description = description;
+    properties[key] = json;
+    if (!isOptional) required.push(key);
+  }
+  return { type: "object" as const, properties, required };
+}
+
+function unwrap(z: any): { inner: any; isOptional: boolean; description?: string } {
+  let node = z;
+  let isOptional = false;
+  let description: string | undefined;
+  while (node?._def) {
+    if (node._def.description && !description) description = node._def.description;
+    const t = node._def.typeName;
+    if (t === "ZodOptional" || t === "ZodDefault" || t === "ZodNullable") {
+      isOptional = true;
+      node = node._def.innerType;
+    } else break;
+  }
+  return { inner: node, isOptional, description };
+}
+
+function zodToJson(z: any): any {
+  if (!z?._def) return {};
+  const t = z._def.typeName;
+  const description = z._def.description;
+  const withDesc = (obj: any) => (description ? { ...obj, description } : obj);
+  if (t === "ZodString") return withDesc({ type: "string" });
+  if (t === "ZodNumber") return withDesc({ type: "number" });
+  if (t === "ZodBoolean") return withDesc({ type: "boolean" });
+  if (t === "ZodEnum") return withDesc({ type: "string", enum: z._def.values });
+  if (t === "ZodArray") return withDesc({ type: "array", items: zodToJson(z._def.type) });
+  if (t === "ZodObject") {
+    const shape = typeof z._def.shape === "function" ? z._def.shape() : z._def.shape;
+    const sub = rawShapeToJsonSchema(shape);
+    return withDesc({ type: "object", properties: sub.properties, required: sub.required });
+  }
+  if (t === "ZodOptional" || t === "ZodNullable" || t === "ZodDefault") return zodToJson(z._def.innerType);
+  return withDesc({});
+}
+
+const handler = createMcpHandler(registerTools);
 
 export { handler as GET, handler as POST, handler as DELETE };

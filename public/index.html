@@ -3,127 +3,1032 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Property Data MCP Server</title>
+  <title>OpenClaw Mission Control · Rex</title>
   <style>
+    :root {
+      --bg: #070a13;
+      --panel: #0f172a;
+      --panel-2: #121a2e;
+      --border: #1e293b;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-2: #7dd3fc;
+      --good: #34d399;
+      --warn: #fbbf24;
+      --bad: #f87171;
+      --glow: 0 0 0 1px rgba(56,189,248,0.25), 0 0 24px -4px rgba(56,189,248,0.35);
+    }
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; line-height: 1.6; }
-    .container { max-width: 1000px; margin: 0 auto; padding: 2rem; }
-    h1 { font-size: 2rem; margin-bottom: 0.5rem; color: #38bdf8; }
-    h2 { font-size: 1.3rem; margin: 2rem 0 1rem; color: #7dd3fc; border-bottom: 1px solid #1e293b; padding-bottom: 0.5rem; }
-    .subtitle { color: #94a3b8; margin-bottom: 2rem; }
-    .badge { display: inline-block; background: #1e3a5f; color: #38bdf8; padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.8rem; margin: 0.2rem; }
-    .badge.free { background: #064e3b; color: #34d399; }
-    .tool-grid { display: grid; gap: 1rem; }
-    .tool { background: #1e293b; border-radius: 8px; padding: 1rem 1.2rem; border-left: 3px solid #38bdf8; }
-    .tool-name { font-weight: 600; color: #f1f5f9; font-family: monospace; font-size: 0.95rem; }
-    .tool-desc { color: #94a3b8; font-size: 0.85rem; margin-top: 0.3rem; }
-    .env-table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
-    .env-table td { padding: 0.4rem 0.8rem; border-bottom: 1px solid #1e293b; font-size: 0.85rem; }
-    .env-table td:first-child { font-family: monospace; color: #38bdf8; white-space: nowrap; }
-    .env-table td:last-child { color: #94a3b8; }
-    .setup { background: #1e293b; border-radius: 8px; padding: 1.2rem; margin-top: 1rem; }
-    code { background: #0f172a; padding: 0.15rem 0.4rem; border-radius: 3px; font-size: 0.85rem; color: #38bdf8; }
-    pre { background: #0f172a; padding: 1rem; border-radius: 6px; overflow-x: auto; margin: 0.5rem 0; font-size: 0.85rem; color: #e2e8f0; }
+    html, body { height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, sans-serif;
+      background:
+        radial-gradient(1200px 600px at 10% -10%, rgba(56,189,248,0.15), transparent 60%),
+        radial-gradient(1000px 500px at 110% 10%, rgba(125,211,252,0.08), transparent 60%),
+        var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+    .shell { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
+    @media (max-width: 900px) { .shell { grid-template-columns: 1fr; } .sidebar { position: static; } }
+
+    /* Sidebar */
+    .sidebar {
+      background: rgba(7,10,19,0.7);
+      border-right: 1px solid var(--border);
+      backdrop-filter: blur(8px);
+      padding: 1.25rem 0.75rem;
+      position: sticky; top: 0; height: 100vh;
+      display: flex; flex-direction: column;
+    }
+    .brand { display: flex; align-items: center; gap: 0.6rem; padding: 0.25rem 0.5rem 1rem; border-bottom: 1px solid var(--border); margin-bottom: 0.75rem; }
+    .brand-logo {
+      width: 32px; height: 32px; border-radius: 8px;
+      background: linear-gradient(135deg, #38bdf8 0%, #6366f1 100%);
+      display: grid; place-items: center; font-weight: 800; color: #06121f;
+    }
+    .brand-text { display: flex; flex-direction: column; line-height: 1.1; }
+    .brand-name { font-weight: 700; letter-spacing: 0.2px; }
+    .brand-sub { font-size: 0.7rem; color: var(--muted); letter-spacing: 0.8px; text-transform: uppercase; }
+
+    .nav { display: flex; flex-direction: column; gap: 2px; }
+    .nav button {
+      all: unset; cursor: pointer;
+      display: flex; align-items: center; gap: 0.6rem;
+      padding: 0.55rem 0.7rem; border-radius: 8px;
+      color: var(--muted); font-size: 0.92rem;
+    }
+    .nav button:hover { background: var(--panel); color: var(--text); }
+    .nav button.active { background: var(--panel-2); color: var(--text); box-shadow: var(--glow); }
+    .nav .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+    .nav button.active .dot { background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+
+    .sidebar-footer { margin-top: auto; padding: 0.75rem 0.5rem 0; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.75rem; }
+    .sidebar-footer .pulse { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--good); margin-right: 6px; box-shadow: 0 0 10px var(--good); animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+    /* Main */
+    .main { padding: 1.5rem 2rem 4rem; max-width: 1400px; }
+    @media (max-width: 700px) { .main { padding: 1rem; } }
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+    .topbar h1 { font-size: 1.6rem; letter-spacing: -0.01em; }
+    .topbar .subtitle { color: var(--muted); font-size: 0.9rem; margin-top: 2px; }
+    .topbar-actions { display: flex; gap: 0.5rem; align-items: center; }
+    .btn {
+      all: unset; cursor: pointer;
+      background: var(--panel); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 0.5rem 0.85rem; font-size: 0.85rem;
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      transition: all 0.15s ease;
+    }
+    .btn:hover { border-color: var(--accent); color: var(--accent); }
+    .btn.primary { background: linear-gradient(135deg, #38bdf8, #6366f1); color: #06121f; font-weight: 600; border-color: transparent; }
+    .btn.primary:hover { filter: brightness(1.1); color: #06121f; }
+
+    /* Status cards */
+    .grid { display: grid; gap: 1rem; }
+    .stats { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+    .card {
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0)) var(--panel);
+      border: 1px solid var(--border); border-radius: 12px;
+      padding: 1.1rem 1.2rem;
+    }
+    .stat .label { color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.8px; }
+    .stat .value { font-size: 1.6rem; font-weight: 700; margin-top: 0.3rem; letter-spacing: -0.01em; }
+    .stat .value small { color: var(--muted); font-size: 0.75rem; font-weight: 500; margin-left: 0.3rem; }
+    .stat.good .value { color: var(--good); }
+    .stat.warn .value { color: var(--warn); }
+    .stat.bad .value { color: var(--bad); }
+
+    .pill { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.75rem; background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); }
+    .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+    .pill.good { color: var(--good); border-color: rgba(52,211,153,0.35); }
+    .pill.good .dot { background: var(--good); box-shadow: 0 0 8px var(--good); }
+    .pill.warn { color: var(--warn); border-color: rgba(251,191,36,0.35); }
+    .pill.warn .dot { background: var(--warn); }
+    .pill.bad { color: var(--bad); border-color: rgba(248,113,113,0.35); }
+    .pill.bad .dot { background: var(--bad); }
+
+    /* Sections */
+    .section { margin-top: 2rem; }
+    .section h2 { font-size: 1.1rem; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem; }
+    .section h2 .count { color: var(--muted); font-size: 0.85rem; font-weight: 500; }
+
+    /* Tool grid */
+    .tool-groups { display: grid; gap: 1.25rem; }
+    .tool-group h3 { color: var(--accent-2); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0.6rem; }
+    .tool-list { display: grid; gap: 0.6rem; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+    .tool {
+      background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+      border-radius: 10px; padding: 0.75rem 0.9rem;
+      transition: all 0.15s ease; cursor: default;
+    }
+    .tool:hover { border-color: var(--border); border-left-color: var(--accent-2); transform: translateY(-1px); }
+    .tool-name { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.88rem; font-weight: 600; color: #f1f5f9; }
+    .tool-desc { color: var(--muted); font-size: 0.8rem; margin-top: 0.3rem; }
+    .tool-badges { margin-top: 0.5rem; display: flex; gap: 0.3rem; flex-wrap: wrap; }
+    .badge { display: inline-block; background: rgba(56,189,248,0.12); color: var(--accent); padding: 0.12rem 0.5rem; border-radius: 4px; font-size: 0.7rem; letter-spacing: 0.3px; }
+    .badge.free { background: rgba(52,211,153,0.12); color: var(--good); }
+
+    /* Env table */
+    table.env { width: 100%; border-collapse: collapse; }
+    table.env td { padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--border); font-size: 0.88rem; vertical-align: top; }
+    table.env tr:last-child td { border-bottom: none; }
+    table.env td:first-child { font-family: ui-monospace, monospace; color: var(--accent); white-space: nowrap; width: 260px; }
+    table.env td:nth-child(2) { color: var(--muted); }
+    table.env td:nth-child(3) { width: 130px; text-align: right; }
+
+    /* Activity */
+    .activity { display: flex; flex-direction: column; gap: 0.4rem; max-height: 360px; overflow-y: auto; }
+    .event {
+      display: grid; grid-template-columns: auto 1fr auto; gap: 0.75rem; align-items: center;
+      background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+      padding: 0.55rem 0.75rem; font-size: 0.85rem;
+    }
+    .event .ts { color: var(--muted); font-family: ui-monospace, monospace; font-size: 0.78rem; }
+    .event .msg { color: var(--text); }
+    .event .tag { font-size: 0.7rem; padding: 0.1rem 0.45rem; border-radius: 4px; background: var(--panel-2); color: var(--muted); }
+    .event.info .tag { color: var(--accent); }
+    .event.ok .tag { color: var(--good); }
+    .event.warn .tag { color: var(--warn); }
+    .event.err .tag { color: var(--bad); }
+
+    /* Code snippet */
+    pre.code {
+      background: #020617; border: 1px solid var(--border); border-radius: 8px;
+      padding: 1rem; overflow-x: auto; font-size: 0.82rem; color: #cbd5e1;
+      line-height: 1.55;
+    }
+    pre.code .k { color: #7dd3fc; }
+    pre.code .s { color: #86efac; }
+
+    /* Panels */
+    .panel { display: none; }
+    .panel.active { display: block; animation: fadein 0.2s ease; }
+    @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+    /* Copy-to-clipboard feedback */
+    .copied { color: var(--good) !important; }
+
+    /* Link card */
+    .link-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.75rem; }
+    .link-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 0.9rem 1rem; }
+    .link-card h4 { font-size: 0.9rem; margin-bottom: 0.4rem; }
+    .link-card p { color: var(--muted); font-size: 0.82rem; }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #334155; }
+
+    /* Run button on tool card */
+    .tool-actions { margin-top: 0.6rem; display: flex; justify-content: flex-end; }
+    .btn-run {
+      all: unset; cursor: pointer; font-size: 0.75rem; padding: 0.25rem 0.55rem;
+      border-radius: 6px; background: rgba(56,189,248,0.1); color: var(--accent);
+      border: 1px solid rgba(56,189,248,0.25); transition: all 0.15s ease;
+    }
+    .btn-run:hover { background: rgba(56,189,248,0.2); }
+    .btn-run[disabled] { opacity: 0.4; cursor: not-allowed; }
+
+    /* Modal */
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(7,10,19,0.75);
+      backdrop-filter: blur(6px); z-index: 50;
+      display: none; align-items: flex-start; justify-content: center;
+      padding: 3rem 1rem; overflow-y: auto;
+    }
+    .modal-backdrop.open { display: flex; animation: fadein 0.15s ease; }
+    .modal {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+      width: 100%; max-width: 640px; box-shadow: 0 20px 60px -20px rgba(0,0,0,0.6);
+    }
+    .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); }
+    .modal-head h3 { font-size: 1.05rem; font-family: ui-monospace, monospace; color: var(--accent); }
+    .modal-head .x { all: unset; cursor: pointer; color: var(--muted); font-size: 1.4rem; line-height: 1; }
+    .modal-head .x:hover { color: var(--text); }
+    .modal-body { padding: 1rem 1.25rem; }
+    .modal-body .desc { color: var(--muted); font-size: 0.88rem; margin-bottom: 1rem; }
+    .field { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.85rem; }
+    .field label { font-size: 0.82rem; color: var(--text); display: flex; gap: 0.35rem; align-items: center; }
+    .field label .req { color: var(--bad); }
+    .field label .type { color: var(--muted); font-family: ui-monospace, monospace; font-size: 0.72rem; padding: 0.08rem 0.35rem; background: var(--panel-2); border-radius: 4px; }
+    .field .hint { color: var(--muted); font-size: 0.75rem; }
+    .field input[type="text"], .field input[type="number"], .field textarea {
+      background: var(--bg); color: var(--text); border: 1px solid var(--border);
+      border-radius: 6px; padding: 0.5rem 0.65rem; font-size: 0.88rem; font-family: inherit; outline: none;
+    }
+    .field input:focus, .field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(56,189,248,0.15); }
+    .field textarea { min-height: 80px; font-family: ui-monospace, monospace; font-size: 0.82rem; }
+    .field input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
+    .modal-foot { display: flex; justify-content: flex-end; gap: 0.5rem; padding: 0.9rem 1.25rem; border-top: 1px solid var(--border); }
+    .result {
+      margin-top: 1rem; background: #020617; border: 1px solid var(--border);
+      border-radius: 8px; padding: 0.8rem 0.9rem; max-height: 320px; overflow: auto;
+      font-family: ui-monospace, monospace; font-size: 0.8rem; white-space: pre-wrap;
+      color: #cbd5e1; line-height: 1.5;
+    }
+    .result.err { color: var(--bad); border-color: rgba(248,113,113,0.35); }
+    .result .meta { color: var(--muted); font-size: 0.72rem; margin-bottom: 0.5rem; display: block; }
+    .spinner {
+      width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent);
+      border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Login overlay */
+    .login-overlay {
+      position: fixed; inset: 0; background: rgba(7,10,19,0.92);
+      backdrop-filter: blur(10px); z-index: 100;
+      display: none; align-items: center; justify-content: center; padding: 1rem;
+    }
+    .login-overlay.open { display: flex; animation: fadein 0.2s ease; }
+    .login-box {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+      padding: 1.75rem 1.75rem 1.5rem; width: 100%; max-width: 380px;
+      box-shadow: 0 30px 80px -20px rgba(0,0,0,0.8);
+    }
+    .login-box h2 { font-size: 1.1rem; color: var(--accent); margin-bottom: 0.3rem; }
+    .login-box p { color: var(--muted); font-size: 0.85rem; margin-bottom: 1.2rem; }
+    .login-box input {
+      width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border);
+      border-radius: 8px; padding: 0.65rem 0.8rem; font-size: 0.92rem; font-family: ui-monospace, monospace; outline: none;
+    }
+    .login-box input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(56,189,248,0.15); }
+    .login-box .err { color: var(--bad); font-size: 0.82rem; margin-top: 0.6rem; min-height: 1em; }
+    .login-box .submit { margin-top: 1rem; width: 100%; justify-content: center; display: flex; }
+
+    /* Activity controls */
+    .activity-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+    .activity-head .meta { color: var(--muted); font-size: 0.78rem; }
+    .activity-head button { all: unset; cursor: pointer; color: var(--muted); font-size: 0.78rem; }
+    .activity-head button:hover { color: var(--bad); }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>Property Data MCP Server</h1>
-    <p class="subtitle">A PropertyRadar-style property intelligence platform exposed as MCP tools. 27 tools for property lookup, owner research, mortgage analysis, foreclosure tracking, list building, and investment analysis.</p>
-
-    <h2>MCP Tools (27 total)</h2>
-
-    <h3 style="color:#7dd3fc;margin:1rem 0 0.5rem">Property Lookup &amp; Search</h3>
-    <div class="tool-grid">
-      <div class="tool"><span class="tool-name">property_lookup_by_address</span> <span class="badge free">Free data</span> <span class="badge">PR API</span><div class="tool-desc">Full property details by street address. Combines PropertyRadar, Zillow, ATTOM, flood zone, and school data.</div></div>
-      <div class="tool"><span class="tool-name">property_lookup_by_apn</span> <span class="badge">PR API</span><div class="tool-desc">Look up by Assessor Parcel Number with county assessor links.</div></div>
-      <div class="tool"><span class="tool-name">property_search</span> <span class="badge">PR API</span><div class="tool-desc">Search with filters: location, type, beds/baths, sqft, value, owner status, etc.</div></div>
-      <div class="tool"><span class="tool-name">property_comps</span> <span class="badge">PR API</span><div class="tool-desc">Comparable sales near a property for valuation.</div></div>
-    </div>
-
-    <h3 style="color:#7dd3fc;margin:1rem 0 0.5rem">Owner Information</h3>
-    <div class="tool-grid">
-      <div class="tool"><span class="tool-name">owner_lookup</span> <span class="badge">PR API</span><div class="tool-desc">Owner name, mailing address, ownership type, vesting.</div></div>
-      <div class="tool"><span class="tool-name">owner_search</span> <span class="badge">PR API</span><div class="tool-desc">Find all properties by owner name.</div></div>
-      <div class="tool"><span class="tool-name">find_absentee_owners</span> <span class="badge">PR API</span><div class="tool-desc">Properties where owner doesn't live at property.</div></div>
-      <div class="tool"><span class="tool-name">find_corporate_owned</span> <span class="badge">PR API</span><div class="tool-desc">Properties owned by corporations or LLCs.</div></div>
-      <div class="tool"><span class="tool-name">find_trust_owned</span> <span class="badge">PR API</span><div class="tool-desc">Properties held in trusts.</div></div>
-      <div class="tool"><span class="tool-name">find_out_of_state_owners</span> <span class="badge">PR API</span><div class="tool-desc">Properties with owners in a different state.</div></div>
-    </div>
-
-    <h3 style="color:#7dd3fc;margin:1rem 0 0.5rem">Mortgage &amp; Loan Data</h3>
-    <div class="tool-grid">
-      <div class="tool"><span class="tool-name">mortgage_details</span> <span class="badge">PR API</span><div class="tool-desc">Lender, amount, rate, type, term, estimated balance &amp; payment.</div></div>
-      <div class="tool"><span class="tool-name">find_high_equity_properties</span> <span class="badge">PR API</span><div class="tool-desc">Properties with high equity / low LTV.</div></div>
-      <div class="tool"><span class="tool-name">find_free_and_clear</span> <span class="badge">PR API</span><div class="tool-desc">Properties with no mortgage (100% equity).</div></div>
-      <div class="tool"><span class="tool-name">find_arm_loans</span> <span class="badge">PR API</span><div class="tool-desc">Properties with adjustable rate mortgages.</div></div>
-    </div>
-
-    <h3 style="color:#7dd3fc;margin:1rem 0 0.5rem">Foreclosure &amp; Distress</h3>
-    <div class="tool-grid">
-      <div class="tool"><span class="tool-name">foreclosure_details</span> <span class="badge">PR API</span><div class="tool-desc">NOD/NTS details, auction date, default amount, trustee info.</div></div>
-      <div class="tool"><span class="tool-name">find_preforeclosures</span> <span class="badge">PR API</span><div class="tool-desc">Properties with Notice of Default filed.</div></div>
-      <div class="tool"><span class="tool-name">find_auction_properties</span> <span class="badge">PR API</span><div class="tool-desc">Properties scheduled for trustee sale/auction.</div></div>
-      <div class="tool"><span class="tool-name">find_bank_owned</span> <span class="badge">PR API</span><div class="tool-desc">REO / bank-owned properties.</div></div>
-      <div class="tool"><span class="tool-name">find_tax_delinquent</span> <span class="badge">PR API</span><div class="tool-desc">Properties with unpaid property taxes.</div></div>
-    </div>
-
-    <h3 style="color:#7dd3fc;margin:1rem 0 0.5rem">Sales &amp; Transfers</h3>
-    <div class="tool-grid">
-      <div class="tool"><span class="tool-name">transfer_history</span> <span class="badge">PR API</span><div class="tool-desc">Full sale/transfer history with dates, prices, parties.</div></div>
-      <div class="tool"><span class="tool-name">find_recent_sales</span> <span class="badge">PR API</span><div class="tool-desc">Recently sold properties, cash buyer filter.</div></div>
-    </div>
-
-    <h3 style="color:#7dd3fc;margin:1rem 0 0.5rem">List Building</h3>
-    <div class="tool-grid">
-      <div class="tool"><span class="tool-name">build_property_list</span> <span class="badge">PR API</span><div class="tool-desc">Create targeted lists with 40+ filter criteria (like PropertyRadar's 285+ criteria list builder).</div></div>
-      <div class="tool"><span class="tool-name">get_property_lists</span> <span class="badge">PR API</span><div class="tool-desc">Retrieve all saved property lists.</div></div>
-    </div>
-
-    <h3 style="color:#7dd3fc;margin:1rem 0 0.5rem">Market &amp; Location Data</h3>
-    <div class="tool-grid">
-      <div class="tool"><span class="tool-name">market_demographics</span> <span class="badge free">Free data</span><div class="tool-desc">Census data: population, income, home values, rents, vacancy rates.</div></div>
-      <div class="tool"><span class="tool-name">flood_zone_check</span> <span class="badge free">Free data</span><div class="tool-desc">FEMA flood zone designation for any address.</div></div>
-      <div class="tool"><span class="tool-name">nearby_schools</span> <span class="badge free">Free data</span><div class="tool-desc">Schools near a property from OpenStreetMap.</div></div>
-      <div class="tool"><span class="tool-name">geocode_address</span> <span class="badge free">Free data</span><div class="tool-desc">Address-to-coordinates and reverse geocoding.</div></div>
-      <div class="tool"><span class="tool-name">county_assessor_lookup</span> <span class="badge free">Free data</span><div class="tool-desc">County assessor website lookup URLs by APN.</div></div>
-    </div>
-
-    <h3 style="color:#7dd3fc;margin:1rem 0 0.5rem">Valuation &amp; Investment</h3>
-    <div class="tool-grid">
-      <div class="tool"><span class="tool-name">property_valuation</span> <span class="badge free">Free data</span> <span class="badge">PR API</span><div class="tool-desc">Multi-source valuation: Zillow, ATTOM, PropertyRadar, assessor data.</div></div>
-      <div class="tool"><span class="tool-name">investment_analysis</span> <span class="badge free">Free data</span><div class="tool-desc">Cash flow, cap rate, cash-on-cash return, DSCR analysis.</div></div>
-    </div>
-
-    <h3 style="color:#7dd3fc;margin:1rem 0 0.5rem">Alerts &amp; Monitoring</h3>
-    <div class="tool-grid">
-      <div class="tool"><span class="tool-name">create_property_alert</span> <span class="badge">PR API</span><div class="tool-desc">Set up monitoring for new listings, price changes, foreclosures, sales.</div></div>
-      <div class="tool"><span class="tool-name">check_alerts</span> <span class="badge">PR API</span><div class="tool-desc">Manually check for properties matching alert criteria.</div></div>
-    </div>
-
-    <h2>Setup &amp; Environment Variables</h2>
-    <div class="setup">
-      <p style="margin-bottom:0.8rem">Configure these in your Vercel project settings or <code>.env</code> file:</p>
-      <table class="env-table">
-        <tr><td>PROPERTY_RADAR_API_TOKEN</td><td><strong>Required</strong> for PR API tools. Get from <a href="https://app.propertyradar.com/settings/api" style="color:#38bdf8">PropertyRadar Settings</a></td></tr>
-        <tr><td>RAPIDAPI_KEY</td><td>Optional. Enables Zillow Zestimate data via RapidAPI</td></tr>
-        <tr><td>ATTOM_API_KEY</td><td>Optional. Enables ATTOM property data</td></tr>
-        <tr><td>CENSUS_API_KEY</td><td>Optional. Census Bureau API (works without key at lower rate limits)</td></tr>
-        <tr><td>HUD_API_KEY</td><td>Optional. HUD Fair Market Rent data</td></tr>
-      </table>
-    </div>
-
-    <h2>Connect via MCP</h2>
-    <div class="setup">
-      <p>Add to your MCP client config (Claude Desktop, Cursor, etc.):</p>
-      <pre>{
-  "mcpServers": {
-    "property-data": {
-      "url": "https://YOUR-DEPLOYMENT.vercel.app/mcp"
-    }
-  }
-}</pre>
+  <!-- LOGIN OVERLAY (shown when MISSION_CONTROL_TOKEN is set and session is missing) -->
+  <div class="login-overlay" id="login-overlay">
+    <div class="login-box">
+      <h2>🔒 Mission Control</h2>
+      <p>This dashboard is locked. Enter the access token to continue.</p>
+      <form id="login-form">
+        <input type="password" id="login-token" placeholder="Access token" autocomplete="current-password" autofocus />
+        <div class="err" id="login-err"></div>
+        <button class="btn primary submit" type="submit" id="login-submit">Unlock</button>
+      </form>
     </div>
   </div>
+
+  <div class="shell">
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">◈</div>
+        <div class="brand-text">
+          <span class="brand-name">OpenClaw</span>
+          <span class="brand-sub">Mission Control</span>
+        </div>
+      </div>
+
+      <nav class="nav" id="nav">
+        <button data-tab="overview" class="active"><span class="dot"></span>Overview</button>
+        <button data-tab="tools"><span class="dot"></span>Tools</button>
+        <button data-tab="config"><span class="dot"></span>Config</button>
+        <button data-tab="activity"><span class="dot"></span>Activity</button>
+        <button data-tab="connect"><span class="dot"></span>Connect</button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div><span class="pulse"></span><span id="live-status">online</span></div>
+        <div style="margin-top:4px">Paired with <strong style="color:var(--text)">Rex</strong></div>
+      </div>
+    </aside>
+
+    <!-- MAIN -->
+    <main class="main">
+      <!-- TOPBAR -->
+      <div class="topbar">
+        <div>
+          <h1 id="project-name">Property Data MCP</h1>
+          <div class="subtitle" id="project-desc">Loading project manifest…</div>
+        </div>
+        <div class="topbar-actions">
+          <span id="auth-pill" class="pill" style="display:none"><span class="dot"></span><span id="auth-pill-label">Locked</span></span>
+          <button class="btn" id="btn-logout" style="display:none" title="Clear session">⎋ Logout</button>
+          <button class="btn" id="btn-refresh" title="Refresh status">↻ Refresh</button>
+          <button class="btn primary" id="btn-copy-url">⎘ Copy MCP URL</button>
+        </div>
+      </div>
+
+      <!-- OVERVIEW PANEL -->
+      <section class="panel active" data-panel="overview">
+        <div class="grid stats">
+          <div class="card stat good">
+            <div class="label">Server</div>
+            <div class="value" id="stat-status">—</div>
+            <div class="pill good" style="margin-top:0.6rem"><span class="dot"></span><span id="stat-status-detail">checking…</span></div>
+          </div>
+          <div class="card stat">
+            <div class="label">Tools Exposed</div>
+            <div class="value" id="stat-tools">27 <small>registered</small></div>
+            <div class="pill" style="margin-top:0.6rem"><span class="dot"></span>MCP-compatible</div>
+          </div>
+          <div class="card stat">
+            <div class="label">Config Sources</div>
+            <div class="value" id="stat-config">0 / 5</div>
+            <div class="pill" id="stat-config-pill" style="margin-top:0.6rem"><span class="dot"></span>API keys loaded</div>
+          </div>
+          <div class="card stat">
+            <div class="label">Version</div>
+            <div class="value" id="stat-version">—</div>
+            <div class="pill" style="margin-top:0.6rem"><span class="dot"></span><span id="stat-runtime">Vercel Functions</span></div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2>Quick Links</h2>
+          <div class="link-grid">
+            <div class="link-card">
+              <h4>🔌 Connect a client</h4>
+              <p>Add this server to Claude Desktop, Cursor, Windsurf, or any MCP client.</p>
+              <a href="#" data-goto="connect">View connection snippets →</a>
+            </div>
+            <div class="link-card">
+              <h4>🧰 Browse tools</h4>
+              <p>Inspect all 27 registered tools grouped by category.</p>
+              <a href="#" data-goto="tools">Open tool explorer →</a>
+            </div>
+            <div class="link-card">
+              <h4>⚙️ Review config</h4>
+              <p>Check which API integrations are live based on configured env vars.</p>
+              <a href="#" data-goto="config">Audit configuration →</a>
+            </div>
+            <div class="link-card">
+              <h4>📡 Recent activity</h4>
+              <p>Live log of mission-control events from this session.</p>
+              <a href="#" data-goto="activity">View activity feed →</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2>MCP Endpoint</h2>
+          <div class="card">
+            <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
+              <code id="mcp-url" style="font-size:0.95rem;color:var(--accent)">https://your-deployment.vercel.app/mcp</code>
+              <button class="btn" id="btn-copy-inline">⎘ Copy</button>
+            </div>
+            <p style="color:var(--muted);font-size:0.85rem;margin-top:0.6rem">
+              Every MCP client connects to this URL. Share it with Rex or any other agent to grant access to all tools below.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- TOOLS PANEL -->
+      <section class="panel" data-panel="tools">
+        <div class="section" style="margin-top:0">
+          <h2>Tool Inventory <span class="count" id="tools-count">(27)</span></h2>
+          <div class="card" style="padding:0.6rem 0.8rem;margin-bottom:1rem">
+            <input type="search" id="tool-filter" placeholder="Filter tools by name or description…"
+              style="width:100%;background:transparent;border:none;color:var(--text);font-size:0.95rem;outline:none" />
+          </div>
+          <div class="tool-groups" id="tool-groups"></div>
+        </div>
+      </section>
+
+      <!-- CONFIG PANEL -->
+      <section class="panel" data-panel="config">
+        <div class="section" style="margin-top:0">
+          <h2>Environment</h2>
+          <div class="card" style="padding:0">
+            <table class="env" id="env-table">
+              <tbody></tbody>
+            </table>
+          </div>
+          <p style="color:var(--muted);font-size:0.82rem;margin-top:0.75rem">
+            Values are never sent to the browser — only a boolean indicating whether each key is set on the server.
+          </p>
+        </div>
+      </section>
+
+      <!-- ACTIVITY PANEL -->
+      <section class="panel" data-panel="activity">
+        <div class="section" style="margin-top:0">
+          <h2>Mission Log</h2>
+          <div class="activity-head">
+            <span class="meta" id="activity-meta">0 events · persisted locally</span>
+            <button id="btn-clear-log" title="Clear activity log">✕ Clear log</button>
+          </div>
+          <div class="activity" id="activity-list"></div>
+        </div>
+      </section>
+
+      <!-- CONNECT PANEL -->
+      <section class="panel" data-panel="connect">
+        <div class="section" style="margin-top:0">
+          <h2>Connect an MCP Client</h2>
+          <p style="color:var(--muted);font-size:0.9rem;margin-bottom:1rem">
+            Drop the snippet below into your client's MCP config. Replace the URL if deploying elsewhere.
+          </p>
+
+          <h3 style="color:var(--accent-2);font-size:0.9rem;text-transform:uppercase;letter-spacing:1px;margin:1rem 0 0.5rem">Claude Desktop / Cursor / Windsurf</h3>
+          <pre class="code" id="snippet-desktop"></pre>
+
+          <h3 style="color:var(--accent-2);font-size:0.9rem;text-transform:uppercase;letter-spacing:1px;margin:1.25rem 0 0.5rem">MCP Inspector (CLI)</h3>
+          <pre class="code" id="snippet-inspector"></pre>
+
+          <h3 style="color:var(--accent-2);font-size:0.9rem;text-transform:uppercase;letter-spacing:1px;margin:1.25rem 0 0.5rem">Rex / custom agent (fetch)</h3>
+          <pre class="code" id="snippet-fetch"></pre>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- RUN TOOL MODAL -->
+  <div class="modal-backdrop" id="run-modal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="run-modal-title">
+      <div class="modal-head">
+        <h3 id="run-modal-title">tool_name</h3>
+        <button class="x" id="run-modal-close" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="desc" id="run-modal-desc"></div>
+        <form id="run-form"></form>
+        <div id="run-result" style="display:none"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" id="run-modal-cancel">Cancel</button>
+        <button class="btn primary" id="run-modal-submit">▶ Run</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ── Tool catalog (kept in sync with api/server.ts) ────────────────
+    const TOOL_GROUPS = [
+      { name: 'Property Lookup & Search', tools: [
+        { n: 'property_lookup_by_address', d: 'Full property details by street address. Combines PropertyRadar, Zillow, ATTOM, flood, schools.', b: ['free','pr'] },
+        { n: 'property_lookup_by_apn', d: 'Look up by Assessor Parcel Number with county assessor links.', b: ['pr'] },
+        { n: 'property_search', d: 'Filter by location, type, beds/baths, sqft, value, owner status, etc.', b: ['pr'] },
+        { n: 'property_comps', d: 'Comparable sales near a property for valuation.', b: ['pr'] },
+      ]},
+      { name: 'Owner Information', tools: [
+        { n: 'owner_lookup', d: 'Owner name, mailing address, ownership type, vesting.', b: ['pr'] },
+        { n: 'owner_search', d: 'Find all properties owned by a person or entity.', b: ['pr'] },
+        { n: 'find_absentee_owners', d: "Owner's mailing address differs from property address.", b: ['pr'] },
+        { n: 'find_corporate_owned', d: 'Properties owned by corporations or LLCs.', b: ['pr'] },
+        { n: 'find_trust_owned', d: 'Properties held in trusts.', b: ['pr'] },
+        { n: 'find_out_of_state_owners', d: 'Owners living in a different state.', b: ['pr'] },
+      ]},
+      { name: 'Mortgage & Loan Data', tools: [
+        { n: 'mortgage_details', d: 'Lender, amount, rate, type, term, estimated balance & payment.', b: ['pr'] },
+        { n: 'find_high_equity_properties', d: 'High equity / low LTV.', b: ['pr'] },
+        { n: 'find_free_and_clear', d: 'No mortgage — 100% equity.', b: ['pr'] },
+        { n: 'find_arm_loans', d: 'Adjustable rate mortgages.', b: ['pr'] },
+      ]},
+      { name: 'Foreclosure & Distress', tools: [
+        { n: 'foreclosure_details', d: 'NOD/NTS details, auction date, default amount, trustee info.', b: ['pr'] },
+        { n: 'find_preforeclosures', d: 'Notice of Default filed.', b: ['pr'] },
+        { n: 'find_auction_properties', d: 'Scheduled trustee sale / auction.', b: ['pr'] },
+        { n: 'find_bank_owned', d: 'REO / bank-owned properties.', b: ['pr'] },
+        { n: 'find_tax_delinquent', d: 'Unpaid property taxes.', b: ['pr'] },
+      ]},
+      { name: 'Sales & Transfers', tools: [
+        { n: 'transfer_history', d: 'Full sale/transfer history with dates, prices, parties.', b: ['pr'] },
+        { n: 'find_recent_sales', d: 'Recently sold properties; cash buyer filter.', b: ['pr'] },
+      ]},
+      { name: 'List Building', tools: [
+        { n: 'build_property_list', d: 'Create targeted lists with 40+ filter criteria.', b: ['pr'] },
+        { n: 'get_property_lists', d: 'Retrieve saved property lists.', b: ['pr'] },
+      ]},
+      { name: 'Market & Location Data', tools: [
+        { n: 'market_demographics', d: 'Census: population, income, home values, rents, vacancy.', b: ['free'] },
+        { n: 'flood_zone_check', d: 'FEMA flood zone designation.', b: ['free'] },
+        { n: 'nearby_schools', d: 'Schools near a location (OpenStreetMap).', b: ['free'] },
+        { n: 'geocode_address', d: 'Forward / reverse geocoding.', b: ['free'] },
+        { n: 'county_assessor_lookup', d: 'County assessor website URLs by APN.', b: ['free'] },
+      ]},
+      { name: 'Valuation & Investment', tools: [
+        { n: 'property_valuation', d: 'Multi-source: Zillow, ATTOM, PropertyRadar, assessor.', b: ['free','pr'] },
+        { n: 'investment_analysis', d: 'Cash flow, cap rate, cash-on-cash, DSCR.', b: ['free'] },
+      ]},
+      { name: 'Alerts & Monitoring', tools: [
+        { n: 'create_property_alert', d: 'Set up monitors for listings, price changes, foreclosures, sales.', b: ['pr'] },
+        { n: 'check_alerts', d: 'Run alert filters against current data.', b: ['pr'] },
+      ]},
+    ];
+
+    const ENV_VARS = [
+      { key: 'PROPERTY_RADAR_API_TOKEN', req: true, note: 'Required for PropertyRadar-backed tools (most of the inventory).' },
+      { key: 'RAPIDAPI_KEY', req: false, note: 'Enables Zillow Zestimate data via RapidAPI.' },
+      { key: 'ATTOM_API_KEY', req: false, note: 'Enables ATTOM property data.' },
+      { key: 'CENSUS_API_KEY', req: false, note: 'Census Bureau API — works keyless at lower rate limits.' },
+      { key: 'HUD_API_KEY', req: false, note: 'HUD Fair Market Rent data.' },
+    ];
+
+    // ── State ────────────────────────────────────────────────────────
+    const LOG_KEY = 'openclaw.mission.log.v1';
+    const state = {
+      status: null,
+      events: loadEvents(),
+      schemas: null,        // cached { [toolName]: { description, inputSchema } }
+      schemasLoading: false,
+      schemasError: null,
+      runningTool: null,
+    };
+    function loadEvents() {
+      try {
+        const raw = localStorage.getItem(LOG_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed.slice(0, 200) : [];
+      } catch { return []; }
+    }
+    function persistEvents() {
+      try { localStorage.setItem(LOG_KEY, JSON.stringify(state.events.slice(0, 200))); } catch {}
+    }
+
+    // ── Nav wiring ───────────────────────────────────────────────────
+    function switchTab(tab) {
+      document.querySelectorAll('.nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+      document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.dataset.panel === tab));
+      logEvent('info', `nav → ${tab}`);
+    }
+    document.querySelectorAll('.nav button').forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
+    document.querySelectorAll('[data-goto]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); switchTab(a.dataset.goto); }));
+
+    // ── Activity log ─────────────────────────────────────────────────
+    function logEvent(kind, msg) {
+      const ts = new Date().toLocaleTimeString();
+      state.events.unshift({ kind, msg, ts });
+      if (state.events.length > 200) state.events.pop();
+      persistEvents();
+      renderActivity();
+    }
+    function renderActivity() {
+      const el = document.getElementById('activity-list');
+      el.innerHTML = state.events.map(e => `
+        <div class="event ${e.kind}">
+          <span class="ts">${e.ts}</span>
+          <span class="msg">${escapeHtml(e.msg)}</span>
+          <span class="tag">${e.kind.toUpperCase()}</span>
+        </div>
+      `).join('') || '<p style="color:var(--muted);font-size:0.85rem;padding:0.5rem">No events yet.</p>';
+      const meta = document.getElementById('activity-meta');
+      if (meta) meta.textContent = `${state.events.length} event${state.events.length === 1 ? '' : 's'} · persisted locally`;
+    }
+    document.getElementById('btn-clear-log').addEventListener('click', () => {
+      state.events = [];
+      persistEvents();
+      renderActivity();
+      logEvent('info', 'log cleared');
+    });
+
+    function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+    // ── Render tools ─────────────────────────────────────────────────
+    function renderTools(filter = '') {
+      const groups = document.getElementById('tool-groups');
+      const q = filter.trim().toLowerCase();
+      let total = 0;
+      groups.innerHTML = TOOL_GROUPS.map(g => {
+        const matches = g.tools.filter(t => !q || t.n.includes(q) || t.d.toLowerCase().includes(q));
+        total += matches.length;
+        if (!matches.length) return '';
+        return `
+          <div class="tool-group">
+            <h3>${g.name} <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">· ${matches.length}</span></h3>
+            <div class="tool-list">
+              ${matches.map(t => `
+                <div class="tool">
+                  <div class="tool-name">${t.n}</div>
+                  <div class="tool-desc">${t.d}</div>
+                  <div class="tool-badges">
+                    ${t.b.includes('free') ? '<span class="badge free">Free data</span>' : ''}
+                    ${t.b.includes('pr') ? '<span class="badge">PropertyRadar</span>' : ''}
+                  </div>
+                  <div class="tool-actions">
+                    <button class="btn-run" data-run="${t.n}">▶ Run</button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }).join('');
+      document.getElementById('tools-count').textContent = `(${total})`;
+    }
+    document.getElementById('tool-filter').addEventListener('input', e => renderTools(e.target.value));
+
+    // Delegate Run button clicks
+    document.getElementById('tool-groups').addEventListener('click', e => {
+      const btn = e.target.closest('[data-run]');
+      if (!btn) return;
+      openRunModal(btn.dataset.run);
+    });
+
+    // ── Tool schemas ─────────────────────────────────────────────────
+    async function ensureSchemas() {
+      if (state.schemas) return state.schemas;
+      if (state.schemasLoading) {
+        while (state.schemasLoading) await new Promise(r => setTimeout(r, 50));
+        return state.schemas;
+      }
+      state.schemasLoading = true;
+      state.schemasError = null;
+      try {
+        const res = await fetch('/api/invoke', { cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const map = {};
+        for (const t of (data.tools || [])) {
+          map[t.name] = { description: t.description, inputSchema: t.inputSchema };
+        }
+        state.schemas = map;
+        logEvent('ok', `loaded schemas for ${Object.keys(map).length} tools`);
+        return map;
+      } catch (err) {
+        state.schemasError = err.message;
+        logEvent('err', `schema load failed: ${err.message}`);
+        throw err;
+      } finally {
+        state.schemasLoading = false;
+      }
+    }
+
+    // ── Run modal ────────────────────────────────────────────────────
+    const modal = document.getElementById('run-modal');
+    const modalTitle = document.getElementById('run-modal-title');
+    const modalDesc = document.getElementById('run-modal-desc');
+    const modalForm = document.getElementById('run-form');
+    const modalResult = document.getElementById('run-result');
+    const modalSubmit = document.getElementById('run-modal-submit');
+
+    function closeRunModal() {
+      modal.classList.remove('open');
+      state.runningTool = null;
+      modalForm.innerHTML = '';
+      modalResult.style.display = 'none';
+      modalResult.innerHTML = '';
+      modalSubmit.disabled = false;
+      modalSubmit.innerHTML = '▶ Run';
+    }
+    document.getElementById('run-modal-close').addEventListener('click', closeRunModal);
+    document.getElementById('run-modal-cancel').addEventListener('click', closeRunModal);
+    modal.addEventListener('click', e => { if (e.target === modal) closeRunModal(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && modal.classList.contains('open')) closeRunModal(); });
+
+    async function openRunModal(name) {
+      state.runningTool = name;
+      modalTitle.textContent = name;
+      modalDesc.innerHTML = '<span class="spinner"></span> Loading schema…';
+      modalForm.innerHTML = '';
+      modalResult.style.display = 'none';
+      modal.classList.add('open');
+      logEvent('info', `open run dialog · ${name}`);
+
+      try {
+        const schemas = await ensureSchemas();
+        const schema = schemas[name];
+        if (!schema) {
+          modalDesc.innerHTML = `<span style="color:var(--bad)">Tool not found in server registry.</span>`;
+          return;
+        }
+        modalDesc.textContent = schema.description || '';
+        renderForm(schema.inputSchema || { type: 'object', properties: {} });
+      } catch (err) {
+        modalDesc.innerHTML = `<span style="color:var(--bad)">Could not load tool schemas: ${escapeHtml(err.message)}</span>`;
+      }
+    }
+
+    function renderForm(schema) {
+      const props = schema.properties || {};
+      const required = new Set(schema.required || []);
+      const names = Object.keys(props);
+      if (!names.length) {
+        modalForm.innerHTML = '<p style="color:var(--muted);font-size:0.88rem">This tool takes no arguments. Just run it.</p>';
+        return;
+      }
+      modalForm.innerHTML = names.map(key => {
+        const p = props[key] || {};
+        const type = p.type || 'string';
+        const isRequired = required.has(key);
+        const descHtml = p.description ? `<span class="hint">${escapeHtml(p.description)}</span>` : '';
+        const typeLabel = Array.isArray(type) ? type.join('|') : type;
+        const labelRow = `
+          <label>
+            <span>${escapeHtml(key)}</span>
+            ${isRequired ? '<span class="req">*</span>' : ''}
+            <span class="type">${escapeHtml(typeLabel)}</span>
+          </label>`;
+        if (type === 'boolean') {
+          return `<div class="field">${labelRow}
+            <input type="checkbox" name="${escapeHtml(key)}" data-type="boolean" />
+            ${descHtml}
+          </div>`;
+        }
+        if (type === 'number' || type === 'integer') {
+          return `<div class="field">${labelRow}
+            <input type="number" name="${escapeHtml(key)}" data-type="${type}" ${isRequired ? 'required' : ''} />
+            ${descHtml}
+          </div>`;
+        }
+        if (type === 'object' || type === 'array') {
+          return `<div class="field">${labelRow}
+            <textarea name="${escapeHtml(key)}" data-type="${type}" placeholder='${type === 'array' ? '[]' : '{}'}'></textarea>
+            ${descHtml}
+          </div>`;
+        }
+        return `<div class="field">${labelRow}
+          <input type="text" name="${escapeHtml(key)}" data-type="string" ${isRequired ? 'required' : ''} />
+          ${descHtml}
+        </div>`;
+      }).join('');
+    }
+
+    modalSubmit.addEventListener('click', async () => {
+      if (!state.runningTool) return;
+      const name = state.runningTool;
+      const args = {};
+      let formError = null;
+
+      for (const el of modalForm.querySelectorAll('[name]')) {
+        const key = el.name;
+        const type = el.dataset.type;
+        if (type === 'boolean') {
+          if (el.checked) args[key] = true;
+        } else if (type === 'number' || type === 'integer') {
+          if (el.value !== '') {
+            const n = Number(el.value);
+            if (Number.isNaN(n)) { formError = `"${key}" must be a number`; break; }
+            args[key] = type === 'integer' ? Math.trunc(n) : n;
+          }
+        } else if (type === 'object' || type === 'array') {
+          const raw = el.value.trim();
+          if (raw) {
+            try { args[key] = JSON.parse(raw); }
+            catch { formError = `"${key}" must be valid JSON`; break; }
+          }
+        } else {
+          if (el.value !== '') args[key] = el.value;
+        }
+      }
+
+      if (formError) {
+        showResult({ error: formError }, true);
+        return;
+      }
+
+      modalSubmit.disabled = true;
+      modalSubmit.innerHTML = '<span class="spinner"></span> Running…';
+      logEvent('info', `invoke · ${name} ${JSON.stringify(args)}`.slice(0, 180));
+      const started = performance.now();
+
+      try {
+        const res = await fetch('/api/invoke', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name, arguments: args }),
+        });
+        const elapsed = Math.round(performance.now() - started);
+        const data = await res.json();
+        if (!res.ok) {
+          showResult({ error: data.error || `HTTP ${res.status}`, elapsedMs: elapsed }, true);
+          logEvent('err', `invoke failed · ${name} · ${data.error || res.status}`);
+          return;
+        }
+        showResult({ result: data.result, elapsedMs: elapsed, durationMs: data.durationMs }, false);
+        logEvent('ok', `invoke ok · ${name} · ${elapsed}ms`);
+      } catch (err) {
+        showResult({ error: err.message }, true);
+        logEvent('err', `invoke failed · ${name} · ${err.message}`);
+      } finally {
+        modalSubmit.disabled = false;
+        modalSubmit.innerHTML = '▶ Run';
+      }
+    });
+
+    function showResult(data, isErr) {
+      modalResult.style.display = 'block';
+      const elapsed = data.elapsedMs != null ? ` · ${data.elapsedMs}ms client` : '';
+      const server = data.durationMs != null ? ` · ${data.durationMs}ms server` : '';
+      const payload = data.error
+        ? data.error
+        : extractToolText(data.result);
+      modalResult.className = 'result' + (isErr ? ' err' : '');
+      modalResult.innerHTML = `<span class="meta">${isErr ? 'error' : 'success'}${elapsed}${server}</span>` +
+        escapeHtml(payload);
+    }
+    function extractToolText(result) {
+      if (!result) return '(no result)';
+      const content = result.content || [];
+      const text = content.filter(c => c.type === 'text').map(c => c.text).join('\n\n');
+      if (text) return text;
+      return JSON.stringify(result, null, 2);
+    }
+
+    // ── Render env table ─────────────────────────────────────────────
+    function renderEnv(envStatus = {}) {
+      const tbody = document.querySelector('#env-table tbody');
+      tbody.innerHTML = ENV_VARS.map(v => {
+        const configured = envStatus[v.key] === true;
+        const pillClass = configured ? 'good' : (v.req ? 'bad' : 'warn');
+        const label = configured ? 'configured' : (v.req ? 'missing' : 'optional');
+        return `
+          <tr>
+            <td>${v.key}${v.req ? ' <span style="color:var(--bad);font-weight:700">*</span>' : ''}</td>
+            <td>${escapeHtml(v.note)}</td>
+            <td><span class="pill ${pillClass}"><span class="dot"></span>${label}</span></td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    // ── Snippets ─────────────────────────────────────────────────────
+    function mcpUrl() {
+      const origin = window.location.origin.replace(/^http:/, window.location.protocol);
+      return `${origin}/mcp`;
+    }
+    function renderSnippets() {
+      const url = mcpUrl();
+      document.getElementById('mcp-url').textContent = url;
+
+      const desktop = {
+        mcpServers: {
+          'property-data': { url }
+        }
+      };
+      document.getElementById('snippet-desktop').textContent = JSON.stringify(desktop, null, 2);
+      document.getElementById('snippet-inspector').textContent = `npx @modelcontextprotocol/inspector ${url}`;
+      document.getElementById('snippet-fetch').textContent =
+`// Example: call a tool from any agent (node fetch)
+const res = await fetch('${url}', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({
+    jsonrpc: '2.0', id: 1, method: 'tools/list', params: {}
+  })
+});
+console.log(await res.json());`;
+    }
+
+    // ── Copy handlers ────────────────────────────────────────────────
+    async function copy(text, btn) {
+      try {
+        await navigator.clipboard.writeText(text);
+        if (btn) {
+          const prev = btn.textContent;
+          btn.textContent = '✓ Copied';
+          btn.classList.add('copied');
+          setTimeout(() => { btn.textContent = prev; btn.classList.remove('copied'); }, 1200);
+        }
+        logEvent('ok', `copied ${text.length > 40 ? text.slice(0,37)+'…' : text}`);
+      } catch {
+        logEvent('err', 'clipboard copy failed');
+      }
+    }
+    document.getElementById('btn-copy-url').addEventListener('click', e => copy(mcpUrl(), e.currentTarget));
+    document.getElementById('btn-copy-inline').addEventListener('click', e => copy(mcpUrl(), e.currentTarget));
+
+    // ── Status fetch ─────────────────────────────────────────────────
+    async function fetchStatus() {
+      try {
+        const res = await fetch('/api/status', { cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        state.status = data;
+        applyStatus(data);
+        logEvent('ok', `status: online · ${data.tools} tools · v${data.version}`);
+      } catch (err) {
+        state.status = null;
+        applyStatus(null);
+        logEvent('warn', `status endpoint unreachable (${err.message}) — showing static info`);
+      }
+    }
+    function applyStatus(data) {
+      if (data) {
+        document.getElementById('project-name').textContent = data.name || 'MCP Server';
+        document.getElementById('project-desc').textContent = data.description || '';
+        document.getElementById('stat-status').textContent = 'Online';
+        document.getElementById('stat-status-detail').textContent = `uptime ${fmtUptime(data.uptime)}`;
+        document.getElementById('stat-tools').innerHTML = `${data.tools} <small>registered</small>`;
+        document.getElementById('stat-version').textContent = `v${data.version}`;
+        document.getElementById('stat-runtime').textContent = data.runtime || 'Vercel Functions';
+        const env = data.env || {};
+        const total = Object.keys(env).length;
+        const configured = Object.values(env).filter(Boolean).length;
+        document.getElementById('stat-config').textContent = `${configured} / ${total}`;
+        const pill = document.getElementById('stat-config-pill');
+        pill.className = 'pill ' + (configured === total ? 'good' : configured > 0 ? 'warn' : 'bad');
+        renderEnv(env);
+        document.getElementById('live-status').textContent = 'online';
+      } else {
+        document.getElementById('stat-status').textContent = 'Unknown';
+        document.getElementById('stat-status-detail').textContent = 'status endpoint unreachable';
+        document.getElementById('live-status').textContent = 'offline';
+        renderEnv({});
+      }
+      applyAuth(data?.auth);
+    }
+
+    // ── Auth ─────────────────────────────────────────────────────────
+    function applyAuth(auth) {
+      const overlay = document.getElementById('login-overlay');
+      const pill = document.getElementById('auth-pill');
+      const pillLabel = document.getElementById('auth-pill-label');
+      const logoutBtn = document.getElementById('btn-logout');
+      if (!auth || !auth.required) {
+        overlay.classList.remove('open');
+        pill.style.display = 'none';
+        logoutBtn.style.display = 'none';
+        return;
+      }
+      pill.style.display = 'inline-flex';
+      if (auth.authenticated) {
+        overlay.classList.remove('open');
+        pill.className = 'pill good';
+        pillLabel.textContent = 'Unlocked';
+        logoutBtn.style.display = 'inline-flex';
+      } else {
+        overlay.classList.add('open');
+        pill.className = 'pill bad';
+        pillLabel.textContent = 'Locked';
+        logoutBtn.style.display = 'none';
+        setTimeout(() => document.getElementById('login-token')?.focus(), 50);
+      }
+    }
+
+    document.getElementById('login-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const input = document.getElementById('login-token');
+      const err = document.getElementById('login-err');
+      const submit = document.getElementById('login-submit');
+      const token = input.value;
+      err.textContent = '';
+      submit.disabled = true;
+      submit.innerHTML = '<span class="spinner"></span> Checking…';
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ token }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          err.textContent = data.error || `Login failed (${res.status})`;
+          logEvent('err', `login failed: ${err.textContent}`);
+          input.select();
+          return;
+        }
+        input.value = '';
+        logEvent('ok', 'unlocked mission control');
+        // invalidate any cached schemas that were fetched while locked
+        state.schemas = null;
+        await fetchStatus();
+      } catch (e2) {
+        err.textContent = e2.message;
+        logEvent('err', `login error: ${e2.message}`);
+      } finally {
+        submit.disabled = false;
+        submit.innerHTML = 'Unlock';
+      }
+    });
+
+    document.getElementById('btn-logout').addEventListener('click', async () => {
+      try {
+        await fetch('/api/logout', { method: 'POST' });
+      } catch { /* ignore */ }
+      state.schemas = null;
+      logEvent('info', 'logged out');
+      await fetchStatus();
+    });
+    function fmtUptime(s) {
+      if (typeof s !== 'number') return '—';
+      if (s < 60) return `${Math.round(s)}s`;
+      if (s < 3600) return `${Math.round(s/60)}m`;
+      return `${Math.round(s/3600)}h`;
+    }
+
+    document.getElementById('btn-refresh').addEventListener('click', e => {
+      logEvent('info', 'manual refresh');
+      fetchStatus();
+    });
+
+    // ── Bootstrap ────────────────────────────────────────────────────
+    renderTools();
+    renderEnv({});
+    renderSnippets();
+    logEvent('info', 'Mission Control online — hello, pilot.');
+    fetchStatus();
+    setInterval(fetchStatus, 30000);
+  </script>
 </body>
 </html>

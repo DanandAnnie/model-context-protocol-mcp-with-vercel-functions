@@ -1,5 +1,11 @@
 {
-  "rewrites": [{ "source": "/(.+)", "destination": "/api/server" }],
+  "rewrites": [
+    { "source": "/api/status", "destination": "/api/status" },
+    { "source": "/api/invoke", "destination": "/api/invoke" },
+    { "source": "/api/login",  "destination": "/api/login"  },
+    { "source": "/api/logout", "destination": "/api/logout" },
+    { "source": "/((?!api/).*)", "destination": "/api/server" }
+  ],
   "functions": {
     "api/server.ts": {
       "maxDuration": 60,

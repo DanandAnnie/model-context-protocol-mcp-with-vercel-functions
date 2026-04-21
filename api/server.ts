@@ -3,6 +3,8 @@ import { z } from "zod";
 import type { ZodRawShape } from "zod";
 import * as prApi from "./services/property-radar-api.js";
 import * as publicApi from "./services/public-data-api.js";
+import { ghlFetch, GHL_LOC } from "./services/ghl-api.js";
+import { verifyToken } from "./services/auth.js";
 
 type ToolContent = { type: "text"; text: string };
 type ToolResult = { content: ToolContent[] };
@@ -1261,6 +1263,175 @@ function registerTools(server: any) {
       };
     }
   );
+
+  // ================================================================
+  // 10. GHL PILOT — Red Rock Real Estate sub-account (read-only)
+  // ================================================================
+
+  server.tool(
+    "ghl-pilot:get_location",
+    "Read-only. Fetch The Finest Homes / Red Rock Real Estate sub-account details from GHL.",
+    {},
+    async () => {
+      const data = await ghlFetch(`/locations/${GHL_LOC}`);
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "ghl-pilot:search_contacts",
+    "Read-only. Search contacts in the Red Rock Real Estate GHL sub-account.",
+    {
+      query: z.string().optional().describe("Name, email, or phone search string"),
+      limit: z.number().optional().default(10).describe("Max results (1–100)"),
+    },
+    async ({ query, limit }) => {
+      const body: Record<string, unknown> = { locationId: GHL_LOC, pageLimit: limit };
+      if (query) body.query = query;
+      const data = await ghlFetch("/contacts/search", { method: "POST", body });
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "ghl-pilot:get_contact",
+    "Read-only. Fetch a single GHL contact by ID from the Red Rock Real Estate sub-account.",
+    {
+      contactId: z.string().describe("GHL contact ID"),
+    },
+    async ({ contactId }) => {
+      const data = await ghlFetch(`/contacts/${contactId}`);
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "ghl-pilot:list_tags",
+    "Read-only. List all contact tags defined in the Red Rock Real Estate GHL sub-account.",
+    {},
+    async () => {
+      const data = await ghlFetch(`/locations/${GHL_LOC}/tags`);
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "ghl-pilot:list_pipelines",
+    "Read-only. List all opportunity pipelines and their stages in the Red Rock Real Estate GHL sub-account.",
+    {},
+    async () => {
+      const data = await ghlFetch("/opportunities/pipelines", {
+        queryParams: { locationId: GHL_LOC },
+      });
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "ghl-pilot:list_opportunities",
+    "Read-only. List opportunities in the Red Rock Real Estate GHL sub-account, optionally filtered by pipeline or stage.",
+    {
+      pipelineId: z.string().optional().describe("Filter by pipeline ID"),
+      stageId: z.string().optional().describe("Filter by pipeline stage ID"),
+      limit: z.number().optional().default(50).describe("Max results (1–100)"),
+    },
+    async ({ pipelineId, stageId, limit }) => {
+      const q: Record<string, string> = {
+        locationId: GHL_LOC,
+        limit: String(limit),
+      };
+      if (pipelineId) q.pipelineId = pipelineId;
+      if (stageId) q.pipelineStageId = stageId;
+      const data = await ghlFetch("/opportunities/search", { queryParams: q });
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "ghl-pilot:get_opportunity",
+    "Read-only. Fetch a single opportunity by ID from the Red Rock Real Estate GHL sub-account.",
+    {
+      opportunityId: z.string().describe("GHL opportunity ID"),
+    },
+    async ({ opportunityId }) => {
+      const data = await ghlFetch(`/opportunities/${opportunityId}`);
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "ghl-pilot:list_calendars",
+    "Read-only. List all calendars configured in the Red Rock Real Estate GHL sub-account.",
+    {},
+    async () => {
+      const data = await ghlFetch("/calendars/", {
+        queryParams: { locationId: GHL_LOC },
+      });
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "ghl-pilot:get_calendar_free_slots",
+    "Read-only. Get available booking slots for a GHL calendar in the Red Rock Real Estate sub-account. Timestamps must be Unix milliseconds.",
+    {
+      calendarId: z.string().describe("GHL calendar ID"),
+      startTimeMs: z.number().describe("Window start — Unix timestamp in milliseconds"),
+      endTimeMs: z.number().describe("Window end — Unix timestamp in milliseconds"),
+    },
+    async ({ calendarId, startTimeMs, endTimeMs }) => {
+      const data = await ghlFetch(`/calendars/${calendarId}/free-slots`, {
+        queryParams: {
+          startTime: String(startTimeMs),
+          endTime: String(endTimeMs),
+        },
+      });
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "ghl-pilot:list_custom_fields",
+    "Read-only. List all custom contact/opportunity fields defined in the Red Rock Real Estate GHL sub-account.",
+    {},
+    async () => {
+      const data = await ghlFetch(`/locations/${GHL_LOC}/customFields`);
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "ghl-pilot:list_invoices",
+    "Read-only. List invoices in the Red Rock Real Estate GHL sub-account.",
+    {
+      limit: z.number().optional().default(50).describe("Max results"),
+      status: z
+        .enum(["draft", "sent", "paid", "void", "partially_paid"])
+        .optional()
+        .describe("Filter by invoice status"),
+    },
+    async ({ limit, status }) => {
+      const q: Record<string, string> = {
+        locationId: GHL_LOC,
+        limit: String(limit),
+      };
+      if (status) q.status = status;
+      const data = await ghlFetch("/invoices/", { queryParams: q });
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "ghl-pilot:list_workflows",
+    "Read-only. List all automation workflows in the Red Rock Real Estate GHL sub-account.",
+    {},
+    async () => {
+      const data = await ghlFetch("/workflows/", {
+        queryParams: { locationId: GHL_LOC },
+      });
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+  );
 }
 
 // Populate TOOL_DEFS at module load via a duck-typed recorder.
@@ -1335,6 +1506,26 @@ function zodToJson(z: any): any {
   return withDesc({});
 }
 
-const handler = createMcpHandler(registerTools);
+// Wrap every MCP route with fail-closed bearer auth.
+// 503 if MISSION_CONTROL_TOKEN is unset (forces explicit setup before deploy works).
+// 401 if token is missing or wrong.
+function withBearerAuth(
+  fn: (req: Request) => Response | Promise<Response>
+): (req: Request) => Promise<Response> {
+  return async (req: Request): Promise<Response> => {
+    if (!process.env.MISSION_CONTROL_TOKEN) {
+      return new Response("Auth not configured. Set MISSION_CONTROL_TOKEN.", { status: 503 });
+    }
+    const authHeader = req.headers.get("authorization") ?? "";
+    const m = authHeader.match(/^Bearer\s+(.+)$/i);
+    if (!m || !verifyToken(m[1])) {
+      return new Response("Invalid or missing bearer token.", { status: 401 });
+    }
+    return fn(req);
+  };
+}
+
+const _mcpHandler = createMcpHandler(registerTools);
+const handler = withBearerAuth(_mcpHandler);
 
 export { handler as GET, handler as POST, handler as DELETE };

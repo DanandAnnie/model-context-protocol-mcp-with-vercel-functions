@@ -1,19 +1,27 @@
 // ============================================================
 // PropertyRadar API Service
-// Official API integration: https://api.propertyradar.com
-// Requires a PropertyRadar subscription with API access
+// Official API: https://developers.propertyradar.com/api
+//
+// Core pattern:
+//   - Search: POST /v1/properties with { Criteria, Fields, Limit }
+//     Criteria is an array of { name, value: [...] } objects where `name` is
+//     one of PropertyRadar's filter IDs (State, City, ZipFive, County, APN,
+//     Address, SiteAddress, RadarID, …).
+//   - Single property: GET /v1/properties/{RadarID}
+//   - Sub-resources:
+//       GET /v1/properties/{RadarID}/comps/sales
+//       GET /v1/properties/{RadarID}/transactions
+//
+// `Fields` controls the returned field set. `Overview` covers the basics
+// (address, owner, value). `PropertyTab` is a richer bundle that includes
+// mortgage/loan and foreclosure signals.
 // ============================================================
 
-import type {
-  PropertyDetails,
-  PropertySearchFilters,
-  OwnerInfo,
-  MortgageInfo,
-  TransferRecord,
-  ForeclosureInfo,
-} from "../types/property.js";
+import type { PropertySearchFilters } from "../types/property.js";
 
 const PR_API_BASE = "https://api.propertyradar.com/v1";
+
+export type Criterion = { name: string; value: Array<string | number> };
 
 function getApiToken(): string {
   const token = process.env.PROPERTY_RADAR_API_TOKEN;
@@ -26,143 +34,221 @@ function getApiToken(): string {
   return token;
 }
 
-async function prFetch(
-  endpoint: string,
-  params: Record<string, string | number | boolean | undefined> = {}
+async function prRequest(
+  method: "GET" | "POST",
+  path: string,
+  opts: { query?: Record<string, string | number | undefined>; body?: unknown } = {}
 ): Promise<any> {
   const token = getApiToken();
-  const url = new URL(`${PR_API_BASE}${endpoint}`);
-
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined) {
-      url.searchParams.set(key, String(value));
+  const url = new URL(`${PR_API_BASE}${path}`);
+  if (opts.query) {
+    for (const [k, v] of Object.entries(opts.query)) {
+      if (v !== undefined) url.searchParams.set(k, String(v));
     }
   }
 
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/json",
+  };
+  if (opts.body !== undefined) headers["Content-Type"] = "application/json";
+
   const response = await fetch(url.toString(), {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/json",
-    },
+    method,
+    headers,
+    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
   });
 
   if (!response.ok) {
     const errorBody = await response.text();
-    throw new Error(
-      `PropertyRadar API error ${response.status}: ${errorBody}`
-    );
+    throw new Error(`PropertyRadar API error ${response.status}: ${errorBody}`);
+  }
+  return response.json();
+}
+
+// ── Criteria builder ─────────────────────────────────────────
+// Maps our PropertySearchFilters shape onto PropertyRadar's Criteria names.
+// Names marked "documented" come from the official API docs. Names marked
+// "best-effort" follow PR's usual CamelCase convention but should be
+// verified when the tool is exercised with real credentials — if PR returns
+// an "unknown criterion" error, tweak the name here.
+function buildCriteria(filters: PropertySearchFilters): Criterion[] {
+  const c: Criterion[] = [];
+  const pushStr = (name: string, v?: string) => { if (v) c.push({ name, value: [v] }); };
+  const pushNum = (name: string, v?: number) => { if (v !== undefined) c.push({ name, value: [v] }); };
+  const pushRange = (name: string, min?: number, max?: number) => {
+    if (min !== undefined || max !== undefined) {
+      c.push({ name, value: [min ?? "", max ?? ""].map(String) });
+    }
+  };
+  const pushBool = (name: string, v?: boolean) => {
+    if (v !== undefined) c.push({ name, value: [v ? 1 : 0] });
+  };
+
+  // documented
+  pushStr("State", filters.state);
+  pushStr("City", filters.city);
+  pushStr("ZipFive", filters.zip);
+  pushStr("County", filters.county);
+  pushStr("APN", filters.apn);
+  pushStr("Address", filters.address);
+  if (filters.propertyType?.length) {
+    c.push({ name: "PropertyType", value: filters.propertyType });
+  }
+  if (filters.ownerName) {
+    c.push({ name: "OwnerFirstName", value: [filters.ownerName] });
   }
 
-  return response.json();
+  // best-effort (PR's typical CamelCase; adjust if API rejects)
+  pushRange("Beds", filters.bedroomsMin, filters.bedroomsMax);
+  pushRange("Baths", filters.bathroomsMin, filters.bathroomsMax);
+  pushRange("SquareFeet", filters.sqftMin, filters.sqftMax);
+  pushRange("LotSize", filters.lotSizeMin, filters.lotSizeMax);
+  pushRange("YearBuilt", filters.yearBuiltMin, filters.yearBuiltMax);
+  pushRange("AVMValue", filters.valueMin, filters.valueMax);
+  pushRange("AvailableEquity", filters.equityMin, filters.equityMax);
+  pushRange("EquityPercent", filters.equityPercentMin, filters.equityPercentMax);
+  pushRange("LengthOfOwnership", filters.lengthOfOwnershipMin, filters.lengthOfOwnershipMax);
+
+  pushBool("OwnerOccupied", filters.ownerOccupied);
+  pushBool("AbsenteeOwner", filters.absenteeOwner);
+  pushBool("CorporateOwned", filters.corporateOwned);
+  pushBool("TrustOwned", filters.trustOwned);
+  pushBool("OutOfStateOwner", filters.outOfStateOwner);
+  pushBool("HasMultipleMortgages", filters.hasMultipleMortgages);
+  pushBool("AdjustableRate", filters.armLoan);
+  pushBool("FreeAndClear", filters.freeClear);
+  pushBool("HighEquity", filters.highEquity);
+  pushBool("PreForeclosure", filters.preForeclosure);
+  pushBool("Auction", filters.auction);
+  pushBool("BankOwned", filters.bankOwned);
+  pushBool("TaxDelinquent", filters.taxDelinquent);
+  pushBool("ListedForSale", filters.listedForSale);
+  pushBool("RecentlySold", filters.recentlySold);
+  pushBool("CashBuyer", filters.cashBuyer);
+  pushBool("Pool", filters.pool);
+
+  pushStr("LoanType", filters.loanType);
+  pushNum("Stories", filters.stories);
+  pushNum("SoldWithinMonths", filters.soldWithinMonths);
+
+  return c;
 }
 
 // ── Property Search ──────────────────────────────────────────
 export async function searchProperties(
-  filters: PropertySearchFilters
+  filters: PropertySearchFilters,
+  opts: { fields?: string[]; limit?: number } = {}
 ): Promise<any> {
-  const params: Record<string, any> = {};
-
-  if (filters.address) params.address = filters.address;
-  if (filters.city) params.city = filters.city;
-  if (filters.state) params.state = filters.state;
-  if (filters.zip) params.zip = filters.zip;
-  if (filters.county) params.county = filters.county;
-  if (filters.apn) params.apn = filters.apn;
-  if (filters.propertyType) params.property_type = filters.propertyType.join(",");
-  if (filters.bedroomsMin) params.bedrooms_min = filters.bedroomsMin;
-  if (filters.bedroomsMax) params.bedrooms_max = filters.bedroomsMax;
-  if (filters.bathroomsMin) params.bathrooms_min = filters.bathroomsMin;
-  if (filters.bathroomsMax) params.bathrooms_max = filters.bathroomsMax;
-  if (filters.sqftMin) params.sqft_min = filters.sqftMin;
-  if (filters.sqftMax) params.sqft_max = filters.sqftMax;
-  if (filters.valueMin) params.value_min = filters.valueMin;
-  if (filters.valueMax) params.value_max = filters.valueMax;
-  if (filters.ownerOccupied !== undefined) params.owner_occupied = filters.ownerOccupied;
-  if (filters.preForeclosure) params.pre_foreclosure = true;
-  if (filters.taxDelinquent) params.tax_delinquent = true;
-  if (filters.freeClear) params.free_clear = true;
-  if (filters.page) params.page = filters.page;
-  if (filters.limit) params.limit = filters.limit;
-  if (filters.sortBy) params.sort_by = filters.sortBy;
-
-  return prFetch("/properties", params);
+  const limit = opts.limit ?? filters.limit ?? 25;
+  const page = filters.page && filters.page > 1 ? filters.page : 1;
+  const body: Record<string, unknown> = {
+    Criteria: buildCriteria(filters),
+    Fields: opts.fields ?? ["Overview"],
+    Limit: limit,
+  };
+  if (page > 1) body.Start = (page - 1) * limit;
+  return prRequest("POST", "/properties", { body });
 }
 
-// ── Property Details ─────────────────────────────────────────
-export async function getPropertyDetails(
-  propertyId: string
-): Promise<any> {
-  return prFetch(`/properties/${propertyId}`);
+// ── Single Property ──────────────────────────────────────────
+export async function getPropertyDetails(radarId: string): Promise<any> {
+  return prRequest("GET", `/properties/${encodeURIComponent(radarId)}`);
 }
 
-// ── Property by Address ──────────────────────────────────────
+// ── Property by Street Address ───────────────────────────────
+// Does a Criteria search (Address + City + State) and returns the first hit.
 export async function getPropertyByAddress(
   address: string,
   city: string,
   state: string
 ): Promise<any> {
-  return prFetch("/properties/search", { address, city, state });
+  const result = await prRequest("POST", "/properties", {
+    body: {
+      Criteria: [
+        { name: "Address", value: [address] },
+        { name: "City", value: [city] },
+        { name: "State", value: [state] },
+      ],
+      Fields: ["Overview"],
+      Limit: 1,
+    },
+  });
+  // PR wraps results in various envelope shapes across endpoints; return the
+  // first record if we can find one, otherwise the raw response so callers
+  // can inspect the envelope.
+  const first =
+    result?.results?.[0] ??
+    result?.items?.[0] ??
+    result?.data?.[0] ??
+    (Array.isArray(result) ? result[0] : undefined);
+  return first ?? result;
 }
 
-// ── Owner Info ───────────────────────────────────────────────
-export async function getOwnerInfo(propertyId: string): Promise<any> {
-  return prFetch(`/properties/${propertyId}/owner`);
+// ── Owner info ───────────────────────────────────────────────
+// Owner is included in the `Overview` Fields bundle on a property lookup.
+export async function getOwnerInfo(radarId: string): Promise<any> {
+  return getPropertyDetails(radarId);
 }
 
-// ── Mortgage Data ────────────────────────────────────────────
-export async function getMortgageData(propertyId: string): Promise<any> {
-  return prFetch(`/properties/${propertyId}/mortgages`);
+// ── Mortgage / Loan data ─────────────────────────────────────
+// Mortgage signals come back via the `PropertyTab` Fields bundle.
+export async function getMortgageData(radarId: string): Promise<any> {
+  return prRequest("POST", "/properties", {
+    body: {
+      Criteria: [{ name: "RadarID", value: [radarId] }],
+      Fields: ["PropertyTab"],
+      Limit: 1,
+    },
+  });
 }
 
-// ── Transfer History ─────────────────────────────────────────
-export async function getTransferHistory(
-  propertyId: string
-): Promise<any> {
-  return prFetch(`/properties/${propertyId}/transfers`);
+// ── Foreclosure data ─────────────────────────────────────────
+export async function getForeclosureData(radarId: string): Promise<any> {
+  return prRequest("POST", "/properties", {
+    body: {
+      Criteria: [{ name: "RadarID", value: [radarId] }],
+      Fields: ["PropertyTab"],
+      Limit: 1,
+    },
+  });
 }
 
-// ── Foreclosure Data ─────────────────────────────────────────
-export async function getForeclosureData(
-  propertyId: string
-): Promise<any> {
-  return prFetch(`/properties/${propertyId}/foreclosure`);
+// ── Transfer / Transaction history ───────────────────────────
+// PR's endpoint is /transactions (NOT /transfers).
+export async function getTransferHistory(radarId: string): Promise<any> {
+  return prRequest("GET", `/properties/${encodeURIComponent(radarId)}/transactions`);
 }
 
 // ── Comparable Sales ─────────────────────────────────────────
 export async function getComparableSales(
-  propertyId: string,
+  radarId: string,
   radius: number = 1,
   months: number = 6
 ): Promise<any> {
-  return prFetch(`/properties/${propertyId}/comps`, { radius, months });
+  return prRequest(
+    "GET",
+    `/properties/${encodeURIComponent(radarId)}/comps/sales`,
+    { query: { radius, months } }
+  );
 }
 
 // ── Lists ────────────────────────────────────────────────────
+// Persons/Lists endpoints — exact request shape isn't fully specified in the
+// public docs section we relied on. Best-effort POST /lists with a Criteria
+// array; tweak here if PR returns a schema mismatch.
 export async function createPropertyList(
   name: string,
   filters: PropertySearchFilters
 ): Promise<any> {
-  const token = getApiToken();
-  const response = await fetch(`${PR_API_BASE}/lists`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
+  return prRequest("POST", "/lists", {
+    body: {
+      Name: name,
+      Criteria: buildCriteria(filters),
     },
-    body: JSON.stringify({ name, criteria: filters }),
   });
-
-  if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(
-      `PropertyRadar API error ${response.status}: ${errorBody}`
-    );
-  }
-
-  return response.json();
 }
 
 export async function getPropertyLists(): Promise<any> {
-  return prFetch("/lists");
+  return prRequest("GET", "/lists");
 }

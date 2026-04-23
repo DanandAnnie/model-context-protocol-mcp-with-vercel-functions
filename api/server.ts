@@ -1337,11 +1337,11 @@ function registerTools(server: any) {
     },
     async ({ pipelineId, stageId, limit }) => {
       const q: Record<string, string> = {
-        locationId: GHL_LOC,
+        location_id: GHL_LOC,
         limit: String(limit),
       };
-      if (pipelineId) q.pipelineId = pipelineId;
-      if (stageId) q.pipelineStageId = stageId;
+      if (pipelineId) q.pipeline_id = pipelineId;
+      if (stageId) q.pipeline_stage_id = stageId;
       const data = await ghlFetch("/opportunities/search", { queryParams: q });
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     }

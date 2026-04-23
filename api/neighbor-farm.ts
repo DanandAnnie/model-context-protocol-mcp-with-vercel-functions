@@ -24,11 +24,7 @@ interface QueueEntry extends NeighborFarmPayload {
   chatId: string;
 }
 
-export default async function handler(req: Request): Promise<Response> {
-  if (req.method !== "POST") {
-    return json({ error: "Method Not Allowed" }, 405);
-  }
-
+async function handler(req: Request): Promise<Response> {
   const auth = getAuthState(req);
   if (!auth.authenticated) {
     return json({ error: "Unauthorized" }, 401);
@@ -117,6 +113,8 @@ export default async function handler(req: Request): Promise<Response> {
     201
   );
 }
+
+export { handler as POST };
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 

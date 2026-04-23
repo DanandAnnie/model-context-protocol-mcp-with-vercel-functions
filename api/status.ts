@@ -26,7 +26,7 @@ const ENV_KEYS = [
   "HUD_API_KEY",
 ];
 
-export default function handler(req: Request): Response {
+function handler(req: Request): Response {
   const env: Record<string, boolean> = {};
   for (const k of ENV_KEYS) env[k] = Boolean(process.env[k]);
 
@@ -54,3 +54,5 @@ export default function handler(req: Request): Response {
     },
   });
 }
+
+export { handler as GET };

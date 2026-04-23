@@ -3,8 +3,9 @@
     { "source": "/api/status", "destination": "/api/status" },
     { "source": "/api/invoke", "destination": "/api/invoke" },
     { "source": "/api/login",  "destination": "/api/login"  },
-    { "source": "/api/logout", "destination": "/api/logout" },
-    { "source": "/((?!api/).*)", "destination": "/api/server" }
+    { "source": "/api/logout",        "destination": "/api/logout" },
+    { "source": "/api/neighbor-farm", "destination": "/api/neighbor-farm" },
+    { "source": "/((?!api/).*)",      "destination": "/api/server" }
   ],
   "functions": {
     "api/server.ts": {

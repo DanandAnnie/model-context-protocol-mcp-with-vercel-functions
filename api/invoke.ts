@@ -22,7 +22,7 @@ function jsonResponse(status: number, body: unknown): Response {
   });
 }
 
-export default async function handler(req: Request): Promise<Response> {
+async function handler(req: Request): Promise<Response> {
   const auth = getAuthState(req);
   if (auth.required && !auth.authenticated) {
     return jsonResponse(401, { error: "authentication required" });
@@ -54,3 +54,5 @@ export default async function handler(req: Request): Promise<Response> {
     return jsonResponse(500, { error: err?.message || String(err) });
   }
 }
+
+export { handler as GET, handler as POST };

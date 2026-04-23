@@ -3,9 +3,11 @@
     { "source": "/((?!api/).*)", "destination": "/api/server" }
   ],
   "functions": {
-    "api/server.ts": {
-      "maxDuration": 60,
-      "memory": 1024
-    }
+    "api/server.ts":        { "maxDuration": 60, "memory": 1024 },
+    "api/invoke.ts":        { "maxDuration": 30, "memory": 512  },
+    "api/neighbor-farm.ts": { "maxDuration": 10, "memory": 256  },
+    "api/status.ts":        { "maxDuration": 10, "memory": 256  },
+    "api/login.ts":         { "maxDuration": 10, "memory": 256  },
+    "api/logout.ts":        { "maxDuration": 10, "memory": 256  }
   }
 }

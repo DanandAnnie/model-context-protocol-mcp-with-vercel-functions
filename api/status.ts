@@ -1,4 +1,4 @@
-// Mission Control status endpoint.
+// Mission Control status endpoint. Rebuilt 2026-04-22.
 // Returns non-sensitive server metadata: name, version, tool count, env key presence.
 // Secret values are NEVER included — only booleans indicating whether each key is set.
 

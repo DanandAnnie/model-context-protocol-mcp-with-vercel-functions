@@ -7,9 +7,9 @@
 // Phase 2 stub: Vortex GeoLeads pull + Mojo Sync automation is deferred.
 
 import { getAuthState } from "./services/auth.js";
-import { writeFileSync, mkdirSync, existsSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
+import { writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 interface NeighborFarmPayload {
   address: string;

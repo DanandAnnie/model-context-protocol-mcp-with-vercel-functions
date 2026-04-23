@@ -7,9 +7,6 @@
 // Phase 2 stub: Vortex GeoLeads pull + Mojo Sync automation is deferred.
 
 import { getAuthState } from "./services/auth.js";
-import { writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 
 interface NeighborFarmPayload {
   address: string;
@@ -142,22 +139,10 @@ async function sendTelegram(botToken: string, chatId: string, text: string): Pro
 }
 
 function writeFallbackQueue(entry: QueueEntry): void {
-  // Try ~/.openclaw/workspace first (works in local dev), then /tmp (Vercel prod)
-  const paths = [
-    join(homedir(), ".openclaw", "workspace", "neighbor-farm-queue.jsonl"),
-    join("/tmp", "neighbor-farm-queue.jsonl"),
-  ];
-  for (const filePath of paths) {
-    try {
-      const dir = filePath.slice(0, filePath.lastIndexOf("/"));
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-      writeFileSync(filePath, JSON.stringify(entry) + "\n", { flag: "a" });
-      console.log(`[NEIGHBOR-FARM] Queue entry written to ${filePath}`);
-      return;
-    } catch (e) {
-      console.error(`[NEIGHBOR-FARM] Could not write to ${filePath}:`, (e as Error).message);
-    }
-  }
+  // In serverless (Vercel), the filesystem is not writable — emit as a structured
+  // log line so nothing is lost. The daily scheduled task reads this prefix from
+  // Vercel log drains / local vercel dev output.
+  console.log(`[NEIGHBOR-FARM-QUEUE] ${JSON.stringify(entry)}`);
 }
 
 // Returns next 8:00 AM Mountain Time (America/Denver) from a given Date.

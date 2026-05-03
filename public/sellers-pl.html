@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Seller's P&amp;L · 12345 Main Street</title>
+  <style>
+    :root {
+      --bg: #070a13;
+      --panel: #0f172a;
+      --panel-2: #121a2e;
+      --border: #1e293b;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-2: #7dd3fc;
+      --good: #34d399;
+      --warn: #fbbf24;
+      --bad: #f87171;
+      --highlight: rgba(56,189,248,0.08);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, sans-serif;
+      background:
+        radial-gradient(1200px 600px at 10% -10%, rgba(56,189,248,0.15), transparent 60%),
+        radial-gradient(1000px 500px at 110% 10%, rgba(125,211,252,0.08), transparent 60%),
+        var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .wrap { max-width: 1400px; margin: 0 auto; padding: 1.5rem 2rem 4rem; }
+    @media (max-width: 700px) { .wrap { padding: 1rem; } }
+
+    /* Topbar */
+    .topbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+    .topbar h1 { font-size: 1.6rem; letter-spacing: -0.01em; }
+    .topbar .sub { color: var(--muted); font-size: 0.9rem; margin-top: 4px; }
+    .crumb a { color: var(--muted); font-size: 0.85rem; }
+    .crumb a:hover { color: var(--accent); }
+
+    .btn {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      background: var(--panel); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 0.45rem 0.8rem; font-size: 0.85rem; cursor: pointer;
+    }
+    .btn:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
+
+    /* Property header */
+    .property {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1rem; margin-bottom: 2rem;
+    }
+    .stat-card {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+      padding: 1rem 1.1rem;
+    }
+    .stat-card .label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.8px; }
+    .stat-card .value { font-size: 1.4rem; font-weight: 700; margin-top: 0.3rem; letter-spacing: -0.01em; }
+    .stat-card .value.good { color: var(--good); }
+
+    /* Section */
+    .section { margin-top: 2.25rem; }
+    .section h2 { font-size: 1.1rem; margin-bottom: 0.75rem; display: flex; align-items: baseline; gap: 0.5rem; }
+    .section h2 .hint { color: var(--muted); font-size: 0.8rem; font-weight: 400; }
+
+    /* Comparison table */
+    .table-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    table.cmp { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    table.cmp th, table.cmp td {
+      padding: 0.55rem 0.85rem; text-align: right;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    table.cmp th:first-child, table.cmp td:first-child {
+      text-align: left; color: var(--text); font-weight: 500; min-width: 280px;
+      position: sticky; left: 0; background: var(--panel); z-index: 1;
+    }
+    table.cmp thead th {
+      background: var(--panel-2); color: var(--accent-2);
+      font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 600;
+    }
+    table.cmp thead th:first-child { color: var(--muted); }
+    table.cmp tbody tr:hover td { background: var(--highlight); }
+    table.cmp tbody tr:hover td:first-child { background: var(--panel-2); }
+    table.cmp tr.subtotal td { font-weight: 700; background: rgba(255,255,255,0.02); }
+    table.cmp tr.subtotal td:first-child { background: var(--panel-2); }
+    table.cmp tr.section-head td {
+      color: var(--accent-2); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px;
+      background: rgba(56,189,248,0.04); padding-top: 0.7rem; padding-bottom: 0.7rem;
+    }
+    table.cmp tr.section-head td:first-child { background: rgba(56,189,248,0.04); }
+    table.cmp .num { font-variant-numeric: tabular-nums; }
+    table.cmp .pos { color: var(--good); }
+    table.cmp .neg { color: var(--bad); }
+    table.cmp .mute { color: var(--muted); }
+    table.cmp col.featured { background: rgba(56,189,248,0.06); }
+    table.cmp .scroll { overflow-x: auto; }
+    .scroll-x { overflow-x: auto; }
+
+    /* Highlight / featured column header */
+    .col-featured-mark {
+      display: inline-block; padding: 0.05rem 0.4rem; border-radius: 4px;
+      background: rgba(56,189,248,0.15); color: var(--accent);
+      font-size: 0.65rem; margin-left: 0.3rem; letter-spacing: 0;
+    }
+
+    /* Bottom-line cards */
+    .bottom-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem; }
+    .net-card {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+      padding: 1rem 1.1rem; position: relative; overflow: hidden;
+    }
+    .net-card .who { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.8px; }
+    .net-card .net { font-size: 1.4rem; font-weight: 700; margin-top: 0.4rem; }
+    .net-card .pct { color: var(--muted); font-size: 0.8rem; margin-top: 0.2rem; }
+    .net-card .delta { margin-top: 0.6rem; font-size: 0.85rem; font-weight: 600; }
+    .net-card .delta.pos { color: var(--good); }
+    .net-card .delta.neg { color: var(--bad); }
+    .net-card .delta.zero { color: var(--muted); }
+    .net-card.best { border-color: rgba(52,211,153,0.45); box-shadow: 0 0 0 1px rgba(52,211,153,0.15), 0 0 24px -6px rgba(52,211,153,0.25); }
+    .net-card.featured { border-color: rgba(56,189,248,0.45); }
+    .net-card.featured::before {
+      content: 'Featured'; position: absolute; top: 0.5rem; right: 0.7rem;
+      background: rgba(56,189,248,0.15); color: var(--accent);
+      font-size: 0.65rem; padding: 0.1rem 0.4rem; border-radius: 4px; letter-spacing: 0.5px;
+    }
+
+    /* Marketing distribution */
+    .dist-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 800px) { .dist-wrap { grid-template-columns: 1fr; } }
+    .dist-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 1.1rem 1.2rem; }
+    .dist-card h3 { font-size: 0.95rem; margin-bottom: 0.75rem; }
+    .dist-row { display: grid; grid-template-columns: 130px 1fr 90px 60px; align-items: center; gap: 0.6rem; padding: 0.4rem 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+    .dist-row:last-child { border-bottom: none; }
+    .dist-row .who { color: var(--muted); }
+    .dist-row .bar { background: var(--panel-2); border-radius: 4px; height: 8px; overflow: hidden; }
+    .dist-row .bar > i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+    .dist-row .amt { text-align: right; font-variant-numeric: tabular-nums; }
+    .dist-row .pct { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .dist-row.total { font-weight: 700; }
+    .dist-row.total .pct, .dist-row.total .who { color: var(--text); }
+
+    /* Footnote */
+    .footnote { color: var(--muted); font-size: 0.78rem; margin-top: 1rem; line-height: 1.6; }
+    .footnote strong { color: var(--text); }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #334155; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="crumb" style="margin-bottom: 0.6rem">
+      <a href="/">← Mission Control</a>
+    </div>
+
+    <div class="topbar">
+      <div>
+        <h1>Seller's Profit &amp; Loss</h1>
+        <div class="sub">Property Marketing Budget Projections · <strong style="color:var(--text)">12345 Main Street</strong> · Stewart Team Real Estate Advisors</div>
+      </div>
+      <button class="btn" id="btn-print">⎙ Print</button>
+    </div>
+
+    <!-- Property assumptions -->
+    <div class="property" id="property-assumptions"></div>
+
+    <!-- Bottom-line proceeds (also pinned at the top because that's the punchline) -->
+    <div class="section" style="margin-top: 0">
+      <h2>Net Proceeds to Seller <span class="hint">After commissions, title, warranty, prep, closing</span></h2>
+      <div class="bottom-grid" id="net-cards"></div>
+    </div>
+
+    <!-- Commission & broker comparison -->
+    <div class="section">
+      <h2>Commission &amp; Broker Splits</h2>
+      <div class="table-wrap scroll-x">
+        <table class="cmp" id="commission-table"></table>
+      </div>
+    </div>
+
+    <!-- Marketing budget by category -->
+    <div class="section">
+      <h2>Projected Marketing Budget by Category</h2>
+      <div class="table-wrap scroll-x">
+        <table class="cmp" id="budget-table"></table>
+      </div>
+    </div>
+
+    <!-- Marketing dollar distribution (Stewart Team) -->
+    <div class="section">
+      <h2>Where the Marketing Dollars Go <span class="hint">Stewart Team plan · $8,100.50 total</span></h2>
+      <div class="dist-wrap">
+        <div class="dist-card">
+          <h3>By Recipient</h3>
+          <div id="dist-recipient"></div>
+        </div>
+        <div class="dist-card">
+          <h3>By Category</h3>
+          <div id="dist-category"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Full P&L -->
+    <div class="section">
+      <h2>Seller's Profit &amp; Loss Statement</h2>
+      <div class="table-wrap scroll-x">
+        <table class="cmp" id="pnl-table"></table>
+      </div>
+    </div>
+
+    <p class="footnote">
+      <strong>Source:</strong> <code>Sellers_Profit_Loss_version_1.xls</code> · prepared by Stewart Team Real Estate Advisors.
+      All figures are projections for a $450,000 sale price with a $200,000 loan payoff and standard seller-paid closing items.
+      "Featured" column reflects Stewart Team's proposed plan vs. the four common alternative listing structures.
+    </p>
+  </div>
+
+  <script>
+    // ── Data extracted from Sellers_Profit_Loss_version_1.xls ────────
+    const SCENARIOS = [
+      { key: 'stewart',     label: 'Stewart Team',          tag: 'Featured' },
+      { key: 'traditional', label: 'Traditional Agent 6%',  tag: null },
+      { key: 'other5',      label: 'Other Agent 5%',        tag: null },
+      { key: 'other4',      label: 'Other Agent 4%',        tag: null },
+      { key: 'flat',        label: 'Flat Rate Agent',       tag: null },
+    ];
+
+    const PROPERTY = {
+      askPrice: 450000,
+      soldPrice: 450000,
+      loanPayoff: 200000,
+      grossProceeds: 250000,
+    };
+
+    // Each row: [label, stewart, traditional, other5, other4, flat, fmt]
+    // fmt: 'usd' (dollars), 'pct' (decimal -> %), 'usd0' (no decimals)
+    const COMMISSION_ROWS = [
+      ['Property Marketing Fee (commission)',           31500,    27000,    22500,    18000,    14000,    'usd0'],
+      ['Co-Op Marketing Fee %',                         0.035,    0.03,     0.03,     0.03,     0.03,     'pct'],
+      ['Listing Marketing Fee %',                       0.035,    0.03,     0.02,     0.01,     0.001111, 'pct'],
+      ['MLS Co-Op Broker Buyer Commission',             15750,    13500,    13500,    13500,    13500,    'usd0'],
+      ['MLS Co-Op Commission %',                        0.035,    0.03,     0.03,     0.03,     0.03,     'pct'],
+      ['Listing Broker Portion',                        551.25,   3375,     2250,     1125,     null,     'usd'],
+      ['Listing Broker Portion % of Listing Comm.',     0.035,    0.25,     0.25,     0.25,     null,     'pct'],
+      ['Buyer Agent / Broker Expenses',                 16301.25, 16875,    15750,    14625,    13500,    'usd'],
+      ['Buyer Agent / Broker Expense %',                0.036225, 0.0375,   0.035,    0.0325,   0.03,     'pct'],
+      ['Remaining Marketing Dollars Available',         15198.75, 10125,    6750,     3375,     500,      'usd', 'subtotal'],
+      ['Remaining Listing Agent %',                     0.033775, 0.0225,   0.015,    0.0075,   0.001111, 'pct'],
+    ];
+
+    // Marketing budget rows. Each section starts with section-head; ends with subtotal.
+    const BUDGET_SECTIONS = [
+      { name: 'Pre-Sale Activity & Materials', total: [975, 400, 300, 300, 0] },
+      { name: 'Maximum Property Marketing',    total: [2520, 960, 257.5, 155, 60] },
+      { name: 'License & MLS Services',        total: [205.50, 171.42, 164.50, 164.50, 137.50] },
+      { name: 'Tours / Open House',            total: [850, 450, 280, 30, 0] },
+      { name: 'Seller Feedback Systems',       total: [100, 75, 0, 0, 0] },
+      { name: 'Negotiation / Closing Services',total: [775, 375, 200, 75, 0] },
+      { name: 'Office G&A (Overhead)',         total: [2375, 2075, 1200, 700, 100] },
+      { name: 'Community Support',             total: [300, 0, 0, 0, 0] },
+    ];
+
+    const BUDGET_FOOTERS = [
+      ['Total Listing Agent Marketing Fee',             15198.75, 10125, 6750, 3375, 500,    'usd',  'subtotal'],
+      ['Projected Marketing Budget',                    8100.50, 4506.42, 2402, 1424.50, 297.50, 'usd', 'subtotal'],
+      ['Projected Marketing Budget (% of fee)',         0.532971, 0.445078, 0.355852, 0.422074, 0.595, 'pct'],
+    ];
+
+    // Stewart Team — $8,100.50 marketing budget recipient breakdown
+    const RECIPIENT_DIST = [
+      { label: 'Agent',           amount: 3025.00, pct: 0.373434 },
+      { label: 'Agent / Team',    amount: 1975.00, pct: 0.243812 },
+      { label: 'Outside Vendor',  amount:  700.00, pct: 0.086414 },
+      { label: 'Direct Expense',  amount: 2400.50, pct: 0.296340 },
+    ];
+    // Stewart Team — by category share of budget
+    const CATEGORY_DIST = [
+      { label: 'Agent Commission (residual)', amount: 7098.25, pct: 0.467029 },
+      { label: 'Office G&A (Overhead)',       amount: 2375.00, pct: 0.156263 },
+      { label: 'Maximum Property Marketing',  amount: 2520.00, pct: 0.165803 },
+      { label: 'Tours / Open House',          amount:  850.00, pct: 0.055926 },
+      { label: 'Negotiation / Closing',       amount:  775.00, pct: 0.050991 },
+      { label: 'Pre-Sale Activity',           amount:  975.00, pct: 0.064150 },
+      { label: 'Community Support',           amount:  300.00, pct: 0.019738 },
+      { label: 'License & MLS Services',      amount:  205.50, pct: 0.013521 },
+      { label: 'Seller Feedback Systems',     amount:  100.00, pct: 0.006579 },
+    ];
+
+    const PNL_ROWS = [
+      ['Sales Price',                                  450000,  450000,  450000,  450000,  450000,  'usd0', 'pos'],
+      ['Sellers Home Loan Payoff',                    -200000, -200000, -200000, -200000, -200000, 'usd0', 'neg'],
+      ['Sellers Gross Proceeds',                       250000,  250000,  250000,  250000,  250000,  'usd0', 'subtotal'],
+      ['Marketing Fee (commission) Paid',              -31500,  -27000,  -22500,  -18000,  -14000, 'usd0', 'neg'],
+      ['Title Insurance Provided by Seller',            -2712,   -2712,   -2712,   -2712,   -2712, 'usd0', 'neg'],
+      ['Residential Service Contract (Home Warranty)',   -415,    -415,    -415,    -415,    -415, 'usd0', 'neg'],
+      ['Home Improvement & Preparation for Sale',       -5000,   -3000,   -2500,   -1500,   -1000, 'usd0', 'neg'],
+      ['Miscellaneous Closing & Escrow Fees',            -575,    -575,    -575,    -575,    -575, 'usd0', 'neg'],
+      ['Sellers Maximum Value Net Proceeds ($)',       209798,  216298,  221298,  226798,  231298, 'usd0', 'subtotal'],
+      ['Sellers Maximum Value Net Proceeds (%)',     0.466218, 0.480662, 0.491773, 0.503996, 0.513996, 'pct'],
+      ['Net Proceeds vs Traditional Agent ($)',         -6500,       0,    5000,   10500,   15000, 'usd0', 'delta'],
+    ];
+
+    // ── Formatters ───────────────────────────────────────────────────
+    const usd  = n => n == null ? '—' : (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const usd0 = n => n == null ? '—' : (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    const pct  = n => n == null ? '—' : (n * 100).toFixed(2) + '%';
+    const fmtMap = { usd, usd0, pct };
+
+    function cellHtml(value, fmt, hint) {
+      if (value === null || value === undefined) return '<td class="num mute">n/a</td>';
+      const formatted = (fmtMap[fmt] || usd)(value);
+      let cls = 'num';
+      if (hint === 'pos' && value > 0) cls += ' pos';
+      if (hint === 'neg' && value < 0) cls += ' neg';
+      if (hint === 'delta') {
+        if (value > 0) cls += ' pos';
+        else if (value < 0) cls += ' neg';
+        else cls += ' mute';
+      }
+      return `<td class="${cls}">${formatted}</td>`;
+    }
+
+    // ── Render: property assumptions ─────────────────────────────────
+    document.getElementById('property-assumptions').innerHTML = `
+      <div class="stat-card"><div class="label">Ask Price</div><div class="value">${usd0(PROPERTY.askPrice)}</div></div>
+      <div class="stat-card"><div class="label">Estimated Sold Price</div><div class="value">${usd0(PROPERTY.soldPrice)}</div></div>
+      <div class="stat-card"><div class="label">Loan Payoff</div><div class="value">${usd0(PROPERTY.loanPayoff)}</div></div>
+      <div class="stat-card"><div class="label">Gross Proceeds</div><div class="value good">${usd0(PROPERTY.grossProceeds)}</div></div>
+    `;
+
+    // ── Render: comparison table ─────────────────────────────────────
+    function renderTable(targetId, headerLabel, rows, opts = {}) {
+      const t = document.getElementById(targetId);
+      const featuredIdx = 0; // Stewart Team is column 0 of scenario data
+      const colCount = SCENARIOS.length;
+      const cols = '<colgroup>' +
+        '<col>' +
+        SCENARIOS.map((_, i) => i === featuredIdx ? '<col class="featured">' : '<col>').join('') +
+        '</colgroup>';
+
+      const head = `<thead><tr>
+        <th>${headerLabel}</th>
+        ${SCENARIOS.map(s => `<th>${s.label}${s.tag ? `<span class="col-featured-mark">${s.tag}</span>` : ''}</th>`).join('')}
+      </tr></thead>`;
+
+      const body = '<tbody>' + rows.map(r => {
+        if (r.sectionHead) {
+          return `<tr class="section-head"><td colspan="${colCount + 1}">${r.sectionHead}</td></tr>`;
+        }
+        const [label, ...rest] = r;
+        const fmt = rest[colCount];
+        const rowOpt = rest[colCount + 1];
+        const cls = rowOpt === 'subtotal' ? 'subtotal' : (rowOpt === 'delta' ? 'delta' : '');
+        const cells = rest.slice(0, colCount).map(v => cellHtml(v, fmt, rowOpt)).join('');
+        return `<tr class="${cls}"><td>${label}</td>${cells}</tr>`;
+      }).join('') + '</tbody>';
+
+      t.innerHTML = cols + head + body;
+    }
+
+    renderTable('commission-table', 'Line Item', COMMISSION_ROWS);
+
+    // Build budget rows: section-head + subtotal each, then footers
+    const budgetRows = [];
+    BUDGET_SECTIONS.forEach(s => {
+      budgetRows.push([s.name + ' Total', ...s.total, 'usd', 'subtotal']);
+    });
+    BUDGET_FOOTERS.forEach(r => budgetRows.push(r));
+    renderTable('budget-table', 'Category', budgetRows);
+
+    renderTable('pnl-table', 'Line Item', PNL_ROWS);
+
+    // ── Render: net-proceeds cards ───────────────────────────────────
+    const netRow = PNL_ROWS.find(r => r[0].startsWith('Sellers Maximum Value Net Proceeds ($'));
+    const pctRow = PNL_ROWS.find(r => r[0].startsWith('Sellers Maximum Value Net Proceeds (%'));
+    const deltaRow = PNL_ROWS.find(r => r[0].startsWith('Net Proceeds vs Traditional'));
+    const netVals = netRow.slice(1, 1 + SCENARIOS.length);
+    const pctVals = pctRow.slice(1, 1 + SCENARIOS.length);
+    const deltaVals = deltaRow.slice(1, 1 + SCENARIOS.length);
+    const bestIdx = netVals.indexOf(Math.max(...netVals));
+
+    document.getElementById('net-cards').innerHTML = SCENARIOS.map((s, i) => {
+      const d = deltaVals[i];
+      const dCls = d > 0 ? 'pos' : d < 0 ? 'neg' : 'zero';
+      const dTxt = d === 0 ? 'baseline' : (d > 0 ? '+' : '−') + '$' + Math.abs(d).toLocaleString('en-US');
+      const cardCls = ['net-card'];
+      if (i === bestIdx) cardCls.push('best');
+      if (s.tag) cardCls.push('featured');
+      return `
+        <div class="${cardCls.join(' ')}">
+          <div class="who">${s.label}</div>
+          <div class="net">${usd0(netVals[i])}</div>
+          <div class="pct">${pct(pctVals[i])} of sale price</div>
+          <div class="delta ${dCls}">${dTxt} <span style="color:var(--muted);font-weight:400">vs Traditional 6%</span></div>
+        </div>`;
+    }).join('');
+
+    // ── Render: distribution bars ────────────────────────────────────
+    function renderDist(targetId, items) {
+      const max = Math.max(...items.map(i => i.amount));
+      const total = items.reduce((a, b) => a + b.amount, 0);
+      const html = items.map(i => `
+        <div class="dist-row">
+          <span class="who">${i.label}</span>
+          <span class="bar"><i style="width:${(i.amount / max * 100).toFixed(1)}%"></i></span>
+          <span class="amt">${usd(i.amount)}</span>
+          <span class="pct">${(i.pct * 100).toFixed(1)}%</span>
+        </div>
+      `).join('');
+      const totalRow = `
+        <div class="dist-row total">
+          <span class="who">Total</span>
+          <span></span>
+          <span class="amt">${usd(total)}</span>
+          <span class="pct">100%</span>
+        </div>`;
+      document.getElementById(targetId).innerHTML = html + totalRow;
+    }
+    renderDist('dist-recipient', RECIPIENT_DIST);
+    renderDist('dist-category', CATEGORY_DIST);
+
+    // ── Print ────────────────────────────────────────────────────────
+    document.getElementById('btn-print').addEventListener('click', () => window.print());
+  </script>
+</body>
+</html>

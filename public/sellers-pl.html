@@ -33,83 +33,91 @@
     }
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 
-    .wrap { max-width: 1400px; margin: 0 auto; padding: 1.5rem 2rem 4rem; }
+    .wrap { max-width: 1400px; margin: 0 auto; padding: 1.25rem 2rem 4rem; }
     @media (max-width: 700px) { .wrap { padding: 1rem; } }
 
     /* Topbar */
-    .topbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
-    .topbar h1 { font-size: 1.6rem; letter-spacing: -0.01em; }
-    .topbar .sub { color: var(--muted); font-size: 0.9rem; margin-top: 4px; }
-    .crumb a { color: var(--muted); font-size: 0.85rem; }
-    .crumb a:hover { color: var(--accent); }
+    .topbar {
+      position: sticky; top: 0; z-index: 10;
+      background: rgba(7,10,19,0.85); backdrop-filter: blur(8px);
+      margin: -1.25rem -2rem 1.25rem;
+      padding: 0.85rem 2rem;
+      border-bottom: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;
+    }
+    .topbar h1 { font-size: 1.3rem; letter-spacing: -0.01em; }
+    .topbar .sub { color: var(--muted); font-size: 0.82rem; margin-top: 2px; }
+    .topbar-actions { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
 
     .btn {
       display: inline-flex; align-items: center; gap: 0.4rem;
       background: var(--panel); color: var(--text);
       border: 1px solid var(--border); border-radius: 8px;
-      padding: 0.45rem 0.8rem; font-size: 0.85rem; cursor: pointer;
+      padding: 0.4rem 0.7rem; font-size: 0.82rem; cursor: pointer;
+      font-family: inherit;
     }
     .btn:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
+    .btn.danger:hover { border-color: var(--bad); color: var(--bad); }
+    .saved-pill {
+      display: inline-flex; align-items: center; gap: 0.35rem;
+      padding: 0.2rem 0.55rem; border-radius: 999px;
+      background: rgba(52,211,153,0.1); color: var(--good);
+      border: 1px solid rgba(52,211,153,0.3);
+      font-size: 0.72rem; opacity: 0; transition: opacity 0.4s ease;
+    }
+    .saved-pill.show { opacity: 1; }
 
-    /* Property header */
-    .property {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 1rem; margin-bottom: 2rem;
+    /* Quick edit nav */
+    .quick-nav {
+      display: flex; gap: 0.4rem; flex-wrap: wrap;
+      margin: 0 0 1.5rem;
     }
-    .stat-card {
-      background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
-      padding: 1rem 1.1rem;
+    .quick-nav a {
+      display: inline-flex; align-items: center; gap: 0.3rem;
+      padding: 0.4rem 0.8rem; border-radius: 8px;
+      background: var(--panel); border: 1px solid var(--border);
+      color: var(--muted); font-size: 0.85rem;
     }
-    .stat-card .label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.8px; }
-    .stat-card .value { font-size: 1.4rem; font-weight: 700; margin-top: 0.3rem; letter-spacing: -0.01em; }
-    .stat-card .value.good { color: var(--good); }
+    .quick-nav a:hover {
+      color: var(--accent); border-color: var(--accent);
+      background: rgba(56,189,248,0.05); text-decoration: none;
+    }
+    .quick-nav a .pencil { color: var(--accent); }
 
     /* Section */
-    .section { margin-top: 2.25rem; }
-    .section h2 { font-size: 1.1rem; margin-bottom: 0.75rem; display: flex; align-items: baseline; gap: 0.5rem; }
+    .section { margin-top: 2.25rem; scroll-margin-top: 5rem; }
+    .section h2 { font-size: 1.1rem; margin-bottom: 0.75rem; display: flex; align-items: baseline; gap: 0.6rem; }
     .section h2 .hint { color: var(--muted); font-size: 0.8rem; font-weight: 400; }
+    .section h2 .anchor { color: var(--muted); font-size: 0.78rem; font-weight: 400; }
+    .section h2 .anchor:hover { color: var(--accent); }
 
-    /* Comparison table */
-    .table-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
-    table.cmp { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
-    table.cmp th, table.cmp td {
-      padding: 0.55rem 0.85rem; text-align: right;
-      border-bottom: 1px solid var(--border);
-      white-space: nowrap;
+    /* Property assumptions grid */
+    .prop-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 0.85rem;
     }
-    table.cmp th:first-child, table.cmp td:first-child {
-      text-align: left; color: var(--text); font-weight: 500; min-width: 280px;
-      position: sticky; left: 0; background: var(--panel); z-index: 1;
+    .prop-card {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+      padding: 0.85rem 1rem;
     }
-    table.cmp thead th {
-      background: var(--panel-2); color: var(--accent-2);
-      font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 600;
+    .prop-card .label { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.8px; display: flex; gap: 0.3rem; align-items: center; }
+    .prop-card .label .pencil { color: var(--accent); font-size: 0.8rem; }
+    .prop-card.derived { background: linear-gradient(180deg, rgba(52,211,153,0.05), rgba(52,211,153,0)) var(--panel); border-color: rgba(52,211,153,0.25); }
+    .prop-card .value-row {
+      display: flex; align-items: baseline; gap: 0.3rem; margin-top: 0.4rem;
     }
-    table.cmp thead th:first-child { color: var(--muted); }
-    table.cmp tbody tr:hover td { background: var(--highlight); }
-    table.cmp tbody tr:hover td:first-child { background: var(--panel-2); }
-    table.cmp tr.subtotal td { font-weight: 700; background: rgba(255,255,255,0.02); }
-    table.cmp tr.subtotal td:first-child { background: var(--panel-2); }
-    table.cmp tr.section-head td {
-      color: var(--accent-2); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px;
-      background: rgba(56,189,248,0.04); padding-top: 0.7rem; padding-bottom: 0.7rem;
+    .prop-card .currency { color: var(--muted); font-size: 1rem; }
+    .prop-card input.big {
+      background: transparent; color: var(--text); border: none;
+      font-size: 1.4rem; font-weight: 700; padding: 0; outline: none;
+      width: 100%; font-family: inherit; letter-spacing: -0.01em;
+      border-bottom: 1px dashed transparent;
     }
-    table.cmp tr.section-head td:first-child { background: rgba(56,189,248,0.04); }
-    table.cmp .num { font-variant-numeric: tabular-nums; }
-    table.cmp .pos { color: var(--good); }
-    table.cmp .neg { color: var(--bad); }
-    table.cmp .mute { color: var(--muted); }
-    table.cmp col.featured { background: rgba(56,189,248,0.06); }
-    table.cmp .scroll { overflow-x: auto; }
-    .scroll-x { overflow-x: auto; }
-
-    /* Highlight / featured column header */
-    .col-featured-mark {
-      display: inline-block; padding: 0.05rem 0.4rem; border-radius: 4px;
-      background: rgba(56,189,248,0.15); color: var(--accent);
-      font-size: 0.65rem; margin-left: 0.3rem; letter-spacing: 0;
-    }
+    .prop-card:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .prop-card input.big:focus { border-bottom-color: var(--accent); }
+    .prop-card .derived-value { font-size: 1.4rem; font-weight: 700; margin-top: 0.4rem; color: var(--good); letter-spacing: -0.01em; }
 
     /* Bottom-line cards */
     .bottom-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem; }
@@ -132,292 +140,567 @@
       font-size: 0.65rem; padding: 0.1rem 0.4rem; border-radius: 4px; letter-spacing: 0.5px;
     }
 
-    /* Marketing distribution */
-    .dist-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-    @media (max-width: 800px) { .dist-wrap { grid-template-columns: 1fr; } }
+    /* Comparison tables */
+    .table-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    .scroll-x { overflow-x: auto; }
+    table.cmp { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    table.cmp th, table.cmp td {
+      padding: 0.5rem 0.85rem; text-align: right;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    table.cmp th:first-child, table.cmp td:first-child {
+      text-align: left; color: var(--text); font-weight: 500; min-width: 280px;
+      position: sticky; left: 0; background: var(--panel); z-index: 1;
+    }
+    table.cmp thead th {
+      background: var(--panel-2); color: var(--accent-2);
+      font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 600;
+    }
+    table.cmp thead th:first-child { color: var(--muted); }
+    table.cmp tbody tr:hover td { background: var(--highlight); }
+    table.cmp tbody tr:hover td:first-child { background: var(--panel-2); }
+    table.cmp tr.subtotal td { font-weight: 700; background: rgba(255,255,255,0.025); }
+    table.cmp tr.subtotal td:first-child { background: var(--panel-2); }
+    table.cmp tr.derived td:first-child { color: var(--muted); font-style: italic; font-size: 0.84rem; }
+    table.cmp tr.input-row td:first-child .badge {
+      display: inline-block; margin-left: 0.4rem;
+      padding: 0.05rem 0.4rem; border-radius: 4px;
+      background: rgba(56,189,248,0.12); color: var(--accent);
+      font-size: 0.65rem; letter-spacing: 0.4px;
+    }
+    table.cmp tr.input-row td:first-child .hint {
+      color: var(--muted); font-weight: 400; font-style: italic; font-size: 0.8rem; margin-left: 0.4rem;
+    }
+    table.cmp .num { font-variant-numeric: tabular-nums; }
+    table.cmp .pos { color: var(--good); }
+    table.cmp .neg { color: var(--bad); }
+    table.cmp .mute { color: var(--muted); }
+    table.cmp col.featured { background: rgba(56,189,248,0.06); }
+    table.cmp .featured-mark {
+      display: inline-block; padding: 0.05rem 0.4rem; border-radius: 4px;
+      background: rgba(56,189,248,0.15); color: var(--accent);
+      font-size: 0.65rem; margin-left: 0.3rem; letter-spacing: 0;
+    }
+
+    /* Inline editable cells */
+    table.cmp td.edit-cell {
+      background: rgba(56,189,248,0.04);
+      padding: 0.3rem 0.5rem;
+    }
+    table.cmp tr:hover td.edit-cell { background: rgba(56,189,248,0.1); }
+    .cell-input {
+      background: transparent; color: var(--text); border: 1px solid transparent;
+      border-radius: 6px; padding: 0.25rem 0.45rem;
+      font-family: inherit; font-size: 0.88rem; text-align: right;
+      width: 100px; outline: none; font-variant-numeric: tabular-nums;
+    }
+    .cell-input:hover { border-color: var(--border); }
+    .cell-input:focus { border-color: var(--accent); background: var(--bg); box-shadow: 0 0 0 2px rgba(56,189,248,0.15); }
+    .cell-input.pct { width: 72px; }
+    table.cmp td.edit-cell .suffix { color: var(--muted); font-size: 0.78rem; margin-left: 0.15rem; }
+    table.cmp td.edit-cell .minus { color: var(--bad); font-size: 0.95rem; margin-right: 0.1rem; }
+
+    /* Distribution */
     .dist-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 1.1rem 1.2rem; }
     .dist-card h3 { font-size: 0.95rem; margin-bottom: 0.75rem; }
-    .dist-row { display: grid; grid-template-columns: 130px 1fr 90px 60px; align-items: center; gap: 0.6rem; padding: 0.4rem 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+    .dist-card .sub { color: var(--muted); font-size: 0.82rem; margin-bottom: 0.75rem; }
+    .dist-row { display: grid; grid-template-columns: 200px 1fr 100px 60px; align-items: center; gap: 0.6rem; padding: 0.4rem 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
     .dist-row:last-child { border-bottom: none; }
-    .dist-row .who { color: var(--muted); }
+    .dist-row .who { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .dist-row .bar { background: var(--panel-2); border-radius: 4px; height: 8px; overflow: hidden; }
-    .dist-row .bar > i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+    .dist-row .bar > i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width 0.25s ease; }
     .dist-row .amt { text-align: right; font-variant-numeric: tabular-nums; }
     .dist-row .pct { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
     .dist-row.total { font-weight: 700; }
     .dist-row.total .pct, .dist-row.total .who { color: var(--text); }
 
     /* Footnote */
-    .footnote { color: var(--muted); font-size: 0.78rem; margin-top: 1rem; line-height: 1.6; }
+    .footnote { color: var(--muted); font-size: 0.78rem; margin-top: 1.5rem; line-height: 1.6; }
     .footnote strong { color: var(--text); }
+
+    /* Reset/print */
+    @media print {
+      .topbar, .quick-nav, .btn, .saved-pill { display: none !important; }
+      .wrap { padding: 0; }
+      body { background: white; color: black; }
+      .table-wrap, .prop-card, .net-card, .dist-card { background: white; border: 1px solid #ccc; }
+      table.cmp th:first-child, table.cmp td:first-child { background: white; }
+      .cell-input { border: none; }
+    }
 
     /* Scrollbar */
     ::-webkit-scrollbar { width: 8px; height: 8px; }
     ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
     ::-webkit-scrollbar-thumb:hover { background: #334155; }
+
+    input[type=number]::-webkit-outer-spin-button,
+    input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type=number] { -moz-appearance: textfield; }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="crumb" style="margin-bottom: 0.6rem">
-      <a href="/">← Mission Control</a>
-    </div>
-
     <div class="topbar">
       <div>
-        <h1>Seller's Profit &amp; Loss</h1>
-        <div class="sub">Property Marketing Budget Projections · <strong style="color:var(--text)">12345 Main Street</strong> · Stewart Team Real Estate Advisors</div>
+        <h1>Seller's Profit &amp; Loss <span class="hint" style="color:var(--muted);font-size:0.85rem;font-weight:400">· Editor</span></h1>
+        <div class="sub">12345 Main Street · Stewart Team Real Estate Advisors</div>
       </div>
-      <button class="btn" id="btn-print">⎙ Print</button>
+      <div class="topbar-actions">
+        <span class="saved-pill" id="saved-pill"><span>●</span>Saved</span>
+        <a class="btn" href="/">← Mission Control</a>
+        <button class="btn" id="btn-print">⎙ Print</button>
+        <button class="btn danger" id="btn-reset">⟲ Reset to defaults</button>
+      </div>
     </div>
+
+    <!-- Quick edit links -->
+    <nav class="quick-nav" aria-label="Edit shortcuts">
+      <a href="#sec-property"><span class="pencil">✏</span> Property assumptions</a>
+      <a href="#sec-commission"><span class="pencil">✏</span> Commission &amp; splits</a>
+      <a href="#sec-budget"><span class="pencil">✏</span> Marketing budget</a>
+      <a href="#sec-pnl"><span class="pencil">✏</span> P&amp;L line items</a>
+    </nav>
 
     <!-- Property assumptions -->
-    <div class="property" id="property-assumptions"></div>
+    <section class="section" id="sec-property" style="margin-top: 0">
+      <h2>Property Assumptions <span class="hint">click any field to edit</span></h2>
+      <div class="prop-grid" id="property-grid"></div>
+    </section>
 
-    <!-- Bottom-line proceeds (also pinned at the top because that's the punchline) -->
-    <div class="section" style="margin-top: 0">
+    <!-- Net proceeds cards (derived) -->
+    <section class="section">
       <h2>Net Proceeds to Seller <span class="hint">After commissions, title, warranty, prep, closing</span></h2>
       <div class="bottom-grid" id="net-cards"></div>
-    </div>
+    </section>
 
     <!-- Commission & broker comparison -->
-    <div class="section">
-      <h2>Commission &amp; Broker Splits</h2>
+    <section class="section" id="sec-commission">
+      <h2>Commission &amp; Broker Splits <a href="#sec-commission" class="anchor">#</a></h2>
       <div class="table-wrap scroll-x">
         <table class="cmp" id="commission-table"></table>
       </div>
-    </div>
+    </section>
 
     <!-- Marketing budget by category -->
-    <div class="section">
-      <h2>Projected Marketing Budget by Category</h2>
+    <section class="section" id="sec-budget">
+      <h2>Projected Marketing Budget by Category <a href="#sec-budget" class="anchor">#</a></h2>
       <div class="table-wrap scroll-x">
         <table class="cmp" id="budget-table"></table>
       </div>
-    </div>
+    </section>
 
-    <!-- Marketing dollar distribution (Stewart Team) -->
-    <div class="section">
-      <h2>Where the Marketing Dollars Go <span class="hint">Stewart Team plan · $8,100.50 total</span></h2>
-      <div class="dist-wrap">
-        <div class="dist-card">
-          <h3>By Recipient</h3>
-          <div id="dist-recipient"></div>
-        </div>
-        <div class="dist-card">
-          <h3>By Category</h3>
-          <div id="dist-category"></div>
-        </div>
+    <!-- Stewart Team distribution -->
+    <section class="section">
+      <h2>Stewart Team Budget Distribution <span class="hint">live from the table above</span></h2>
+      <div class="dist-card">
+        <div class="sub">How the Stewart Team plan allocates its <span data-d="scen.0.projectedBudget" data-format="usd"></span> projected marketing spend across categories.</div>
+        <div id="dist-category"></div>
       </div>
-    </div>
+    </section>
 
     <!-- Full P&L -->
-    <div class="section">
-      <h2>Seller's Profit &amp; Loss Statement</h2>
+    <section class="section" id="sec-pnl">
+      <h2>Seller's Profit &amp; Loss Statement <a href="#sec-pnl" class="anchor">#</a></h2>
       <div class="table-wrap scroll-x">
         <table class="cmp" id="pnl-table"></table>
       </div>
-    </div>
+    </section>
 
     <p class="footnote">
       <strong>Source:</strong> <code>Sellers_Profit_Loss_version_1.xls</code> · prepared by Stewart Team Real Estate Advisors.
-      All figures are projections for a $450,000 sale price with a $200,000 loan payoff and standard seller-paid closing items.
-      "Featured" column reflects Stewart Team's proposed plan vs. the four common alternative listing structures.
+      Edits are saved to your browser only — they don't leave this device. Use <em>Reset to defaults</em> to restore the original spreadsheet values.
     </p>
   </div>
 
   <script>
-    // ── Data extracted from Sellers_Profit_Loss_version_1.xls ────────
-    const SCENARIOS = [
-      { key: 'stewart',     label: 'Stewart Team',          tag: 'Featured' },
-      { key: 'traditional', label: 'Traditional Agent 6%',  tag: null },
-      { key: 'other5',      label: 'Other Agent 5%',        tag: null },
-      { key: 'other4',      label: 'Other Agent 4%',        tag: null },
-      { key: 'flat',        label: 'Flat Rate Agent',       tag: null },
-    ];
-
-    const PROPERTY = {
-      askPrice: 450000,
-      soldPrice: 450000,
-      loanPayoff: 200000,
-      grossProceeds: 250000,
+    // ── Defaults from the source XLS ─────────────────────────────────
+    const DEFAULTS = {
+      property: { askPrice: 450000, soldPrice: 450000, loanPayoff: 200000 },
+      scenarios: [
+        { key: 'stewart',     label: 'Stewart Team',         tag: 'Featured', coOpPct: 0.035, listingPct: 0.035,    mlsCoOpPct: 0.035, brokerSplitPct: 0.035 },
+        { key: 'traditional', label: 'Traditional Agent 6%', tag: null,       coOpPct: 0.03,  listingPct: 0.03,     mlsCoOpPct: 0.03,  brokerSplitPct: 0.25  },
+        { key: 'other5',      label: 'Other Agent 5%',       tag: null,       coOpPct: 0.03,  listingPct: 0.02,     mlsCoOpPct: 0.03,  brokerSplitPct: 0.25  },
+        { key: 'other4',      label: 'Other Agent 4%',       tag: null,       coOpPct: 0.03,  listingPct: 0.01,     mlsCoOpPct: 0.03,  brokerSplitPct: 0.25  },
+        { key: 'flat',        label: 'Flat Rate Agent',      tag: null,       coOpPct: 0.03,  listingPct: 0.001111, mlsCoOpPct: 0.03,  brokerSplitPct: 0     },
+      ],
+      budgetCategories: [
+        { key: 'preSale',   label: 'Pre-Sale Activity & Materials',  values: [975, 400, 300, 300, 0] },
+        { key: 'marketing', label: 'Maximum Property Marketing',     values: [2520, 960, 257.5, 155, 60] },
+        { key: 'license',   label: 'License & MLS Services',          values: [205.50, 171.42, 164.50, 164.50, 137.50] },
+        { key: 'tours',     label: 'Tours / Open House',              values: [850, 450, 280, 30, 0] },
+        { key: 'feedback',  label: 'Seller Feedback Systems',         values: [100, 75, 0, 0, 0] },
+        { key: 'closing',   label: 'Negotiation / Closing Services',  values: [775, 375, 200, 75, 0] },
+        { key: 'overhead',  label: 'Office G&A (Overhead)',           values: [2375, 2075, 1200, 700, 100] },
+        { key: 'community', label: 'Community Support',               values: [300, 0, 0, 0, 0] },
+      ],
+      pnlSeller: {
+        titleInsurance: 2712,
+        homeWarranty: 415,
+        miscClosing: 575,
+        homeImprovement: [5000, 3000, 2500, 1500, 1000],
+      },
     };
 
-    // Each row: [label, stewart, traditional, other5, other4, flat, fmt]
-    // fmt: 'usd' (dollars), 'pct' (decimal -> %), 'usd0' (no decimals)
-    const COMMISSION_ROWS = [
-      ['Property Marketing Fee (commission)',           31500,    27000,    22500,    18000,    14000,    'usd0'],
-      ['Co-Op Marketing Fee %',                         0.035,    0.03,     0.03,     0.03,     0.03,     'pct'],
-      ['Listing Marketing Fee %',                       0.035,    0.03,     0.02,     0.01,     0.001111, 'pct'],
-      ['MLS Co-Op Broker Buyer Commission',             15750,    13500,    13500,    13500,    13500,    'usd0'],
-      ['MLS Co-Op Commission %',                        0.035,    0.03,     0.03,     0.03,     0.03,     'pct'],
-      ['Listing Broker Portion',                        551.25,   3375,     2250,     1125,     null,     'usd'],
-      ['Listing Broker Portion % of Listing Comm.',     0.035,    0.25,     0.25,     0.25,     null,     'pct'],
-      ['Buyer Agent / Broker Expenses',                 16301.25, 16875,    15750,    14625,    13500,    'usd'],
-      ['Buyer Agent / Broker Expense %',                0.036225, 0.0375,   0.035,    0.0325,   0.03,     'pct'],
-      ['Remaining Marketing Dollars Available',         15198.75, 10125,    6750,     3375,     500,      'usd', 'subtotal'],
-      ['Remaining Listing Agent %',                     0.033775, 0.0225,   0.015,    0.0075,   0.001111, 'pct'],
-    ];
+    const STORAGE_KEY = 'stewart.sellers_pl.v1';
+    const clone = o => JSON.parse(JSON.stringify(o));
 
-    // Marketing budget rows. Each section starts with section-head; ends with subtotal.
-    const BUDGET_SECTIONS = [
-      { name: 'Pre-Sale Activity & Materials', total: [975, 400, 300, 300, 0] },
-      { name: 'Maximum Property Marketing',    total: [2520, 960, 257.5, 155, 60] },
-      { name: 'License & MLS Services',        total: [205.50, 171.42, 164.50, 164.50, 137.50] },
-      { name: 'Tours / Open House',            total: [850, 450, 280, 30, 0] },
-      { name: 'Seller Feedback Systems',       total: [100, 75, 0, 0, 0] },
-      { name: 'Negotiation / Closing Services',total: [775, 375, 200, 75, 0] },
-      { name: 'Office G&A (Overhead)',         total: [2375, 2075, 1200, 700, 100] },
-      { name: 'Community Support',             total: [300, 0, 0, 0, 0] },
-    ];
+    // Load & save
+    let state = (() => {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const loaded = JSON.parse(raw);
+          // Merge into defaults so newly-added fields use defaults
+          return mergeDeep(clone(DEFAULTS), loaded);
+        }
+      } catch {}
+      return clone(DEFAULTS);
+    })();
 
-    const BUDGET_FOOTERS = [
-      ['Total Listing Agent Marketing Fee',             15198.75, 10125, 6750, 3375, 500,    'usd',  'subtotal'],
-      ['Projected Marketing Budget',                    8100.50, 4506.42, 2402, 1424.50, 297.50, 'usd', 'subtotal'],
-      ['Projected Marketing Budget (% of fee)',         0.532971, 0.445078, 0.355852, 0.422074, 0.595, 'pct'],
-    ];
+    function mergeDeep(target, src) {
+      for (const k in src) {
+        if (src[k] && typeof src[k] === 'object' && !Array.isArray(src[k])) {
+          target[k] = mergeDeep(target[k] || {}, src[k]);
+        } else if (Array.isArray(src[k]) && Array.isArray(target[k])) {
+          // Element-wise merge for objects in arrays (scenarios, budgetCategories)
+          for (let i = 0; i < src[k].length; i++) {
+            if (typeof src[k][i] === 'object' && src[k][i] !== null) {
+              target[k][i] = { ...(target[k][i] || {}), ...src[k][i] };
+            } else {
+              target[k][i] = src[k][i];
+            }
+          }
+        } else {
+          target[k] = src[k];
+        }
+      }
+      return target;
+    }
 
-    // Stewart Team — $8,100.50 marketing budget recipient breakdown
-    const RECIPIENT_DIST = [
-      { label: 'Agent',           amount: 3025.00, pct: 0.373434 },
-      { label: 'Agent / Team',    amount: 1975.00, pct: 0.243812 },
-      { label: 'Outside Vendor',  amount:  700.00, pct: 0.086414 },
-      { label: 'Direct Expense',  amount: 2400.50, pct: 0.296340 },
-    ];
-    // Stewart Team — by category share of budget
-    const CATEGORY_DIST = [
-      { label: 'Agent Commission (residual)', amount: 7098.25, pct: 0.467029 },
-      { label: 'Office G&A (Overhead)',       amount: 2375.00, pct: 0.156263 },
-      { label: 'Maximum Property Marketing',  amount: 2520.00, pct: 0.165803 },
-      { label: 'Tours / Open House',          amount:  850.00, pct: 0.055926 },
-      { label: 'Negotiation / Closing',       amount:  775.00, pct: 0.050991 },
-      { label: 'Pre-Sale Activity',           amount:  975.00, pct: 0.064150 },
-      { label: 'Community Support',           amount:  300.00, pct: 0.019738 },
-      { label: 'License & MLS Services',      amount:  205.50, pct: 0.013521 },
-      { label: 'Seller Feedback Systems',     amount:  100.00, pct: 0.006579 },
-    ];
+    let saveTimer = null;
+    function saveState() {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
+      const pill = document.getElementById('saved-pill');
+      pill.classList.add('show');
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => pill.classList.remove('show'), 800);
+    }
 
-    const PNL_ROWS = [
-      ['Sales Price',                                  450000,  450000,  450000,  450000,  450000,  'usd0', 'pos'],
-      ['Sellers Home Loan Payoff',                    -200000, -200000, -200000, -200000, -200000, 'usd0', 'neg'],
-      ['Sellers Gross Proceeds',                       250000,  250000,  250000,  250000,  250000,  'usd0', 'subtotal'],
-      ['Marketing Fee (commission) Paid',              -31500,  -27000,  -22500,  -18000,  -14000, 'usd0', 'neg'],
-      ['Title Insurance Provided by Seller',            -2712,   -2712,   -2712,   -2712,   -2712, 'usd0', 'neg'],
-      ['Residential Service Contract (Home Warranty)',   -415,    -415,    -415,    -415,    -415, 'usd0', 'neg'],
-      ['Home Improvement & Preparation for Sale',       -5000,   -3000,   -2500,   -1500,   -1000, 'usd0', 'neg'],
-      ['Miscellaneous Closing & Escrow Fees',            -575,    -575,    -575,    -575,    -575, 'usd0', 'neg'],
-      ['Sellers Maximum Value Net Proceeds ($)',       209798,  216298,  221298,  226798,  231298, 'usd0', 'subtotal'],
-      ['Sellers Maximum Value Net Proceeds (%)',     0.466218, 0.480662, 0.491773, 0.503996, 0.513996, 'pct'],
-      ['Net Proceeds vs Traditional Agent ($)',         -6500,       0,    5000,   10500,   15000, 'usd0', 'delta'],
-    ];
+    // ── Path helpers ─────────────────────────────────────────────────
+    function getPath(obj, path) {
+      return path.split('.').reduce((o, k) => (o == null ? o : o[k]), obj);
+    }
+    function setPath(obj, path, value) {
+      const keys = path.split('.');
+      let cur = obj;
+      for (let i = 0; i < keys.length - 1; i++) {
+        if (cur[keys[i]] == null) cur[keys[i]] = {};
+        cur = cur[keys[i]];
+      }
+      cur[keys[keys.length - 1]] = value;
+    }
 
     // ── Formatters ───────────────────────────────────────────────────
-    const usd  = n => n == null ? '—' : (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const usd0 = n => n == null ? '—' : (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-    const pct  = n => n == null ? '—' : (n * 100).toFixed(2) + '%';
-    const fmtMap = { usd, usd0, pct };
+    const usd  = n => n == null || isNaN(n) ? '—' : (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const usd0 = n => n == null || isNaN(n) ? '—' : (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    const pct  = n => n == null || isNaN(n) ? '—' : (n * 100).toFixed(2) + '%';
+    const fmt = (n, f) => f === 'pct' ? pct(n) : f === 'usd0' ? usd0(n) : usd(n);
 
-    function cellHtml(value, fmt, hint) {
-      if (value === null || value === undefined) return '<td class="num mute">n/a</td>';
-      const formatted = (fmtMap[fmt] || usd)(value);
-      let cls = 'num';
-      if (hint === 'pos' && value > 0) cls += ' pos';
-      if (hint === 'neg' && value < 0) cls += ' neg';
-      if (hint === 'delta') {
-        if (value > 0) cls += ' pos';
-        else if (value < 0) cls += ' neg';
-        else cls += ' mute';
+    // ── Compute derived ──────────────────────────────────────────────
+    function compute() {
+      const sp = Number(state.property.soldPrice) || 0;
+      const lp = Number(state.property.loanPayoff) || 0;
+      const grossProceeds = sp - lp;
+      const ti = Number(state.pnlSeller.titleInsurance) || 0;
+      const hw = Number(state.pnlSeller.homeWarranty) || 0;
+      const mc = Number(state.pnlSeller.miscClosing) || 0;
+
+      const scenarios = state.scenarios.map((s, i) => {
+        const coOpPct = Number(s.coOpPct) || 0;
+        const listingPct = Number(s.listingPct) || 0;
+        const mlsCoOpPct = Number(s.mlsCoOpPct) || 0;
+        const brokerSplitPct = Number(s.brokerSplitPct) || 0;
+        const marketingFee = sp * (coOpPct + listingPct);
+        const mlsCoOpAmount = sp * mlsCoOpPct;
+        const listingBrokerPortion = sp * listingPct * brokerSplitPct;
+        const buyerAgentExpense = mlsCoOpAmount + listingBrokerPortion;
+        const buyerAgentPct = sp > 0 ? buyerAgentExpense / sp : 0;
+        const remainingMarketingFee = marketingFee - buyerAgentExpense;
+        const remainingListingPct = sp > 0 ? remainingMarketingFee / sp : 0;
+        const projectedBudget = state.budgetCategories.reduce((sum, c) => sum + (Number(c.values[i]) || 0), 0);
+        const projectedBudgetPct = remainingMarketingFee > 0 ? projectedBudget / remainingMarketingFee : 0;
+        const homeImprovement = Number(state.pnlSeller.homeImprovement[i]) || 0;
+        const totalSellerCosts = marketingFee + ti + hw + homeImprovement + mc;
+        const netProceeds = grossProceeds - totalSellerCosts;
+        const netProceedsPct = sp > 0 ? netProceeds / sp : 0;
+        return {
+          ...s,
+          marketingFee, mlsCoOpAmount, listingBrokerPortion, buyerAgentExpense,
+          buyerAgentPct, remainingMarketingFee, remainingListingPct,
+          projectedBudget, projectedBudgetPct,
+          homeImprovement, grossProceeds, netProceeds, netProceedsPct,
+        };
+      });
+      const baseline = scenarios[1] ? scenarios[1].netProceeds : 0;
+      scenarios.forEach(s => s.vsTraditional = s.netProceeds - baseline);
+      return { scenarios, grossProceeds };
+    }
+
+    // ── Resolve data-d ids ──────────────────────────────────────────
+    function resolveDerived(id, computed) {
+      const { scenarios, grossProceeds } = computed;
+      let neg = false;
+      let key = id;
+      if (key.endsWith('.neg')) { neg = true; key = key.slice(0, -4); }
+
+      let v;
+      if (key === 'grossProceeds') v = grossProceeds;
+      else if (key === 'property.soldPrice') v = Number(state.property.soldPrice) || 0;
+      else if (key === 'property.askPrice')  v = Number(state.property.askPrice) || 0;
+      else if (key === 'property.loanPayoff') v = Number(state.property.loanPayoff) || 0;
+      else if (key.startsWith('pnlSeller.homeImprovement.')) {
+        const i = Number(key.split('.')[2]);
+        v = Number(state.pnlSeller.homeImprovement[i]) || 0;
+      } else if (key.startsWith('pnlSeller.')) {
+        const k = key.split('.')[1];
+        v = Number(state.pnlSeller[k]) || 0;
+      } else if (key.startsWith('scen.')) {
+        const parts = key.split('.');
+        const idx = Number(parts[1]);
+        const k = parts.slice(2).join('.');
+        v = scenarios[idx] ? scenarios[idx][k] : null;
       }
-      return `<td class="${cls}">${formatted}</td>`;
+      if (neg && v != null) v = -v;
+      return v;
     }
 
-    // ── Render: property assumptions ─────────────────────────────────
-    document.getElementById('property-assumptions').innerHTML = `
-      <div class="stat-card"><div class="label">Ask Price</div><div class="value">${usd0(PROPERTY.askPrice)}</div></div>
-      <div class="stat-card"><div class="label">Estimated Sold Price</div><div class="value">${usd0(PROPERTY.soldPrice)}</div></div>
-      <div class="stat-card"><div class="label">Loan Payoff</div><div class="value">${usd0(PROPERTY.loanPayoff)}</div></div>
-      <div class="stat-card"><div class="label">Gross Proceeds</div><div class="value good">${usd0(PROPERTY.grossProceeds)}</div></div>
-    `;
-
-    // ── Render: comparison table ─────────────────────────────────────
-    function renderTable(targetId, headerLabel, rows, opts = {}) {
-      const t = document.getElementById(targetId);
-      const featuredIdx = 0; // Stewart Team is column 0 of scenario data
-      const colCount = SCENARIOS.length;
-      const cols = '<colgroup>' +
-        '<col>' +
-        SCENARIOS.map((_, i) => i === featuredIdx ? '<col class="featured">' : '<col>').join('') +
+    // ── Build tables ────────────────────────────────────────────────
+    function colgroup() {
+      return '<colgroup><col>' +
+        state.scenarios.map((_, i) => i === 0 ? '<col class="featured">' : '<col>').join('') +
         '</colgroup>';
-
-      const head = `<thead><tr>
-        <th>${headerLabel}</th>
-        ${SCENARIOS.map(s => `<th>${s.label}${s.tag ? `<span class="col-featured-mark">${s.tag}</span>` : ''}</th>`).join('')}
-      </tr></thead>`;
-
-      const body = '<tbody>' + rows.map(r => {
-        if (r.sectionHead) {
-          return `<tr class="section-head"><td colspan="${colCount + 1}">${r.sectionHead}</td></tr>`;
-        }
-        const [label, ...rest] = r;
-        const fmt = rest[colCount];
-        const rowOpt = rest[colCount + 1];
-        const cls = rowOpt === 'subtotal' ? 'subtotal' : (rowOpt === 'delta' ? 'delta' : '');
-        const cells = rest.slice(0, colCount).map(v => cellHtml(v, fmt, rowOpt)).join('');
-        return `<tr class="${cls}"><td>${label}</td>${cells}</tr>`;
-      }).join('') + '</tbody>';
-
-      t.innerHTML = cols + head + body;
+    }
+    function thead(label) {
+      return `<thead><tr><th>${label}</th>${state.scenarios.map(s =>
+        `<th>${s.label}${s.tag ? `<span class="featured-mark">${s.tag}</span>` : ''}</th>`
+      ).join('')}</tr></thead>`;
     }
 
-    renderTable('commission-table', 'Line Item', COMMISSION_ROWS);
+    // Property assumption cards
+    function buildProperty() {
+      const fields = [
+        { path: 'property.askPrice',   label: 'Ask Price' },
+        { path: 'property.soldPrice',  label: 'Estimated Sold Price' },
+        { path: 'property.loanPayoff', label: 'Loan Payoff' },
+      ];
+      const html = fields.map(f => `
+        <div class="prop-card">
+          <div class="label"><span class="pencil">✏</span> ${f.label}</div>
+          <div class="value-row">
+            <span class="currency">$</span>
+            <input type="number" class="big" data-bind="${f.path}" step="1000" min="0">
+          </div>
+        </div>`).join('') + `
+        <div class="prop-card derived">
+          <div class="label">Gross Proceeds <span class="hint" style="color:var(--muted);text-transform:none;letter-spacing:0;font-size:0.7rem">(derived)</span></div>
+          <div class="derived-value" data-d="grossProceeds" data-format="usd0">—</div>
+        </div>`;
+      document.getElementById('property-grid').innerHTML = html;
+    }
 
-    // Build budget rows: section-head + subtotal each, then footers
-    const budgetRows = [];
-    BUDGET_SECTIONS.forEach(s => {
-      budgetRows.push([s.name + ' Total', ...s.total, 'usd', 'subtotal']);
-    });
-    BUDGET_FOOTERS.forEach(r => budgetRows.push(r));
-    renderTable('budget-table', 'Category', budgetRows);
+    function buildCommissionTable() {
+      const t = document.getElementById('commission-table');
+      const rows = [];
+      const inputCells = (key) => state.scenarios.map((_, i) =>
+        `<td class="num edit-cell"><input type="number" class="cell-input pct" step="0.01" data-bind="scenarios.${i}.${key}" data-format="pct"><span class="suffix">%</span></td>`
+      ).join('');
+      const derivedCells = (key, format) => state.scenarios.map((_, i) =>
+        `<td class="num"><span data-d="scen.${i}.${key}" data-format="${format}">—</span></td>`
+      ).join('');
 
-    renderTable('pnl-table', 'Line Item', PNL_ROWS);
+      rows.push(`<tr class="derived"><td>Property Marketing Fee (commission)</td>${derivedCells('marketingFee', 'usd0')}</tr>`);
+      rows.push(`<tr class="input-row"><td>Co-Op Marketing Fee <span class="badge">Edit %</span></td>${inputCells('coOpPct')}</tr>`);
+      rows.push(`<tr class="input-row"><td>Listing Marketing Fee <span class="badge">Edit %</span></td>${inputCells('listingPct')}</tr>`);
+      rows.push(`<tr class="derived"><td>MLS Co-Op Broker Buyer Commission</td>${derivedCells('mlsCoOpAmount', 'usd0')}</tr>`);
+      rows.push(`<tr class="input-row"><td>MLS Co-Op Commission <span class="badge">Edit %</span></td>${inputCells('mlsCoOpPct')}</tr>`);
+      rows.push(`<tr class="derived"><td>Listing Broker Portion</td>${derivedCells('listingBrokerPortion', 'usd')}</tr>`);
+      rows.push(`<tr class="input-row"><td>Listing Broker Portion of Listing Comm. <span class="badge">Edit %</span></td>${inputCells('brokerSplitPct')}</tr>`);
+      rows.push(`<tr class="derived"><td>Buyer Agent / Broker Expenses</td>${derivedCells('buyerAgentExpense', 'usd')}</tr>`);
+      rows.push(`<tr class="derived"><td>Buyer Agent / Broker Expense %</td>${derivedCells('buyerAgentPct', 'pct')}</tr>`);
+      rows.push(`<tr class="subtotal"><td>Remaining Marketing Dollars Available</td>${derivedCells('remainingMarketingFee', 'usd')}</tr>`);
+      rows.push(`<tr><td>Remaining Listing Agent %</td>${derivedCells('remainingListingPct', 'pct')}</tr>`);
 
-    // ── Render: net-proceeds cards ───────────────────────────────────
-    const netRow = PNL_ROWS.find(r => r[0].startsWith('Sellers Maximum Value Net Proceeds ($'));
-    const pctRow = PNL_ROWS.find(r => r[0].startsWith('Sellers Maximum Value Net Proceeds (%'));
-    const deltaRow = PNL_ROWS.find(r => r[0].startsWith('Net Proceeds vs Traditional'));
-    const netVals = netRow.slice(1, 1 + SCENARIOS.length);
-    const pctVals = pctRow.slice(1, 1 + SCENARIOS.length);
-    const deltaVals = deltaRow.slice(1, 1 + SCENARIOS.length);
-    const bestIdx = netVals.indexOf(Math.max(...netVals));
+      t.innerHTML = colgroup() + thead('Line Item') + '<tbody>' + rows.join('') + '</tbody>';
+    }
 
-    document.getElementById('net-cards').innerHTML = SCENARIOS.map((s, i) => {
-      const d = deltaVals[i];
-      const dCls = d > 0 ? 'pos' : d < 0 ? 'neg' : 'zero';
-      const dTxt = d === 0 ? 'baseline' : (d > 0 ? '+' : '−') + '$' + Math.abs(d).toLocaleString('en-US');
-      const cardCls = ['net-card'];
-      if (i === bestIdx) cardCls.push('best');
-      if (s.tag) cardCls.push('featured');
-      return `
-        <div class="${cardCls.join(' ')}">
+    function buildBudgetTable() {
+      const t = document.getElementById('budget-table');
+      const rows = [];
+      state.budgetCategories.forEach((c, ci) => {
+        const cells = state.scenarios.map((_, si) =>
+          `<td class="num edit-cell"><span class="suffix" style="margin-right:0.15rem">$</span><input type="number" class="cell-input" step="1" min="0" data-bind="budgetCategories.${ci}.values.${si}"></td>`
+        ).join('');
+        rows.push(`<tr class="input-row"><td>${c.label}<span class="badge">Edit $</span></td>${cells}</tr>`);
+      });
+      const totalCells = state.scenarios.map((_, i) =>
+        `<td class="num"><span data-d="scen.${i}.projectedBudget" data-format="usd">—</span></td>`
+      ).join('');
+      rows.push(`<tr class="subtotal"><td>Projected Marketing Budget</td>${totalCells}</tr>`);
+      const remCells = state.scenarios.map((_, i) =>
+        `<td class="num"><span data-d="scen.${i}.remainingMarketingFee" data-format="usd">—</span></td>`
+      ).join('');
+      rows.push(`<tr class="derived"><td>Listing Agent Marketing Fee Available</td>${remCells}</tr>`);
+      const pctCells = state.scenarios.map((_, i) =>
+        `<td class="num"><span data-d="scen.${i}.projectedBudgetPct" data-format="pct">—</span></td>`
+      ).join('');
+      rows.push(`<tr class="derived"><td>Budget as % of Available Fee</td>${pctCells}</tr>`);
+
+      t.innerHTML = colgroup() + thead('Category') + '<tbody>' + rows.join('') + '</tbody>';
+    }
+
+    function buildPnlTable() {
+      const t = document.getElementById('pnl-table');
+      const rows = [];
+      // Sales price (same across all 5)
+      const salesCells = state.scenarios.map(() =>
+        `<td class="num pos"><span data-d="property.soldPrice" data-format="usd0">—</span></td>`
+      ).join('');
+      rows.push(`<tr><td>Sales Price</td>${salesCells}</tr>`);
+
+      const loanCells = state.scenarios.map(() =>
+        `<td class="num neg"><span data-d="property.loanPayoff.neg" data-format="usd0">—</span></td>`
+      ).join('');
+      rows.push(`<tr><td>Sellers Home Loan Payoff</td>${loanCells}</tr>`);
+
+      const grossCells = state.scenarios.map(() =>
+        `<td class="num"><span data-d="grossProceeds" data-format="usd0">—</span></td>`
+      ).join('');
+      rows.push(`<tr class="subtotal"><td>Sellers Gross Proceeds</td>${grossCells}</tr>`);
+
+      // Marketing fee — derived per scenario, displayed as negative
+      const mktCells = state.scenarios.map((_, i) =>
+        `<td class="num neg"><span data-d="scen.${i}.marketingFee.neg" data-format="usd0">—</span></td>`
+      ).join('');
+      rows.push(`<tr class="derived"><td>Marketing Fee (commission) Paid</td>${mktCells}</tr>`);
+
+      // Shared inputs (single editor in column 0, mirrors in others)
+      const sharedRow = (label, bindKey) => {
+        const cells = state.scenarios.map((_, i) => {
+          if (i === 0) {
+            return `<td class="num edit-cell"><span class="minus">−</span><input type="number" class="cell-input" step="1" min="0" data-bind="${bindKey}"></td>`;
+          }
+          return `<td class="num neg"><span data-d="${bindKey}.neg" data-format="usd0">—</span></td>`;
+        }).join('');
+        return `<tr class="input-row"><td>${label}<span class="hint">applied to all scenarios</span></td>${cells}</tr>`;
+      };
+      rows.push(sharedRow('Title Insurance Provided by Seller', 'pnlSeller.titleInsurance'));
+      rows.push(sharedRow('Residential Service Contract (Home Warranty)', 'pnlSeller.homeWarranty'));
+
+      // Per-scenario home improvement
+      const hiCells = state.scenarios.map((_, i) =>
+        `<td class="num edit-cell"><span class="minus">−</span><input type="number" class="cell-input" step="1" min="0" data-bind="pnlSeller.homeImprovement.${i}"></td>`
+      ).join('');
+      rows.push(`<tr class="input-row"><td>Home Improvement &amp; Preparation<span class="badge">Edit $</span></td>${hiCells}</tr>`);
+
+      rows.push(sharedRow('Miscellaneous Closing &amp; Escrow Fees', 'pnlSeller.miscClosing'));
+
+      // Net proceeds
+      const netCells = state.scenarios.map((_, i) =>
+        `<td class="num"><span data-d="scen.${i}.netProceeds" data-format="usd0">—</span></td>`
+      ).join('');
+      rows.push(`<tr class="subtotal"><td>Sellers Maximum Value Net Proceeds ($)</td>${netCells}</tr>`);
+
+      const netPctCells = state.scenarios.map((_, i) =>
+        `<td class="num"><span data-d="scen.${i}.netProceedsPct" data-format="pct">—</span></td>`
+      ).join('');
+      rows.push(`<tr><td>Sellers Maximum Value Net Proceeds (%)</td>${netPctCells}</tr>`);
+
+      const vsCells = state.scenarios.map((_, i) =>
+        `<td class="num"><span data-d="scen.${i}.vsTraditional" data-format="usd0" data-colored="delta">—</span></td>`
+      ).join('');
+      rows.push(`<tr><td>Net Proceeds vs Traditional Agent</td>${vsCells}</tr>`);
+
+      t.innerHTML = colgroup() + thead('Line Item') + '<tbody>' + rows.join('') + '</tbody>';
+    }
+
+    // ── Bind every input to state ───────────────────────────────────
+    function bindInputs() {
+      document.querySelectorAll('input[data-bind]').forEach(input => {
+        const path = input.dataset.bind;
+        const format = input.dataset.format;
+        const raw = getPath(state, path);
+        if (format === 'pct') {
+          input.value = +(raw * 100).toFixed(4);
+        } else {
+          input.value = raw;
+        }
+        input.addEventListener('input', () => {
+          const n = Number(input.value);
+          let v = Number.isFinite(n) ? n : 0;
+          if (format === 'pct') v = v / 100;
+          setPath(state, path, v);
+          saveState();
+          recalcAll();
+        });
+      });
+    }
+
+    // ── Re-render derived cells without re-creating inputs ─────────
+    function recalcAll() {
+      const computed = compute();
+      document.querySelectorAll('[data-d]').forEach(el => {
+        const id = el.dataset.d;
+        const f = el.dataset.format || 'usd';
+        const v = resolveDerived(id, computed);
+        el.textContent = fmt(v, f);
+        el.classList.remove('pos', 'neg', 'mute');
+        if (el.dataset.colored === 'delta') {
+          if (v > 0) el.classList.add('pos');
+          else if (v < 0) el.classList.add('neg');
+          else el.classList.add('mute');
+        }
+      });
+      renderNetCards(computed);
+      renderDistribution(computed);
+    }
+
+    // ── Net proceeds cards ─────────────────────────────────────────
+    function renderNetCards(computed) {
+      const { scenarios } = computed;
+      const bestIdx = scenarios.reduce((mi, s, i, a) => s.netProceeds > a[mi].netProceeds ? i : mi, 0);
+      document.getElementById('net-cards').innerHTML = scenarios.map((s, i) => {
+        const d = s.vsTraditional;
+        const dCls = d > 0.5 ? 'pos' : d < -0.5 ? 'neg' : 'zero';
+        const dTxt = Math.abs(d) < 0.5 ? 'baseline' : (d > 0 ? '+' : '−') + '$' + Math.abs(d).toLocaleString('en-US', { maximumFractionDigits: 0 });
+        const cardCls = ['net-card'];
+        if (i === bestIdx) cardCls.push('best');
+        if (s.tag) cardCls.push('featured');
+        return `<div class="${cardCls.join(' ')}">
           <div class="who">${s.label}</div>
-          <div class="net">${usd0(netVals[i])}</div>
-          <div class="pct">${pct(pctVals[i])} of sale price</div>
+          <div class="net">${usd0(s.netProceeds)}</div>
+          <div class="pct">${pct(s.netProceedsPct)} of sale price</div>
           <div class="delta ${dCls}">${dTxt} <span style="color:var(--muted);font-weight:400">vs Traditional 6%</span></div>
         </div>`;
-    }).join('');
+      }).join('');
+    }
 
-    // ── Render: distribution bars ────────────────────────────────────
-    function renderDist(targetId, items) {
-      const max = Math.max(...items.map(i => i.amount));
-      const total = items.reduce((a, b) => a + b.amount, 0);
+    // ── Distribution chart (Stewart Team, by category) ─────────────
+    function renderDistribution(computed) {
+      const stewart = computed.scenarios[0];
+      const total = stewart.projectedBudget;
+      const items = state.budgetCategories.map(c => ({
+        label: c.label,
+        amount: Number(c.values[0]) || 0,
+      })).filter(i => i.amount > 0).sort((a, b) => b.amount - a.amount);
+      const max = items.length ? items[0].amount : 1;
       const html = items.map(i => `
         <div class="dist-row">
-          <span class="who">${i.label}</span>
+          <span class="who" title="${i.label}">${i.label}</span>
           <span class="bar"><i style="width:${(i.amount / max * 100).toFixed(1)}%"></i></span>
           <span class="amt">${usd(i.amount)}</span>
-          <span class="pct">${(i.pct * 100).toFixed(1)}%</span>
-        </div>
-      `).join('');
+          <span class="pct">${total > 0 ? (i.amount / total * 100).toFixed(1) : '0.0'}%</span>
+        </div>`).join('');
       const totalRow = `
         <div class="dist-row total">
           <span class="who">Total</span>
@@ -425,13 +708,42 @@
           <span class="amt">${usd(total)}</span>
           <span class="pct">100%</span>
         </div>`;
-      document.getElementById(targetId).innerHTML = html + totalRow;
+      document.getElementById('dist-category').innerHTML = html + totalRow;
     }
-    renderDist('dist-recipient', RECIPIENT_DIST);
-    renderDist('dist-category', CATEGORY_DIST);
 
-    // ── Print ────────────────────────────────────────────────────────
+    // ── Reset / print ──────────────────────────────────────────────
+    document.getElementById('btn-reset').addEventListener('click', () => {
+      if (!confirm('Reset all values to the original spreadsheet defaults?')) return;
+      state = clone(DEFAULTS);
+      saveState();
+      // Re-bind inputs to default values
+      buildAll();
+    });
     document.getElementById('btn-print').addEventListener('click', () => window.print());
+
+    // Quick-nav focus first input in the target section
+    document.querySelectorAll('.quick-nav a').forEach(a => {
+      a.addEventListener('click', () => {
+        setTimeout(() => {
+          const sel = a.getAttribute('href');
+          const sec = document.querySelector(sel);
+          if (!sec) return;
+          const input = sec.querySelector('input');
+          if (input) input.focus({ preventScroll: true });
+        }, 200);
+      });
+    });
+
+    // ── Init ───────────────────────────────────────────────────────
+    function buildAll() {
+      buildProperty();
+      buildCommissionTable();
+      buildBudgetTable();
+      buildPnlTable();
+      bindInputs();
+      recalcAll();
+    }
+    buildAll();
   </script>
 </body>
 </html>

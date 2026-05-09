@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OpenClaw Mission Control · Rex</title>
+  <title>Hermes Command Center · Red Rock Real Estate</title>
   <style>
     :root {
       --bg: #070a13;
@@ -270,14 +270,131 @@
     .activity-head .meta { color: var(--muted); font-size: 0.78rem; }
     .activity-head button { all: unset; cursor: pointer; color: var(--muted); font-size: 0.78rem; }
     .activity-head button:hover { color: var(--bad); }
+
+    /* ── Command Center ─────────────────────────────────────────────── */
+    .cc-grid {
+      display: grid; gap: 1rem;
+      grid-template-columns: 2fr 1fr;
+      grid-template-areas: "briefing weather" "briefing schedule";
+    }
+    @media (max-width: 1100px) { .cc-grid { grid-template-columns: 1fr; grid-template-areas: "briefing" "weather" "schedule"; } }
+    .cc-tile { display: flex; flex-direction: column; min-height: 180px; }
+    .cc-tile.briefing { grid-area: briefing; min-height: 360px; }
+    .cc-tile.weather { grid-area: weather; }
+    .cc-tile.schedule { grid-area: schedule; }
+    .cc-tile-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.85rem; }
+    .cc-tile-head h3 { font-size: 0.78rem; color: var(--accent-2); text-transform: uppercase; letter-spacing: 1px; }
+    .cc-tile-head .cc-actions { display: flex; gap: 0.4rem; align-items: center; }
+    .cc-tile-head button.cc-icon {
+      all: unset; cursor: pointer; color: var(--muted); font-size: 0.85rem;
+      padding: 0.2rem 0.5rem; border-radius: 6px; border: 1px solid var(--border);
+    }
+    .cc-tile-head button.cc-icon:hover { color: var(--accent); border-color: var(--accent); }
+    .cc-tile-head .cc-meta { font-size: 0.72rem; color: var(--muted); }
+    .cc-empty { color: var(--muted); font-size: 0.85rem; padding: 0.5rem 0; }
+    .cc-loading { display: flex; align-items: center; gap: 0.5rem; color: var(--muted); font-size: 0.85rem; }
+
+    /* Briefing markdown */
+    .cc-md { font-size: 0.92rem; line-height: 1.65; color: var(--text); }
+    .cc-md p { margin: 0 0 0.6rem; }
+    .cc-md strong { color: var(--accent-2); font-weight: 600; }
+    .cc-md ul, .cc-md ol { margin: 0.2rem 0 0.7rem 1.25rem; padding: 0; }
+    .cc-md li { margin: 0.15rem 0; }
+    .cc-md h1, .cc-md h2, .cc-md h3 { font-size: 0.95rem; color: var(--accent-2); margin: 0.7rem 0 0.3rem; }
+    .cc-md hr { border: none; border-top: 1px solid var(--border); margin: 0.7rem 0; }
+
+    /* Weather */
+    .wx-now { display: flex; align-items: baseline; gap: 0.6rem; }
+    .wx-now .temp { font-size: 2.6rem; font-weight: 700; letter-spacing: -0.02em; }
+    .wx-now .emoji { font-size: 2rem; }
+    .wx-now .cond { color: var(--muted); font-size: 0.9rem; }
+    .wx-meta { display: flex; gap: 0.9rem; color: var(--muted); font-size: 0.78rem; margin-top: 0.4rem; flex-wrap: wrap; }
+    .wx-forecast { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.4rem; margin-top: 0.85rem; }
+    .wx-day { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.4rem; text-align: center; font-size: 0.72rem; }
+    .wx-day .d { color: var(--muted); }
+    .wx-day .e { font-size: 1.2rem; margin: 0.15rem 0; }
+    .wx-day .hl { font-weight: 600; color: var(--text); }
+    .wx-day .lo { color: var(--muted); }
+
+    /* Schedule */
+    .sched-list { display: flex; flex-direction: column; gap: 0.45rem; }
+    .sched-item { display: grid; grid-template-columns: 60px 1fr; gap: 0.6rem; align-items: start;
+      background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 0.55rem 0.7rem; font-size: 0.85rem; }
+    .sched-item .t { color: var(--accent); font-family: ui-monospace, monospace; font-size: 0.78rem; }
+    .sched-item .b { color: var(--text); }
+    .sched-item .b small { color: var(--muted); display: block; margin-top: 0.15rem; font-size: 0.74rem; }
+
+    /* ── Hermes chat dock ───────────────────────────────────────────── */
+    .hermes-dock {
+      position: fixed; right: 1.25rem; bottom: 1.25rem; z-index: 40;
+      width: 380px; max-width: calc(100vw - 2rem);
+      background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+      box-shadow: 0 30px 80px -20px rgba(0,0,0,0.7), var(--glow);
+      display: flex; flex-direction: column; max-height: min(640px, calc(100vh - 2.5rem));
+      transition: max-height 0.2s ease;
+    }
+    .hermes-dock.collapsed { max-height: 48px; }
+    .hermes-dock.collapsed .hermes-body, .hermes-dock.collapsed .hermes-input { display: none; }
+    .hermes-head {
+      display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+      padding: 0.7rem 0.9rem; border-bottom: 1px solid var(--border); cursor: pointer;
+    }
+    .hermes-head .hermes-title { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; }
+    .hermes-head .hermes-title .bolt {
+      width: 22px; height: 22px; border-radius: 6px;
+      background: linear-gradient(135deg, #38bdf8, #6366f1);
+      display: grid; place-items: center; color: #06121f; font-weight: 800; font-size: 0.85rem;
+    }
+    .hermes-head .hermes-ctl { all: unset; cursor: pointer; color: var(--muted); font-size: 0.95rem; padding: 0.2rem 0.45rem; border-radius: 6px; }
+    .hermes-head .hermes-ctl:hover { color: var(--accent); background: var(--panel-2); }
+    .hermes-body {
+      flex: 1; overflow-y: auto; padding: 0.85rem 0.9rem; display: flex; flex-direction: column; gap: 0.6rem; min-height: 240px;
+    }
+    .hermes-msg { display: flex; flex-direction: column; gap: 0.2rem; max-width: 92%; }
+    .hermes-msg.user { align-self: flex-end; }
+    .hermes-msg.assistant { align-self: flex-start; }
+    .hermes-msg .who { font-size: 0.7rem; color: var(--muted); letter-spacing: 0.4px; text-transform: uppercase; }
+    .hermes-msg .bubble {
+      padding: 0.55rem 0.75rem; border-radius: 10px; font-size: 0.88rem; line-height: 1.5;
+      white-space: pre-wrap; word-wrap: break-word;
+    }
+    .hermes-msg.user .bubble { background: linear-gradient(135deg, rgba(56,189,248,0.18), rgba(99,102,241,0.18)); border: 1px solid rgba(56,189,248,0.3); }
+    .hermes-msg.assistant .bubble { background: var(--panel-2); border: 1px solid var(--border); }
+    .hermes-tool {
+      align-self: flex-start; max-width: 92%;
+      font-family: ui-monospace, monospace; font-size: 0.74rem; color: var(--muted);
+      padding: 0.35rem 0.6rem; background: rgba(56,189,248,0.06); border: 1px dashed rgba(56,189,248,0.2); border-radius: 6px;
+    }
+    .hermes-tool.ok { border-color: rgba(52,211,153,0.3); color: var(--good); }
+    .hermes-tool.err { border-color: rgba(248,113,113,0.3); color: var(--bad); }
+    .hermes-input { display: flex; gap: 0.45rem; padding: 0.7rem 0.8rem; border-top: 1px solid var(--border); }
+    .hermes-input input {
+      flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--border);
+      border-radius: 8px; padding: 0.5rem 0.7rem; font-size: 0.88rem; outline: none;
+    }
+    .hermes-input input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(56,189,248,0.15); }
+    .hermes-input button { padding: 0.5rem 0.8rem; }
+    .hermes-suggestions { display: flex; flex-wrap: wrap; gap: 0.3rem; padding: 0 0.9rem 0.6rem; }
+    .hermes-suggestions button {
+      all: unset; cursor: pointer;
+      font-size: 0.73rem; padding: 0.25rem 0.55rem; border-radius: 999px;
+      background: var(--panel-2); color: var(--muted); border: 1px solid var(--border);
+    }
+    .hermes-suggestions button:hover { color: var(--accent); border-color: var(--accent); }
+
+    /* Push main content so the dock doesn't cover bottom of the page on small screens */
+    @media (max-width: 700px) {
+      .hermes-dock { right: 0.5rem; bottom: 0.5rem; left: 0.5rem; width: auto; }
+      .main { padding-bottom: 6rem; }
+    }
   </style>
 </head>
 <body>
   <!-- LOGIN OVERLAY (shown when MISSION_CONTROL_TOKEN is set and session is missing) -->
   <div class="login-overlay" id="login-overlay">
     <div class="login-box">
-      <h2>🔒 Mission Control</h2>
-      <p>This dashboard is locked. Enter the access token to continue.</p>
+      <h2>⚡ Hermes Command Center</h2>
+      <p>This dashboard is locked. Enter your access token to wake Hermes.</p>
       <form id="login-form">
         <input type="password" id="login-token" placeholder="Access token" autocomplete="current-password" autofocus />
         <div class="err" id="login-err"></div>
@@ -290,15 +407,16 @@
     <!-- SIDEBAR -->
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-logo">◈</div>
+        <div class="brand-logo">⚡</div>
         <div class="brand-text">
-          <span class="brand-name">OpenClaw</span>
-          <span class="brand-sub">Mission Control</span>
+          <span class="brand-name">Hermes</span>
+          <span class="brand-sub">Command Center</span>
         </div>
       </div>
 
       <nav class="nav" id="nav">
-        <button data-tab="overview" class="active"><span class="dot"></span>Overview</button>
+        <button data-tab="command" class="active"><span class="dot"></span>Command</button>
+        <button data-tab="overview"><span class="dot"></span>Overview</button>
         <button data-tab="tools"><span class="dot"></span>Tools</button>
         <button data-tab="config"><span class="dot"></span>Config</button>
         <button data-tab="activity"><span class="dot"></span>Activity</button>
@@ -307,7 +425,7 @@
 
       <div class="sidebar-footer">
         <div><span class="pulse"></span><span id="live-status">online</span></div>
-        <div style="margin-top:4px">Paired with <strong style="color:var(--text)">Rex</strong></div>
+        <div style="margin-top:4px">Hermes paired with <strong style="color:var(--text)">Rex</strong></div>
       </div>
     </aside>
 
@@ -316,7 +434,7 @@
       <!-- TOPBAR -->
       <div class="topbar">
         <div>
-          <h1 id="project-name">Property Data MCP</h1>
+          <h1 id="project-name">Hermes Command Center</h1>
           <div class="subtitle" id="project-desc">Loading project manifest…</div>
         </div>
         <div class="topbar-actions">
@@ -327,8 +445,46 @@
         </div>
       </div>
 
+      <!-- COMMAND PANEL — Hermes-driven daily ops view -->
+      <section class="panel active" data-panel="command">
+        <div class="cc-grid">
+          <div class="card cc-tile briefing">
+            <div class="cc-tile-head">
+              <h3>📰 Daily Briefing</h3>
+              <div class="cc-actions">
+                <span class="cc-meta" id="briefing-meta"></span>
+                <button class="cc-icon" id="briefing-refresh" title="Regenerate briefing">↻</button>
+              </div>
+            </div>
+            <div id="briefing-body" class="cc-md">
+              <div class="cc-loading"><span class="spinner"></span> Hermes is preparing your briefing…</div>
+            </div>
+          </div>
+
+          <div class="card cc-tile weather">
+            <div class="cc-tile-head">
+              <h3>🌤️ Weather</h3>
+              <span class="cc-meta" id="weather-place"></span>
+            </div>
+            <div id="weather-body">
+              <div class="cc-loading"><span class="spinner"></span> Loading conditions…</div>
+            </div>
+          </div>
+
+          <div class="card cc-tile schedule">
+            <div class="cc-tile-head">
+              <h3>📅 Today's Schedule</h3>
+              <button class="cc-icon" id="schedule-refresh" title="Refresh schedule">↻</button>
+            </div>
+            <div id="schedule-body">
+              <div class="cc-loading"><span class="spinner"></span> Pulling calendars…</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- OVERVIEW PANEL -->
-      <section class="panel active" data-panel="overview">
+      <section class="panel" data-panel="overview">
         <div class="grid stats">
           <div class="card stat good">
             <div class="label">Server</div>
@@ -451,6 +607,33 @@
       </section>
     </main>
   </div>
+
+  <!-- HERMES CHAT DOCK -->
+  <aside class="hermes-dock" id="hermes-dock" aria-label="Hermes chat">
+    <header class="hermes-head" id="hermes-head">
+      <span class="hermes-title"><span class="bolt">H</span> Hermes</span>
+      <div>
+        <button class="hermes-ctl" id="hermes-clear" title="Clear chat">⌫</button>
+        <button class="hermes-ctl" id="hermes-toggle" title="Collapse">−</button>
+      </div>
+    </header>
+    <div class="hermes-body" id="hermes-body">
+      <div class="hermes-msg assistant">
+        <span class="who">Hermes</span>
+        <div class="bubble">Hey — I'm wired into the property toolkit and your GHL sub-account. Ask me about pipeline movement, comp a property, summarize your day, or anything else.</div>
+      </div>
+    </div>
+    <div class="hermes-suggestions" id="hermes-suggestions">
+      <button data-prompt="What's on my plate today?">📋 Today</button>
+      <button data-prompt="Show me pipeline movement in the last week.">💼 Pipeline</button>
+      <button data-prompt="Find pre-foreclosures in St. George, UT.">🏚️ Pre-foreclosures</button>
+      <button data-prompt="Summarize the high-equity opportunities in our markets.">💰 High equity</button>
+    </div>
+    <form class="hermes-input" id="hermes-form" autocomplete="off">
+      <input type="text" id="hermes-input" placeholder="Ask Hermes anything…" />
+      <button class="btn primary" type="submit" id="hermes-send">→</button>
+    </form>
+  </aside>
 
   <!-- RUN TOOL MODAL -->
   <div class="modal-backdrop" id="run-modal">
@@ -989,10 +1172,11 @@ console.log(await res.json());`;
           return;
         }
         input.value = '';
-        logEvent('ok', 'unlocked mission control');
+        logEvent('ok', 'unlocked Hermes Command Center');
         // invalidate any cached schemas that were fetched while locked
         state.schemas = null;
         await fetchStatus();
+        bootCommandCenter();
       } catch (e2) {
         err.textContent = e2.message;
         logEvent('err', `login error: ${e2.message}`);
@@ -1022,13 +1206,340 @@ console.log(await res.json());`;
       fetchStatus();
     });
 
+    // ── Command Center: Briefing ─────────────────────────────────────
+    async function loadBriefing(force = false) {
+      const body = document.getElementById('briefing-body');
+      const meta = document.getElementById('briefing-meta');
+      body.innerHTML = '<div class="cc-loading"><span class="spinner"></span> Hermes is preparing your briefing…</div>';
+      meta.textContent = '';
+      try {
+        const res = await fetch('/api/briefing' + (force ? '?refresh=1' : ''), { cache: 'no-store' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        body.innerHTML = renderMarkdown(data.markdown || '_No briefing available._');
+        const ts = new Date(data.generatedAt);
+        meta.textContent = (data.cached ? '⚡ cached · ' : '✨ fresh · ') + ts.toLocaleTimeString();
+        logEvent('ok', `briefing loaded · ${data.cached ? 'cached' : 'fresh'}`);
+      } catch (err) {
+        body.innerHTML = `<div class="cc-empty">Briefing unavailable: ${escapeHtml(err.message)}<br><small>Set <code>ANTHROPIC_API_KEY</code> in your Vercel env to enable Hermes.</small></div>`;
+        logEvent('err', `briefing failed: ${err.message}`);
+      }
+    }
+    document.getElementById('briefing-refresh').addEventListener('click', () => loadBriefing(true));
+
+    // ── Command Center: Weather ──────────────────────────────────────
+    async function loadWeather() {
+      const body = document.getElementById('weather-body');
+      const place = document.getElementById('weather-place');
+      try {
+        const res = await fetch('/api/weather', { cache: 'no-store' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        place.textContent = data.timezone || '';
+        const c = data.current || {};
+        const days = (data.daily || []).slice(0, 5);
+        body.innerHTML = `
+          <div class="wx-now">
+            <span class="emoji">${c.emoji || '☀️'}</span>
+            <span class="temp">${c.temperature_f ?? '—'}°</span>
+            <span class="cond">${escapeHtml(c.condition || '')}</span>
+          </div>
+          <div class="wx-meta">
+            <span>Feels ${c.feels_like_f ?? '—'}°</span>
+            <span>Wind ${c.wind_mph ?? '—'} mph</span>
+            <span>Humidity ${c.humidity ?? '—'}%</span>
+          </div>
+          <div class="wx-forecast">
+            ${days.map(d => `
+              <div class="wx-day">
+                <div class="d">${dayShort(d.date)}</div>
+                <div class="e">${d.emoji || ''}</div>
+                <div class="hl">${d.high_f ?? '—'}°</div>
+                <div class="lo">${d.low_f ?? '—'}°</div>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      } catch (err) {
+        body.innerHTML = `<div class="cc-empty">Weather unavailable: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+    function dayShort(dateStr) {
+      try {
+        const d = new Date(dateStr + 'T12:00:00');
+        return d.toLocaleDateString(undefined, { weekday: 'short' });
+      } catch { return dateStr; }
+    }
+
+    // ── Command Center: Schedule ─────────────────────────────────────
+    async function loadSchedule() {
+      const body = document.getElementById('schedule-body');
+      try {
+        const res = await fetch('/api/invoke', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name: 'ghl-pilot:list_calendars', arguments: {} }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        const text = extractToolText(data.result);
+        let parsed = null;
+        try { parsed = JSON.parse(text); } catch {}
+        const calendars = parsed?.calendars || parsed?.data || [];
+        if (!Array.isArray(calendars) || !calendars.length) {
+          body.innerHTML = `
+            <div class="cc-empty">
+              No calendars connected to GHL yet.
+              <br><small>Once GHL credentials are set, your booking calendars will show here. In the meantime, ask Hermes about your day below.</small>
+            </div>`;
+          return;
+        }
+        body.innerHTML = `
+          <div class="sched-list">
+            ${calendars.slice(0, 6).map(c => `
+              <div class="sched-item">
+                <span class="t">${escapeHtml((c.slug || c.name || '').slice(0, 8))}</span>
+                <span class="b">${escapeHtml(c.name || c.calendarName || 'Untitled calendar')}
+                  <small>${escapeHtml(c.description || c.eventTitle || `${c.slotDuration || 30}-min slots · ${c.isActive ? 'active' : 'inactive'}`)}</small>
+                </span>
+              </div>
+            `).join('')}
+          </div>
+          <div style="margin-top:0.6rem;font-size:0.78rem;color:var(--muted)">
+            Ask Hermes <a href="#" id="sched-ask-hermes">"What's my day look like?"</a> for a synthesized view.
+          </div>
+        `;
+        const ask = document.getElementById('sched-ask-hermes');
+        if (ask) ask.addEventListener('click', e => { e.preventDefault(); openHermes("What's my day look like? Pull from GHL calendars and any pending opportunities."); });
+      } catch (err) {
+        body.innerHTML = `<div class="cc-empty">Schedule unavailable: ${escapeHtml(err.message)}<br><small>The GHL pilot tools require <code>GHL_API_KEY</code> + <code>GHL_LOCATION_ID</code>.</small></div>`;
+      }
+    }
+    document.getElementById('schedule-refresh').addEventListener('click', loadSchedule);
+
+    // ── Tiny markdown renderer ───────────────────────────────────────
+    // Supports paragraphs, bold (**x**), italics (_x_), inline code (`x`),
+    // ## headings, and bulleted lists (- / *). Enough for the briefing.
+    function renderMarkdown(md) {
+      if (!md) return '';
+      const lines = String(md).split(/\r?\n/);
+      const html = [];
+      let inList = false;
+      const flushList = () => { if (inList) { html.push('</ul>'); inList = false; } };
+      for (const raw of lines) {
+        const line = raw.trimEnd();
+        if (!line.trim()) { flushList(); html.push(''); continue; }
+        const h = line.match(/^(#{1,3})\s+(.*)$/);
+        if (h) { flushList(); html.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`); continue; }
+        const li = line.match(/^[-*]\s+(.*)$/);
+        if (li) {
+          if (!inList) { html.push('<ul>'); inList = true; }
+          html.push(`<li>${inline(li[1])}</li>`);
+          continue;
+        }
+        flushList();
+        html.push(`<p>${inline(line)}</p>`);
+      }
+      flushList();
+      return html.join('\n');
+    }
+    function inline(s) {
+      return escapeHtml(s)
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/_([^_]+)_/g, '<em>$1</em>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>');
+    }
+
+    // ── Hermes chat dock ─────────────────────────────────────────────
+    const HERMES_KEY = 'hermes.chat.v1';
+    const hermes = {
+      messages: loadHermesHistory(),
+      streaming: false,
+    };
+    function loadHermesHistory() {
+      try {
+        const raw = localStorage.getItem(HERMES_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed.slice(-40) : [];
+      } catch { return []; }
+    }
+    function persistHermes() {
+      try { localStorage.setItem(HERMES_KEY, JSON.stringify(hermes.messages.slice(-40))); } catch {}
+    }
+    function renderHermes() {
+      const body = document.getElementById('hermes-body');
+      // Keep the welcome bubble if there are no real messages yet
+      if (!hermes.messages.length) return;
+      body.innerHTML = hermes.messages.map(m => {
+        if (m.kind === 'tool') {
+          const cls = m.ok === false ? 'err' : (m.ok === true ? 'ok' : '');
+          return `<div class="hermes-tool ${cls}">🛠 ${escapeHtml(m.name)}${m.error ? ' · ' + escapeHtml(m.error) : ''}</div>`;
+        }
+        return `
+          <div class="hermes-msg ${m.role}">
+            <span class="who">${m.role === 'user' ? 'You' : 'Hermes'}</span>
+            <div class="bubble">${m.role === 'assistant' ? renderMarkdown(m.text) : escapeHtml(m.text)}</div>
+          </div>
+        `;
+      }).join('');
+      body.scrollTop = body.scrollHeight;
+    }
+    function pushHermes(msg) {
+      hermes.messages.push(msg);
+      persistHermes();
+      renderHermes();
+    }
+
+    function openHermes(prefill) {
+      const dock = document.getElementById('hermes-dock');
+      dock.classList.remove('collapsed');
+      const input = document.getElementById('hermes-input');
+      if (prefill) {
+        input.value = prefill;
+        sendHermes();
+      } else {
+        input.focus();
+      }
+    }
+
+    document.getElementById('hermes-toggle').addEventListener('click', e => {
+      e.stopPropagation();
+      document.getElementById('hermes-dock').classList.toggle('collapsed');
+    });
+    document.getElementById('hermes-head').addEventListener('click', () => {
+      document.getElementById('hermes-dock').classList.toggle('collapsed');
+    });
+    document.getElementById('hermes-clear').addEventListener('click', e => {
+      e.stopPropagation();
+      hermes.messages = [];
+      persistHermes();
+      const body = document.getElementById('hermes-body');
+      body.innerHTML = `<div class="hermes-msg assistant"><span class="who">Hermes</span><div class="bubble">Cleared. What's next?</div></div>`;
+      logEvent('info', 'hermes chat cleared');
+    });
+
+    document.getElementById('hermes-form').addEventListener('submit', e => {
+      e.preventDefault();
+      sendHermes();
+    });
+
+    document.getElementById('hermes-suggestions').addEventListener('click', e => {
+      const btn = e.target.closest('button[data-prompt]');
+      if (!btn) return;
+      document.getElementById('hermes-input').value = btn.dataset.prompt;
+      sendHermes();
+    });
+
+    async function sendHermes() {
+      if (hermes.streaming) return;
+      const input = document.getElementById('hermes-input');
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = '';
+
+      pushHermes({ kind: 'msg', role: 'user', text });
+      const assistantMsg = { kind: 'msg', role: 'assistant', text: '' };
+      hermes.messages.push(assistantMsg);
+      renderHermes();
+
+      hermes.streaming = true;
+      document.getElementById('hermes-send').disabled = true;
+      logEvent('info', `hermes ▷ "${text.slice(0, 60)}"`);
+
+      // Build conversation: only role+content text from prior messages.
+      const apiMessages = hermes.messages
+        .filter(m => m.kind === 'msg' && m.text)
+        .map(m => ({ role: m.role, content: m.text }));
+
+      try {
+        const res = await fetch('/api/hermes-chat', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ messages: apiMessages }),
+        });
+        if (!res.ok || !res.body) {
+          const errBody = await res.json().catch(() => ({}));
+          throw new Error(errBody.error || `HTTP ${res.status}`);
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let idx;
+          while ((idx = buffer.indexOf('\n\n')) !== -1) {
+            const chunk = buffer.slice(0, idx);
+            buffer = buffer.slice(idx + 2);
+            handleSseChunk(chunk, assistantMsg);
+          }
+        }
+        if (buffer.trim()) handleSseChunk(buffer, assistantMsg);
+      } catch (err) {
+        assistantMsg.text = (assistantMsg.text || '') + `\n\n_Error: ${err.message}_`;
+        logEvent('err', `hermes failed: ${err.message}`);
+      } finally {
+        hermes.streaming = false;
+        document.getElementById('hermes-send').disabled = false;
+        persistHermes();
+        renderHermes();
+      }
+    }
+
+    function handleSseChunk(chunk, assistantMsg) {
+      let event = 'message';
+      let data = '';
+      for (const line of chunk.split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        else if (line.startsWith('data:')) data += line.slice(5).trim();
+      }
+      if (!data) return;
+      let parsed;
+      try { parsed = JSON.parse(data); } catch { return; }
+
+      if (event === 'text' && typeof parsed.text === 'string') {
+        assistantMsg.text = (assistantMsg.text || '') + parsed.text;
+        renderHermes();
+      } else if (event === 'tool_use') {
+        hermes.messages.push({ kind: 'tool', name: parsed.name, ok: null });
+        renderHermes();
+      } else if (event === 'tool_result') {
+        const last = [...hermes.messages].reverse().find(m => m.kind === 'tool' && m.name === parsed.name && m.ok == null);
+        if (last) { last.ok = parsed.ok; last.error = parsed.error; }
+        renderHermes();
+      } else if (event === 'error') {
+        assistantMsg.text = (assistantMsg.text || '') + `\n\n_${parsed.error || 'error'}_`;
+        renderHermes();
+      }
+    }
+
+    // Run the command-center tile loaders. Idempotent — safe to call again
+    // after a successful login. Fires once per authenticated session.
+    let tilesBooted = false;
+    function bootCommandCenter() {
+      if (tilesBooted) return;
+      tilesBooted = true;
+      loadWeather();
+      loadSchedule();
+      loadBriefing();
+    }
+
     // ── Bootstrap ────────────────────────────────────────────────────
     renderTools();
     renderEnv({});
     renderSnippets();
-    logEvent('info', 'Mission Control online — hello, pilot.');
-    fetchStatus();
+    renderHermes();
+    logEvent('info', 'Hermes Command Center online.');
+    fetchStatus().then(() => {
+      // If auth isn't required, or we're already authed, kick off the tiles.
+      const a = state.status?.auth;
+      if (!a || !a.required || a.authenticated) bootCommandCenter();
+    });
     setInterval(fetchStatus, 30000);
+    setInterval(() => { if (tilesBooted) loadWeather(); }, 10 * 60 * 1000);
   </script>
 </body>
 </html>

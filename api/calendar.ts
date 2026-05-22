@@ -1,124 +1,98 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node'
+import type { VercelRequest, VercelResponse } from "@vercel/node";
 
-/**
- * Google Calendar proxy — keeps OAuth client secret server-side.
- *
- * All requests require Authorization header with a valid Google access token.
- *
- * GET  /api/calendar?action=list&timeMin=...&timeMax=...  → list events
- * GET  /api/calendar?action=freebusy&timeMin=...&timeMax=... → check availability
- * POST /api/calendar  { action: 'create', event: {...} }  → create event
- * POST /api/calendar  { action: 'update', eventId, event } → update event
- * POST /api/calendar  { action: 'delete', eventId }       → delete event
- */
+const CALENDAR_API = "https://www.googleapis.com/calendar/v3";
 
-const CALENDAR_API = 'https://www.googleapis.com/calendar/v3'
-
-function getAccessToken(req: VercelRequest): string | null {
-  const auth = req.headers.authorization
-  if (auth?.startsWith('Bearer ')) return auth.slice(7)
-  return (req.headers['x-access-token'] as string) || null
+function getToken(req: VercelRequest): string | null {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith("Bearer ")) return null;
+  return auth.slice(7);
 }
 
-async function calendarFetch(url: string, token: string, options: RequestInit = {}) {
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
-  })
-  const data = await res.json()
-  if (!res.ok) return { error: true, status: res.status, data }
-  return { error: false, status: res.status, data }
-}
+export async function GET(req: VercelRequest, res: VercelResponse) {
+  const token = getToken(req);
+  if (!token) return res.status(401).json({ error: "Missing Authorization header" });
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const token = getAccessToken(req)
-  if (!token) {
-    return res.status(401).json({ error: 'Missing access token. Include Authorization: Bearer <token>' })
-  }
+  const url = new URL(req.url!, `https://${req.headers.host}`);
+  const action = url.searchParams.get("action") || "list";
 
-  // ---------- GET: list events or check availability ----------
-  if (req.method === 'GET') {
-    const { action, timeMin, timeMax, calendarId = 'primary', maxResults = '50' } = req.query as Record<string, string>
+  if (action === "list") {
+    const timeMin = url.searchParams.get("timeMin") || new Date().toISOString();
+    const timeMax = url.searchParams.get("timeMax") || new Date(Date.now() + 30 * 86400000).toISOString();
+    const calendarId = url.searchParams.get("calendarId") || "primary";
 
-    if (action === 'freebusy') {
-      const result = await calendarFetch(`${CALENDAR_API}/freeBusy`, token, {
-        method: 'POST',
-        body: JSON.stringify({
-          timeMin: timeMin || new Date().toISOString(),
-          timeMax: timeMax || new Date(Date.now() + 7 * 86400000).toISOString(),
-          items: [{ id: calendarId }],
-        }),
-      })
-      if (result.error) return res.status(result.status).json(result.data)
-      return res.status(200).json(result.data)
-    }
-
-    // Default: list events
     const params = new URLSearchParams({
-      timeMin: timeMin || new Date().toISOString(),
-      timeMax: timeMax || new Date(Date.now() + 30 * 86400000).toISOString(),
-      maxResults,
-      singleEvents: 'true',
-      orderBy: 'startTime',
-    })
+      timeMin, timeMax, singleEvents: "true", orderBy: "startTime", maxResults: "100",
+    });
 
-    const result = await calendarFetch(
-      `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events?${params}`,
-      token,
-    )
-    if (result.error) return res.status(result.status).json(result.data)
-    return res.status(200).json(result.data)
+    const apiRes = await fetch(`${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events?${params}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await apiRes.json();
+    if (!apiRes.ok) return res.status(apiRes.status).json(data);
+    return res.json(data);
   }
 
-  // ---------- POST: create, update, delete events ----------
-  if (req.method === 'POST') {
-    const { action, event, eventId, calendarId = 'primary' } = req.body || {}
+  if (action === "freebusy") {
+    const timeMin = url.searchParams.get("timeMin") || new Date().toISOString();
+    const timeMax = url.searchParams.get("timeMax") || new Date(Date.now() + 7 * 86400000).toISOString();
 
-    if (action === 'create') {
-      if (!event) return res.status(400).json({ error: 'Missing event object' })
-
-      const result = await calendarFetch(
-        `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events`,
-        token,
-        { method: 'POST', body: JSON.stringify(event) },
-      )
-      if (result.error) return res.status(result.status).json(result.data)
-      return res.status(201).json(result.data)
-    }
-
-    if (action === 'update') {
-      if (!eventId || !event) return res.status(400).json({ error: 'Missing eventId or event' })
-
-      const result = await calendarFetch(
-        `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
-        token,
-        { method: 'PATCH', body: JSON.stringify(event) },
-      )
-      if (result.error) return res.status(result.status).json(result.data)
-      return res.status(200).json(result.data)
-    }
-
-    if (action === 'delete') {
-      if (!eventId) return res.status(400).json({ error: 'Missing eventId' })
-
-      const delRes = await fetch(
-        `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
-        { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } },
-      )
-
-      if (!delRes.ok && delRes.status !== 204) {
-        const data = await delRes.json().catch(() => ({}))
-        return res.status(delRes.status).json(data)
-      }
-      return res.status(204).end()
-    }
-
-    return res.status(400).json({ error: 'Unknown action. Use create, update, or delete.' })
+    const apiRes = await fetch(`${CALENDAR_API}/freeBusy`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        timeMin, timeMax,
+        items: [{ id: "primary" }],
+      }),
+    });
+    const data = await apiRes.json();
+    if (!apiRes.ok) return res.status(apiRes.status).json(data);
+    return res.json(data);
   }
 
-  return res.status(405).json({ error: 'Method not allowed' })
+  return res.status(400).json({ error: "Unknown action. Use 'list' or 'freebusy'." });
+}
+
+export async function POST(req: VercelRequest, res: VercelResponse) {
+  const token = getToken(req);
+  if (!token) return res.status(401).json({ error: "Missing Authorization header" });
+
+  const { action, calendarId, eventId, event } = req.body || {};
+
+  if (action === "create") {
+    const apiRes = await fetch(`${CALENDAR_API}/calendars/${encodeURIComponent(calendarId || "primary")}/events`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(event),
+    });
+    const data = await apiRes.json();
+    if (!apiRes.ok) return res.status(apiRes.status).json(data);
+    return res.json(data);
+  }
+
+  if (action === "update") {
+    if (!eventId) return res.status(400).json({ error: "Missing eventId" });
+    const apiRes = await fetch(`${CALENDAR_API}/calendars/${encodeURIComponent(calendarId || "primary")}/events/${encodeURIComponent(eventId)}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(event),
+    });
+    const data = await apiRes.json();
+    if (!apiRes.ok) return res.status(apiRes.status).json(data);
+    return res.json(data);
+  }
+
+  if (action === "delete") {
+    if (!eventId) return res.status(400).json({ error: "Missing eventId" });
+    const apiRes = await fetch(`${CALENDAR_API}/calendars/${encodeURIComponent(calendarId || "primary")}/events/${encodeURIComponent(eventId)}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!apiRes.ok) {
+      const data = await apiRes.json().catch(() => ({}));
+      return res.status(apiRes.status).json(data);
+    }
+    return res.json({ success: true });
+  }
+
+  return res.status(400).json({ error: "Unknown action. Use 'create', 'update', or 'delete'." });
 }

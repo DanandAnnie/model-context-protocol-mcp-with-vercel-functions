@@ -1,19 +1,11 @@
-node_modules
-dist
 .vercel
-.vite
+node_modules
 .env
-.env.local
-*.local
-tsconfig.tsbuildinfo
-supabase/.temp/
 
 # Native build artifacts
-android/.gradle/
-android/app/build/
-android/build/
-android/.idea/
-ios/App/Pods/
-ios/DerivedData/
+android/.gradle
+android/app/build
+ios/Pods
+ios/App/build
 *.keystore
 *.jks

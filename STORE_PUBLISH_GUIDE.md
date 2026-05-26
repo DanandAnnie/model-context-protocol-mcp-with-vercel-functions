@@ -20,7 +20,7 @@ Edit `capacitor.config.ts` and replace the placeholder URL with your actual Verc
 
 ```ts
 server: {
-  url: 'https://your-actual-app.vercel.app',  // <-- your real URL
+  url: 'https://model-context-protocol-mcp-with-ver-six-alpha.vercel.app',
   cleartext: false,
 },
 ```

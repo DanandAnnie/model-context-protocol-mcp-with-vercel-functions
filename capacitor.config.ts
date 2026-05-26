@@ -5,7 +5,7 @@ const config: CapacitorConfig = {
   appName: 'Staging Inventory',
   webDir: 'public',
   server: {
-    url: 'https://model-context-protocol-mcp-with-vercel-functions.vercel.app',
+    url: 'https://model-context-protocol-mcp-with-ver-six-alpha.vercel.app',
     cleartext: false,
   },
   ios: {

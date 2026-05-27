@@ -362,7 +362,7 @@
             </div>
             <div class="link-card">
               <h4>🧰 Browse tools</h4>
-              <p>Inspect all 27 registered tools grouped by category.</p>
+              <p>Inspect every registered tool grouped by category.</p>
               <a href="#" data-goto="tools">Open tool explorer →</a>
             </div>
             <div class="link-card">
@@ -524,6 +524,12 @@
         { n: 'create_property_alert', d: 'Set up monitors for listings, price changes, foreclosures, sales.', b: ['pr'] },
         { n: 'check_alerts', d: 'Run alert filters against current data.', b: ['pr'] },
       ]},
+      { name: 'Speed-to-Lead Engine', tools: [
+        { n: 'score_lead', d: 'Instant 0-100 lead score with grade, priority, and factor breakdown.', b: ['free'] },
+        { n: 'route_lead', d: 'Recommend pipeline, stage, tags, and agent queue for a lead.', b: ['free'] },
+        { n: 'plan_follow_up', d: 'Generate the 7-21 touch SMS/email/call cadence; first touch is instant.', b: ['free'] },
+        { n: 'intake_lead', d: 'Full pipeline: normalize, score, route, cadence + optional GHL sync.', b: ['free'] },
+      ]},
     ];
 
     const ENV_VARS = [
@@ -532,6 +538,9 @@
       { key: 'ATTOM_API_KEY', req: false, note: 'Enables ATTOM property data.' },
       { key: 'CENSUS_API_KEY', req: false, note: 'Census Bureau API — works keyless at lower rate limits.' },
       { key: 'HUD_API_KEY', req: false, note: 'HUD Fair Market Rent data.' },
+      { key: 'GHL_API_KEY', req: false, note: 'GHL private integration token — enables speed-to-lead CRM sync.' },
+      { key: 'GHL_LOCATION_ID', req: false, note: 'GHL sub-account location ID for lead intake and pilot tools.' },
+      { key: 'LEAD_WEBHOOK_SECRET', req: false, note: 'Shared secret for the public /api/lead intake webhook.' },
     ];
 
     // ── State ────────────────────────────────────────────────────────

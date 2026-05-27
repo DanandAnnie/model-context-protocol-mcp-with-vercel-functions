@@ -16,6 +16,7 @@ const TOOL_NAMES = [
   "market_demographics","flood_zone_check","nearby_schools","geocode_address","county_assessor_lookup",
   "create_property_alert","check_alerts",
   "property_valuation","investment_analysis",
+  "score_lead","route_lead","plan_follow_up","intake_lead",
 ];
 
 const ENV_KEYS = [
@@ -24,6 +25,9 @@ const ENV_KEYS = [
   "ATTOM_API_KEY",
   "CENSUS_API_KEY",
   "HUD_API_KEY",
+  "GHL_API_KEY",
+  "GHL_LOCATION_ID",
+  "LEAD_WEBHOOK_SECRET",
 ];
 
 function handler(req: Request): Response {

@@ -5,6 +5,11 @@ import * as prApi from "./services/property-radar-api.js";
 import * as publicApi from "./services/public-data-api.js";
 import { ghlFetch, GHL_LOC } from "./services/ghl-api.js";
 import { verifyToken } from "./services/auth.js";
+import { normalizeLead } from "./services/lead-types.js";
+import { scoreLead } from "./services/lead-scoring.js";
+import { routeLead } from "./services/lead-routing.js";
+import { buildCadence } from "./services/follow-up-cadence.js";
+import { planIntake, runLeadIntake } from "./services/lead-intake.js";
 
 type ToolContent = { type: "text"; text: string };
 type ToolResult = { content: ToolContent[] };
@@ -1430,6 +1435,106 @@ function registerTools(server: any) {
         queryParams: { locationId: GHL_LOC },
       });
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // ================================================================
+  // 11. SPEED-TO-LEAD ENGINE — capture, score, route, follow up
+  // ================================================================
+
+  // Shared input shape for the lead-centric tools below.
+  const leadShape: ZodRawShape = {
+    source: z
+      .string()
+      .optional()
+      .describe("Lead source: website, zillow, realtor, redfin, facebook_ad, google_ad, instagram_dm, facebook_dm, referral"),
+    firstName: z.string().optional(),
+    lastName: z.string().optional(),
+    name: z.string().optional().describe("Full name (split into first/last if firstName not given)"),
+    email: z.string().optional(),
+    phone: z.string().optional(),
+    message: z.string().optional().describe("Free-text inquiry, form comments, or DM body"),
+    propertyAddress: z.string().optional().describe("Property of interest, or the lead's home if selling"),
+    propertyValue: z.number().optional(),
+    budgetMin: z.number().optional(),
+    budgetMax: z.number().optional(),
+    timeline: z
+      .string()
+      .optional()
+      .describe("immediate, 1-3_months, 3-6_months, 6-12_months, just_browsing"),
+    preApproved: z.boolean().optional(),
+    type: z.string().optional().describe("Override lead type: buyer, seller, investor, renter"),
+    city: z.string().optional(),
+    state: z.string().optional(),
+    zip: z.string().optional(),
+  };
+
+  server.tool(
+    "score_lead",
+    "Instantly score a lead 0-100 based on reachability, source quality, timeline, financing, and intent. Returns the score, grade (A-D), priority (hot/warm/cold), and a factor breakdown. Pure analysis — no CRM writes.",
+    leadShape,
+    async (args) => {
+      const { source, ...rest } = args;
+      const lead = normalizeLead(rest, source);
+      const score = scoreLead(lead);
+      return { content: [{ type: "text", text: JSON.stringify({ lead, score }, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "route_lead",
+    "Score a lead and recommend the CRM destination: pipeline, entry stage, tags, and agent queue (on-call/standard/nurture). Resolves real GHL pipeline IDs when GHL_PIPELINE_MAP is configured. Pure analysis — no CRM writes.",
+    leadShape,
+    async (args) => {
+      const { source, ...rest } = args;
+      const lead = normalizeLead(rest, source);
+      const score = scoreLead(lead);
+      const routing = routeLead(lead, score);
+      return { content: [{ type: "text", text: JSON.stringify({ score, routing }, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "plan_follow_up",
+    "Generate the 7-21 touch follow-up cadence (SMS, email, and call tasks) for a lead. Touch #1 is the immediate first response. Density scales with lead priority; SMS/calls are clamped to business hours. Pure analysis — no messages are sent.",
+    leadShape,
+    async (args) => {
+      const { source, ...rest } = args;
+      const plan = planIntake(rest, { sourceHint: source });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              { score: plan.score, routing: plan.routing, cadence: plan.cadence },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
+  );
+
+  server.tool(
+    "intake_lead",
+    "Run the full speed-to-lead pipeline for an inbound lead: normalize, score, route, and build the follow-up cadence. With execute=true (and GHL configured), it upserts the contact, applies tags, creates the opportunity, and schedules call tasks. The immediate first response only sends when the autoresponder is enabled. Defaults to a dry run that returns the complete plan.",
+    {
+      ...leadShape,
+      execute: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe("Perform GHL writes (contact, opportunity, tags, call tasks)"),
+      sendFirstResponse: z
+        .boolean()
+        .optional()
+        .describe("Force-send (or suppress) the immediate first response, overriding LEAD_AUTORESPONDER"),
+    },
+    async (args) => {
+      const { source, execute, sendFirstResponse, ...rest } = args;
+      const result = await runLeadIntake(rest, { sourceHint: source, execute, sendFirstResponse });
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     }
   );
 }

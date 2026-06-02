@@ -1,9 +1,16 @@
 {
+  "cleanUrls": true,
   "rewrites": [
     { "source": "/share", "destination": "/share.html" },
     { "source": "/privacy", "destination": "/privacy.html" },
     { "source": "/calendar", "destination": "/calendar.html" },
-    { "source": "/((?!api/).*)", "destination": "/api/server" }
+    { "source": "/((?!api/|share|privacy|calendar|_next).*)", "destination": "/api/server" }
+  ],
+  "headers": [
+    {
+      "source": "/(share|privacy|calendar)\\.html",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }]
+    }
   ],
   "functions": {
     "api/server.ts":        { "maxDuration": 60, "memory": 1024 },

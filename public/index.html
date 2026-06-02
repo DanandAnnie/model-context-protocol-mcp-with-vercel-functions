@@ -270,6 +270,49 @@
     .activity-head .meta { color: var(--muted); font-size: 0.78rem; }
     .activity-head button { all: unset; cursor: pointer; color: var(--muted); font-size: 0.78rem; }
     .activity-head button:hover { color: var(--bad); }
+
+    /* Install banner */
+    .install-banner {
+      background: linear-gradient(135deg, rgba(124,58,237,0.2), rgba(99,102,241,0.15));
+      border: 1px solid rgba(124,58,237,0.35);
+      border-radius: 14px;
+      padding: 1.25rem 1.4rem;
+      margin-bottom: 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .install-banner .install-icon {
+      width: 52px; height: 52px; border-radius: 12px;
+      background: linear-gradient(135deg, #7c3aed, #6366f1);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.6rem; flex-shrink: 0;
+    }
+    .install-banner .install-text { flex: 1; min-width: 200px; }
+    .install-banner .install-text h3 { font-size: 1rem; color: #e2e8f0; margin-bottom: 0.2rem; }
+    .install-banner .install-text p { font-size: 0.85rem; color: #94a3b8; margin: 0; }
+    .install-banner .install-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .btn-install {
+      all: unset; cursor: pointer;
+      background: linear-gradient(135deg, #7c3aed, #6366f1);
+      color: white; font-weight: 600; font-size: 0.88rem;
+      padding: 0.55rem 1.1rem; border-radius: 9px;
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      transition: filter 0.15s;
+    }
+    .btn-install:hover { filter: brightness(1.15); }
+    .btn-share-sm {
+      all: unset; cursor: pointer;
+      background: rgba(255,255,255,0.08);
+      color: #a78bfa; font-size: 0.88rem;
+      padding: 0.55rem 1.1rem; border-radius: 9px;
+      border: 1px solid rgba(124,58,237,0.3);
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      transition: all 0.15s;
+    }
+    .btn-share-sm:hover { background: rgba(255,255,255,0.12); }
+    .install-banner.hidden { display: none; }
   </style>
 </head>
 <body>
@@ -352,9 +395,32 @@
           </div>
         </div>
 
+        <!-- INSTALL BANNER -->
+        <div class="install-banner" id="install-banner">
+          <div class="install-icon">📲</div>
+          <div class="install-text">
+            <h3 id="install-title">Install on your device</h3>
+            <p id="install-desc">Add to your home screen for instant access — works like a native app.</p>
+          </div>
+          <div class="install-actions">
+            <button class="btn-install" id="btn-install">Install App</button>
+            <button class="btn-share-sm" id="btn-share-app">Share</button>
+          </div>
+        </div>
+
         <div class="section">
           <h2>Quick Links</h2>
           <div class="link-grid">
+            <div class="link-card">
+              <h4>📅 Calendar</h4>
+              <p>Schedule appointments, check availability, and manage staging events.</p>
+              <a href="/calendar">Open calendar →</a>
+            </div>
+            <div class="link-card">
+              <h4>📤 Share App</h4>
+              <p>Share with your team. Install on any phone — no app store needed.</p>
+              <a href="/share">Share now →</a>
+            </div>
             <div class="link-card">
               <h4>🔌 Connect a client</h4>
               <p>Add this server to Claude Desktop, Cursor, Windsurf, or any MCP client.</p>
@@ -1020,6 +1086,63 @@ console.log(await res.json());`;
     document.getElementById('btn-refresh').addEventListener('click', e => {
       logEvent('info', 'manual refresh');
       fetchStatus();
+    });
+
+    // ── Install banner ─────────────────────────────────────────────
+    let deferredPrompt = null;
+    const installBanner = document.getElementById('install-banner');
+    const installBtn = document.getElementById('btn-install');
+    const shareBtn = document.getElementById('btn-share-app');
+    const installTitle = document.getElementById('install-title');
+    const installDesc = document.getElementById('install-desc');
+    const appUrl = 'https://model-context-protocol-mcp-with-ver-six-alpha.vercel.app';
+
+    // Detect platform
+    const ua = navigator.userAgent.toLowerCase();
+    const isIOS = /iphone|ipad|ipod/.test(ua);
+    const isAndroid = /android/.test(ua);
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+
+    if (isStandalone) {
+      installBanner.classList.add('hidden');
+    } else if (isIOS) {
+      installTitle.textContent = 'Install on iPhone';
+      installDesc.textContent = 'Tap Share ↑ then "Add to Home Screen" in Safari.';
+      installBtn.textContent = 'How to Install';
+      installBtn.addEventListener('click', () => window.location.href = '/share');
+    } else if (isAndroid) {
+      installTitle.textContent = 'Install on Android';
+      installDesc.textContent = 'Get the app on your home screen — works offline too.';
+      installBtn.addEventListener('click', () => {
+        if (deferredPrompt) { deferredPrompt.prompt(); }
+        else { window.location.href = '/share'; }
+      });
+    } else {
+      installBtn.addEventListener('click', () => {
+        if (deferredPrompt) { deferredPrompt.prompt(); }
+        else { window.location.href = '/share'; }
+      });
+    }
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      installBtn.textContent = 'Install App';
+    });
+
+    window.addEventListener('appinstalled', () => {
+      installBanner.classList.add('hidden');
+      logEvent('ok', 'app installed to home screen');
+    });
+
+    shareBtn.addEventListener('click', async () => {
+      if (navigator.share) {
+        try {
+          await navigator.share({ title: 'Staging Inventory Manager', text: 'Check out this staging inventory app!', url: appUrl });
+        } catch (e) { if (e.name !== 'AbortError') window.location.href = '/share'; }
+      } else {
+        window.location.href = '/share';
+      }
     });
 
     // ── Bootstrap ────────────────────────────────────────────────────

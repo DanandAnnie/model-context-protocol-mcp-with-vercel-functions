@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Privacy Policy · Staging Inventory Manager</title>
+  <meta name="theme-color" content="#1e1b4b" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, sans-serif;
+      background: linear-gradient(135deg, #1e1b4b 0%, #0f0a2e 100%);
+      color: #e2e8f0;
+      min-height: 100vh;
+      padding: 2rem 1rem;
+    }
+    .container { max-width: 640px; margin: 0 auto; }
+    h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+    .updated { color: #a78bfa; font-size: 0.85rem; margin-bottom: 2rem; }
+    h2 { font-size: 1.1rem; color: #a78bfa; margin: 1.5rem 0 0.5rem; }
+    p, li { color: #cbd5e1; font-size: 0.92rem; line-height: 1.6; margin-bottom: 0.75rem; }
+    ul { padding-left: 1.25rem; margin-bottom: 0.75rem; }
+    a { color: #a78bfa; }
+    a:hover { text-decoration: underline; }
+    .back-link {
+      display: inline-block;
+      margin-top: 2rem;
+      color: #a78bfa;
+      text-decoration: none;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Privacy Policy</h1>
+    <p class="updated">Last updated: April 2026</p>
+
+    <h2>Overview</h2>
+    <p>Staging Inventory Manager ("the App") helps home staging professionals manage property inventories, track items, and coordinate with their team. Your privacy matters to us.</p>
+
+    <h2>Data We Collect</h2>
+    <ul>
+      <li><strong>Account information:</strong> Email address and name when you sign up via Supabase Auth.</li>
+      <li><strong>Inventory data:</strong> Property details, item records, room measurements, payment and expense records that you enter.</li>
+      <li><strong>Calendar data:</strong> When you connect Google Calendar, we access your calendar events to display scheduling information. We do not store your Google data on our servers.</li>
+      <li><strong>Device information:</strong> Browser type and operating system for compatibility purposes.</li>
+    </ul>
+
+    <h2>How We Use Your Data</h2>
+    <ul>
+      <li>To provide and maintain the inventory management service</li>
+      <li>To sync data across your devices in real-time</li>
+      <li>To enable team collaboration features</li>
+      <li>To display your Google Calendar events within the app (when connected)</li>
+    </ul>
+
+    <h2>Data Storage</h2>
+    <p>Your data is stored securely using <strong>Supabase</strong> (PostgreSQL database hosted on AWS). Data is encrypted in transit (TLS) and at rest. We also cache data locally on your device using IndexedDB for offline access.</p>
+
+    <h2>Third-Party Services</h2>
+    <ul>
+      <li><strong>Supabase:</strong> Database, authentication, and real-time sync (<a href="https://supabase.com/privacy" target="_blank">Privacy Policy</a>)</li>
+      <li><strong>Vercel:</strong> Application hosting (<a href="https://vercel.com/legal/privacy-policy" target="_blank">Privacy Policy</a>)</li>
+      <li><strong>Google Calendar API:</strong> Calendar integration, only when you explicitly connect your account (<a href="https://policies.google.com/privacy" target="_blank">Privacy Policy</a>)</li>
+    </ul>
+
+    <h2>Google Calendar Data</h2>
+    <p>When you connect Google Calendar, we request read/write access to your calendar events. Your Google access tokens are stored only in your browser's local storage — never on our servers. You can disconnect at any time by revoking access in your Google Account settings.</p>
+
+    <h2>Data Sharing</h2>
+    <p>We do not sell, trade, or share your personal data with third parties. Data is only shared within your team as configured by you.</p>
+
+    <h2>Your Rights</h2>
+    <ul>
+      <li>Access, update, or delete your account and data at any time</li>
+      <li>Export your inventory data</li>
+      <li>Disconnect third-party integrations (Google Calendar)</li>
+      <li>Request complete data deletion by contacting us</li>
+    </ul>
+
+    <h2>Data Retention</h2>
+    <p>Your data is retained as long as your account is active. If you delete your account, all associated data is permanently removed within 30 days.</p>
+
+    <h2>Contact</h2>
+    <p>For privacy questions or data requests, contact us through the app or at the email provided in your account settings.</p>
+
+    <a href="/" class="back-link">&larr; Back to App</a>
+  </div>
+</body>
+</html>

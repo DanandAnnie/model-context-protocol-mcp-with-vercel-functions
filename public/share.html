@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Share · Staging Inventory Manager</title>
+  <meta name="theme-color" content="#1e1b4b" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, sans-serif;
+      background: linear-gradient(135deg, #1e1b4b 0%, #0f0a2e 100%);
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem;
+    }
+    .container { max-width: 480px; width: 100%; }
+    h1 { font-size: 1.5rem; text-align: center; margin-bottom: 0.5rem; }
+    .subtitle { color: #a78bfa; text-align: center; font-size: 0.9rem; margin-bottom: 2rem; }
+
+    .card {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px;
+      padding: 1.5rem;
+      margin-bottom: 1rem;
+      backdrop-filter: blur(10px);
+    }
+    .card h3 { font-size: 1rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem; }
+    .card p { color: #94a3b8; font-size: 0.88rem; line-height: 1.5; }
+
+    .share-btn {
+      width: 100%;
+      padding: 0.9rem;
+      border: none;
+      border-radius: 12px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      transition: all 0.2s;
+      margin-bottom: 0.75rem;
+    }
+    .share-btn.primary {
+      background: linear-gradient(135deg, #7c3aed, #6366f1);
+      color: white;
+    }
+    .share-btn.primary:hover { filter: brightness(1.15); }
+    .share-btn.secondary {
+      background: rgba(255,255,255,0.08);
+      color: #e2e8f0;
+      border: 1px solid rgba(255,255,255,0.15);
+    }
+    .share-btn.secondary:hover { background: rgba(255,255,255,0.12); }
+
+    .url-box {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 1rem;
+    }
+    .url-box input {
+      flex: 1;
+      background: rgba(0,0,0,0.3);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 8px;
+      padding: 0.6rem 0.8rem;
+      color: #a78bfa;
+      font-family: ui-monospace, monospace;
+      font-size: 0.82rem;
+      outline: none;
+    }
+    .url-box input:focus { border-color: #7c3aed; }
+    .url-box button {
+      background: #7c3aed;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 0.6rem 1rem;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .url-box button:hover { filter: brightness(1.15); }
+
+    .install-steps { margin-top: 1rem; }
+    .install-steps .step {
+      display: flex;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+      align-items: flex-start;
+    }
+    .step-num {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: #7c3aed;
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8rem;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .step-text { font-size: 0.88rem; color: #cbd5e1; line-height: 1.4; }
+    .step-text strong { color: #e2e8f0; }
+
+    .platform-tabs {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+    .platform-tab {
+      flex: 1;
+      padding: 0.5rem;
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 8px;
+      background: transparent;
+      color: #94a3b8;
+      font-size: 0.85rem;
+      cursor: pointer;
+      text-align: center;
+    }
+    .platform-tab.active {
+      background: rgba(124,58,237,0.2);
+      border-color: #7c3aed;
+      color: #a78bfa;
+    }
+
+    .platform-content { display: none; }
+    .platform-content.active { display: block; }
+
+    .back-link {
+      display: block;
+      text-align: center;
+      margin-top: 2rem;
+      color: #a78bfa;
+      text-decoration: none;
+      font-size: 0.9rem;
+    }
+    .back-link:hover { text-decoration: underline; }
+
+    .toast {
+      position: fixed;
+      bottom: 2rem;
+      left: 50%;
+      transform: translateX(-50%) translateY(100px);
+      background: #22c55e;
+      color: white;
+      padding: 0.6rem 1.2rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      transition: transform 0.3s ease;
+      z-index: 100;
+    }
+    .toast.show { transform: translateX(-50%) translateY(0); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Share This App</h1>
+    <p class="subtitle">Staging Inventory Manager</p>
+
+    <div class="card">
+      <h3>Share with your team</h3>
+      <p>Send the app link to anyone. They can install it on their phone in seconds — no app store needed.</p>
+
+      <button class="share-btn primary" id="btn-native-share" style="margin-top:1rem">
+        Share App Link
+      </button>
+      <button class="share-btn secondary" id="btn-copy-link">
+        Copy Link
+      </button>
+
+      <div class="url-box">
+        <input type="text" id="share-url" readonly />
+        <button id="btn-copy-url">Copy</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>How to Install</h3>
+
+      <div class="platform-tabs">
+        <button class="platform-tab active" data-platform="ios">iPhone / iPad</button>
+        <button class="platform-tab" data-platform="android">Android</button>
+        <button class="platform-tab" data-platform="desktop">Desktop</button>
+      </div>
+
+      <div class="platform-content active" data-platform="ios">
+        <div class="install-steps">
+          <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-text">Open the link in <strong>Safari</strong> (not Chrome)</div>
+          </div>
+          <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-text">Tap the <strong>Share</strong> button (box with arrow at bottom)</div>
+          </div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-text">Scroll down and tap <strong>"Add to Home Screen"</strong></div>
+          </div>
+          <div class="step">
+            <div class="step-num">4</div>
+            <div class="step-text">Tap <strong>"Add"</strong> — the app icon appears on your home screen</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="platform-content" data-platform="android">
+        <div class="install-steps">
+          <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-text">Open the link in <strong>Chrome</strong></div>
+          </div>
+          <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-text">Tap the <strong>three-dot menu</strong> (top right)</div>
+          </div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-text">Tap <strong>"Add to Home screen"</strong> or <strong>"Install app"</strong></div>
+          </div>
+          <div class="step">
+            <div class="step-num">4</div>
+            <div class="step-text">Tap <strong>"Install"</strong> — opens like a native app</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="platform-content" data-platform="desktop">
+        <div class="install-steps">
+          <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-text">Open the link in <strong>Chrome or Edge</strong></div>
+          </div>
+          <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-text">Click the <strong>install icon</strong> in the address bar (or menu &gt; "Install app")</div>
+          </div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-text">Click <strong>"Install"</strong> — runs as a standalone window</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <a href="/" class="back-link">&larr; Back to App</a>
+  </div>
+
+  <div class="toast" id="toast">Copied!</div>
+
+  <script>
+    const appUrl = window.location.origin;
+    const shareUrl = document.getElementById('share-url');
+    shareUrl.value = appUrl;
+
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg || 'Copied!';
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2000);
+    }
+
+    async function copyToClipboard(text) {
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast('Link copied!');
+      } catch {
+        shareUrl.select();
+        document.execCommand('copy');
+        showToast('Link copied!');
+      }
+    }
+
+    document.getElementById('btn-native-share').addEventListener('click', async () => {
+      if (navigator.share) {
+        try {
+          await navigator.share({
+            title: 'Staging Inventory Manager',
+            text: 'Check out this staging inventory app — install it on your phone!',
+            url: appUrl,
+          });
+        } catch (e) {
+          if (e.name !== 'AbortError') copyToClipboard(appUrl);
+        }
+      } else {
+        copyToClipboard(appUrl);
+      }
+    });
+
+    document.getElementById('btn-copy-link').addEventListener('click', () => copyToClipboard(appUrl));
+    document.getElementById('btn-copy-url').addEventListener('click', () => copyToClipboard(appUrl));
+
+    // Platform tabs
+    const ua = navigator.userAgent.toLowerCase();
+    let defaultPlatform = 'desktop';
+    if (/iphone|ipad|ipod/.test(ua)) defaultPlatform = 'ios';
+    else if (/android/.test(ua)) defaultPlatform = 'android';
+
+    function switchPlatform(platform) {
+      document.querySelectorAll('.platform-tab').forEach(t => t.classList.toggle('active', t.dataset.platform === platform));
+      document.querySelectorAll('.platform-content').forEach(c => c.classList.toggle('active', c.dataset.platform === platform));
+    }
+    switchPlatform(defaultPlatform);
+    document.querySelectorAll('.platform-tab').forEach(tab => {
+      tab.addEventListener('click', () => switchPlatform(tab.dataset.platform));
+    });
+
+    // Hide native share button if not supported
+    if (!navigator.share) {
+      document.getElementById('btn-native-share').style.display = 'none';
+    }
+  </script>
+</body>
+</html>

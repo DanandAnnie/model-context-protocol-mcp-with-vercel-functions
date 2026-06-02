@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 2400">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1b4b"/>
+      <stop offset="100%" stop-color="#0f0a2e"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="2400" fill="url(#bg)"/>
+  <g transform="translate(500,1050)">
+    <path d="M100 0 L200 80 L200 200 Q200 208 192 208 L8 208 Q0 208 0 200 L0 80 Z" fill="rgba(124,58,237,0.3)" stroke="#a78bfa" stroke-width="4" stroke-linejoin="round"/>
+    <rect x="60" y="120" width="80" height="88" rx="3" fill="rgba(124,58,237,0.2)" stroke="#a78bfa" stroke-width="2"/>
+    <line x1="100" y1="120" x2="100" y2="208" stroke="#a78bfa" stroke-width="1.5"/>
+    <line x1="60" y1="164" x2="140" y2="164" stroke="#a78bfa" stroke-width="1.5"/>
+  </g>
+  <text x="600" y="1340" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="42" font-weight="700" fill="#e2e8f0">Staging Inventory</text>
+  <text x="600" y="1385" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="22" fill="#a78bfa">Manager</text>
+</svg>

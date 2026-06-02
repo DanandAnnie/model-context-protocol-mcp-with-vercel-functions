@@ -1,3 +1,11 @@
 .vercel
 node_modules
 .env
+
+# Native build artifacts
+android/.gradle
+android/app/build
+ios/Pods
+ios/App/build
+*.keystore
+*.jks

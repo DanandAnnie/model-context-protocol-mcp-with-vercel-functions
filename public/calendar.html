@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Calendar · Staging Inventory Manager</title>
+  <meta name="theme-color" content="#1e1b4b" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, sans-serif;
+      background: linear-gradient(135deg, #1e1b4b 0%, #0f0a2e 100%);
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+    .header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 1rem 1.25rem; border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    .header h1 { font-size: 1.2rem; }
+    .header a { color: #a78bfa; text-decoration: none; font-size: 0.9rem; }
+    .connect-bar {
+      padding: 1rem 1.25rem; text-align: center;
+      background: rgba(124,58,237,0.1); border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .connect-btn {
+      background: linear-gradient(135deg, #7c3aed, #6366f1); color: white;
+      border: none; border-radius: 10px; padding: 0.7rem 1.5rem;
+      font-size: 0.95rem; font-weight: 600; cursor: pointer;
+    }
+    .connect-btn:hover { filter: brightness(1.15); }
+    .connected-info { color: #34d399; font-size: 0.9rem; }
+
+    /* View tabs */
+    .view-tabs {
+      display: flex; border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .view-tab {
+      flex: 1; padding: 0.7rem; text-align: center;
+      background: none; border: none; color: #94a3b8;
+      font-size: 0.88rem; cursor: pointer; border-bottom: 2px solid transparent;
+    }
+    .view-tab.active { color: #a78bfa; border-bottom-color: #7c3aed; }
+
+    /* Month view */
+    .month-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 1rem 1.25rem;
+    }
+    .month-header h2 { font-size: 1.1rem; }
+    .month-nav { background: none; border: 1px solid rgba(255,255,255,0.15); color: #e2e8f0; border-radius: 8px; padding: 0.4rem 0.8rem; cursor: pointer; }
+    .month-nav:hover { background: rgba(255,255,255,0.08); }
+
+    .cal-grid {
+      display: grid; grid-template-columns: repeat(7, 1fr);
+      gap: 1px; padding: 0 0.5rem 1rem;
+    }
+    .cal-day-label {
+      text-align: center; font-size: 0.72rem; color: #64748b;
+      padding: 0.3rem; text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .cal-day {
+      text-align: center; padding: 0.5rem 0.25rem;
+      border-radius: 10px; cursor: pointer; font-size: 0.88rem;
+      min-height: 44px; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 4px;
+    }
+    .cal-day:hover { background: rgba(255,255,255,0.06); }
+    .cal-day.today { background: rgba(124,58,237,0.25); font-weight: 700; }
+    .cal-day.selected { background: #7c3aed; color: white; }
+    .cal-day.other-month { color: #475569; }
+    .cal-day .dots { display: flex; gap: 3px; justify-content: center; }
+    .cal-day .dot { width: 5px; height: 5px; border-radius: 50%; background: #a78bfa; }
+
+    /* Day view */
+    .day-view { padding: 0 1.25rem 2rem; }
+    .day-title { font-size: 1rem; color: #a78bfa; margin: 1rem 0 0.75rem; }
+    .event-card {
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+      border-left: 3px solid #7c3aed; border-radius: 10px;
+      padding: 0.85rem 1rem; margin-bottom: 0.6rem;
+    }
+    .event-card .time { font-size: 0.8rem; color: #a78bfa; font-weight: 600; }
+    .event-card .title { font-size: 0.95rem; margin-top: 0.2rem; }
+    .event-card .meta { font-size: 0.8rem; color: #94a3b8; margin-top: 0.25rem; }
+    .event-card .actions { margin-top: 0.5rem; display: flex; gap: 0.5rem; }
+    .event-card .actions button {
+      background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12);
+      color: #94a3b8; border-radius: 6px; padding: 0.25rem 0.6rem;
+      font-size: 0.78rem; cursor: pointer;
+    }
+    .event-card .actions button:hover { color: #e2e8f0; background: rgba(255,255,255,0.12); }
+    .event-card .actions button.del:hover { color: #f87171; }
+    .no-events { color: #64748b; font-size: 0.9rem; text-align: center; padding: 2rem; }
+
+    /* Availability view */
+    .avail-view { padding: 0 1.25rem 2rem; }
+    .avail-slot {
+      display: flex; align-items: center; gap: 0.75rem;
+      padding: 0.6rem 0; border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    .avail-time { width: 70px; font-size: 0.82rem; color: #94a3b8; font-family: ui-monospace, monospace; }
+    .avail-status {
+      flex: 1; padding: 0.5rem 0.75rem; border-radius: 8px; font-size: 0.85rem;
+    }
+    .avail-status.free { background: rgba(52,211,153,0.1); color: #34d399; cursor: pointer; }
+    .avail-status.free:hover { background: rgba(52,211,153,0.2); }
+    .avail-status.busy { background: rgba(248,113,113,0.1); color: #f87171; }
+
+    /* FAB */
+    .fab {
+      position: fixed; bottom: 1.5rem; right: 1.5rem;
+      width: 56px; height: 56px; border-radius: 50%;
+      background: linear-gradient(135deg, #7c3aed, #6366f1);
+      color: white; border: none; font-size: 1.8rem;
+      cursor: pointer; box-shadow: 0 4px 20px rgba(124,58,237,0.4);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .fab:hover { filter: brightness(1.15); }
+
+    /* Modal */
+    .modal-bg {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(6px); z-index: 50;
+      display: none; align-items: flex-end; justify-content: center;
+    }
+    .modal-bg.open { display: flex; }
+    .modal {
+      background: #1e1b4b; border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 16px 16px 0 0; width: 100%; max-width: 480px;
+      padding: 1.5rem; max-height: 85vh; overflow-y: auto;
+    }
+    .modal h3 { font-size: 1.1rem; margin-bottom: 1rem; }
+    .modal .field { margin-bottom: 1rem; }
+    .modal label { display: block; font-size: 0.82rem; color: #a78bfa; margin-bottom: 0.3rem; }
+    .modal input, .modal select, .modal textarea {
+      width: 100%; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 8px; padding: 0.6rem 0.8rem; color: #e2e8f0;
+      font-size: 0.9rem; font-family: inherit; outline: none;
+    }
+    .modal input:focus, .modal select:focus, .modal textarea:focus { border-color: #7c3aed; }
+    .modal select { appearance: auto; }
+    .modal textarea { min-height: 60px; resize: vertical; }
+    .modal .btn-row { display: flex; gap: 0.5rem; margin-top: 1.25rem; }
+    .modal .btn-row button {
+      flex: 1; padding: 0.7rem; border-radius: 10px; font-size: 0.92rem;
+      font-weight: 600; cursor: pointer; border: none;
+    }
+    .modal .btn-cancel { background: rgba(255,255,255,0.08); color: #94a3b8; }
+    .modal .btn-save { background: linear-gradient(135deg, #7c3aed, #6366f1); color: white; }
+
+    .view-content { display: none; }
+    .view-content.active { display: block; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Calendar</h1>
+    <a href="/">&larr; Back</a>
+  </div>
+
+  <div class="connect-bar" id="connect-bar">
+    <button class="connect-btn" id="btn-connect">Connect Google Calendar</button>
+  </div>
+
+  <div class="view-tabs">
+    <button class="view-tab active" data-view="month">Month</button>
+    <button class="view-tab" data-view="day">Day</button>
+    <button class="view-tab" data-view="availability">Availability</button>
+  </div>
+
+  <div class="view-content active" data-view="month">
+    <div class="month-header">
+      <button class="month-nav" id="prev-month">&larr;</button>
+      <h2 id="month-label">May 2026</h2>
+      <button class="month-nav" id="next-month">&rarr;</button>
+    </div>
+    <div class="cal-grid" id="cal-grid"></div>
+  </div>
+
+  <div class="view-content" data-view="day">
+    <div class="day-view">
+      <h3 class="day-title" id="day-title">Today</h3>
+      <div id="day-events"></div>
+    </div>
+  </div>
+
+  <div class="view-content" data-view="availability">
+    <div class="avail-view">
+      <div class="month-header" style="padding-left:0;padding-right:0">
+        <button class="month-nav" id="prev-avail-day">&larr;</button>
+        <h2 id="avail-day-label">Today</h2>
+        <button class="month-nav" id="next-avail-day">&rarr;</button>
+      </div>
+      <div id="avail-slots"></div>
+    </div>
+  </div>
+
+  <button class="fab" id="fab" title="Add Event">+</button>
+
+  <div class="modal-bg" id="event-modal">
+    <div class="modal">
+      <h3 id="modal-title">New Event</h3>
+      <input type="hidden" id="edit-event-id" />
+      <div class="field">
+        <label>Event Type</label>
+        <select id="ev-type">
+          <option value="Walkthrough">Walkthrough</option>
+          <option value="Setup / Install">Setup / Install</option>
+          <option value="Removal / Destage">Removal / Destage</option>
+          <option value="Consultation">Consultation</option>
+          <option value="Delivery">Delivery</option>
+          <option value="Photography">Photography</option>
+          <option value="Open House">Open House</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Title / Property</label>
+        <input type="text" id="ev-title" placeholder="e.g. 123 Main St - Setup" />
+      </div>
+      <div class="field">
+        <label>Date</label>
+        <input type="date" id="ev-date" />
+      </div>
+      <div class="field" style="display:flex;gap:0.75rem">
+        <div style="flex:1">
+          <label>Start Time</label>
+          <input type="time" id="ev-start" value="09:00" />
+        </div>
+        <div style="flex:1">
+          <label>End Time</label>
+          <input type="time" id="ev-end" value="10:00" />
+        </div>
+      </div>
+      <div class="field">
+        <label>Notes</label>
+        <textarea id="ev-notes" placeholder="Optional notes..."></textarea>
+      </div>
+      <div class="btn-row">
+        <button class="btn-cancel" id="modal-cancel">Cancel</button>
+        <button class="btn-save" id="modal-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let accessToken = null;
+    let refreshToken = null;
+    let events = [];
+    let currentMonth = new Date();
+    let selectedDate = new Date();
+    let availDate = new Date();
+
+    // Token management
+    function loadTokens() {
+      try {
+        const stored = JSON.parse(localStorage.getItem('gcal_tokens') || 'null');
+        if (stored) {
+          accessToken = stored.access_token;
+          refreshToken = stored.refresh_token;
+          return true;
+        }
+      } catch {}
+      return false;
+    }
+
+    function saveTokens(tokens) {
+      accessToken = tokens.access_token;
+      if (tokens.refresh_token) refreshToken = tokens.refresh_token;
+      localStorage.setItem('gcal_tokens', JSON.stringify({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        expires_in: tokens.expires_in,
+        saved_at: Date.now(),
+      }));
+    }
+
+    async function refreshAccessToken() {
+      if (!refreshToken) return false;
+      try {
+        const res = await fetch('/api/calendar-auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+        if (!res.ok) return false;
+        const data = await res.json();
+        saveTokens(data);
+        return true;
+      } catch { return false; }
+    }
+
+    async function apiFetch(url, opts = {}) {
+      if (!accessToken) return null;
+      opts.headers = { ...opts.headers, Authorization: 'Bearer ' + accessToken };
+      let res = await fetch(url, opts);
+      if (res.status === 401) {
+        const refreshed = await refreshAccessToken();
+        if (refreshed) {
+          opts.headers.Authorization = 'Bearer ' + accessToken;
+          res = await fetch(url, opts);
+        } else {
+          disconnect();
+          return null;
+        }
+      }
+      return res;
+    }
+
+    function disconnect() {
+      accessToken = null;
+      refreshToken = null;
+      localStorage.removeItem('gcal_tokens');
+      events = [];
+      updateConnectBar();
+      renderMonth();
+    }
+
+    // Connect
+    document.getElementById('btn-connect').addEventListener('click', () => {
+      const w = window.open('/api/calendar-auth?action=consent', 'gcal', 'width=500,height=600');
+      window.addEventListener('message', function handler(e) {
+        if (e.data?.type === 'google-calendar-tokens') {
+          window.removeEventListener('message', handler);
+          saveTokens(e.data);
+          updateConnectBar();
+          loadEvents();
+        }
+      });
+    });
+
+    function updateConnectBar() {
+      const bar = document.getElementById('connect-bar');
+      if (accessToken) {
+        bar.innerHTML = '<span class="connected-info">Connected to Google Calendar</span>';
+      } else {
+        bar.innerHTML = '<button class="connect-btn" id="btn-connect">Connect Google Calendar</button>';
+        document.getElementById('btn-connect').addEventListener('click', () => {
+          const w = window.open('/api/calendar-auth?action=consent', 'gcal', 'width=500,height=600');
+          window.addEventListener('message', function handler(e) {
+            if (e.data?.type === 'google-calendar-tokens') {
+              window.removeEventListener('message', handler);
+              saveTokens(e.data);
+              updateConnectBar();
+              loadEvents();
+            }
+          });
+        });
+      }
+    }
+
+    // Load events
+    async function loadEvents() {
+      if (!accessToken) return;
+      const start = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
+      const end = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 2, 0);
+      const res = await apiFetch(`/api/calendar?action=list&timeMin=${start.toISOString()}&timeMax=${end.toISOString()}`);
+      if (!res) return;
+      const data = await res.json();
+      events = (data.items || []).map(e => ({
+        id: e.id,
+        title: e.summary || '(No title)',
+        start: new Date(e.start?.dateTime || e.start?.date),
+        end: new Date(e.end?.dateTime || e.end?.date),
+        description: e.description || '',
+        allDay: !!e.start?.date,
+      }));
+      renderMonth();
+      renderDay();
+    }
+
+    // View switching
+    document.querySelectorAll('.view-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.view-tab').forEach(t => t.classList.toggle('active', t === tab));
+        document.querySelectorAll('.view-content').forEach(c => c.classList.toggle('active', c.dataset.view === tab.dataset.view));
+        if (tab.dataset.view === 'day') renderDay();
+        if (tab.dataset.view === 'availability') renderAvailability();
+      });
+    });
+
+    // Month view
+    const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+    function renderMonth() {
+      const grid = document.getElementById('cal-grid');
+      const year = currentMonth.getFullYear();
+      const month = currentMonth.getMonth();
+      document.getElementById('month-label').textContent = `${MONTHS[month]} ${year}`;
+
+      const firstDay = new Date(year, month, 1).getDay();
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      const prevDays = new Date(year, month, 0).getDate();
+      const today = new Date();
+
+      let html = DAYS.map(d => `<div class="cal-day-label">${d}</div>`).join('');
+
+      for (let i = 0; i < firstDay; i++) {
+        const day = prevDays - firstDay + 1 + i;
+        html += `<div class="cal-day other-month">${day}</div>`;
+      }
+
+      for (let d = 1; d <= daysInMonth; d++) {
+        const date = new Date(year, month, d);
+        const isToday = date.toDateString() === today.toDateString();
+        const isSelected = date.toDateString() === selectedDate.toDateString();
+        const dayEvents = events.filter(e => e.start.toDateString() === date.toDateString());
+        const dots = dayEvents.length > 0
+          ? `<div class="dots">${dayEvents.slice(0,3).map(() => '<div class="dot"></div>').join('')}</div>`
+          : '';
+        const cls = [isToday ? 'today' : '', isSelected ? 'selected' : ''].filter(Boolean).join(' ');
+        html += `<div class="cal-day ${cls}" data-date="${date.toISOString()}">${d}${dots}</div>`;
+      }
+
+      const totalCells = firstDay + daysInMonth;
+      const remaining = (7 - totalCells % 7) % 7;
+      for (let i = 1; i <= remaining; i++) {
+        html += `<div class="cal-day other-month">${i}</div>`;
+      }
+
+      grid.innerHTML = html;
+
+      grid.querySelectorAll('.cal-day:not(.other-month):not(.cal-day-label)').forEach(el => {
+        el.addEventListener('click', () => {
+          if (!el.dataset.date) return;
+          selectedDate = new Date(el.dataset.date);
+          renderMonth();
+          renderDay();
+          document.querySelector('[data-view="day"].view-tab').click();
+        });
+      });
+    }
+
+    document.getElementById('prev-month').addEventListener('click', () => {
+      currentMonth.setMonth(currentMonth.getMonth() - 1);
+      loadEvents();
+    });
+    document.getElementById('next-month').addEventListener('click', () => {
+      currentMonth.setMonth(currentMonth.getMonth() + 1);
+      loadEvents();
+    });
+
+    // Day view
+    function renderDay() {
+      const container = document.getElementById('day-events');
+      const opts = { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' };
+      document.getElementById('day-title').textContent = selectedDate.toLocaleDateString('en-US', opts);
+
+      const dayEvents = events
+        .filter(e => e.start.toDateString() === selectedDate.toDateString())
+        .sort((a, b) => a.start - b.start);
+
+      if (!dayEvents.length) {
+        container.innerHTML = '<div class="no-events">No events scheduled</div>';
+        return;
+      }
+
+      container.innerHTML = dayEvents.map(e => {
+        const timeStr = e.allDay ? 'All day' :
+          `${e.start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} - ${e.end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+        return `
+          <div class="event-card">
+            <div class="time">${timeStr}</div>
+            <div class="title">${esc(e.title)}</div>
+            ${e.description ? `<div class="meta">${esc(e.description)}</div>` : ''}
+            <div class="actions">
+              <button onclick="editEvent('${e.id}')">Edit</button>
+              <button class="del" onclick="deleteEvent('${e.id}')">Delete</button>
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    // Availability view
+    document.getElementById('prev-avail-day').addEventListener('click', () => {
+      availDate.setDate(availDate.getDate() - 1);
+      renderAvailability();
+    });
+    document.getElementById('next-avail-day').addEventListener('click', () => {
+      availDate.setDate(availDate.getDate() + 1);
+      renderAvailability();
+    });
+
+    function renderAvailability() {
+      const opts = { weekday: 'short', month: 'short', day: 'numeric' };
+      document.getElementById('avail-day-label').textContent = availDate.toLocaleDateString('en-US', opts);
+      const container = document.getElementById('avail-slots');
+
+      const dayEvents = events.filter(e => e.start.toDateString() === availDate.toDateString());
+      let html = '';
+      for (let h = 8; h <= 18; h++) {
+        const hour = h > 12 ? h - 12 : h;
+        const ampm = h >= 12 ? 'PM' : 'AM';
+        const label = `${hour}:00 ${ampm}`;
+        const slotStart = new Date(availDate); slotStart.setHours(h, 0, 0, 0);
+        const slotEnd = new Date(availDate); slotEnd.setHours(h + 1, 0, 0, 0);
+        const conflict = dayEvents.find(e => e.start < slotEnd && e.end > slotStart);
+        if (conflict) {
+          html += `<div class="avail-slot">
+            <div class="avail-time">${label}</div>
+            <div class="avail-status busy">Busy — ${esc(conflict.title)}</div>
+          </div>`;
+        } else {
+          html += `<div class="avail-slot">
+            <div class="avail-time">${label}</div>
+            <div class="avail-status free" onclick="quickBook(${h})">Available — tap to book</div>
+          </div>`;
+        }
+      }
+      container.innerHTML = html;
+    }
+
+    // Event modal
+    const modal = document.getElementById('event-modal');
+    document.getElementById('fab').addEventListener('click', () => openModal());
+    document.getElementById('modal-cancel').addEventListener('click', () => modal.classList.remove('open'));
+    modal.addEventListener('click', e => { if (e.target === modal) modal.classList.remove('open'); });
+
+    function openModal(ev) {
+      document.getElementById('modal-title').textContent = ev ? 'Edit Event' : 'New Event';
+      document.getElementById('edit-event-id').value = ev ? ev.id : '';
+      document.getElementById('ev-title').value = ev ? ev.title : '';
+      document.getElementById('ev-date').value = (ev ? ev.start : selectedDate).toISOString().split('T')[0];
+      document.getElementById('ev-start').value = ev ? ev.start.toTimeString().slice(0,5) : '09:00';
+      document.getElementById('ev-end').value = ev ? ev.end.toTimeString().slice(0,5) : '10:00';
+      document.getElementById('ev-notes').value = ev ? ev.description : '';
+      document.getElementById('ev-type').value = ev ? guessType(ev.title) : 'Walkthrough';
+      modal.classList.add('open');
+    }
+
+    function guessType(title) {
+      const t = (title || '').toLowerCase();
+      if (t.includes('setup') || t.includes('install')) return 'Setup / Install';
+      if (t.includes('removal') || t.includes('destage')) return 'Removal / Destage';
+      if (t.includes('consult')) return 'Consultation';
+      if (t.includes('deliver')) return 'Delivery';
+      if (t.includes('photo')) return 'Photography';
+      if (t.includes('open house')) return 'Open House';
+      if (t.includes('walk')) return 'Walkthrough';
+      return 'Other';
+    }
+
+    window.editEvent = function(id) {
+      const ev = events.find(e => e.id === id);
+      if (ev) openModal(ev);
+    };
+
+    window.deleteEvent = async function(id) {
+      if (!confirm('Delete this event?')) return;
+      const res = await apiFetch('/api/calendar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', eventId: id }),
+      });
+      if (res && res.ok) {
+        events = events.filter(e => e.id !== id);
+        renderDay();
+        renderMonth();
+      }
+    };
+
+    window.quickBook = function(hour) {
+      const date = new Date(availDate);
+      document.getElementById('ev-date').value = date.toISOString().split('T')[0];
+      document.getElementById('ev-start').value = `${String(hour).padStart(2,'0')}:00`;
+      document.getElementById('ev-end').value = `${String(hour+1).padStart(2,'0')}:00`;
+      document.getElementById('ev-title').value = '';
+      document.getElementById('ev-notes').value = '';
+      document.getElementById('edit-event-id').value = '';
+      document.getElementById('modal-title').textContent = 'New Event';
+      modal.classList.add('open');
+    };
+
+    document.getElementById('modal-save').addEventListener('click', async () => {
+      const eventId = document.getElementById('edit-event-id').value;
+      const type = document.getElementById('ev-type').value;
+      const title = document.getElementById('ev-title').value || type;
+      const date = document.getElementById('ev-date').value;
+      const start = document.getElementById('ev-start').value;
+      const end = document.getElementById('ev-end').value;
+      const notes = document.getElementById('ev-notes').value;
+
+      const event = {
+        summary: title,
+        description: notes || `Type: ${type}`,
+        start: { dateTime: `${date}T${start}:00`, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+        end: { dateTime: `${date}T${end}:00`, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+      };
+
+      const action = eventId ? 'update' : 'create';
+      const res = await apiFetch('/api/calendar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, eventId: eventId || undefined, event }),
+      });
+
+      if (res && res.ok) {
+        modal.classList.remove('open');
+        await loadEvents();
+      }
+    });
+
+    function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+    // Init
+    if (loadTokens()) {
+      updateConnectBar();
+      loadEvents();
+    }
+    renderMonth();
+  </script>
+</body>
+</html>

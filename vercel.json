@@ -1,6 +1,16 @@
 {
+  "cleanUrls": true,
   "rewrites": [
-    { "source": "/((?!api/).*)", "destination": "/api/server" }
+    { "source": "/share", "destination": "/share.html" },
+    { "source": "/privacy", "destination": "/privacy.html" },
+    { "source": "/calendar", "destination": "/calendar.html" },
+    { "source": "/((?!api/|share|privacy|calendar|_next).*)", "destination": "/api/server" }
+  ],
+  "headers": [
+    {
+      "source": "/(share|privacy|calendar)\\.html",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }]
+    }
   ],
   "functions": {
     "api/server.ts":        { "maxDuration": 60, "memory": 1024 },
@@ -8,6 +18,8 @@
     "api/neighbor-farm.ts": { "maxDuration": 10, "memory": 256  },
     "api/status.ts":        { "maxDuration": 10, "memory": 256  },
     "api/login.ts":         { "maxDuration": 10, "memory": 256  },
-    "api/logout.ts":        { "maxDuration": 10, "memory": 256  }
+    "api/logout.ts":        { "maxDuration": 10, "memory": 256  },
+    "api/calendar-auth.ts": { "maxDuration": 15, "memory": 256  },
+    "api/calendar.ts":      { "maxDuration": 15, "memory": 256  }
   }
 }

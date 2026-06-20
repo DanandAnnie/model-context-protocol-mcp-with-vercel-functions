@@ -1,0 +1,46 @@
+# Dan Cloud Computers - local Docker Compose.
+#
+# Two pieces:
+#   1) `desktop`  - builds the XFCE/noVNC desktop image used for every computer.
+#                   It is NOT meant to run via compose `up`; the control API
+#                   spawns desktop containers on demand. Build it with:
+#                       docker compose build desktop
+#   2) `agent`    - the FastAPI control API + dashboard. It talks to the host
+#                   Docker daemon (mounted socket) to spawn sibling desktop
+#                   containers.
+#
+# Quick start:
+#   docker compose build desktop      # build the desktop image once
+#   docker compose up agent           # start the control API on :8000
+#   open http://localhost:8000/       # dashboard
+#
+# NOTE: because `agent` spawns sibling containers via the host daemon, desktop
+# volume bind-mounts must use HOST paths. DCC_HOST_DATA_DIR tells the agent the
+# host path of ./data (defaults below to the compose project dir).
+
+services:
+  desktop:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.desktop
+    image: dan-cloud-computer/desktop:latest
+    # Not started by `up`; built and then launched per-computer by the API.
+    profiles: ["manual"]
+
+  agent:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.agent
+    image: dan-cloud-computer/agent:latest
+    ports:
+      - "8000:8000"
+    environment:
+      DCC_API_TOKEN: "${DCC_API_TOKEN:-dev-secret-token}"
+      DCC_IMAGE: "dan-cloud-computer/desktop:latest"
+      DCC_DATA_DIR: "/app/data"
+      # Host path of ./data so sibling desktop containers bind-mount correctly.
+      DCC_HOST_DATA_DIR: "${PWD}/data"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/app/data
+    restart: unless-stopped

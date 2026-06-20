@@ -1,0 +1,23 @@
+# Dan Cloud Computers - control API container.
+# Runs the FastAPI app + dashboard. Needs the docker CLI to drive the host
+# daemon (socket is mounted by docker-compose) for spawning desktop containers.
+
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends docker.io curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY agent ./agent
+COPY dashboard ./dashboard
+
+EXPOSE 8000
+
+CMD ["uvicorn", "agent.main:app", "--host", "0.0.0.0", "--port", "8000"]

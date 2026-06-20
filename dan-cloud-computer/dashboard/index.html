@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dan Cloud Computers</title>
+  <link rel="stylesheet" href="/dashboard/style.css" />
+</head>
+<body>
+  <header>
+    <h1>Dan Cloud Computers</h1>
+    <div class="token-bar">
+      <input id="token" type="password" placeholder="API token" />
+      <button id="save-token">Save token</button>
+      <span id="conn" class="pill">disconnected</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="spawn">
+      <h2>Spawn a computer</h2>
+      <div class="row">
+        <input id="new-name" placeholder="name (e.g. box1)" />
+        <input id="new-notes" placeholder="notes (optional)" />
+        <button id="spawn-btn">Spawn</button>
+      </div>
+      <p class="hint">Spawning pulls/launches a Docker desktop container. First boot can take ~10s.</p>
+    </section>
+
+    <section class="list">
+      <div class="list-head">
+        <h2>Active computers</h2>
+        <button id="refresh-btn">Refresh</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th><th>Status</th><th>Port</th><th>Notes</th><th>Created</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="rows">
+          <tr><td colspan="6" class="empty">No computers yet.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <p id="msg" class="msg"></p>
+  </main>
+
+  <script src="/dashboard/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,70 @@
+# Dan Cloud Computers - Linux XFCE desktop image
+#
+# Built from scratch (no Orgo code/branding). Provides:
+#   - XFCE4 desktop on a virtual X display (:1)
+#   - TigerVNC server (port 5901)
+#   - noVNC + websockify browser access (port 6080)
+#   - Google Chrome (launched with container-safe flags)
+#   - scrot + xdotool for screenshot / click / type / key control
+#
+# The control API drives this container from the host via `docker exec`
+# using xdotool/scrot against DISPLAY=:1.
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    DISPLAY=:1 \
+    SCREEN_GEOMETRY=1280x800 \
+    HOME=/root
+
+# ---- Base desktop + VNC + control tooling -------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        xfce4 \
+        xfce4-terminal \
+        dbus-x11 \
+        x11-utils \
+        tigervnc-standalone-server \
+        tigervnc-common \
+        novnc \
+        websockify \
+        python3 \
+        scrot \
+        xdotool \
+        imagemagick \
+        wget \
+        curl \
+        ca-certificates \
+        fonts-liberation \
+        supervisor \
+        sudo \
+        nano \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---- Google Chrome ------------------------------------------------------
+RUN wget -q -O /tmp/chrome.deb \
+        https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends /tmp/chrome.deb \
+    && rm -f /tmp/chrome.deb \
+    && rm -rf /var/lib/apt/lists/*
+
+# Chrome wrapper: containers need --no-sandbox and a profile on the volume.
+COPY chrome-wrapper.sh /usr/local/bin/google-chrome
+RUN chmod +x /usr/local/bin/google-chrome \
+    && sed -i 's#^Exec=.*#Exec=/usr/local/bin/google-chrome %U#' \
+        /usr/share/applications/google-chrome.desktop || true
+
+# ---- Startup scripts ----------------------------------------------------
+COPY start-xfce.sh /usr/local/bin/start-xfce.sh
+COPY supervisord.conf /etc/supervisor/conf.d/dcc.conf
+RUN chmod +x /usr/local/bin/start-xfce.sh \
+    && mkdir -p /var/log/supervisor /root/persist
+
+# Persistent per-computer data (browser profile, files) lives here and is
+# bind-mounted from the host by the control API.
+VOLUME ["/root/persist"]
+
+# 6080 = noVNC (browser access), 5901 = raw VNC
+EXPOSE 6080 5901
+
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]

@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Local env
+.env
+
+# Runtime data: the empty data/computers.json seed is tracked; ignore volumes + temp.
+data/volumes/
+data/*.tmp

@@ -1,4 +1,4 @@
-import { buildClearCookie } from "./services/auth.js";
+import { buildClearCookie } from "./_services/auth.js";
 
 async function handler(req: Request): Promise<Response> {
   return new Response(JSON.stringify({ ok: true }), {

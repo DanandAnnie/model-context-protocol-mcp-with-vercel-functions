@@ -17,7 +17,7 @@
 // mortgage/loan and foreclosure signals.
 // ============================================================
 
-import type { PropertySearchFilters } from "../types/property.js";
+import type { PropertySearchFilters } from "../_types/property.js";
 
 const PR_API_BASE = "https://api.propertyradar.com/v1";
 

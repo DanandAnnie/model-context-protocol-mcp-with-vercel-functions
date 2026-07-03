@@ -6,7 +6,7 @@
 //
 // Phase 2 stub: Vortex GeoLeads pull + Mojo Sync automation is deferred.
 
-import { getAuthState } from "./services/auth.js";
+import { getAuthState } from "./_services/auth.js";
 
 interface NeighborFarmPayload {
   address: string;

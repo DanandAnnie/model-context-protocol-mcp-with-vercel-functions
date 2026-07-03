@@ -2,7 +2,7 @@
 // Returns non-sensitive server metadata: name, version, tool count, env key presence.
 // Secret values are NEVER included — only booleans indicating whether each key is set.
 
-import { getAuthState } from "./services/auth.js";
+import { getAuthState } from "./_services/auth.js";
 
 const START_TIME = Date.now();
 

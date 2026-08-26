@@ -152,6 +152,15 @@ class TestCaptions(unittest.TestCase):
         ]
         self.assertEqual(len(captions._events_for_scene(words, 0.0)), 2)
 
+    def test_playres_follows_aspect(self):
+        header = "ScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 0"
+        fitted = captions._fit_playres(header, "16:9")
+        self.assertIn("PlayResX: 1920", fitted)
+        self.assertIn("PlayResY: 1080", fitted)
+        self.assertIn("WrapStyle: 0", fitted)
+        # 9:16 leaves the vertical template untouched
+        self.assertEqual(captions._fit_playres(header, "9:16"), header)
+
     def test_build_ass_from_plan(self):
         plan = sample_plan()
         wd = config.work_dir(plan["video_id"])
@@ -233,6 +242,20 @@ class TestAssemblySmoke(unittest.TestCase):
         self.assertAlmostEqual(dur, expected, delta=0.35)
         thumb = media.thumbnail(final, wd / "thumb.jpg")
         self.assertTrue(thumb.exists())
+
+        # Secondary 16:9 pass from the same stills (the --also-horizontal path).
+        from toon_video.cli import _secondary_clips
+
+        state.save(plan)
+        loaded = state.load(plan["video_id"])
+        for s in loaded["scenes"]:
+            state.set_scene_asset(loaded, s["n"], "still", wd / f"still_{s['n']}.png")
+        state.save(loaded)
+        clips2 = _secondary_clips(loaded, wd, "16:9")
+        self.assertEqual(len(clips2), 2)
+        silent2 = media.concat_clips(clips2, wd / "video_silent_16x9.mp4")
+        final2 = media.mux_and_burn(silent2, vo_track, None, wd / "final_16x9.mp4")
+        self.assertAlmostEqual(media.probe_duration(final2), expected, delta=0.35)
 
 
 if __name__ == "__main__":

@@ -227,6 +227,36 @@ def cmd_captions(args):
     _print({"video_id": args.video_id, "ass": str(out)})
 
 
+def final_name(aspect: str) -> str:
+    return "final_" + aspect.replace(":", "x") + ".mp4"
+
+
+def _secondary_clips(plan: dict, wd: Path, aspect: str) -> list:
+    """Re-render every scene's motion clip at a second aspect. Pure FFmpeg
+    from assets already on disk (stills + raw hook clip), zero credit cost,
+    so these aren't tracked in the plan — just rebuilt when missing."""
+    out_dir = wd / ("clips_" + aspect.replace(":", "x"))
+    out_dir.mkdir(exist_ok=True)
+    clips = []
+    for s in plan["scenes"]:
+        n = s["n"]
+        out = out_dir / f"scene_{n:02d}.mp4"
+        if out.exists():
+            clips.append(out)
+            continue
+        dur = float(s["duration_sec"]) + config.SCENE_PAD_SEC
+        raw_hook = wd / "clips" / f"scene_{n:02d}.raw.mp4"
+        if s.get("is_hook") and raw_hook.exists():
+            dur = min(dur, config.HOOK_CLIP_MAX_SEC)
+            clips.append(media.conform_clip(raw_hook, out, dur, aspect))
+            continue
+        still = state.scene_asset(plan, n, "still")
+        if still is None:
+            raise SystemExit(f"scene {n}: no still on disk — can't render {aspect} clip")
+        clips.append(media.kenburns_clip(still, out, dur, s["camera"], aspect))
+    return clips
+
+
 def cmd_assemble(args):
     plan = state.load(args.video_id)
     wd = config.work_dir(args.video_id)
@@ -256,21 +286,26 @@ def cmd_assemble(args):
         print("assemble: no music bed registered, using VO only")
         mixed = vo_track
 
-    ass = wd / "captions.ass"
-    if not ass.exists() and not args.no_captions:
-        ass_path = captions.build_ass(args.video_id)
-    else:
-        ass_path = None if args.no_captions else ass
+    primary = plan.get("aspect", "9:16")
+    ass_path = None if args.no_captions else captions.build_ass(args.video_id, aspect=primary)
 
-    out = media.mux_and_burn(silent, mixed, ass_path, wd / "final_9x16.mp4")
+    out = media.mux_and_burn(silent, mixed, ass_path, wd / final_name(primary))
     thumb = media.thumbnail(out, wd / "thumbnail.jpg")
     result = {"video_id": args.video_id, "mp4": str(out), "thumbnail": str(thumb),
               "runtime_sec": round(media.probe_duration(out), 2)}
 
     if args.also_horizontal:
-        # Second aspect is a full re-render from stills, not a crop of the vertical.
-        print("assemble: 16:9 export requires clips rendered at 16:9 — "
-              "re-run `clips --force` with aspect switched; skipping for now")
+        other = "16:9" if primary == "9:16" else "9:16"
+        silent2 = media.concat_clips(
+            _secondary_clips(plan, wd, other),
+            wd / ("video_silent_" + other.replace(":", "x") + ".mp4"),
+        )
+        ass2 = None if args.no_captions else captions.build_ass(
+            args.video_id, aspect=other,
+            out_name="captions_" + other.replace(":", "x") + ".ass",
+        )
+        out2 = media.mux_and_burn(silent2, mixed, ass2, wd / final_name(other))
+        result["mp4_" + other.replace(":", "x")] = str(out2)
     _print(result)
 
 
@@ -278,21 +313,27 @@ def cmd_publish(args):
     from . import supabase_io, telegram_gate
     plan = state.load(args.video_id)
     wd = config.work_dir(args.video_id)
-    mp4 = wd / "final_9x16.mp4"
+    primary_name = final_name(plan.get("aspect", "9:16"))
+    mp4 = wd / primary_name
     thumb = wd / "thumbnail.jpg"
     if not mp4.exists():
-        raise SystemExit("No final_9x16.mp4 — run `assemble` first")
+        raise SystemExit(f"No {primary_name} — run `assemble` first")
 
     vid = plan["video_id"]
-    supabase_io.upload(config.BUCKET_VIDEOS, f"{vid}/final_9x16.mp4", mp4)
+    supabase_io.upload(config.BUCKET_VIDEOS, f"{vid}/{primary_name}", mp4)
     if thumb.exists():
         supabase_io.upload(config.BUCKET_VIDEOS, f"{vid}/thumbnail.jpg", thumb)
-    url = supabase_io.signed_url(config.BUCKET_VIDEOS, f"{vid}/final_9x16.mp4")
+    # Secondary-aspect export rides along when assemble produced one.
+    for aspect in config.RESOLUTIONS:
+        extra = wd / final_name(aspect)
+        if extra.exists() and extra != mp4:
+            supabase_io.upload(config.BUCKET_VIDEOS, f"{vid}/{extra.name}", extra)
+    url = supabase_io.signed_url(config.BUCKET_VIDEOS, f"{vid}/{primary_name}")
 
     actual = costs.actual_spend(vid)
     supabase_io.upsert_job(
         plan, "awaiting_approval",
-        output_url=f"supabase://{config.BUCKET_VIDEOS}/{vid}/final_9x16.mp4",
+        output_url=f"supabase://{config.BUCKET_VIDEOS}/{vid}/{primary_name}",
         credit_cost_actual=actual,
     )
     flagged = [s["n"] for s in plan["scenes"] if (s.get("qc") or {}).get("flagged")]

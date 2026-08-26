@@ -177,8 +177,10 @@ $TOON_PY -m toon_video assemble <video_id>
 ```
 
 Concat demuxer → mux VO → duck music → burn captions → 1080x1920 H.264
-CRF 20, AAC 192k (+ thumbnail). 16:9 needs clips re-rendered at that aspect —
-only do it if Dan asked.
+CRF 20, AAC 192k (+ thumbnail). Add `--also-horizontal` (only when Dan asked
+for both) to re-render every clip at 1920x1080 from the same stills/hook
+footage — pure FFmpeg, zero credit cost — with aspect-corrected captions;
+`publish` uploads both exports automatically.
 
 ### Step 9 — Publish gate (SHARED pattern)
 

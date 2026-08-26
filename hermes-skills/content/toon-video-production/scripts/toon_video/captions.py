@@ -3,6 +3,7 @@ timeline, styled by the template asset. Styles are addable by dropping a
 new .ass template into assets/captions/ — no code changes."""
 
 import json
+import re
 from pathlib import Path
 
 from . import config, state
@@ -42,13 +43,15 @@ def _events_for_scene(words: list, offset: float) -> list:
     ]
 
 
-def build_ass(video_id: str, template: Path = None) -> Path:
+def build_ass(video_id: str, template: Path = None, aspect: str = None,
+              out_name: str = "captions.ass") -> Path:
     plan = state.load(video_id)
     template = template or config.ASS_TEMPLATE
     header = template.read_text()
     if "[Events]" not in header:
         raise SystemExit(f"Caption template {template} has no [Events] section")
     header = header.split("[Events]")[0].rstrip()
+    header = _fit_playres(header, aspect or plan.get("aspect", "9:16"))
 
     starts = state.scene_slot_starts(plan)
     lines = [
@@ -71,7 +74,16 @@ def build_ass(video_id: str, template: Path = None) -> Path:
             )
             n_events += 1
 
-    out = config.work_dir(video_id) / "captions.ass"
+    out = config.work_dir(video_id) / out_name
     out.write_text("\n".join(lines) + "\n")
     print(f"captions: {n_events} events -> {out}")
     return out
+
+
+def _fit_playres(header: str, aspect: str) -> str:
+    """Point the template's PlayRes at the render resolution so ASS
+    positioning/margins stay correct for both exports of one video."""
+    w, h = config.RESOLUTIONS.get(aspect, config.RESOLUTIONS["9:16"])
+    header = re.sub(r"(?m)^PlayResX:\s*\d+", f"PlayResX: {w}", header)
+    header = re.sub(r"(?m)^PlayResY:\s*\d+", f"PlayResY: {h}", header)
+    return header

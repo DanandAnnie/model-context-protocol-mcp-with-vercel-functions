@@ -1,0 +1,77 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "toon-video-production/scene_plan.schema.json",
+  "title": "Toon Video Scene Plan",
+  "type": "object",
+  "required": ["video_id", "title", "style", "target_length_sec", "aspect", "characters", "music_mood", "scenes"],
+  "additionalProperties": false,
+  "properties": {
+    "video_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "style": { "enum": ["classic-cartoon", "flat-modern", "3d-soft"] },
+    "target_length_sec": { "enum": [60, 90] },
+    "aspect": { "enum": ["9:16", "16:9"] },
+    "characters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["slug", "description"],
+        "additionalProperties": false,
+        "properties": {
+          "slug": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+          "description": { "type": "string", "minLength": 1 },
+          "reference_image_url": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "music_mood": { "type": "string", "minLength": 1 },
+    "music_asset": { "type": ["string", "null"] },
+    "caption_template": { "type": ["string", "null"] },
+    "hook_video": { "type": "boolean" },
+    "status": { "type": "string" },
+    "scenes": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 18,
+      "items": {
+        "type": "object",
+        "required": ["n", "narration", "visual", "characters", "camera", "is_hook", "duration_sec", "assets"],
+        "additionalProperties": false,
+        "properties": {
+          "n": { "type": "integer", "minimum": 1 },
+          "narration": { "type": "string", "minLength": 1 },
+          "visual": { "type": "string", "minLength": 1 },
+          "characters": { "type": "array", "items": { "type": "string" } },
+          "camera": { "enum": ["zoom-in", "zoom-out", "pan-left", "pan-right", "static"] },
+          "mood": { "type": "string" },
+          "is_hook": { "type": "boolean" },
+          "duration_sec": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+          "qc": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "properties": {
+              "rerolled": { "type": "integer", "minimum": 0 },
+              "flagged": { "type": "boolean" },
+              "reason": { "type": ["string", "null"] }
+            }
+          },
+          "assets": {
+            "type": "object",
+            "required": ["vo", "still", "clip"],
+            "additionalProperties": false,
+            "properties": {
+              "vo": { "type": ["string", "null"] },
+              "still": { "type": ["string", "null"] },
+              "clip": { "type": ["string", "null"] },
+              "clip_source": { "enum": ["hook-raw", "still", null] },
+              "words": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    }
+  }
+}

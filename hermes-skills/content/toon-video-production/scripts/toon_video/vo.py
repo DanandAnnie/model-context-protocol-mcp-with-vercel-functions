@@ -117,8 +117,9 @@ def run_vo(video_id: str, only_scenes=None, force: bool = False) -> dict:
                 cost_usd=len(scene["narration"]) / 1000.0 * config.COST_PER_1K_VO_CHARS,
                 note=f"scene {n}",
             )
-            # Force re-cutting downstream: a new VO invalidates the old clip.
-            state.set_scene_asset(plan, n, "clip", None)
+            # Force re-cutting downstream: a new VO duration invalidates the
+            # rendered clips (raw hook footage is kept — it just gets re-cut).
+            state.invalidate_clips(plan, n)
         if not words.exists():
             if not whisper_fallback(mp3, words):
                 print(f"scene {n}: WARNING no word timestamps (no alignment, no whisper-cpp)")

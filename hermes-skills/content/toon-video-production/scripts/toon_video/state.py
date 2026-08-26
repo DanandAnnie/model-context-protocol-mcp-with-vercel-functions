@@ -133,6 +133,24 @@ def set_scene_asset(plan: dict, n: int, kind: str, path) -> None:
     scene["assets"][kind] = str(path) if path is not None else None
 
 
+def invalidate_clips(plan: dict, n: int, drop_hook_raw: bool = False) -> None:
+    """Clear every motion artifact for scene n: the tracked clip, its source
+    marker, and any secondary-aspect renders (those cache by file existence
+    only, so they must be deleted here or a later --also-horizontal pass
+    reuses stale footage). drop_hook_raw also discards raw image-to-video
+    footage — pass it for visual changes, where re-conforming the old hook
+    would be wrong; keep it for duration-only changes, which just re-cut."""
+    set_scene_asset(plan, n, "clip", None)
+    set_scene_asset(plan, n, "clip_source", None)
+    wd = config.work_dir(plan["video_id"])
+    for stale in wd.glob(f"clips_*/scene_{n:02d}.mp4"):
+        stale.unlink()
+    if drop_hook_raw:
+        raw = wd / "clips" / f"scene_{n:02d}.raw.mp4"
+        if raw.exists():
+            raw.unlink()
+
+
 def total_vo_runtime(plan: dict) -> float:
     return sum(float(s.get("duration_sec") or 0.0) for s in plan["scenes"])
 

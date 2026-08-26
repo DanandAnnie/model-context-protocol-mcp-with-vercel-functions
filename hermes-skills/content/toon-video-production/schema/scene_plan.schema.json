@@ -29,6 +29,7 @@
     },
     "music_mood": { "type": "string", "minLength": 1 },
     "music_asset": { "type": ["string", "null"] },
+    "caption_template": { "type": ["string", "null"] },
     "hook_video": { "type": "boolean" },
     "status": { "type": "string" },
     "scenes": {
@@ -65,6 +66,7 @@
               "vo": { "type": ["string", "null"] },
               "still": { "type": ["string", "null"] },
               "clip": { "type": ["string", "null"] },
+              "clip_source": { "enum": ["hook-raw", "still", null] },
               "words": { "type": ["string", "null"] }
             }
           }

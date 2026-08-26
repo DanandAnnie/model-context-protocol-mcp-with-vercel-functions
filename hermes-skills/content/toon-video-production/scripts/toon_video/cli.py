@@ -124,8 +124,8 @@ def cmd_register_still(args):
     wd.mkdir(exist_ok=True)
     dest = _fetch_to(args.source, wd / f"scene_{args.n:02d}.png")
     state.set_scene_asset(plan, args.n, "still", dest)
-    # New still invalidates the old motion clip.
-    state.set_scene_asset(plan, args.n, "clip", None)
+    # New still = new visuals: every motion artifact for the scene is stale.
+    state.invalidate_clips(plan, args.n, drop_hook_raw=True)
     state.save(plan)
     _print({"scene": args.n, "still": str(dest)})
 
@@ -144,6 +144,7 @@ def cmd_register_clip(args):
     )
     conformed = media.conform_clip(raw, wd / f"scene_{args.n:02d}.mp4", dur, plan["aspect"])
     state.set_scene_asset(plan, args.n, "clip", conformed)
+    state.set_scene_asset(plan, args.n, "clip_source", "hook-raw")
     state.save(plan)
     costs.log_spend(args.video_id, "hook-clip", args.provider, 1, args.cost_usd, f"scene {args.n}")
     _print({"scene": args.n, "clip": str(conformed), "duration_sec": dur})
@@ -185,6 +186,7 @@ def cmd_clips(args):
         dur = float(s["duration_sec"]) + config.SCENE_PAD_SEC
         clip = media.kenburns_clip(still, wd / f"scene_{n:02d}.mp4", dur, s["camera"], plan["aspect"])
         state.set_scene_asset(plan, n, "clip", clip)
+        state.set_scene_asset(plan, n, "clip_source", "still")
         state.save(plan)
         made.append(n)
     _print({"video_id": args.video_id, "rendered": made})
@@ -222,20 +224,35 @@ def cmd_music(args):
 
 
 def cmd_captions(args):
-    template = Path(args.template) if args.template else None
-    out = captions.build_ass(args.video_id, template=template)
+    # Remember the chosen template so assemble's rebuilds (secondary aspect,
+    # missing file) use the same style instead of silently reverting to the
+    # default.
+    plan = state.load(args.video_id)
+    plan["caption_template"] = str(Path(args.template).resolve()) if args.template else None
+    state.save(plan)
+    out = captions.build_ass(args.video_id, template=_caption_template(plan))
     _print({"video_id": args.video_id, "ass": str(out)})
 
 
+def _caption_template(plan: dict):
+    tmpl = plan.get("caption_template")
+    return Path(tmpl) if tmpl else None
+
+
+def aspect_slug(aspect: str) -> str:
+    return aspect.replace(":", "x")
+
+
 def final_name(aspect: str) -> str:
-    return "final_" + aspect.replace(":", "x") + ".mp4"
+    return f"final_{aspect_slug(aspect)}.mp4"
 
 
 def _secondary_clips(plan: dict, wd: Path, aspect: str) -> list:
     """Re-render every scene's motion clip at a second aspect. Pure FFmpeg
     from assets already on disk (stills + raw hook clip), zero credit cost,
-    so these aren't tracked in the plan — just rebuilt when missing."""
-    out_dir = wd / ("clips_" + aspect.replace(":", "x"))
+    so these aren't tracked in the plan — just rebuilt when missing (stale
+    ones are deleted by state.invalidate_clips when a scene changes)."""
+    out_dir = wd / f"clips_{aspect_slug(aspect)}"
     out_dir.mkdir(exist_ok=True)
     clips = []
     for s in plan["scenes"]:
@@ -246,7 +263,10 @@ def _secondary_clips(plan: dict, wd: Path, aspect: str) -> list:
             continue
         dur = float(s["duration_sec"]) + config.SCENE_PAD_SEC
         raw_hook = wd / "clips" / f"scene_{n:02d}.raw.mp4"
-        if s.get("is_hook") and raw_hook.exists():
+        # Mirror the primary export's footage choice: use hook footage only
+        # when the tracked clip actually came from it, so the two aspects
+        # never show different scene-1 content.
+        if (s.get("assets") or {}).get("clip_source") == "hook-raw" and raw_hook.exists():
             dur = min(dur, config.HOOK_CLIP_MAX_SEC)
             clips.append(media.conform_clip(raw_hook, out, dur, aspect))
             continue
@@ -287,7 +307,15 @@ def cmd_assemble(args):
         mixed = vo_track
 
     primary = plan.get("aspect", "9:16")
-    ass_path = None if args.no_captions else captions.build_ass(args.video_id, aspect=primary)
+    other = "16:9" if primary == "9:16" else "9:16"
+    ass_path = None
+    if not args.no_captions:
+        # Reuse the Step-7 captions when present (they may carry a custom
+        # template); rebuild only when missing.
+        existing = wd / "captions.ass"
+        ass_path = existing if existing.exists() else captions.build_ass(
+            args.video_id, template=_caption_template(plan), aspect=primary
+        )
 
     out = media.mux_and_burn(silent, mixed, ass_path, wd / final_name(primary))
     thumb = media.thumbnail(out, wd / "thumbnail.jpg")
@@ -295,17 +323,23 @@ def cmd_assemble(args):
               "runtime_sec": round(media.probe_duration(out), 2)}
 
     if args.also_horizontal:
-        other = "16:9" if primary == "9:16" else "9:16"
         silent2 = media.concat_clips(
             _secondary_clips(plan, wd, other),
-            wd / ("video_silent_" + other.replace(":", "x") + ".mp4"),
+            wd / f"video_silent_{aspect_slug(other)}.mp4",
         )
         ass2 = None if args.no_captions else captions.build_ass(
-            args.video_id, aspect=other,
-            out_name="captions_" + other.replace(":", "x") + ".ass",
+            args.video_id, template=_caption_template(plan), aspect=other,
+            out_name=f"captions_{aspect_slug(other)}.ass",
         )
         out2 = media.mux_and_burn(silent2, mixed, ass2, wd / final_name(other))
-        result["mp4_" + other.replace(":", "x")] = str(out2)
+        result["mp4_" + aspect_slug(other)] = str(out2)
+    else:
+        # Drop any earlier secondary export so publish can't ship a cut that
+        # no longer matches this assembly.
+        stale = wd / final_name(other)
+        if stale.exists():
+            stale.unlink()
+            print(f"assemble: removed stale {stale.name} (not part of this assembly)")
     _print(result)
 
 
@@ -369,7 +403,7 @@ def cmd_reroll(args):
     if args.visual:
         scene["visual"] = args.visual
     state.set_scene_asset(plan, args.n, "still", None)
-    state.set_scene_asset(plan, args.n, "clip", None)
+    state.invalidate_clips(plan, args.n, drop_hook_raw=True)
     if args.narration:
         scene["narration"] = args.narration
         state.set_scene_asset(plan, args.n, "vo", None)

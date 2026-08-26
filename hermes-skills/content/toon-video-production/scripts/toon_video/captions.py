@@ -80,10 +80,51 @@ def build_ass(video_id: str, template: Path = None, aspect: str = None,
     return out
 
 
+def _playres_value(header: str, key: str):
+    m = re.search(rf"(?m)^{key}:\s*(\d+)", header)
+    return int(m.group(1)) if m else None
+
+
+# Style fields measured in PlayRes pixels, and which axis they scale with.
+_H_SCALED_FIELDS = ("Fontsize", "Spacing", "Outline", "Shadow", "MarginV")
+_W_SCALED_FIELDS = ("MarginL", "MarginR")
+
+
+def _scale_styles(header: str, wf: float, hf: float) -> str:
+    """Scale pixel-denominated Style fields when the script space changes,
+    so captions keep the same on-screen proportions in every export."""
+    lines = header.splitlines()
+    fields = None
+    for i, line in enumerate(lines):
+        if line.startswith("Format:") and fields is None and "Fontsize" in line:
+            fields = [f.strip() for f in line.split(":", 1)[1].split(",")]
+        elif line.startswith("Style:") and fields:
+            values = [v.strip() for v in line.split(":", 1)[1].split(",")]
+            for j, name in enumerate(fields[: len(values)]):
+                factor = hf if name in _H_SCALED_FIELDS else wf if name in _W_SCALED_FIELDS else None
+                if factor is not None:
+                    try:
+                        values[j] = str(int(round(float(values[j]) * factor)))
+                    except ValueError:
+                        pass
+            lines[i] = "Style: " + ",".join(values)
+    return "\n".join(lines)
+
+
 def _fit_playres(header: str, aspect: str) -> str:
-    """Point the template's PlayRes at the render resolution so ASS
-    positioning/margins stay correct for both exports of one video."""
+    """Fit the template's script space to the render resolution: rewrite (or
+    inject) PlayRes and rescale the Style's pixel values to match, so caption
+    size and placement stay proportionally identical across exports."""
     w, h = config.RESOLUTIONS.get(aspect, config.RESOLUTIONS["9:16"])
+    tw, th = _playres_value(header, "PlayResX"), _playres_value(header, "PlayResY")
+    if tw is None or th is None:
+        # No declared script space: claim the render resolution outright so
+        # libass never falls back to its implied 384x288 space.
+        return header.replace(
+            "[Script Info]", f"[Script Info]\nPlayResX: {w}\nPlayResY: {h}", 1
+        )
+    if (tw, th) == (w, h):
+        return header
     header = re.sub(r"(?m)^PlayResX:\s*\d+", f"PlayResX: {w}", header)
     header = re.sub(r"(?m)^PlayResY:\s*\d+", f"PlayResY: {h}", header)
-    return header
+    return _scale_styles(header, w / tw, h / th)

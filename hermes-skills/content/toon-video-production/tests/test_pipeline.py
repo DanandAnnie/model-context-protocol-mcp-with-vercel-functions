@@ -96,6 +96,31 @@ class TestState(unittest.TestCase):
         state.set_scene_asset(loaded, 1, "still", real)
         self.assertEqual(state.scene_asset(loaded, 1, "still"), real)
 
+    def test_invalidate_clips(self):
+        plan = sample_plan()
+        state.save(plan)
+        wd = config.work_dir(plan["video_id"])
+        (wd / "clips").mkdir(exist_ok=True)
+        (wd / "clips_16x9").mkdir(exist_ok=True)
+        tracked = wd / "clips" / "scene_01.mp4"
+        secondary = wd / "clips_16x9" / "scene_01.mp4"
+        raw = wd / "clips" / "scene_01.raw.mp4"
+        for f in (tracked, secondary, raw):
+            f.write_bytes(b"mp4")
+        state.set_scene_asset(plan, 1, "clip", tracked)
+        state.set_scene_asset(plan, 1, "clip_source", "hook-raw")
+
+        # Duration-only change: clips cleared, raw hook footage kept for re-cut.
+        state.invalidate_clips(plan, 1)
+        self.assertIsNone(state.scene_asset(plan, 1, "clip"))
+        self.assertIsNone(plan["scenes"][0]["assets"]["clip_source"])
+        self.assertFalse(secondary.exists())
+        self.assertTrue(raw.exists())
+
+        # Visual change: raw footage goes too.
+        state.invalidate_clips(plan, 1, drop_hook_raw=True)
+        self.assertFalse(raw.exists())
+
     def test_slot_starts(self):
         plan = sample_plan(n_scenes=8)
         for s in plan["scenes"]:
@@ -152,14 +177,29 @@ class TestCaptions(unittest.TestCase):
         ]
         self.assertEqual(len(captions._events_for_scene(words, 0.0)), 2)
 
-    def test_playres_follows_aspect(self):
-        header = "ScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 0"
-        fitted = captions._fit_playres(header, "16:9")
+    ASS_HEADER = (
+        "[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\n\n"
+        "[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, Outline, Shadow, "
+        "Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        "Style: Toon,DejaVu Sans,72,&H00FFFFFF,6,2,2,60,60,320,1"
+    )
+
+    def test_playres_follows_aspect_and_scales_style(self):
+        fitted = captions._fit_playres(self.ASS_HEADER, "16:9")
         self.assertIn("PlayResX: 1920", fitted)
         self.assertIn("PlayResY: 1080", fitted)
-        self.assertIn("WrapStyle: 0", fitted)
-        # 9:16 leaves the vertical template untouched
-        self.assertEqual(captions._fit_playres(header, "9:16"), header)
+        # Pixel-denominated style values scale with the script space:
+        # heights by 1080/1920, horizontal margins by 1920/1080.
+        self.assertIn("Style: Toon,DejaVu Sans,40,&H00FFFFFF,3,1,2,107,107,180,1", fitted)
+        # Matching aspect leaves the template untouched.
+        self.assertEqual(captions._fit_playres(self.ASS_HEADER, "9:16"), self.ASS_HEADER)
+
+    def test_playres_injected_when_missing(self):
+        bare = "[Script Info]\nScriptType: v4.00+"
+        fitted = captions._fit_playres(bare, "16:9")
+        self.assertIn("PlayResX: 1920", fitted)
+        self.assertIn("PlayResY: 1080", fitted)
 
     def test_build_ass_from_plan(self):
         plan = sample_plan()

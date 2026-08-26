@@ -1,0 +1,20 @@
+[Script Info]
+; toon-video-production default caption style.
+; New styles: copy this file into assets/captions/, rename the file, keep the
+; Style name "Toon", and pass --template to the captions command — no code
+; changes needed. Sized for 1080x1920 vertical; PlayRes keeps positioning
+; stable if the render resolution changes.
+Title: Toon Captions
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+YCbCr Matrix: TV.709
+PlayResX: 1080
+PlayResY: 1920
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Toon,DejaVu Sans,72,&H00FFFFFF,&H00FFFFFF,&H00101010,&H96000000,-1,0,0,0,100,100,0,0,1,6,2,2,60,60,320,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

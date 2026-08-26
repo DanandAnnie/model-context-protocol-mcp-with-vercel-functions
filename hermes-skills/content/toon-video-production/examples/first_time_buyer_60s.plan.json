@@ -1,0 +1,106 @@
+{
+  "video_id": "00000000-0000-4000-8000-000000000001",
+  "title": "Buying Your First Home in St. George",
+  "style": "classic-cartoon",
+  "target_length_sec": 60,
+  "aspect": "9:16",
+  "characters": [
+    {
+      "slug": "bee-agent",
+      "description": "cheerful cartoon honeybee real estate agent wearing a tiny navy blazer and gold name tag, big friendly eyes, expressive antennae",
+      "reference_image_url": null
+    }
+  ],
+  "music_mood": "upbeat-light",
+  "hook_video": false,
+  "scenes": [
+    {
+      "n": 1,
+      "narration": "Think you can't buy your first home in St. George? Let's bust that myth in sixty seconds.",
+      "visual": "bee-agent bursting through a paper banner that reads nothing, confetti flying, sunny desert-town skyline with red rock cliffs behind",
+      "characters": ["bee-agent"],
+      "camera": "zoom-in",
+      "mood": "energetic",
+      "is_hook": true,
+      "duration_sec": null,
+      "assets": { "vo": null, "still": null, "clip": null }
+    },
+    {
+      "n": 2,
+      "narration": "Myth number one: you need twenty percent down. Most first-time buyers here put down far less.",
+      "visual": "giant cracked piggy bank labeled with a percent sign, bee-agent shrugging beside a small tidy stack of coins",
+      "characters": ["bee-agent"],
+      "camera": "pan-right",
+      "mood": "reassuring",
+      "is_hook": false,
+      "duration_sec": null,
+      "assets": { "vo": null, "still": null, "clip": null }
+    },
+    {
+      "n": 3,
+      "narration": "There are loan programs built for first-timers, some with just three percent down.",
+      "visual": "three friendly doors labeled with small percent tags, warm light glowing from each doorway",
+      "characters": [],
+      "camera": "static",
+      "mood": "hopeful",
+      "is_hook": false,
+      "duration_sec": null,
+      "assets": { "vo": null, "still": null, "clip": null }
+    },
+    {
+      "n": 4,
+      "narration": "Step one: talk to a lender before you scroll listings. Know your real budget.",
+      "visual": "bee-agent at a desk with a calculator, a simple budget sheet with a big green checkmark",
+      "characters": ["bee-agent"],
+      "camera": "zoom-in",
+      "mood": "practical",
+      "is_hook": false,
+      "duration_sec": null,
+      "assets": { "vo": null, "still": null, "clip": null }
+    },
+    {
+      "n": 5,
+      "narration": "Step two: get pre-approved. Sellers take pre-approved buyers seriously.",
+      "visual": "glowing golden ticket stamped APPROVED held up proudly by bee-agent",
+      "characters": ["bee-agent"],
+      "camera": "zoom-out",
+      "mood": "confident",
+      "is_hook": false,
+      "duration_sec": null,
+      "assets": { "vo": null, "still": null, "clip": null }
+    },
+    {
+      "n": 6,
+      "narration": "Step three: tour smart. Two or three focused showings beat twenty random ones.",
+      "visual": "map of a cartoon neighborhood with three houses circled, dotted flight path of the bee between them",
+      "characters": [],
+      "camera": "pan-left",
+      "mood": "focused",
+      "is_hook": false,
+      "duration_sec": null,
+      "assets": { "vo": null, "still": null, "clip": null }
+    },
+    {
+      "n": 7,
+      "narration": "When you find the one, your agent negotiates price, repairs, and closing costs for you.",
+      "visual": "bee-agent shaking hands with a smiling young couple in front of a cozy cartoon house with a sold sign",
+      "characters": ["bee-agent"],
+      "camera": "zoom-in",
+      "mood": "warm",
+      "is_hook": false,
+      "duration_sec": null,
+      "assets": { "vo": null, "still": null, "clip": null }
+    },
+    {
+      "n": 8,
+      "narration": "Ready to stop renting? Message The Finest Homes and let's find your first front door.",
+      "visual": "bright front door opening onto sunrise over St. George red rocks, keys dangling with a tiny bee keychain",
+      "characters": [],
+      "camera": "zoom-out",
+      "mood": "inviting",
+      "is_hook": false,
+      "duration_sec": null,
+      "assets": { "vo": null, "still": null, "clip": null }
+    }
+  ]
+}

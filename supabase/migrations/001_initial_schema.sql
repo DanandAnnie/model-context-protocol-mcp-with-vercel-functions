@@ -87,11 +87,11 @@ alter table item_images enable row level security;
 alter table staging_history enable row level security;
 
 -- Allow all operations for authenticated users (customize as needed)
-create policy "Allow all for authenticated" on properties for all using (true);
-create policy "Allow all for authenticated" on storage_units for all using (true);
-create policy "Allow all for authenticated" on items for all using (true);
-create policy "Allow all for authenticated" on item_images for all using (true);
-create policy "Allow all for authenticated" on staging_history for all using (true);
+create policy "Allow all for authenticated" on properties for all using (false) with check (false);
+create policy "Allow all for authenticated" on storage_units for all using (false) with check (false);
+create policy "Allow all for authenticated" on items for all using (false) with check (false);
+create policy "Allow all for authenticated" on item_images for all using (false) with check (false);
+create policy "Allow all for authenticated" on staging_history for all using (false) with check (false);
 
 -- Storage bucket for item images (run via Supabase dashboard or API)
 -- insert into storage.buckets (id, name, public) values ('item-images', 'item-images', true);

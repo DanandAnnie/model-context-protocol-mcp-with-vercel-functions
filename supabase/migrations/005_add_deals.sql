@@ -40,8 +40,8 @@ create index if not exists idx_deals_found_at on deals(found_at);
 alter table deals enable row level security;
 alter table deal_watches enable row level security;
 
-create policy "Allow all for authenticated" on deals for all using (true);
-create policy "Allow all for authenticated" on deal_watches for all using (true);
+create policy "Allow all for authenticated" on deals for all using (false) with check (false);
+create policy "Allow all for authenticated" on deal_watches for all using (false) with check (false);
 
 create trigger deal_watches_updated_at before update on deal_watches
   for each row execute function update_updated_at();

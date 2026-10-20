@@ -16,4 +16,4 @@ create index if not exists idx_staging_payments_property on staging_payments(pro
 create index if not exists idx_staging_payments_month on staging_payments(month_covered);
 
 alter table staging_payments enable row level security;
-create policy "Allow all for authenticated" on staging_payments for all using (true);
+create policy "Allow all for authenticated" on staging_payments for all using (false) with check (false);

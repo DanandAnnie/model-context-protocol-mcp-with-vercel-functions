@@ -126,22 +126,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const joinTeam = async (inviteCode: string) => {
     if (!user) return { error: 'Not logged in' }
 
-    // Find team by invite code
-    const { data: targetTeam, error: findErr } = await supabase
-      .from('teams')
-      .select('id, name')
-      .eq('invite_code', inviteCode.trim().toLowerCase())
-      .single()
-
-    if (findErr || !targetTeam) return { error: 'Invalid invite code' }
-
-    // Update profile to join that team
-    const { error: updateErr } = await supabase
-      .from('profiles')
-      .update({ team_id: targetTeam.id, role: 'member' })
-      .eq('id', user.id)
-
-    if (updateErr) return { error: updateErr.message }
+    const { error: joinError } = await supabase.rpc('join_staging_team', { invite: inviteCode })
+    if (joinError) return { error: joinError.message }
 
     await fetchProfile(user.id)
     return { error: null }

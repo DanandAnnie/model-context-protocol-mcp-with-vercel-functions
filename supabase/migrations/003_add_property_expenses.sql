@@ -15,7 +15,7 @@ create index if not exists idx_property_expenses_property on property_expenses(p
 create index if not exists idx_property_expenses_category on property_expenses(category);
 
 alter table property_expenses enable row level security;
-create policy "Allow all for authenticated" on property_expenses for all using (true);
+create policy "Allow all for authenticated" on property_expenses for all using (false) with check (false);
 
 create trigger property_expenses_updated_at before update on property_expenses
   for each row execute function update_updated_at();

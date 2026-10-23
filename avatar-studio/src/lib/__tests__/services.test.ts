@@ -85,6 +85,23 @@ describe("avatars", () => {
     assert.equal(avatars[0].id, created.id);
   });
 
+  it("renames a photo avatar and changes its gender, never a library presenter or someone else's", async () => {
+    const { updateAvatar, updateAvatarSchema } = await import("../services/avatars");
+    const created = await createAvatar({ name: "Dan", imageUrl: "https://example.com/p.jpg", gender: "male" }, "r1");
+    const renamed = await updateAvatar(created.id, updateAvatarSchema.parse({ name: " Daniel " }), "r1");
+    assert.equal(renamed.name, "Daniel");
+    assert.equal(renamed.gender, "male", "untouched fields stay");
+    assert.equal(renamed.imageUrl, created.imageUrl);
+    const cleared = await updateAvatar(created.id, { gender: null }, "r1");
+    assert.equal("gender" in cleared, false, "null clears the gender");
+    assert.equal((await updateAvatar(created.id, { gender: "neutral" }, "r1")).gender, "neutral");
+    assert.equal((await listAvatars("r1"))[0].name, "Daniel");
+    await assert.rejects(updateAvatar(created.id, { name: "Nope" }, "r2"), /not found/);
+    await assert.rejects(updateAvatar(STOCK_AVATARS[0].id, { name: "Nope" }, "r1"), /not found/, "library presenters are the provider's");
+    assert.throws(() => updateAvatarSchema.parse({}), /Nothing to update/);
+    assert.throws(() => updateAvatarSchema.parse({ name: "" }));
+  });
+
   it("rejects non-image inputs", () => {
     assert.throws(() => createAvatarSchema.parse({ name: "x", imageUrl: "not a url" }));
     assert.doesNotThrow(() => createAvatarSchema.parse({ name: "x", imageUrl: "data:image/png;base64,AAAA" }));
@@ -483,6 +500,12 @@ describe("scenes", () => {
     const cast = { avatars: { [ava.id]: ava, [marcus.id]: marcus }, voices: { [emma.id]: emma, [james.id]: james } };
     assert.equal((await heygen.createVideo(req, ava, emma, cast)).providerJobId, "hg_1");
     assert.deepEqual(sent!.video_inputs.map((i) => [i.character.avatar_id, i.voice.voice_id]), [[ava.id, emma.id], [marcus.id, james.id]]);
+    // Burned-in captions only when the video has no caption style of its own; the styled look comes from the subtitle track.
+    const bodyOf = () => sent as unknown as { caption: boolean };
+    await heygen.createVideo({ ...req, captions: true }, ava, emma, cast);
+    assert.equal(bodyOf().caption, true);
+    await heygen.createVideo({ ...req, captions: true, captionStyle: { position: "top", size: "large" } }, ava, emma, cast);
+    assert.equal(bodyOf().caption, false, "a styled caption is not burned in");
     // A scene layout becomes the character's scale and offset; a scene without one sends neither.
     const placed = videoRequestSchema.parse({ ...req, scenes: [{ ...req.scenes![0], layout: { scale: 1.2, x: 0.25, y: -0.1 } }, req.scenes![1]] });
     await heygen.createVideo(placed, ava, emma, cast);

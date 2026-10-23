@@ -54,6 +54,28 @@ export async function createAvatar(input: z.infer<typeof createAvatarSchema>, ow
   return getStore().put("avatar", avatar);
 }
 
+export const updateAvatarSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80).optional(),
+    /** `null` clears the gender. */
+    gender: z.enum(["male", "female", "neutral"]).nullable().optional(),
+  })
+  .refine((v) => v.name !== undefined || v.gender !== undefined, "Nothing to update");
+
+/**
+ * Renames a photo avatar or changes its gender. Library presenters belong to the provider and
+ * cannot be edited (404, like any avatar that is not the owner's). Videos keep the name they
+ * were rendered with; new renders pick up the new one.
+ */
+export async function updateAvatar(id: string, patch: z.infer<typeof updateAvatarSchema>, ownerId: string = LOCAL_OWNER): Promise<Avatar> {
+  const existing = owned(await getStore().get<Avatar>("avatar", id), ownerId, `Avatar ${id}`);
+  const next: Avatar = { ...existing };
+  if (patch.name !== undefined) next.name = patch.name;
+  if (patch.gender === null) delete next.gender;
+  else if (patch.gender !== undefined) next.gender = patch.gender;
+  return getStore().put("avatar", next);
+}
+
 export async function deleteAvatar(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
   owned(await getStore().get<Avatar>("avatar", id), ownerId, `Avatar ${id}`);
   await getStore().remove("avatar", id);

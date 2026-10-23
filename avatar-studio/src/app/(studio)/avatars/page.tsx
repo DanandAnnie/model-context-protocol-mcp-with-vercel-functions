@@ -1,7 +1,7 @@
 "use client";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
-import { Camera, Trash2, Upload, Users, Video as VideoIcon } from "lucide-react";
+import { Camera, Pencil, Trash2, Upload, Users, Video as VideoIcon } from "lucide-react";
 import { AvatarTile } from "@/components/AvatarPicker";
 import { FavoriteStar } from "@/components/FavoriteStar";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -37,6 +37,20 @@ function AvatarsInner() {
     }),
     favorites.avatarIds,
   );
+
+  async function rename(a: Avatar) {
+    const answer = window.prompt("Avatar name", a.name);
+    if (answer === null) return;
+    const name = answer.trim();
+    if (!name || name === a.name) return;
+    try {
+      await api(`/api/avatars/${a.id}`, { method: "PATCH", body: JSON.stringify({ name }) });
+      setActionErr(null);
+      refetch();
+    } catch (e) {
+      setActionErr(e instanceof Error ? e.message : "Could not rename the avatar");
+    }
+  }
 
   async function remove(a: Avatar) {
     if (!confirm(`Delete avatar "${a.name}"?`)) return;
@@ -101,13 +115,23 @@ function AvatarsInner() {
               <AvatarTile avatar={a} />
               <FavoriteStar name={a.name} on={favorites.avatarIds.has(a.id)} onToggle={() => favorites.toggle("avatar", a.id)} className="absolute left-2 top-2" />
               {a.source === "custom" && (
-                <button
-                  onClick={() => remove(a)}
-                  aria-label="Delete avatar"
-                  className="absolute right-2 top-2 rounded-full bg-white/90 p-1.5 text-slate-600 shadow hover:text-rose-600"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                <span className="absolute right-2 top-2 flex gap-1">
+                  <button
+                    onClick={() => rename(a)}
+                    aria-label={`Rename ${a.name}`}
+                    title="Rename this avatar; videos already rendered keep the old name"
+                    className="rounded-full bg-white/90 p-1.5 text-slate-600 shadow hover:text-brand-700"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => remove(a)}
+                    aria-label="Delete avatar"
+                    className="rounded-full bg-white/90 p-1.5 text-slate-600 shadow hover:text-rose-600"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </span>
               )}
             </div>
           ))}

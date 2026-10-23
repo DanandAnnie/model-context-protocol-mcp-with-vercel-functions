@@ -47,7 +47,9 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     const scenes = req.scenes?.length ? req.scenes : [{ script: req.script, background: req.background }];
     const body = {
       title: req.title,
-      caption: req.captions,
+      // HeyGen burns captions in at its own position and size; a video with a caption style of its
+      // own is captioned by the share page's subtitle track instead, so the chosen look is the only one.
+      caption: req.captions && !req.captionStyle,
       ...(webhookUrl("heygen") ? { callback_url: webhookUrl("heygen") } : {}),
       dimension: dimensionsFor(req.aspect, req.resolution),
       // One input per scene, each with its own presenter and voice when the scene names them.

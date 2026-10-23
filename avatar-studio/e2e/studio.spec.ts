@@ -188,6 +188,17 @@ test("the avatar library filters by gender and name", async ({ page }) => {
   await expect(page.getByRole("img", { name: "Lucas Meyer" })).toBeVisible();
   await expect(page.getByRole("img", { name: "Marcus Hill" })).toHaveCount(0);
   await expect(page.getByText(/^1 of \d+$/)).toBeVisible();
+  // A photo avatar can be renamed in place; a library presenter cannot be edited at all.
+  const tag = Date.now().toString(36);
+  const created = (await (await page.request.post("/api/avatars", { data: { name: `Rename me ${tag}`, imageUrl: "https://example.com/p.jpg" } })).json()).avatar as { id: string };
+  await page.goto("/avatars");
+  page.once("dialog", (d) => d.accept(`Renamed ${tag}`));
+  await page.getByRole("button", { name: `Rename Rename me ${tag}` }).click();
+  await expect(page.getByRole("img", { name: `Renamed ${tag}` })).toBeVisible();
+  expect((await (await page.request.get(`/api/avatars/${created.id}`)).json()).avatar.name).toBe(`Renamed ${tag}`);
+  expect((await page.request.patch("/api/avatars/stock_1", { data: { name: "Nope" } })).status()).toBe(404);
+  expect((await page.request.patch(`/api/avatars/${created.id}`, { data: {} })).status()).toBe(400);
+  expect((await page.request.delete(`/api/avatars/${created.id}`)).status()).toBe(200);
 });
 
 test("the voice library filters by language and gender", async ({ page }) => {

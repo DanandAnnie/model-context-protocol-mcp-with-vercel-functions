@@ -417,7 +417,7 @@ function CreateInner() {
                   {active.script.trim().split(/(?<=[.!?])\s+/)[0].slice(0, 90)}
                 </div>
               )}
-              <span className={`absolute left-3 top-3 rounded px-2 py-0.5 text-[11px] font-medium ${bgIsDark ? "bg-white/15 text-white" : "bg-black/10 text-slate-800"}`}>
+              <span className={`absolute left-3 ${captions && captionStyle.position === "top" ? "bottom-3" : "top-3"} rounded px-2 py-0.5 text-[11px] font-medium ${bgIsDark ? "bg-white/15 text-white" : "bg-black/10 text-slate-800"}`}>
                 {aspect} preview{scenes.length > 1 ? ` · scene ${activeIdx + 1}` : ""}
               </span>
             </div>
@@ -734,7 +734,7 @@ function CreateInner() {
                 {captions && (
                   <div className="rounded-lg border border-slate-200 px-3 py-3" data-testid="caption-style">
                     <div className="text-sm font-medium text-slate-800">Caption style</div>
-                    <div className="mt-0.5 text-xs text-slate-500">Where subtitles sit and how big they read on the share page and in the subtitle file.</div>
+                    <div className="mt-0.5 text-xs text-slate-500">Where subtitles sit and how big they read in the share page's subtitle track and the subtitle file. A renderer that burns captions into the video leaves them off, so this look is the only one.</div>
                     <div className="mt-2 grid gap-2 sm:grid-cols-2">
                       <div role="group" aria-label="Caption position" className="flex gap-1">
                         {CAPTION_POSITIONS.map((pos) => (

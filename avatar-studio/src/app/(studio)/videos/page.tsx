@@ -29,16 +29,19 @@ function VideosInner() {
   });
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<"all" | VideoStatus>("all");
+  const [folder, setFolder] = useState<string>("all"); // "all" | "unfiled" | folder name
+  const folders = useMemo(() => Array.from(new Set((data?.videos ?? []).map((v) => v.folder).filter((f): f is string => !!f))).sort(), [data]);
   const videos = useMemo(() => {
     const all = data?.videos ?? [];
     const needle = q.trim().toLowerCase();
     return all.filter((v) => {
       if (batch && v.batchId !== batch) return false;
+      if (folder === "unfiled" ? !!v.folder : folder !== "all" && v.folder !== folder) return false;
       const statusOk = status === "all" ? true : status === "processing" ? v.status === "processing" || v.status === "queued" : v.status === status;
       const textOk = !needle || `${v.title} ${v.script} ${v.avatarName ?? ""} ${v.voiceName ?? ""}`.toLowerCase().includes(needle);
       return statusOk && textOk;
     });
-  }, [data, q, status, batch]);
+  }, [data, q, status, batch, folder]);
   const hasAny = (data?.videos.length ?? 0) > 0;
 
   return (
@@ -65,6 +68,17 @@ function VideosInner() {
       {hasAny && (
         <div className="mb-5 flex flex-wrap items-center gap-2">
           <input className={`${inputClass} max-w-xs`} placeholder="Search title, script, avatar, voice" value={q} onChange={(e) => setQ(e.target.value)} />
+          {folders.length > 0 && (
+            <select aria-label="Folder" value={folder} onChange={(e) => setFolder(e.target.value)} className={`${inputClass} w-auto`}>
+              <option value="all">All folders</option>
+              <option value="unfiled">Unfiled</option>
+              {folders.map((f) => (
+                <option key={f} value={f}>
+                  {f}
+                </option>
+              ))}
+            </select>
+          )}
           {STATUSES.map((s) => (
             <button
               key={s}
@@ -86,7 +100,7 @@ function VideosInner() {
         <EmptyState
           icon={<Clapperboard className="h-8 w-8" />}
           title={hasAny ? "No videos match" : "No videos yet"}
-          body={hasAny ? "Try a different search or status filter." : "Your rendered videos will show up here."}
+          body={hasAny ? "Try a different search, status, or folder." : "Your rendered videos will show up here."}
         />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

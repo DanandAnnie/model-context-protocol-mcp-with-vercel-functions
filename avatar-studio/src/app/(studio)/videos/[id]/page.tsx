@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import { ArrowLeft, Captions, Check, Code2, Copy, Download, Languages, Link2, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, Captions, Check, Code2, Copy, Download, Eye, FolderOpen, Languages, Link2, Pencil, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate, formatSeconds, isDarkHex } from "@/lib/client";
@@ -24,6 +24,25 @@ export default function VideoDetailPage() {
   const video = data?.video;
 
   const savingTitle = useRef(false);
+
+  // Folder: free text with the owner's existing folders as suggestions.
+  const { data: libraryData } = useApi<{ videos: Video[] }>("/api/videos");
+  const folders = Array.from(new Set((libraryData?.videos ?? []).map((v) => v.folder).filter((f): f is string => !!f))).sort();
+  const [folderDraft, setFolderDraft] = useState<string | null>(null);
+  const [folderErr, setFolderErr] = useState<string | null>(null);
+  async function saveFolder() {
+    if (!video || folderDraft === null) return;
+    const folder = folderDraft.trim();
+    setFolderDraft(null);
+    if (folder === (video.folder ?? "")) return;
+    try {
+      const res = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify({ folder }) });
+      setData({ video: { ...video, folder: res.video.folder } });
+      setFolderErr(null);
+    } catch (e) {
+      setFolderErr(e instanceof Error ? e.message : "Could not move the video");
+    }
+  }
 
   async function saveTitle() {
     if (!video || savingTitle.current) return; // Enter triggers this, then the unmount's blur does too.
@@ -88,7 +107,7 @@ export default function VideoDetailPage() {
       <Link href="/videos" className="mb-4 inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900">
         <ArrowLeft className="h-4 w-4" /> All videos
       </Link>
-      <ErrorBanner message={error ?? renameErr} />
+      <ErrorBanner message={error ?? renameErr ?? folderErr} />
       {loading || !video ? (
         <Skeleton className="aspect-video w-full" />
       ) : (
@@ -186,6 +205,49 @@ export default function VideoDetailPage() {
                 <dl className="mt-3 space-y-2 text-sm">
                   <Row label="Status"><StatusBadge status={video.status} /></Row>
                   <Row label="Duration">{video.durationSec != null ? formatSeconds(video.durationSec) : "—"}</Row>
+                  <Row label="Share views">
+                    <span className="inline-flex items-center gap-1.5" title={video.lastViewedAt ? `Last viewed ${formatDate(video.lastViewedAt)}` : "No views yet"}>
+                      <Eye className="h-3.5 w-3.5 text-slate-400" />
+                      {video.views ?? 0}
+                    </span>
+                  </Row>
+                  <Row label="Folder">
+                    {folderDraft === null ? (
+                      <button
+                        type="button"
+                        onClick={() => setFolderDraft(video.folder ?? "")}
+                        className="inline-flex items-center gap-1.5 rounded px-1 text-slate-900 hover:bg-slate-100"
+                        title="Move to a folder"
+                        aria-label="Move to a folder"
+                      >
+                        <FolderOpen className="h-3.5 w-3.5 text-slate-400" />
+                        {video.folder ?? "Unfiled"}
+                      </button>
+                    ) : (
+                      <>
+                        <input
+                          autoFocus
+                          list="video-folders"
+                          aria-label="Folder name"
+                          value={folderDraft}
+                          maxLength={40}
+                          placeholder="Unfiled"
+                          onChange={(e) => setFolderDraft(e.target.value)}
+                          onBlur={saveFolder}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") saveFolder();
+                            if (e.key === "Escape") setFolderDraft(null);
+                          }}
+                          className="w-36 rounded border border-slate-200 px-2 py-0.5 text-right text-sm focus:border-brand-500 focus:outline-none"
+                        />
+                        <datalist id="video-folders">
+                          {folders.map((f) => (
+                            <option key={f} value={f} />
+                          ))}
+                        </datalist>
+                      </>
+                    )}
+                  </Row>
                   <Row label="Avatar">{video.avatarName ?? video.avatarId}</Row>
                   <Row label="Voice">{video.voiceName ?? video.voiceId}</Row>
                   <Row label="Speed">{video.speed}x</Row>

@@ -5,8 +5,8 @@ import { refreshSupabaseSession } from "@/lib/supabase/proxy";
 // Paths that stay reachable without a session: the landing page, login, auth
 // callbacks, public share pages, provider webhooks, and static assets.
 const PUBLIC_PREFIXES = ["/login", "/auth/", "/api/auth/", "/share/", "/api/webhooks/", "/_next/", "/favicon"];
-// Caption files back the public share player's subtitle track.
-const PUBLIC_PATTERNS = [/^\/api\/videos\/[^/]+\/captions$/];
+// Caption files back the public share player's subtitle track; view beacons come from it too.
+const PUBLIC_PATTERNS = [/^\/api\/videos\/[^/]+\/captions$/, /^\/api\/videos\/[^/]+\/view$/];
 
 export async function proxy(req: NextRequest) {
   const mode = authMode();

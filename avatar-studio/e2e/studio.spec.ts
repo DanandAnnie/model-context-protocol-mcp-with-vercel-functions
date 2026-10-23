@@ -193,3 +193,38 @@ test("brand kit pre-fills the editor and brands the share page", async ({ page }
     expect((await page.request.delete("/api/brand")).status()).toBe(204);
   }
 });
+
+test("folders filter the library and share views are counted once per viewer", async ({ page }) => {
+  // Unique names: the suite shares one store, and a retry must not see the previous attempt's videos.
+  const tag = Date.now().toString(36);
+  const folder = `Listings ${tag}`;
+  const a = await createVideoViaApi(page, `Filed video ${tag}`);
+  await createVideoViaApi(page, `Loose video ${tag}`);
+  const patch = await page.request.patch(`/api/videos/${a.id}`, { data: { folder } });
+  expect(patch.status()).toBe(200);
+  expect((await page.request.patch(`/api/videos/${a.id}`, { data: {} })).status()).toBe(400);
+
+  await page.goto("/videos");
+  await page.getByLabel("Folder").selectOption(folder);
+  await expect(page.locator("a[href^='/videos/vid_']")).toHaveCount(1);
+  await expect(page.getByText(`Filed video ${tag}`)).toBeVisible();
+  await page.getByLabel("Folder").selectOption("unfiled");
+  await expect(page.getByText(`Filed video ${tag}`)).toHaveCount(0);
+
+  // Views: nothing while rendering, then one per viewer per window once completed.
+  expect((await (await page.request.post(`/api/videos/${a.id}/view`)).json()).counted).toBe(false);
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${a.id}`)).json()).video.status, { timeout: 20_000 }).toBe("completed");
+  await page.goto(`/share/${a.id}`);
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${a.id}`)).json()).video.views).toBe(1);
+  await page.reload();
+  await page.waitForTimeout(500);
+  expect((await (await page.request.get(`/api/videos/${a.id}`)).json()).video.views).toBe(1);
+
+  await page.goto(`/videos/${a.id}`);
+  await expect(page.getByRole("button", { name: "Move to a folder" })).toContainText(folder);
+  await page.getByRole("button", { name: "Move to a folder" }).click();
+  await page.getByLabel("Folder name").fill("Archive");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", { name: "Move to a folder" })).toContainText("Archive");
+  expect((await (await page.request.get(`/api/videos/${a.id}`)).json()).video.folder).toBe("Archive");
+});

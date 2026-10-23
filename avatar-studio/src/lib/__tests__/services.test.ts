@@ -16,7 +16,10 @@ import {
   getVideo,
   listAvatars,
   listVideos,
+  recordView,
   scriptSchema,
+  updateVideo,
+  videoPatchSchema,
   videoRequestSchema,
 } from "../services";
 import { MockAvatarProvider } from "../providers/avatar/mock";
@@ -443,5 +446,33 @@ describe("brand kit", () => {
     await assert.rejects(saveBrandKit(brandKitSchema.parse({ primaryColor: "#0f766e", defaultVoiceId: "nope" }), "u1"), /not available/);
     const foreign = await createAvatar({ name: "Theirs", imageUrl: "https://example.com/t.jpg" }, "u2");
     await assert.rejects(saveBrandKit(brandKitSchema.parse({ primaryColor: "#0f766e", defaultAvatarId: foreign.id }), "u1"), /not found/);
+  });
+});
+
+describe("folders and share views", () => {
+  const req = { title: "T", script: "Hello there.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9" as const, background: { type: "color" as const, value: "#fff" }, captions: false, speed: 1 };
+
+  it("moves a video into and out of a folder without touching the title", async () => {
+    const v = await createVideo(req);
+    const moved = await updateVideo(v.id, videoPatchSchema.parse({ folder: " Listings " }));
+    assert.equal(moved.folder, "Listings");
+    assert.equal(moved.title, "T");
+    const unfiled = await updateVideo(v.id, videoPatchSchema.parse({ folder: "" }));
+    assert.equal("folder" in unfiled, false);
+    assert.throws(() => videoPatchSchema.parse({}), /Nothing to update/);
+    await assert.rejects(updateVideo(v.id, { folder: "x" }, "someone-else"), /not found/);
+  });
+
+  it("counts share views only once the render completed", async () => {
+    const v = await createVideo(req);
+    assert.deepEqual(await recordView(v.id), { views: 0, counted: false });
+    await getVideo(v.id, undefined, false).then(async (fresh) => {
+      globalThis.__avatarStudioStore!.put("video", { ...fresh, status: "completed" });
+    });
+    assert.deepEqual(await recordView(v.id), { views: 1, counted: true });
+    assert.deepEqual(await recordView(v.id, () => false), { views: 1, counted: false }, "gated repeat is not counted");
+    assert.equal((await recordView(v.id)).views, 2);
+    assert.ok((await getVideo(v.id, undefined, false)).lastViewedAt);
+    await assert.rejects(recordView("vid_missing"), /not found/);
   });
 });

@@ -4,6 +4,7 @@ import { Sparkles } from "lucide-react";
 import { NotFoundError, PUBLIC_ACCESS, getBrandKit, getVideo } from "@/lib/services";
 import { LOCAL_OWNER } from "@/lib/owner";
 import { formatSeconds } from "@/lib/client";
+import { ViewBeacon } from "@/components/ViewBeacon";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,7 @@ export default async function SharePage({ params }: { params: Promise<{ id: stri
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
+      {video.status === "completed" && <ViewBeacon videoId={video.id} />}
       {accent && <div className="h-1.5" style={{ background: accent }} aria-hidden />}
       <header className="mx-auto flex max-w-4xl items-center justify-between px-6 py-5">
         {brand && (brand.name || brand.logoUrl) ? (

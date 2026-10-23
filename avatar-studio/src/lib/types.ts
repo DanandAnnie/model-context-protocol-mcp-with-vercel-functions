@@ -79,6 +79,11 @@ export interface Video extends VideoRequest {
   rowLabel?: string;
   avatarName?: string;
   voiceName?: string;
+  /** Library folder name; unfiled when absent. */
+  folder?: string;
+  /** Share page views (completed videos only; one per viewer per window). */
+  views?: number;
+  lastViewedAt?: string;
   provider: string;
   providerJobId?: string;
   videoUrl?: string;

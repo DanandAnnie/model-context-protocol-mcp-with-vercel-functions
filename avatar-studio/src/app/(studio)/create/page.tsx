@@ -439,7 +439,7 @@ function CreateInner() {
                 onClick={() => setTab(key)}
                 className={`flex min-w-0 flex-1 items-center justify-center gap-1 px-1 py-3 text-xs font-medium sm:gap-2 sm:px-3 sm:text-sm ${tab === key ? "border-b-2 border-brand-600 text-brand-700" : "text-slate-500 hover:text-slate-900"}`}
               >
-                <Icon className="h-4 w-4" /> {label}
+                <Icon className="h-4 w-4 shrink-0" /> {label}
               </button>
             ))}
           </div>

@@ -8,6 +8,18 @@ export const ASPECT_DIMENSIONS: Record<AspectRatio, { width: number; height: num
   "1:1": { width: 1080, height: 1080 },
 };
 
+/** Output quality; the short side of the frame in pixels. */
+export type Resolution = "720p" | "1080p";
+export const RESOLUTIONS: Resolution[] = ["720p", "1080p"];
+
+/** Pixel dimensions for an aspect ratio at a given quality (1080p when omitted). */
+export function dimensionsFor(aspect: AspectRatio, resolution: Resolution = "1080p"): { width: number; height: number } {
+  const full = ASPECT_DIMENSIONS[aspect];
+  if (resolution === "1080p") return full;
+  const scale = 720 / 1080;
+  return { width: Math.round(full.width * scale), height: Math.round(full.height * scale) };
+}
+
 export type AvatarSource = "stock" | "custom" | "provider";
 
 /** Upper bound on scenes per video, shared by the editor and the request schema. */
@@ -68,6 +80,8 @@ export interface VideoRequest {
   avatarId: string;
   voiceId: string;
   aspect: AspectRatio;
+  /** Output quality; videos saved before this option exists have none and rendered at 1080p. */
+  resolution?: Resolution;
   background: Background;
   captions: boolean;
   /** 0.5 - 1.5 speaking rate multiplier. */

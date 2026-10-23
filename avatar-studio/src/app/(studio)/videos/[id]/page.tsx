@@ -142,7 +142,7 @@ export default function VideoDetailPage() {
                 </button>
               )
             }
-            subtitle={`Created ${formatDate(video.createdAt)} · ${video.aspect} · ${video.provider}`}
+            subtitle={`Created ${formatDate(video.createdAt)} · ${video.aspect}${video.resolution ? ` · ${video.resolution}` : ""} · ${video.provider}`}
             action={
               <div className="flex items-center gap-2">
                 {video.videoUrl && (

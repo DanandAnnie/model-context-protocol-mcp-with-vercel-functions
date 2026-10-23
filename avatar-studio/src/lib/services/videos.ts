@@ -23,6 +23,7 @@ export const videoRequestSchema = z
     avatarId: z.string().min(1),
     voiceId: z.string().min(1),
     aspect: z.enum(["16:9", "9:16", "1:1"]).default("16:9"),
+    resolution: z.enum(["720p", "1080p"]).default("1080p"),
     background: backgroundSchema.default({ type: "color", value: "#f1f5f9" }),
     captions: z.boolean().default(false),
     speed: z.number().min(0.5).max(1.5).default(1),

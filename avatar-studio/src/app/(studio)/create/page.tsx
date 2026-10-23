@@ -10,7 +10,7 @@ import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib/client";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
-import { MAX_SCENES, type AspectRatio, type Avatar, type Background, type BrandKit, type Scene, type Video, type Voice } from "@/lib/types";
+import { MAX_SCENES, RESOLUTIONS, type AspectRatio, type Avatar, type Background, type BrandKit, type Resolution, type Scene, type Video, type Voice } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -20,6 +20,7 @@ interface Draft {
   title: string;
   scenes: Scene[];
   aspect: AspectRatio;
+  resolution?: Resolution;
   captions: boolean;
   speed: number;
   avatarId?: string;
@@ -90,6 +91,7 @@ function CreateInner() {
   const [avatar, setAvatar] = useState<Avatar | null>(null);
   const [voice, setVoice] = useState<Voice | null>(null);
   const [aspect, setAspect] = useState<AspectRatio>("16:9");
+  const [resolution, setResolution] = useState<Resolution>("1080p");
   const [captions, setCaptions] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [tab, setTab] = useState<Tab>("avatar");
@@ -137,6 +139,7 @@ function CreateInner() {
     setScenes(d.scenes.map((sc) => newScene(sc.script, sc.background)));
     setActiveIdx(0);
     setAspect(d.aspect);
+    setResolution(d.resolution ?? "1080p");
     setCaptions(d.captions);
     setSpeed(d.speed);
     setPrefill({ avatarId: d.avatarId, voiceId: d.voiceId });
@@ -148,10 +151,10 @@ function CreateInner() {
     if (!hydrated.current) return;
     const empty = scenes.every((sc) => !sc.script.trim()) && title === "Untitled video";
     const t = setTimeout(() => {
-      writeDraft(empty ? null : { title, scenes, aspect, captions, speed, avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
+      writeDraft(empty ? null : { title, scenes, aspect, resolution, captions, speed, avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
     }, 400);
     return () => clearTimeout(t);
-  }, [title, scenes, aspect, captions, speed, avatar, voice]);
+  }, [title, scenes, aspect, resolution, captions, speed, avatar, voice]);
 
   function discardDraft() {
     writeDraft(null);
@@ -159,6 +162,7 @@ function CreateInner() {
     setScenes([newScene()]);
     setActiveIdx(0);
     setAspect("16:9");
+    setResolution("1080p");
     setCaptions(false);
     setSpeed(1);
     setDraftRestored(null);
@@ -197,6 +201,7 @@ function CreateInner() {
         setScenes(video.scenes?.length ? video.scenes.map((sc) => newScene(sc.script, sc.background)) : [newScene(video.script, video.background)]);
         setActiveIdx(0);
         setAspect(video.aspect);
+        setResolution(video.resolution ?? "1080p");
         setCaptions(video.captions);
         setSpeed(video.speed);
         setPrefill({ avatarId: video.avatarId, voiceId: video.voiceId });
@@ -239,7 +244,7 @@ function CreateInner() {
     try {
       const { video } = await api<{ video: Video }>("/api/videos", {
         method: "POST",
-        body: JSON.stringify({ title, scenes, avatarId: avatar.id, voiceId: voice.id, aspect, captions, speed }),
+        body: JSON.stringify({ title, scenes, avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, speed }),
       });
       writeDraft(null);
       router.push(`/videos/${video.id}`);
@@ -519,6 +524,23 @@ function CreateInner() {
                       >
                         {a}
                         <div className="text-[11px] font-normal text-slate-500">{a === "16:9" ? "Landscape" : a === "9:16" ? "Portrait" : "Square"}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div className="mb-2 text-sm font-medium text-slate-700">Output quality</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {RESOLUTIONS.map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        aria-pressed={resolution === r}
+                        onClick={() => setResolution(r)}
+                        className={`rounded-lg border px-3 py-3 text-sm font-medium ${resolution === r ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}
+                      >
+                        {r}
+                        <div className="text-[11px] font-normal text-slate-500">{r === "720p" ? "HD · faster, smaller file" : "Full HD · best quality"}</div>
                       </button>
                     ))}
                   </div>

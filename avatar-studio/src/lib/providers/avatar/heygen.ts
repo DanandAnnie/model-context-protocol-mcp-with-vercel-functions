@@ -1,4 +1,4 @@
-import { ASPECT_DIMENSIONS, type Avatar, type VideoRequest, type Voice } from "../../types";
+import { dimensionsFor, type Avatar, type VideoRequest, type Voice } from "../../types";
 import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
 import { HeyGenClient } from "../heygen-client";
@@ -57,7 +57,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       title: req.title,
       caption: req.captions,
       ...(webhookUrl("heygen") ? { callback_url: webhookUrl("heygen") } : {}),
-      dimension: ASPECT_DIMENSIONS[req.aspect],
+      dimension: dimensionsFor(req.aspect, req.resolution),
       video_inputs: scenes.map((scene) => ({
         character,
         voice: { type: "text", input_text: scene.script, voice_id: voice?.id ?? req.voiceId, speed: req.speed },

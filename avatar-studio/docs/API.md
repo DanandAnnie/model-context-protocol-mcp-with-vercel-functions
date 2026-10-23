@@ -59,6 +59,7 @@ Instead of `script`, send `scenes` (1 to 20), each with its own `script` and `ba
 | `avatarId` | string | from `GET /api/avatars` |
 | `voiceId` | string | from `GET /api/voices` |
 | `aspect` | `16:9` \| `9:16` \| `1:1` | default `16:9` |
+| `resolution` | `720p` \| `1080p` | default `1080p`; 1080p is the long side at 1920 (16:9) or 1080 (9:16, 1:1), 720p scales both sides down |
 | `background` | `{ type: "color" \| "image", value }` | default light grey |
 | `captions` | boolean | default `false` |
 | `speed` | 0.5–1.5 | default `1` |

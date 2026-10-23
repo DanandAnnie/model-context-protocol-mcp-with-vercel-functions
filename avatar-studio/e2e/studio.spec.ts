@@ -62,12 +62,17 @@ test("templates pre-fill the editor and edit-a-copy restores settings", async ({
   await expect(page.getByText("9:16 preview")).toBeVisible();
   await page.getByRole("button", { name: "Voice" }).click();
   await page.getByText("Olivia").click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("button", { name: /^720p/ }).click();
   await page.getByRole("button", { name: "Generate video" }).click();
   await page.waitForURL(/\/videos\/vid_/);
+  await expect(page.getByText(/9:16 · 720p/)).toBeVisible();
   await page.locator("a:has-text('Edit a copy')").click();
   await page.waitForURL(/\/create\?from=/);
   await expect(page.locator("textarea")).toHaveValue(/Welcome to \{address\}/);
   await expect(page.getByText(/Olivia · 9:16/)).toBeVisible();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByRole("button", { name: /^720p/ })).toHaveAttribute("aria-pressed", "true");
 });
 
 test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page }) => {
@@ -152,6 +157,13 @@ test("API validation and webhook guard", async ({ request }) => {
   expect((await request.post("/api/videos", { data: { title: "", script: "" } })).status()).toBe(400);
   const badVoice = await request.post("/api/videos", { data: { title: "t", script: "hi", avatarId: "stock_1", voiceId: "zzz" } });
   expect(badVoice.status()).toBe(400);
+  const base = { title: "q", script: "hi", avatarId: "stock_1", voiceId: "stock_voice_1" };
+  expect((await request.post("/api/videos", { data: { ...base, resolution: "4k" } })).status()).toBe(400);
+  const hd = await request.post("/api/videos", { data: { ...base, resolution: "720p" } });
+  expect(hd.status()).toBe(201);
+  expect((await hd.json()).video.resolution).toBe("720p");
+  const full = await request.post("/api/videos", { data: base });
+  expect((await full.json()).video.resolution).toBe("1080p");
   expect((await request.post("/api/webhooks/heygen", { data: {} })).status()).toBe(503);
   const preview = await request.post("/api/voices/preview", { data: { voiceId: "stock_voice_1", text: "hi" } });
   expect(preview.status()).toBe(204);

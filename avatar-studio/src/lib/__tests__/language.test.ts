@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { languageCode, languageTag } from "../language";
+import { languageCode, languageLabel, languageTag } from "../language";
 
 describe("languageTag", () => {
   it("passes tags through with normalised casing", () => {
@@ -33,5 +33,14 @@ describe("languageTag", () => {
     assert.equal(languageCode("en-GB"), "en");
     assert.equal(languageCode("German"), "de");
     assert.equal(languageCode("nope"), undefined);
+  });
+});
+
+describe("languageLabel", () => {
+  it("names provider language values for people", () => {
+    assert.equal(languageLabel("en-GB"), "British English");
+    assert.match(languageLabel("ja-JP"), /^Japanese/);
+    assert.equal(languageLabel("Spanish (Mexico)"), "Spanish");
+    assert.equal(languageLabel("klingon"), "klingon");
   });
 });

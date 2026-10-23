@@ -92,6 +92,22 @@ test("the library pages large batches and filters on the server", async ({ page 
   await expect(cards).toHaveCount(10);
 });
 
+test("the voice library filters by language and gender", async ({ page }) => {
+  await page.goto("/voices");
+  await expect(page.getByText("Emma", { exact: true })).toBeVisible();
+  await page.getByLabel("Language").selectOption({ label: "British English" });
+  await expect(page.getByText("Olivia", { exact: true })).toBeVisible();
+  await expect(page.getByText("Emma", { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/1 of \d+ voices/)).toBeVisible();
+  await page.getByLabel("Language").selectOption("all");
+  await page.getByLabel("Gender").selectOption("male");
+  await expect(page.getByText("James", { exact: true })).toBeVisible();
+  await expect(page.getByText("Olivia", { exact: true })).toHaveCount(0);
+  await page.getByPlaceholder(/Search by name/).fill("Kenji");
+  await expect(page.getByText("Kenji", { exact: true })).toBeVisible();
+  await expect(page.getByText("James", { exact: true })).toHaveCount(0);
+});
+
 test("templates pre-fill the editor and edit-a-copy restores settings", async ({ page }) => {
   await page.goto("/templates");
   await page.getByRole("button", { name: "Real estate" }).click();

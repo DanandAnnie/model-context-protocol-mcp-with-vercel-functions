@@ -7,7 +7,10 @@ import { VoiceRow } from "@/components/VoicePicker";
 import { EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useVoicePreview } from "@/hooks/useVoicePreview";
+import { languageLabel } from "@/lib/language";
 import type { ProviderStatus, Voice } from "@/lib/types";
+
+const GENDERS: Array<NonNullable<Voice["gender"]>> = ["female", "male", "neutral"];
 
 const SAMPLE = "Hi, this is a quick preview of my voice. I can read your script in any tone you need.";
 
@@ -30,12 +33,25 @@ export default function VoicesPage() {
   const [sample, setSample] = useState(SAMPLE);
   const [previewErr, setPreviewErr] = useState<string | null>(null);
 
+  const [language, setLanguage] = useState("all");
+  const [gender, setGender] = useState<"all" | NonNullable<Voice["gender"]>>("all");
+  // Languages offered by the current voice provider, named for people ("en-GB" → "British English").
+  const languages = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const v of data?.voices ?? []) if (v.language && !seen.has(v.language)) seen.set(v.language, languageLabel(v.language));
+    return Array.from(seen, ([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [data]);
+  const genders = useMemo(() => GENDERS.filter((g) => (data?.voices ?? []).some((v) => v.gender === g)), [data]);
+
   const voices = useMemo(() => {
     const all = data?.voices ?? [];
     const needle = q.trim().toLowerCase();
-    if (!needle) return all;
-    return all.filter((v) => [v.name, v.language, v.gender, ...(v.tags ?? [])].filter(Boolean).join(" ").toLowerCase().includes(needle));
-  }, [data, q]);
+    return all.filter((v) => {
+      if (language !== "all" && v.language !== language) return false;
+      if (gender !== "all" && v.gender !== gender) return false;
+      return !needle || [v.name, v.language, v.gender, ...(v.tags ?? [])].filter(Boolean).join(" ").toLowerCase().includes(needle);
+    });
+  }, [data, q, language, gender]);
 
   return (
     <>
@@ -48,6 +64,27 @@ export default function VoicesPage() {
         <input className={inputClass} placeholder="Search by name, language, or style" value={q} onChange={(e) => setQ(e.target.value)} />
         <input className={inputClass} value={sample} onChange={(e) => setSample(e.target.value)} placeholder="Sample text to speak" />
       </div>
+      {(languages.length > 1 || genders.length > 1) && (
+        <div className="mb-5 flex flex-wrap items-center gap-2">
+          {languages.length > 1 && (
+            <select aria-label="Language" value={language} onChange={(e) => setLanguage(e.target.value)} className={`${inputClass} w-auto`}>
+              <option value="all">All languages</option>
+              {languages.map((l) => (
+                <option key={l.value} value={l.value}>{l.label}</option>
+              ))}
+            </select>
+          )}
+          {genders.length > 1 && (
+            <select aria-label="Gender" value={gender} onChange={(e) => setGender(e.target.value as typeof gender)} className={`${inputClass} w-auto`}>
+              <option value="all">Any gender</option>
+              {genders.map((g) => (
+                <option key={g} value={g}>{g[0].toUpperCase() + g.slice(1)}</option>
+              ))}
+            </select>
+          )}
+          <span className="text-xs text-slate-500">{voices.length} of {data?.voices.length ?? 0} voices</span>
+        </div>
+      )}
       {loading ? (
         <div className="space-y-2">
           {Array.from({ length: 6 }).map((_, i) => (

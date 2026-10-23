@@ -51,3 +51,14 @@ export function languageTag(input?: string | null): string | undefined {
 export function languageCode(input?: string | null): string | undefined {
   return languageTag(input)?.split("-")[0];
 }
+
+/** A readable name for a provider language value ("en-GB" → "British English"); the value itself when unknown. */
+export function languageLabel(value: string): string {
+  const tag = languageTag(value);
+  if (!tag) return value;
+  try {
+    return new Intl.DisplayNames(["en"], { type: "language" }).of(tag) ?? value;
+  } catch {
+    return value;
+  }
+}

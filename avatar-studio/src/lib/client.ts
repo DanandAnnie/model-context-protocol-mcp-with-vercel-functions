@@ -1,6 +1,7 @@
 // Browser-side helpers for calling the app's own API.
 export class ApiError extends Error {
-  constructor(message: string, public status: number, public issues?: unknown) {
+  /** `body` is the parsed error response, for routes that return a record alongside the error (e.g. a failed render). */
+  constructor(message: string, public status: number, public issues?: unknown, public body?: Record<string, unknown>) {
     super(message);
   }
 }
@@ -14,7 +15,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const text = await res.text();
   const body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
   if (!res.ok) {
-    throw new ApiError((body.error as string) ?? `Request failed (${res.status})`, res.status, body.issues);
+    throw new ApiError((body.error as string) ?? `Request failed (${res.status})`, res.status, body.issues, body);
   }
   return body as T;
 }

@@ -62,7 +62,7 @@ export default async function SharePage({ params }: { params: Promise<{ id: stri
         </div>
         {video.shareDownload && video.status === "completed" && video.videoUrl && (
           <p className="mt-4">
-            <a href={video.videoUrl} download className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-700">
+            <a href={video.videoUrl} download target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-700">
               Download video
             </a>
           </p>

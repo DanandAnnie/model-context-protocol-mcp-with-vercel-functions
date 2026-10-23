@@ -20,7 +20,7 @@ export const batchRequestSchema = z.object({
   avatarId: z.string().min(1),
   voiceId: z.string().min(1),
   aspect: z.enum(["16:9", "9:16", "1:1"]).default("16:9"),
-  resolution: z.enum(["720p", "1080p"]).optional(),
+  resolution: z.enum(["720p", "1080p"]).default("1080p"),
   background: backgroundSchema.default({ type: "color", value: "#f1f5f9" }),
   captions: z.boolean().default(false),
   speed: z.number().min(0.5).max(1.5).default(1),
@@ -77,7 +77,7 @@ export async function createBatch(input: z.infer<typeof batchRequestSchema>, own
         avatarId: input.avatarId,
         voiceId: input.voiceId,
         aspect: input.aspect,
-        resolution: input.resolution ?? "1080p",
+        resolution: input.resolution,
         background: input.background,
         captions: input.captions,
         speed: input.speed,
@@ -85,8 +85,9 @@ export async function createBatch(input: z.infer<typeof batchRequestSchema>, own
       ownerId,
       ctx,
       true,
+      { batchId, rowLabel: label },
     );
-    videos[i] = await getStore().put("video", { ...video, batchId, rowLabel: label });
+    videos[i] = video;
     if (video.status === "failed") failed.push({ row: i + 1, reason: video.error ?? "The render could not be started" });
   };
   await runWithConcurrency(allowedRows, BATCH_CONCURRENCY, startRow);

@@ -79,7 +79,10 @@ export async function resolveRenderContext(req: Pick<VideoRequest, "avatarId" | 
  * Start a render. The allowance check is read-then-write and therefore
  * best-effort under concurrent requests; batches reserve their rows up front.
  */
-export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWNER, ctx?: RenderContext, skipLimit = false): Promise<Video> {
+/** Library fields a caller may set on a new video alongside the render request (batch row, folder, retry link). */
+export type VideoExtras = Partial<Pick<Video, "folder" | "batchId" | "rowLabel" | "retryOf">>;
+
+export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWNER, ctx?: RenderContext, skipLimit = false, extras: VideoExtras = {}): Promise<Video> {
   if (!skipLimit) await enforceRenderLimit(ownerId);
   const resolved = ctx ?? (await resolveRenderContext(req, ownerId));
   let avatar = resolved.avatar;
@@ -88,6 +91,7 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
 
   const base: Video = {
     ...req,
+    ...stripUndefined(extras),
     id: newId("vid"),
     ownerId,
     status: "queued",
@@ -226,9 +230,8 @@ export async function retryVideo(id: string, ownerId: string = LOCAL_OWNER): Pro
     captions: failed.captions,
     speed: failed.speed,
   };
-  const video = await createVideo(req, ownerId);
-  const carried = stripUndefined({ folder: failed.folder, batchId: failed.batchId, rowLabel: failed.rowLabel, retryOf: failed.id });
-  return Object.keys(carried).length ? getStore().put("video", { ...video, ...carried }) : video;
+  // One write: the provider's webhook can land as soon as the job exists, so nothing may overwrite the stored video afterwards.
+  return createVideo(req, ownerId, undefined, false, { folder: failed.folder, batchId: failed.batchId, rowLabel: failed.rowLabel, retryOf: failed.id });
 }
 
 export async function deleteVideo(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {

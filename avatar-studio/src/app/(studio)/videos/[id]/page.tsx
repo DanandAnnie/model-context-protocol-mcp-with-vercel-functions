@@ -5,7 +5,7 @@ import { useRef, useState } from "react";
 import { ArrowLeft, Captions, Check, Code2, Copy, Download, Eye, FolderOpen, Languages, Link2, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
-import { api, formatDate, formatSeconds, isDarkHex } from "@/lib/client";
+import { ApiError, api, formatDate, formatSeconds, isDarkHex } from "@/lib/client";
 import type { Video } from "@/lib/types";
 
 export default function VideoDetailPage() {
@@ -117,6 +117,12 @@ export default function VideoDetailPage() {
       const { video: next } = await api<{ video: Video }>(`/api/videos/${video.id}/retry`, { method: "POST" });
       router.push(`/videos/${next.id}`);
     } catch (e) {
+      // A refused start still records the new (failed) video; show it rather than piling up silent copies.
+      const failedId = e instanceof ApiError ? (e.body?.video as { id?: string } | undefined)?.id : undefined;
+      if (failedId) {
+        router.push(`/videos/${failedId}`);
+        return;
+      }
       setRetryErr(e instanceof Error ? e.message : "Could not retry the render");
       setRetrying(false);
     }

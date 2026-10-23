@@ -361,7 +361,7 @@ describe("personalized batches", () => {
     assert.equal(preview.rowCount, 2);
     assert.deepEqual(preview.missing, []);
     assert.equal(preview.samples[1].script, "Hi Priya from Denver.");
-    const result = await createBatch({ title: "Welcome", scriptTemplate: "Hi {name} from {city}.", csv, avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, "batch-user");
+    const result = await createBatch({ title: "Welcome", scriptTemplate: "Hi {name} from {city}.", csv, avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, aspect: "16:9", resolution: "1080p", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, "batch-user");
     assert.equal(result.videos.length, 2);
     assert.ok(result.videos.every((v) => v.batchId === result.batchId));
     assert.equal(result.videos[0].title, "Welcome – Jordan");
@@ -373,7 +373,7 @@ describe("personalized batches", () => {
   it("rejects missing columns and stops at the allowance", async () => {
     const { createBatch } = await import("../services");
     const { config } = await import("../config");
-    const base = { title: "W", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, aspect: "16:9" as const, background: { type: "color" as const, value: "#fff" }, captions: false, speed: 1 };
+    const base = { title: "W", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, aspect: "16:9" as const, resolution: "1080p" as const, background: { type: "color" as const, value: "#fff" }, captions: false, speed: 1 };
     await assert.rejects(createBatch({ ...base, scriptTemplate: "Hi {nope}", csv: "name\nA" }, "u"), /does not have: nope/);
     await assert.rejects(createBatch({ ...base, scriptTemplate: "Hi", csv: "name" }, "u"), /at least one data row/);
     const original = config.renderLimitPerMonth;
@@ -442,7 +442,7 @@ describe("second review fixes", () => {
   it("batch reserves the allowance up front and reports failed starts", async () => {
     const { createBatch } = await import("../services");
     const { config } = await import("../config");
-    const base = { title: "W", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, aspect: "16:9" as const, background: { type: "color" as const, value: "#fff" }, captions: false, speed: 1 };
+    const base = { title: "W", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, aspect: "16:9" as const, resolution: "1080p" as const, background: { type: "color" as const, value: "#fff" }, captions: false, speed: 1 };
     const original = config.renderLimitPerMonth;
     (config as { renderLimitPerMonth?: number }).renderLimitPerMonth = 3;
     try {

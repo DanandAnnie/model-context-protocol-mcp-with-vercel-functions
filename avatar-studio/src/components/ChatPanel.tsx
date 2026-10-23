@@ -84,12 +84,26 @@ export function ChatPanel({
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, busy]);
+  /** Drop the recogniser without letting its final `onend` send what was heard. */
+  function dropRecognizer() {
+    const rec = recognizer.current;
+    recognizer.current = null;
+    heard.current = "";
+    if (rec) {
+      rec.onresult = null;
+      rec.onerror = null;
+      rec.onend = null;
+      rec.abort();
+    }
+  }
+
   useEffect(() => {
     setCanListen(recognizerCtor() !== null);
     return () => {
       window.speechSynthesis?.cancel();
-      recognizer.current?.abort();
+      dropRecognizer();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function speak(text: string) {
@@ -178,7 +192,8 @@ export function ChatPanel({
 
   function reset() {
     window.speechSynthesis?.cancel();
-    recognizer.current?.abort();
+    dropRecognizer();
+    setListening(false);
     setSpeaking(false);
     setMessages([]);
     setErr(null);

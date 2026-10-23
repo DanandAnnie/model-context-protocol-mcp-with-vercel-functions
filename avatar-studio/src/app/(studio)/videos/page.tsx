@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { ArchiveRestore, CheckSquare, Clapperboard, FolderInput, Link2, Link2Off, Trash2, X } from "lucide-react";
+import { ArchiveRestore, CheckSquare, Clapperboard, FolderInput, FolderMinus, FolderPen, Link2, Link2Off, Trash2, X } from "lucide-react";
 import { api } from "@/lib/client";
 import { VideoCard } from "@/components/VideoCard";
 import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -83,8 +83,37 @@ function VideosInner() {
     setSelecting(false);
     setSelected(new Set());
   }
+  // Folder management: rename the chosen folder (merging into an existing name) or remove it, leaving its videos unfiled.
+  const [folderBusy, setFolderBusy] = useState(false);
+  async function manageFolder(remove: boolean) {
+    if (folder === "all" || folder === "unfiled") return;
+    let to = "";
+    if (remove) {
+      if (!window.confirm(`Remove the folder "${folder}"? Its videos stay in the library as unfiled.`)) return;
+    } else {
+      const answer = window.prompt("New folder name", folder);
+      if (answer === null) return;
+      to = answer.trim();
+      if (!to || to === folder) return;
+    }
+    setFolderBusy(true);
+    setBulkErr(null);
+    try {
+      await api("/api/videos/folders", { method: "POST", body: JSON.stringify({ from: folder, to }) });
+      setFolder(to || "all");
+      await refetch();
+    } catch (e) {
+      setBulkErr(e instanceof Error ? e.message : "Could not update the folder");
+    } finally {
+      setFolderBusy(false);
+    }
+  }
   // A new filter hides cards; drop the selection so bulk actions only ever touch what is visible.
   useEffect(() => setSelected(new Set()), [q, status, folder, batch, trash]);
+  // The last purge empties both views; leave the trash so the "No videos yet" state (and the filter bar) comes back.
+  useEffect(() => {
+    if (trash && data && data.total === 0 && data.trashed === 0) setTrash(false);
+  }, [data, trash]);
   async function bulk(action: BulkAction) {
     const ids = Array.from(selected);
     if (!ids.length) return;
@@ -93,7 +122,7 @@ function VideosInner() {
       const answer = window.prompt("Folder name (leave empty to move to Unfiled)", "");
       if (answer === null) return;
       targetFolder = answer;
-    } else if (action === "delete" && !window.confirm(`Move ${ids.length} ${ids.length === 1 ? "video" : "videos"} to the trash? You can restore them for ${TRASH_RETENTION_DAYS} days.`)) {
+    } else if (action === "delete" && !window.confirm(`Move ${ids.length} ${ids.length === 1 ? "video" : "videos"} to the trash? You can restore ${ids.length === 1 ? "it" : "them"} for ${TRASH_RETENTION_DAYS} days.`)) {
       return;
     } else if (action === "purge" && !window.confirm(`Delete ${ids.length} ${ids.length === 1 ? "video" : "videos"} for good? This cannot be undone.`)) {
       return;
@@ -154,6 +183,16 @@ function VideosInner() {
                 </option>
               ))}
             </select>
+          )}
+          {folder !== "all" && folder !== "unfiled" && !trash && (
+            <span className="flex gap-1" data-testid="folder-actions">
+              <button type="button" onClick={() => manageFolder(false)} disabled={folderBusy} aria-label="Rename folder" title="Rename this folder" className="rounded p-1.5 text-slate-500 hover:bg-slate-100 disabled:opacity-50">
+                <FolderPen className="h-4 w-4" />
+              </button>
+              <button type="button" onClick={() => manageFolder(true)} disabled={folderBusy} aria-label="Remove folder" title="Remove this folder; its videos become unfiled" className="rounded p-1.5 text-slate-500 hover:bg-slate-100 disabled:opacity-50">
+                <FolderMinus className="h-4 w-4" />
+              </button>
+            </span>
           )}
           <span className="flex-1" />
           {selecting ? (

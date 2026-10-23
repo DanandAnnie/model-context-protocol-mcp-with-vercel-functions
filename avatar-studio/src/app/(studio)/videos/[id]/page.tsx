@@ -381,7 +381,7 @@ export default function VideoDetailPage() {
                     <Download className="h-4 w-4" /> Download
                   </a>
                 )}
-                {video.status === "completed" && (
+                {video.status === "completed" && !video.deletedAt && (
                   <>
                     <a href={`/api/videos/${video.id}/captions`} download className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50" title="Also available as WebVTT with ?format=vtt">
                       <Captions className="h-4 w-4" /> Captions (.srt)
@@ -669,10 +669,10 @@ export default function VideoDetailPage() {
                     />
                     <textarea className={`${inputClass} min-h-[60px]`} aria-label="Message" placeholder="A note for the recipients (optional)" maxLength={500} value={mailMsg} onChange={(e) => setMailMsg(e.target.value)} />
                     <div className="flex flex-wrap items-center gap-2">
-                      <Button type="submit" className="px-3 py-1.5 text-xs" loading={mailBusy} disabled={mailRecipients.length === 0 || !shareLive || shareExpired(video)}>
+                      <Button type="submit" className="px-3 py-1.5 text-xs" loading={mailBusy} disabled={mailRecipients.length === 0 || !shareLive || shareExpired(video) || !!video.deletedAt}>
                         Send link
                       </Button>
-                      {(!shareLive || shareExpired(video)) && <span className="text-xs text-slate-500">Turn the share link on first.</span>}
+                      {video.deletedAt ? <span className="text-xs text-slate-500">Restore the video from the trash first.</span> : (!shareLive || shareExpired(video)) && <span className="text-xs text-slate-500">Turn the share link on first.</span>}
                       {/* Always mounted so screen readers announce the first message too. */}
                       <span className={`text-xs ${mailStatus?.ok ? "text-emerald-700" : "text-rose-600"}`} data-testid="share-email-status" role="status">
                         {mailStatus?.text}

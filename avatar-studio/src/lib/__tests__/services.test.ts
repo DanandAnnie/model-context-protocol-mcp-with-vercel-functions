@@ -144,6 +144,7 @@ describe("videos", () => {
     assert.deepEqual((await listVideos(LOCAL_OWNER, false, true)).map((v) => v.id), [a.id], "and shows in the trash");
     await deleteVideo(a.id, LOCAL_OWNER, true);
     await assert.rejects(deleteVideo(a.id), /not found/, "deleted for good");
+    await assert.rejects(deleteVideo(b.id, LOCAL_OWNER, true), /trash first/, "deleting for good is only offered from the trash");
     assert.equal((await listVideos(LOCAL_OWNER, false, true)).length, 0);
   });
 
@@ -179,7 +180,7 @@ describe("videos", () => {
     const back = await restoreVideo(v.id);
     assert.equal("deletedAt" in back, false);
     assert.equal(back.views, 3);
-    assert.equal((await restoreVideo(v.id)).id, v.id, "restoring a live video is a no-op");
+    assert.equal((await restoreVideo(v.id)).updatedAt, back.updatedAt, "restoring a live video is a no-op");
     await getVideo(v.id, PUBLIC_ACCESS, false);
     // A failed render in the trash cannot be retried until it is restored.
     await globalThis.__avatarStudioStore!.put("video", { ...(await getVideo(v.id, undefined, false)), status: "failed", deletedAt: new Date().toISOString() });
@@ -188,9 +189,48 @@ describe("videos", () => {
     await updateVideo(v.id, videoPatchSchema.parse({ sharePassword: "secret12" }));
     const old = new Date(Date.now() - (TRASH_RETENTION_DAYS * 86_400_000 + 1000)).toISOString();
     await globalThis.__avatarStudioStore!.put("video", { ...(await getVideo(v.id, undefined, false)), deletedAt: old });
+    await assert.rejects(getVideo(v.id, undefined, false), /not found/, "a due video reads as gone before any listing purges it");
+    await assert.rejects(restoreVideo(v.id), /not found/, "and cannot be restored");
     assert.equal((await listVideos(LOCAL_OWNER, false, true)).length, 0, "purged on the way out");
     await assert.rejects(getVideo(v.id, undefined, false), /not found/);
     assert.equal(await getShareLock(v.id), null, "the lock went with it");
+    // A write that raced a purge never brings the record back.
+    await assert.rejects(updateVideo(v.id, videoPatchSchema.parse({ title: "ghost" })), /not found/);
+    assert.equal(await globalThis.__avatarStudioStore!.get("video", v.id), null);
+  });
+
+  it("purges a bounded batch per listing and keeps listing when a purge fails", async () => {
+    const { PURGE_PER_LIST, queryVideos, videoQuerySchema } = await import("../services/videos");
+    const { TRASH_RETENTION_DAYS } = await import("../types");
+    const old = new Date(Date.now() - (TRASH_RETENTION_DAYS + 1) * 86_400_000).toISOString();
+    const ids: string[] = [];
+    for (let i = 0; i < PURGE_PER_LIST + 2; i += 1) {
+      const v = await createVideo(videoRequestSchema.parse({ ...base, title: `Old ${i}` }), "purger");
+      await globalThis.__avatarStudioStore!.put("video", { ...(await getVideo(v.id, "purger", false)), deletedAt: old });
+      ids.push(v.id);
+    }
+    const keep = await createVideo(videoRequestSchema.parse({ ...base, title: "Keep" }), "purger");
+    const store = globalThis.__avatarStudioStore!;
+    const realRemove = store.remove.bind(store);
+    let failed = 0;
+    store.remove = async (kind: Parameters<typeof realRemove>[0], id: string) => {
+      if (kind === "video" && id === ids[0] && failed === 0) {
+        failed += 1;
+        throw new Error("store hiccup");
+      }
+      return realRemove(kind, id);
+    };
+    try {
+      const page = await queryVideos("purger", videoQuerySchema.parse({}));
+      assert.deepEqual(page.videos.map((v) => v.id), [keep.id], "the listing answers although one purge failed");
+      assert.equal(page.trashed, 0, "due videos are gone from the owner's point of view");
+      const left = (await store.list("video", "purger")).filter((v) => (v as { deletedAt?: string }).deletedAt).length;
+      assert.equal(left, 3, "a bounded batch went, the failed one and the overflow wait for the next listing");
+      await queryVideos("purger", videoQuerySchema.parse({}));
+      assert.equal((await store.list("video", "purger")).filter((v) => (v as { deletedAt?: string }).deletedAt).length, 0, "the next listing finishes the job");
+    } finally {
+      store.remove = realRemove;
+    }
   });
 
   it("the library refreshes in-flight renders without a detail visit", async () => {
@@ -906,6 +946,28 @@ describe("folders and share views", () => {
     await assert.rejects(updateVideo(v.id, { folder: "x" }, "someone-else"), /not found/);
   });
 
+  it("renames or removes a folder for every video in it, trashed ones included", async () => {
+    const { renameFolder, folderRenameSchema } = await import("../services/videos");
+    const a = await createVideo(req, "f1");
+    const b = await createVideo(req, "f1");
+    const c = await createVideo(req, "f1");
+    const theirs = await createVideo(req, "f2");
+    for (const v of [a, b, theirs]) await updateVideo(v.id, { folder: "Listings" }, v.id === theirs.id ? "f2" : "f1");
+    await updateVideo(c.id, { folder: "Other" }, "f1");
+    await deleteVideo(b.id, "f1");
+    assert.deepEqual(await renameFolder(folderRenameSchema.parse({ from: " Listings ", to: "Homes" }), "f1"), { moved: 2 });
+    assert.equal((await getVideo(a.id, "f1", false)).folder, "Homes");
+    assert.equal((await getVideo(b.id, "f1", false)).folder, "Homes", "a trashed video follows its folder");
+    assert.equal((await getVideo(c.id, "f1", false)).folder, "Other");
+    assert.equal((await getVideo(theirs.id, "f2", false)).folder, "Listings", "another owner's folder is untouched");
+    assert.deepEqual(await renameFolder({ from: "Homes", to: "Homes" }, "f1"), { moved: 0 });
+    assert.deepEqual(await renameFolder({ from: "Other", to: "Homes" }, "f1"), { moved: 1 }, "renaming onto an existing folder merges");
+    assert.deepEqual(await renameFolder({ from: "Homes", to: "" }, "f1"), { moved: 3 }, "an empty name removes the folder");
+    assert.equal("folder" in (await getVideo(a.id, "f1", false)), false);
+    assert.deepEqual(await renameFolder({ from: "Nope", to: "X" }, "f1"), { moved: 0 });
+    assert.throws(() => folderRenameSchema.parse({ from: "", to: "X" }));
+  });
+
   it("counts share views only once the render completed", async () => {
     const v = await createVideo(req);
     assert.deepEqual(await recordView(v.id), { views: 0, counted: false });
@@ -1098,6 +1160,7 @@ describe("folders and share views", () => {
     assert.equal(await getShareLock(v.id), null);
     assert.equal(await shareUnlocked(open, undefined), true);
     await updateVideo(v.id, videoPatchSchema.parse({ sharePassword: "back again" }));
+    await deleteVideo(v.id);
     await deleteVideo(v.id, LOCAL_OWNER, true);
     assert.equal(await getShareLock(v.id), null, "deleting the video for good removes its lock");
   });
@@ -1228,6 +1291,7 @@ describe("cover image", () => {
     assert.equal("cover" in cleared, false);
     assert.equal(await getCover(v.id), null);
     await updateVideo(v.id, videoPatchSchema.parse({ cover: png }));
+    await deleteVideo(v.id);
     await deleteVideo(v.id, LOCAL_OWNER, true);
     assert.equal(await getCover(v.id), null, "deleting the video removes its cover");
   });

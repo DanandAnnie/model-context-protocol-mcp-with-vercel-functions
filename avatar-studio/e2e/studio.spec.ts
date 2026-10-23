@@ -754,10 +754,10 @@ test("folders filter the library and share views are counted once per viewer", a
   expect((await page.request.patch(`/api/videos/${a.id}`, { data: {} })).status()).toBe(400);
 
   await page.goto("/videos");
-  await page.getByLabel("Folder").selectOption(folder);
+  await page.getByLabel("Folder", { exact: true }).selectOption(folder);
   await expect(page.locator("a[href^='/videos/vid_']")).toHaveCount(1);
   await expect(page.getByText(`Filed video ${tag}`)).toBeVisible();
-  await page.getByLabel("Folder").selectOption("unfiled");
+  await page.getByLabel("Folder", { exact: true }).selectOption("unfiled");
   await expect(page.getByText(`Filed video ${tag}`)).toHaveCount(0);
 
   // Views: nothing while rendering, then one per viewer per window once completed.
@@ -776,6 +776,23 @@ test("folders filter the library and share views are counted once per viewer", a
   await page.keyboard.press("Enter");
   await expect(page.getByRole("button", { name: "Move to a folder" })).toContainText("Archive");
   expect((await (await page.request.get(`/api/videos/${a.id}`)).json()).video.folder).toBe("Archive");
+
+  // The library renames and removes the chosen folder; the actions only show for a real folder.
+  expect((await page.request.patch(`/api/videos/${a.id}`, { data: { folder: `Keep ${tag}` } })).status()).toBe(200);
+  await page.goto("/videos");
+  await expect(page.getByTestId("folder-actions")).toHaveCount(0);
+  await page.getByLabel("Folder", { exact: true }).selectOption(`Keep ${tag}`);
+  page.once("dialog", (d) => d.accept(`Kept ${tag}`));
+  await page.getByRole("button", { name: "Rename folder" }).click();
+  await expect(page.getByLabel("Folder", { exact: true })).toHaveValue(`Kept ${tag}`);
+  await expect(page.getByText(`Filed video ${tag}`)).toBeVisible();
+  expect((await (await page.request.get(`/api/videos/${a.id}`)).json()).video.folder).toBe(`Kept ${tag}`);
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: "Remove folder" }).click();
+  await expect(page.getByTestId("folder-actions")).toHaveCount(0);
+  await expect(page.getByText(`Filed video ${tag}`)).toBeVisible();
+  expect((await (await page.request.get(`/api/videos/${a.id}`)).json()).video.folder).toBeUndefined();
+  expect((await page.request.post("/api/videos/folders", { data: { from: "", to: "x" } })).status()).toBe(400);
 });
 
 test("library multi-select moves and deletes videos in bulk", async ({ page }) => {
@@ -854,7 +871,7 @@ test("library multi-select moves and deletes videos in bulk", async ({ page }) =
   expect(await (await page.request.post("/api/videos/bulk", { data: { action: "purge", ids: [a.id] } })).json()).toEqual({ done: 0, missing: [a.id] });
   expect((await page.request.get(`/api/videos/${a.id}`)).status()).toBe(200);
   expect((await page.request.post("/api/videos/bulk", { data: { action: "move", ids: [] } })).status()).toBe(400);
-  expect(dialogs).toEqual(["Folder name (leave empty to move to Unfiled)", "Move 1 video to the trash? You can restore them for 30 days.", "Delete this video for good? This cannot be undone."]);
+  expect(dialogs).toEqual(["Folder name (leave empty to move to Unfiled)", "Move 1 video to the trash? You can restore it for 30 days.", "Delete this video for good? This cannot be undone."]);
 });
 
 test("webhook settings reject private hosts and show the signing secret", async ({ page }) => {

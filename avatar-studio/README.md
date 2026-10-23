@@ -12,11 +12,11 @@ D-ID, ElevenLabs, or in a fully offline **demo mode** with no keys at all.
 
 | Area | What you get |
 |---|---|
-| Home | Quick actions, recent videos |
+| Home | Quick actions, recent videos, and insights: renders per day for the last 14 days, completion rate, share views, and the most viewed videos |
 | Create video | Draft autosave (survives a refresh), multi-scene script editor (up to 20 scenes, each with its own background), word/duration counter, AI script writer from a topic or a public web page URL plus an Improve menu (polish, shorten, expand, change tone, translate), avatar picker, voice picker with live preview, background color/image, 16:9 / 9:16 / 1:1 at 720p or 1080p, captions, speaking speed, live stage preview |
 | My videos | Library with search, status filters, and sorting (newest, oldest, title, most viewed), player, inline rename, download, SRT captions, share link, delete, retry a failed render with one click, "Edit a copy" |
 | Share page | Public, sidebar-free player at `/share/:id` with a native subtitle track and an optional download button (owner toggle); "Embed" copies an iframe snippet |
-| Hardening | Password sign-in is rate limited (5 attempts per 15 minutes per IP); security headers on every response; only share pages may be framed |
+| Hardening | Password sign-in is rate limited (5 attempts per 15 minutes per IP); security headers on every response; only share and talk pages may be framed |
 | Personalize | One script with `{column}` placeholders plus a CSV of recipients produces one video per row (up to 100), with live preview, missing-column checks, and the monthly allowance respected |
 | Templates | Script templates by category (real estate, marketing, training, support, social) that pre-fill the editor |
 | Avatars | Library presenters + photo avatars created from an uploaded portrait, a webcam capture, or an image URL |
@@ -28,7 +28,7 @@ D-ID, ElevenLabs, or in a fully offline **demo mode** with no keys at all.
 | Interactive avatar | Chat with a presenter in real time, by typing or by speaking (push-to-talk through the browser's speech recognition where available): replies come from the script provider (Claude when configured, scripted in demo mode) in the owner's instructions and language, spoken by the browser while the portrait animates. Save a presenter as a shared agent and visitors talk to it at `/talk/:id` with no sign-in (instructions stay server-side; per-visitor and per-agent rate limits; conversation counts, transcripts, and optional email capture (`lead.captured` webhook) for the owner; brand header; embeddable, with a one-line `<script>` launcher for any website). With `AVATAR_PROVIDER=heygen`, sessions open on HeyGen Streaming and the browser joins the LiveKit room for live video (adapter follows the v1 streaming docs and is not exercised in tests); otherwise the portrait animates and the browser speaks |
 | Brand kit | Logo, primary and accent colors, default avatar, voice, aspect ratio, output quality, and captions; applied to every new video and shown on shared pages |
 | Developer API | Personal API keys (created and revoked from Settings, secret shown once) let scripts call every `/api/*` endpoint with `Authorization: Bearer <key>` in any auth mode |
-| Webhook notifications | One signed outbound webhook per account (HMAC-SHA256 over `timestamp.body`) fired on `video.completed` and `video.failed`, with a test button and last-delivery status; private hosts rejected |
+| Webhook notifications | One signed outbound webhook per account (HMAC-SHA256 over `timestamp.body`) fired on `video.completed`, `video.failed`, and `lead.captured`, with a test button and last-delivery status; private hosts rejected |
 | Plans | Free and Pro plans per account or workspace; the plan sets the monthly render allowance (`RENDER_LIMIT_PER_MONTH`, `PLAN_PRO_RENDERS`); upgrade and manage from Settings via Stripe Checkout and the Billing Portal, or instantly with the demo provider |
 | Email on completion | One email per video when it completes or fails, through the email provider; `/api/health` for uptime monitors |
 | Your data | Export everything for the account or workspace as JSON (secrets redacted) or delete all of it with a typed confirmation; both need a signed-in session |

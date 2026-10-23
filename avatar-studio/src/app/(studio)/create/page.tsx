@@ -98,6 +98,25 @@ function CreateInner() {
   // A scene may name its own presenter and voice; otherwise it uses the video's.
   const sceneAvatar = (active.avatarId && avatarData?.avatars.find((a) => a.id === active.avatarId)) || avatar;
   const sceneVoice = (active.voiceId && voiceData?.voices.find((v) => v.id === active.voiceId)) || voice;
+  // A scene's presenter or voice may have been deleted since the draft or the original video was
+  // saved; once the lists are known, drop ids they no longer contain so the scene really does use
+  // the video's choice (which is what the selects would otherwise claim) instead of failing to render.
+  useEffect(() => {
+    if (!avatarData || !voiceData) return;
+    const avatars = new Set(avatarData.avatars.map((a) => a.id));
+    const voices = new Set(voiceData.voices.map((v) => v.id));
+    setScenes((prev) => {
+      let changed = false;
+      const next = prev.map((sc) => {
+        const dropAvatar = !!sc.avatarId && !avatars.has(sc.avatarId);
+        const dropVoice = !!sc.voiceId && !voices.has(sc.voiceId);
+        if (!dropAvatar && !dropVoice) return sc;
+        changed = true;
+        return newScene(sc.script, sc.background, { avatarId: dropAvatar ? undefined : sc.avatarId, voiceId: dropVoice ? undefined : sc.voiceId });
+      });
+      return changed ? next : prev;
+    });
+  }, [avatarData, voiceData, scenes]);
   const [aspect, setAspect] = useState<AspectRatio>("16:9");
   const [resolution, setResolution] = useState<Resolution>("1080p");
   const [captions, setCaptions] = useState(false);
@@ -310,6 +329,7 @@ function CreateInner() {
               {sceneAvatar ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
+                  data-testid="stage-avatar"
                   src={sceneAvatar.imageUrl}
                   alt={sceneAvatar.name}
                   className={`${aspect === "16:9" ? "h-[92%]" : "h-[80%]"} max-w-[80%] object-contain object-bottom drop-shadow-xl`}

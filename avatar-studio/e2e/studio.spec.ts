@@ -142,7 +142,10 @@ test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page 
   // The second scene gets its own presenter and voice; the stage preview follows the choice.
   await page.getByLabel("Scene avatar").selectOption({ label: "Marcus Hill" });
   await page.getByLabel("Scene voice").selectOption({ label: "Olivia" });
-  await expect(page.locator("img[alt='Marcus Hill']").first()).toBeVisible();
+  await expect(page.getByTestId("stage-avatar")).toHaveAttribute("alt", "Marcus Hill");
+  await page.getByRole("button", { name: "1", exact: true }).click();
+  await expect(page.getByTestId("stage-avatar")).not.toHaveAttribute("alt", "Marcus Hill");
+  await page.getByRole("button", { name: "2", exact: true }).click();
   await page.getByRole("button", { name: "Generate video" }).click();
   await page.waitForURL(/\/videos\/vid_/);
   const id = page.url().split("/").pop()!;
@@ -158,6 +161,21 @@ test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page 
   await expect(page.getByText(/2 scenes/)).toBeVisible();
   await page.getByRole("button", { name: "2", exact: true }).click();
   await expect(page.getByLabel("Scene voice")).toHaveValue("stock_voice_3");
+  // A scene whose presenter was deleted since falls back to the video's and still renders.
+  const custom = await page.request.post("/api/avatars", { data: { name: "Gone soon", imageUrl: "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%2F%3E" } });
+  expect(custom.status()).toBe(201);
+  const customId = ((await custom.json()) as { avatar: { id: string } }).avatar.id;
+  const withCustom = await page.request.post("/api/videos", {
+    data: { title: "Custom scene", avatarId: "stock_1", voiceId: "stock_voice_1", scenes: [{ script: "One.", background: { type: "color", value: "#fff" } }, { script: "Two.", background: { type: "color", value: "#fff" }, avatarId: customId }] },
+  });
+  expect(withCustom.status()).toBe(201);
+  const withCustomId = ((await withCustom.json()) as { video: { id: string } }).video.id;
+  expect((await page.request.delete(`/api/avatars/${customId}`)).ok()).toBe(true);
+  await page.goto(`/create?from=${withCustomId}`);
+  await page.getByRole("button", { name: "2", exact: true }).click();
+  await expect(page.getByLabel("Scene avatar")).toHaveValue("");
+  await page.getByRole("button", { name: "Generate video" }).click();
+  await page.waitForURL(/\/videos\/vid_/);
 });
 
 test("captions, share page, rename, and library filters", async ({ page }) => {

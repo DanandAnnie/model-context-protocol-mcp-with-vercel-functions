@@ -407,6 +407,7 @@ describe("videos", () => {
 
     const all = await listVideos(LOCAL_OWNER, false);
     assert.deepEqual(filterVideos(all, query({ q: "QUARTZ" })).map((v) => v.id), [b.id], "search covers the script, case-insensitively");
+    assert.deepEqual(filterVideos([{ ...a, description: "Lakeside listing tour" }, b, c], query({ q: "lakeside" })).map((v) => v.id), [a.id], "and the share-page description");
     assert.deepEqual(filterVideos(all, query({ folder: "Listings" })).map((v) => v.id), [b.id]);
     assert.deepEqual(filterVideos(all, query({ folder: "" })).map((v) => v.id), [c.id, a.id], "an empty folder means unfiled");
     assert.deepEqual(filterVideos(all, query({ status: "failed" })).map((v) => v.id), [c.id]);

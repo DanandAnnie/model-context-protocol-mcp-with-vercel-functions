@@ -45,6 +45,21 @@ export default function VideoDetailPage() {
   const folders = Array.from(new Set((libraryData?.videos ?? []).map((v) => v.folder).filter((f): f is string => !!f))).sort();
   const [folderDraft, setFolderDraft] = useState<string | null>(null);
   const [folderErr, setFolderErr] = useState<string | null>(null);
+  /**
+   * Folds a PATCH response into the page's record. Merging (rather than replacing) means two saves
+   * in flight cannot let the earlier response undo the later one; keys the server dropped (a removed
+   * description, a link turned back on) must disappear too, or the control flips back until the
+   * refetch lands.
+   */
+  const OPTIONAL_KEYS = ["description", "folder", "shareDisabled", "shareDownload", "shareLocked", "shareCta", "shareExpiresAt"] as const;
+  function applyServer(next: Video) {
+    setData((d) => {
+      const merged = { ...d?.video, ...next } as Video;
+      for (const key of OPTIONAL_KEYS) if (!(key in next)) delete merged[key];
+      return { video: merged };
+    });
+  }
+
   async function saveFolder() {
     if (!video || folderDraft === null) return;
     const folder = folderDraft.trim();
@@ -52,7 +67,7 @@ export default function VideoDetailPage() {
     if (folder === (video.folder ?? "")) return;
     try {
       const res = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify({ folder }) });
-      setData({ video: { ...video, folder: res.video.folder } });
+      applyServer(res.video);
       setFolderErr(null);
     } catch (e) {
       setFolderErr(e instanceof Error ? e.message : "Could not move the video");
@@ -69,7 +84,7 @@ export default function VideoDetailPage() {
     savingTitle.current = true;
     try {
       const res = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify({ title }) });
-      setData({ video: { ...video, title: res.video.title } });
+      applyServer(res.video);
       setRenameErr(null);
       setEditing(false);
     } catch (e) {
@@ -101,14 +116,7 @@ export default function VideoDetailPage() {
     setShareDraft((d) => ({ ...d, ...patch }));
     try {
       const { video: next } = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify(patch) });
-      // Merge so two saves in flight (download, then live) cannot let the earlier response undo the
-      // later one; share flags the server has dropped (turning the link back on deletes the key)
-      // must disappear too, or the box would flip back until the refetch lands.
-      setData((d) => {
-        const merged = { ...d?.video, ...next } as Video;
-        for (const key of ["shareDisabled", "shareDownload", "shareLocked", "shareCta", "shareExpiresAt"] as const) if (!(key in next)) delete merged[key];
-        return { video: merged };
-      });
+      applyServer(next);
       // A status poll that started before the save would land after it with the old record.
       void refetch();
       return true;
@@ -243,11 +251,7 @@ export default function VideoDetailPage() {
     setDescErr(null);
     try {
       const { video: next } = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify({ description: descDraft.trim() }) });
-      setData((d) => {
-        const merged = { ...d?.video, ...next } as Video;
-        if (!("description" in next)) delete merged.description;
-        return { video: merged };
-      });
+      applyServer(next);
       setDescDraft(null);
       void refetch();
     } catch (e) {
@@ -268,7 +272,7 @@ export default function VideoDetailPage() {
     try {
       const body = remove ? { shareCta: null } : { shareCta: ctaDraft };
       const { video: next } = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify(body) });
-      setData({ video: next });
+      applyServer(next);
       setCtaLabel(null);
       setCtaUrl(null);
       void refetch();

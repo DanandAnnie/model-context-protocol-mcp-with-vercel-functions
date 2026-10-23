@@ -737,7 +737,7 @@ export function filterVideos(videos: Video[], query: VideoQuery): Video[] {
       if (query.batch && v.batchId !== query.batch) return false;
       if (query.folder !== undefined && (v.folder ?? "") !== query.folder) return false;
       if (query.status === "processing" ? v.status !== "processing" && v.status !== "queued" : query.status !== "all" && v.status !== query.status) return false;
-      return !needle || `${v.title} ${v.script} ${v.avatarName ?? ""} ${v.voiceName ?? ""}`.toLowerCase().includes(needle);
+      return !needle || `${v.title} ${v.description ?? ""} ${v.script} ${v.avatarName ?? ""} ${v.voiceName ?? ""}`.toLowerCase().includes(needle);
     })
     .sort(SORTERS[query.sort]);
 }

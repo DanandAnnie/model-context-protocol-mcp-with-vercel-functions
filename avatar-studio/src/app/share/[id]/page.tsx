@@ -61,7 +61,7 @@ export async function generateMetadata({
       twitter: { card: "summary", title: video.title, description },
     };
   }
-  const description = video.description || excerpt(video.script) || `A video from ${siteName}`;
+  const description = excerpt(video.description ?? "") || excerpt(video.script) || `A video from ${siteName}`;
   const ready = video.status === "completed" && !!video.videoUrl;
   const poster = posterUrl(video, base);
   const images = poster

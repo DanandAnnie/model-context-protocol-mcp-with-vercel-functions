@@ -82,7 +82,7 @@ When completed the video also carries `videoUrl`, `thumbnailUrl`, and `durationS
 
 ### `GET /api/videos` — list the library
 
-Query parameters, all optional: `q` (matches title, script, avatar, and voice), `status` (`processing`, which includes queued, `completed`, or `failed`), `folder` (a name; pass it empty for unfiled videos), `batch`, `sort` (`newest`, `oldest`, `title`, `views`), `limit` (1–200; omit it to receive every match), and `trash` (`true` or `1` lists the trash instead of the library, newest deletion first). Returns `{ "videos", "matched", "total", "hasMore", "folders", "rendering", "trashed" }`: `matched` counts the query's results before `limit`, `total` the whole library (never the trash), `folders` the names in use, `rendering` the renders still in flight, and `trashed` the videos in the trash. The newest ten in-flight renders are refreshed from the provider on the way out, so polling the list is enough to see completions.
+Query parameters, all optional: `q` (matches title, description, script, avatar, and voice), `status` (`processing`, which includes queued, `completed`, or `failed`), `folder` (a name; pass it empty for unfiled videos), `batch`, `sort` (`newest`, `oldest`, `title`, `views`), `limit` (1–200; omit it to receive every match), and `trash` (`true` or `1` lists the trash instead of the library, newest deletion first). Returns `{ "videos", "matched", "total", "hasMore", "folders", "rendering", "trashed" }`: `matched` counts the query's results before `limit`, `total` the whole library (never the trash), `folders` the names in use, `rendering` the renders still in flight, and `trashed` the videos in the trash. The newest ten in-flight renders are refreshed from the provider on the way out, so polling the list is enough to see completions.
 
 ### `GET /api/videos/analytics` — the library's share analytics as a CSV download
 
@@ -104,7 +104,7 @@ Emails the share link of a **completed** video to up to 10 recipients (de-duplic
 
 ### `POST /api/videos/:id/retry`
 
-Submits a **failed** render again as a new video with the same scenes, presenter, look, and quality; the new video keeps the original's folder and batch row and carries `retryOf` with the original id. Returns `201 { video }` (or `502` when the provider refuses the start again). `409` when the video is not failed, `404` when it is not yours.
+Submits a **failed** render again as a new video with the same scenes, presenter, look, and quality; the new video keeps the original's folder, description, and batch row and carries `retryOf` with the original id. Returns `201 { video }` (or `502` when the provider refuses the start again). `409` when the video is not failed, `404` when it is not yours.
 
 ### `GET /api/videos/:id/cover` — the custom poster image (public under the share page's rules: `404` while the link is offline, for a password-protected link without the unlock cookie, and when no cover is set; `?v=` responses are immutable, and `public` only for a link that is neither offline nor password-protected, with a lifetime capped at the link's expiry)
 ### `GET /api/videos/:id/captions` — SRT; add `?format=vtt` for WebVTT, whose cues carry the video's caption position (public; while the share link is offline only the owner's own request gets them, and a password-protected link needs the unlock cookie or the owner)

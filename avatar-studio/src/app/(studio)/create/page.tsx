@@ -301,14 +301,17 @@ function CreateInner() {
     if (!avatar && avatarData?.avatars.length) setAvatar(avatarData.avatars[0]);
   }, [avatarData, avatar]);
   useEffect(() => {
-    if (voice || !voiceData?.voices.length) return;
-    setVoice((avatar?.defaultVoiceId && voiceData.voices.find((v) => v.id === avatar.defaultVoiceId)) || voiceData.voices[0]);
-  }, [voiceData, voice, avatar]);
-  // Apply a copied video's avatar/voice once both lists are loaded, then clear the prefill.
+    // Wait for the avatar list (or its failure) so the first avatar's default voice wins whichever list lands first.
+    if (voice || !voiceData?.voices.length || avatarsLoading) return;
+    const first = avatar ?? avatarData?.avatars[0];
+    setVoice((first?.defaultVoiceId && voiceData.voices.find((v) => v.id === first.defaultVoiceId)) || voiceData.voices[0]);
+  }, [voiceData, voice, avatar, avatarData, avatarsLoading]);
+  // Apply a copied video's avatar/voice once both lists are loaded, then clear the prefill. A saved
+  // voice that is gone (a deleted clone, another voice provider) gives way to the presenter's own default.
   useEffect(() => {
     if (!prefill || !avatarData || !voiceData) return;
     const a = avatarData.avatars.find((x) => x.id === prefill.avatarId);
-    const v = voiceData.voices.find((x) => x.id === prefill.voiceId);
+    const v = voiceData.voices.find((x) => x.id === prefill.voiceId) ?? (a?.defaultVoiceId ? voiceData.voices.find((x) => x.id === a.defaultVoiceId) : undefined);
     if (a) setAvatar(a);
     if (v) setVoice(v);
     setPrefill(null);
@@ -365,7 +368,7 @@ function CreateInner() {
   }, [canGenerate, title, scenes, avatar, voice, aspect, captions, captionStyle, isDefaultCaptionStyle, speed]);
 
   const stageAspect = aspect === "9:16" ? "aspect-[9/16]" : aspect === "1:1" ? "aspect-square" : "aspect-video";
-  const bgIsDark = background.type === "color" && isDarkHex(background.value);
+  const bgIsDark = (background.type === "color" && isDarkHex(background.value)) || background.type === "video";
 
   return (
     <>
@@ -394,7 +397,10 @@ function CreateInner() {
           <input className={`${inputClass} text-base font-medium`} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Video title" />
 
           <Card className="overflow-hidden">
-            <div className={`relative mx-auto w-full ${stageAspect} ${aspect === "9:16" ? "max-h-[520px]" : ""} flex items-end justify-center overflow-hidden`} style={background.type === "color" ? { background: background.value } : { backgroundImage: `url(${background.value})`, backgroundSize: "cover", backgroundPosition: "center" }}>
+            <div className={`relative mx-auto w-full ${stageAspect} ${aspect === "9:16" ? "max-h-[520px]" : ""} flex items-end justify-center overflow-hidden`} style={background.type === "color" ? { background: background.value } : background.type === "image" ? { backgroundImage: `url(${background.value})`, backgroundSize: "cover", backgroundPosition: "center" } : { background: "#0f172a" }}>
+              {background.type === "video" && (
+                <video key={background.value} src={background.value} muted loop autoPlay playsInline aria-hidden="true" data-testid="stage-video" className="absolute inset-0 h-full w-full object-cover" />
+              )}
               {sceneAvatar ? (
                 // The offset moves a frame-sized layer so one unit is half the frame on either axis; the scale stays on the portrait.
                 <div data-testid="stage-presenter" className="absolute inset-0 flex items-end justify-center" style={{ transform: `translate(${layout.x * 50}%, ${layout.y * 50}%)` }}>
@@ -445,7 +451,7 @@ function CreateInner() {
                     i === activeIdx ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                   }`}
                 >
-                  <span className="h-2.5 w-2.5 rounded-full border border-black/10" style={sc.background.type === "color" ? { background: sc.background.value } : { background: "linear-gradient(135deg,#94a3b8,#cbd5e1)" }} />
+                  <span className="h-2.5 w-2.5 rounded-full border border-black/10" style={sc.background.type === "color" ? { background: sc.background.value } : sc.background.type === "video" ? { background: "linear-gradient(135deg,#0f172a,#475569)" } : { background: "linear-gradient(135deg,#94a3b8,#cbd5e1)" }} />
                   {i + 1}
                   {sc.script.trim() ? (
                     <span className="font-normal text-slate-400" data-testid="scene-duration">~{formatSeconds(Math.max(1, estimateSeconds(sc.script, speed)))}</span>
@@ -486,7 +492,12 @@ function CreateInner() {
             {scenes.length > 1 && (
               <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="scene-presenter">
                 <span className="font-medium">Scene {activeIdx + 1} presenter</span>
-                <select aria-label="Scene avatar" className={`${inputClass} w-auto py-1 text-xs`} value={active.avatarId ?? ""} onChange={(e) => updateScene(activeIdx, { avatarId: e.target.value || undefined })}>
+                <select aria-label="Scene avatar" className={`${inputClass} w-auto py-1 text-xs`} value={active.avatarId ?? ""} onChange={(e) => {
+                  const picked = avatarData?.avatars.find((a) => a.id === e.target.value);
+                  // A presenter's default voice comes along unless the scene already has a voice of its own.
+                  const voiceId = picked?.defaultVoiceId && !active.voiceId && voiceData?.voices.some((v) => v.id === picked.defaultVoiceId) ? picked.defaultVoiceId : active.voiceId;
+                  updateScene(activeIdx, { avatarId: e.target.value || undefined, voiceId });
+                }}>
                   <option value="">{avatar ? `Video avatar (${avatar.name})` : "Video avatar"}</option>
                   {(avatarData?.avatars ?? []).map((a) => (
                     <option key={a.id} value={a.id}>{a.name}</option>
@@ -690,6 +701,17 @@ function CreateInner() {
                       onChange={(e) => setBackground(e.target.value ? { type: "image", value: e.target.value } : DEFAULT_BG)}
                     />
                     <span className="flex items-center text-slate-400"><ImageIcon className="h-5 w-5" /></span>
+                  </div>
+                </Field>
+                <Field label="Video URL" hint="A public MP4 or WebM URL that loops behind the avatar. HeyGen plays it; other renderers use their default background.">
+                  <div className="flex gap-2">
+                    <input
+                      className={inputClass}
+                      placeholder="https://…/background.mp4"
+                      value={background.type === "video" ? background.value : ""}
+                      onChange={(e) => setBackground(e.target.value ? { type: "video", value: e.target.value } : DEFAULT_BG)}
+                    />
+                    <span className="flex items-center text-slate-400"><Clapperboard className="h-5 w-5" /></span>
                   </div>
                 </Field>
               </div>

@@ -60,7 +60,7 @@ Instead of `script`, send `scenes` (1 to 20), each with its own `script` and `ba
 | `voiceId` | string | from `GET /api/voices` |
 | `aspect` | `16:9` \| `9:16` \| `1:1` | default `16:9` |
 | `resolution` | `720p` \| `1080p` | default `1080p`; the short side of the frame (1080p: 1920×1080, 1080×1920, 1080×1080; 720p: 1280×720, 720×1280, 720×720). HeyGen renders at these sizes; D-ID and the demo renderer record the value but output at their native size |
-| `background` | `{ type: "color" \| "image", value }` | default light grey |
+| `background` | `{ type: "color" \| "image" \| "video", value }` | a hex colour, a public image URL, or a public http(s) video URL (MP4 or WebM) that loops behind the presenter and fills the frame on HeyGen (other renderers use their default); default light grey |
 | `captions` | boolean | default `false` |
 | `captionStyle` | object | `{ position: "bottom" \| "top", size: "small" \| "medium" \| "large" }`, how subtitles sit and read in the share player's subtitle track and the WebVTT file (`top` becomes a `line:5%` cue setting); a value equal to the default is stored as absent; when set, HeyGen is told not to burn captions into the file so this look is the only one, which means the downloaded file of a styled video carries no captions (the share page's track is on from the start, except for a HeyGen file that already carries captions, where it waits in the CC menu) |
 | `speed` | 0.5–1.5 | default `1` |

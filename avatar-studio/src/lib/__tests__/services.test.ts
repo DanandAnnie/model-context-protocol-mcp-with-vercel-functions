@@ -595,6 +595,12 @@ describe("scenes", () => {
     assert.equal(bodyOf().caption, true);
     await heygen.createVideo({ ...req, captions: true, captionStyle: { position: "top", size: "large" } }, ava, emma, cast);
     assert.equal(bodyOf().caption, false, "a styled caption is not burned in");
+    // A video background loops and fills the frame; an image is passed by URL; a colour as a value.
+    const withVideo = videoRequestSchema.parse({ ...req, scenes: [{ ...req.scenes![0], background: { type: "video", value: "https://cdn.example.com/loop.mp4" } }, { ...req.scenes![1], background: { type: "image", value: "https://cdn.example.com/bg.jpg" } }] });
+    await heygen.createVideo(withVideo, ava, emma, cast);
+    const backgrounds = (sent as unknown as { video_inputs: Array<{ background: unknown }> }).video_inputs.map((i) => i.background);
+    assert.deepEqual(backgrounds, [{ type: "video", url: "https://cdn.example.com/loop.mp4", play_style: "loop", fit: "cover" }, { type: "image", url: "https://cdn.example.com/bg.jpg" }]);
+    assert.equal(videoRequestSchema.safeParse({ ...req, scenes: [{ ...req.scenes![0], background: { type: "video", value: "loop.mp4" } }] }).success, false, "a video background must be a URL");
     // A scene layout becomes the character's scale and offset; a scene without one sends neither.
     const placed = videoRequestSchema.parse({ ...req, scenes: [{ ...req.scenes![0], layout: { scale: 1.2, x: 0.25, y: -0.1 } }, req.scenes![1]] });
     await heygen.createVideo(placed, ava, emma, cast);
@@ -2041,6 +2047,35 @@ describe("voice cloning", () => {
     const agent = await createAgent(agentSchema.parse({ name: "Dana live", avatarId: "stock_1", voiceId: voice.id }), "u1");
     assert.equal(agent.voiceLanguage, "en-GB");
     await assert.rejects(createAgent(agentSchema.parse({ name: "x", avatarId: "stock_1", voiceId: voice.id }), "u2"), /not available/, "another account cannot use it");
+  });
+
+  it("a visitor's turn counts on the stored presenter and writes nothing for one deleted mid-chat", async () => {
+    const { MockScriptProvider } = await import("../providers/script/mock");
+    const proto = MockScriptProvider.prototype as unknown as { chat: (...args: unknown[]) => Promise<string> };
+    const realChat = proto.chat;
+    let during: () => Promise<unknown> = async () => undefined;
+    proto.chat = async function (this: unknown, ...args: unknown[]) {
+      await during();
+      return realChat.apply(this, args);
+    };
+    try {
+      const agent = await createAgent(agentSchema.parse({ name: "Dana", avatarId: "stock_1", isPublic: true }), "u-turn");
+      during = () => updateAgent(agent.id, { name: "Dana (renamed)" }, "u-turn");
+      await talkToAgent(agent.id, { messages: [{ role: "user", content: "Hi" }] });
+      const after = await getAgent(agent.id, "u-turn");
+      assert.equal(after.name, "Dana (renamed)", "an edit that landed during the chat survives the counter write");
+      assert.equal(after.conversations, 1);
+      assert.equal(after.messages, 1);
+
+      const gone = await createAgent(agentSchema.parse({ name: "Gone", avatarId: "stock_1", isPublic: true }), "u-turn");
+      during = () => deleteAgent(gone.id, "u-turn");
+      const turn = await talkToAgent(gone.id, { messages: [{ role: "user", content: "Hi" }] });
+      assert.ok(turn.reply, "the visitor still gets the reply");
+      await assert.rejects(getAgent(gone.id, "u-turn"), /not found/, "the deleted presenter is not brought back");
+      await assert.rejects(listConversations(gone.id, "u-turn"), /not found/, "and no transcript is written for it");
+    } finally {
+      proto.chat = realChat;
+    }
   });
 
   it("caps cloned voices per account", async () => {

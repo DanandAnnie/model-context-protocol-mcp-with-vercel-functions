@@ -82,8 +82,12 @@ export interface VideoTemplate {
   updatedAt: string;
 }
 
+/**
+ * What sits behind the presenter: a hex colour, a public image URL, or a public video URL that
+ * loops behind the presenter (HeyGen plays it; other renderers fall back to their default).
+ */
 export interface Background {
-  type: "color" | "image";
+  type: "color" | "image" | "video";
   value: string;
 }
 

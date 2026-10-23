@@ -220,6 +220,16 @@ test("the avatar library filters by gender and name", async ({ page }) => {
   await expect(page.getByText(/Ava Chen · Emma · /)).toBeVisible();
   await page.getByRole("button", { name: new RegExp(`^Renamed ${tag} Renamed ${tag}`) }).click();
   await expect(page.getByText(new RegExp(`Renamed ${tag} · James · `))).toBeVisible();
+  // A scene's own presenter brings its default voice along too, unless the scene already chose a voice.
+  await page.getByRole("button", { name: "Add scene" }).click();
+  await page.getByLabel("Scene avatar").selectOption({ label: "Ava Chen" });
+  await expect(page.getByLabel("Scene voice")).toHaveValue("");
+  await page.getByLabel("Scene avatar").selectOption({ label: `Renamed ${tag}` });
+  await expect(page.getByLabel("Scene voice")).toHaveValue("stock_voice_2");
+  await page.getByLabel("Scene voice").selectOption({ label: "Olivia" });
+  await page.getByLabel("Scene avatar").selectOption({ label: "Ava Chen" });
+  await page.getByLabel("Scene avatar").selectOption({ label: `Renamed ${tag}` });
+  await expect(page.getByLabel("Scene voice")).toHaveValue("stock_voice_3");
   expect((await page.request.delete(`/api/avatars/${created.id}`)).status()).toBe(200);
 });
 
@@ -269,6 +279,9 @@ test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page 
   await page.locator("textarea").fill("Scene two says goodbye.");
   await page.getByRole("button", { name: "Background" }).click();
   await page.getByLabel("Background #0f172a").click();
+  // A looping video can sit behind the presenter; the stage previews it and the scene stores it.
+  await page.getByLabel("Video URL").fill("https://example.com/loop.mp4");
+  await expect(page.getByTestId("stage-video")).toHaveAttribute("src", "https://example.com/loop.mp4");
   await expect(page.getByText(/2 scenes/)).toBeVisible();
   // The second scene gets its own presenter and voice; the stage preview follows the choice.
   await page.getByLabel("Scene avatar").selectOption({ label: "Marcus Hill" });
@@ -292,7 +305,8 @@ test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page 
   expect(video.scenes).toHaveLength(2);
   expect(video.script).toBe("Scene one says hello.\n\nScene two says goodbye.");
   expect(video.scenes[0].avatarName).toBeUndefined();
-  expect(video.scenes[1]).toMatchObject({ avatarId: "stock_2", avatarName: "Marcus Hill", voiceId: "stock_voice_3", voiceName: "Olivia", layout: { scale: 1.2, x: 0.5, y: 0 } });
+  expect(video.scenes[1]).toMatchObject({ avatarId: "stock_2", avatarName: "Marcus Hill", voiceId: "stock_voice_3", voiceName: "Olivia", layout: { scale: 1.2, x: 0.5, y: 0 }, background: { type: "video", value: "https://example.com/loop.mp4" } });
+  expect((await page.request.post("/api/videos", { data: { title: "Bad", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9", background: { type: "video", value: "loop.mp4" } } })).status()).toBe(400);
   expect(video.scenes[0].layout).toBeUndefined();
   await expect(page.getByText("Script · 2 scenes")).toBeVisible();
   await expect(page.getByText("Marcus Hill · Olivia")).toBeVisible();

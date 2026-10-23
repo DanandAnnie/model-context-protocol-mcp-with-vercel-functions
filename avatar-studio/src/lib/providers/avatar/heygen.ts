@@ -61,10 +61,13 @@ export class HeyGenAvatarProvider implements AvatarProvider {
           // HeyGen places the presenter with a scale (1 = default) and an x/y offset of the frame.
           character: { ...this.character(sceneAvatar), ...(scene.layout ? { scale: scene.layout.scale, offset: { x: scene.layout.x, y: scene.layout.y } } : {}) },
           voice: { type: "text", input_text: scene.script, voice_id: this.voiceId(sceneVoice, req.voiceId), speed: req.speed },
+          // A video background loops for the length of the scene and fills the frame.
           background:
-            scene.background.type === "image"
-              ? { type: "image", url: scene.background.value }
-              : { type: "color", value: scene.background.value },
+            scene.background.type === "video"
+              ? { type: "video", url: scene.background.value, play_style: "loop", fit: "cover" }
+              : scene.background.type === "image"
+                ? { type: "image", url: scene.background.value }
+                : { type: "color", value: scene.background.value },
         };
       }),
     };

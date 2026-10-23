@@ -17,7 +17,9 @@ import { clearCover, setCover } from "../cover";
 import { shareOffline } from "../client";
 import { bumpViewsByDay } from "../insights";
 
-export const backgroundSchema = z.object({ type: z.enum(["color", "image"]), value: z.string().min(1) });
+export const backgroundSchema = z
+  .object({ type: z.enum(["color", "image", "video"]), value: z.string().min(1).max(2000) })
+  .refine((b) => b.type !== "video" || /^https?:\/\//.test(b.value), "A video background must be a public http(s) URL");
 /** How captions look on the share page; see `CaptionStyle`. */
 export const captionStyleSchema = z.object({ position: z.enum(CAPTION_POSITIONS), size: z.enum(CAPTION_SIZES) });
 /** Presenter size and position in the frame; see `SceneLayout`. */

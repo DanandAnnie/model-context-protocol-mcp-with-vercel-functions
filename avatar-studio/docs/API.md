@@ -96,8 +96,10 @@ A template is a starting point for the editor: scenes (with any per-scene presen
 Submits a **failed** render again as a new video with the same scenes, presenter, look, and quality; the new video keeps the original's folder and batch row and carries `retryOf` with the original id. Returns `201 { video }` (or `502` when the provider refuses the start again). `409` when the video is not failed, `404` when it is not yours.
 
 ### `GET /api/videos/:id/captions` — SRT; add `?format=vtt` for WebVTT (public)
-### `POST /api/videos/:id/view` — share-page view beacon (public; one per viewer per 10 minutes)
-### `POST /api/videos/:id/cta` — call-to-action click beacon (public; one per viewer per 10 minutes; counts only while the video carries a button)
+### `POST /api/videos/:id/view` — share-page view beacon (public; one per viewer per 10 minutes, 600 per video; counts only once the render completed)
+### `POST /api/videos/:id/cta` — call-to-action click beacon (public; one per viewer per 10 minutes, 300 per video; counts only while a completed video carries a button)
+
+Both beacons answer `{ "views" | "clicks", "counted" }` and never fail on repeats. A browser request from another site (`Sec-Fetch-Site` other than `same-origin`) is not counted, so a page elsewhere cannot count for visitors who never opened the share page.
 
 ### Personalized batch
 

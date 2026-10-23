@@ -408,7 +408,7 @@ function CreateInner() {
                   key={i}
                   type="button"
                   onClick={() => setActiveIdx(i)}
-                  aria-label={`Scene ${i + 1}${sc.script.trim() ? `, about ${formatSeconds(estimateSeconds(sc.script, speed))}` : ", empty"}`}
+                  aria-label={`Scene ${i + 1}${sc.script.trim() ? `, about ${formatSeconds(Math.max(1, estimateSeconds(sc.script, speed)))}` : ", empty"}`}
                   aria-current={i === activeIdx ? "true" : undefined}
                   className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${
                     i === activeIdx ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
@@ -417,7 +417,7 @@ function CreateInner() {
                   <span className="h-2.5 w-2.5 rounded-full border border-black/10" style={sc.background.type === "color" ? { background: sc.background.value } : { background: "linear-gradient(135deg,#94a3b8,#cbd5e1)" }} />
                   {i + 1}
                   {sc.script.trim() ? (
-                    <span className="font-normal text-slate-400" data-testid="scene-duration">~{formatSeconds(estimateSeconds(sc.script, speed))}</span>
+                    <span className="font-normal text-slate-400" data-testid="scene-duration">~{formatSeconds(Math.max(1, estimateSeconds(sc.script, speed)))}</span>
                   ) : (
                     <span className="text-amber-500" title="Empty scene">•</span>
                   )}

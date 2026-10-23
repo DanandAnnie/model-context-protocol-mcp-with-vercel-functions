@@ -371,6 +371,11 @@ test("the owner can take a share link offline and back", async ({ page }) => {
   const v = await createVideoViaApi(page, `Offline ${Date.now().toString(36)}`);
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
   expect((await page.request.get(`/share/${v.id}`)).status()).toBe(200);
+  // A beacon sent from another site does not count and does not use up the viewer's slot.
+  const beacon = async (headers?: Record<string, string>) => ((await (await page.request.post(`/api/videos/${v.id}/view`, { headers })).json()) as { counted: boolean }).counted;
+  expect(await beacon({ "sec-fetch-site": "cross-site" })).toBe(false);
+  expect(await beacon({ "sec-fetch-site": "same-origin" })).toBe(true);
+  expect(await beacon()).toBe(false);
   await page.goto(`/videos/${v.id}`);
   await page.getByLabel("Share link is live").uncheck();
   await expect(page.getByTestId("share-off-note")).toBeVisible();

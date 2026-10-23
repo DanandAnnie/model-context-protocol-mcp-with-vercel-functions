@@ -27,13 +27,14 @@ export class DidAvatarProvider implements AvatarProvider {
   }
 
   async listAvatars(): Promise<Avatar[]> {
-    const data = await this.request<{ presenters: Array<{ presenter_id: string; name?: string; thumbnail_url?: string; image_url?: string; gender?: string }> }>(
+    const data = await this.request<{ presenters: Array<{ presenter_id: string; name?: string; thumbnail_url?: string; image_url?: string; preview_url?: string; gender?: string }> }>(
       "/clips/presenters?limit=50",
     );
     return (data.presenters ?? []).map((p): Avatar => ({
       id: p.presenter_id,
       name: p.name ?? p.presenter_id,
       imageUrl: p.thumbnail_url ?? p.image_url ?? "",
+      ...(p.preview_url ? { previewVideoUrl: p.preview_url } : {}),
       source: "provider",
       provider: this.name,
       gender: (p.gender?.toLowerCase() as Avatar["gender"]) ?? undefined,

@@ -196,7 +196,8 @@ export function ChatPanel({
     } catch (e) {
       setErr(e instanceof Error ? e.message : "The presenter could not answer");
       setMessages(messages);
-      setDraft(content);
+      // Put the failed text back unless the visitor has something of their own in the box.
+      setDraft((d) => (d.trim() ? d : content));
     } finally {
       setBusy(false);
     }
@@ -303,12 +304,7 @@ export function ChatPanel({
               <button
                 key={i}
                 type="button"
-                onClick={() => {
-                  // A chip ends any push-to-talk in progress so what was heard is not sent as a second message.
-                  dropRecognizer();
-                  setListening(false);
-                  send(s);
-                }}
+                onClick={() => send(s)}
                 disabled={busy || listening}
                 className={`rounded-full border px-3 py-1 text-xs ${dark ? "border-slate-700 text-slate-200 hover:bg-slate-800" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}
               >

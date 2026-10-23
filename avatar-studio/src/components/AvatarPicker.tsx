@@ -22,14 +22,6 @@ export function AvatarTile({ avatar, selected, onSelect, compact }: { avatar: Av
       }`}
     >
       <div className={`${compact ? "aspect-[4/5]" : "aspect-[4/5]"} relative w-full overflow-hidden bg-slate-100`}>
-        {preview && previewing && (
-          <video src={preview} muted loop autoPlay playsInline aria-hidden="true" data-testid="avatar-preview" className="absolute inset-0 z-10 h-full w-full object-cover" />
-        )}
-        {preview && !previewing && (
-          <span className="absolute bottom-2 right-2 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/50 text-white" title="Hover to preview" data-testid="avatar-preview-badge">
-            <Play className="h-3 w-3" />
-          </span>
-        )}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={avatar.imageUrl}
@@ -44,6 +36,15 @@ export function AvatarTile({ avatar, selected, onSelect, compact }: { avatar: Av
             }
           }}
         />
+        {/* After the portrait and without a z-index, so the clip covers the portrait only; the favourite star and the selected check stay clickable above it. */}
+        {preview && previewing && (
+          <video src={preview} muted loop autoPlay playsInline aria-hidden="true" data-testid="avatar-preview" className="absolute inset-0 h-full w-full object-cover" />
+        )}
+        {preview && !previewing && (
+          <span className="absolute bottom-2 right-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/50 text-white" title="Hover to preview" data-testid="avatar-preview-badge">
+            <Play className="h-3 w-3" />
+          </span>
+        )}
       </div>
       <div className="p-2.5">
         <div className="truncate text-sm font-medium text-slate-900">{avatar.name}</div>

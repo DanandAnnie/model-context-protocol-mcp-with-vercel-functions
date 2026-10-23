@@ -186,6 +186,10 @@ test("the avatar library filters by gender and name", async ({ page }) => {
   await page.getByRole("img", { name: "Ava Chen" }).hover();
   await expect(page.getByTestId("avatar-preview")).toHaveAttribute("src", /ForBiggerEscapes\.mp4$/);
   await expect(page.getByTestId("avatar-preview")).toHaveJSProperty("muted", true);
+  // The clip sits under the favourite star, so the star still takes the click while the clip plays.
+  await page.getByRole("button", { name: "Add Ava Chen to favourites" }).click();
+  await expect(page.getByRole("button", { name: "Remove Ava Chen from favourites" })).toBeVisible();
+  await page.getByRole("button", { name: "Remove Ava Chen from favourites" }).click();
   await page.getByRole("img", { name: "Sofia Reyes" }).hover();
   await expect(page.getByTestId("avatar-preview")).toHaveCount(0);
   await page.getByLabel("Gender").selectOption("male");

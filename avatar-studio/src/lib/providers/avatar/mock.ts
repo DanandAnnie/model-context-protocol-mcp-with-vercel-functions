@@ -1,9 +1,9 @@
-import { STOCK_AVATARS } from "../../stock";
+import { SAMPLE_PREVIEW_VIDEO, STOCK_AVATARS } from "../../stock";
 import type { Avatar, VideoRequest } from "../../types";
 import type { AvatarJobStatus, AvatarProvider } from "../types";
 
-/** Public-domain sample clip used to stand in for a rendered avatar video in demo mode. */
-const SAMPLE_VIDEO = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4";
+/** Public-domain sample clip used to stand in for a rendered avatar video in demo mode (the same one presenters preview). */
+const SAMPLE_VIDEO = SAMPLE_PREVIEW_VIDEO;
 const SAMPLE_THUMB = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/ForBiggerEscapes.jpg";
 
 /** Simulates an async render that completes ~12s after submission. */

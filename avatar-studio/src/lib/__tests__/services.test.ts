@@ -400,9 +400,20 @@ describe("share call to action", () => {
     assert.equal(cleared.shareCta, undefined);
     assert.throws(() => videoPatchSchema.parse({ shareCta: { label: "Go", url: "javascript:alert(1)" } }), /http/);
     assert.throws(() => videoPatchSchema.parse({ shareCta: { label: "Go", url: "example.com" } }), /http/);
-    assert.throws(() => videoPatchSchema.parse({ shareCta: { label: "x".repeat(41), url: "https://example.com" } }));
+    assert.throws(() => videoPatchSchema.parse({ shareCta: { label: "x".repeat(41), url: "https://example.com" } }), /40/);
     assert.throws(() => videoPatchSchema.parse({ shareCta: { label: "", url: "https://example.com" } }));
+    assert.throws(() => videoPatchSchema.parse({ shareCta: { label: "   ", url: "https://example.com" } }));
+    assert.throws(() => videoPatchSchema.parse({ shareCta: {} }));
+    assert.throws(() => videoPatchSchema.parse({ shareCta: { label: "Go" } }));
     assert.throws(() => videoPatchSchema.parse({}), /Nothing to update/);
+  });
+
+  it("survives patches that do not mention it", async () => {
+    const { updateVideo, videoPatchSchema } = await import("../services/videos");
+    const video = await createVideo(videoRequestSchema.parse({ title: "CTA", script: "Hi.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }));
+    await updateVideo(video.id, videoPatchSchema.parse({ shareCta: { label: "Book", url: "https://example.com" } }));
+    const renamed = await updateVideo(video.id, videoPatchSchema.parse({ title: "Renamed", shareDownload: true }));
+    assert.deepEqual(renamed.shareCta, { label: "Book", url: "https://example.com" });
   });
 });
 

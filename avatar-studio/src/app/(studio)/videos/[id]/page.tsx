@@ -31,7 +31,7 @@ export default function VideoDetailPage() {
       setTemplateErr(e instanceof Error ? e.message : "Could not save the template");
     }
   }
-  const { data, loading, error, setData } = useApi<{ video: Video }>(`/api/videos/${id}`, {
+  const { data, loading, error, setData, refetch } = useApi<{ video: Video }>(`/api/videos/${id}`, {
     pollMs: 5000,
     pollWhile: (d) => d.video.status === "processing" || d.video.status === "queued",
   });
@@ -100,6 +100,8 @@ export default function VideoDetailPage() {
     try {
       const { video: next } = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify({ shareDownload: on }) });
       setData({ video: next });
+      // A status poll that started before the save would land after it with the old record.
+      void refetch();
     } catch (e) {
       setShareErr(e instanceof Error ? e.message : "Could not update sharing");
     } finally {
@@ -111,21 +113,23 @@ export default function VideoDetailPage() {
   const [ctaLabel, setCtaLabel] = useState<string | null>(null);
   const [ctaUrl, setCtaUrl] = useState<string | null>(null);
   const [ctaErr, setCtaErr] = useState<string | null>(null);
-  const [ctaSaving, setCtaSaving] = useState(false);
+  const [ctaBusy, setCtaBusy] = useState<"save" | "remove" | null>(null);
+  const ctaDraft = { label: (ctaLabel ?? video?.shareCta?.label ?? "").trim(), url: (ctaUrl ?? video?.shareCta?.url ?? "").trim() };
   async function saveCta(remove = false) {
-    if (!video) return;
+    if (!video || ctaBusy) return;
     setCtaErr(null);
-    setCtaSaving(true);
+    setCtaBusy(remove ? "remove" : "save");
     try {
-      const body = remove ? { shareCta: null } : { shareCta: { label: (ctaLabel ?? video.shareCta?.label ?? "").trim(), url: (ctaUrl ?? video.shareCta?.url ?? "").trim() } };
+      const body = remove ? { shareCta: null } : { shareCta: ctaDraft };
       const { video: next } = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify(body) });
       setData({ video: next });
       setCtaLabel(null);
       setCtaUrl(null);
+      void refetch();
     } catch (e) {
       setCtaErr(e instanceof Error ? e.message : "Could not save the button");
     } finally {
-      setCtaSaving(false);
+      setCtaBusy(null);
     }
   }
 
@@ -362,21 +366,29 @@ export default function VideoDetailPage() {
               <Card className="p-4" data-testid="share-cta-card">
                 <h3 className="text-sm font-semibold text-slate-900">Call to action</h3>
                 <p className="mt-1 text-xs text-slate-500">A button under the player on the share page, in your brand colour.</p>
-                <div className="mt-3 space-y-2">
+                <form
+                  className="mt-3 space-y-2"
+                  // The server's message names the accepted schemes; the browser's generic URL check would hide it.
+                  noValidate
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (ctaDraft.label && ctaDraft.url) void saveCta();
+                  }}
+                >
                   <input className={inputClass} aria-label="Button label" placeholder="Book a showing" maxLength={40} value={ctaLabel ?? video.shareCta?.label ?? ""} onChange={(e) => setCtaLabel(e.target.value)} />
                   <input className={inputClass} aria-label="Button link" type="url" placeholder="https://…" value={ctaUrl ?? video.shareCta?.url ?? ""} onChange={(e) => setCtaUrl(e.target.value)} />
                   <div className="flex items-center gap-2">
-                    <Button className="px-3 py-1.5 text-xs" onClick={() => saveCta()} loading={ctaSaving} disabled={!(ctaLabel ?? video.shareCta?.label) || !(ctaUrl ?? video.shareCta?.url)}>
+                    <Button type="submit" className="px-3 py-1.5 text-xs" loading={ctaBusy === "save"} disabled={!ctaDraft.label || !ctaDraft.url || ctaBusy === "remove"}>
                       Save button
                     </Button>
                     {video.shareCta && (
-                      <Button variant="secondary" className="px-3 py-1.5 text-xs" onClick={() => saveCta(true)} disabled={ctaSaving}>
+                      <Button type="button" variant="secondary" className="px-3 py-1.5 text-xs" onClick={() => saveCta(true)} loading={ctaBusy === "remove"} disabled={ctaBusy === "save"}>
                         Remove
                       </Button>
                     )}
                     {ctaErr && <span className="text-xs text-rose-600">{ctaErr}</span>}
                   </div>
-                </div>
+                </form>
               </Card>
               <Card className="p-4">
                 <h3 className="text-sm font-semibold text-slate-900">{video.scenes && video.scenes.length > 1 ? `Script · ${video.scenes.length} scenes` : "Script"}</h3>

@@ -336,8 +336,12 @@ test("share page offers a download only when the owner allows it", async ({ page
   // A call-to-action button set from the video page shows under the share-page player.
   await page.goto(`/videos/${v.id}`);
   await page.getByLabel("Button label").fill("Book a showing");
-  await page.getByLabel("Button link").fill("https://example.com/book");
+  // A link without a scheme is refused with the field's own message, not a generic one.
+  await page.getByLabel("Button link").fill("example.com/book");
   await page.getByRole("button", { name: "Save button" }).click();
+  await expect(page.getByTestId("share-cta-card")).toContainText("The link must start with http:// or https://");
+  await page.getByLabel("Button link").fill("https://example.com/book");
+  await page.getByLabel("Button link").press("Enter");
   await expect(page.getByRole("button", { name: "Remove" })).toBeVisible();
   await page.goto(`/share/${v.id}`);
   const cta = page.getByTestId("share-cta");

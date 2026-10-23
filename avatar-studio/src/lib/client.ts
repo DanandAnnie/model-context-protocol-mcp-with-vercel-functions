@@ -6,6 +6,18 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The message a failed response should show. Schema failures arrive as a generic
+ * "Invalid request" plus the field issues, so the first issue's own wording
+ * ("The link must start with http:// or https://") is used when there is one.
+ */
+export function errorMessage(body: Record<string, unknown>, status: number): string {
+  const error = typeof body.error === "string" ? body.error : `Request failed (${status})`;
+  const issues = Array.isArray(body.issues) ? (body.issues as Array<{ message?: unknown }>) : [];
+  const first = issues.find((i) => typeof i?.message === "string" && i.message.trim())?.message;
+  return typeof first === "string" ? first : error;
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
@@ -15,7 +27,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const text = await res.text();
   const body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
   if (!res.ok) {
-    throw new ApiError((body.error as string) ?? `Request failed (${res.status})`, res.status, body.issues, body);
+    throw new ApiError(errorMessage(body, res.status), res.status, body.issues, body);
   }
   return body as T;
 }

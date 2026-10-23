@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { Sparkles } from "lucide-react";
 import { NotFoundError, PUBLIC_ACCESS, getBrandKit, getVideo } from "@/lib/services";
 import { LOCAL_OWNER } from "@/lib/owner";
-import { formatSeconds } from "@/lib/client";
+import { formatSeconds, isDarkHex } from "@/lib/client";
 import { ViewBeacon } from "@/components/ViewBeacon";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +21,7 @@ export default async function SharePage({ params }: { params: Promise<{ id: stri
 
   const brand = await getBrandKit(video.ownerId ?? LOCAL_OWNER);
   const accent = brand?.accentColor ?? brand?.primaryColor;
+  const ctaBackground = accent ?? "#4f46e5";
 
   const frame = video.aspect === "9:16" ? "aspect-[9/16] max-w-[420px]" : video.aspect === "1:1" ? "aspect-square max-w-[640px]" : "aspect-video";
 
@@ -68,8 +69,8 @@ export default async function SharePage({ params }: { params: Promise<{ id: stri
                 target="_blank"
                 rel="noreferrer noopener"
                 data-testid="share-cta"
-                className="inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-90"
-                style={{ background: accent ?? "#4f46e5" }}
+                className="inline-flex max-w-full items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold shadow-sm [overflow-wrap:anywhere] hover:opacity-90"
+                style={{ background: ctaBackground, color: isDarkHex(ctaBackground) ? "#fff" : "#0f172a" }}
               >
                 {video.shareCta.label}
               </a>

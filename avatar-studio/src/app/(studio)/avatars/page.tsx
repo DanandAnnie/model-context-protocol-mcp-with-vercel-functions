@@ -1,7 +1,7 @@
 "use client";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
-import { Camera, Trash2, Upload, Users } from "lucide-react";
+import { Camera, Trash2, Upload, Users, Video as VideoIcon } from "lucide-react";
 import { AvatarTile } from "@/components/AvatarPicker";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
@@ -93,6 +93,57 @@ function CreateAvatarPanel({ onClose, onCreated }: { onClose: () => void; onCrea
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [camera, setCamera] = useState(false);
+
+  function stopCamera() {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    setCamera(false);
+  }
+
+  async function startCamera() {
+    setErr(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 1600 } }, audio: false });
+      streamRef.current = stream;
+      setCamera(true);
+      requestAnimationFrame(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(() => undefined);
+        }
+      });
+    } catch {
+      setErr("Camera access was blocked. Upload a portrait instead.");
+    }
+  }
+
+  function capture() {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth) return;
+    // Crop to a 4:5 portrait around the centre.
+    const targetRatio = 4 / 5;
+    let w = video.videoWidth;
+    let h = video.videoHeight;
+    if (w / h > targetRatio) w = Math.round(h * targetRatio);
+    else h = Math.round(w / targetRatio);
+    const sx = Math.round((video.videoWidth - w) / 2);
+    const sy = Math.round((video.videoHeight - h) / 2);
+    const canvas = document.createElement("canvas");
+    canvas.width = 800;
+    canvas.height = 1000;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1); // un-mirror the selfie preview
+    ctx.drawImage(video, sx, sy, w, h, 0, 0, canvas.width, canvas.height);
+    setImageUrl(canvas.toDataURL("image/jpeg", 0.92));
+    stopCamera();
+  }
+
+  useEffect(() => stopCamera, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -128,10 +179,18 @@ function CreateAvatarPanel({ onClose, onCreated }: { onClose: () => void; onCrea
     <Card className="mb-6 p-5">
       <div className="grid gap-5 md:grid-cols-[180px_1fr]">
         <div
-          onClick={() => fileRef.current?.click()}
-          className="flex aspect-[4/5] cursor-pointer flex-col items-center justify-center overflow-hidden rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 text-center text-xs text-slate-500 hover:border-brand-400"
+          onClick={() => !camera && fileRef.current?.click()}
+          className="relative flex aspect-[4/5] cursor-pointer flex-col items-center justify-center overflow-hidden rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 text-center text-xs text-slate-500 hover:border-brand-400"
         >
-          {imageUrl ? (
+          {camera ? (
+            <>
+              <video ref={videoRef} muted playsInline className="h-full w-full object-cover" style={{ transform: "scaleX(-1)" }} />
+              <div className="absolute inset-x-0 bottom-2 flex justify-center gap-2" onClick={(e) => e.stopPropagation()}>
+                <button type="button" onClick={capture} className="rounded-full bg-white px-3 py-1.5 text-xs font-medium text-slate-900 shadow">Capture</button>
+                <button type="button" onClick={stopCamera} className="rounded-full bg-black/60 px-3 py-1.5 text-xs font-medium text-white">Cancel</button>
+              </div>
+            </>
+          ) : imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={imageUrl} alt="Portrait preview" className="h-full w-full object-cover" />
           ) : (
@@ -142,6 +201,18 @@ function CreateAvatarPanel({ onClose, onCreated }: { onClose: () => void; onCrea
             </>
           )}
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
+          {!camera && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                startCamera();
+              }}
+              className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-medium text-slate-700 shadow hover:text-brand-700"
+            >
+              <VideoIcon className="h-3 w-3" /> Use camera
+            </button>
+          )}
         </div>
         <div className="space-y-4">
           <Field label="Avatar name">

@@ -34,9 +34,13 @@ export interface AvatarProvider {
   parseWebhook?(body: unknown): { providerJobId: string; update: AvatarJobStatus } | null;
 }
 
+export type ScriptAction = "shorten" | "expand" | "tone" | "translate" | "polish";
+
 export interface ScriptProvider {
   readonly name: string;
   generate(input: { topic: string; tone: string; lengthSec: number; language: string; audience?: string }): Promise<string>;
+  /** Transform an existing script: shorten, expand, change tone, translate, or polish. */
+  revise(input: { script: string; action: ScriptAction; tone?: string; language?: string }): Promise<string>;
 }
 
 export interface TranslateProvider {

@@ -84,6 +84,17 @@ export async function generateScript(input: z.infer<typeof scriptSchema>): Promi
   return getScriptProvider().generate(input);
 }
 
+export const reviseSchema = z.object({
+  script: z.string().trim().min(1).max(5000),
+  action: z.enum(["shorten", "expand", "tone", "translate", "polish"]),
+  tone: z.enum(["friendly", "professional", "formal", "energetic", "calm"]).optional(),
+  language: z.string().trim().min(2).max(40).optional(),
+});
+
+export async function reviseScript(input: z.infer<typeof reviseSchema>): Promise<string> {
+  return getScriptProvider().revise(input);
+}
+
 // ---------- Videos ----------
 
 const backgroundSchema = z.object({ type: z.enum(["color", "image"]), value: z.string().min(1) });

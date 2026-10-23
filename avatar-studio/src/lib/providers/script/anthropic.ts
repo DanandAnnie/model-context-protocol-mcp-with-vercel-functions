@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { ScriptProvider } from "../types";
+import type { ScriptAction, ScriptProvider } from "../types";
 
 const SYSTEM = `You write spoken scripts for short AI avatar videos. Rules:
 - Output only the words the presenter says. No headings, stage directions, markdown, or quotes.
@@ -14,6 +14,17 @@ export class AnthropicScriptProvider implements ScriptProvider {
     this.client = new Anthropic({ apiKey });
   }
 
+  async revise(input: { script: string; action: ScriptAction; tone?: string; language?: string }) {
+    const instruction: Record<ScriptAction, string> = {
+      shorten: "Cut this script to roughly half its length. Keep the hook and the call to action.",
+      expand: "Expand this script to roughly 1.5x its length with one concrete example or detail. Keep the same voice.",
+      tone: `Rewrite this script in a ${input.tone ?? "friendly"} tone without changing its meaning or length.`,
+      translate: `Translate this script into ${input.language ?? "English"}. Keep it natural for a spoken presenter; do not add commentary.`,
+      polish: "Tighten the wording for spoken delivery: shorter sentences, contractions, no filler. Keep meaning and length.",
+    };
+    return this.complete(`${instruction[input.action]}\n\nScript:\n${input.script}`);
+  }
+
   async generate(input: { topic: string; tone: string; lengthSec: number; language: string; audience?: string }) {
     const words = Math.round(input.lengthSec * 2.5);
     const prompt = [
@@ -26,6 +37,10 @@ export class AnthropicScriptProvider implements ScriptProvider {
       .filter(Boolean)
       .join("\n");
 
+    return this.complete(prompt);
+  }
+
+  private async complete(prompt: string): Promise<string> {
     const response = await this.client.beta.messages.create({
       model: "claude-opus-5-5",
       max_tokens: 16000,

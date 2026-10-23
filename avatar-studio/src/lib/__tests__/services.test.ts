@@ -240,3 +240,14 @@ describe("rename", () => {
     await assert.rejects(updateVideo("missing", { title: "x" }), /not found/);
   });
 });
+
+describe("script assistant", () => {
+  it("revises scripts in demo mode", async () => {
+    const { reviseScript } = await import("../services");
+    const script = "Hi there! One. Two. Three. Four.";
+    assert.equal(await reviseScript({ script, action: "shorten" }), "Hi there! One. Two.");
+    assert.match(await reviseScript({ script, action: "expand" }), /Thanks for watching\.$/);
+    assert.match(await reviseScript({ script, action: "tone", tone: "formal" }), /^Hello\./);
+    assert.match(await reviseScript({ script, action: "translate", language: "Spanish" }), /^\[Spanish\]/);
+  });
+});

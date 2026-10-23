@@ -1,7 +1,7 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Captions, Clapperboard, Image as ImageIcon, Layers, Mic2, Palette, Play, Plus, Square, Trash2, Users, Wand2, X } from "lucide-react";
+import { Captions, Clapperboard, Image as ImageIcon, Layers, Mic2, Palette, Play, Plus, Sparkles, Square, Trash2, Users, Wand2, X } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { VoiceRow } from "@/components/VoicePicker";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -93,6 +93,28 @@ function CreateInner() {
   const [speed, setSpeed] = useState(1);
   const [tab, setTab] = useState<Tab>("avatar");
   const [writerOpen, setWriterOpen] = useState(params.get("writer") === "1");
+  const [assistOpen, setAssistOpen] = useState(false);
+  const [assistBusy, setAssistBusy] = useState(false);
+  const [assistTone, setAssistTone] = useState<(typeof TONES)[number]>("professional");
+  const [assistLanguage, setAssistLanguage] = useState("Spanish");
+
+  async function revise(action: "shorten" | "expand" | "tone" | "translate" | "polish") {
+    if (!active.script.trim()) return;
+    setAssistBusy(true);
+    setErr(null);
+    try {
+      const { script: out } = await api<{ script: string }>("/api/script", {
+        method: "POST",
+        body: JSON.stringify({ action, script: active.script, tone: action === "tone" ? assistTone : undefined, language: action === "translate" ? assistLanguage : undefined }),
+      });
+      setScript(out);
+      setAssistOpen(false);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not revise the script");
+    } finally {
+      setAssistBusy(false);
+    }
+  }
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [voiceQuery, setVoiceQuery] = useState("");
@@ -310,6 +332,36 @@ function CreateInner() {
                 <Button variant="secondary" className="px-3 py-1.5" onClick={() => setWriterOpen((v) => !v)}>
                   <Wand2 className="h-4 w-4" /> Write with AI
                 </Button>
+                <div className="relative">
+                  <Button variant="secondary" className="px-3 py-1.5" disabled={!active.script.trim()} loading={assistBusy} onClick={() => setAssistOpen((v) => !v)}>
+                    <Sparkles className="h-4 w-4" /> Improve
+                  </Button>
+                  {assistOpen && (
+                    <div className="absolute right-0 z-20 mt-1 w-64 rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+                      {(
+                        [
+                          ["polish", "Polish for speech"],
+                          ["shorten", "Shorten"],
+                          ["expand", "Expand"],
+                        ] as const
+                      ).map(([action, label]) => (
+                        <button key={action} type="button" onClick={() => revise(action)} className="block w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">
+                          {label}
+                        </button>
+                      ))}
+                      <div className="mt-1 flex items-center gap-1 border-t border-slate-100 px-1 pt-2">
+                        <select className={`${inputClass} py-1.5 text-xs`} value={assistTone} onChange={(e) => setAssistTone(e.target.value as typeof assistTone)}>
+                          {TONES.map((t) => <option key={t} value={t}>{t[0].toUpperCase() + t.slice(1)}</option>)}
+                        </select>
+                        <button type="button" onClick={() => revise("tone")} className="shrink-0 rounded-md px-2 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50">Change tone</button>
+                      </div>
+                      <div className="mt-1 flex items-center gap-1 px-1">
+                        <input className={`${inputClass} py-1.5 text-xs`} value={assistLanguage} onChange={(e) => setAssistLanguage(e.target.value)} placeholder="Language" />
+                        <button type="button" onClick={() => revise("translate")} className="shrink-0 rounded-md px-2 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50">Translate</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
                 {voice && (
                   <Button
                     variant="secondary"

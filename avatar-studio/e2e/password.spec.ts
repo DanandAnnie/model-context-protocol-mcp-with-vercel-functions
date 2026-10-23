@@ -52,6 +52,11 @@ test("API keys grant script access without a session; minting needs a session", 
   expect((await script.delete(`/api/keys/${key.id}`, { headers: auth })).status()).toBe(403);
   const made = await script.post("/api/videos", { headers: auth, data: { title: "From a script", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9" } });
   expect(made.status()).toBe(201);
+  // The key reaches the per-video routes too: sharing settings and retry (409: the render is not failed).
+  const madeId = ((await made.json()) as { video: { id: string } }).video.id;
+  expect((await script.patch(`/api/videos/${madeId}`, { headers: auth, data: { shareDownload: true } })).status()).toBe(200);
+  expect((await script.post(`/api/videos/${madeId}/retry`, { headers: auth })).status()).toBe(409);
+  expect((await script.post(`/api/videos/${madeId}/retry`)).status()).toBe(401);
 
   const listed = (await (await request.get("/api/keys")).json()) as { keys: Array<{ id: string; lastUsedAt?: string }> };
   expect(listed.keys.find((k) => k.id === key.id)?.lastUsedAt).toBeTruthy();

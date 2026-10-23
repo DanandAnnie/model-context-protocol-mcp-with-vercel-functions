@@ -260,8 +260,20 @@ export const videoPatchSchema = z
     folder: z.string().trim().max(MAX_FOLDER_NAME).optional(),
     /** Whether the public share page offers a download link. */
     shareDownload: z.boolean().optional(),
+    /** A call-to-action button on the share page; null removes it. */
+    shareCta: z
+      .object({
+        label: z.string().trim().min(1).max(40),
+        url: z
+          .string()
+          .trim()
+          .max(2000)
+          .refine((v) => /^https?:\/\/[^\s]+$/i.test(v), "The link must start with http:// or https://"),
+      })
+      .nullable()
+      .optional(),
   })
-  .refine((p) => p.title !== undefined || p.folder !== undefined || p.shareDownload !== undefined, "Nothing to update");
+  .refine((p) => p.title !== undefined || p.folder !== undefined || p.shareDownload !== undefined || p.shareCta !== undefined, "Nothing to update");
 
 export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSchema>, ownerId: string = LOCAL_OWNER): Promise<Video> {
   const existing = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
@@ -274,6 +286,10 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
   if (patch.shareDownload !== undefined) {
     if (patch.shareDownload) next.shareDownload = true;
     else delete next.shareDownload;
+  }
+  if (patch.shareCta !== undefined) {
+    if (patch.shareCta) next.shareCta = patch.shareCta;
+    else delete next.shareCta;
   }
   return getStore().put("video", next);
 }

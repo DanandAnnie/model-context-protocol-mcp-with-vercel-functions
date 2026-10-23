@@ -389,6 +389,23 @@ describe("scenes", () => {
   });
 });
 
+describe("share call to action", () => {
+  it("stores a labelled http(s) link and clears it with null", async () => {
+    const { updateVideo, videoPatchSchema } = await import("../services/videos");
+    const video = await createVideo(videoRequestSchema.parse({ title: "CTA", script: "Hi.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }));
+    const set = await updateVideo(video.id, videoPatchSchema.parse({ shareCta: { label: "  Book a showing ", url: "https://example.com/book " } }));
+    assert.deepEqual(set.shareCta, { label: "Book a showing", url: "https://example.com/book" });
+    assert.equal((await getVideo(video.id, LOCAL_OWNER, false)).shareCta?.label, "Book a showing");
+    const cleared = await updateVideo(video.id, videoPatchSchema.parse({ shareCta: null }));
+    assert.equal(cleared.shareCta, undefined);
+    assert.throws(() => videoPatchSchema.parse({ shareCta: { label: "Go", url: "javascript:alert(1)" } }), /http/);
+    assert.throws(() => videoPatchSchema.parse({ shareCta: { label: "Go", url: "example.com" } }), /http/);
+    assert.throws(() => videoPatchSchema.parse({ shareCta: { label: "x".repeat(41), url: "https://example.com" } }));
+    assert.throws(() => videoPatchSchema.parse({ shareCta: { label: "", url: "https://example.com" } }));
+    assert.throws(() => videoPatchSchema.parse({}), /Nothing to update/);
+  });
+});
+
 describe("saved templates", () => {
   it("saves a video as a template and reopens it", async () => {
     const { createTemplate, deleteTemplate, getTemplate, listTemplates, templateInputSchema, MAX_TEMPLATES } = await import("../services/templates");

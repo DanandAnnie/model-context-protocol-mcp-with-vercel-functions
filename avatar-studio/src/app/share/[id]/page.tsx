@@ -60,11 +60,25 @@ export default async function SharePage({ params }: { params: Promise<{ id: stri
             </div>
           )}
         </div>
-        {video.shareDownload && video.status === "completed" && video.videoUrl && (
-          <p className="mt-4">
-            <a href={video.videoUrl} download target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-700">
-              Download video
-            </a>
+        {(video.shareCta || (video.shareDownload && video.status === "completed" && video.videoUrl)) && (
+          <p className="mt-4 flex flex-wrap items-center gap-3">
+            {video.shareCta && (
+              <a
+                href={video.shareCta.url}
+                target="_blank"
+                rel="noreferrer noopener"
+                data-testid="share-cta"
+                className="inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-90"
+                style={{ background: accent ?? "#4f46e5" }}
+              >
+                {video.shareCta.label}
+              </a>
+            )}
+            {video.shareDownload && video.status === "completed" && video.videoUrl && (
+              <a href={video.videoUrl} download target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-700">
+                Download video
+              </a>
+            )}
           </p>
         )}
         <p className="mt-6 whitespace-pre-wrap text-sm leading-relaxed text-slate-300">{video.script}</p>

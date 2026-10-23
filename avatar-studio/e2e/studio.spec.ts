@@ -321,6 +321,21 @@ test("share page offers a download only when the owner allows it", async ({ page
   await page.goto(`/share/${v.id}`);
   await expect(page.getByRole("link", { name: "Download video" })).toBeVisible();
 
+  // A call-to-action button set from the video page shows under the share-page player.
+  await page.goto(`/videos/${v.id}`);
+  await page.getByLabel("Button label").fill("Book a showing");
+  await page.getByLabel("Button link").fill("https://example.com/book");
+  await page.getByRole("button", { name: "Save button" }).click();
+  await expect(page.getByRole("button", { name: "Remove" })).toBeVisible();
+  await page.goto(`/share/${v.id}`);
+  const cta = page.getByTestId("share-cta");
+  await expect(cta).toHaveText("Book a showing");
+  await expect(cta).toHaveAttribute("href", "https://example.com/book");
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareCta: { label: "Go", url: "javascript:alert(1)" } } })).status()).toBe(400);
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareCta: null } })).status()).toBe(200);
+  await page.goto(`/share/${v.id}`);
+  await expect(page.getByTestId("share-cta")).toHaveCount(0);
+
   expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareDownload: false } })).status()).toBe(200);
   await page.reload();
   await expect(page.getByRole("link", { name: "Download video" })).toHaveCount(0);

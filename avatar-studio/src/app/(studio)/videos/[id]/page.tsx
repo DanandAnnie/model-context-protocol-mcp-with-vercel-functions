@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { ArrowLeft, Captions, Check, Code2, Copy, Download, Eye, FolderOpen, Languages, LayoutTemplate, Link2, Pencil, RotateCcw, Trash2 } from "lucide-react";
-import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge } from "@/components/ui";
+import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { ApiError, api, formatDate, formatSeconds, isDarkHex } from "@/lib/client";
 import type { Video } from "@/lib/types";
@@ -104,6 +104,28 @@ export default function VideoDetailPage() {
       setShareErr(e instanceof Error ? e.message : "Could not update sharing");
     } finally {
       setDownloadOn(null);
+    }
+  }
+
+  // Call to action shown under the share-page player.
+  const [ctaLabel, setCtaLabel] = useState<string | null>(null);
+  const [ctaUrl, setCtaUrl] = useState<string | null>(null);
+  const [ctaErr, setCtaErr] = useState<string | null>(null);
+  const [ctaSaving, setCtaSaving] = useState(false);
+  async function saveCta(remove = false) {
+    if (!video) return;
+    setCtaErr(null);
+    setCtaSaving(true);
+    try {
+      const body = remove ? { shareCta: null } : { shareCta: { label: (ctaLabel ?? video.shareCta?.label ?? "").trim(), url: (ctaUrl ?? video.shareCta?.url ?? "").trim() } };
+      const { video: next } = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify(body) });
+      setData({ video: next });
+      setCtaLabel(null);
+      setCtaUrl(null);
+    } catch (e) {
+      setCtaErr(e instanceof Error ? e.message : "Could not save the button");
+    } finally {
+      setCtaSaving(false);
     }
   }
 
@@ -336,6 +358,25 @@ export default function VideoDetailPage() {
                     )}
                   </Row>
                 </dl>
+              </Card>
+              <Card className="p-4" data-testid="share-cta-card">
+                <h3 className="text-sm font-semibold text-slate-900">Call to action</h3>
+                <p className="mt-1 text-xs text-slate-500">A button under the player on the share page, in your brand colour.</p>
+                <div className="mt-3 space-y-2">
+                  <input className={inputClass} aria-label="Button label" placeholder="Book a showing" maxLength={40} value={ctaLabel ?? video.shareCta?.label ?? ""} onChange={(e) => setCtaLabel(e.target.value)} />
+                  <input className={inputClass} aria-label="Button link" type="url" placeholder="https://…" value={ctaUrl ?? video.shareCta?.url ?? ""} onChange={(e) => setCtaUrl(e.target.value)} />
+                  <div className="flex items-center gap-2">
+                    <Button className="px-3 py-1.5 text-xs" onClick={() => saveCta()} loading={ctaSaving} disabled={!(ctaLabel ?? video.shareCta?.label) || !(ctaUrl ?? video.shareCta?.url)}>
+                      Save button
+                    </Button>
+                    {video.shareCta && (
+                      <Button variant="secondary" className="px-3 py-1.5 text-xs" onClick={() => saveCta(true)} disabled={ctaSaving}>
+                        Remove
+                      </Button>
+                    )}
+                    {ctaErr && <span className="text-xs text-rose-600">{ctaErr}</span>}
+                  </div>
+                </div>
               </Card>
               <Card className="p-4">
                 <h3 className="text-sm font-semibold text-slate-900">{video.scenes && video.scenes.length > 1 ? `Script · ${video.scenes.length} scenes` : "Script"}</h3>

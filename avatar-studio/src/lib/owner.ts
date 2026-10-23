@@ -34,6 +34,20 @@ export async function currentUser(): Promise<User> {
   return { id: user.id, email: user.email ?? undefined };
 }
 
+/**
+ * The person behind the request for attribution. A script with an API key carries no session,
+ * so it is credited to the key's owner; any other failure to resolve the user is an error, not
+ * a reason to credit the work to the workspace and leave its real author unable to undo it.
+ */
+export async function userOrOwner(owner: string): Promise<User> {
+  try {
+    return await currentUser();
+  } catch (err) {
+    if (err instanceof UnauthorizedError) return { id: owner };
+    throw err;
+  }
+}
+
 /** The workspace selected by the cookie, when the user is still a member of it. */
 export async function activeWorkspaceId(user: User): Promise<string | null> {
   const id = (await cookies()).get(WORKSPACE_COOKIE)?.value;

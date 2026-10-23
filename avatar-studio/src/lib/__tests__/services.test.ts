@@ -488,6 +488,18 @@ describe("captions", () => {
     assert.equal(captionsBurnedIn({ captions: true, provider: "did" }), false);
   });
 
+  it("stores a zero pitch as absent and keeps a shift through a retry and a template", async () => {
+    const { createTemplate, templateInputSchema: tplSchema } = await import("../services/templates");
+    const req = { title: "P", script: "Hi.", avatarId: "stock_1", voiceId: STOCK_VOICES[0].id, aspect: "16:9" as const, background: { type: "color" as const, value: "#fff" }, captions: false, speed: 1 };
+    const flat = await createVideo({ ...req, pitch: 0 });
+    assert.equal("pitch" in flat, false);
+    const high = await createVideo({ ...req, pitch: 15 });
+    assert.equal(high.pitch, 15);
+    const tpl = await createTemplate(tplSchema.parse({ fromVideoId: high.id }));
+    assert.equal(tpl.pitch, 15);
+    assert.equal("pitch" in (await createTemplate(tplSchema.parse({ fromVideoId: flat.id }))), false);
+  });
+
   it("stores the default caption style as absent whichever client spelled it out", async () => {
     const req = { title: "C", script: "Hi.", avatarId: "stock_1", voiceId: STOCK_VOICES[0].id, aspect: "16:9" as const, background: { type: "color" as const, value: "#fff" }, captions: true, speed: 1 };
     const plain = await createVideo({ ...req, captionStyle: { position: "bottom", size: "medium" } });
@@ -596,6 +608,13 @@ describe("scenes", () => {
     assert.equal(bodyOf().caption, true);
     await heygen.createVideo({ ...req, captions: true, captionStyle: { position: "top", size: "large" } }, ava, emma, cast);
     assert.equal(bodyOf().caption, false, "a styled caption is not burned in");
+    // A pitch shift reaches the voice settings; none means the field is left out.
+    await heygen.createVideo({ ...req, pitch: 20 }, ava, emma, cast);
+    assert.equal((sent as unknown as { video_inputs: Array<{ voice: { pitch?: number } }> }).video_inputs[0].voice.pitch, 20);
+    await heygen.createVideo(req, ava, emma, cast);
+    assert.equal("pitch" in (sent as unknown as { video_inputs: Array<{ voice: object }> }).video_inputs[0].voice, false);
+    assert.equal(videoRequestSchema.safeParse({ ...req, pitch: 51 }).success, false);
+    assert.equal(videoRequestSchema.safeParse({ ...req, pitch: 2.5 }).success, false);
     // A video background loops and fills the frame; an image is passed by URL; a colour as a value.
     const withVideo = videoRequestSchema.parse({ ...req, scenes: [{ ...req.scenes![0], background: { type: "video", value: "https://cdn.example.com/loop.mp4" } }, { ...req.scenes![1], background: { type: "image", value: "https://cdn.example.com/bg.jpg" } }] });
     await heygen.createVideo(withVideo, ava, emma, cast);

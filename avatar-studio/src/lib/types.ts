@@ -76,6 +76,7 @@ export interface VideoTemplate {
   captions: boolean;
   captionStyle?: CaptionStyle;
   speed: number;
+  pitch?: number;
   /** The video it was saved from, when it was. */
   sourceVideoId?: string;
   createdAt: string;
@@ -132,6 +133,8 @@ export interface VideoRequest {
   captionStyle?: CaptionStyle;
   /** 0.5 - 1.5 speaking rate multiplier. */
   speed: number;
+  /** Voice pitch shift from -50 to 50 (HeyGen; other renderers use the voice's natural pitch); absent means none. */
+  pitch?: number;
 }
 
 export const CAPTION_POSITIONS = ["bottom", "top"] as const;

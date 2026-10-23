@@ -26,6 +26,7 @@ interface Draft {
   captions: boolean;
   captionStyle?: CaptionStyle;
   speed: number;
+  pitch?: number;
   avatarId?: string;
   voiceId?: string;
   savedAt: string;
@@ -155,6 +156,7 @@ function CreateInner() {
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>(DEFAULT_CAPTION_STYLE);
   const isDefaultCaptionStyle = isDefaultCaptionStyleFn(captionStyle);
   const [speed, setSpeed] = useState(1);
+  const [pitch, setPitch] = useState(0);
   const [tab, setTab] = useState<Tab>("avatar");
   const [writerOpen, setWriterOpen] = useState(params.get("writer") === "1");
   const [assistOpen, setAssistOpen] = useState(false);
@@ -204,6 +206,7 @@ function CreateInner() {
     setCaptions(d.captions);
     setCaptionStyle(d.captionStyle ?? DEFAULT_CAPTION_STYLE);
     setSpeed(d.speed);
+    setPitch(d.pitch ?? 0);
     setPrefill({ avatarId: d.avatarId, voiceId: d.voiceId });
     setDraftRestored(d.savedAt);
   }, [templateId, fromId]);
@@ -213,10 +216,10 @@ function CreateInner() {
     if (!hydrated.current) return;
     const empty = scenes.every((sc) => !sc.script.trim()) && title === "Untitled video";
     const t = setTimeout(() => {
-      writeDraft(empty ? null : { title, scenes, aspect, resolution, captions, ...(isDefaultCaptionStyle ? {} : { captionStyle }), speed, avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
+      writeDraft(empty ? null : { title, scenes, aspect, resolution, captions, ...(isDefaultCaptionStyle ? {} : { captionStyle }), speed, ...(pitch ? { pitch } : {}), avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
     }, 400);
     return () => clearTimeout(t);
-  }, [title, scenes, aspect, resolution, captions, captionStyle, isDefaultCaptionStyle, speed, avatar, voice]);
+  }, [title, scenes, aspect, resolution, captions, captionStyle, isDefaultCaptionStyle, speed, pitch, avatar, voice]);
 
   function discardDraft() {
     writeDraft(null);
@@ -227,6 +230,7 @@ function CreateInner() {
     setResolution("1080p");
     setCaptions(false);
     setSpeed(1);
+    setPitch(0);
     setDraftRestored(null);
   }
 
@@ -271,6 +275,7 @@ function CreateInner() {
         setCaptions(template.captions);
         setCaptionStyle(template.captionStyle ?? DEFAULT_CAPTION_STYLE);
         setSpeed(template.speed);
+        setPitch(template.pitch ?? 0);
         setPrefill({ avatarId: template.avatarId, voiceId: template.voiceId });
       })
       .catch((e) => setErr(e instanceof Error ? e.message : "Could not load the template"));
@@ -290,6 +295,7 @@ function CreateInner() {
         setCaptions(video.captions);
         setCaptionStyle(video.captionStyle ?? DEFAULT_CAPTION_STYLE);
         setSpeed(video.speed);
+        setPitch(video.pitch ?? 0);
         setPrefill({ avatarId: video.avatarId, voiceId: video.voiceId });
       })
       .catch((e) => setErr(e instanceof Error ? e.message : "Could not load the original video"));
@@ -344,7 +350,7 @@ function CreateInner() {
     try {
       const { video } = await api<{ video: Video }>("/api/videos", {
         method: "POST",
-        body: JSON.stringify({ title, scenes, avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed }),
+        body: JSON.stringify({ title, scenes, avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}) }),
       });
       writeDraft(null);
       router.push(`/videos/${video.id}`);
@@ -365,7 +371,7 @@ function CreateInner() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canGenerate, title, scenes, avatar, voice, aspect, captions, captionStyle, isDefaultCaptionStyle, speed]);
+  }, [canGenerate, title, scenes, avatar, voice, aspect, captions, captionStyle, isDefaultCaptionStyle, speed, pitch]);
 
   const stageAspect = aspect === "9:16" ? "aspect-[9/16]" : aspect === "1:1" ? "aspect-square" : "aspect-video";
   const bgIsDark = (background.type === "color" && isDarkHex(background.value)) || background.type === "video";
@@ -754,6 +760,9 @@ function CreateInner() {
                 </div>
                 <Field label={`Speaking speed · ${speed.toFixed(2)}x`}>
                   <input type="range" min={0.5} max={1.5} step={0.05} value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full accent-brand-600" />
+                </Field>
+                <Field label={`Voice pitch · ${pitch > 0 ? `+${pitch}` : pitch === 0 ? "natural" : pitch}`} hint="HeyGen shifts the voice up or down; other renderers keep its natural pitch.">
+                  <input type="range" min={-50} max={50} step={5} value={pitch} onChange={(e) => setPitch(Number(e.target.value))} aria-label="Voice pitch" className="w-full accent-brand-600" />
                 </Field>
                 <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-3">
                   <span>

@@ -648,6 +648,7 @@ export default function VideoDetailPage() {
                   <Row label="Avatar">{video.avatarName ?? video.avatarId}</Row>
                   <Row label="Voice">{video.voiceName ?? video.voiceId}</Row>
                   <Row label="Speed">{video.speed}x</Row>
+                  {video.pitch ? <Row label="Pitch">{video.pitch > 0 ? `+${video.pitch}` : video.pitch}</Row> : null}
                   <Row label="Captions">{video.captions ? `On${video.captionStyle ? ` · ${video.captionStyle.position}, ${video.captionStyle.size}` : ""}` : "Off"}</Row>
                   <Row label="Background">
                     {video.background.type === "color" ? (

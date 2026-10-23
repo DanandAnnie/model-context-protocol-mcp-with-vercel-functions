@@ -64,6 +64,7 @@ Instead of `script`, send `scenes` (1 to 20), each with its own `script` and `ba
 | `captions` | boolean | default `false` |
 | `captionStyle` | object | `{ position: "bottom" \| "top", size: "small" \| "medium" \| "large" }`, how subtitles sit and read in the share player's subtitle track and the WebVTT file (`top` becomes a `line:5%` cue setting); a value equal to the default is stored as absent; when set, HeyGen is told not to burn captions into the file so this look is the only one, which means the downloaded file of a styled video carries no captions (the share page's track is on from the start, except for a HeyGen file that already carries captions, where it waits in the CC menu) |
 | `speed` | 0.5–1.5 | default `1` |
+| `pitch` | integer -50–50 | voice pitch shift; HeyGen applies it (`voice.pitch`), other renderers keep the voice's natural pitch; `0` is stored as absent |
 
 Returns `201` with `{ "video": Video }`. The video starts as `queued` or `processing`; poll `GET /api/videos/:id` or use a webhook.
 

@@ -7,7 +7,7 @@ import type { Video, VideoTemplate } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { LimitError, NotFoundError, ValidationError } from "../errors";
 import { owned } from "./shared";
-import { backgroundSchema, captionStyleSchema, sceneLayoutSchema } from "./videos";
+import { backgroundSchema, captionStyleSchema, pitchSchema, sceneLayoutSchema } from "./videos";
 
 export const MAX_TEMPLATES = 50;
 
@@ -32,6 +32,7 @@ export const templateInputSchema = z.object({
   captions: z.boolean().optional(),
   captionStyle: captionStyleSchema.optional(),
   speed: z.number().min(0.5).max(1.5).optional(),
+  pitch: pitchSchema.optional(),
 });
 export type TemplateInput = z.infer<typeof templateInputSchema>;
 
@@ -72,6 +73,7 @@ export async function createTemplate(input: TemplateInput, ownerId: string = LOC
       captions: video.captions,
       ...(video.captionStyle ? { captionStyle: video.captionStyle } : {}),
       speed: video.speed,
+      ...(video.pitch ? { pitch: video.pitch } : {}),
       sourceVideoId: video.id,
     };
   } else {
@@ -87,6 +89,7 @@ export async function createTemplate(input: TemplateInput, ownerId: string = LOC
       captions: input.captions ?? false,
       ...(input.captionStyle ? { captionStyle: input.captionStyle } : {}),
       speed: input.speed ?? 1,
+      ...(input.pitch ? { pitch: input.pitch } : {}),
     };
   }
   return getStore().put("template", { ...base, id: newId("tpl"), ownerId, createdAt: nowIso(), updatedAt: nowIso() });

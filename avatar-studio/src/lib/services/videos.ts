@@ -17,10 +17,10 @@ import { clearCover, setCover } from "../cover";
 import { shareOffline } from "../client";
 import { bumpViewsByDay } from "../insights";
 
-import { backgroundSchema, captionStyleSchema, sceneLayoutSchema } from "./schemas";
+import { backgroundSchema, captionStyleSchema, pitchSchema, sceneLayoutSchema } from "./schemas";
 import { getBrandKit } from "./brand";
 import { spokenCopy } from "../pronounce";
-export { backgroundSchema, captionStyleSchema, sceneLayoutSchema };
+export { backgroundSchema, captionStyleSchema, pitchSchema, sceneLayoutSchema };
 
 export const videoRequestSchema = z
   .object({
@@ -49,6 +49,7 @@ export const videoRequestSchema = z
     captions: z.boolean().default(false),
     captionStyle: captionStyleSchema.optional(),
     speed: z.number().min(0.5).max(1.5).default(1),
+    pitch: pitchSchema.optional(),
   })
   .transform((v, ctx) => {
     if (v.scenes) {
@@ -149,6 +150,7 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
   // Like a scene's layout: the default look is stored as absent whichever client spelled it out, so every
   // renderer sees one shape (and burns captions in when it can).
   if (base.captionStyle && isDefaultCaptionStyle(base.captionStyle)) delete base.captionStyle;
+  if (!base.pitch) delete base.pitch; // no shift is stored as absent
 
   try {
     if (provider.prepareAvatar) {
@@ -638,6 +640,7 @@ export async function retryVideo(id: string, ownerId: string = LOCAL_OWNER): Pro
     captions: failed.captions,
     ...(failed.captionStyle ? { captionStyle: failed.captionStyle } : {}),
     speed: failed.speed,
+    ...(failed.pitch ? { pitch: failed.pitch } : {}),
   };
   // One write: the provider's webhook can land as soon as the job exists, so nothing may overwrite the stored video afterwards.
   return createVideo(req, ownerId, undefined, false, { folder: failed.folder, description: failed.description, batchId: failed.batchId, rowLabel: failed.rowLabel, retryOf: failed.id });

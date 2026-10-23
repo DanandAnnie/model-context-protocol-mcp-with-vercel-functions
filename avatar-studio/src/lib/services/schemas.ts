@@ -8,5 +8,7 @@ export const backgroundSchema = z
   .refine((b) => b.type !== "video" || /^https?:\/\//.test(b.value), "A video background must be a public http(s) URL");
 /** How captions look on the share page; see `CaptionStyle`. */
 export const captionStyleSchema = z.object({ position: z.enum(CAPTION_POSITIONS), size: z.enum(CAPTION_SIZES) });
+/** Voice pitch shift, -50..50 whole steps; HeyGen applies it, other renderers keep the voice's natural pitch. */
+export const pitchSchema = z.number().int().min(-50).max(50);
 /** Presenter size and position in the frame; see `SceneLayout`. */
 export const sceneLayoutSchema = z.object({ scale: z.number().min(0.5).max(1.5), x: z.number().min(-1).max(1), y: z.number().min(-1).max(1) });

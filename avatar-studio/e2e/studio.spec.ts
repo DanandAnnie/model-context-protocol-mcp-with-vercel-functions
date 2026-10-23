@@ -309,10 +309,15 @@ test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page 
   await expect(page.getByTestId("scene-layout")).not.toContainText("120%");
   await expect(page.getByTestId("stage-avatar")).not.toHaveAttribute("alt", "Marcus Hill");
   await page.getByRole("button", { name: /^Scene 2,/ }).click();
+  // The voice can be pitched up or down for the whole video.
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByLabel("Voice pitch").fill("10");
+  await expect(page.getByText(/Voice pitch · \+10/)).toBeVisible();
   await page.getByRole("button", { name: "Generate video" }).click();
   await page.waitForURL(/\/videos\/vid_/);
   const id = page.url().split("/").pop()!;
   const video = (await (await page.request.get(`/api/videos/${id}`)).json()).video;
+  expect(video.pitch).toBe(10);
   expect(video.scenes).toHaveLength(2);
   expect(video.script).toBe("Scene one says hello.\n\nScene two says goodbye.");
   expect(video.scenes[0].avatarName).toBeUndefined();

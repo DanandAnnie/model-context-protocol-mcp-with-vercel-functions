@@ -61,7 +61,7 @@ export async function generateMetadata({
       twitter: { card: "summary", title: video.title, description },
     };
   }
-  const description = excerpt(video.script) || `A video from ${siteName}`;
+  const description = video.description || excerpt(video.script) || `A video from ${siteName}`;
   const ready = video.status === "completed" && !!video.videoUrl;
   const poster = posterUrl(video, base);
   const images = poster
@@ -209,6 +209,11 @@ export default async function SharePage({
                       Download video
                     </a>
                   )}
+              </p>
+            )}
+            {video.description && (
+              <p className="mt-6 whitespace-pre-wrap text-base leading-relaxed text-slate-100" data-testid="share-description">
+                {video.description}
               </p>
             )}
             <p className="mt-6 whitespace-pre-wrap text-sm leading-relaxed text-slate-300">

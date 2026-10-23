@@ -746,6 +746,11 @@ describe("rename", () => {
     assert.equal(renamed.title, "New");
     assert.ok(renamed.updatedAt >= v.updatedAt);
     await assert.rejects(updateVideo("missing", { title: "x" }), /not found/);
+    // A share-page description is trimmed, kept, and removed by a blank save.
+    assert.equal((await updateVideo(v.id, videoPatchSchema.parse({ description: "  Why this matters.  " }))).description, "Why this matters.");
+    assert.equal((await updateVideo(v.id, { title: "Newer" })).description, "Why this matters.", "other edits keep it");
+    assert.equal("description" in (await updateVideo(v.id, videoPatchSchema.parse({ description: "   " }))), false, "a blank save removes it");
+    assert.equal(videoPatchSchema.safeParse({ description: "x".repeat(501) }).success, false);
   });
 });
 
@@ -2072,7 +2077,9 @@ describe("voice cloning", () => {
       const turn = await talkToAgent(gone.id, { messages: [{ role: "user", content: "Hi" }] });
       assert.ok(turn.reply, "the visitor still gets the reply");
       await assert.rejects(getAgent(gone.id, "u-turn"), /not found/, "the deleted presenter is not brought back");
-      await assert.rejects(listConversations(gone.id, "u-turn"), /not found/, "and no transcript is written for it");
+      const { getStore } = await import("../store");
+      const rows = (await getStore().list<{ agentId: string }>("conversation", "u-turn")).filter((c) => c.agentId === gone.id);
+      assert.equal(rows.length, 0, "and no transcript is written for it");
     } finally {
       proto.chat = realChat;
     }
@@ -2098,7 +2105,7 @@ describe("retrying a failed render", () => {
     const { retryVideo, ConflictError, NotFoundError } = await import("../services");
     const { getStore } = await import("../store");
     const ok = await createVideo({ title: "Fine", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, "u1");
-    const failed: Video = { ...ok, id: "vid_failed", status: "failed", error: "provider hiccup", providerJobId: undefined, folder: "Q4", batchId: "batch_1", rowLabel: "Ann", resolution: "720p", scenes: [{ script: "Hi.", background: ok.background }] };
+    const failed: Video = { ...ok, id: "vid_failed", status: "failed", error: "provider hiccup", providerJobId: undefined, folder: "Q4", description: "Keep me", batchId: "batch_1", rowLabel: "Ann", resolution: "720p", scenes: [{ script: "Hi.", background: ok.background }] };
     await getStore().put("video", failed);
 
     // One store write per retry: a provider webhook can arrive as soon as the job exists, so no second put may overwrite it.
@@ -2118,6 +2125,7 @@ describe("retrying a failed render", () => {
     assert.equal(videoPuts, 1, "retry writes the new video once");
     assert.notEqual(again.id, failed.id);
     assert.equal(again.status, "processing");
+    assert.equal(again.description, "Keep me", "a retry keeps the share-page description");
     assert.equal(again.title, "Fine");
     assert.equal(again.resolution, "720p");
     assert.deepEqual(again.scenes, failed.scenes);

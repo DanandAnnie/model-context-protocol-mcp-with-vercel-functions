@@ -233,6 +233,29 @@ export default function VideoDetailPage() {
       setMailBusy(false);
     }
   }
+  // Description shown under the share-page player; a blank save removes it.
+  const [descDraft, setDescDraft] = useState<string | null>(null);
+  const [descBusy, setDescBusy] = useState(false);
+  const [descErr, setDescErr] = useState<string | null>(null);
+  async function saveDescription() {
+    if (!video || descBusy || descDraft === null) return;
+    setDescBusy(true);
+    setDescErr(null);
+    try {
+      const { video: next } = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify({ description: descDraft.trim() }) });
+      setData((d) => {
+        const merged = { ...d?.video, ...next } as Video;
+        if (!("description" in next)) delete merged.description;
+        return { video: merged };
+      });
+      setDescDraft(null);
+      void refetch();
+    } catch (e) {
+      setDescErr(e instanceof Error ? e.message : "Could not save the description");
+    } finally {
+      setDescBusy(false);
+    }
+  }
   const [ctaLabel, setCtaLabel] = useState<string | null>(null);
   const [ctaUrl, setCtaUrl] = useState<string | null>(null);
   const [ctaErr, setCtaErr] = useState<string | null>(null);
@@ -683,6 +706,32 @@ export default function VideoDetailPage() {
                   </form>
                 </Card>
               )}
+              <Card className="p-4" data-testid="share-description-card">
+                <h3 className="text-sm font-semibold text-slate-900">Description</h3>
+                <p className="mt-1 text-xs text-slate-500">Shown under the player on the share page and in link previews. Leave it empty to show nothing.</p>
+                <form
+                  className="mt-3 space-y-2"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void saveDescription();
+                  }}
+                >
+                  <textarea
+                    className={`${inputClass} min-h-[72px]`}
+                    aria-label="Share page description"
+                    placeholder="What viewers should know before they press play"
+                    maxLength={500}
+                    value={descDraft ?? video.description ?? ""}
+                    onChange={(e) => setDescDraft(e.target.value)}
+                  />
+                  <div className="flex items-center gap-2">
+                    <Button type="submit" className="px-3 py-1.5 text-xs" loading={descBusy} disabled={descDraft === null || descDraft.trim() === (video.description ?? "")}>
+                      Save description
+                    </Button>
+                    {descErr && <span className="text-xs text-rose-600">{descErr}</span>}
+                  </div>
+                </form>
+              </Card>
               <Card className="p-4" data-testid="share-cta-card">
                 <h3 className="text-sm font-semibold text-slate-900">Call to action</h3>
                 <p className="mt-1 text-xs text-slate-500">A button under the player on the share page, in your brand colour.</p>

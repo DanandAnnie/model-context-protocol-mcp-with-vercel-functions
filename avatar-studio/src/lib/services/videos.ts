@@ -18,7 +18,7 @@ import { shareOffline } from "../client";
 import { bumpViewsByDay } from "../insights";
 
 export const backgroundSchema = z
-  .object({ type: z.enum(["color", "image", "video"]), value: z.string().min(1).max(2000) })
+  .object({ type: z.enum(["color", "image", "video"]), value: z.string().min(1).max(2000, "A background must be a colour or a URL of at most 2000 characters") })
   .refine((b) => b.type !== "video" || /^https?:\/\//.test(b.value), "A video background must be a public http(s) URL");
 /** How captions look on the share page; see `CaptionStyle`. */
 export const captionStyleSchema = z.object({ position: z.enum(CAPTION_POSITIONS), size: z.enum(CAPTION_SIZES) });
@@ -114,7 +114,7 @@ export async function resolveRenderContext(req: Pick<VideoRequest, "avatarId" | 
  * best-effort under concurrent requests; batches reserve their rows up front.
  */
 /** Library fields a caller may set on a new video alongside the render request (batch row, folder, retry link). */
-export type VideoExtras = Partial<Pick<Video, "folder" | "batchId" | "rowLabel" | "retryOf">>;
+export type VideoExtras = Partial<Pick<Video, "folder" | "description" | "batchId" | "rowLabel" | "retryOf">>;
 
 export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWNER, ctx?: RenderContext, skipLimit = false, extras: VideoExtras = {}): Promise<Video> {
   if (!skipLimit) await enforceRenderLimit(ownerId);
@@ -340,6 +340,8 @@ export const MAX_FOLDER_NAME = 40;
 export const videoPatchSchema = z
   .object({
     title: z.string().trim().min(1).max(120).optional(),
+    /** Text under the share-page player (and the link preview's description); an empty string removes it. */
+    description: z.string().trim().max(500).optional(),
     /** Folder name; an empty string moves the video back to "unfiled". */
     folder: z.string().trim().max(MAX_FOLDER_NAME).optional(),
     /** Whether the public share page offers a download link. */
@@ -381,6 +383,7 @@ export const videoPatchSchema = z
   .refine(
     (p) =>
       p.title !== undefined ||
+      p.description !== undefined ||
       p.folder !== undefined ||
       p.shareDownload !== undefined ||
       p.shareDisabled !== undefined ||
@@ -397,6 +400,10 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
   if (purgeDue(existing, Date.now())) throw new NotFoundError(`Video ${id} not found`);
   const next: Video = { ...existing, updatedAt: nowIso() };
   if (patch.title !== undefined) next.title = patch.title;
+  if (patch.description !== undefined) {
+    if (patch.description) next.description = patch.description;
+    else delete next.description;
+  }
   if (patch.folder !== undefined) {
     if (patch.folder) next.folder = patch.folder;
     else delete next.folder;
@@ -634,7 +641,7 @@ export async function retryVideo(id: string, ownerId: string = LOCAL_OWNER): Pro
     speed: failed.speed,
   };
   // One write: the provider's webhook can land as soon as the job exists, so nothing may overwrite the stored video afterwards.
-  return createVideo(req, ownerId, undefined, false, { folder: failed.folder, batchId: failed.batchId, rowLabel: failed.rowLabel, retryOf: failed.id });
+  return createVideo(req, ownerId, undefined, false, { folder: failed.folder, description: failed.description, batchId: failed.batchId, rowLabel: failed.rowLabel, retryOf: failed.id });
 }
 
 /**

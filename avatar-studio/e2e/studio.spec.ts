@@ -390,6 +390,17 @@ test("share page offers a download only when the owner allows it", async ({ page
   await page.goto(`/share/${v.id}`);
   await expect(page.getByRole("link", { name: "Download video" })).toBeVisible();
 
+  // A description saved from the video page shows under the share-page player and in the link preview.
+  await page.goto(`/videos/${v.id}`);
+  await expect(page.getByRole("button", { name: "Save description" })).toBeDisabled();
+  await page.getByLabel("Share page description").fill("Three things to know before the tour.");
+  await page.getByRole("button", { name: "Save description" }).click();
+  await expect(page.getByRole("button", { name: "Save description" })).toBeDisabled();
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.description).toBe("Three things to know before the tour.");
+  const shareHtml = await (await page.request.get(`/share/${v.id}`)).text();
+  expect(shareHtml).toContain('property="og:description" content="Three things to know before the tour."');
+  await page.goto(`/share/${v.id}`);
+  await expect(page.getByTestId("share-description")).toHaveText("Three things to know before the tour.");
   // A call-to-action button set from the video page shows under the share-page player.
   await page.goto(`/videos/${v.id}`);
   await page.getByLabel("Button label").fill("Book a showing");

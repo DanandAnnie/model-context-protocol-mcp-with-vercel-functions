@@ -398,7 +398,8 @@ function CreateInner() {
 
           <Card className="overflow-hidden">
             <div className={`relative mx-auto w-full ${stageAspect} ${aspect === "9:16" ? "max-h-[520px]" : ""} flex items-end justify-center overflow-hidden`} style={background.type === "color" ? { background: background.value } : background.type === "image" ? { backgroundImage: `url(${background.value})`, backgroundSize: "cover", backgroundPosition: "center" } : { background: "#0f172a" }}>
-              {background.type === "video" && (
+              {/* Only a complete URL is previewed, so a half-typed one is not requested keystroke by keystroke. */}
+              {background.type === "video" && /^https?:\/\/\S+\.\S+/.test(background.value) && (
                 <video key={background.value} src={background.value} muted loop autoPlay playsInline aria-hidden="true" data-testid="stage-video" className="absolute inset-0 h-full w-full object-cover" />
               )}
               {sceneAvatar ? (

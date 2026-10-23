@@ -6,6 +6,7 @@ import { Button, ErrorBanner, inputClass } from "@/components/ui";
 import { api } from "@/lib/client";
 import { supabaseAuthConfigured } from "@/lib/supabase/env";
 import { createSupabaseBrowser } from "@/lib/supabase/browser";
+import { safeNextPath } from "@/lib/safe-url-client";
 
 export default function LoginPage() {
   return (
@@ -18,8 +19,7 @@ export default function LoginPage() {
 function LoginInner() {
   const router = useRouter();
   const params = useSearchParams();
-  const next = params.get("next");
-  const target = next && next.startsWith("/") ? next : "/home";
+  const target = safeNextPath(params.get("next"));
   const accounts = supabaseAuthConfigured();
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");

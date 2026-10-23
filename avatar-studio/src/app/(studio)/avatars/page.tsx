@@ -21,12 +21,18 @@ function AvatarsInner() {
   const { data, loading, error, refetch } = useApi<{ avatars: Avatar[] }>("/api/avatars");
   const [open, setOpen] = useState(params.get("new") === "1");
   const [filter, setFilter] = useState<"all" | "custom" | "library">("all");
+  const [actionErr, setActionErr] = useState<string | null>(null);
   const avatars = (data?.avatars ?? []).filter((a) => (filter === "all" ? true : filter === "custom" ? a.source === "custom" : a.source !== "custom"));
 
   async function remove(a: Avatar) {
     if (!confirm(`Delete avatar "${a.name}"?`)) return;
-    await api(`/api/avatars/${a.id}`, { method: "DELETE" });
-    refetch();
+    try {
+      await api(`/api/avatars/${a.id}`, { method: "DELETE" });
+      setActionErr(null);
+      refetch();
+    } catch (e) {
+      setActionErr(e instanceof Error ? e.message : "Could not delete the avatar");
+    }
   }
 
   return (
@@ -40,7 +46,7 @@ function AvatarsInner() {
           </Button>
         }
       />
-      <ErrorBanner message={error} />
+      <ErrorBanner message={error ?? actionErr} />
 
       <div className="mb-5 flex gap-2">
         {(["all", "library", "custom"] as const).map((f) => (

@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ArrowLeft, Captions, Check, Code2, Copy, Download, Languages, Link2, Pencil, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
@@ -23,13 +23,16 @@ export default function VideoDetailPage() {
   });
   const video = data?.video;
 
+  const savingTitle = useRef(false);
+
   async function saveTitle() {
-    if (!video) return;
+    if (!video || savingTitle.current) return; // Enter triggers this, then the unmount's blur does too.
     const title = draftTitle.trim();
     if (!title || title === video.title) {
       setEditing(false);
       return;
     }
+    savingTitle.current = true;
     try {
       const res = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify({ title }) });
       setData({ video: { ...video, title: res.video.title } });
@@ -37,6 +40,8 @@ export default function VideoDetailPage() {
       setEditing(false);
     } catch (e) {
       setRenameErr(e instanceof Error ? e.message : "Could not rename");
+    } finally {
+      savingTitle.current = false;
     }
   }
 
@@ -72,7 +77,8 @@ export default function VideoDetailPage() {
     try {
       await api(`/api/videos/${video.id}`, { method: "DELETE" });
       router.push("/videos");
-    } finally {
+    } catch (e) {
+      setRenameErr(e instanceof Error ? e.message : "Could not delete the video");
       setDeleting(false);
     }
   }

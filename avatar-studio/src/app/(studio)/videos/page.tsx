@@ -22,6 +22,7 @@ function VideosInner() {
   const params = useSearchParams();
   const batch = params.get("batch");
   const skipped = Number(params.get("skipped") ?? 0);
+  const failedCount = Number(params.get("failed") ?? 0);
   const { data, loading, error } = useApi<{ videos: Video[] }>("/api/videos", {
     pollMs: 6000,
     pollWhile: (d) => d.videos.some((v) => v.status === "processing" || v.status === "queued"),
@@ -55,7 +56,8 @@ function VideosInner() {
       {batch && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm text-brand-900">
           <span>
-            Showing one personalized batch{skipped > 0 ? `. ${skipped} ${skipped === 1 ? "row was" : "rows were"} not started because the monthly allowance was reached.` : "."}
+            Showing one personalized batch{skipped > 0 ? `. ${skipped} ${skipped === 1 ? "row was" : "rows were"} not started because the monthly allowance was reached` : ""}
+            {failedCount > 0 ? `. ${failedCount} ${failedCount === 1 ? "render" : "renders"} could not be started; open the failed cards for the provider's message` : ""}.
           </span>
           <Link href="/videos" className="font-medium underline hover:no-underline">Show all videos</Link>
         </div>

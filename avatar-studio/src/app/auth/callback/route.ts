@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
+import { safeNextPath } from "@/lib/safe-url";
 
 export const dynamic = "force-dynamic";
 
@@ -7,8 +8,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
-  const next = url.searchParams.get("next");
-  const target = next && next.startsWith("/") ? next : "/home";
+  const target = safeNextPath(url.searchParams.get("next"));
   if (code) {
     const supabase = await createSupabaseServer();
     const { error } = await supabase.auth.exchangeCodeForSession(code);

@@ -361,3 +361,59 @@ describe("hardening", () => {
     assert.match(vtt, /^WEBVTT\n\n1\n00:00:00\.000 --> 00:00:0\d\.\d{3}\nHello there\.\n/);
   });
 });
+
+describe("second review fixes", () => {
+  it("safeNextPath blocks open redirects", async () => {
+    const { safeNextPath } = await import("../safe-url-client");
+    assert.equal(safeNextPath("/videos"), "/videos");
+    assert.equal(safeNextPath("//evil.com"), "/home");
+    assert.equal(safeNextPath("/\\evil.com"), "/home");
+    assert.equal(safeNextPath("https://evil.com"), "/home");
+    assert.equal(safeNextPath(null), "/home");
+  });
+
+  it("rejects private and loopback image hosts, accepts public literals", async () => {
+    const { assertPublicHttpUrl, isPrivateAddress } = await import("../safe-url");
+    for (const bad of ["http://127.0.0.1/x", "http://10.0.0.5:8080/admin", "http://169.254.169.254/latest", "http://[::1]/", "http://localhost/x", "ftp://example.com/x", "http://192.168.1.1/"]) {
+      await assert.rejects(assertPublicHttpUrl(bad), Error, bad);
+    }
+    assert.equal((await assertPublicHttpUrl("https://93.184.216.34/portrait.jpg")).hostname, "93.184.216.34");
+    assert.equal(isPrivateAddress("::ffff:10.1.1.1"), true);
+    assert.equal(isPrivateAddress("8.8.8.8"), false);
+  });
+
+  it("decodes base64 and utf8 data URLs", async () => {
+    const { decodeDataUrl } = await import("../providers/image");
+    const b64 = decodeDataUrl("data:image/png;base64,aGVsbG8=");
+    assert.equal(b64.mimeType, "image/png");
+    assert.equal(Buffer.from(b64.bytes).toString(), "hello");
+    const utf = decodeDataUrl("data:image/svg+xml;utf8,%3Csvg%20fill%3D%22rgba(1%2C2%2C3)%22%3E");
+    assert.equal(utf.mimeType, "image/svg+xml");
+    assert.equal(Buffer.from(utf.bytes).toString(), '<svg fill="rgba(1,2,3)">');
+  });
+
+  it("batch reserves the allowance up front and reports failed starts", async () => {
+    const { createBatch } = await import("../services");
+    const { config } = await import("../config");
+    const base = { title: "W", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, aspect: "16:9" as const, background: { type: "color" as const, value: "#fff" }, captions: false, speed: 1 };
+    const original = config.renderLimitPerMonth;
+    (config as { renderLimitPerMonth?: number }).renderLimitPerMonth = 3;
+    try {
+      const r = await createBatch({ ...base, scriptTemplate: "Hi {name}", csv: "name\nA\nB\nC\nD\nE" }, "quota-batch-2");
+      assert.equal(r.videos.length, 3);
+      assert.deepEqual(r.videos.map((v) => v.rowLabel), ["A", "B", "C"], "row order preserved under concurrency");
+      assert.deepEqual(r.skipped.map((s) => s.row), [4, 5]);
+      assert.deepEqual(r.failed, []);
+    } finally {
+      (config as { renderLimitPerMonth?: number }).renderLimitPerMonth = original;
+    }
+  });
+
+  it("global login backstop blocks forged client keys", async () => {
+    const { rateLimitPair } = await import("../rate-limit");
+    const t0 = 5_000_000;
+    let blocked = 0;
+    for (let i = 0; i < 20; i++) if (!rateLimitPair(`ip:${i}`, 5, "all", 10, 60_000, t0 + i).allowed) blocked++;
+    assert.equal(blocked, 10, "after 10 global attempts every further request is blocked");
+  });
+});

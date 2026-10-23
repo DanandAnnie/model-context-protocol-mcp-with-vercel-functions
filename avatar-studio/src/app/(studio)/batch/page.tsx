@@ -60,11 +60,11 @@ export default function BatchPage() {
     setBusy(true);
     setErr(null);
     try {
-      const result = await api<{ batchId: string; videos: unknown[]; skipped: Array<{ row: number; reason: string }> }>("/api/videos/batch", {
+      const result = await api<{ batchId: string; videos: unknown[]; skipped: Array<{ row: number; reason: string }>; failed: Array<{ row: number; reason: string }> }>("/api/videos/batch", {
         method: "POST",
         body: JSON.stringify({ title, scriptTemplate: template, csv, avatarId, voiceId, aspect, captions }),
       });
-      const note = result.skipped.length ? `&skipped=${result.skipped.length}` : "";
+      const note = `${result.skipped.length ? `&skipped=${result.skipped.length}` : ""}${result.failed.length ? `&failed=${result.failed.length}` : ""}`;
       router.push(`/videos?batch=${result.batchId}${note}`);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not start the batch");

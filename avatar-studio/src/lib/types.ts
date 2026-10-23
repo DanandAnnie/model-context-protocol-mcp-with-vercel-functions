@@ -118,4 +118,6 @@ export interface ProviderStatus {
   authMode: "open" | "password" | "supabase";
   /** Renders allowed per owner per calendar month, or null when unlimited. */
   renderLimitPerMonth: number | null;
+  /** Present when the request carried an owner (signed in, or open/password mode). */
+  usage?: { rendersThisMonth: number };
 }

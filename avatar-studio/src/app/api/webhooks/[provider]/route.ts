@@ -1,4 +1,5 @@
 import { config } from "@/lib/config";
+import { timingSafeEqual } from "@/lib/auth";
 import { errorResponse, json } from "@/lib/api-utils";
 import { applyAvatarWebhook, applyTranslationWebhook } from "@/lib/services";
 
@@ -12,8 +13,10 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request, ctx: { params: Promise<{ provider: string }> }) {
   try {
     if (!config.webhookSecret) return json({ error: "Webhooks are disabled: set WEBHOOK_SECRET" }, { status: 503 });
-    const secret = new URL(req.url).searchParams.get("secret");
-    if (secret !== config.webhookSecret) return json({ error: "Forbidden" }, { status: 403 });
+    // Providers can only call a URL, so the secret travels as a query parameter;
+    // keep it long and random, and rotate it if a provider dashboard exposes it.
+    const secret = new URL(req.url).searchParams.get("secret") ?? req.headers.get("x-webhook-secret") ?? "";
+    if (!timingSafeEqual(secret, config.webhookSecret)) return json({ error: "Forbidden" }, { status: 403 });
 
     const { provider } = await ctx.params;
     const body = await req.json().catch(() => null);

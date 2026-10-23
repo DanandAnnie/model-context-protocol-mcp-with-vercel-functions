@@ -24,6 +24,9 @@ export async function POST(req: Request) {
     const owner = await requireOwner();
     const input = batchRequestSchema.parse(await readJson(req));
     const result = await createBatch(input, owner);
+    if (result.videos.length > 0 && result.failed.length === result.videos.length) {
+      return json({ ...result, error: `No video could be started: ${result.failed[0].reason}` }, { status: 502 });
+    }
     return json(result, { status: 201 });
   } catch (err) {
     return errorResponse(err);

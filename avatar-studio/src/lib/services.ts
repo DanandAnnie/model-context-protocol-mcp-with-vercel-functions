@@ -49,7 +49,11 @@ export async function getAvatar(id: string, ownerId: string = LOCAL_OWNER): Prom
 
 export const createAvatarSchema = z.object({
   name: z.string().trim().min(1).max(80),
-  imageUrl: z.string().min(1).refine((v) => v.startsWith("data:image/") || /^https?:\/\//.test(v), "Must be an image URL or uploaded image"),
+  imageUrl: z
+    .string()
+    .min(1)
+    .max(8_000_000, "Uploaded image must be under 6 MB")
+    .refine((v) => v.startsWith("data:image/") || /^https?:\/\//.test(v), "Must be an image URL or uploaded image"),
   gender: z.enum(["male", "female", "neutral"]).optional(),
 });
 
@@ -160,12 +164,27 @@ async function enforceRenderLimit(ownerId: string): Promise<void> {
   }
 }
 
-export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWNER): Promise<Video> {
-  await enforceRenderLimit(ownerId);
-  let avatar = await getAvatar(req.avatarId, ownerId);
-  const voices = await listVoices();
+interface RenderContext {
+  avatar: Avatar;
+  voice: Voice;
+}
+
+async function resolveRenderContext(req: Pick<VideoRequest, "avatarId" | "voiceId">, ownerId: string): Promise<RenderContext> {
+  const [avatar, voices] = await Promise.all([getAvatar(req.avatarId, ownerId), listVoices()]);
   const voice = voices.find((v) => v.id === req.voiceId) ?? null;
   if (!voice) throw new ValidationError(`Voice ${req.voiceId} is not available with the current voice provider`);
+  return { avatar, voice };
+}
+
+/**
+ * Start a render. The allowance check is read-then-write and therefore
+ * best-effort under concurrent requests; batches reserve their rows up front.
+ */
+export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWNER, ctx?: RenderContext, skipLimit = false): Promise<Video> {
+  if (!skipLimit) await enforceRenderLimit(ownerId);
+  const resolved = ctx ?? (await resolveRenderContext(req, ownerId));
+  let avatar = resolved.avatar;
+  const voice = resolved.voice;
   const provider = getAvatarProvider();
 
   const base: Video = {
@@ -216,8 +235,10 @@ export const batchRequestSchema = z.object({
 export interface BatchResult {
   batchId: string;
   videos: Video[];
-  /** Rows not started, with the reason (allowance reached, missing columns). */
+  /** Rows not started because the allowance was reached. */
   skipped: Array<{ row: number; reason: string }>;
+  /** Rows whose render could not be started by the provider (stored with status "failed"). */
+  failed: Array<{ row: number; reason: string }>;
 }
 
 /** Pure preview: the substituted scripts for the first rows, plus columns the template uses but the CSV lacks. */
@@ -238,35 +259,57 @@ export async function createBatch(input: z.infer<typeof batchRequestSchema>, own
 
   const batchId = newId("batch");
   const labelColumn = table.columns[0];
-  const videos: Video[] = [];
+
+  // Resolve avatar and voice once (they may cost provider round-trips) and reserve
+  // the allowance for the whole batch before starting any row.
+  const ctx = await resolveRenderContext(input, ownerId);
+  const limit = config.renderLimitPerMonth;
+  const used = limit ? await rendersThisMonth(ownerId) : 0;
+  const allowedRows = limit ? Math.max(0, Math.min(table.rows.length, limit - used)) : table.rows.length;
   const skipped: BatchResult["skipped"] = [];
-  for (const [i, row] of table.rows.entries()) {
-    const label = row[labelColumn] || `row ${i + 1}`;
-    try {
-      const video = await createVideo(
-        {
-          title: `${input.title} – ${label}`.slice(0, 120),
-          script: fillTemplate(input.scriptTemplate, row),
-          avatarId: input.avatarId,
-          voiceId: input.voiceId,
-          aspect: input.aspect,
-          background: input.background,
-          captions: input.captions,
-          speed: input.speed,
-        },
-        ownerId,
-      );
-      videos.push(await getStore().put("video", { ...video, batchId, rowLabel: label }));
-    } catch (err) {
-      if (err instanceof LimitError) {
-        // Stop the whole batch at the allowance; remaining rows are reported, not silently dropped.
-        for (let j = i; j < table.rows.length; j++) skipped.push({ row: j + 1, reason: err.message });
-        break;
-      }
-      throw err;
-    }
+  for (let j = allowedRows; j < table.rows.length; j++) {
+    skipped.push({ row: j + 1, reason: `Monthly render limit reached (${used} of ${limit}). The allowance resets on the 1st.` });
   }
-  return { batchId, videos, skipped };
+
+  const videos: Video[] = new Array(allowedRows);
+  const failed: BatchResult["failed"] = [];
+  const startRow = async (i: number) => {
+    const row = table.rows[i];
+    const label = row[labelColumn] || `row ${i + 1}`;
+    const video = await createVideo(
+      {
+        title: `${input.title} – ${label}`.slice(0, 120),
+        script: fillTemplate(input.scriptTemplate, row),
+        avatarId: input.avatarId,
+        voiceId: input.voiceId,
+        aspect: input.aspect,
+        background: input.background,
+        captions: input.captions,
+        speed: input.speed,
+      },
+      ownerId,
+      ctx,
+      true,
+    );
+    videos[i] = await getStore().put("video", { ...video, batchId, rowLabel: label });
+    if (video.status === "failed") failed.push({ row: i + 1, reason: video.error ?? "The render could not be started" });
+  };
+  await runWithConcurrency(allowedRows, BATCH_CONCURRENCY, startRow);
+  failed.sort((a, b) => a.row - b.row);
+  return { batchId, videos, skipped, failed };
+}
+
+const BATCH_CONCURRENCY = 5;
+
+async function runWithConcurrency(count: number, concurrency: number, task: (i: number) => Promise<void>): Promise<void> {
+  let next = 0;
+  const workers = Array.from({ length: Math.min(concurrency, count) }, async () => {
+    while (next < count) {
+      const i = next++;
+      await task(i);
+    }
+  });
+  await Promise.all(workers);
 }
 
 export async function listVideos(ownerId: string = LOCAL_OWNER): Promise<Video[]> {

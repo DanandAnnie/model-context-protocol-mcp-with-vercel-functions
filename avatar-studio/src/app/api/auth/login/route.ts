@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { SESSION_COOKIE, SESSION_MAX_AGE, accessPassword, sessionToken, timingSafeEqual } from "@/lib/auth";
-import { clientIp, rateLimit, resetRateLimit } from "@/lib/rate-limit";
+import { clientIp, rateLimitPair, resetRateLimit } from "@/lib/rate-limit";
 
 const ATTEMPTS = 5;
+/** Backstop across all clients, since the client key can be forged on self-hosted setups. */
+const GLOBAL_ATTEMPTS = 100;
 const WINDOW_MS = 15 * 60 * 1000;
 
 export const dynamic = "force-dynamic";
@@ -16,7 +18,7 @@ export async function POST(req: Request) {
   const body = schema.safeParse(await req.json().catch(() => null));
   if (!body.success) return NextResponse.json({ error: "Password required" }, { status: 400 });
   const key = `login:${clientIp(req)}`;
-  const limit = rateLimit(key, ATTEMPTS, WINDOW_MS);
+  const limit = rateLimitPair(key, ATTEMPTS, "login:*", GLOBAL_ATTEMPTS, WINDOW_MS);
   if (!limit.allowed) {
     return NextResponse.json(
       { error: `Too many attempts. Try again in ${Math.ceil(limit.retryAfterSec / 60)} minutes.` },

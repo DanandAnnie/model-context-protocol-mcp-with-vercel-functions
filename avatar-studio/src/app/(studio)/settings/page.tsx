@@ -4,7 +4,7 @@ import { useApi } from "@/hooks/useApi";
 import { formatSeconds } from "@/lib/client";
 import type { ProviderStatus, Video } from "@/lib/types";
 
-const ROWS: Array<{ key: keyof Omit<ProviderStatus, "mode" | "authEnabled" | "authMode">; label: string; env: string; options: string }> = [
+const ROWS: Array<{ key: keyof Omit<ProviderStatus, "mode" | "authEnabled" | "authMode" | "renderLimitPerMonth" | "usage">; label: string; env: string; options: string }> = [
   { key: "avatar", label: "Avatar rendering", env: "AVATAR_PROVIDER + HEYGEN_API_KEY / DID_API_KEY", options: "heygen, did, mock" },
   { key: "tts", label: "Voices / text-to-speech", env: "TTS_PROVIDER + ELEVENLABS_API_KEY / HEYGEN_API_KEY", options: "elevenlabs, heygen, mock" },
   { key: "script", label: "AI script writer", env: "SCRIPT_PROVIDER + ANTHROPIC_API_KEY", options: "anthropic, mock" },
@@ -27,10 +27,7 @@ export default function SettingsPage() {
   const { data: videoData } = useApi<{ videos: Video[] }>("/api/videos");
   const usage = summarize(videoData?.videos ?? []);
   const limit = data?.renderLimitPerMonth ?? null;
-  const monthStart = new Date();
-  monthStart.setUTCDate(1);
-  monthStart.setUTCHours(0, 0, 0, 0);
-  const thisMonth = (videoData?.videos ?? []).filter((v) => v.createdAt >= monthStart.toISOString() && v.status !== "failed").length;
+  const thisMonth = data?.usage?.rendersThisMonth ?? 0;
   return (
     <>
       <SectionTitle title="Settings" subtitle="Providers are configured with environment variables on the server, never from the browser." />

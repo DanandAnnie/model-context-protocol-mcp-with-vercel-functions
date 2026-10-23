@@ -1,10 +1,10 @@
 // Resolves which workspace the current request belongs to.
 import { cookies, headers } from "next/headers";
 import { ownerForApiKey } from "./api-keys";
-import { authMode } from "./auth";
-import { UnauthorizedError } from "./errors";
+import { SESSION_COOKIE, authMode, isValidSession } from "./auth";
+import { ForbiddenError, UnauthorizedError } from "./errors";
 import { createSupabaseServer } from "./supabase/server";
-import { WORKSPACE_COOKIE, workspaceForMember, type User } from "./workspaces";
+import { WORKSPACE_COOKIE, isWorkspaceId, memberOf, workspaceForMember, type User } from "./workspaces";
 
 import { LOCAL_OWNER } from "./owner-id";
 export { LOCAL_OWNER };
@@ -18,7 +18,14 @@ export async function presentedApiKey(): Promise<string | null> {
 
 /** The signed-in person (their personal owner id), independent of any active workspace. */
 export async function currentUser(): Promise<User> {
-  if (authMode() !== "supabase") return { id: LOCAL_OWNER };
+  const mode = authMode();
+  if (mode === "open") return { id: LOCAL_OWNER };
+  if (mode === "password") {
+    // The proxy already checks this for session requests; route handlers reached with a
+    // non-key bearer header or by other means must not get the shared owner for free.
+    if (!(await isValidSession((await cookies()).get(SESSION_COOKIE)?.value))) throw new UnauthorizedError("Sign in required");
+    return { id: LOCAL_OWNER };
+  }
   const supabase = await createSupabaseServer();
   const {
     data: { user },
@@ -49,4 +56,19 @@ export async function requireOwner(): Promise<string> {
   }
   const user = await currentUser();
   return (await activeWorkspaceId(user)) ?? user.id;
+}
+
+/**
+ * Owner of the current request for account-level actions (wiping all data, billing): session
+ * only, and when the active owner is a team workspace the signed-in person must hold the
+ * owner role there. Editors keep full content access but cannot cancel the team's plan or
+ * delete everything at once.
+ */
+export async function requireAccountOwner(): Promise<string> {
+  const user = await currentUser();
+  const id = (await cookies()).get(WORKSPACE_COOKIE)?.value;
+  const ws = id && isWorkspaceId(id) ? await workspaceForMember(id, user.id) : null;
+  if (!ws) return user.id;
+  if (memberOf(ws, user.id)?.role !== "owner") throw new ForbiddenError("Only workspace owners can do that");
+  return ws.id;
 }

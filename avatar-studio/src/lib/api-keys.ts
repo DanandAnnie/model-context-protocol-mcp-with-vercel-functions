@@ -4,7 +4,8 @@ import { newId, nowIso } from "./ids";
 import { getStore } from "./store";
 import type { ApiKey } from "./types";
 
-export const API_KEY_PREFIX = "as_live_";
+import { API_KEY_PREFIX } from "./auth";
+export { API_KEY_PREFIX };
 export const MAX_API_KEYS = 10;
 const LAST_USED_WRITE_INTERVAL_MS = 60_000;
 

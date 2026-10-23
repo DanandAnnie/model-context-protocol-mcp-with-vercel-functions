@@ -8,12 +8,23 @@ function isPrivateIPv4(ip: string): boolean {
   return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
 }
 
+/**
+ * IPv4-mapped addresses are classified by the IPv4 they wrap, in both the dotted form DNS
+ * returns ("::ffff:10.0.0.1") and the hex form the URL parser produces ("::ffff:a00:1").
+ * Everything else outside global unicast (2000::/3) is loopback, link-local, unique-local,
+ * NAT64, or otherwise not a public host.
+ */
 function isPrivateIPv6(ip: string): boolean {
   const v = ip.toLowerCase();
-  if (v === "::1" || v === "::") return true;
-  if (v.startsWith("fc") || v.startsWith("fd") || v.startsWith("fe80")) return true;
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(v);
-  return mapped ? isPrivateIPv4(mapped[1]) : false;
+  const dotted = /^(?:0*:){2,6}ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(v);
+  if (dotted) return isPrivateIPv4(dotted[1]);
+  const hex = /^(?:0*:){2,6}ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(v);
+  if (hex) {
+    const hi = parseInt(hex[1], 16);
+    const lo = parseInt(hex[2], 16);
+    return isPrivateIPv4(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+  }
+  return !/^[23][0-9a-f]{0,3}:/.test(v);
 }
 
 export function isPrivateAddress(ip: string): boolean {

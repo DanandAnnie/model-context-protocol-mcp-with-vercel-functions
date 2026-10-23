@@ -1,15 +1,15 @@
 import { errorResponse, json } from "@/lib/api-utils";
 import { getBillingProvider } from "@/lib/billing";
 import { ValidationError } from "@/lib/errors";
-import { presentedApiKey, requireOwner } from "@/lib/owner";
+import { presentedApiKey, requireAccountOwner } from "@/lib/owner";
 
 export const dynamic = "force-dynamic";
 
-/** Starts an upgrade to Pro for the active owner. Browser sessions only. */
+/** Starts an upgrade to Pro for the active owner. Browser sessions only; workspace owners only. */
 export async function POST(req: Request) {
   try {
     if (await presentedApiKey()) return json({ error: "Sign in to change billing" }, { status: 403 });
-    const owner = await requireOwner();
+    const owner = await requireAccountOwner();
     const returnUrl = `${new URL(req.url).origin}/settings`;
     try {
       return json(await getBillingProvider().checkout(owner, returnUrl));

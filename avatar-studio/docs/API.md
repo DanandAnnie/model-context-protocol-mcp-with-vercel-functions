@@ -14,7 +14,7 @@ Authorization: Bearer as_live_…
 - Keys work in every access mode (open, shared password, Supabase accounts).
 - Creating or revoking keys needs a signed-in browser session, never another key (`403` otherwise).
 - Keys minted inside a workspace are revoked when that member leaves or is removed, and when the workspace is deleted.
-- Unknown or revoked keys get `401`.
+- Unknown or revoked keys get `401`. Only tokens that start with `as_live_` are treated as keys; any other bearer value falls back to the normal session check.
 
 Public routes need no key: `/api/videos/:id/captions`, `/api/videos/:id/view`, `/api/talk/:id`, `/api/webhooks/:provider`, `/api/auth/*`, `/share/:id`.
 
@@ -186,8 +186,8 @@ Returns `{ "reply": "…" }`.
 
 ## Billing
 
-- `POST /api/billing/checkout` → `{ "url" }` to start a Pro upgrade (Stripe Checkout, or an instant upgrade with the mock); browser sessions only (`403` with a key)
-- `POST /api/billing/portal` → `{ "url" }` for the Stripe Billing Portal (the mock downgrades to Free)
+- `POST /api/billing/checkout` → `{ "url" }` to start a Pro upgrade (Stripe Checkout, or an instant upgrade with the mock); browser sessions only (`403` with a key); in a workspace, owners only (`403` for editors)
+- `POST /api/billing/portal` → `{ "url" }` for the Stripe Billing Portal (the mock downgrades to Free); same access rule as checkout
 - `POST /api/webhooks/stripe` receives Stripe events (`checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`), verified with `STRIPE_WEBHOOK_SECRET`
 - `GET /api/status` reports `renderLimitPerMonth` for the active owner and `usage.plan`
 
@@ -199,7 +199,7 @@ Returns `{ "reply": "…" }`.
 ## Account data
 
 - `GET /api/account/export` downloads everything stored for the active account or workspace as JSON (key hashes and the webhook secret are left out). Session only; `403` with a key.
-- `DELETE /api/account` with `{ "confirm": "DELETE" }` removes every record of the active account or workspace (cloned voices are deleted at the provider too) and returns counts per kind. Session only. Workspace membership is unaffected.
+- `DELETE /api/account` with `{ "confirm": "DELETE" }` removes every record of the active account or workspace (cloned voices are deleted at the provider too) and returns counts per kind. Session only; in a workspace, owners only (`403` for editors). Workspace membership is unaffected.
 
 ## Outbound webhooks
 

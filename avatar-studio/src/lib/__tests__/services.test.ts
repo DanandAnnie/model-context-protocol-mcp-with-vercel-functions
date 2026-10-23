@@ -426,6 +426,12 @@ describe("second review fixes", () => {
     assert.equal(safeNextPath("/\\evil.com"), "/home");
     assert.equal(safeNextPath("https://evil.com"), "/home");
     assert.equal(safeNextPath(null), "/home");
+    // The URL parser drops tabs and newlines before parsing, so these would resolve off-origin.
+    for (const sneaky of ["/\t/evil.com", "/\t//evil.com", "/\n/evil.com", "/\r//evil.com", "/\t\\evil.com", "/ /evil.com", "/videos\n"]) {
+      assert.equal(safeNextPath(sneaky), "/home", JSON.stringify(sneaky));
+      assert.equal(new URL(safeNextPath(sneaky), "https://app.example").origin, "https://app.example");
+    }
+    assert.equal(safeNextPath("/videos?folder=Q4%20launch#top"), "/videos?folder=Q4%20launch#top");
   });
 
   it("rejects private and loopback image hosts, accepts public literals", async () => {
@@ -434,8 +440,15 @@ describe("second review fixes", () => {
       await assert.rejects(assertPublicHttpUrl(bad), Error, bad);
     }
     assert.equal((await assertPublicHttpUrl("https://93.184.216.34/portrait.jpg")).hostname, "93.184.216.34");
+    assert.equal((await assertPublicHttpUrl("https://[2606:4700::1111]/x")).hostname, "[2606:4700::1111]");
     assert.equal(isPrivateAddress("::ffff:10.1.1.1"), true);
     assert.equal(isPrivateAddress("8.8.8.8"), false);
+    // IPv4-mapped literals arrive from the URL parser in hex form; NAT64 and other non-global ranges stay blocked.
+    for (const bad of ["http://[::ffff:127.0.0.1]/", "http://[::ffff:169.254.169.254]/latest/meta-data/", "http://[::ffff:10.0.0.5]/", "http://[64:ff9b::7f00:1]/", "http://[fd12::1]/", "http://[fe80::1]/", "http://[::]/"]) {
+      await assert.rejects(assertPublicHttpUrl(bad), Error, bad);
+    }
+    for (const ip of ["::ffff:7f00:1", "::ffff:a9fe:a9fe", "::ffff:a00:5", "0:0:0:0:0:ffff:7f00:1", "64:ff9b::808:808", "100::1"]) assert.equal(isPrivateAddress(ip), true, ip);
+    for (const ip of ["::ffff:8.8.8.8", "::ffff:808:808", "2606:4700::1111", "2001:4860:4860::8888"]) assert.equal(isPrivateAddress(ip), false, ip);
   });
 
   it("decodes base64 and utf8 data URLs", async () => {

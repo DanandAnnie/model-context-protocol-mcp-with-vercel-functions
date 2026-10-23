@@ -13,6 +13,8 @@ export function authMode(): AuthMode {
 }
 
 export const SESSION_COOKIE = "studio_session";
+/** Every API key secret starts with this; the proxy uses it to tell a key from a stray bearer token. */
+export const API_KEY_PREFIX = "as_live_";
 export const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
 export function accessPassword(): string | undefined {

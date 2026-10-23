@@ -65,6 +65,29 @@ test("API keys grant script access without a session; minting needs a session", 
   await script.dispose();
 });
 
+test("a made-up bearer token is not a session", async ({ request }) => {
+  // The proxy only lets real API keys past the session check; everything else needs the cookie.
+  const bogus = { Authorization: "Bearer x" };
+  expect((await request.post("/api/script", { headers: bogus, data: { topic: "Anything", lengthSec: 30 } })).status()).toBe(401);
+  expect((await request.post("/api/voices/preview", { headers: bogus, data: { voiceId: "stock_voice_1", text: "Hi" } })).status()).toBe(401);
+  expect((await request.get("/api/workspaces", { headers: bogus })).status()).toBe(401);
+  expect((await request.get("/api/videos", { headers: bogus })).status()).toBe(401);
+  // A key-shaped but unknown token reaches the route and is rejected there.
+  expect((await request.post("/api/script", { headers: { Authorization: "Bearer as_live_nope" }, data: { topic: "Anything", lengthSec: 30 } })).status()).toBe(401);
+  await request.post("/api/auth/login", { data: { password: "hunter2" } });
+  expect((await request.post("/api/script", { data: { topic: "Anything", lengthSec: 30 } })).status()).toBe(200);
+});
+
+test("post-login redirects never leave the site", async ({ request }) => {
+  for (const next of ["/%09/evil.com", "/%09//evil.com", "/%0A/evil.com", "//evil.com"]) {
+    const res = await request.get(`/auth/callback?next=${next}`, { maxRedirects: 0 });
+    expect(res.status()).toBe(307);
+    expect(res.headers()["location"]).toBe("http://localhost:3102/home");
+  }
+  const ok = await request.get("/auth/callback?next=%2Fvideos", { maxRedirects: 0 });
+  expect(ok.headers()["location"]).toBe("http://localhost:3102/videos");
+});
+
 test("data export and deletion need a session and a typed confirmation", async ({ request, playwright }) => {
   await request.post("/api/auth/login", { data: { password: "hunter2" } });
   const made = await request.post("/api/videos", { data: { title: "Export me", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9" } });

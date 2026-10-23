@@ -3,6 +3,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { useMobileNav } from "@/components/MobileNav";
+import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
 import { Clapperboard, Home, Languages, Layers3, LayoutTemplate, LogOut, Mic2, Palette, Settings, Users, Video, Sparkles, X } from "lucide-react";
 import { useApi } from "@/hooks/useApi";
 import type { ProviderStatus } from "@/lib/types";
@@ -53,6 +54,7 @@ export function Sidebar() {
         <span className="text-base font-semibold tracking-tight">Avatar Studio</span>
       </Link>
 
+      <WorkspaceSwitcher />
       <div className="px-3">
         <Link
           href="/create"

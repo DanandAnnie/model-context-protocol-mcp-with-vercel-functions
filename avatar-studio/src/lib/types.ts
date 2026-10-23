@@ -158,6 +158,35 @@ export interface NotifySettings {
   lastDelivery?: { at: string; event: NotifyEvent; ok: boolean; status?: number; error?: string };
 }
 
+export type WorkspaceRole = "owner" | "editor";
+
+export interface WorkspaceMember {
+  userId: string;
+  email?: string;
+  role: WorkspaceRole;
+  joinedAt: string;
+}
+
+export interface WorkspaceInvite {
+  /** Secret token in the invite link. */
+  token: string;
+  email?: string;
+  role: WorkspaceRole;
+  createdAt: string;
+  expiresAt: string;
+}
+
+/** A shared owner id: every video, avatar, brand kit, key, and webhook created while it is active belongs to it. */
+export interface Workspace {
+  id: string;
+  name: string;
+  createdBy: string;
+  members: WorkspaceMember[];
+  invites: WorkspaceInvite[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ProviderStatus {
   mode: "demo" | "live";
   avatar: string;

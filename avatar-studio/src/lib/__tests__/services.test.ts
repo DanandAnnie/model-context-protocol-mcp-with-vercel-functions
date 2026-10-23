@@ -28,6 +28,7 @@ import { MockAvatarProvider } from "../providers/avatar/mock";
 import { API_KEY_PREFIX, MAX_API_KEYS, createApiKey, listApiKeys, ownerForApiKey, revokeApiKey } from "../api-keys";
 import { createHmac } from "node:crypto";
 import { computeInsights } from "../insights";
+import { acceptInvite, createInvite, createWorkspace, deleteWorkspace, findInvite, listWorkspaces, removeMember, revokeInvite, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
 import type { Video } from "../types";
 import { dispatchNotification, getNotifySettings, notifyVideoTransition, saveNotifySettings, setNotificationFetch, signPayload } from "../notifications";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
@@ -613,5 +614,50 @@ describe("insights", () => {
     assert.deepEqual(r.topViewed.map((v) => v.views), [7, 2]);
     assert.deepEqual(r.folders, [{ name: "Listings", count: 2 }]);
     assert.equal(computeInsights([], now).completionRate, null);
+  });
+});
+
+describe("workspaces", () => {
+  const alice = { id: "alice", email: "alice@example.com" };
+  const bob = { id: "bob", email: "bob@example.com" };
+
+  it("creates, invites, joins, scopes content, and protects the last owner", async () => {
+    const ws = await createWorkspace("Acme", alice);
+    assert.equal(ws.members[0].role, "owner");
+    assert.equal((await listWorkspaces(alice.id)).length, 1);
+    assert.deepEqual(await listWorkspaces(bob.id), []);
+    assert.equal(await workspaceForMember(ws.id, bob.id), null);
+
+    await assert.rejects(createInvite(ws.id, { role: "editor" }, bob), /not found/);
+    const invite = await createInvite(ws.id, { email: bob.email, role: "editor" }, alice);
+    assert.ok((await findInvite(invite.token))?.workspace.id === ws.id);
+    assert.equal(await findInvite("nope"), null);
+    const joined = await acceptInvite(invite.token, bob);
+    assert.equal(joined.members.length, 2);
+    assert.equal(joined.invites.length, 0, "invite consumed");
+    await assert.rejects(acceptInvite(invite.token, bob), /invalid or has expired/);
+    assert.ok(await workspaceForMember(ws.id, bob.id));
+
+    // Content created under the workspace id is visible to any member and not in personal spaces.
+    const v = await createVideo({ title: "Team", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, ws.id);
+    assert.equal((await listVideos(ws.id))[0].id, v.id);
+    assert.deepEqual(await listVideos(alice.id), []);
+
+    // Editors cannot manage members; the sole owner cannot be removed or demoted.
+    await assert.rejects(removeMember(ws.id, alice.id, bob), /Only workspace owners/);
+    await assert.rejects(removeMember(ws.id, alice.id, alice), /at least one owner/);
+    await assert.rejects(setMemberRole(ws.id, alice.id, "editor", alice), /at least one owner/);
+    assert.equal(workspaceView(ws, bob).invites.length, 0, "editors do not see invite tokens");
+    const promoted = await setMemberRole(ws.id, bob.id, "owner", alice);
+    assert.equal(promoted.members.find((m) => m.userId === "bob")?.role, "owner");
+    const left = await removeMember(ws.id, bob.id, bob);
+    assert.equal(left.members.length, 1);
+
+    const second = await createInvite(ws.id, { role: "owner" }, alice);
+    await revokeInvite(ws.id, second.token, alice);
+    assert.equal(await findInvite(second.token), null);
+    await assert.rejects(deleteWorkspace(ws.id, bob), /not found/);
+    await deleteWorkspace(ws.id, alice);
+    assert.deepEqual(await listWorkspaces(alice.id), []);
   });
 });

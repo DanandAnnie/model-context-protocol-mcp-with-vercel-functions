@@ -293,3 +293,50 @@ test("pages have no WCAG 2.1 AA violations", async ({ page }) => {
   }
   expect(report, report.join("\n")).toEqual([]);
 });
+
+test("workspaces: create, switch, isolate content, invite, join, leave, delete", async ({ page, playwright }) => {
+  const tag = Date.now().toString(36);
+  const personal = await createVideoViaApi(page, `Personal ${tag}`);
+  const created = await page.request.post("/api/workspaces", { data: { name: `Team ${tag}` } });
+  expect(created.status()).toBe(201);
+  const ws = (await created.json()).workspace as { id: string };
+  try {
+    expect((await page.request.post("/api/workspaces/switch", { data: { id: ws.id } })).status()).toBe(200);
+    const inTeam = (await (await page.request.get("/api/videos")).json()).videos as Array<{ id: string }>;
+    expect(inTeam.find((v) => v.id === personal.id)).toBeUndefined();
+    const team = await createVideoViaApi(page, `Team video ${tag}`);
+
+    await page.goto("/home");
+    await expect(page.getByLabel("Workspace")).toHaveValue(ws.id);
+    await expect(page.getByText(`Team video ${tag}`)).toBeVisible();
+    await expect(page.getByText(`Personal ${tag}`)).toHaveCount(0);
+
+    // Invite link from the members page.
+    await page.goto("/workspace");
+    await page.getByRole("button", { name: "Create invite link" }).click();
+    const link = (await page.getByTestId("invite-link").locator("code").innerText()).trim();
+    expect(link).toContain("/invite/");
+
+    // A second browser context (a teammate) opens the link and joins; in open mode both are "local",
+    // so the join is a no-op for membership but must still consume the invite and set the cookie.
+    const other = await playwright.request.newContext({ baseURL: "http://localhost:3100" });
+    const token = link.split("/invite/")[1];
+    expect((await other.get(`/api/invites/${token}`)).status()).toBe(200);
+    expect((await other.post(`/api/invites/${token}`)).status()).toBe(200);
+    expect((await other.get(`/api/invites/${token}`)).status()).toBe(404);
+    const theirs = (await (await other.get("/api/videos")).json()).videos as Array<{ id: string }>;
+    expect(theirs.some((v) => v.id === team.id)).toBe(true);
+    await other.dispose();
+
+    // Back to personal: the team video is gone, the personal one is back.
+    await page.getByLabel("Workspace").selectOption({ label: "Personal" });
+    await page.waitForURL(/\/home$/);
+    await expect(page.getByLabel("Workspace")).not.toHaveValue(ws.id);
+    const mine = (await (await page.request.get("/api/videos")).json()).videos as Array<{ id: string }>;
+    expect(mine.some((v) => v.id === personal.id)).toBe(true);
+    expect(mine.some((v) => v.id === team.id)).toBe(false);
+  } finally {
+    await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
+    expect((await page.request.delete(`/api/workspaces/${ws.id}`)).status()).toBe(204);
+  }
+});

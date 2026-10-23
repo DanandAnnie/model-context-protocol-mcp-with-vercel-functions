@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { Camera, Clapperboard, Languages, Layers3, LayoutTemplate, Wand2 } from "lucide-react";
+import { Insights } from "@/components/Insights";
 import { VideoCard } from "@/components/VideoCard";
 import { EmptyState, SectionTitle, Skeleton } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
@@ -34,6 +35,13 @@ export default function HomePage() {
           </Link>
         ))}
       </div>
+
+      {data && data.videos.length > 0 && (
+        <div className="mt-10">
+          <h2 className="mb-4 text-lg font-semibold text-slate-900">Insights</h2>
+          <Insights videos={data.videos} />
+        </div>
+      )}
 
       <div className="mt-10">
         <div className="mb-4 flex items-center justify-between">

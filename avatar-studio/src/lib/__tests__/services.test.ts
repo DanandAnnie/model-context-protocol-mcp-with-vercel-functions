@@ -27,6 +27,8 @@ import {
 import { MockAvatarProvider } from "../providers/avatar/mock";
 import { API_KEY_PREFIX, MAX_API_KEYS, createApiKey, listApiKeys, ownerForApiKey, revokeApiKey } from "../api-keys";
 import { createHmac } from "node:crypto";
+import { computeInsights } from "../insights";
+import type { Video } from "../types";
 import { dispatchNotification, getNotifySettings, notifyVideoTransition, saveNotifySettings, setNotificationFetch, signPayload } from "../notifications";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import { SCRIPT_TEMPLATES, findTemplate } from "../templates";
@@ -575,5 +577,41 @@ describe("outbound webhooks", () => {
     } finally {
       setNotificationFetch(null);
     }
+  });
+});
+
+describe("insights", () => {
+  it("buckets renders per UTC day, compares with the previous window, and ranks views", () => {
+    const now = Date.parse("2026-10-23T15:00:00Z");
+    const mk = (daysAgo: number, extra: Partial<Video> = {}): Video => ({
+      id: `v${daysAgo}${extra.title ?? ""}`,
+      title: "t",
+      script: "s",
+      avatarId: "a",
+      voiceId: "v",
+      aspect: "16:9",
+      background: { type: "color", value: "#fff" },
+      captions: false,
+      speed: 1,
+      status: "completed",
+      provider: "mock",
+      createdAt: new Date(now - daysAgo * 86_400_000).toISOString(),
+      updatedAt: new Date(now).toISOString(),
+      ...extra,
+    });
+    const videos = [mk(0), mk(0, { title: "b", views: 7 }), mk(13, { views: 2 }), mk(14), mk(20, { status: "failed" }), mk(40), mk(3, { folder: "Listings" }), mk(2, { folder: "Listings", status: "failed" })];
+    const r = computeInsights(videos, now);
+    assert.equal(r.perDay.length, 14);
+    assert.equal(r.perDay[13].day, "2026-10-23");
+    assert.equal(r.perDay[13].count, 2);
+    assert.equal(r.perDay[0].day, "2026-10-10");
+    assert.equal(r.perDay[0].count, 1, "13 days ago is the first day of the window");
+    assert.equal(r.totalLast, 5);
+    assert.equal(r.totalPrevious, 2, "14 and 20 days ago fall in the previous window; 40 is older");
+    assert.equal(r.completionRate, 6 / 8);
+    assert.equal(r.totalViews, 9);
+    assert.deepEqual(r.topViewed.map((v) => v.views), [7, 2]);
+    assert.deepEqual(r.folders, [{ name: "Listings", count: 2 }]);
+    assert.equal(computeInsights([], now).completionRate, null);
   });
 });

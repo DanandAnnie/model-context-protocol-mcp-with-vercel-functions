@@ -1,7 +1,7 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Captions, Clapperboard, Image as ImageIcon, Layers, Mic2, Palette, Play, Plus, Sparkles, Square, Trash2, Users, Wand2, X } from "lucide-react";
+import { Captions, ChevronLeft, ChevronRight, Clapperboard, Copy, Image as ImageIcon, Layers, Mic2, Palette, Play, Plus, Sparkles, Square, Trash2, Users, Wand2, X } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { VoiceRow } from "@/components/VoicePicker";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -93,6 +93,23 @@ function CreateInner() {
     if (scenes.length <= 1) return;
     setScenes((prev) => prev.filter((_, i) => i !== idx));
     setActiveIdx(Math.max(0, idx - 1));
+  }
+  /** Swaps a scene with its neighbour and keeps it selected. */
+  function moveScene(idx: number, dir: -1 | 1) {
+    const j = idx + dir;
+    if (j < 0 || j >= scenes.length) return;
+    setScenes((prev) => {
+      const next = [...prev];
+      [next[idx], next[j]] = [next[j], next[idx]];
+      return next;
+    });
+    setActiveIdx(j);
+  }
+  /** Inserts a copy right after the scene (script, background, and presenter included) and selects it. */
+  function duplicateScene(idx: number) {
+    if (scenes.length >= MAX_SCENES) return;
+    setScenes((prev) => [...prev.slice(0, idx + 1), { ...prev[idx] }, ...prev.slice(idx + 1)]);
+    setActiveIdx(idx + 1);
   }
   const [avatar, setAvatar] = useState<Avatar | null>(null);
   const [voice, setVoice] = useState<Voice | null>(null);
@@ -387,11 +404,26 @@ function CreateInner() {
               >
                 <Plus className="h-3.5 w-3.5" /> Add scene
               </button>
-              {scenes.length > 1 && (
-                <button type="button" onClick={() => removeScene(activeIdx)} aria-label="Remove scene" className="ml-auto inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs text-slate-500 hover:bg-rose-50 hover:text-rose-600">
-                  <Trash2 className="h-3.5 w-3.5" /> Remove scene {activeIdx + 1}
+              <span className="ml-auto flex items-center gap-1">
+                {scenes.length > 1 && (
+                  <>
+                    <button type="button" onClick={() => moveScene(activeIdx, -1)} disabled={activeIdx === 0} aria-label="Move scene left" title="Move scene earlier" className="rounded-full p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40">
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+                    <button type="button" onClick={() => moveScene(activeIdx, 1)} disabled={activeIdx === scenes.length - 1} aria-label="Move scene right" title="Move scene later" className="rounded-full p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40">
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </>
+                )}
+                <button type="button" onClick={() => duplicateScene(activeIdx)} disabled={scenes.length >= MAX_SCENES} aria-label="Duplicate scene" title="Duplicate this scene" className="rounded-full p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40">
+                  <Copy className="h-4 w-4" />
                 </button>
-              )}
+                {scenes.length > 1 && (
+                  <button type="button" onClick={() => removeScene(activeIdx)} aria-label="Remove scene" className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs text-slate-500 hover:bg-rose-50 hover:text-rose-600">
+                    <Trash2 className="h-3.5 w-3.5" /> Remove scene {activeIdx + 1}
+                  </button>
+                )}
+              </span>
             </div>
             {scenes.length > 1 && (
               <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="scene-presenter">

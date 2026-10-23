@@ -95,6 +95,27 @@ test("the library pages large batches and filters on the server", async ({ page 
   await expect(cards).toHaveCount(10);
 });
 
+test("scenes can be duplicated and reordered", async ({ page }) => {
+  await page.goto("/create");
+  await page.locator("textarea").fill("A.");
+  await page.getByRole("button", { name: "Add scene" }).click();
+  await page.locator("textarea").fill("B.");
+  await page.getByRole("button", { name: "Duplicate scene" }).click();
+  await expect(page.getByText("Scene 3 script")).toBeVisible();
+  await expect(page.locator("textarea")).toHaveValue("B.");
+  await page.locator("textarea").fill("C.");
+  await page.getByRole("button", { name: "Move scene left" }).click();
+  await expect(page.getByText("Scene 2 script")).toBeVisible();
+  await expect(page.locator("textarea")).toHaveValue("C.");
+  await page.getByRole("button", { name: "Move scene left" }).click();
+  await expect(page.getByRole("button", { name: "Move scene left" })).toBeDisabled();
+  await page.getByRole("button", { name: "Generate video" }).click();
+  await page.waitForURL(/\/videos\/vid_/);
+  const id = page.url().split("/").pop()!;
+  const video = (await (await page.request.get(`/api/videos/${id}`)).json()).video as { scenes: Array<{ script: string }> };
+  expect(video.scenes.map((sc) => sc.script)).toEqual(["C.", "A.", "B."]);
+});
+
 test("the voice library filters by language and gender", async ({ page }) => {
   await page.goto("/voices");
   await expect(page.getByText("Emma", { exact: true })).toBeVisible();

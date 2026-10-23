@@ -3,8 +3,10 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { Camera, Trash2, Upload, Users, Video as VideoIcon } from "lucide-react";
 import { AvatarTile } from "@/components/AvatarPicker";
+import { FavoriteStar } from "@/components/FavoriteStar";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
+import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { api } from "@/lib/client";
 import type { Avatar } from "@/lib/types";
 
@@ -26,11 +28,15 @@ function AvatarsInner() {
   const [actionErr, setActionErr] = useState<string | null>(null);
   const genders = (["female", "male", "neutral"] as const).filter((g) => (data?.avatars ?? []).some((a) => a.gender === g));
   const needle = q.trim().toLowerCase();
-  const avatars = (data?.avatars ?? []).filter((a) => {
-    if (filter === "custom" ? a.source !== "custom" : filter === "library" && a.source === "custom") return false;
-    if (gender !== "all" && a.gender !== gender) return false;
-    return !needle || [a.name, ...(a.tags ?? [])].join(" ").toLowerCase().includes(needle);
-  });
+  const favorites = useFavorites();
+  const avatars = favoritesFirst(
+    (data?.avatars ?? []).filter((a) => {
+      if (filter === "custom" ? a.source !== "custom" : filter === "library" && a.source === "custom") return false;
+      if (gender !== "all" && a.gender !== gender) return false;
+      return !needle || [a.name, ...(a.tags ?? [])].join(" ").toLowerCase().includes(needle);
+    }),
+    favorites.avatarIds,
+  );
 
   async function remove(a: Avatar) {
     if (!confirm(`Delete avatar "${a.name}"?`)) return;
@@ -89,10 +95,11 @@ function AvatarsInner() {
       ) : avatars.length === 0 ? (
         <EmptyState icon={<Users className="h-8 w-8" />} title="No avatars here" body="Create a photo avatar from a portrait to get started." />
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" data-testid="avatar-library">
           {avatars.map((a) => (
             <div key={a.id} className="relative">
               <AvatarTile avatar={a} />
+              <FavoriteStar name={a.name} on={favorites.avatarIds.has(a.id)} onToggle={() => favorites.toggle("avatar", a.id)} className="absolute left-2 top-2" />
               {a.source === "custom" && (
                 <button
                   onClick={() => remove(a)}

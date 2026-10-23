@@ -6,6 +6,7 @@ import { AvatarGrid } from "@/components/AvatarPicker";
 import { VoiceRow } from "@/components/VoicePicker";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
+import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib/client";
 import { languageLabel } from "@/lib/language";
@@ -293,6 +294,8 @@ function CreateInner() {
     setPrefill(null);
   }, [prefill, avatarData, voiceData]);
 
+  const favorites = useFavorites();
+  const avatarsSorted = useMemo(() => favoritesFirst(avatarData?.avatars ?? [], favorites.avatarIds), [avatarData, favorites.avatarIds]);
   const [voiceLanguage, setVoiceLanguage] = useState("all");
   const voiceLanguages = useMemo(() => {
     const seen = new Map<string, string>();
@@ -302,8 +305,9 @@ function CreateInner() {
   const voices = useMemo(() => {
     const all = voiceData?.voices ?? [];
     const q = voiceQuery.trim().toLowerCase();
-    return all.filter((v) => (voiceLanguage === "all" || v.language === voiceLanguage) && (!q || [v.name, v.language, v.gender, ...(v.tags ?? [])].filter(Boolean).join(" ").toLowerCase().includes(q)));
-  }, [voiceData, voiceQuery, voiceLanguage]);
+    const matching = all.filter((v) => (voiceLanguage === "all" || v.language === voiceLanguage) && (!q || [v.name, v.language, v.gender, ...(v.tags ?? [])].filter(Boolean).join(" ").toLowerCase().includes(q)));
+    return favoritesFirst(matching, favorites.voiceIds);
+  }, [voiceData, voiceQuery, voiceLanguage, favorites.voiceIds]);
 
   const words = wordCount(script);
   const seconds = estimateSeconds(script, speed);
@@ -564,7 +568,7 @@ function CreateInner() {
                   {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="aspect-[4/5]" />)}
                 </div>
               ) : (
-                <AvatarGrid avatars={avatarData?.avatars ?? []} selectedId={avatar?.id} onSelect={setAvatar} compact />
+                <AvatarGrid avatars={avatarsSorted} selectedId={avatar?.id} onSelect={setAvatar} compact favoriteIds={favorites.avatarIds} onToggleFavorite={(a) => favorites.toggle("avatar", a.id)} />
               )
             )}
 
@@ -592,6 +596,8 @@ function CreateInner() {
                         playing={playingId === v.id}
                         busy={busyId === v.id}
                         onPreview={() => play(v, script.trim().slice(0, 200) || "Hi, this is a preview of my voice.", speed).catch((e) => setErr(e.message))}
+                        favorite={favorites.voiceIds.has(v.id)}
+                        onToggleFavorite={() => favorites.toggle("voice", v.id)}
                       />
                     ))}
               </div>

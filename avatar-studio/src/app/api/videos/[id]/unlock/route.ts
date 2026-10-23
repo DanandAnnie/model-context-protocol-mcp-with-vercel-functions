@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { errorResponse, json, readJson } from "@/lib/api-utils";
-import { clientIp, rateLimitPair, resetRateLimit } from "@/lib/rate-limit";
+import { clientIp, rateLimit, rateLimitPair, resetRateLimit } from "@/lib/rate-limit";
 import { PUBLIC_ACCESS, getVideo } from "@/lib/services";
 import { SHARE_COOKIE_MAX_AGE, SHARE_PASSWORD_MAX, shareCookieName, shareCookieValue, verifySharePassword } from "@/lib/share-lock";
 
@@ -10,6 +10,8 @@ export const dynamic = "force-dynamic";
 const ATTEMPTS = 5;
 /** Attempts one video can receive from every client together per window. */
 const ATTEMPTS_PER_VIDEO = 100;
+/** Attempts one client may spread across every video per window, so many links cannot be tried in parallel. */
+const ATTEMPTS_PER_CLIENT = 30;
 const WINDOW_MS = 15 * 60 * 1000;
 
 const schema = z.object({ password: z.string().trim().min(1).max(SHARE_PASSWORD_MAX) });
@@ -22,8 +24,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     if (!video.shareLocked) return json({ ok: true });
     const body = schema.safeParse(await readJson(req));
     if (!body.success) return json({ error: "Password required" }, { status: 400 });
-    const clientKey = `unlock:${clientIp(req)}:${id}`;
-    const limit = rateLimitPair(clientKey, ATTEMPTS, `unlock:video:${id}`, ATTEMPTS_PER_VIDEO, WINDOW_MS);
+    const ip = clientIp(req);
+    const clientKey = `unlock:${ip}:${id}`;
+    const perVideo = rateLimitPair(clientKey, ATTEMPTS, `unlock:video:${id}`, ATTEMPTS_PER_VIDEO, WINDOW_MS);
+    const perClient = rateLimit(`unlock:client:${ip}`, ATTEMPTS_PER_CLIENT, WINDOW_MS);
+    const limit = perVideo.allowed ? perClient : perVideo;
     if (!limit.allowed) {
       return json({ error: `Too many attempts. Try again in ${Math.ceil(limit.retryAfterSec / 60)} minutes.` }, { status: 429, headers: { "Retry-After": String(limit.retryAfterSec) } });
     }

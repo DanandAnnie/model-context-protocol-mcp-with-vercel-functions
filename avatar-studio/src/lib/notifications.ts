@@ -92,8 +92,23 @@ export async function getPrefs(ownerId: string = LOCAL_OWNER): Promise<Prefs | n
 
 export async function savePrefs(input: z.infer<typeof prefsSchema>, ownerId: string = LOCAL_OWNER): Promise<Prefs> {
   const existing = await getPrefs(ownerId);
+  // Favourites live on the same record and survive an email change.
   const next: Prefs = { ...(existing ?? { id: prefsId(ownerId), ownerId }), emailOnComplete: input.emailOnComplete, updatedAt: nowIso() };
   if (!next.emailOnComplete) delete next.emailOnComplete;
+  return getStore().put("prefs", next);
+}
+
+export const MAX_FAVORITES = 50;
+export const favoriteSchema = z.object({ kind: z.enum(["avatar", "voice"]), id: z.string().trim().min(1).max(120), on: z.boolean() });
+
+/** Star or unstar an avatar or voice. The newest 50 per kind are kept; starring is idempotent. */
+export async function toggleFavorite(input: z.infer<typeof favoriteSchema>, ownerId: string = LOCAL_OWNER): Promise<Prefs> {
+  const existing = await getPrefs(ownerId);
+  const field = input.kind === "avatar" ? "favoriteAvatarIds" : "favoriteVoiceIds";
+  const current = (existing?.[field] ?? []).filter((id) => id !== input.id);
+  const ids = input.on ? [...current, input.id].slice(-MAX_FAVORITES) : current;
+  const next: Prefs = { ...(existing ?? { id: prefsId(ownerId), ownerId }), [field]: ids, updatedAt: nowIso() };
+  if (ids.length === 0) delete next[field];
   return getStore().put("prefs", next);
 }
 

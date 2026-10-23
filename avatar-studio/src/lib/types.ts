@@ -225,6 +225,9 @@ export interface Prefs {
   ownerId: string;
   /** Send an email when a render completes or fails. */
   emailOnComplete?: string;
+  /** Starred avatars and voices, listed first in every picker. */
+  favoriteAvatarIds?: string[];
+  favoriteVoiceIds?: string[];
   updatedAt: string;
 }
 

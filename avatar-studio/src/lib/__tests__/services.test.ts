@@ -942,6 +942,27 @@ describe("folders and share views", () => {
   });
 });
 
+describe("favourites", () => {
+  it("stars avatars and voices idempotently, keeps the newest 50, and survives an email change", async () => {
+    const { getPrefs, toggleFavorite } = await import("../notifications");
+    await toggleFavorite({ kind: "avatar", id: "stock_2", on: true }, "fav1");
+    await toggleFavorite({ kind: "avatar", id: "stock_2", on: true }, "fav1");
+    await toggleFavorite({ kind: "voice", id: "stock_voice_3", on: true }, "fav1");
+    assert.deepEqual((await getPrefs("fav1"))?.favoriteAvatarIds, ["stock_2"]);
+    assert.deepEqual((await getPrefs("fav1"))?.favoriteVoiceIds, ["stock_voice_3"]);
+    await savePrefs({ emailOnComplete: "fav@example.com" }, "fav1");
+    assert.deepEqual((await getPrefs("fav1"))?.favoriteAvatarIds, ["stock_2"], "an email change keeps the stars");
+    assert.equal((await getPrefs("fav1"))?.emailOnComplete, "fav@example.com");
+    for (let i = 0; i < 60; i++) await toggleFavorite({ kind: "avatar", id: `a${i}`, on: true }, "fav1");
+    const many = (await getPrefs("fav1"))?.favoriteAvatarIds ?? [];
+    assert.equal(many.length, 50);
+    assert.equal(many[0], "a10", "the oldest stars fall off first");
+    await toggleFavorite({ kind: "voice", id: "stock_voice_3", on: false }, "fav1");
+    assert.equal("favoriteVoiceIds" in ((await getPrefs("fav1")) ?? {}), false);
+    assert.equal((await getPrefs("someone-else"))?.favoriteAvatarIds, undefined, "stars are per owner");
+  });
+});
+
 describe("bulk actions", () => {
   const req = { title: "B", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9" as const, background: { type: "color" as const, value: "#fff" }, captions: false, speed: 1 };
 

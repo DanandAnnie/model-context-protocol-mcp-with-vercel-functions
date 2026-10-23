@@ -6,6 +6,7 @@ import { api } from "@/lib/client";
 import { VoiceRow } from "@/components/VoicePicker";
 import { EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
+import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { languageLabel } from "@/lib/language";
 import type { ProviderStatus, Voice } from "@/lib/types";
@@ -43,15 +44,17 @@ export default function VoicesPage() {
   }, [data]);
   const genders = useMemo(() => GENDERS.filter((g) => (data?.voices ?? []).some((v) => v.gender === g)), [data]);
 
+  const favorites = useFavorites();
   const voices = useMemo(() => {
     const all = data?.voices ?? [];
     const needle = q.trim().toLowerCase();
-    return all.filter((v) => {
+    const matching = all.filter((v) => {
       if (language !== "all" && v.language !== language) return false;
       if (gender !== "all" && v.gender !== gender) return false;
       return !needle || [v.name, v.language, v.gender, ...(v.tags ?? [])].filter(Boolean).join(" ").toLowerCase().includes(needle);
     });
-  }, [data, q, language, gender]);
+    return favoritesFirst(matching, favorites.voiceIds);
+  }, [data, q, language, gender, favorites.voiceIds]);
 
   return (
     <>
@@ -94,10 +97,17 @@ export default function VoicesPage() {
       ) : voices.length === 0 ? (
         <EmptyState icon={<Mic2 className="h-8 w-8" />} title="No voices match" />
       ) : (
-        <div className="grid gap-2 md:grid-cols-2">
+        <div className="grid gap-2 md:grid-cols-2" data-testid="voice-list">
           {voices.map((v) => (
             <div key={v.id} className="relative">
-              <VoiceRow voice={v} playing={playingId === v.id} busy={busyId === v.id} onPreview={() => play(v, sample || SAMPLE).catch((e) => setPreviewErr(e.message))} />
+              <VoiceRow
+                voice={v}
+                playing={playingId === v.id}
+                busy={busyId === v.id}
+                onPreview={() => play(v, sample || SAMPLE).catch((e) => setPreviewErr(e.message))}
+                favorite={favorites.voiceIds.has(v.id)}
+                onToggleFavorite={() => favorites.toggle("voice", v.id)}
+              />
               {v.source === "custom" && (
                 <button
                   type="button"

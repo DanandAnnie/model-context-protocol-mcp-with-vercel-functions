@@ -441,6 +441,40 @@ test("a share link can require a password", async ({ page }) => {
   await expect(page.locator("video")).toBeVisible();
 });
 
+test("starred avatars and voices come first everywhere and persist", async ({ page }) => {
+  await page.goto("/avatars");
+  await expect(page.getByRole("img", { name: "Ava Chen" })).toBeVisible();
+  const firstTile = () => page.getByTestId("avatar-library").locator("> div").first();
+  await expect(firstTile()).not.toContainText("Marcus Hill");
+  await page.getByRole("button", { name: "Add Marcus Hill to favourites" }).click();
+  await expect(page.getByRole("button", { name: "Remove Marcus Hill from favourites" })).toHaveAttribute("aria-pressed", "true");
+  await expect(firstTile()).toContainText("Marcus Hill");
+  await page.reload();
+  await expect(firstTile()).toContainText("Marcus Hill");
+  expect(((await (await page.request.get("/api/prefs")).json()).prefs as { favoriteAvatarIds?: string[] }).favoriteAvatarIds).toEqual(["stock_2"]);
+
+  await page.goto("/voices");
+  await expect(page.getByText("Olivia", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Add Olivia to favourites", exact: true }).click();
+  await page.reload();
+  await expect(page.getByTestId("voice-list").locator("> div").first()).toContainText("Olivia");
+
+  // The editor's pickers follow the same order.
+  await page.goto("/create");
+  await expect(page.locator("[data-testid=stage-avatar]")).toBeVisible();
+  await expect(page.getByTestId("avatar-grid").locator("> div").first()).toContainText("Marcus Hill");
+  await page.getByRole("button", { name: /^Voice$/ }).click();
+  await expect(page.getByRole("button", { name: "Remove Olivia from favourites", exact: true })).toBeVisible();
+
+  // Unstar from the editor; the library follows.
+  await page.getByRole("button", { name: "Remove Olivia from favourites", exact: true }).click();
+  await page.getByRole("button", { name: /^Avatar$/ }).click();
+  await page.getByRole("button", { name: "Remove Marcus Hill from favourites" }).click();
+  await expect.poll(async () => (await (await page.request.get("/api/prefs")).json()).prefs?.favoriteAvatarIds).toBeUndefined();
+  await page.goto("/avatars");
+  await expect(firstTile()).not.toContainText("Marcus Hill");
+});
+
 test("draft autosave survives a reload and clears after generating", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Draft title");
   await page.locator("textarea").fill("Draft script survives reload.");
@@ -474,8 +508,11 @@ test("mobile drawer opens, navigates, and closes", async ({ browser }) => {
 test("no page scrolls sideways at phone width", async ({ browser }) => {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const page = await ctx.newPage();
+  let agentId: string | undefined;
   try {
     const v = await createVideoViaApi(page, "Phone width check");
+    // A shared presenter makes the Interactive page render its widest row (six actions per presenter).
+    agentId = ((await (await page.request.post("/api/agents", { data: { name: "Phone width presenter", avatarId: "stock_1" } })).json()).agent as { id: string }).id;
     const pages = ["/home", "/create", "/videos", `/videos/${v.id}`, "/templates", "/avatars", "/voices", "/batch", "/brand", "/interactive", "/workspace", "/settings", "/translate", `/share/${v.id}`];
     for (const path of pages) {
       await page.goto(path);
@@ -488,6 +525,7 @@ test("no page scrolls sideways at phone width", async ({ browser }) => {
       expect(over, `${path} overflows: ${over.join(", ")}`).toEqual([]);
     }
   } finally {
+    if (agentId) await page.request.delete(`/api/agents/${agentId}`);
     await ctx.close();
   }
 });

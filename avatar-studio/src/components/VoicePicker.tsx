@@ -1,5 +1,6 @@
 "use client";
 import { Loader2, Pause, Play } from "lucide-react";
+import { FavoriteStar } from "@/components/FavoriteStar";
 import type { Voice } from "@/lib/types";
 
 export function VoiceRow({
@@ -9,6 +10,8 @@ export function VoiceRow({
   onPreview,
   playing,
   busy,
+  favorite,
+  onToggleFavorite,
 }: {
   voice: Voice;
   selected?: boolean;
@@ -16,6 +19,8 @@ export function VoiceRow({
   onPreview: () => void;
   playing: boolean;
   busy: boolean;
+  favorite?: boolean;
+  onToggleFavorite?: () => void;
 }) {
   return (
     <div
@@ -42,6 +47,7 @@ export function VoiceRow({
           {[voice.language, voice.gender, ...(voice.tags ?? [])].filter(Boolean).slice(0, 4).join(" · ") || voice.provider}
         </div>
       </div>
+      {onToggleFavorite && <FavoriteStar name={voice.name} on={!!favorite} onToggle={onToggleFavorite} className="shrink-0 shadow-none" />}
     </div>
   );
 }

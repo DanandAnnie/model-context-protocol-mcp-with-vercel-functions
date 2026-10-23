@@ -11,7 +11,7 @@ import {
 } from "@/lib/services";
 import { LOCAL_OWNER } from "@/lib/owner";
 import { config } from "@/lib/config";
-import { formatSeconds, isDarkHex } from "@/lib/client";
+import { formatSeconds, isDarkHex, posterUrl } from "@/lib/client";
 import { excerpt } from "@/lib/text";
 import { dimensionsFor } from "@/lib/types";
 import { ViewBeacon } from "@/components/ViewBeacon";
@@ -61,8 +61,9 @@ export async function generateMetadata({
   }
   const description = excerpt(video.script) || `A video from ${siteName}`;
   const ready = video.status === "completed" && !!video.videoUrl;
-  const images = video.thumbnailUrl
-    ? [{ url: video.thumbnailUrl, alt: video.title }]
+  const poster = posterUrl(video, base);
+  const images = poster
+    ? [{ url: poster, alt: video.title }]
     : undefined;
   const { width, height } = dimensionsFor(video.aspect, video.resolution);
   return {
@@ -172,7 +173,7 @@ export default async function SharePage({
               {video.status === "completed" && video.videoUrl ? (
                 <video
                   src={video.videoUrl}
-                  poster={video.thumbnailUrl}
+                  poster={posterUrl(video)}
                   controls
                   autoPlay={false}
                   className="h-full w-full"

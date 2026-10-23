@@ -13,6 +13,7 @@ import { getAvatar } from "./avatars";
 import { listVoices } from "./voices";
 import { PUBLIC_ACCESS, owned, scheduleNotification, stripUndefined } from "./shared";
 import { SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, clearShareLock, setShareLock, shareUnlocked } from "../share-lock";
+import { clearCover, setCover } from "../cover";
 
 export const backgroundSchema = z.object({ type: z.enum(["color", "image"]), value: z.string().min(1) });
 
@@ -265,6 +266,13 @@ export const videoPatchSchema = z
     /** Whether the public share page offers a download link. */
     shareDownload: z.boolean().optional(),
     shareDisabled: z.boolean().optional(),
+    /** A `data:image/...` URL (PNG, JPEG, WebP, or GIF; 2 MB decoded) or null to remove the cover. */
+    cover: z
+      .string()
+      .max(3_000_000, "The cover image is too large (2 MB max)")
+      .refine((v) => v.startsWith("data:image/"), "The cover must be an uploaded image")
+      .nullable()
+      .optional(),
     sharePassword: z
       .string()
       .trim()
@@ -286,7 +294,14 @@ export const videoPatchSchema = z
       .optional(),
   })
   .refine(
-    (p) => p.title !== undefined || p.folder !== undefined || p.shareDownload !== undefined || p.shareDisabled !== undefined || p.sharePassword !== undefined || p.shareCta !== undefined,
+    (p) =>
+      p.title !== undefined ||
+      p.folder !== undefined ||
+      p.shareDownload !== undefined ||
+      p.shareDisabled !== undefined ||
+      p.sharePassword !== undefined ||
+      p.shareCta !== undefined ||
+      p.cover !== undefined,
     "Nothing to update",
   );
 
@@ -309,6 +324,15 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
   if (patch.shareCta !== undefined) {
     if (patch.shareCta) next.shareCta = patch.shareCta;
     else delete next.shareCta;
+  }
+  if (patch.cover !== undefined) {
+    if (patch.cover) {
+      const cover = await setCover(next, patch.cover);
+      next.cover = { updatedAt: cover.updatedAt };
+    } else {
+      await clearCover(next.id);
+      delete next.cover;
+    }
   }
   if (patch.sharePassword !== undefined) {
     if (patch.sharePassword) {
@@ -369,6 +393,7 @@ export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId
     if (input.action === "delete") {
       await getStore().remove("video", id);
       await clearShareLock(id);
+      await clearCover(id);
     }
     else await updateVideo(id, { folder: input.folder }, ownerId);
     done += 1;
@@ -403,6 +428,7 @@ export async function deleteVideo(id: string, ownerId: string = LOCAL_OWNER): Pr
   owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
   await getStore().remove("video", id);
   await clearShareLock(id);
+  await clearCover(id);
 }
 
 export async function applyAvatarWebhook(providerName: string, body: unknown): Promise<Video | null> {

@@ -481,6 +481,36 @@ test("starred avatars and voices come first everywhere and persist", async ({ pa
   await expect(firstTile()).not.toContainText("Marcus Hill");
 });
 
+test("a custom cover image replaces the poster everywhere", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Cover ${Date.now().toString(36)}`);
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  expect((await page.request.get(`/api/videos/${v.id}/cover`)).status()).toBe(404);
+  await page.goto(`/videos/${v.id}`);
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+  await page.getByLabel("Cover image").setInputFiles({ name: "cover.png", mimeType: "image/png", buffer: png });
+  await expect(page.getByRole("button", { name: "Remove cover" })).toBeVisible();
+  const record = (await (await page.request.get(`/api/videos/${v.id}`)).json()).video as { cover?: { updatedAt: string } };
+  expect(record.cover?.updatedAt).toBeTruthy();
+  const served = await page.request.get(`/api/videos/${v.id}/cover?v=${Date.parse(record.cover!.updatedAt)}`);
+  expect(served.status()).toBe(200);
+  expect(served.headers()["content-type"]).toBe("image/jpeg");
+  expect(served.headers()["cache-control"]).toContain("immutable");
+  // The share page's poster and link preview use it.
+  const html = await (await page.request.get(`/share/${v.id}`)).text();
+  expect(html).toContain(`/api/videos/${v.id}/cover?v=`);
+  expect(/<meta property="og:image" content="[^"]*\/cover\?v=/.test(html)).toBe(true);
+  await page.goto("/videos");
+  await expect(page.locator(`a[href="/videos/${v.id}"] img`)).toHaveAttribute("src", /\/cover\?v=/);
+  // Offline links hide it from the public; the owner still sees it.
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareDisabled: true } })).status()).toBe(200);
+  expect((await page.request.get(`/api/videos/${v.id}/cover`)).status()).toBe(200);
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareDisabled: false } })).status()).toBe(200);
+  await page.goto(`/videos/${v.id}`);
+  await page.getByRole("button", { name: "Remove cover" }).click();
+  await expect(page.getByRole("button", { name: "Remove cover" })).toHaveCount(0);
+  await expect.poll(async () => (await page.request.get(`/api/videos/${v.id}/cover`)).status()).toBe(404);
+});
+
 test("draft autosave survives a reload and clears after generating", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Draft title");
   await page.locator("textarea").fill("Draft script survives reload.");

@@ -4,7 +4,7 @@ import { getTtsProvider } from "../providers";
 import { getStore } from "../store";
 import { LOCAL_OWNER } from "../owner-id";
 
-const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock"] as const;
+const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover"] as const;
 
 /** Everything stored under an owner id, for a data export. Secrets (key hashes, webhook secret) are redacted. */
 export type OwnerExport = { ownerId: string; exportedAt: string } & Record<(typeof OWNER_KINDS)[number], Record<string, unknown>[]>;
@@ -20,6 +20,11 @@ export async function exportOwnerData(ownerId: string = LOCAL_OWNER): Promise<Ow
       if (kind === "sharelock") {
         delete copy.hash;
         delete copy.salt;
+      }
+      if (kind === "cover" && typeof copy.data === "string") {
+        // The image itself can be downloaded from the video; the export keeps its size.
+        copy.bytes = Buffer.from(copy.data, "base64").byteLength;
+        delete copy.data;
       }
       return copy;
     });

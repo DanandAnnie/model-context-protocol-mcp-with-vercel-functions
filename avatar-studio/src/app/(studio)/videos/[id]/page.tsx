@@ -5,7 +5,7 @@ import { useRef, useState } from "react";
 import { ArrowLeft, Captions, Check, Code2, Copy, Download, Eye, FolderOpen, Languages, LayoutTemplate, Link2, Lock, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
-import { ApiError, api, formatDate, formatSeconds, isDarkHex } from "@/lib/client";
+import { ApiError, api, formatDate, formatSeconds, isDarkHex, posterUrl } from "@/lib/client";
 import type { Video } from "@/lib/types";
 
 export default function VideoDetailPage() {
@@ -121,6 +121,44 @@ export default function VideoDetailPage() {
     }
   }
   const shareLive = !(shareDraft.shareDisabled ?? !!video?.shareDisabled);
+
+  // Cover image: downscaled in the browser to at most 1280px wide, sent as a JPEG data URL.
+  const [coverBusy, setCoverBusy] = useState<"save" | "remove" | null>(null);
+  const [coverErr, setCoverErr] = useState<string | null>(null);
+  async function fileToCover(file: File): Promise<string> {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = () => reject(new Error("That file is not an image"));
+        el.src = url;
+      });
+      const scale = Math.min(1, 1280 / img.naturalWidth);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+      canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL("image/jpeg", 0.85);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+  async function saveCover(file: File | null) {
+    if (!video || coverBusy) return;
+    setCoverErr(null);
+    setCoverBusy(file ? "save" : "remove");
+    try {
+      const body = { cover: file ? await fileToCover(file) : null };
+      const { video: next } = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify(body) });
+      setData({ video: next });
+      void refetch();
+    } catch (e) {
+      setCoverErr(e instanceof Error ? e.message : "Could not update the cover");
+    } finally {
+      setCoverBusy(null);
+    }
+  }
 
   // Share password: set or change it from one input, remove it with a button; never shown back.
   const [sharePw, setSharePw] = useState("");
@@ -347,7 +385,7 @@ export default function VideoDetailPage() {
               <div className="flex items-center justify-center bg-slate-950 p-0">
                <div className={`relative flex items-center justify-center ${video.aspect === "9:16" ? "aspect-[9/16] h-[70vh]" : video.aspect === "1:1" ? "aspect-square w-full max-w-[560px]" : "aspect-video w-full"}`}>
                 {video.status === "completed" && video.videoUrl ? (
-                  <video src={video.videoUrl} poster={video.thumbnailUrl} controls className="h-full w-full" />
+                  <video src={video.videoUrl} poster={posterUrl(video)} controls className="h-full w-full" />
                 ) : video.status === "failed" ? (
                   <div className="p-8 text-center text-sm text-rose-200">
                     <p className="font-medium">Render failed</p>
@@ -438,6 +476,37 @@ export default function VideoDetailPage() {
                     )}
                   </Row>
                 </dl>
+              </Card>
+              <Card className="p-4" data-testid="cover-card">
+                <h3 className="text-sm font-semibold text-slate-900">Cover image</h3>
+                <p className="mt-1 text-xs text-slate-500">The poster shown on the share page, in link previews, and in your library. Up to 1280px wide; 2 MB.</p>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  {posterUrl(video) && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={posterUrl(video)} alt="" className="h-14 w-24 rounded-md border border-slate-200 object-cover" data-testid="cover-preview" />
+                  )}
+                  <label className="inline-flex cursor-pointer items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50">
+                    {coverBusy === "save" ? "Uploading…" : video.cover ? "Replace cover" : "Upload cover"}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      aria-label="Cover image"
+                      className="sr-only"
+                      disabled={!!coverBusy}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0] ?? null;
+                        e.target.value = "";
+                        if (file) void saveCover(file);
+                      }}
+                    />
+                  </label>
+                  {video.cover && (
+                    <Button type="button" variant="secondary" className="px-3 py-1.5 text-xs" onClick={() => saveCover(null)} loading={coverBusy === "remove"} disabled={coverBusy === "save"}>
+                      Remove cover
+                    </Button>
+                  )}
+                  {coverErr && <span className="text-xs text-rose-600">{coverErr}</span>}
+                </div>
               </Card>
               <Card className="p-4" data-testid="share-cta-card">
                 <h3 className="text-sm font-semibold text-slate-900">Call to action</h3>

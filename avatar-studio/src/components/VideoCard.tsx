@@ -2,16 +2,16 @@
 import Link from "next/link";
 import { Film, LinkIcon, Lock } from "lucide-react";
 import { StatusBadge } from "./ui";
-import { formatDate, formatSeconds } from "@/lib/client";
+import { formatDate, formatSeconds, posterUrl } from "@/lib/client";
 import type { Video } from "@/lib/types";
 
 export function VideoCard({ video, selectable = false, selected = false, onToggle }: { video: Video; selectable?: boolean; selected?: boolean; onToggle?: () => void }) {
   const body = (
     <>
       <div className="relative aspect-video w-full overflow-hidden bg-slate-900">
-        {video.thumbnailUrl ? (
+        {posterUrl(video) ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={video.thumbnailUrl} alt="" className="h-full w-full object-cover" onError={(e) => (e.currentTarget.style.display = "none")} />
+          <img src={posterUrl(video)} alt="" className="h-full w-full object-cover" onError={(e) => (e.currentTarget.style.display = "none")} />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-slate-500">
             <Film className="h-8 w-8" />

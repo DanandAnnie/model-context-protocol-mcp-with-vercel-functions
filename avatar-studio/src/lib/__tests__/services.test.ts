@@ -942,6 +942,39 @@ describe("folders and share views", () => {
   });
 });
 
+describe("cover image", () => {
+  const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+  it("stores a poster in its own record, serves it back, and removes it with the video", async () => {
+    const { updateVideo, videoPatchSchema } = await import("../services/videos");
+    const { getCover } = await import("../cover");
+    const { exportOwnerData } = await import("../services/account");
+    const v = await createVideo(videoRequestSchema.parse({ title: "Cover", script: "Hi.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }));
+    const set = await updateVideo(v.id, videoPatchSchema.parse({ cover: png }));
+    assert.ok(set.cover?.updatedAt);
+    assert.equal(JSON.stringify(set).includes("iVBOR"), false, "the bytes never sit on the video");
+    const cover = await getCover(v.id);
+    assert.equal(cover?.mimeType, "image/png");
+    assert.equal(cover?.bytes.byteLength, 70);
+    const row = (await exportOwnerData(LOCAL_OWNER)).cover.find((r) => r.videoId === v.id)!;
+    assert.ok(row && !("data" in row) && row.bytes === 70, "the export keeps the size, not the bytes");
+    await assert.rejects(updateVideo(v.id, videoPatchSchema.parse({ cover: "data:image/svg+xml;base64,PHN2Zy8+" })), /PNG, JPEG, WebP, or GIF/);
+    assert.throws(() => videoPatchSchema.parse({ cover: "https://example.com/a.png" }), /uploaded image/);
+    const cleared = await updateVideo(v.id, videoPatchSchema.parse({ cover: null }));
+    assert.equal("cover" in cleared, false);
+    assert.equal(await getCover(v.id), null);
+    await updateVideo(v.id, videoPatchSchema.parse({ cover: png }));
+    await deleteVideo(v.id);
+    assert.equal(await getCover(v.id), null, "deleting the video removes its cover");
+  });
+
+  it("refuses a cover over the size limit", async () => {
+    const { setCover } = await import("../cover");
+    const big = `data:image/png;base64,${Buffer.alloc(2 * 1024 * 1024 + 1, 1).toString("base64")}`;
+    await assert.rejects(setCover({ id: "vid_big" }, big), /too large/);
+  });
+});
+
 describe("favourites", () => {
   it("stars avatars and voices idempotently, keeps the newest 50, and survives an email change", async () => {
     const { getPrefs, toggleFavorite } = await import("../notifications");

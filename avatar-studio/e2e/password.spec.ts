@@ -104,9 +104,18 @@ test("a password-protected share link opens only with the password or for the ow
   expect(await (await anon.get(`/share/${id}`)).text()).not.toContain('data-testid="share-unlock"');
   // The owner never needs it.
   expect((await request.get(`/api/videos/${id}/captions`)).status()).toBe(200);
+  // A cover follows the same rule: the unlocked visitor and the owner get it, a stranger does not.
+  const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+  expect((await request.patch(`/api/videos/${id}`, { data: { cover: png } })).status()).toBe(200);
+  expect((await anon.get(`/api/videos/${id}/cover`)).status()).toBe(200);
+  const stranger = await playwright.request.newContext({ baseURL: "http://localhost:3102" });
+  expect((await stranger.get(`/api/videos/${id}/cover`)).status()).toBe(404);
+  await stranger.dispose();
   // Changing the password signs the visitor out again.
   expect((await request.patch(`/api/videos/${id}`, { data: { sharePassword: "another-1" } })).status()).toBe(200);
   expect((await anon.get(`/api/videos/${id}/captions`)).status()).toBe(401);
+  expect((await anon.get(`/api/videos/${id}/cover`)).status()).toBe(404);
+  expect((await request.get(`/api/videos/${id}/cover`)).status()).toBe(200);
   await anon.dispose();
 });
 

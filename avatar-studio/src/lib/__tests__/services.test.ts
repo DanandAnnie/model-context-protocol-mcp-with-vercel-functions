@@ -49,7 +49,7 @@ import {
 import { MockAvatarProvider } from "../providers/avatar/mock";
 import { API_KEY_PREFIX, MAX_API_KEYS, createApiKey, listApiKeys, ownerForApiKey, revokeApiKey } from "../api-keys";
 import { createHmac } from "node:crypto";
-import { computeInsights, finishRateOf } from "../insights";
+import { ANALYTICS_COLUMNS, analyticsRows, computeInsights, finishRateOf } from "../insights";
 import { acceptInvite, canManageAccount, createInvite, createWorkspace, deleteWorkspace, findInvite, listWorkspaces, removeMember, revokeInvite, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
 import type { Video } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
@@ -1316,6 +1316,16 @@ describe("insights", () => {
     assert.equal(computeInsights([], now).finishRate, null);
     assert.equal(computeInsights([mk(0, { views: 4 })], now).finishRate, null, "views without any watch marks are no data, not 0%");
     assert.equal(computeInsights([mk(0, { views: 4, watch: { q25: 1, q50: 0, q75: 0, q100: 0 } })], now).finishRate, 0, "a mark without a finish is a real 0%");
+    // The CSV rows carry the same numbers in spreadsheet form.
+    const rows = analyticsRows([videos[1], videos[0]], "https://studio.example.com/");
+    assert.deepEqual(Object.keys(rows[0]), [...ANALYTICS_COLUMNS], "columns in order");
+    assert.equal(rows[0].views, 7);
+    assert.equal(rows[0].watched_100, 3);
+    assert.equal(rows[0].finish_rate, 43, "percent, rounded");
+    assert.equal(rows[0].cta_clicks, 3);
+    assert.equal(rows[0].share_link, `https://studio.example.com/share/${videos[1].id}`, "no double slash");
+    assert.equal(rows[1].views, 0);
+    assert.equal(rows[1].finish_rate, undefined, "no views, empty cell");
     assert.equal(finishRateOf(videos[1]), 3 / 7);
     assert.equal(finishRateOf({ views: 0 }), null);
     assert.equal(finishRateOf({ views: 2, watch: { q25: 9, q50: 9, q75: 9, q100: 9 } }), 1, "never above one when counters disagree");

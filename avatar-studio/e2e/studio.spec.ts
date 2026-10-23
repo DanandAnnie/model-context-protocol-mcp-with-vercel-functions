@@ -381,6 +381,18 @@ test("share page offers a download only when the owner allows it", async ({ page
   await expect(page.getByTestId("cta-click-summary")).toContainText(/button clicks?/);
   await expect(page.getByTestId("finish-rate-summary")).toContainText(/\d+% watched to the end/);
   await expect(page.getByTestId("finish-rate").first()).toContainText(/\d+%/);
+  // The same numbers download as a spreadsheet.
+  await expect(page.getByTestId("analytics-csv")).toBeVisible();
+  const analytics = await page.request.get("/api/videos/analytics");
+  expect(analytics.headers()["content-type"]).toContain("text/csv");
+  const sheet = (await analytics.text()).replace(/^\uFEFF/, "").split("\r\n");
+  expect(sheet[0]).toBe('"id","title","status","created","folder","duration_sec","views","last_viewed","watched_25","watched_50","watched_75","watched_100","finish_rate","cta_clicks","share_link"');
+  const row = sheet.find((l) => l.startsWith(`"${v.id}"`))!.slice(1, -1).split('","');
+  const col = (name: string) => row[sheet[0].slice(1, -1).split('","').indexOf(name)];
+  expect([col("watched_25"), col("watched_50"), col("watched_75"), col("watched_100"), col("cta_clicks")]).toEqual(["1", "1", "1", "1", "1"]);
+  expect(Number(col("views"))).toBeGreaterThan(0);
+  expect(Number(col("finish_rate"))).toBeGreaterThan(0);
+  expect(col("share_link")).toContain(`/share/${v.id}`);
   await page.goto(`/share/${v.id}`);
   expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareCta: { label: "Go", url: "javascript:alert(1)" } } })).status()).toBe(400);
   expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareCta: null } })).status()).toBe(200);

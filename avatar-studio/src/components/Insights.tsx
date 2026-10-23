@@ -96,7 +96,14 @@ export function Insights({ videos }: { videos: Video[] }) {
           <div className="mt-1 text-xs text-slate-500">{data.completionRate === null ? "No finished renders yet" : "completed out of completed + failed"}</div>
         </Card>
         <Card className="p-5">
-          <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Share views</div>
+          <div className="flex items-baseline justify-between gap-2">
+            <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Share views</div>
+            {videos.length > 0 && (
+              <a href="/api/videos/analytics" download className="text-xs text-brand-700 hover:underline" title="Views, watch-through, clicks, and share links for every video" data-testid="analytics-csv">
+                Download CSV
+              </a>
+            )}
+          </div>
           <div className="mt-1 text-2xl font-semibold text-slate-900">{data.totalViews}</div>
           {data.totalClicks > 0 && (
             <div className="mt-1 text-xs text-slate-500" data-testid="cta-click-summary">

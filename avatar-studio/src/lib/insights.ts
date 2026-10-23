@@ -30,6 +30,33 @@ export function finishRateOf(video: Pick<Video, "views" | "watch">): number | nu
   return Math.min(1, (video.watch?.q100 ?? 0) / video.views);
 }
 
+export const ANALYTICS_COLUMNS = ["id", "title", "status", "created", "folder", "duration_sec", "views", "last_viewed", "watched_25", "watched_50", "watched_75", "watched_100", "finish_rate", "cta_clicks", "share_link"] as const;
+
+/** One spreadsheet row per video: what the owner sees on the video page, in a form that sorts and sums. */
+export function analyticsRows(videos: Video[], base: string): Array<Record<(typeof ANALYTICS_COLUMNS)[number], string | number | undefined>> {
+  const origin = base.replace(/\/$/, "");
+  return videos.map((v) => {
+    const rate = finishRateOf(v);
+    return {
+      id: v.id,
+      title: v.title,
+      status: v.status,
+      created: v.createdAt,
+      folder: v.folder,
+      duration_sec: v.durationSec,
+      views: v.views ?? 0,
+      last_viewed: v.lastViewedAt,
+      watched_25: v.watch?.q25 ?? 0,
+      watched_50: v.watch?.q50 ?? 0,
+      watched_75: v.watch?.q75 ?? 0,
+      watched_100: v.watch?.q100 ?? 0,
+      finish_rate: rate === null ? undefined : Math.round(rate * 100),
+      cta_clicks: v.ctaClicks ?? 0,
+      share_link: `${origin}/share/${v.id}`,
+    };
+  });
+}
+
 const DAY_MS = 86_400_000;
 const dayKey = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 

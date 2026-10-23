@@ -1845,6 +1845,14 @@ describe("interactive avatar", () => {
     assert.equal("greeting" in (await updateAgent(agent.id, agentPatchSchema.parse({ greeting: "" }), "u-know", fake)), false);
     assert.equal("greeting" in (await createAgent(agentSchema.parse({ name: "Mute", avatarId: "stock_1", greeting: "   " }), "u-know")), false);
     assert.throws(() => agentSchema.parse({ name: "x", avatarId: "stock_1", greeting: "g".repeat(201) }));
+    // Suggested questions: up to three, offered to visitors, an empty list removes them.
+    const chips = await updateAgent(agent.id, agentPatchSchema.parse({ starters: [" What are your hours? ", "Do you take walk-ins?"] }), "u-know", fake);
+    assert.deepEqual(chips.starters, ["What are your hours?", "Do you take walk-ins?"]);
+    assert.deepEqual((await publicAgent(agent.id)).starters, ["What are your hours?", "Do you take walk-ins?"]);
+    assert.equal("starters" in (await updateAgent(agent.id, agentPatchSchema.parse({ starters: [] }), "u-know", fake)), false);
+    assert.equal("starters" in (await createAgent(agentSchema.parse({ name: "Quiet", avatarId: "stock_1", starters: [] }), "u-know")), false);
+    assert.throws(() => agentSchema.parse({ name: "x", avatarId: "stock_1", starters: ["a", "b", "c", "d"] }));
+    assert.throws(() => agentSchema.parse({ name: "x", avatarId: "stock_1", starters: ["   "] }));
     assert.ok(withKnowledge(agent).startsWith("You represent Hillcrest Dental.\n\n" + KNOWLEDGE_MARKER));
     assert.match(withKnowledge(agent), /untrusted reference material/);
     const { splitKnowledge } = await import("../providers/types");

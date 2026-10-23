@@ -49,6 +49,7 @@ export function ChatPanel({
   ask,
   emptyHint = "Say hello to get started.",
   opening,
+  starters = [],
   dark = false,
   compact = false,
   aside,
@@ -62,6 +63,8 @@ export function ChatPanel({
   emptyHint?: string;
   /** The presenter's first message, shown before the visitor says anything and kept in the transcript. */
   opening?: string;
+  /** Suggested questions offered as chips until the visitor's first message. */
+  starters?: string[];
   dark?: boolean;
   /** Single column with a small portrait, for the website embed. */
   compact?: boolean;
@@ -182,7 +185,11 @@ export function ChatPanel({
     setBusy(true);
     setErr(null);
     try {
-      const reply = await ask(next.slice(-20));
+      // The last 20 turns; once the transcript outgrows that, the window starts at a visitor turn so the
+      // model never sees a mid-conversation reply as the presenter's opening.
+      const window = next.slice(-20);
+      const firstUser = window.findIndex((m) => m.role === "user");
+      const reply = await ask(next.length > 20 && firstUser > 0 ? window.slice(firstUser) : window);
       setMessages([...next, { role: "assistant", content: reply }]);
       if (!(live && (await live.speak(reply)))) speak(reply);
     } catch (e) {
@@ -289,6 +296,21 @@ export function ChatPanel({
             </div>
           )}
         </div>
+        {starters.length > 0 && messages.length === openingTurns.length && (
+          <div className="flex flex-wrap gap-2 px-4 pb-3" data-testid="chat-starters">
+            {starters.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => send(s)}
+                disabled={busy}
+                className={`rounded-full border px-3 py-1 text-xs ${dark ? "border-slate-700 text-slate-200 hover:bg-slate-800" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        )}
         <form
           className={`flex items-center gap-2 border-t px-4 py-3 ${dark ? "border-slate-800" : "border-slate-100"}`}
           onSubmit={(e) => {

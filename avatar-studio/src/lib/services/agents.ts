@@ -34,6 +34,8 @@ const agentFields = {
   instructions: z.string().trim().max(2000),
   /** Shown to visitors as the presenter's first message; an empty string removes it. */
   greeting: z.string().trim().max(200),
+  /** Suggested questions offered as chips before the first message; an empty list removes them. */
+  starters: z.array(z.string().trim().min(1).max(80)).max(3),
   /** A public page read once and kept as reference material for replies (see `readKnowledge`). */
   knowledgeUrl: knowledgeUrlSchema,
   language: z.string().trim().min(2).max(40),
@@ -46,6 +48,7 @@ export const agentSchema = z.object({
   ...agentFields,
   instructions: agentFields.instructions.default(""),
   greeting: agentFields.greeting.optional(),
+  starters: agentFields.starters.optional(),
   knowledgeUrl: agentFields.knowledgeUrl.optional(),
   language: agentFields.language.default("English"),
   isPublic: agentFields.isPublic.default(true),
@@ -129,18 +132,20 @@ async function presenterSnapshot(avatarId: string, voiceId: string | undefined, 
 export async function createAgent(input: z.infer<typeof agentSchema>, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<Agent> {
   if ((await listAgents(ownerId)).length >= MAX_AGENTS) throw new ValidationError(`At most ${MAX_AGENTS} agents per account`);
   const snapshot = await presenterSnapshot(input.avatarId, input.voiceId, ownerId);
-  const { knowledgeUrl, greeting, ...rest } = input;
+  const { knowledgeUrl, greeting, starters, ...rest } = input;
   const knowledge = knowledgeUrl ? await readKnowledge(knowledgeUrl, fetchImpl) : {};
   const now = nowIso();
-  return getStore().put("agent", { id: newId("agent"), ownerId, ...rest, ...(greeting ? { greeting } : {}), ...snapshot, ...knowledge, conversations: 0, messages: 0, createdAt: now, updatedAt: now });
+  return getStore().put("agent", { id: newId("agent"), ownerId, ...rest, ...(greeting ? { greeting } : {}), ...(starters?.length ? { starters } : {}), ...snapshot, ...knowledge, conversations: 0, messages: 0, createdAt: now, updatedAt: now });
 }
 
 export async function updateAgent(id: string, patch: z.infer<typeof agentPatchSchema>, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<Agent> {
   const existing = await getAgent(id, ownerId);
-  const { knowledgeUrl, greeting, ...rest } = patch;
+  const { knowledgeUrl, greeting, starters, ...rest } = patch;
   const next: Agent = { ...existing, ...rest };
   if (greeting === "") delete next.greeting;
   else if (greeting) next.greeting = greeting;
+  if (starters && starters.length === 0) delete next.starters;
+  else if (starters) next.starters = starters;
   const snapshot = patch.avatarId || patch.voiceId ? await presenterSnapshot(next.avatarId, next.voiceId, ownerId) : {};
   if (knowledgeUrl === null) {
     delete next.knowledgeUrl;
@@ -170,6 +175,7 @@ export async function publicAgent(id: string) {
     avatar: { id: agent.avatarId, name: agent.avatarName, imageUrl: agent.avatarImageUrl },
     voiceLanguage: agent.voiceLanguage,
     ...(agent.greeting ? { greeting: agent.greeting } : {}),
+    ...(agent.starters?.length ? { starters: agent.starters } : {}),
     collectEmail: agent.collectEmail ?? false,
     liveVideo: getStreamingProvider().available,
     brand: brand ? { name: brand.name, logoUrl: brand.logoUrl, primaryColor: brand.primaryColor, accentColor: brand.accentColor } : null,

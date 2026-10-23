@@ -389,12 +389,6 @@ test("share page offers a download only when the owner allows it", async ({ page
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.shareDownload).toBe(true);
   await page.goto(`/share/${v.id}`);
   await expect(page.getByRole("link", { name: "Download video" })).toBeVisible();
-  // Embeds may ask the page to start muted and repeat; the plain link does neither.
-  await expect(page.getByTestId("share-player")).not.toHaveAttribute("autoplay", "");
-  await page.goto(`/share/${v.id}?autoplay=1&loop=1`);
-  await expect(page.getByTestId("share-player")).toHaveAttribute("autoplay", "");
-  await expect(page.getByTestId("share-player")).toHaveAttribute("loop", "");
-  await expect(page.getByTestId("share-player")).toHaveJSProperty("muted", true);
 
   // A description saved from the video page shows under the share-page player and in the link preview.
   await page.goto(`/videos/${v.id}`);
@@ -438,6 +432,14 @@ test("share page offers a download only when the owner allows it", async ({ page
   expect((await page.request.post(`/api/videos/${v.id}/watch`, { data: { quarter: 30 } })).status()).toBe(400);
   // Reaching the end counts every marker this viewer has not been counted for yet.
   expect((await watch(100)).watch).toEqual({ q25: 1, q50: 1, q75: 1, q100: 1 });
+  // Embeds may ask the page to start muted and repeat; the plain link does neither. Visited after the
+  // beacon checks so an autoplaying player could never use up this viewer's quarter slots first.
+  await page.goto(`/share/${v.id}`);
+  await expect(page.getByTestId("share-player")).not.toHaveAttribute("autoplay", "");
+  await page.goto(`/share/${v.id}?autoplay=1&loop=1`);
+  await expect(page.getByTestId("share-player")).toHaveAttribute("autoplay", "");
+  await expect(page.getByTestId("share-player")).toHaveAttribute("loop", "");
+  await expect(page.getByTestId("share-player")).toHaveJSProperty("muted", true);
   await page.goto(`/videos/${v.id}`);
   await expect(page.getByTestId("cta-clicks")).toHaveText("1");
   // Views land on today's bar of the per-day sparkline.
@@ -1132,12 +1134,23 @@ test("shared presenter: save from the interactive page, talk publicly, turn off"
   await expect(greetedPage.locator("[data-testid=chat-log] [data-role=assistant]")).toHaveCount(1);
   await greetedPage.close();
 
+  // Suggested questions are offered as chips until the first message; a chip sends its question.
+  expect((await page.request.patch(`/api/agents/${id}`, { data: { starters: ["Any open houses this week?", "How do I book a showing?"] } })).status()).toBe(200);
+  const chipPage = await page.context().newPage();
+  await chipPage.goto(`/talk/${id}`);
+  await expect(chipPage.getByTestId("chat-starters").getByRole("button")).toHaveCount(2);
+  await chipPage.getByRole("button", { name: "How do I book a showing?" }).click();
+  await expect(chipPage.locator("[data-testid=chat-log] [data-role=user]")).toHaveText("How do I book a showing?");
+  await expect(chipPage.locator("[data-testid=chat-log] [data-role=assistant]")).toHaveCount(2);
+  await expect(chipPage.getByTestId("chat-starters")).toHaveCount(0);
+  await chipPage.close();
+
   await page.reload();
-  await expect(page.getByTestId("agent-list")).toContainText("3 conversations");
+  await expect(page.getByTestId("agent-list")).toContainText("4 conversations");
   await page.getByRole("button", { name: `Transcripts for Dana ${tag}` }).click();
   await expect(page.getByTestId("transcripts")).toContainText("Any open houses?");
   await expect(page.getByTestId("transcripts")).toContainText(`sam-${tag}@example.com`);
-  await expect(page.getByTestId("transcripts").locator("summary")).toHaveCount(3);
+  await expect(page.getByTestId("transcripts").locator("summary")).toHaveCount(4);
   // The same conversations download as a lead list.
   await expect(page.getByTestId("transcripts").getByRole("link", { name: "Download CSV" })).toBeVisible();
   const csvRes = await page.request.get(`/api/agents/${id}/conversations?format=csv`);

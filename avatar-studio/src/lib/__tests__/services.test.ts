@@ -876,10 +876,20 @@ describe("folders and share views", () => {
     assert.deepEqual(await recordWatch(v.id, 25), { watch: { q25: 0, q50: 0, q75: 0, q100: 0 }, counted: false }, "nothing counts before the render completed");
     const fresh = await getVideo(v.id, undefined, false);
     globalThis.__avatarStudioStore!.put("video", { ...fresh, status: "completed" });
-    assert.deepEqual(await recordWatch(v.id, 25), { watch: { q25: 1, q50: 0, q75: 0, q100: 0 }, counted: true });
-    assert.deepEqual(await recordWatch(v.id, 100), { watch: { q25: 1, q50: 0, q75: 0, q100: 1 }, counted: true });
-    assert.deepEqual((await recordWatch(v.id, 25, () => false)).counted, false, "gated repeat is not counted");
-    assert.equal((await getVideo(v.id, undefined, false)).watch?.q25, 1);
+    // One viewer's windows: each quarter counts once, however the beacons arrive.
+    const seen = new Set<number>();
+    const viewer = (q: number) => (seen.has(q) ? false : (seen.add(q), true));
+    assert.deepEqual(await recordWatch(v.id, 25, viewer), { watch: { q25: 1, q50: 0, q75: 0, q100: 0 }, counted: true });
+    assert.deepEqual(await recordWatch(v.id, 100, viewer), { watch: { q25: 1, q50: 1, q75: 1, q100: 1 }, counted: true }, "the end counts every marker not yet counted, in one write");
+    assert.deepEqual(await recordWatch(v.id, 75, viewer), { watch: { q25: 1, q50: 1, q75: 1, q100: 1 }, counted: false }, "nothing left to count for this viewer");
+    assert.equal((await getVideo(v.id, undefined, false)).watch?.q75, 1);
+    // Beacons that land together (several viewers, or a view and a quarter) lose nothing.
+    const before = (await getVideo(v.id, undefined, false)).views ?? 0;
+    const burst = await Promise.all([recordWatch(v.id, 25), recordWatch(v.id, 50), recordView(v.id), recordWatch(v.id, 75), recordView(v.id)]);
+    assert.ok(burst.every((r) => r.counted));
+    const after = await getVideo(v.id, undefined, false);
+    assert.deepEqual(after.watch, { q25: 4, q50: 3, q75: 2, q100: 1 }, "every concurrent quarter landed");
+    assert.equal(after.views, before + 2, "views landed beside them");
     await updateVideo(v.id, videoPatchSchema.parse({ sharePassword: "letmein1" }));
     assert.equal((await recordWatch(v.id, 50)).counted, false, "a locked link needs the unlock cookie");
     const { getShareLock, shareCookieValue } = await import("../share-lock");

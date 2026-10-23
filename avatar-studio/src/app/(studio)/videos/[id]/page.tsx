@@ -507,15 +507,15 @@ export default function VideoDetailPage() {
                       {video.views ?? 0}
                     </span>
                   </Row>
-                  {video.watch && (
-                    <Row label="Watch-through">
+                  {video.status === "completed" && (
+                    <Row label="Watch-through" wrap>
                       <span
                         data-testid="watch-through"
-                        title={`Viewers who reached a quarter, half, three quarters, and the end${video.views ? `; ${Math.round(((video.watch.q100 ?? 0) / video.views) * 100)}% of views played to the end` : ""}`}
+                        title={`Viewers who reached a quarter, half, three quarters, and the end${video.views ? `; ${Math.min(100, Math.round(((video.watch?.q100 ?? 0) / video.views) * 100))}% of views played to the end` : ""}`}
                       >
                         {([25, 50, 75, 100] as const).map((q, i) => (
-                          <span key={q}>
-                            {i > 0 && <span className="text-slate-300"> · </span>}
+                          <span key={q} className="inline-block">
+                            {i > 0 && <span className="text-slate-300">&nbsp;·&nbsp;</span>}
                             <span className="text-slate-500">{q}%</span> {video.watch?.[`q${q}`] ?? 0}
                           </span>
                         ))}
@@ -700,11 +700,11 @@ export default function VideoDetailPage() {
   );
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Row({ label, children, wrap = false }: { label: string; children: React.ReactNode; wrap?: boolean }) {
   return (
     <div className="flex items-center justify-between gap-4">
-      <dt className="text-slate-500">{label}</dt>
-      <dd className="truncate text-right text-slate-900">{children}</dd>
+      <dt className="shrink-0 text-slate-500">{label}</dt>
+      <dd className={`${wrap ? "" : "truncate"} text-right text-slate-900`}>{children}</dd>
     </div>
   );
 }

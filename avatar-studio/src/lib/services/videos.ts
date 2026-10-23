@@ -358,55 +358,86 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
   return getStore().put("video", next);
 }
 
+// ---------------------------------------------------------------------------
+// Share-page counters. Each counter is a read-modify-write of the whole video record, and the
+// beacons from one share page can land together (a view and a quarter, or several quarters at
+// once after a seek), so writes to one video's counters run one after another within this
+// instance. Other instances still race; a store-side increment would close that fully.
+
+const counterQueue = new Map<string, Promise<unknown>>();
+
+function withCounterLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  const previous = counterQueue.get(id) ?? Promise.resolve();
+  const run = previous.then(fn, fn);
+  counterQueue.set(id, run.catch(() => undefined));
+  void run.finally(() => {
+    if (counterQueue.get(id) === run) counterQueue.delete(id);
+  }).catch(() => undefined);
+  return run;
+}
+
 /**
  * Count a share-page view. Public: no owner check. Only completed videos accumulate views,
  * so a page opened while rendering is not a view. `gate` runs only for a countable view
  * (the route's per-viewer window), so an early visit does not use up the viewer's slot.
  */
-export async function recordView(id: string, gate: () => boolean = () => true, shareCookie?: string): Promise<{ views: number; counted: boolean }> {
-  const video = await getStore().get<Video>("video", id);
-  if (!video || shareOffline(video)) throw new NotFoundError(`Video ${id} not found`);
-  if (video.status !== "completed" || !(await shareUnlocked(video, shareCookie)) || !gate()) return { views: video.views ?? 0, counted: false };
-  const views = (video.views ?? 0) + 1;
-  await getStore().put("video", { ...video, views, lastViewedAt: nowIso() });
-  return { views, counted: true };
+export function recordView(id: string, gate: () => boolean = () => true, shareCookie?: string): Promise<{ views: number; counted: boolean }> {
+  return withCounterLock(id, async () => {
+    const video = await getStore().get<Video>("video", id);
+    if (!video || shareOffline(video)) throw new NotFoundError(`Video ${id} not found`);
+    if (video.status !== "completed" || !(await shareUnlocked(video, shareCookie)) || !gate()) return { views: video.views ?? 0, counted: false };
+    const views = (video.views ?? 0) + 1;
+    await getStore().put("video", { ...video, views, lastViewedAt: nowIso() });
+    return { views, counted: true };
+  });
 }
 
 export const watchSchema = z.object({ quarter: z.union([z.literal(25), z.literal(50), z.literal(75), z.literal(100)]) });
+export const WATCH_QUARTERS: readonly WatchQuarter[] = [25, 50, 75, 100];
 
 /**
- * Count a viewer passing a quarter of the share-page player. Public, like `recordView`; the
- * route's `gate` keeps each viewer to one count per quarter per window.
+ * Count a viewer reaching a point in the share-page player. Every quarter up to `quarter` that
+ * the viewer has not been counted for yet is counted in one write, so a seek past three
+ * markers (or a player that reports them together) is one write, not three. `gate(q)` is the
+ * route's per-viewer window for each quarter.
  */
-export async function recordWatch(
+export function recordWatch(
   id: string,
   quarter: WatchQuarter,
-  gate: () => boolean = () => true,
+  gate: (q: WatchQuarter) => boolean = () => true,
   shareCookie?: string,
 ): Promise<{ watch: Video["watch"]; counted: boolean }> {
-  const video = await getStore().get<Video>("video", id);
-  if (!video || shareOffline(video)) throw new NotFoundError(`Video ${id} not found`);
-  const watch = { ...EMPTY_WATCH, ...video.watch };
-  if (video.status !== "completed" || !(await shareUnlocked(video, shareCookie)) || !gate()) return { watch, counted: false };
-  const key = `q${quarter}` as keyof typeof watch;
-  watch[key] += 1;
-  await getStore().put("video", { ...video, watch });
-  return { watch, counted: true };
+  return withCounterLock(id, async () => {
+    const video = await getStore().get<Video>("video", id);
+    if (!video || shareOffline(video)) throw new NotFoundError(`Video ${id} not found`);
+    const watch = { ...EMPTY_WATCH, ...video.watch };
+    if (video.status !== "completed" || !(await shareUnlocked(video, shareCookie))) return { watch, counted: false };
+    let counted = false;
+    for (const q of WATCH_QUARTERS) {
+      if (q > quarter || !gate(q)) continue;
+      watch[`q${q}`] += 1;
+      counted = true;
+    }
+    if (counted) await getStore().put("video", { ...video, watch });
+    return { watch, counted };
+  });
 }
 
 /**
  * Count a click on the share-page call to action. Public, like `recordView`; only a completed
  * video that still carries a button counts, and `gate` applies the route's per-viewer window.
  */
-export async function recordCtaClick(id: string, gate: () => boolean = () => true, shareCookie?: string): Promise<{ clicks: number; counted: boolean }> {
-  const video = await getStore().get<Video>("video", id);
-  if (!video || shareOffline(video)) throw new NotFoundError(`Video ${id} not found`);
-  if (video.status !== "completed" || !video.shareCta || !(await shareUnlocked(video, shareCookie)) || !gate()) {
-    return { clicks: video.ctaClicks ?? 0, counted: false };
-  }
-  const clicks = (video.ctaClicks ?? 0) + 1;
-  await getStore().put("video", { ...video, ctaClicks: clicks, lastCtaClickAt: nowIso() });
-  return { clicks, counted: true };
+export function recordCtaClick(id: string, gate: () => boolean = () => true, shareCookie?: string): Promise<{ clicks: number; counted: boolean }> {
+  return withCounterLock(id, async () => {
+    const video = await getStore().get<Video>("video", id);
+    if (!video || shareOffline(video)) throw new NotFoundError(`Video ${id} not found`);
+    if (video.status !== "completed" || !video.shareCta || !(await shareUnlocked(video, shareCookie)) || !gate()) {
+      return { clicks: video.ctaClicks ?? 0, counted: false };
+    }
+    const clicks = (video.ctaClicks ?? 0) + 1;
+    await getStore().put("video", { ...video, ctaClicks: clicks, lastCtaClickAt: nowIso() });
+    return { clicks, counted: true };
+  });
 }
 
 export const bulkVideoSchema = z.discriminatedUnion("action", [

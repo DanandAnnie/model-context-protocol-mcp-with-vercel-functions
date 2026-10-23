@@ -360,14 +360,17 @@ test("share page offers a download only when the owner allows it", async ({ page
     (await (await page.request.post(`/api/videos/${v.id}/watch`, { data: { quarter }, headers })).json()) as { counted: boolean; watch: { q25: number; q100: number } };
   expect((await watch(25)).counted).toBe(true);
   expect((await watch(25)).counted).toBe(false);
-  expect((await watch(100)).counted).toBe(true);
-  expect((await watch(50, { "sec-fetch-site": "cross-site" })).counted).toBe(false);
+  expect((await watch(100, { "sec-fetch-site": "cross-site" })).counted).toBe(false);
   expect((await page.request.post(`/api/videos/${v.id}/watch`, { data: { quarter: 30 } })).status()).toBe(400);
+  // Reaching the end counts every marker this viewer has not been counted for yet.
+  expect((await watch(100)).watch).toEqual({ q25: 1, q50: 1, q75: 1, q100: 1 });
   await page.goto(`/videos/${v.id}`);
   await expect(page.getByTestId("cta-clicks")).toHaveText("1");
   await expect(page.getByTestId("watch-through")).toContainText("25% 1");
-  await expect(page.getByTestId("watch-through")).toContainText("50% 0");
   await expect(page.getByTestId("watch-through")).toContainText("100% 1");
+  // The row stays readable rather than ellipsised at laptop widths.
+  const cell = page.getByTestId("watch-through");
+  expect(await cell.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
   // Home insights total the clicks across the library next to share views.
   await page.goto("/home");
   await expect(page.getByTestId("cta-click-summary")).toContainText(/button clicks?/);

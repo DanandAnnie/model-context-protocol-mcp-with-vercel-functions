@@ -11,6 +11,14 @@ import type { Video, VideoStatus } from "@/lib/types";
 
 const STATUSES: Array<"all" | VideoStatus> = ["all", "processing", "completed", "failed"];
 
+type SortKey = "newest" | "oldest" | "title" | "views";
+const SORTERS: Record<SortKey, (a: Video, b: Video) => number> = {
+  newest: (a, b) => b.createdAt.localeCompare(a.createdAt),
+  oldest: (a, b) => a.createdAt.localeCompare(b.createdAt),
+  title: (a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }) || b.createdAt.localeCompare(a.createdAt),
+  views: (a, b) => (b.views ?? 0) - (a.views ?? 0) || b.createdAt.localeCompare(a.createdAt),
+};
+
 export default function VideosPage() {
   return (
     <Suspense>
@@ -31,6 +39,7 @@ function VideosInner() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<"all" | VideoStatus>("all");
   const [folder, setFolder] = useState<string>("all"); // "all" | "unfiled" | folder name
+  const [sort, setSort] = useState<SortKey>("newest");
   const folders = useMemo(() => Array.from(new Set((data?.videos ?? []).map((v) => v.folder).filter((f): f is string => !!f))).sort(), [data]);
   const videos = useMemo(() => {
     const all = data?.videos ?? [];
@@ -41,8 +50,8 @@ function VideosInner() {
       const statusOk = status === "all" ? true : status === "processing" ? v.status === "processing" || v.status === "queued" : v.status === status;
       const textOk = !needle || `${v.title} ${v.script} ${v.avatarName ?? ""} ${v.voiceName ?? ""}`.toLowerCase().includes(needle);
       return statusOk && textOk;
-    });
-  }, [data, q, status, batch, folder]);
+    }).sort(SORTERS[sort]);
+  }, [data, q, status, batch, folder, sort]);
   const hasAny = (data?.videos.length ?? 0) > 0;
 
   // Multi-select: move the chosen videos to a folder or delete them in one request.
@@ -154,6 +163,12 @@ function VideosInner() {
               {s === "all" ? "All" : s[0].toUpperCase() + s.slice(1)}
             </button>
           ))}
+          <select aria-label="Sort videos" value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className="ml-auto rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700">
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="title">Title A–Z</option>
+            <option value="views">Most viewed</option>
+          </select>
         </div>
       )}
       {loading ? (

@@ -116,6 +116,25 @@ test("captions, share page, rename, and library filters", async ({ page }) => {
   expect((await (await page.request.get(`/api/videos/${a.id}`)).json()).video.title).toBe("Renamed video");
 });
 
+test("library sorts by date, title, and views", async ({ page }) => {
+  const older = await createVideoViaApi(page, "Zulu sortcheck");
+  await createVideoViaApi(page, "Alpha sortcheck");
+  await page.goto("/videos");
+  await page.getByPlaceholder(/Search title/).fill("sortcheck");
+  const titles = page.locator("a[href^='/videos/vid_'] .truncate");
+  await expect(titles).toHaveCount(2);
+  await expect(titles.first()).toHaveText("Alpha sortcheck"); // newest first by default
+  await page.getByLabel("Sort videos").selectOption("oldest");
+  await expect(titles.first()).toHaveText("Zulu sortcheck");
+  await page.getByLabel("Sort videos").selectOption("title");
+  await expect(titles.first()).toHaveText("Alpha sortcheck");
+  // Views only accrue on completed renders; the share beacon counts one for the older video.
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${older.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  expect((await page.request.post(`/api/videos/${older.id}/view`)).status()).toBe(200);
+  await page.getByLabel("Sort videos").selectOption("views");
+  await expect(titles.first()).toHaveText("Zulu sortcheck");
+});
+
 test("draft autosave survives a reload and clears after generating", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Draft title");
   await page.locator("textarea").fill("Draft script survives reload.");

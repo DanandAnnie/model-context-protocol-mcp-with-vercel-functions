@@ -10,8 +10,8 @@ const TABLE = "studio_items";
 export class SupabaseStore implements Store {
   private client: SupabaseClient;
 
-  constructor(url: string, serviceRoleKey: string) {
-    this.client = createClient(url, serviceRoleKey, { auth: { persistSession: false } });
+  constructor(url: string, serviceRoleKey: string, fetchImpl: typeof fetch = fetch) {
+    this.client = createClient(url, serviceRoleKey, { auth: { persistSession: false }, global: { fetch: fetchImpl } });
   }
 
   async list<T>(kind: ItemKind, ownerId?: string): Promise<T[]> {

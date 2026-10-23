@@ -1,0 +1,41 @@
+import type { Avatar, Translation, Video, VideoRequest, Voice } from "../types";
+
+export interface TtsProvider {
+  readonly name: string;
+  listVoices(): Promise<Voice[]>;
+  /**
+   * Synthesize speech. Returns null when the provider cannot produce audio
+   * server-side (demo mode); the client then falls back to browser TTS.
+   */
+  synthesize(voiceId: string, text: string, speed: number): Promise<{ audio: Uint8Array; mimeType: string } | null>;
+}
+
+export interface AvatarJobStatus {
+  status: Video["status"];
+  videoUrl?: string;
+  thumbnailUrl?: string;
+  durationSec?: number;
+  error?: string;
+}
+
+export interface AvatarProvider {
+  readonly name: string;
+  listAvatars(): Promise<Avatar[]>;
+  /** Kick off a render. Returns the provider's job id. */
+  createVideo(req: VideoRequest, avatar: Avatar, voice: Voice | null): Promise<{ providerJobId: string }>;
+  getStatus(providerJobId: string): Promise<AvatarJobStatus>;
+  /** Parse an inbound webhook body into a job update, or null if unrecognised. */
+  parseWebhook?(body: unknown): { providerJobId: string; update: AvatarJobStatus } | null;
+}
+
+export interface ScriptProvider {
+  readonly name: string;
+  generate(input: { topic: string; tone: string; lengthSec: number; language: string; audience?: string }): Promise<string>;
+}
+
+export interface TranslateProvider {
+  readonly name: string;
+  createTranslation(input: { sourceVideoUrl: string; targetLanguage: string; title: string }): Promise<{ providerJobId: string }>;
+  getStatus(providerJobId: string): Promise<Pick<Translation, "status" | "videoUrl" | "error">>;
+  supportedLanguages(): string[];
+}

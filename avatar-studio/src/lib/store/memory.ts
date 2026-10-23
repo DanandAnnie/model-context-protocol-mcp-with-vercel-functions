@@ -1,0 +1,42 @@
+import type { ItemKind, Store } from "./index";
+
+/**
+ * In-process store. Survives hot reloads in `next dev` (held on globalThis)
+ * but NOT cold starts on serverless hosts. Configure Supabase for production.
+ */
+export class MemoryStore implements Store {
+  private data = new Map<ItemKind, Map<string, unknown>>();
+
+  private bucket(kind: ItemKind): Map<string, unknown> {
+    let b = this.data.get(kind);
+    if (!b) {
+      b = new Map();
+      this.data.set(kind, b);
+    }
+    return b;
+  }
+
+  async list<T>(kind: ItemKind): Promise<T[]> {
+    return [...this.bucket(kind).values()] as T[];
+  }
+
+  async get<T>(kind: ItemKind, id: string): Promise<T | null> {
+    return (this.bucket(kind).get(id) as T | undefined) ?? null;
+  }
+
+  async put<T extends { id: string }>(kind: ItemKind, item: T): Promise<T> {
+    this.bucket(kind).set(item.id, item);
+    return item;
+  }
+
+  async remove(kind: ItemKind, id: string): Promise<void> {
+    this.bucket(kind).delete(id);
+  }
+
+  async find<T>(kind: ItemKind, predicate: (item: T) => boolean): Promise<T | null> {
+    for (const v of this.bucket(kind).values()) {
+      if (predicate(v as T)) return v as T;
+    }
+    return null;
+  }
+}

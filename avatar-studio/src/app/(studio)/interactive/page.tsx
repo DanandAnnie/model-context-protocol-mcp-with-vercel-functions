@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Check, Copy, Link2, Trash2 } from "lucide-react";
+import { Check, Code2, Copy, Link2, Trash2 } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { ChatPanel, type ChatTurn } from "@/components/ChatPanel";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -166,7 +166,7 @@ export default function InteractivePage() {
 
         <Card className="p-5">
           <h3 className="text-sm font-semibold text-slate-900">Shared presenters</h3>
-          <p className="mt-1 text-xs text-slate-500">Each one has a public page. Turn a link off to pause it without deleting the setup.</p>
+          <p className="mt-1 text-xs text-slate-500">Each one has a public page and a one-line website embed (a floating launcher that opens the chat). Turn a link off to pause it without deleting the setup.</p>
           <ul className="mt-3 divide-y divide-slate-100" data-testid="agent-list">
             {agentData?.agents.length === 0 && <li className="py-3 text-xs text-slate-500">Nothing shared yet.</li>}
             {agentData?.agents.map((a) => {
@@ -182,6 +182,15 @@ export default function InteractivePage() {
                   <div className="flex items-center gap-1.5">
                     <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => copy(url, a.id)} aria-label={`Copy link for ${a.name}`}>
                       {copied === a.id ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />} Link
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="px-2.5 py-1 text-xs"
+                      onClick={() => copy(`<script src="${window.location.origin}/embed/agent.js?id=${a.id}" async></script>`, `embed-${a.id}`)}
+                      aria-label={`Copy embed code for ${a.name}`}
+                      title="Paste before </body> on your site to add a floating chat launcher"
+                    >
+                      {copied === `embed-${a.id}` ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Code2 className="h-3.5 w-3.5" />} Embed
                     </Button>
                     <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => togglePublic(a)} aria-label={`${a.isPublic ? "Turn off" : "Turn on"} link for ${a.name}`}>
                       {a.isPublic ? "Turn off" : "Turn on"}

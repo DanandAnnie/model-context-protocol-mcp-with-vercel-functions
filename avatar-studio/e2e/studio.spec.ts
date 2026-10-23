@@ -400,3 +400,32 @@ test("interactive avatar answers a visitor in character", async ({ page }) => {
   await expect(page.locator("[data-testid=chat-log] [data-role=assistant]").nth(1)).toContainText(/pricing/i);
   expect((await page.request.post("/api/chat", { data: { avatarId: "stock_1", messages: [] } })).status()).toBe(400);
 });
+
+test("website embed script adds a launcher that opens the talk page", async ({ page }) => {
+  const agent = (await (await page.request.post("/api/agents", { data: { name: "Embed agent", avatarId: "stock_2" } })).json()).agent as { id: string };
+  try {
+    const bad = await page.request.get("/embed/agent.js?id=nope");
+    expect(bad.status()).toBe(400);
+    const js = await page.request.get(`/embed/agent.js?id=${agent.id}&color=%230f766e&label=Ask%20Dana`);
+    expect(js.status()).toBe(200);
+    expect(js.headers()["content-type"]).toContain("javascript");
+    expect(await js.text()).toContain(`/talk/${agent.id}?embed=1`);
+
+    // A customer's page loads the script and gets a working launcher. The host page is served
+    // through a routed response because Chrome blocks loopback loads from a null (about:blank) origin.
+    await page.route("http://localhost:3100/customer-site.html", (route) =>
+      route.fulfill({ contentType: "text/html", body: `<!doctype html><html><body><h1>Acme Realty</h1><script src="/embed/agent.js?id=${agent.id}&label=Ask%20Dana"></script></body></html>` }),
+    );
+    await page.goto("http://localhost:3100/customer-site.html");
+    const launcher = page.getByRole("button", { name: "Ask Dana" });
+    await expect(launcher).toBeVisible();
+    await launcher.click();
+    const frame = page.frameLocator("iframe[title='Chat with our presenter']");
+    await expect(frame.getByTestId("talk-name")).toContainText("Embed agent");
+    await expect(page.getByRole("button", { name: "Close" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("button", { name: "Ask Dana" })).toBeVisible();
+  } finally {
+    await page.request.delete(`/api/agents/${agent.id}`);
+  }
+});

@@ -20,6 +20,7 @@ export function ChatPanel({
   ask,
   emptyHint = "Say hello to get started.",
   dark = false,
+  compact = false,
   aside,
 }: {
   name: string;
@@ -28,6 +29,8 @@ export function ChatPanel({
   ask: (messages: ChatTurn[]) => Promise<string>;
   emptyHint?: string;
   dark?: boolean;
+  /** Single column with a small portrait, for the website embed. */
+  compact?: boolean;
   /** Extra controls rendered under the portrait (e.g. a voice picker). */
   aside?: React.ReactNode;
 }) {
@@ -91,9 +94,9 @@ export function ChatPanel({
   const muted500 = dark ? "text-slate-400" : "text-slate-500";
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
+    <div className={compact ? "grid gap-3" : "grid gap-6 lg:grid-cols-[320px_1fr]"}>
       <div className={`overflow-hidden ${card}`}>
-        <div className={`relative aspect-[4/5] ${dark ? "bg-slate-800" : "bg-slate-100"}`}>
+        <div className={`relative ${compact ? "aspect-[16/7]" : "aspect-[4/5]"} ${dark ? "bg-slate-800" : "bg-slate-100"}`}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={imageUrl}
@@ -132,7 +135,7 @@ export function ChatPanel({
         </div>
       </div>
 
-      <div className={`flex min-h-[480px] flex-col ${card}`}>
+      <div className={`flex flex-col ${compact ? "min-h-[300px]" : "min-h-[480px]"} ${card}`}>
         <div className={`flex items-center justify-between border-b px-4 py-3 ${dark ? "border-slate-800" : "border-slate-100"}`}>
           <h3 className={`flex items-center gap-2 text-sm font-semibold ${dark ? "text-slate-100" : "text-slate-900"}`}>
             <MessageSquare className="h-4 w-4 text-slate-400" /> Conversation

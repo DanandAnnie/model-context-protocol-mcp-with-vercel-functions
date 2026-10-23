@@ -30,6 +30,7 @@ import { createHmac } from "node:crypto";
 import { computeInsights } from "../insights";
 import { acceptInvite, createInvite, createWorkspace, deleteWorkspace, findInvite, listWorkspaces, removeMember, revokeInvite, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
 import type { Video } from "../types";
+import { MockEmailProvider, inviteEmail, setEmailProvider } from "../providers/email";
 import { dispatchNotification, getNotifySettings, notifyVideoTransition, saveNotifySettings, setNotificationFetch, signPayload } from "../notifications";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import { SCRIPT_TEMPLATES, findTemplate } from "../templates";
@@ -675,5 +676,26 @@ describe("workspaces", () => {
     assert.equal(await ownerForApiKey(personal.secret), bob.id, "personal keys are untouched");
     await deleteWorkspace(ws.id, alice);
     assert.equal(await ownerForApiKey(aliceKey.secret), null, "deletion revokes every workspace key");
+  });
+});
+
+describe("invite emails", () => {
+  it("builds a safe message with the link and expiry, and the mock records sends", async () => {
+    const msg = inviteEmail({ to: "bob@example.com", workspaceName: "Acme <Realty>", inviterEmail: "alice@example.com", role: "editor", url: "https://studio.example.com/invite/abc", expiresAt: "2026-10-30T00:00:00.000Z" });
+    assert.equal(msg.subject, 'Join "Acme <Realty>" on Avatar Studio');
+    assert.match(msg.text, /alice@example.com invited you/);
+    assert.match(msg.text, /https:\/\/studio.example.com\/invite\/abc/);
+    assert.match(msg.html, /Acme &lt;Realty&gt;/, "html escapes the workspace name");
+    assert.match(msg.html, /href="https:\/\/studio.example.com\/invite\/abc"/);
+    const mock = new MockEmailProvider();
+    setEmailProvider(mock);
+    try {
+      assert.equal(mock.delivers, false);
+      await mock.send(msg);
+      assert.equal(mock.sent.length, 1);
+      assert.equal(mock.sent[0].to, "bob@example.com");
+    } finally {
+      setEmailProvider(undefined);
+    }
   });
 });

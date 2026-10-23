@@ -27,6 +27,7 @@ export default function WorkspacePage() {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"owner" | "editor">("editor");
   const [link, setLink] = useState<string | null>(null);
+  const [mailNote, setMailNote] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -48,8 +49,9 @@ export default function WorkspacePage() {
   async function invite() {
     if (!ws) return;
     await run(async () => {
-      const res = await api<{ url: string }>(`/api/workspaces/${ws.id}/invites`, { method: "POST", body: JSON.stringify({ email: email || undefined, role }) });
+      const res = await api<{ url: string; emailed: boolean; emailError?: string }>(`/api/workspaces/${ws.id}/invites`, { method: "POST", body: JSON.stringify({ email: email || undefined, role }) });
       setLink(res.url);
+      setMailNote(res.emailed ? `Invite emailed to ${email}.` : res.emailError ? `Email failed (${res.emailError}); share the link instead.` : email ? "Email sending is not configured; share the link." : null);
       setEmail("");
     });
   }
@@ -193,7 +195,7 @@ export default function WorkspacePage() {
               <h3 className="text-sm font-semibold text-slate-900">Invite someone</h3>
               <p className="mt-1 text-xs text-slate-500">Creates a link that joins this workspace. Anyone with the link can use it, so send it privately. Links expire after 7 days.</p>
               <div className="mt-3 space-y-3">
-                <Field label="Email (optional, for your records)">
+                <Field label="Email (optional)" hint="Sent automatically when EMAIL_PROVIDER is configured; otherwise kept for your records.">
                   <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="teammate@example.com" className={inputClass} />
                 </Field>
                 <Field label="Role">
@@ -207,6 +209,7 @@ export default function WorkspacePage() {
                 </Button>
                 {link && (
                   <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900" data-testid="invite-link">
+                    {mailNote && <div className="mb-2 font-medium">{mailNote}</div>}
                     <code className="break-all">{link}</code>
                     <Button variant="secondary" className="mt-2 px-2.5 py-1 text-xs" onClick={copy}>
                       {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />} {copied ? "Copied" : "Copy link"}

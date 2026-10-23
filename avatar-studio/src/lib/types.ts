@@ -196,6 +196,8 @@ export interface ProviderStatus {
   script: string;
   translate: string;
   persistence: "memory" | "supabase";
+  /** Invite email backend: "resend" or "mock" (links only). */
+  email: string;
   authEnabled: boolean;
   authMode: "open" | "password" | "supabase";
   /** Renders allowed per owner per calendar month, or null when unlimited. */

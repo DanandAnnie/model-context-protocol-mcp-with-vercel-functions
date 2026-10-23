@@ -12,6 +12,7 @@ const ROWS: Array<{ key: keyof Omit<ProviderStatus, "mode" | "authEnabled" | "au
   { key: "script", label: "AI script writer", env: "SCRIPT_PROVIDER + ANTHROPIC_API_KEY", options: "anthropic, mock" },
   { key: "translate", label: "Video translation", env: "HEYGEN_API_KEY", options: "heygen, mock" },
   { key: "persistence", label: "Storage", env: "SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY", options: "supabase, memory" },
+  { key: "email", label: "Invite emails", env: "EMAIL_PROVIDER + RESEND_API_KEY + EMAIL_FROM", options: "resend, mock (links only)" },
 ];
 
 function summarize(videos: Video[]) {

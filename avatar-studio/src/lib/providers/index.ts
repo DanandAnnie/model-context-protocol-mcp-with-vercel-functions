@@ -1,6 +1,7 @@
 // Resolves concrete providers from configuration. Falls back to demo
 // implementations whenever a key is missing so the app always boots.
 import { config } from "../config";
+import { getEmailProvider } from "./email";
 import type { ProviderStatus } from "../types";
 import { persistenceKind } from "../store";
 import { authEnabled, authMode } from "../auth";
@@ -66,5 +67,16 @@ export function providerStatus(): ProviderStatus {
   const script = getScriptProvider().name;
   const translate = getTranslateProvider().name;
   const live = [avatar, tts, script, translate].some((n) => n !== "mock");
-  return { mode: live ? "live" : "demo", avatar, tts, script, translate, persistence: persistenceKind(), authEnabled: authEnabled(), authMode: authMode(), renderLimitPerMonth: config.renderLimitPerMonth ?? null };
+  return {
+    mode: live ? "live" : "demo",
+    avatar,
+    tts,
+    script,
+    translate,
+    persistence: persistenceKind(),
+    email: getEmailProvider().name,
+    authEnabled: authEnabled(),
+    authMode: authMode(),
+    renderLimitPerMonth: config.renderLimitPerMonth ?? null,
+  };
 }

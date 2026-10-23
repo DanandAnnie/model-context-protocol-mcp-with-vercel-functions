@@ -17,6 +17,10 @@ export const config = {
   supabaseServiceRoleKey: env("SUPABASE_SERVICE_ROLE_KEY"),
   appUrl: env("APP_URL") ?? env("VERCEL_URL")?.replace(/^(?!https?:\/\/)/, "https://") ?? "http://localhost:3000",
   webhookSecret: env("WEBHOOK_SECRET"),
+  /** "resend" sends workspace invites by email; anything else only produces links. */
+  emailProvider: (env("EMAIL_PROVIDER") ?? "mock").toLowerCase(),
+  resendApiKey: env("RESEND_API_KEY"),
+  emailFrom: env("EMAIL_FROM") ?? "Avatar Studio <onboarding@resend.dev>",
   /** Optional cap on renders per owner per calendar month (UTC). Unset = unlimited. */
   renderLimitPerMonth: parsePositiveInt(env("RENDER_LIMIT_PER_MONTH")),
 };

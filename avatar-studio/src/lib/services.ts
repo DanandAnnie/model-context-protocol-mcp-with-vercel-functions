@@ -10,7 +10,7 @@ import {
   getTtsProvider,
 } from "./providers";
 import { getStore } from "./store";
-import { MAX_SCENES, type Agent, type Avatar, type BrandKit, type Translation, type Video, type VideoRequest, type Voice } from "./types";
+import { MAX_SCENES, type Agent, type Avatar, type Conversation, type BrandKit, type Translation, type Video, type VideoRequest, type Voice } from "./types";
 
 import { LOCAL_OWNER } from "./owner-id";
 import { after } from "next/server";
@@ -221,6 +221,7 @@ export async function updateAgent(id: string, patch: z.infer<typeof agentPatchSc
 
 export async function deleteAgent(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
   await getAgent(id, ownerId);
+  await clearConversations(id, ownerId);
   await getStore().remove("agent", id);
 }
 
@@ -242,21 +243,58 @@ export async function publicAgent(id: string) {
 
 export const talkSchema = z.object({
   messages: chatSchema.shape.messages,
+  /** Returned by the first turn; send it back to keep one transcript per visit. */
+  conversationId: z.string().regex(/^conv_[a-z0-9]+$/).optional(),
 });
 
-/** A visitor's turn with a public agent. Counts conversations (first turn) and messages. */
-export async function talkToAgent(id: string, input: z.infer<typeof talkSchema>): Promise<string> {
+/** Transcript limits: per visit and per presenter (oldest visits are dropped). */
+export const MAX_TRANSCRIPT_MESSAGES = 40;
+export const MAX_CONVERSATIONS_PER_AGENT = 100;
+
+/** A visitor's turn with a public agent. Records the transcript and counts conversations and messages. */
+export async function talkToAgent(id: string, input: z.infer<typeof talkSchema>): Promise<{ reply: string; conversationId: string }> {
   const agent = await getStore().get<Agent>("agent", id);
   if (!agent || !agent.isPublic) throw new NotFoundError("This presenter is not available");
-  if (input.messages[input.messages.length - 1].role !== "user") throw new ValidationError("The last message must be from the visitor");
+  const last = input.messages[input.messages.length - 1];
+  if (last.role !== "user") throw new ValidationError("The last message must be from the visitor");
   const avatar = await getAvatar(agent.avatarId, agent.ownerId);
   const reply = await getScriptProvider().chat({ persona: { name: avatar.name, instructions: agent.instructions, language: agent.language }, messages: input.messages });
-  const firstTurn = input.messages.filter((m) => m.role === "user").length === 1;
-  // Counters are best effort; a lost increment never fails the visitor's turn.
-  getStore()
-    .put("agent", { ...agent, conversations: agent.conversations + (firstTurn ? 1 : 0), messages: agent.messages + 1 })
-    .catch(() => {});
-  return reply;
+
+  const now = nowIso();
+  let conversation = input.conversationId ? await getStore().get<Conversation>("conversation", input.conversationId) : null;
+  if (conversation && conversation.agentId !== agent.id) conversation = null; // a token from another presenter starts fresh
+  const isNew = !conversation;
+  if (!conversation) conversation = { id: newId("conv"), ownerId: agent.ownerId, agentId: agent.id, messages: [], startedAt: now, updatedAt: now };
+  const messages = [...conversation.messages, { role: "user" as const, content: last.content, at: now }, { role: "assistant" as const, content: reply, at: now }].slice(-MAX_TRANSCRIPT_MESSAGES);
+  // Transcripts and counters are best effort; a lost write never fails the visitor's turn.
+  const record = async () => {
+    await getStore().put("conversation", { ...conversation, messages, updatedAt: now });
+    await getStore().put("agent", { ...agent, conversations: agent.conversations + (isNew ? 1 : 0), messages: agent.messages + 1 });
+    if (isNew) await pruneConversations(agent);
+  };
+  await record().catch((err) => console.error("transcript write failed:", err));
+  return { reply, conversationId: conversation.id };
+}
+
+async function pruneConversations(agent: Agent) {
+  const all = (await getStore().list<Conversation>("conversation", agent.ownerId)).filter((c) => c.agentId === agent.id);
+  if (all.length <= MAX_CONVERSATIONS_PER_AGENT) return;
+  all.sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+  for (const c of all.slice(0, all.length - MAX_CONVERSATIONS_PER_AGENT)) await getStore().remove("conversation", c.id);
+}
+
+/** The owner's transcripts for one presenter, newest first. */
+export async function listConversations(agentId: string, ownerId: string = LOCAL_OWNER, limit = 50): Promise<Conversation[]> {
+  await getAgent(agentId, ownerId);
+  const all = (await getStore().list<Conversation>("conversation", ownerId)).filter((c) => c.agentId === agentId);
+  return all.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, limit);
+}
+
+export async function clearConversations(agentId: string, ownerId: string = LOCAL_OWNER): Promise<number> {
+  await getAgent(agentId, ownerId);
+  const all = (await getStore().list<Conversation>("conversation", ownerId)).filter((c) => c.agentId === agentId);
+  for (const c of all) await getStore().remove("conversation", c.id);
+  return all.length;
 }
 
 // ---------- Videos ----------

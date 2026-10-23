@@ -1,12 +1,12 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Check, Code2, Copy, Link2, Trash2 } from "lucide-react";
+import { Check, Code2, Copy, Link2, MessagesSquare, Trash2 } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { ChatPanel, type ChatTurn } from "@/components/ChatPanel";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
-import type { Agent, Avatar, ProviderStatus, Voice } from "@/lib/types";
+import type { Agent, Avatar, Conversation, ProviderStatus, Voice } from "@/lib/types";
 
 const DEFAULT_INSTRUCTIONS = "You represent a real estate team. Help visitors with open houses, listings, and how to book a showing. Be warm and concise.";
 
@@ -29,6 +29,31 @@ export default function InteractivePage() {
   const [saveErr, setSaveErr] = useState<string | null>(null);
   const [savedLink, setSavedLink] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [transcriptsFor, setTranscriptsFor] = useState<Agent | null>(null);
+  const [transcripts, setTranscripts] = useState<Conversation[] | null>(null);
+
+  async function openTranscripts(agent: Agent) {
+    setTranscriptsFor(agent);
+    setTranscripts(null);
+    setSaveErr(null);
+    try {
+      const { conversations } = await api<{ conversations: Conversation[] }>(`/api/agents/${agent.id}/conversations`);
+      setTranscripts(conversations);
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : "Could not load transcripts");
+      setTranscriptsFor(null);
+    }
+  }
+
+  async function clearTranscripts(agent: Agent) {
+    if (!window.confirm("Delete all saved conversations for this presenter?")) return;
+    try {
+      await api(`/api/agents/${agent.id}/conversations`, { method: "DELETE" });
+      setTranscripts([]);
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : "Could not delete transcripts");
+    }
+  }
 
   useEffect(() => {
     if (!avatar && avatarData?.avatars.length) setAvatar(avatarData.avatars[0]);
@@ -192,6 +217,9 @@ export default function InteractivePage() {
                     >
                       {copied === `embed-${a.id}` ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Code2 className="h-3.5 w-3.5" />} Embed
                     </Button>
+                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => openTranscripts(a)} aria-label={`Transcripts for ${a.name}`}>
+                      <MessagesSquare className="h-3.5 w-3.5" /> Transcripts
+                    </Button>
                     <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => togglePublic(a)} aria-label={`${a.isPublic ? "Turn off" : "Turn on"} link for ${a.name}`}>
                       {a.isPublic ? "Turn off" : "Turn on"}
                     </Button>
@@ -203,6 +231,49 @@ export default function InteractivePage() {
               );
             })}
           </ul>
+          {transcriptsFor && (
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="transcripts">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h4 className="text-sm font-semibold text-slate-900">Conversations with {transcriptsFor.name}</h4>
+                <div className="flex gap-2">
+                  {transcripts && transcripts.length > 0 && (
+                    <button type="button" onClick={() => clearTranscripts(transcriptsFor)} className="text-xs text-slate-500 hover:text-rose-700">
+                      Delete all
+                    </button>
+                  )}
+                  <button type="button" onClick={() => setTranscriptsFor(null)} className="text-xs text-slate-500 hover:text-slate-900">
+                    Close
+                  </button>
+                </div>
+              </div>
+              <p className="mt-1 text-xs text-slate-500">Newest first, up to 50 visits; each visit keeps its last 40 messages. Visitors are told conversations may be kept.</p>
+              {transcripts === null ? (
+                <p className="mt-3 text-xs text-slate-500">Loading…</p>
+              ) : transcripts.length === 0 ? (
+                <p className="mt-3 text-xs text-slate-500">No conversations yet.</p>
+              ) : (
+                <ul className="mt-3 space-y-2">
+                  {transcripts.map((c) => (
+                    <li key={c.id}>
+                      <details className="rounded-lg border border-slate-200 bg-white">
+                        <summary className="cursor-pointer select-none px-3 py-2 text-xs text-slate-700">
+                          {formatDate(c.startedAt)} · {c.messages.length} {c.messages.length === 1 ? "message" : "messages"} · <span className="text-slate-500">{c.messages[0]?.content.slice(0, 80)}</span>
+                        </summary>
+                        <ol className="space-y-1.5 border-t border-slate-100 px-3 py-2 text-xs">
+                          {c.messages.map((m, i) => (
+                            <li key={i} className={m.role === "user" ? "text-slate-900" : "text-slate-600"}>
+                              <span className="mr-1 font-medium">{m.role === "user" ? "Visitor" : transcriptsFor.name}:</span>
+                              {m.content}
+                            </li>
+                          ))}
+                        </ol>
+                      </details>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
         </Card>
       </div>
     </>

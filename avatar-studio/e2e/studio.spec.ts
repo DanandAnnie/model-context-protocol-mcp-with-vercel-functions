@@ -372,12 +372,19 @@ test("shared presenter: save from the interactive page, talk publicly, turn off"
   expect(JSON.stringify(info)).not.toContain("real estate team");
   const turn = await visitor.post(`/api/talk/${id}`, { data: { messages: [{ role: "user", content: "Hi there" }] } });
   expect(turn.status()).toBe(200);
-  expect((await turn.json()).reply).toMatch(/^Hi, I'm /);
+  const first = (await turn.json()) as { reply: string; conversationId: string };
+  expect(first.reply).toMatch(/^Hi, I'm /);
+  expect(first.conversationId).toMatch(/^conv_/);
+  const second = await visitor.post(`/api/talk/${id}`, { data: { conversationId: first.conversationId, messages: [{ role: "user", content: "Hi there" }, { role: "assistant", content: first.reply }, { role: "user", content: "Any open houses?" }] } });
+  expect((await second.json()).conversationId).toBe(first.conversationId);
   expect((await visitor.get(`/talk/${id}`)).headers()["x-frame-options"]).toBeUndefined();
   expect((await visitor.get(`/api/agents/${id}`)).status()).toBe(200); // open mode: owner routes need no session
 
   await page.reload();
   await expect(page.getByTestId("agent-list")).toContainText("1 conversation");
+  await page.getByRole("button", { name: `Transcripts for Dana ${tag}` }).click();
+  await expect(page.getByTestId("transcripts")).toContainText("Any open houses?");
+  await expect(page.getByTestId("transcripts").locator("summary")).toHaveCount(1);
   await page.getByRole("button", { name: `Turn off link for Dana ${tag}` }).click();
   await expect(page.getByTestId("agent-list")).toContainText("link off");
   expect((await visitor.get(`/api/talk/${id}`)).status()).toBe(404);

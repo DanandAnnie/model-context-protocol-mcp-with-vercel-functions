@@ -25,7 +25,7 @@ export async function POST(req: Request, ctx: Ctx) {
     const gate = !perClient.allowed ? perClient : !perAgent.allowed ? perAgent : null;
     if (gate) return json({ error: "This presenter is busy; try again in a few minutes" }, { status: 429, headers: { "Retry-After": String(gate.retryAfterSec) } });
     const input = talkSchema.parse(await readJson(req));
-    return json({ reply: await talkToAgent(id, input) });
+    return json(await talkToAgent(id, input));
   } catch (err) {
     return errorResponse(err);
   }

@@ -28,6 +28,9 @@ import {
   publicAgent,
   talkToAgent,
   updateAgent,
+  listConversations,
+  clearConversations,
+  MAX_TRANSCRIPT_MESSAGES,
   recordView,
   scriptSchema,
   updateVideo,
@@ -801,11 +804,28 @@ describe("shared agents", () => {
     assert.equal("ownerId" in pub, false);
 
     const first = await talkToAgent(agent.id, { messages: [{ role: "user", content: "Hi" }] });
-    assert.match(first, /Hi, I'm Ava Chen/);
-    await talkToAgent(agent.id, { messages: [{ role: "user", content: "Hi" }, { role: "assistant", content: first }, { role: "user", content: "When?" }] });
+    assert.match(first.reply, /Hi, I'm Ava Chen/);
+    assert.match(first.conversationId, /^conv_/);
+    await talkToAgent(agent.id, { conversationId: first.conversationId, messages: [{ role: "user", content: "Hi" }, { role: "assistant", content: first.reply }, { role: "user", content: "When?" }] });
     const counted = await getAgent(agent.id, "u1");
-    assert.equal(counted.conversations, 1);
+    assert.equal(counted.conversations, 1, "a continued visit is one conversation");
     assert.equal(counted.messages, 2);
+
+    // Transcripts: owner-only, one per visit, capped per visit, cleared on demand and on delete.
+    const transcripts = await listConversations(agent.id, "u1");
+    assert.equal(transcripts.length, 1);
+    assert.deepEqual(transcripts[0].messages.map((m) => m.role), ["user", "assistant", "user", "assistant"]);
+    assert.equal(transcripts[0].messages[2].content, "When?");
+    await assert.rejects(listConversations(agent.id, "u2"), /not found/);
+    const other = await talkToAgent(agent.id, { messages: [{ role: "user", content: "New visitor" }] });
+    assert.notEqual(other.conversationId, first.conversationId);
+    assert.equal((await listConversations(agent.id, "u1")).length, 2);
+    let conv = other.conversationId;
+    for (let i = 0; i < MAX_TRANSCRIPT_MESSAGES; i++) conv = (await talkToAgent(agent.id, { conversationId: conv, messages: [{ role: "user", content: `turn ${i}` }] })).conversationId;
+    const capped = (await listConversations(agent.id, "u1")).find((c) => c.id === conv)!;
+    assert.equal(capped.messages.length, MAX_TRANSCRIPT_MESSAGES, "transcript is capped per visit");
+    assert.equal(await clearConversations(agent.id, "u1"), 2);
+    assert.deepEqual(await listConversations(agent.id, "u1"), []);
 
     await updateAgent(agent.id, { isPublic: false }, "u1");
     await assert.rejects(publicAgent(agent.id), /not available/);

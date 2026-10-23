@@ -220,6 +220,17 @@ export interface Agent {
   updatedAt: string;
 }
 
+/** A visitor's conversation with a shared presenter, kept for the owner. */
+export interface Conversation {
+  id: string;
+  /** The agent's owner, so transcripts list with the owner index. */
+  ownerId: string;
+  agentId: string;
+  messages: Array<{ role: "user" | "assistant"; content: string; at: string }>;
+  startedAt: string;
+  updatedAt: string;
+}
+
 export type PlanId = "free" | "pro";
 
 /** Billing plan of an owner (person or workspace). Absent means free. */

@@ -86,6 +86,10 @@ Import the repository and set **Root Directory** to `avatar-studio`. Add the
 environment variables above. For production use Supabase storage, since the
 in-memory store resets on every cold start.
 
+## API
+
+Every route is documented in [docs/API.md](docs/API.md): authentication with personal keys, request shapes, the batch and script endpoints, workspaces, and how to verify outbound webhook signatures.
+
 ## Project layout
 
 ```

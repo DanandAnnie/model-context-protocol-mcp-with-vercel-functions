@@ -367,6 +367,25 @@ test("share page offers a download only when the owner allows it", async ({ page
   await expect(page.getByRole("link", { name: "Download video" })).toHaveCount(0);
 });
 
+test("the owner can take a share link offline and back", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Offline ${Date.now().toString(36)}`);
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  expect((await page.request.get(`/share/${v.id}`)).status()).toBe(200);
+  await page.goto(`/videos/${v.id}`);
+  await page.getByLabel("Share link is live").uncheck();
+  await expect(page.getByTestId("share-off-note")).toBeVisible();
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.shareDisabled).toBe(true);
+  expect((await page.request.get(`/share/${v.id}`)).status()).toBe(404);
+  expect(((await (await page.request.post(`/api/videos/${v.id}/view`)).json()) as { counted: boolean }).counted).toBe(false);
+  // The owner's own captions download keeps working (open mode: every request is the owner's).
+  expect((await page.request.get(`/api/videos/${v.id}/captions`)).status()).toBe(200);
+  await page.reload();
+  await expect(page.getByLabel("Share link is live")).not.toBeChecked();
+  await page.getByLabel("Share link is live").check();
+  await expect(page.getByTestId("share-off-note")).toHaveCount(0);
+  await expect.poll(async () => (await (await page.request.get(`/share/${v.id}`)).status())).toBe(200);
+});
+
 test("draft autosave survives a reload and clears after generating", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Draft title");
   await page.locator("textarea").fill("Draft script survives reload.");

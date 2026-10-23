@@ -129,6 +129,8 @@ export interface Video extends VideoRequest {
   retryOf?: string;
   /** Share page offers a download link when true (off by default). */
   shareDownload?: boolean;
+  /** The share page, its captions, and the beacons answer "not found" while true. */
+  shareDisabled?: boolean;
   /** A button under the share-page player: "Book a showing" → https://… */
   shareCta?: { label: string; url: string };
   /** Share page views (completed videos only; one per viewer per window). */

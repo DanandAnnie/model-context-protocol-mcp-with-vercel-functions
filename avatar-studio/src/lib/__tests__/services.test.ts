@@ -856,6 +856,24 @@ describe("folders and share views", () => {
     await assert.rejects(recordView("vid_missing"), /not found/);
   });
 
+  it("takes the share link offline for the public only", async () => {
+    const { recordCtaClick, updateVideo, videoPatchSchema } = await import("../services/videos");
+    const v = await createVideo(req);
+    const fresh = await getVideo(v.id, undefined, false);
+    globalThis.__avatarStudioStore!.put("video", { ...fresh, status: "completed", shareCta: { label: "Go", url: "https://example.com" } });
+    assert.equal((await getVideo(v.id, null, false)).id, v.id, "public before the switch");
+    const off = await updateVideo(v.id, videoPatchSchema.parse({ shareDisabled: true }));
+    assert.equal(off.shareDisabled, true);
+    await assert.rejects(getVideo(v.id, null, false), /not found/, "public after the switch");
+    assert.equal((await getVideo(v.id, undefined, false)).id, v.id, "the owner still sees it");
+    assert.deepEqual(await recordView(v.id), { views: 0, counted: false });
+    assert.deepEqual(await recordCtaClick(v.id), { clicks: 0, counted: false });
+    const on = await updateVideo(v.id, videoPatchSchema.parse({ shareDisabled: false }));
+    assert.equal("shareDisabled" in on, false);
+    assert.equal((await getVideo(v.id, null, false)).id, v.id);
+    assert.deepEqual(await recordView(v.id), { views: 1, counted: true });
+  });
+
   it("counts call-to-action clicks only while a completed video carries the button", async () => {
     const { recordCtaClick, updateVideo, videoPatchSchema } = await import("../services/videos");
     const v = await createVideo(req);

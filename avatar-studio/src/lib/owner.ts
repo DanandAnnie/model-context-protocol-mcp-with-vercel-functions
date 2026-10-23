@@ -58,6 +58,16 @@ export async function requireOwner(): Promise<string> {
   return (await activeWorkspaceId(user)) ?? user.id;
 }
 
+/** The request's owner when it carries a valid key or session, else null; never throws for a missing one. */
+export async function optionalOwner(): Promise<string | null> {
+  try {
+    return await requireOwner();
+  } catch (err) {
+    if (err instanceof UnauthorizedError) return null;
+    throw err;
+  }
+}
+
 /**
  * Owner of the current request for account-level actions (wiping all data, billing): session
  * only, and when the active owner is a team workspace the signed-in person must hold the

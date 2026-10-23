@@ -11,7 +11,7 @@ import { renderLimitFor } from "../billing";
 import { ConflictError, LimitError, NotFoundError, ValidationError } from "../errors";
 import { getAvatar } from "./avatars";
 import { listVoices } from "./voices";
-import { owned, scheduleNotification, stripUndefined } from "./shared";
+import { PUBLIC_ACCESS, owned, scheduleNotification, stripUndefined } from "./shared";
 
 export const backgroundSchema = z.object({ type: z.enum(["color", "image"]), value: z.string().min(1) });
 
@@ -207,6 +207,8 @@ export async function listVideos(ownerId: string = LOCAL_OWNER, refresh = true):
  */
 export async function getVideo(id: string, ownerId: string | null = LOCAL_OWNER, refresh = true): Promise<Video> {
   const video = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
+  // A share link the owner switched off is indistinguishable from a missing video to the public.
+  if (ownerId === PUBLIC_ACCESS && video.shareDisabled) throw new NotFoundError(`Video ${id} not found`);
   return refresh ? refreshStatus(video) : video;
 }
 
@@ -260,6 +262,7 @@ export const videoPatchSchema = z
     folder: z.string().trim().max(MAX_FOLDER_NAME).optional(),
     /** Whether the public share page offers a download link. */
     shareDownload: z.boolean().optional(),
+    shareDisabled: z.boolean().optional(),
     /** A call-to-action button on the share page; null removes it. */
     shareCta: z
       .object({
@@ -273,7 +276,7 @@ export const videoPatchSchema = z
       .nullable()
       .optional(),
   })
-  .refine((p) => p.title !== undefined || p.folder !== undefined || p.shareDownload !== undefined || p.shareCta !== undefined, "Nothing to update");
+  .refine((p) => p.title !== undefined || p.folder !== undefined || p.shareDownload !== undefined || p.shareDisabled !== undefined || p.shareCta !== undefined, "Nothing to update");
 
 export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSchema>, ownerId: string = LOCAL_OWNER): Promise<Video> {
   const existing = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
@@ -286,6 +289,10 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
   if (patch.shareDownload !== undefined) {
     if (patch.shareDownload) next.shareDownload = true;
     else delete next.shareDownload;
+  }
+  if (patch.shareDisabled !== undefined) {
+    if (patch.shareDisabled) next.shareDisabled = true;
+    else delete next.shareDisabled;
   }
   if (patch.shareCta !== undefined) {
     if (patch.shareCta) next.shareCta = patch.shareCta;
@@ -302,7 +309,7 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
 export async function recordView(id: string, gate: () => boolean = () => true): Promise<{ views: number; counted: boolean }> {
   const video = await getStore().get<Video>("video", id);
   if (!video) throw new NotFoundError(`Video ${id} not found`);
-  if (video.status !== "completed" || !gate()) return { views: video.views ?? 0, counted: false };
+  if (video.status !== "completed" || video.shareDisabled || !gate()) return { views: video.views ?? 0, counted: false };
   const views = (video.views ?? 0) + 1;
   await getStore().put("video", { ...video, views, lastViewedAt: nowIso() });
   return { views, counted: true };
@@ -315,7 +322,7 @@ export async function recordView(id: string, gate: () => boolean = () => true): 
 export async function recordCtaClick(id: string, gate: () => boolean = () => true): Promise<{ clicks: number; counted: boolean }> {
   const video = await getStore().get<Video>("video", id);
   if (!video) throw new NotFoundError(`Video ${id} not found`);
-  if (video.status !== "completed" || !video.shareCta || !gate()) return { clicks: video.ctaClicks ?? 0, counted: false };
+  if (video.status !== "completed" || video.shareDisabled || !video.shareCta || !gate()) return { clicks: video.ctaClicks ?? 0, counted: false };
   const clicks = (video.ctaClicks ?? 0) + 1;
   await getStore().put("video", { ...video, ctaClicks: clicks, lastCtaClickAt: nowIso() });
   return { clicks, counted: true };

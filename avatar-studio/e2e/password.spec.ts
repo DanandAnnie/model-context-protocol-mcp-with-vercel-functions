@@ -65,6 +65,26 @@ test("API keys grant script access without a session; minting needs a session", 
   await script.dispose();
 });
 
+test("an offline share link is hidden from the public but not from the owner", async ({ request, playwright }) => {
+  expect((await request.post("/api/auth/login", { data: { password: "hunter2" } })).status()).toBe(200);
+  const made = await request.post("/api/videos", { data: { title: "Private for now", script: "Hi there.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9" } });
+  expect(made.status()).toBe(201);
+  const id = ((await made.json()) as { video: { id: string } }).video.id;
+  const anon = await playwright.request.newContext({ baseURL: "http://localhost:3102" });
+  expect((await anon.get(`/share/${id}`)).status()).toBe(200);
+  expect((await anon.get(`/api/videos/${id}/captions`)).status()).toBe(200);
+
+  expect((await request.patch(`/api/videos/${id}`, { data: { shareDisabled: true } })).status()).toBe(200);
+  expect((await anon.get(`/share/${id}`)).status()).toBe(404);
+  expect((await anon.get(`/api/videos/${id}/captions`)).status()).toBe(404);
+  expect((await request.get(`/api/videos/${id}/captions`)).status()).toBe(200);
+  expect((await request.get(`/api/videos/${id}`)).status()).toBe(200);
+
+  expect((await request.patch(`/api/videos/${id}`, { data: { shareDisabled: false } })).status()).toBe(200);
+  expect((await anon.get(`/share/${id}`)).status()).toBe(200);
+  await anon.dispose();
+});
+
 test("a made-up bearer token is not a session", async ({ request }) => {
   // The proxy only lets real API keys past the session check; everything else needs the cookie.
   const bogus = { Authorization: "Bearer x" };

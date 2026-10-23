@@ -1,6 +1,8 @@
 import { errorResponse } from "@/lib/api-utils";
 import { buildSrt, buildVtt } from "@/lib/captions";
-import { PUBLIC_ACCESS, getVideo } from "@/lib/services";
+import { optionalOwner } from "@/lib/owner";
+import { NotFoundError, PUBLIC_ACCESS, getVideo } from "@/lib/services";
+import type { Video } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -9,8 +11,16 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   try {
     const { id } = await ctx.params;
     const vtt = new URL(req.url).searchParams.get("format") === "vtt";
-    // Captions are derived from the script, which the public share page already shows.
-    const video = await getVideo(id, PUBLIC_ACCESS, false);
+    // Captions are derived from the script, which the public share page already shows. When the
+    // owner has switched the share link off, only the owner's own download still works.
+    let video: Video;
+    try {
+      video = await getVideo(id, PUBLIC_ACCESS, false);
+    } catch (err) {
+      const owner = err instanceof NotFoundError ? await optionalOwner() : null;
+      if (!owner) throw err;
+      video = await getVideo(id, owner, false);
+    }
     // Fall back to a reading-speed estimate when the provider did not report a duration.
     const words = video.script.trim().split(/\s+/).filter(Boolean).length;
     const duration = video.durationSec ?? Math.max(1, Math.round(words / 2.5 / video.speed));

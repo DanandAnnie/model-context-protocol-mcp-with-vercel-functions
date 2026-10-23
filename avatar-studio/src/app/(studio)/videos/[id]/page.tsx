@@ -91,23 +91,29 @@ export default function VideoDetailPage() {
   }
 
   const [shareErr, setShareErr] = useState<string | null>(null);
-  // Optimistic: the box flips at once and reverts if the save fails.
-  const [downloadOn, setDownloadOn] = useState<boolean | null>(null);
-  async function setShareDownload(on: boolean) {
+  // Optimistic: a box flips at once and reverts if the save fails.
+  type SharePatch = { shareDownload?: boolean; shareDisabled?: boolean };
+  const [shareDraft, setShareDraft] = useState<SharePatch>({});
+  async function patchShare(patch: SharePatch) {
     if (!video) return;
     setShareErr(null);
-    setDownloadOn(on);
+    setShareDraft((d) => ({ ...d, ...patch }));
     try {
-      const { video: next } = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify({ shareDownload: on }) });
+      const { video: next } = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify(patch) });
       setData({ video: next });
       // A status poll that started before the save would land after it with the old record.
       void refetch();
     } catch (e) {
       setShareErr(e instanceof Error ? e.message : "Could not update sharing");
     } finally {
-      setDownloadOn(null);
+      setShareDraft((d) => {
+        const rest = { ...d };
+        for (const key of Object.keys(patch) as Array<keyof SharePatch>) delete rest[key];
+        return rest;
+      });
     }
   }
+  const shareLive = !(shareDraft.shareDisabled ?? !!video?.shareDisabled);
 
   // Call to action shown under the share-page player.
   const [ctaLabel, setCtaLabel] = useState<string | null>(null);
@@ -239,10 +245,15 @@ export default function VideoDetailPage() {
                     <Button variant="secondary" onClick={copyEmbed} title="Copy an iframe snippet for your site">
                       {embedCopied ? <Check className="h-4 w-4 text-emerald-600" /> : <Code2 className="h-4 w-4" />} {embedCopied ? "Embed copied" : "Embed"}
                     </Button>
+                    <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700" title="Turn off to make the share page and embed unavailable; views and clicks stop counting">
+                      <input type="checkbox" checked={shareLive} onChange={(e) => patchShare({ shareDisabled: !e.target.checked })} className="accent-brand-600" />
+                      Share link is live
+                    </label>
                     <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700" title="Show a download button on the share page">
-                      <input type="checkbox" checked={downloadOn ?? !!video.shareDownload} onChange={(e) => setShareDownload(e.target.checked)} className="accent-brand-600" />
+                      <input type="checkbox" checked={shareDraft.shareDownload ?? !!video.shareDownload} onChange={(e) => patchShare({ shareDownload: e.target.checked })} className="accent-brand-600" />
                       Viewers can download
                     </label>
+                    {!shareLive && <span className="text-xs text-slate-500" data-testid="share-off-note">Share link off: the share page and embed answer “not found”.</span>}
                     {shareErr && <span className="text-xs text-rose-600">{shareErr}</span>}
                   </>
                 )}

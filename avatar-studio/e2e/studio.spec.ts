@@ -811,6 +811,7 @@ test("brand kit pre-fills the editor and brands the share page", async ({ page }
     await page.getByLabel("Captions on by default").check();
     await page.getByLabel("Default output quality").selectOption("720p");
     await page.getByLabel("Default background").selectOption("image");
+    await expect(page.getByRole("button", { name: "Save brand kit" })).toBeDisabled();
     await page.getByLabel("Default background URL").fill("https://example.com/brand-bg.jpg");
     await page.getByRole("button", { name: "Save brand kit" }).click();
     await expect(page.getByText(/^Saved /)).toBeVisible();

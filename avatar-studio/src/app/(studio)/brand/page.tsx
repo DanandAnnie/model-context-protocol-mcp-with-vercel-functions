@@ -106,6 +106,9 @@ export default function BrandPage() {
       setAvatarId("");
       setVoiceId("");
       setAspect("");
+      setResolution("");
+      setBgType("");
+      setBgUrl("");
       setCaptions(false);
       setSavedAt(null);
     } catch (e) {
@@ -211,7 +214,7 @@ export default function BrandPage() {
               </select>
             </Field>
             {bgType && (
-              <Field label={bgType === "video" ? "Background video URL" : "Background image URL"} hint="A public URL.">
+              <Field label={bgType === "video" ? "Background video URL" : "Background image URL"} hint="A public URL; the kit cannot be saved while this is empty.">
                 <input aria-label="Default background URL" value={bgUrl} onChange={(e) => setBgUrl(e.target.value)} placeholder={bgType === "video" ? "https://…/loop.mp4" : "https://…/background.jpg"} className={inputClass} maxLength={2000} />
               </Field>
             )}
@@ -239,7 +242,7 @@ export default function BrandPage() {
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
             <span className="text-xs text-slate-500">{savedAt ? `Saved ${new Date(savedAt).toLocaleString()}` : "Not saved yet"}</span>
-            <Button onClick={save} loading={saving} disabled={!primaryValid || !accentValid || loading}>
+            <Button onClick={save} loading={saving} disabled={!primaryValid || !accentValid || (!!bgType && !bgUrl.trim()) || loading}>
               Save brand kit
             </Button>
           </div>

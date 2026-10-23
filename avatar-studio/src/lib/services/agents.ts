@@ -3,7 +3,7 @@ import { z } from "zod";
 import { newId, nowIso } from "../ids";
 import { getScriptProvider } from "../providers";
 import { getStore } from "../store";
-import type { Agent, Conversation, Voice } from "../types";
+import type { Agent, Conversation } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { dispatchNotification, getNotifySettings } from "../notifications";
 import { NotFoundError, ValidationError } from "../errors";

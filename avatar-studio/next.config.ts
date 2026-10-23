@@ -10,8 +10,8 @@ const nextConfig: NextConfig = {
     const common = [
       { key: "X-Content-Type-Options", value: "nosniff" },
       { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-      // Camera is used for photo-avatar capture; nothing needs mic or geolocation.
-      { key: "Permissions-Policy", value: "camera=(self), microphone=(), geolocation=()" },
+      // Camera for photo-avatar capture, microphone for voice-clone recording; nothing needs geolocation.
+      { key: "Permissions-Policy", value: "camera=(self), microphone=(self), geolocation=()" },
     ];
     return [
       // Share pages may be embedded anywhere (the "Embed" snippet relies on it).

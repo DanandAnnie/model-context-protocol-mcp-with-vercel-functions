@@ -187,6 +187,8 @@ test("captions are served as SRT and VTT, security headers are set", async ({ pa
   const home = await request.get("/home");
   expect(home.headers()["x-frame-options"]).toBe("DENY");
   expect(home.headers()["x-content-type-options"]).toBe("nosniff");
+  // Voice cloning records from the microphone and photo avatars use the camera, so both stay allowed for the app itself.
+  expect(home.headers()["permissions-policy"]).toBe("camera=(self), microphone=(self), geolocation=()");
   // The subtitle track renders once the (mock) render completes, ~12s after submission.
   await expect.poll(async () => (await (await request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
   const share = await request.get(`/share/${v.id}`);

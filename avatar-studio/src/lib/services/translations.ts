@@ -58,3 +58,13 @@ export async function getTranslation(id: string, ownerId: string = LOCAL_OWNER):
 export function supportedLanguages(): string[] {
   return getTranslateProvider().supportedLanguages();
 }
+
+export async function applyTranslationWebhook(providerName: string, body: unknown): Promise<Translation | null> {
+  const provider = getTranslateProviderByName(providerName);
+  const parsed = provider.parseWebhook?.(body);
+  if (!parsed) return null;
+  const item = await getStore().findBy<Translation>("translation", "providerJobId", parsed.providerJobId);
+  if (!item) return null;
+  const next: Translation = { ...item, ...stripUndefined(parsed.update), updatedAt: nowIso() };
+  return getStore().put("translation", next);
+}

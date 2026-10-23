@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { nowIso } from "../ids";
 import { getStore } from "../store";
-import type { BrandKit, Voice } from "../types";
+import type { BrandKit } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ValidationError } from "../errors";
 import { getAvatar } from "./avatars";

@@ -3,7 +3,7 @@ import { config } from "../config";
 import { MemoryStore } from "./memory";
 import { SupabaseStore } from "./supabase";
 
-export type ItemKind = "video" | "avatar" | "translation";
+export type ItemKind = "video" | "avatar" | "translation" | "brand";
 
 export interface Store {
   /** All items of a kind, optionally only those whose `ownerId` matches. */

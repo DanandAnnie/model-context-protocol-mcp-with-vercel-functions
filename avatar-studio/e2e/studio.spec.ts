@@ -170,3 +170,26 @@ test("captions are served as SRT and VTT, security headers are set", async ({ pa
   expect(share.headers()["x-frame-options"]).toBeUndefined();
   expect(await share.text()).toContain(`/api/videos/${v.id}/captions?format=vtt`);
 });
+
+test("brand kit pre-fills the editor and brands the share page", async ({ page }) => {
+  try {
+    await page.goto("/brand");
+    await page.getByPlaceholder("Acme Realty").fill("Acme Realty");
+    await page.getByLabel("Primary color", { exact: true }).fill("#0f766e");
+    await page.getByLabel("Default voice").selectOption("stock_voice_3");
+    await page.getByLabel("Captions on by default").check();
+    await page.getByRole("button", { name: "Save brand kit" }).click();
+    await expect(page.getByText(/^Saved /)).toBeVisible();
+
+    await page.goto("/create");
+    await expect(page.getByText(/· Olivia · 16:9 · 1 scene · captions on$/)).toBeVisible({ timeout: 10_000 });
+
+    const v = await createVideoViaApi(page, "Branded video");
+    await page.goto(`/share/${v.id}`);
+    await expect(page.getByTestId("share-brand")).toContainText("Acme Realty");
+    await expect(page.getByRole("link", { name: "Avatar Studio" })).toBeVisible();
+  } finally {
+    // The suite shares one in-memory store; later tests expect the plain defaults.
+    expect((await page.request.delete("/api/brand")).status()).toBe(204);
+  }
+});

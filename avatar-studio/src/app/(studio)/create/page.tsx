@@ -10,7 +10,7 @@ import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib/client";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
-import { MAX_SCENES, type AspectRatio, type Avatar, type Background, type Scene, type Video, type Voice } from "@/lib/types";
+import { MAX_SCENES, type AspectRatio, type Avatar, type Background, type BrandKit, type Scene, type Video, type Voice } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -63,6 +63,7 @@ function CreateInner() {
   const params = useSearchParams();
   const { data: avatarData, loading: avatarsLoading, error: avatarsError } = useApi<{ avatars: Avatar[] }>("/api/avatars");
   const { data: voiceData, loading: voicesLoading, error: voicesError } = useApi<{ voices: Voice[] }>("/api/voices");
+  const { data: brandData } = useApi<{ brand: BrandKit | null }>("/api/brand");
   const { play, playingId, busyId } = useVoicePreview();
 
   const [title, setTitle] = useState("Untitled video");
@@ -162,6 +163,21 @@ function CreateInner() {
     setSpeed(1);
     setDraftRestored(null);
   }
+
+  // Brand kit defaults for a fresh editor: avatar, voice, captions, and (without a template) aspect and background.
+  // Restored drafts and copies keep what they had.
+  const brandApplied = useRef(false);
+  useEffect(() => {
+    if (brandApplied.current || !brandData) return;
+    brandApplied.current = true;
+    const b = brandData.brand;
+    if (!b || fromId || draftRestored) return;
+    if (b.captionsByDefault != null) setCaptions(b.captionsByDefault);
+    if (b.defaultAvatarId || b.defaultVoiceId) setPrefill({ avatarId: b.defaultAvatarId, voiceId: b.defaultVoiceId });
+    if (templateId) return;
+    if (b.defaultAspect) setAspect(b.defaultAspect);
+    setScenes((prev) => prev.map((sc) => (sc.script.trim() ? sc : { ...sc, background: { type: "color", value: b.primaryColor } })));
+  }, [brandData, fromId, templateId, draftRestored]);
 
   // Pre-fill from a template (?template=) or an existing video (?from=).
   useEffect(() => {

@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Clapperboard, Home, Languages, Layers3, LayoutTemplate, LogOut, Menu, Mic2, Settings, Users, Video, Sparkles, X } from "lucide-react";
+import { Clapperboard, Home, Languages, Layers3, LayoutTemplate, LogOut, Menu, Mic2, Palette, Settings, Users, Video, Sparkles, X } from "lucide-react";
 import { useApi } from "@/hooks/useApi";
 import type { ProviderStatus } from "@/lib/types";
 
@@ -15,6 +15,7 @@ const NAV = [
   { href: "/avatars", label: "Avatars", icon: Users },
   { href: "/voices", label: "Voices", icon: Mic2 },
   { href: "/translate", label: "Video translate", icon: Languages },
+  { href: "/brand", label: "Brand kit", icon: Palette },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

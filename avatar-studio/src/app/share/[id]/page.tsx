@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Sparkles } from "lucide-react";
-import { NotFoundError, PUBLIC_ACCESS, getVideo } from "@/lib/services";
+import { NotFoundError, PUBLIC_ACCESS, getBrandKit, getVideo } from "@/lib/services";
+import { LOCAL_OWNER } from "@/lib/owner";
 import { formatSeconds } from "@/lib/client";
 
 export const dynamic = "force-dynamic";
@@ -17,17 +18,31 @@ export default async function SharePage({ params }: { params: Promise<{ id: stri
     throw err;
   }
 
+  const brand = await getBrandKit(video.ownerId ?? LOCAL_OWNER);
+  const accent = brand?.accentColor ?? brand?.primaryColor;
+
   const frame = video.aspect === "9:16" ? "aspect-[9/16] max-w-[420px]" : video.aspect === "1:1" ? "aspect-square max-w-[640px]" : "aspect-video";
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
+      {accent && <div className="h-1.5" style={{ background: accent }} aria-hidden />}
       <header className="mx-auto flex max-w-4xl items-center justify-between px-6 py-5">
-        <Link href="/" className="flex items-center gap-2 text-sm font-medium text-slate-300 hover:text-white">
-          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-brand-600 text-white">
-            <Sparkles className="h-3.5 w-3.5" />
-          </span>
-          Avatar Studio
-        </Link>
+        {brand && (brand.name || brand.logoUrl) ? (
+          <div className="flex items-center gap-3 text-sm font-medium text-slate-200" data-testid="share-brand">
+            {brand.logoUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={brand.logoUrl} alt={brand.name ? `${brand.name} logo` : "Logo"} className="h-8 max-w-[140px] object-contain" />
+            )}
+            {brand.name && <span>{brand.name}</span>}
+          </div>
+        ) : (
+          <Link href="/" className="flex items-center gap-2 text-sm font-medium text-slate-300 hover:text-white">
+            <span className="flex h-7 w-7 items-center justify-center rounded-md bg-brand-600 text-white">
+              <Sparkles className="h-3.5 w-3.5" />
+            </span>
+            Avatar Studio
+          </Link>
+        )}
         {video.durationSec != null && <span className="text-xs text-slate-400">{formatSeconds(video.durationSec)}</span>}
       </header>
       <section className="mx-auto max-w-4xl px-6 pb-16">
@@ -44,6 +59,11 @@ export default async function SharePage({ params }: { params: Promise<{ id: stri
           )}
         </div>
         <p className="mt-6 whitespace-pre-wrap text-sm leading-relaxed text-slate-300">{video.script}</p>
+        {brand && (brand.name || brand.logoUrl) && (
+          <p className="mt-10 text-xs text-slate-500">
+            Made with <Link href="/" className="underline hover:text-slate-300">Avatar Studio</Link>
+          </p>
+        )}
       </section>
     </main>
   );

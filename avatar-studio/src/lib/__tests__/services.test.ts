@@ -4,8 +4,12 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import {
+  brandKitSchema,
   createAvatar,
   createAvatarSchema,
+  deleteBrandKit,
+  getBrandKit,
+  saveBrandKit,
   createTranslation,
   createVideo,
   deleteVideo,
@@ -415,5 +419,29 @@ describe("second review fixes", () => {
     let blocked = 0;
     for (let i = 0; i < 20; i++) if (!rateLimitPair(`ip:${i}`, 5, "all", 10, 60_000, t0 + i).allowed) blocked++;
     assert.equal(blocked, 10, "after 10 global attempts every further request is blocked");
+  });
+});
+
+describe("brand kit", () => {
+  it("is null until saved, then round-trips per owner", async () => {
+    assert.equal(await getBrandKit("u1"), null);
+    const saved = await saveBrandKit(
+      brandKitSchema.parse({ name: "Acme Realty", primaryColor: "#0F766E", defaultAvatarId: "stock_2", defaultVoiceId: "stock_voice_2", captionsByDefault: true }),
+      "u1",
+    );
+    assert.equal(saved.primaryColor, "#0f766e");
+    assert.equal(saved.logoUrl, undefined);
+    assert.deepEqual(await getBrandKit("u1"), saved);
+    assert.equal(await getBrandKit("u2"), null, "another owner never sees it");
+    await deleteBrandKit("u1");
+    assert.equal(await getBrandKit("u1"), null);
+  });
+
+  it("rejects bad colors, unknown voices, and other owners' avatars", async () => {
+    assert.throws(() => brandKitSchema.parse({ primaryColor: "teal" }));
+    assert.throws(() => brandKitSchema.parse({ primaryColor: "#0f766e", logoUrl: "ftp://x/logo.png" }));
+    await assert.rejects(saveBrandKit(brandKitSchema.parse({ primaryColor: "#0f766e", defaultVoiceId: "nope" }), "u1"), /not available/);
+    const foreign = await createAvatar({ name: "Theirs", imageUrl: "https://example.com/t.jpg" }, "u2");
+    await assert.rejects(saveBrandKit(brandKitSchema.parse({ primaryColor: "#0f766e", defaultAvatarId: foreign.id }), "u1"), /not found/);
   });
 });

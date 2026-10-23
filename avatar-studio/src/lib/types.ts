@@ -107,6 +107,25 @@ export interface Translation extends TranslationRequest {
   updatedAt: string;
 }
 
+/** Per-owner branding applied to new videos and the public share page. */
+export interface BrandKit {
+  /** `brand_<ownerId>`; one kit per owner. */
+  id: string;
+  ownerId: string;
+  /** Company or product name shown on share pages. */
+  name: string;
+  /** Logo as an https URL or an uploaded data URL. */
+  logoUrl?: string;
+  /** Hex colors. Primary becomes the default scene background and the share page accent. */
+  primaryColor: string;
+  accentColor?: string;
+  defaultAvatarId?: string;
+  defaultVoiceId?: string;
+  defaultAspect?: AspectRatio;
+  captionsByDefault?: boolean;
+  updatedAt: string;
+}
+
 export interface ProviderStatus {
   mode: "demo" | "live";
   avatar: string;

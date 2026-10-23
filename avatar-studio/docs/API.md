@@ -192,7 +192,7 @@ Returns `{ "reply": "…" }`.
 ## Brand kit
 
 - `GET /api/brand` → `{ "brand": BrandKit | null }`
-- `PUT /api/brand` → `{ "name", "logoUrl", "primaryColor": "#0f766e", "accentColor"?, "defaultBackground"? (an image or video `background` as on a video, behind every new scene instead of the primary colour), "pronunciations"? (up to 50 `{ "word", "sayAs" }` rules; every render replaces each word, whole and case-insensitively, in the script handed to the renderer while the stored script and its captions keep the spelling), "defaultAvatarId"?, "defaultVoiceId"?, "defaultAspect"?, "defaultResolution"? (`720p` | `1080p`), "captionsByDefault"? }`
+- `PUT /api/brand` → `{ "name", "logoUrl", "primaryColor": "#0f766e", "accentColor"?, "defaultBackground"? (an image or video `background` as on a video, behind every new scene instead of the primary colour), "pronunciations"? (up to 50 `{ "word", "sayAs" }` rules, a word of up to 40 characters and a spelling of up to 80; every render replaces each word, whole and case-insensitively, in the script handed to the renderer while the stored script and its captions keep the spelling), "defaultAvatarId"?, "defaultVoiceId"?, "defaultAspect"?, "defaultResolution"? (`720p` | `1080p`), "captionsByDefault"? }`
 - `DELETE /api/brand`
 
 ## Workspaces

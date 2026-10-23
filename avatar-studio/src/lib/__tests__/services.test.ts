@@ -1087,7 +1087,11 @@ describe("brand kit", () => {
     assert.equal(applyPronunciations("Unchanged.", []), "Unchanged.");
     assert.equal(applyPronunciations("C++ rocks", [{ word: "C++", sayAs: "see plus plus" }]), "see plus plus rocks", "a word is matched literally");
     assert.equal(applyPronunciations("Nair here", [{ word: "Nair", sayAs: "$&-ish $1" }]), "$&-ish $1 here", "a spelling is spoken literally, replacement patterns included");
+    assert.equal(applyPronunciations("Nair visited the ER", [{ word: "Nair", sayAs: "Nye-er" }, { word: "ER", sayAs: "E.R." }]), "Nye-er visited the E.R.", "a spelling is never fed to the other rules");
+    assert.equal(applyPronunciations("alpha beta", [{ word: "alpha", sayAs: "beta" }, { word: "beta", sayAs: "gamma" }]), "beta gamma");
+    assert.equal(applyPronunciations("Dr Lee", [{ word: "Dr", sayAs: "Doctor" }, { word: "Doctor", sayAs: "Dok-tor" }]), "Doctor Lee");
     assert.deepEqual(parsePronunciations("Nair = Nye-er\nno rule here\n = empty\nSaaS=sass "), [{ word: "Nair", sayAs: "Nye-er" }, { word: "SaaS", sayAs: "sass" }]);
+    assert.equal(parsePronunciations(Array.from({ length: 60 }, (_, i) => `w${i} = x`).join("\n")).length, 60, "the page, not the parser, enforces the count");
     assert.equal(formatPronunciations(rules.slice(0, 2)), "Nair = Nye-er\nNairobi = Nye-ROH-bee");
     const copy = spokenCopy({ script: "Hi Nair.", scenes: [{ script: "Bye Nair.", background: { type: "color" as const, value: "#fff" } }] }, rules);
     assert.equal(copy.script, "Hi Nye-er.");

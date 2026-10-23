@@ -4,7 +4,7 @@ import { Palette, Trash2, Upload } from "lucide-react";
 import { Button, Card, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, isDarkHex } from "@/lib/client";
-import { formatPronunciations, parsePronunciations } from "@/lib/pronounce";
+import { MAX_PRONUNCIATIONS, formatPronunciations, parsePronunciations } from "@/lib/pronounce";
 import type { AspectRatio, Avatar, BrandKit, Resolution, Voice } from "@/lib/types";
 
 const DEFAULT_PRIMARY = "#4f46e5";
@@ -71,6 +71,10 @@ export default function BrandPage() {
 
   async function save() {
     const rules = parsePronunciations(pronunciations);
+    if (rules.length > MAX_PRONUNCIATIONS) {
+      setErr(`Up to ${MAX_PRONUNCIATIONS} pronunciations (you have ${rules.length}).`);
+      return;
+    }
     const badRule = rules.find((r) => r.word.length > 40 || r.sayAs.length > 80);
     if (badRule) {
       setErr(`Pronunciation "${badRule.word.slice(0, 20)}": the word is at most 40 characters and the spelling at most 80.`);
@@ -252,7 +256,7 @@ export default function BrandPage() {
             </label>
           </div>
           <Field label="Pronunciation" hint="One per line, word = how to say it (for example Nair = Nye-er). Renders say it that way; scripts and captions keep the spelling. Up to 50.">
-            <textarea aria-label="Pronunciations" value={pronunciations} onChange={(e) => setPronunciations(e.target.value)} rows={3} placeholder={"Nair = Nye-er\nSaaS = sass"} className={`${inputClass} font-mono text-xs`} />
+            <textarea aria-label="Pronunciation" value={pronunciations} onChange={(e) => setPronunciations(e.target.value)} rows={3} placeholder={"Nair = Nye-er\nSaaS = sass"} className={`${inputClass} font-mono text-xs`} />
           </Field>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
             <span className="text-xs text-slate-500">{savedAt ? `Saved ${new Date(savedAt).toLocaleString()}` : "Not saved yet"}</span>

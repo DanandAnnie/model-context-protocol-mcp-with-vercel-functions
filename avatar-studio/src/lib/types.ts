@@ -222,13 +222,13 @@ export interface Translation extends TranslationRequest {
   updatedAt: string;
 }
 
-/** Per-owner branding applied to new videos and the public share page. */
 /** A word the renderer should say differently, e.g. { word: "Nair", sayAs: "Nye-er" }. */
 export interface Pronunciation {
   word: string;
   sayAs: string;
 }
 
+/** Per-owner branding applied to new videos and the public share page. */
 export interface BrandKit {
   /** `brand_<ownerId>`; one kit per owner. */
   id: string;

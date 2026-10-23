@@ -832,14 +832,14 @@ test("brand kit pre-fills the editor and brands the share page", async ({ page }
     await page.getByLabel("Default background").selectOption("image");
     await expect(page.getByRole("button", { name: "Save brand kit" })).toBeDisabled();
     await page.getByLabel("Default background URL").fill("https://example.com/brand-bg.jpg");
-    await page.getByLabel("Pronunciations").fill("Nair = Nye-er\nSaaS = sass");
+    await page.getByLabel("Pronunciation", { exact: true }).fill("Nair = Nye-er\nSaaS = sass");
     await page.getByRole("button", { name: "Save brand kit" }).click();
     await expect(page.getByText(/^Saved /)).toBeVisible();
     const kit = (await (await page.request.get("/api/brand")).json()).brand;
     expect(kit.defaultBackground).toEqual({ type: "image", value: "https://example.com/brand-bg.jpg" });
     expect(kit.pronunciations).toEqual([{ word: "Nair", sayAs: "Nye-er" }, { word: "SaaS", sayAs: "sass" }]);
     await page.reload();
-    await expect(page.getByLabel("Pronunciations")).toHaveValue("Nair = Nye-er\nSaaS = sass");
+    await expect(page.getByLabel("Pronunciation", { exact: true })).toHaveValue("Nair = Nye-er\nSaaS = sass");
 
     await page.goto("/create");
     await expect(page.getByText(/· Olivia · 16:9 · 1 scene · captions on$/)).toBeVisible({ timeout: 10_000 });

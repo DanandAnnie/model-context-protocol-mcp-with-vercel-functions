@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // The repo root carries its own lockfile; this app is its own workspace.
+  outputFileTracingRoot: __dirname,
+  turbopack: { root: __dirname },
   images: {
     // Provider-hosted avatar thumbnails and rendered videos come from many hosts.
     remotePatterns: [{ protocol: "https", hostname: "**" }],

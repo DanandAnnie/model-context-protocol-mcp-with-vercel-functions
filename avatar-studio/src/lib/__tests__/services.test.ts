@@ -874,6 +874,15 @@ describe("folders and share views", () => {
     assert.deepEqual(await recordView(v.id), { views: 1, counted: true });
   });
 
+  it("the in-memory store refuses one id under two kinds, like the single-key table", async () => {
+    const store = new MemoryStore();
+    await store.put("video", { id: "vid_shared" });
+    await assert.rejects(store.put("sharelock", { id: "vid_shared" }), /already belongs to a video record/);
+    await store.put("video", { id: "vid_shared", title: "again" });
+    await store.remove("video", "vid_shared");
+    await store.put("sharelock", { id: "vid_shared" });
+  });
+
   it("protects a share link with a password kept only as a hash", async () => {
     const { updateVideo, videoPatchSchema } = await import("../services/videos");
     const { getShareLock, shareCookieValue, shareUnlocked, verifySharePassword } = await import("../share-lock");

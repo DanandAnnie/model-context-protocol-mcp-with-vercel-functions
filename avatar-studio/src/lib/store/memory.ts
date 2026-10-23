@@ -6,6 +6,8 @@ import type { ItemKind, Store } from "./index";
  */
 export class MemoryStore implements Store {
   private data = new Map<ItemKind, Map<string, unknown>>();
+  /** Which kind owns each id: the Supabase table keys every kind by id alone, so this store refuses the same id under two kinds. */
+  private kindOf = new Map<string, ItemKind>();
 
   private bucket(kind: ItemKind): Map<string, unknown> {
     let b = this.data.get(kind);
@@ -27,12 +29,17 @@ export class MemoryStore implements Store {
   }
 
   async put<T extends { id: string }>(kind: ItemKind, item: T): Promise<T> {
+    const holder = this.kindOf.get(item.id);
+    if (holder && holder !== kind) {
+      throw new Error(`id ${item.id} already belongs to a ${holder} record; a ${kind} record cannot reuse it (one table, one key)`);
+    }
+    this.kindOf.set(item.id, kind);
     this.bucket(kind).set(item.id, item);
     return item;
   }
 
   async remove(kind: ItemKind, id: string): Promise<void> {
-    this.bucket(kind).delete(id);
+    if (this.bucket(kind).delete(id)) this.kindOf.delete(id);
   }
 
   async findBy<T>(kind: ItemKind, field: string, value: string): Promise<T | null> {

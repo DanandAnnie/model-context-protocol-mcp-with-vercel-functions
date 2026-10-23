@@ -264,6 +264,16 @@ test("webhook settings reject private hosts and show the signing secret", async 
   await page.getByRole("button", { name: "Save webhook" }).click();
   await expect(page.getByTestId("webhook-secret")).toContainText("whsec_");
   expect((await (await page.request.get("/api/notifications")).json()).webhook.url).toBe("https://203.0.113.5/hooks/studio");
+
+  // A finished render schedules a delivery after the response; the unroutable endpoint records a failed attempt.
+  const v = await createVideoViaApi(page, `Webhook video ${Date.now().toString(36)}`);
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 20_000 }).toBe("completed");
+  await expect
+    .poll(async () => (await (await page.request.get("/api/notifications")).json()).webhook?.lastDelivery?.event, { timeout: 30_000, intervals: [1000] })
+    .toBe("video.completed");
+  expect((await (await page.request.get("/api/notifications")).json()).webhook.lastDelivery.ok).toBe(false);
+
+  await page.reload();
   page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: "Remove webhook" }).click();
   await expect(page.getByTestId("webhook-secret")).toHaveCount(0);

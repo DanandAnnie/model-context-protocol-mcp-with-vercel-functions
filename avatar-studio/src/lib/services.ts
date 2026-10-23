@@ -13,6 +13,7 @@ import { getStore } from "./store";
 import { MAX_SCENES, type Avatar, type BrandKit, type Translation, type Video, type VideoRequest, type Voice } from "./types";
 
 import { LOCAL_OWNER } from "./owner-id";
+import { after } from "next/server";
 import { notifyVideoTransition } from "./notifications";
 import { LimitError, NotFoundError, ValidationError } from "./errors";
 export { NotFoundError, ValidationError, UnauthorizedError, LimitError } from "./errors";
@@ -384,13 +385,26 @@ export async function getVideo(id: string, ownerId: string | null = LOCAL_OWNER,
     const next: Video = { ...video, ...stripUndefined(update), updatedAt: nowIso() };
     if (next.status !== video.status || next.videoUrl !== video.videoUrl) {
       await getStore().put("video", next);
-      await notifyVideoTransition(video, next);
+      await scheduleNotification(video, next);
     }
     return next;
   } catch (err) {
     // Transient provider errors should not flip the job to failed; surface in logs only.
     console.error(`status refresh failed for ${id}:`, err);
     return video;
+  }
+}
+
+/**
+ * Deliver the owner's webhook after the response is sent, so a status poll never waits on a
+ * third-party endpoint. Outside a request (tests, scripts) the delivery runs inline.
+ */
+async function scheduleNotification(prev: Video, next: Video): Promise<void> {
+  const run = () => notifyVideoTransition(prev, next).catch((err) => console.error("webhook delivery failed:", err));
+  try {
+    after(run);
+  } catch {
+    await run();
   }
 }
 
@@ -464,7 +478,7 @@ export async function applyAvatarWebhook(providerName: string, body: unknown): P
   if (!video) return null;
   const next: Video = { ...video, ...stripUndefined(parsed.update), updatedAt: nowIso() };
   await getStore().put("video", next);
-  await notifyVideoTransition(video, next);
+  await scheduleNotification(video, next);
   return next;
 }
 

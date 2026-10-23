@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { CheckSquare, Clapperboard, FolderInput, Trash2, X } from "lucide-react";
 import { api } from "@/lib/client";
 import { VideoCard } from "@/components/VideoCard";
@@ -62,6 +62,8 @@ function VideosInner() {
     setSelecting(false);
     setSelected(new Set());
   }
+  // A new filter hides cards; drop the selection so bulk actions only ever touch what is visible.
+  useEffect(() => setSelected(new Set()), [q, status, folder, batch]);
   async function bulk(action: "delete" | "move") {
     const ids = Array.from(selected);
     if (!ids.length) return;

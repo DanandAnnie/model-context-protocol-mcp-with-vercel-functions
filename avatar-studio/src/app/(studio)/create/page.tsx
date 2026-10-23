@@ -293,8 +293,8 @@ function CreateInner() {
       )}
 
       <div className="grid gap-6 xl:grid-cols-[1.1fr_1fr]">
-        {/* Left column: stage + script */}
-        <div className="space-y-5">
+        {/* Left column: stage + script. min-w-0 lets the columns shrink below their content width on phones. */}
+        <div className="min-w-0 space-y-5">
           <input className={`${inputClass} text-base font-medium`} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Video title" />
 
           <Card className="overflow-hidden">
@@ -358,9 +358,9 @@ function CreateInner() {
                 </button>
               )}
             </div>
-            <div className="mb-2 flex items-center justify-between">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-semibold text-slate-900">{scenes.length > 1 ? `Scene ${activeIdx + 1} script` : "Script"}</h3>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs text-slate-500">
                   {words} words · ~{formatSeconds(seconds)}{scenes.length > 1 ? " total" : ""}
                 </span>
@@ -424,7 +424,7 @@ function CreateInner() {
         </div>
 
         {/* Right column: configuration tabs */}
-        <Card className="flex max-h-[calc(100vh-11rem)] flex-col">
+        <Card className="flex min-w-0 max-h-[calc(100vh-11rem)] flex-col">
           <div className="flex border-b border-slate-200">
             {(
               [
@@ -437,7 +437,7 @@ function CreateInner() {
               <button
                 key={key}
                 onClick={() => setTab(key)}
-                className={`flex flex-1 items-center justify-center gap-2 px-3 py-3 text-sm font-medium ${tab === key ? "border-b-2 border-brand-600 text-brand-700" : "text-slate-500 hover:text-slate-900"}`}
+                className={`flex min-w-0 flex-1 items-center justify-center gap-1 px-1 py-3 text-xs font-medium sm:gap-2 sm:px-3 sm:text-sm ${tab === key ? "border-b-2 border-brand-600 text-brand-700" : "text-slate-500 hover:text-slate-900"}`}
               >
                 <Icon className="h-4 w-4" /> {label}
               </button>

@@ -182,6 +182,27 @@ test("mobile drawer opens, navigates, and closes", async ({ browser }) => {
   await ctx.close();
 });
 
+test("no page scrolls sideways at phone width", async ({ browser }) => {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const page = await ctx.newPage();
+  try {
+    const v = await createVideoViaApi(page, "Phone width check");
+    const pages = ["/home", "/create", "/videos", `/videos/${v.id}`, "/templates", "/avatars", "/voices", "/batch", "/brand", "/interactive", "/workspace", "/settings", "/translate", `/share/${v.id}`];
+    for (const path of pages) {
+      await page.goto(path);
+      await expect(page.locator("h1").first()).toBeVisible();
+      if (path === "/create") await page.getByRole("button", { name: "Settings" }).click();
+      // Studio pages scroll inside <main>; public pages scroll the document. Neither may be wider than the viewport.
+      const over = await page.evaluate(() =>
+        [document.documentElement, ...document.querySelectorAll("main")].filter((el) => el.scrollWidth > el.clientWidth + 1).map((el) => `${el.tagName} ${el.scrollWidth}>${el.clientWidth}`),
+      );
+      expect(over, `${path} overflows: ${over.join(", ")}`).toEqual([]);
+    }
+  } finally {
+    await ctx.close();
+  }
+});
+
 test("script writer refuses private page URLs", async ({ request }) => {
   const res = await request.post("/api/script", { data: { url: "http://127.0.0.1:3100/home" } });
   expect(res.status()).toBe(400);

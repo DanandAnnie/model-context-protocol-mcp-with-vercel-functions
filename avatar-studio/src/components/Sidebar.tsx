@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Clapperboard, Home, Languages, LayoutTemplate, LogOut, Menu, Mic2, Settings, Users, Video, Sparkles, X } from "lucide-react";
+import { Clapperboard, Home, Languages, Layers3, LayoutTemplate, LogOut, Menu, Mic2, Settings, Users, Video, Sparkles, X } from "lucide-react";
 import { useApi } from "@/hooks/useApi";
 import type { ProviderStatus } from "@/lib/types";
 
@@ -11,6 +11,7 @@ const NAV = [
   { href: "/create", label: "Create video", icon: Clapperboard },
   { href: "/videos", label: "My videos", icon: Video },
   { href: "/templates", label: "Templates", icon: LayoutTemplate },
+  { href: "/batch", label: "Personalize", icon: Layers3 },
   { href: "/avatars", label: "Avatars", icon: Users },
   { href: "/voices", label: "Voices", icon: Mic2 },
   { href: "/translate", label: "Video translate", icon: Languages },

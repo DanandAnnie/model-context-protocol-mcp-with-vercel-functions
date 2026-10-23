@@ -74,6 +74,9 @@ export interface Video extends VideoRequest {
   id: string;
   status: VideoStatus;
   ownerId?: string;
+  /** Set when the video was produced by a personalized batch; `rowLabel` identifies the row. */
+  batchId?: string;
+  rowLabel?: string;
   avatarName?: string;
   voiceName?: string;
   provider: string;

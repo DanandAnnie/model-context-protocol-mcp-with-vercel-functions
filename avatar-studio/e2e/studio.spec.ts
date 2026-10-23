@@ -133,3 +133,25 @@ test("API validation and webhook guard", async ({ request }) => {
   const preview = await request.post("/api/voices/preview", { data: { voiceId: "stock_voice_1", text: "hi" } });
   expect(preview.status()).toBe(204);
 });
+
+test("personalized batch creates one video per CSV row", async ({ page }) => {
+  await page.goto("/batch");
+  await expect(page.getByText(/2 rows · columns: name, property, move_in/)).toBeVisible();
+  await expect(page.getByText("Hi Jordan, welcome to 12 Elm Street!")).toBeVisible();
+  await page.locator("textarea").first().fill("Hi {name}, see you at {property} on {move_in}. Also {oops}.");
+  await expect(page.getByText(/placeholders the CSV does not have: \{oops\}/)).toBeVisible();
+  await expect(page.getByRole("button", { name: /Generate/ })).toBeDisabled();
+  await page.locator("textarea").first().fill("Hi {name}, see you at {property} on {move_in}.");
+  await expect(page.getByRole("button", { name: "Generate 2 videos" })).toBeEnabled();
+  await page.screenshot({ path: "test-results/batch-page.png" });
+  await page.getByRole("button", { name: "Generate 2 videos" }).click();
+  await page.waitForURL(/\/videos\?batch=batch_/);
+  await expect(page.getByText("Showing one personalized batch")).toBeVisible();
+  await expect(page.locator("a[href^='/videos/vid_']")).toHaveCount(2);
+  await expect(page.getByText("Welcome video – Jordan")).toBeVisible();
+  const batch = new URL(page.url()).searchParams.get("batch");
+  const videos = (await (await page.request.get("/api/videos")).json()).videos as Array<{ batchId?: string; script: string; rowLabel?: string }>;
+  const mine = videos.filter((v) => v.batchId === batch);
+  expect(mine.map((v) => v.rowLabel).sort()).toEqual(["Jordan", "Priya"]);
+  expect(mine.find((v) => v.rowLabel === "Priya")?.script).toBe("Hi Priya, see you at 48 Harbor View on November 15.");
+});

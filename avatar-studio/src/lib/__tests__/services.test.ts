@@ -296,3 +296,48 @@ describe("render allowance", () => {
     }
   });
 });
+
+describe("personalized batches", () => {
+  it("parses CSV with quotes, CRLF, and BOM", async () => {
+    const { parseCsv, fillTemplate, placeholdersIn } = await import("../csv");
+    const t = parseCsv('﻿name,note\r\n"Smith, Jo","Says ""hi"""\r\n\r\nAmy,plain\n');
+    assert.deepEqual(t.columns, ["name", "note"]);
+    assert.deepEqual(t.rows, [{ name: "Smith, Jo", note: 'Says "hi"' }, { name: "Amy", note: "plain" }]);
+    assert.equal(fillTemplate("Hi {name}: {note} {missing}", t.rows[0]), 'Hi Smith, Jo: Says "hi" {missing}');
+    assert.deepEqual(placeholdersIn("{a} {b} {a}"), ["a", "b"]);
+  });
+
+  it("creates one video per row with substituted scripts and a shared batch id", async () => {
+    const { createBatch, previewBatch } = await import("../services");
+    const csv = "name,city\nJordan,Austin\nPriya,Denver";
+    const preview = previewBatch("Hi {name} from {city}.", csv);
+    assert.equal(preview.rowCount, 2);
+    assert.deepEqual(preview.missing, []);
+    assert.equal(preview.samples[1].script, "Hi Priya from Denver.");
+    const result = await createBatch({ title: "Welcome", scriptTemplate: "Hi {name} from {city}.", csv, avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, "batch-user");
+    assert.equal(result.videos.length, 2);
+    assert.ok(result.videos.every((v) => v.batchId === result.batchId));
+    assert.equal(result.videos[0].title, "Welcome – Jordan");
+    assert.equal(result.videos[0].script, "Hi Jordan from Austin.");
+    assert.equal(result.videos[0].rowLabel, "Jordan");
+    assert.equal((await listVideos("batch-user")).length, 2);
+  });
+
+  it("rejects missing columns and stops at the allowance", async () => {
+    const { createBatch } = await import("../services");
+    const { config } = await import("../config");
+    const base = { title: "W", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, aspect: "16:9" as const, background: { type: "color" as const, value: "#fff" }, captions: false, speed: 1 };
+    await assert.rejects(createBatch({ ...base, scriptTemplate: "Hi {nope}", csv: "name\nA" }, "u"), /does not have: nope/);
+    await assert.rejects(createBatch({ ...base, scriptTemplate: "Hi", csv: "name" }, "u"), /at least one data row/);
+    const original = config.renderLimitPerMonth;
+    (config as { renderLimitPerMonth?: number }).renderLimitPerMonth = 2;
+    try {
+      const r = await createBatch({ ...base, scriptTemplate: "Hi {name}", csv: "name\nA\nB\nC\nD" }, "quota-batch");
+      assert.equal(r.videos.length, 2);
+      assert.deepEqual(r.skipped.map((s) => s.row), [3, 4]);
+      assert.match(r.skipped[0].reason, /limit reached/);
+    } finally {
+      (config as { renderLimitPerMonth?: number }).renderLimitPerMonth = original;
+    }
+  });
+});

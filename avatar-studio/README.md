@@ -16,6 +16,7 @@ D-ID, ElevenLabs, or in a fully offline **demo mode** with no keys at all.
 | Create video | Draft autosave (survives a refresh), multi-scene script editor (up to 20 scenes, each with its own background), word/duration counter, AI script writer plus an Improve menu (polish, shorten, expand, change tone, translate), avatar picker, voice picker with live preview, background color/image, 16:9 / 9:16 / 1:1, captions, speaking speed, live stage preview |
 | My videos | Library with search and status filters, player, inline rename, download, SRT captions, share link, delete, "Edit a copy" |
 | Share page | Public, sidebar-free player at `/share/:id` |
+| Personalize | One script with `{column}` placeholders plus a CSV of recipients produces one video per row (up to 100), with live preview, missing-column checks, and the monthly allowance respected |
 | Templates | Script templates by category (real estate, marketing, training, support, social) that pre-fill the editor |
 | Avatars | Library presenters + photo avatars created from an uploaded portrait, a webcam capture, or an image URL |
 | Voices | Searchable voice library with previews (provider audio, provider sample, or browser speech in demo mode) |
@@ -82,7 +83,7 @@ in-memory store resets on every cold start.
 ## Project layout
 
 ```
-src/app/(studio)/*      pages: home, create, videos, templates, avatars, voices, translate, settings
+src/app/(studio)/*      pages: home, create, batch, videos, templates, avatars, voices, translate, settings
 src/app/api/*           route handlers
 src/lib/providers/*     HeyGen, D-ID, ElevenLabs, Anthropic, and demo adapters
 src/lib/services.ts     orchestration + validation (zod)

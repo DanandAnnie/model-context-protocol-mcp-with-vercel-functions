@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { Camera, Clapperboard, Languages, LayoutTemplate, Wand2 } from "lucide-react";
+import { Camera, Clapperboard, Languages, Layers3, LayoutTemplate, Wand2 } from "lucide-react";
 import { VideoCard } from "@/components/VideoCard";
 import { EmptyState, SectionTitle, Skeleton } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
@@ -10,6 +10,7 @@ const QUICK = [
   { href: "/create", icon: Clapperboard, title: "Avatar video", body: "Script + avatar + voice. The core workflow.", accent: "bg-brand-600" },
   { href: "/create?writer=1", icon: Wand2, title: "Write with AI", body: "Generate a script from a topic, then render it.", accent: "bg-violet-600" },
   { href: "/templates", icon: LayoutTemplate, title: "Start from a template", body: "Listing walkthroughs, welcomes, tips, and more.", accent: "bg-amber-500" },
+  { href: "/batch", icon: Layers3, title: "Personalize at scale", body: "One script, a CSV of recipients, one video each.", accent: "bg-rose-600" },
   { href: "/avatars?new=1", icon: Camera, title: "Photo avatar", body: "Turn a portrait into a presenter.", accent: "bg-sky-600" },
   { href: "/translate", icon: Languages, title: "Translate a video", body: "Dub an existing video into another language.", accent: "bg-emerald-600" },
 ];
@@ -22,7 +23,7 @@ export default function HomePage() {
     <>
       <SectionTitle title="Home" subtitle="What do you want to make today?" />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {QUICK.map(({ href, icon: Icon, title, body, accent }) => (
           <Link key={title} href={href} className="rounded-xl border border-slate-200 bg-white p-5 transition hover:border-slate-300 hover:shadow-sm">
             <span className={`flex h-10 w-10 items-center justify-center rounded-lg text-white ${accent}`}>

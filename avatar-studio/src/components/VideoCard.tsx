@@ -28,7 +28,7 @@ export function VideoCard({ video }: { video: Video }) {
       <div className="p-3">
         <div className="truncate text-sm font-medium text-slate-900">{video.title}</div>
         <div className="mt-0.5 text-xs text-slate-500">
-          {video.aspect} · {formatDate(video.createdAt)}
+          {video.aspect} · {formatDate(video.createdAt)}{video.batchId ? " · batch" : ""}
         </div>
       </div>
     </Link>

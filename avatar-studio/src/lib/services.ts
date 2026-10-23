@@ -16,6 +16,7 @@ import { LOCAL_OWNER } from "./owner";
 import { LimitError, NotFoundError, ValidationError } from "./errors";
 export { NotFoundError, ValidationError, UnauthorizedError, LimitError } from "./errors";
 import { config } from "./config";
+import { fillTemplate, parseCsv, placeholdersIn } from "./csv";
 
 /** Pass as the owner to skip the ownership check (public share pages). */
 export const PUBLIC_ACCESS = null;
@@ -192,6 +193,80 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
     base.error = err instanceof Error ? err.message : String(err);
   }
   return getStore().put("video", base);
+}
+
+// ---------- Personalized batches ----------
+
+export const MAX_BATCH_ROWS = 100;
+
+export const batchRequestSchema = z.object({
+  title: z.string().trim().min(1).max(120),
+  /** Script with {column} placeholders. */
+  scriptTemplate: z.string().trim().min(1).max(5000),
+  /** Raw CSV text; the first row is the header. */
+  csv: z.string().min(1).max(200_000),
+  avatarId: z.string().min(1),
+  voiceId: z.string().min(1),
+  aspect: z.enum(["16:9", "9:16", "1:1"]).default("16:9"),
+  background: backgroundSchema.default({ type: "color", value: "#f1f5f9" }),
+  captions: z.boolean().default(false),
+  speed: z.number().min(0.5).max(1.5).default(1),
+});
+
+export interface BatchResult {
+  batchId: string;
+  videos: Video[];
+  /** Rows not started, with the reason (allowance reached, missing columns). */
+  skipped: Array<{ row: number; reason: string }>;
+}
+
+/** Pure preview: the substituted scripts for the first rows, plus columns the template uses but the CSV lacks. */
+export function previewBatch(scriptTemplate: string, csv: string, limit = 3) {
+  const table = parseCsv(csv);
+  const used = placeholdersIn(scriptTemplate);
+  const missing = used.filter((c) => !table.columns.includes(c));
+  const samples = table.rows.slice(0, limit).map((row) => ({ label: row[table.columns[0]] ?? "", script: fillTemplate(scriptTemplate, row) }));
+  return { columns: table.columns, rowCount: table.rows.length, missing, samples };
+}
+
+export async function createBatch(input: z.infer<typeof batchRequestSchema>, ownerId: string = LOCAL_OWNER): Promise<BatchResult> {
+  const table = parseCsv(input.csv);
+  if (table.columns.length === 0 || table.rows.length === 0) throw new ValidationError("The CSV needs a header row and at least one data row");
+  if (table.rows.length > MAX_BATCH_ROWS) throw new ValidationError(`A batch can have at most ${MAX_BATCH_ROWS} rows`);
+  const missing = placeholdersIn(input.scriptTemplate).filter((c) => !table.columns.includes(c));
+  if (missing.length) throw new ValidationError(`The script uses columns the CSV does not have: ${missing.join(", ")}`);
+
+  const batchId = newId("batch");
+  const labelColumn = table.columns[0];
+  const videos: Video[] = [];
+  const skipped: BatchResult["skipped"] = [];
+  for (const [i, row] of table.rows.entries()) {
+    const label = row[labelColumn] || `row ${i + 1}`;
+    try {
+      const video = await createVideo(
+        {
+          title: `${input.title} – ${label}`.slice(0, 120),
+          script: fillTemplate(input.scriptTemplate, row),
+          avatarId: input.avatarId,
+          voiceId: input.voiceId,
+          aspect: input.aspect,
+          background: input.background,
+          captions: input.captions,
+          speed: input.speed,
+        },
+        ownerId,
+      );
+      videos.push(await getStore().put("video", { ...video, batchId, rowLabel: label }));
+    } catch (err) {
+      if (err instanceof LimitError) {
+        // Stop the whole batch at the allowance; remaining rows are reported, not silently dropped.
+        for (let j = i; j < table.rows.length; j++) skipped.push({ row: j + 1, reason: err.message });
+        break;
+      }
+      throw err;
+    }
+  }
+  return { batchId, videos, skipped };
 }
 
 export async function listVideos(ownerId: string = LOCAL_OWNER): Promise<Video[]> {

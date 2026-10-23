@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useMemo, useState } from "react";
 import { Clapperboard } from "lucide-react";
 import { VideoCard } from "@/components/VideoCard";
 import { EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -10,6 +11,17 @@ import type { Video, VideoStatus } from "@/lib/types";
 const STATUSES: Array<"all" | VideoStatus> = ["all", "processing", "completed", "failed"];
 
 export default function VideosPage() {
+  return (
+    <Suspense>
+      <VideosInner />
+    </Suspense>
+  );
+}
+
+function VideosInner() {
+  const params = useSearchParams();
+  const batch = params.get("batch");
+  const skipped = Number(params.get("skipped") ?? 0);
   const { data, loading, error } = useApi<{ videos: Video[] }>("/api/videos", {
     pollMs: 6000,
     pollWhile: (d) => d.videos.some((v) => v.status === "processing" || v.status === "queued"),
@@ -20,11 +32,12 @@ export default function VideosPage() {
     const all = data?.videos ?? [];
     const needle = q.trim().toLowerCase();
     return all.filter((v) => {
+      if (batch && v.batchId !== batch) return false;
       const statusOk = status === "all" ? true : status === "processing" ? v.status === "processing" || v.status === "queued" : v.status === status;
       const textOk = !needle || `${v.title} ${v.script} ${v.avatarName ?? ""} ${v.voiceName ?? ""}`.toLowerCase().includes(needle);
       return statusOk && textOk;
     });
-  }, [data, q, status]);
+  }, [data, q, status, batch]);
   const hasAny = (data?.videos.length ?? 0) > 0;
 
   return (
@@ -39,6 +52,14 @@ export default function VideosPage() {
         }
       />
       <ErrorBanner message={error} />
+      {batch && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm text-brand-900">
+          <span>
+            Showing one personalized batch{skipped > 0 ? `. ${skipped} ${skipped === 1 ? "row was" : "rows were"} not started because the monthly allowance was reached.` : "."}
+          </span>
+          <Link href="/videos" className="font-medium underline hover:no-underline">Show all videos</Link>
+        </div>
+      )}
       {hasAny && (
         <div className="mb-5 flex flex-wrap items-center gap-2">
           <input className={`${inputClass} max-w-xs`} placeholder="Search title, script, avatar, voice" value={q} onChange={(e) => setQ(e.target.value)} />

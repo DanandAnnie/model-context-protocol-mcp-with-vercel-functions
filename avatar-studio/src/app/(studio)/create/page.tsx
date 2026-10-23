@@ -233,6 +233,19 @@ function CreateInner() {
     }
   }
 
+  // Ctrl/Cmd+Enter generates from anywhere in the editor.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && canGenerate) {
+        e.preventDefault();
+        generate();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canGenerate, title, scenes, avatar, voice, aspect, captions, speed]);
+
   const stageAspect = aspect === "9:16" ? "aspect-[9/16]" : aspect === "1:1" ? "aspect-square" : "aspect-video";
   const bgIsDark = background.type === "color" && isDarkHex(background.value);
 
@@ -242,7 +255,7 @@ function CreateInner() {
         title="Create video"
         subtitle="Write the script, choose who says it and how it looks, then generate."
         action={
-          <Button onClick={generate} disabled={!canGenerate} loading={submitting}>
+          <Button onClick={generate} disabled={!canGenerate} loading={submitting} title="Ctrl/Cmd + Enter">
             <Clapperboard className="h-4 w-4" /> Generate video
           </Button>
         }

@@ -5,9 +5,10 @@ import { getAvatarProvider } from "../providers";
 import { getStore } from "../store";
 import type { Agent, Avatar } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
-import { NotFoundError } from "../errors";
 import { memo } from "../cache";
 import { LIST_TTL_MS, owned } from "./shared";
+import { listVoices } from "./voices";
+import { NotFoundError, ValidationError } from "../errors";
 
 /** Provider avatar list, memoised per provider for a few minutes. */
 export function providerAvatars(): Promise<Avatar[]> {
@@ -37,15 +38,24 @@ export const createAvatarSchema = z.object({
     .max(8_000_000, "Uploaded image must be under 6 MB")
     .refine((v) => v.startsWith("data:image/") || /^https?:\/\//.test(v), "Must be an image URL or uploaded image"),
   gender: z.enum(["male", "female", "neutral"]).optional(),
+  /** A voice from `GET /api/voices` (the owner's clones included) the editor picks with this avatar. */
+  defaultVoiceId: z.string().trim().min(1).max(200).optional(),
 });
 
+/** A default voice must be one the owner can render with, like the brand kit's. */
+async function assertVoiceAvailable(voiceId: string, ownerId: string): Promise<void> {
+  if (!(await listVoices(ownerId)).some((v) => v.id === voiceId)) throw new ValidationError(`Voice ${voiceId} is not available`);
+}
+
 export async function createAvatar(input: z.infer<typeof createAvatarSchema>, ownerId: string = LOCAL_OWNER): Promise<Avatar> {
+  if (input.defaultVoiceId) await assertVoiceAvailable(input.defaultVoiceId, ownerId);
   const avatar: Avatar = {
     id: newId("av"),
     ownerId,
     name: input.name,
     imageUrl: input.imageUrl,
     gender: input.gender,
+    ...(input.defaultVoiceId ? { defaultVoiceId: input.defaultVoiceId } : {}),
     source: "custom",
     provider: getAvatarProvider().name,
     tags: ["photo avatar"],
@@ -59,11 +69,13 @@ export const updateAvatarSchema = z
     name: z.string().trim().min(1).max(80).optional(),
     /** `null` clears the gender. */
     gender: z.enum(["male", "female", "neutral"]).nullable().optional(),
+    /** `null` clears the default voice. */
+    defaultVoiceId: z.string().trim().min(1).max(200).nullable().optional(),
   })
-  .refine((v) => v.name !== undefined || v.gender !== undefined, "Nothing to update");
+  .refine((v) => v.name !== undefined || v.gender !== undefined || v.defaultVoiceId !== undefined, "Nothing to update");
 
 /**
- * Renames a photo avatar or changes its gender. Library presenters belong to the provider and
+ * Renames a photo avatar, changes its gender, or sets its default voice. Library presenters belong to the provider and
  * cannot be edited (404, like any avatar that is not the owner's). Videos keep the name they
  * were rendered with; new renders and shared presenters (which copy the name) pick up the new one.
  */
@@ -73,10 +85,18 @@ export async function updateAvatar(id: string, patch: z.infer<typeof updateAvata
   if (patch.name !== undefined) next.name = patch.name;
   if (patch.gender === null) delete next.gender;
   else if (patch.gender !== undefined) next.gender = patch.gender;
+  if (patch.defaultVoiceId === null) delete next.defaultVoiceId;
+  else if (patch.defaultVoiceId !== undefined) {
+    await assertVoiceAvailable(patch.defaultVoiceId, ownerId);
+    next.defaultVoiceId = patch.defaultVoiceId;
+  }
   const saved = await getStore().put("avatar", next);
-  if (saved.name !== existing.name) {
-    const agents = (await getStore().list<Agent>("agent", ownerId)).filter((a) => a.avatarId === id);
-    await Promise.all(agents.map((a) => getStore().put("agent", { ...a, avatarName: saved.name })));
+  if (patch.name !== undefined) {
+    // Every presenter still carrying another name is brought in step (so a rename repeated after a
+    // failed write heals the stragglers); a failed write is logged, never a 500 for a rename that landed.
+    const stale = (await getStore().list<Agent>("agent", ownerId)).filter((a) => a.avatarId === id && a.avatarName !== saved.name);
+    const results = await Promise.allSettled(stale.map((a) => getStore().put("agent", { ...a, avatarName: saved.name, updatedAt: nowIso() })));
+    for (const r of results) if (r.status === "rejected") console.error("presenter rename failed:", r.reason);
   }
   return saved;
 }

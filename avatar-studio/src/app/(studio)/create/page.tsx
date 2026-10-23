@@ -12,7 +12,7 @@ import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib
 import { languageLabel } from "@/lib/language";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
-import { CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, RESOLUTIONS, type AspectRatio, type Avatar, type Background, type BrandKit, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice } from "@/lib/types";
+import { CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, RESOLUTIONS, isDefaultCaptionStyle as isDefaultCaptionStyleFn, type AspectRatio, type Avatar, type Background, type BrandKit, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -121,6 +121,12 @@ function CreateInner() {
   }
   const [avatar, setAvatar] = useState<Avatar | null>(null);
   const [voice, setVoice] = useState<Voice | null>(null);
+  /** An explicit pick in the Avatar tab; a photo avatar with a default voice brings that voice along. */
+  function pickAvatar(a: Avatar) {
+    setAvatar(a);
+    const preferred = a.defaultVoiceId ? voiceData?.voices.find((v) => v.id === a.defaultVoiceId) : undefined;
+    if (preferred) setVoice(preferred);
+  }
   // A scene may name its own presenter and voice; otherwise it uses the video's.
   const sceneAvatar = (active.avatarId && avatarData?.avatars.find((a) => a.id === active.avatarId)) || avatar;
   const sceneVoice = (active.voiceId && voiceData?.voices.find((v) => v.id === active.voiceId)) || voice;
@@ -147,7 +153,7 @@ function CreateInner() {
   const [resolution, setResolution] = useState<Resolution>("1080p");
   const [captions, setCaptions] = useState(false);
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>(DEFAULT_CAPTION_STYLE);
-  const isDefaultCaptionStyle = captionStyle.position === DEFAULT_CAPTION_STYLE.position && captionStyle.size === DEFAULT_CAPTION_STYLE.size;
+  const isDefaultCaptionStyle = isDefaultCaptionStyleFn(captionStyle);
   const [speed, setSpeed] = useState(1);
   const [tab, setTab] = useState<Tab>("avatar");
   const [writerOpen, setWriterOpen] = useState(params.get("writer") === "1");
@@ -289,13 +295,15 @@ function CreateInner() {
       .catch((e) => setErr(e instanceof Error ? e.message : "Could not load the original video"));
   }, [fromId]);
 
-  // Default selections once data arrives.
+  // Default selections once data arrives: the first avatar, and its default voice if it has one
+  // (a draft, template, copy, or brand kit applied below overrides both).
   useEffect(() => {
     if (!avatar && avatarData?.avatars.length) setAvatar(avatarData.avatars[0]);
   }, [avatarData, avatar]);
   useEffect(() => {
-    if (!voice && voiceData?.voices.length) setVoice(voiceData.voices[0]);
-  }, [voiceData, voice]);
+    if (voice || !voiceData?.voices.length) return;
+    setVoice((avatar?.defaultVoiceId && voiceData.voices.find((v) => v.id === avatar.defaultVoiceId)) || voiceData.voices[0]);
+  }, [voiceData, voice, avatar]);
   // Apply a copied video's avatar/voice once both lists are loaded, then clear the prefill.
   useEffect(() => {
     if (!prefill || !avatarData || !voiceData) return;
@@ -614,7 +622,7 @@ function CreateInner() {
                   {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="aspect-[4/5]" />)}
                 </div>
               ) : (
-                <AvatarGrid avatars={avatarsSorted} selectedId={avatar?.id} onSelect={setAvatar} compact favoriteIds={favorites.avatarIds} onToggleFavorite={(a) => favorites.toggle("avatar", a.id)} />
+                <AvatarGrid avatars={avatarsSorted} selectedId={avatar?.id} onSelect={pickAvatar} compact favoriteIds={favorites.avatarIds} onToggleFavorite={(a) => favorites.toggle("avatar", a.id)} />
               )
             )}
 

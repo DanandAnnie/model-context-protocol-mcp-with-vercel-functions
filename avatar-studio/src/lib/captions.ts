@@ -10,6 +10,16 @@ export interface Cue {
 
 const MAX_CUE_CHARS = 90;
 
+/** HeyGen writes captions into the file itself unless a caption style asks for the share page's track alone. */
+export function heygenBurnsCaptions(req: { captions?: boolean; captionStyle?: unknown }): boolean {
+  return !!req.captions && !req.captionStyle;
+}
+
+/** True when the rendered file already carries captions, so the share page's track must stay off until asked for. */
+export function captionsBurnedIn(video: { captions?: boolean; captionStyle?: unknown; provider?: string }): boolean {
+  return video.provider === "heygen" && heygenBurnsCaptions(video);
+}
+
 function splitSentences(script: string): string[] {
   const sentences = script
     .replace(/\s+/g, " ")

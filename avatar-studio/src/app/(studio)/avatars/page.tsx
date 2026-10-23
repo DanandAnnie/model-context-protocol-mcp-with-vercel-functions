@@ -8,7 +8,7 @@ import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, Skeleton, i
 import { useApi } from "@/hooks/useApi";
 import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { api } from "@/lib/client";
-import type { Avatar } from "@/lib/types";
+import type { Avatar, Voice } from "@/lib/types";
 
 export default function AvatarsPage() {
   return (
@@ -21,6 +21,8 @@ export default function AvatarsPage() {
 function AvatarsInner() {
   const params = useSearchParams();
   const { data, loading, error, refetch } = useApi<{ avatars: Avatar[] }>("/api/avatars");
+  const { data: voiceData } = useApi<{ voices: Voice[] }>("/api/voices");
+  const voices = voiceData?.voices ?? [];
   const [open, setOpen] = useState(params.get("new") === "1");
   const [filter, setFilter] = useState<"all" | "custom" | "library">("all");
   const [gender, setGender] = useState<"all" | NonNullable<Avatar["gender"]>>("all");
@@ -49,6 +51,16 @@ function AvatarsInner() {
       refetch();
     } catch (e) {
       setActionErr(e instanceof Error ? e.message : "Could not rename the avatar");
+    }
+  }
+
+  async function setDefaultVoice(a: Avatar, voiceId: string) {
+    try {
+      await api(`/api/avatars/${a.id}`, { method: "PATCH", body: JSON.stringify({ defaultVoiceId: voiceId || null }) });
+      setActionErr(null);
+      refetch();
+    } catch (e) {
+      setActionErr(e instanceof Error ? e.message : "Could not set the default voice");
     }
   }
 
@@ -98,7 +110,7 @@ function AvatarsInner() {
         {data && <span className="text-xs text-slate-500">{avatars.length} of {data.avatars.length}</span>}
       </div>
 
-      {open && <CreateAvatarPanel onClose={() => setOpen(false)} onCreated={() => { setOpen(false); refetch(); }} />}
+      {open && <CreateAvatarPanel voices={voices} onClose={() => setOpen(false)} onCreated={() => { setOpen(false); refetch(); }} />}
 
       {loading ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
@@ -133,6 +145,22 @@ function AvatarsInner() {
                   </button>
                 </span>
               )}
+              {a.source === "custom" && voices.length > 0 && (
+                <select
+                  aria-label={`Default voice for ${a.name}`}
+                  title="The editor switches to this voice when the avatar is picked"
+                  className={`${inputClass} mt-1.5 py-1 text-xs`}
+                  value={a.defaultVoiceId && voices.some((v) => v.id === a.defaultVoiceId) ? a.defaultVoiceId : ""}
+                  onChange={(e) => setDefaultVoice(a, e.target.value)}
+                >
+                  <option value="">No default voice</option>
+                  {voices.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
           ))}
         </div>
@@ -141,10 +169,11 @@ function AvatarsInner() {
   );
 }
 
-function CreateAvatarPanel({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+function CreateAvatarPanel({ voices, onClose, onCreated }: { voices: Voice[]; onClose: () => void; onCreated: () => void }) {
   const [name, setName] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [gender, setGender] = useState<"" | "male" | "female" | "neutral">("");
+  const [defaultVoiceId, setDefaultVoiceId] = useState("");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -221,7 +250,7 @@ function CreateAvatarPanel({ onClose, onCreated }: { onClose: () => void; onCrea
     setSaving(true);
     setErr(null);
     try {
-      await api("/api/avatars", { method: "POST", body: JSON.stringify({ name, imageUrl, gender: gender || undefined }) });
+      await api("/api/avatars", { method: "POST", body: JSON.stringify({ name, imageUrl, gender: gender || undefined, defaultVoiceId: defaultVoiceId || undefined }) });
       onCreated();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not create avatar");
@@ -284,6 +313,18 @@ function CreateAvatarPanel({ onClose, onCreated }: { onClose: () => void; onCrea
               <option value="neutral">Neutral</option>
             </select>
           </Field>
+          {voices.length > 0 && (
+            <Field label="Default voice (optional)" hint="The editor switches to this voice when the avatar is picked.">
+              <select className={inputClass} value={defaultVoiceId} onChange={(e) => setDefaultVoiceId(e.target.value)}>
+                <option value="">None</option>
+                {voices.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
           <ErrorBanner message={err} />
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={onClose}>Cancel</Button>

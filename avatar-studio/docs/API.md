@@ -62,7 +62,7 @@ Instead of `script`, send `scenes` (1 to 20), each with its own `script` and `ba
 | `resolution` | `720p` \| `1080p` | default `1080p`; the short side of the frame (1080p: 1920×1080, 1080×1920, 1080×1080; 720p: 1280×720, 720×1280, 720×720). HeyGen renders at these sizes; D-ID and the demo renderer record the value but output at their native size |
 | `background` | `{ type: "color" \| "image", value }` | default light grey |
 | `captions` | boolean | default `false` |
-| `captionStyle` | object | `{ position: "bottom" \| "top", size: "small" \| "medium" \| "large" }`, how subtitles sit and read in the share player's subtitle track and the WebVTT file (`top` becomes a `line:5%` cue setting); a value equal to the default is stored as absent; when set, HeyGen is told not to burn captions into the file so this look is the only one, which means the downloaded file of a styled video carries no captions (the share page's track is on by default) |
+| `captionStyle` | object | `{ position: "bottom" \| "top", size: "small" \| "medium" \| "large" }`, how subtitles sit and read in the share player's subtitle track and the WebVTT file (`top` becomes a `line:5%` cue setting); a value equal to the default is stored as absent; when set, HeyGen is told not to burn captions into the file so this look is the only one, which means the downloaded file of a styled video carries no captions (the share page's track is on from the start, except for a HeyGen file that already carries captions, where it waits in the CC menu) |
 | `speed` | 0.5–1.5 | default `1` |
 
 Returns `201` with `{ "video": Video }`. The video starts as `queued` or `processing`; poll `GET /api/videos/:id` or use a webhook.
@@ -177,11 +177,11 @@ Returns `{ "reply": "…" }`.
 ## Avatars and voices
 
 - `GET /api/avatars` → `{ "avatars": [...] }` (custom photo avatars first, then the library)
-- `POST /api/avatars` → `{ "name", "imageUrl", "gender"? }` where `imageUrl` is an https URL or a `data:image/…` upload (≤ 6 MB). Private and local hosts are rejected.
-- `PATCH /api/avatars/:id` → `{ "name"?: string, "gender"?: "male" | "female" | "neutral" | null }` renames a photo avatar or changes its gender (`null` clears it); library presenters answer `404`. Videos keep the name they were rendered with; shared presenters built on the avatar take the new name
+- `POST /api/avatars` → `{ "name", "imageUrl", "gender"?, "defaultVoiceId"? }` where `imageUrl` is an https URL or a `data:image/…` upload (≤ 6 MB) and `defaultVoiceId` names a voice from `GET /api/voices` (cloned voices included; an unavailable voice is a `400`) that the editor switches to when the avatar is picked. Private and local hosts are rejected.
+- `PATCH /api/avatars/:id` → `{ "name"?: string, "gender"?: "male" | "female" | "neutral" | null, "defaultVoiceId"?: string | null }` renames a photo avatar, changes its gender, or sets its default voice (`null` clears either; deleting a cloned voice clears it from every avatar that named it); library presenters answer `404`. Videos keep the name they were rendered with; shared presenters built on the avatar take the new name
 - `DELETE /api/avatars/:id`
 - `GET /api/voices` → `{ "voices": [...] }` (the account's cloned voices first, `source: "custom"`)
-- `POST /api/voices/clone` → `{ "name", "samples": ["data:audio/webm;base64,…"], "language"? }` (one to five audio data URLs, 10 MB total, five clones per account) → `201 { "voice" }`; `PATCH /api/voices/:id` → `{ "name" }` renames a clone (provider voices answer `404`; videos keep the name they were rendered with); `DELETE /api/voices/:id` removes a clone. Cloning runs on ElevenLabs when it is the voice provider; the demo provider saves the clone and previews use the browser voice
+- `POST /api/voices/clone` → `{ "name", "samples": ["data:audio/webm;base64,…"], "language"? }` (one to five audio data URLs, 10 MB total, five clones per account) → `201 { "voice" }`; `PATCH /api/voices/:id` → `{ "name" }` renames a clone (provider voices answer `404`; videos keep the name they were rendered with, and the provider's own copy of the voice keeps its name); `DELETE /api/voices/:id` removes a clone. Cloning runs on ElevenLabs when it is the voice provider; the demo provider saves the clone and previews use the browser voice
 - `POST /api/voices/preview` → `{ "voiceId", "text", "speed" }`; returns audio, or `204` with `x-tts-fallback: browser` in demo mode
 
 ## Translation

@@ -7,7 +7,7 @@ import type { CaptionSize, WatchQuarter } from "@/lib/types";
  * three quarters, the end), once per marker per mount and one request at a time: the server
  * counts every marker up to the one reported, so a seek past three markers is one beacon.
  */
-export function SharePlayer({ videoId, src, poster, captions, captionSize = "medium" }: { videoId: string; src: string; poster?: string; captions: boolean; captionSize?: CaptionSize }) {
+export function SharePlayer({ videoId, src, poster, captions, captionSize = "medium", trackDefault = true }: { videoId: string; src: string; poster?: string; captions: boolean; captionSize?: CaptionSize; trackDefault?: boolean }) {
   const reported = useRef<WatchQuarter | 0>(0);
   const queue = useRef<Promise<void>>(Promise.resolve());
   const report = (quarter: WatchQuarter) => {
@@ -35,8 +35,8 @@ export function SharePlayer({ videoId, src, poster, captions, captionSize = "med
       }}
       onEnded={() => report(100)}
     >
-      {/* `default` switches the track on without a trip to the CC menu; a styled video has no burned-in captions to fall back on. */}
-      {captions && <track default kind="subtitles" srcLang="en" label="Captions" src={`/api/videos/${videoId}/captions?format=vtt`} />}
+      {/* `default` switches the track on without a trip to the CC menu; it stays off when the file already carries captions. */}
+      {captions && <track default={trackDefault} kind="subtitles" srcLang="en" label="Captions" src={`/api/videos/${videoId}/captions?format=vtt`} />}
     </video>
   );
 }

@@ -4,7 +4,7 @@ import { nowIso } from "../ids";
 import { getTtsProvider } from "../providers";
 import { decodeDataUrl } from "../providers/image";
 import { getStore } from "../store";
-import type { Voice } from "../types";
+import type { Avatar, Voice } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { memo } from "../cache";
 import { ValidationError } from "../errors";
@@ -70,6 +70,9 @@ export async function deleteClonedVoice(id: string, ownerId: string = LOCAL_OWNE
   const provider = getTtsProvider();
   if (provider.name === voice.provider) await provider.deleteVoice?.(id);
   await getStore().remove("voice", id);
+  // Photo avatars that opened the editor with this voice fall back to the video's voice from now on.
+  const defaults = (await getStore().list<Avatar>("avatar", ownerId)).filter((a) => a.defaultVoiceId === id);
+  await Promise.all(defaults.map(({ defaultVoiceId: _gone, ...rest }) => getStore().put("avatar", rest)));
 }
 
 export async function previewVoice(voiceId: string, text: string, speed: number) {

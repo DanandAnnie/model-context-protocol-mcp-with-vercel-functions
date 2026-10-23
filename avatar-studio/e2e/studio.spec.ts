@@ -198,6 +198,28 @@ test("the avatar library filters by gender and name", async ({ page }) => {
   expect((await (await page.request.get(`/api/avatars/${created.id}`)).json()).avatar.name).toBe(`Renamed ${tag}`);
   expect((await page.request.patch("/api/avatars/stock_1", { data: { name: "Nope" } })).status()).toBe(404);
   expect((await page.request.patch(`/api/avatars/${created.id}`, { data: {} })).status()).toBe(400);
+  // A default voice set on the avatar follows it into the editor when the avatar is picked.
+  await page.getByLabel(`Default voice for Renamed ${tag}`).selectOption("stock_voice_2");
+  await expect.poll(async () => (await (await page.request.get(`/api/avatars/${created.id}`)).json()).avatar.defaultVoiceId).toBe("stock_voice_2");
+  expect((await page.request.patch(`/api/avatars/${created.id}`, { data: { defaultVoiceId: "nope" } })).status()).toBe(400);
+  await page.goto("/create");
+  // Other tests may leave a brand kit or newer avatars behind, so the editor's own first pick is not
+  // asserted; wait until both lists have landed (the summary names a voice), then pick the avatar.
+  const summary = page.getByText(/ · 16:9 · 1 scene · /);
+  await expect(summary).toBeVisible();
+  await expect(summary).not.toContainText("No voice");
+  await page.getByRole("button", { name: "Avatar", exact: true }).click();
+  await page.getByRole("button", { name: new RegExp(`^Renamed ${tag} Renamed ${tag}`) }).click();
+  await expect(page.getByText(new RegExp(`Renamed ${tag} · James · `))).toBeVisible();
+  await page.getByRole("button", { name: "Voice", exact: true }).click();
+  await page.getByText("Emma").click();
+  await expect(page.getByText(new RegExp(`Renamed ${tag} · Emma · `))).toBeVisible();
+  // Picking the avatar again brings the voice back; a presenter without one leaves the voice alone.
+  await page.getByRole("button", { name: "Avatar", exact: true }).click();
+  await page.getByRole("button", { name: "Ava Chen Ava Chen" }).click();
+  await expect(page.getByText(/Ava Chen · Emma · /)).toBeVisible();
+  await page.getByRole("button", { name: new RegExp(`^Renamed ${tag} Renamed ${tag}`) }).click();
+  await expect(page.getByText(new RegExp(`Renamed ${tag} · James · `))).toBeVisible();
   expect((await page.request.delete(`/api/avatars/${created.id}`)).status()).toBe(200);
 });
 
@@ -742,7 +764,7 @@ test("captions are served as SRT and VTT, security headers are set", async ({ pa
   // The player carries the size as a class, which the stylesheet turns into a cue font size.
   await page.goto(`/share/${v.id}`);
   await expect(page.getByTestId("share-player")).toHaveClass(/cue-large/);
-  // The track is on from the start: a styled video has no burned-in captions to fall back on.
+  // The track is on from the start: the demo renderer (like D-ID, or HeyGen with a style) burns no captions into the file.
   await expect(page.getByTestId("share-player").locator("track")).toHaveAttribute("default", "");
   await page.goto(`/videos/${v.id}`);
   await expect(page.getByText("On · top, large")).toBeVisible();

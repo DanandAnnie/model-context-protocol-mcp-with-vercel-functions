@@ -18,6 +18,7 @@ import { ViewBeacon } from "@/components/ViewBeacon";
 import { ShareCta } from "@/components/ShareCta";
 import { ShareUnlock } from "@/components/ShareUnlock";
 import { SharePlayer } from "@/components/SharePlayer";
+import { captionsBurnedIn } from "@/lib/captions";
 import { shareCookieName, shareUnlocked } from "@/lib/share-lock";
 
 export const dynamic = "force-dynamic";
@@ -172,7 +173,7 @@ export default async function SharePage({
               className={`mx-auto w-full overflow-hidden rounded-xl bg-black ${frame}`}
             >
               {video.status === "completed" && video.videoUrl ? (
-                <SharePlayer videoId={video.id} src={video.videoUrl} poster={posterUrl(video)} captions={!!video.captions} captionSize={video.captionStyle?.size} />
+                <SharePlayer videoId={video.id} src={video.videoUrl} poster={posterUrl(video)} captions={!!video.captions} captionSize={video.captionStyle?.size} trackDefault={!captionsBurnedIn(video)} />
               ) : (
                 <div className="flex h-full w-full items-center justify-center p-10 text-center text-sm text-slate-400">
                   {video.status === "failed"

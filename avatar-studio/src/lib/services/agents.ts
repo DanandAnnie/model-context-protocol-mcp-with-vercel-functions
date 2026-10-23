@@ -142,7 +142,9 @@ export async function talkToAgent(id: string, input: z.infer<typeof talkSchema>)
   // Transcripts and counters are best effort; a lost write never fails the visitor's turn.
   const record = async () => {
     await getStore().put("conversation", { ...conversation, messages, updatedAt: now });
-    await getStore().put("agent", { ...agent, conversations: agent.conversations + (isNew ? 1 : 0), messages: agent.messages + 1 });
+    // The chat took seconds; count on the stored row so an edit or rename that landed meanwhile is kept.
+    const current = (await getStore().get<Agent>("agent", agent.id)) ?? agent;
+    await getStore().put("agent", { ...current, conversations: current.conversations + (isNew ? 1 : 0), messages: current.messages + 1 });
     if (isNew) await pruneConversations(agent);
   };
   await record().catch((err) => console.error("transcript write failed:", err));

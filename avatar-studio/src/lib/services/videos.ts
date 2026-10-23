@@ -203,7 +203,7 @@ function prepareOnce(provider: AvatarProvider, avatar: Avatar): Promise<Avatar> 
     // The upload takes seconds; a rename that landed meanwhile must survive, so only the asset ids are written,
     // and an avatar deleted meanwhile is not brought back (this render still uses the upload).
     const current = await getStore().get<Avatar>("avatar", avatar.id);
-    return current ? getStore().put("avatar", { ...current, providerAssetIds: prepared.providerAssetIds }) : prepared;
+    return current ? getStore().put("avatar", { ...current, providerAssetIds: { ...current.providerAssetIds, ...prepared.providerAssetIds } }) : prepared;
   })().finally(() => preparing.delete(avatar.id));
   preparing.set(avatar.id, run);
   return run;

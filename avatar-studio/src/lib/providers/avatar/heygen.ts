@@ -1,4 +1,5 @@
 import { dimensionsFor, type Avatar, type VideoRequest, type Voice } from "../../types";
+import { heygenBurnsCaptions } from "../../captions";
 import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
 import { HeyGenClient } from "../heygen-client";
@@ -49,7 +50,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       title: req.title,
       // HeyGen burns captions in at its own position and size; a video with a caption style of its
       // own is captioned by the share page's subtitle track instead, so the chosen look is the only one.
-      caption: req.captions && !req.captionStyle,
+      caption: heygenBurnsCaptions(req),
       ...(webhookUrl("heygen") ? { callback_url: webhookUrl("heygen") } : {}),
       dimension: dimensionsFor(req.aspect, req.resolution),
       // One input per scene, each with its own presenter and voice when the scene names them.

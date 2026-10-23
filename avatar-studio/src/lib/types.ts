@@ -36,6 +36,8 @@ export interface Avatar {
   /** Provider that owns this avatar id (heygen | did | mock). */
   provider: string;
   gender?: "male" | "female" | "neutral";
+  /** Voice the editor switches to when this photo avatar is picked; must be available to the owner. */
+  defaultVoiceId?: string;
   tags?: string[];
   /** Ids assigned by rendering providers after uploading a custom portrait, keyed by provider name. */
   providerAssetIds?: Record<string, string>;

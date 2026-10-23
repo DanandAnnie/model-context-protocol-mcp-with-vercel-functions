@@ -116,6 +116,30 @@ describe("avatars", () => {
     assert.equal((await getAgent(onMine.id, "r3")).avatarImageUrl, mine.imageUrl, "the portrait snapshot stays");
     assert.equal((await publicAgent(onMine.id)).avatar.name, "Daniel", "the talk page shows the new name");
     assert.equal((await getAgent(onOther.id, "r3")).avatarName, "Ann");
+    // A presenter whose write failed last time is brought in step by the next rename, even to the same name.
+    const store = (await import("../store")).getStore();
+    await store.put("agent", { ...(await getAgent(onMine.id, "r3")), avatarName: "Stale" });
+    await updateAvatar(mine.id, { name: "Daniel" }, "r3");
+    assert.equal((await getAgent(onMine.id, "r3")).avatarName, "Daniel", "stragglers heal");
+  });
+
+  it("a photo avatar can carry a default voice the owner can render with, cleared when that clone is deleted", async () => {
+    const { updateAvatar, updateAvatarSchema } = await import("../services/avatars");
+    const sample = `data:audio/webm;base64,${Buffer.from("bytes").toString("base64")}`;
+    const clone = await cloneVoice(cloneVoiceSchema.parse({ name: "Mine", samples: [sample] }), "r5");
+    const a = await createAvatar(createAvatarSchema.parse({ name: "Dan", imageUrl: "https://example.com/p.jpg", defaultVoiceId: STOCK_VOICES[1].id }), "r5");
+    assert.equal(a.defaultVoiceId, STOCK_VOICES[1].id);
+    await assert.rejects(createAvatar({ name: "X", imageUrl: "https://example.com/p.jpg", defaultVoiceId: "nope" }, "r5"), /not available/);
+    await assert.rejects(createAvatar({ name: "X", imageUrl: "https://example.com/p.jpg", defaultVoiceId: clone.id }, "r6"), /not available/, "another account's clone");
+    assert.equal((await updateAvatar(a.id, { defaultVoiceId: clone.id }, "r5")).defaultVoiceId, clone.id);
+    await assert.rejects(updateAvatar(a.id, { defaultVoiceId: "nope" }, "r5"), /not available/);
+    assert.equal((await getAvatar(a.id, "r5")).defaultVoiceId, clone.id, "a refused change leaves the stored voice");
+    await deleteClonedVoice(clone.id, "r5");
+    assert.equal("defaultVoiceId" in (await getAvatar(a.id, "r5")), false, "a deleted clone is cleared from the avatar");
+    const back = await updateAvatar(a.id, { defaultVoiceId: STOCK_VOICES[0].id }, "r5");
+    assert.equal(back.name, "Dan", "other fields stay");
+    assert.equal("defaultVoiceId" in (await updateAvatar(a.id, { defaultVoiceId: null }, "r5")), false, "null clears it");
+    assert.throws(() => updateAvatarSchema.parse({ defaultVoiceId: "" }));
   });
 
   it("an upload that finishes after a rename keeps the new name, and never brings a deleted avatar back", async () => {
@@ -450,6 +474,17 @@ describe("captions", () => {
     const { captionStyleSchema } = await import("../services/videos");
     assert.deepEqual(captionStyleSchema.parse({ position: "top", size: "large" }), { position: "top", size: "large" });
     assert.throws(() => captionStyleSchema.parse({ position: "middle", size: "large" }));
+  });
+
+  it("keeps the share page's track off only for a HeyGen file that carries captions already", async () => {
+    const { captionsBurnedIn, heygenBurnsCaptions } = await import("../captions");
+    assert.equal(heygenBurnsCaptions({ captions: true }), true);
+    assert.equal(heygenBurnsCaptions({ captions: true, captionStyle: { position: "top", size: "large" } }), false);
+    assert.equal(heygenBurnsCaptions({ captions: false }), false);
+    assert.equal(captionsBurnedIn({ captions: true, provider: "heygen" }), true, "default look on HeyGen: burned in, track waits in the CC menu");
+    assert.equal(captionsBurnedIn({ captions: true, provider: "heygen", captionStyle: { position: "top", size: "large" } }), false);
+    assert.equal(captionsBurnedIn({ captions: true, provider: "mock" }), false, "other renderers never burn captions in");
+    assert.equal(captionsBurnedIn({ captions: true, provider: "did" }), false);
   });
 
   it("stores the default caption style as absent whichever client spelled it out", async () => {

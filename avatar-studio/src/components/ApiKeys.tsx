@@ -66,7 +66,7 @@ export function ApiKeys() {
             <KeyRound className="h-4 w-4 text-slate-400" /> Developer API
           </h3>
           <p className="mt-1 text-xs text-slate-500">
-            Call every <code className="rounded bg-slate-100 px-1 py-0.5">/api/*</code> endpoint from scripts with <code className="rounded bg-slate-100 px-1 py-0.5">Authorization: Bearer &lt;key&gt;</code>. Keys act as your account; creating and revoking keys needs a signed-in session.
+            Call every <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">/api/*</code> endpoint from scripts with <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">Authorization: Bearer &lt;key&gt;</code>. Keys act as your account; creating and revoking keys needs a signed-in session.
           </p>
         </div>
       </div>
@@ -105,7 +105,7 @@ export function ApiKeys() {
             <div className="min-w-0">
               <div className="truncate text-sm font-medium text-slate-900">{k.name}</div>
               <div className="text-xs text-slate-500">
-                <code className="rounded bg-slate-100 px-1 py-0.5">{k.prefix}…</code> · created {formatDate(k.createdAt)}
+                <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">{k.prefix}…</code> · created {formatDate(k.createdAt)}
                 {k.lastUsedAt ? ` · last used ${formatDate(k.lastUsedAt)}` : " · never used"}
               </div>
             </div>

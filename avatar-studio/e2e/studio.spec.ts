@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { AxeBuilder } from "@axe-core/playwright";
 
 // Demo-mode flows. The mock renderer completes ~12s after submission.
 
@@ -278,4 +279,17 @@ test("webhook settings reject private hosts and show the signing secret", async 
   await page.getByRole("button", { name: "Remove webhook" }).click();
   await expect(page.getByTestId("webhook-secret")).toHaveCount(0);
   expect((await (await page.request.get("/api/notifications")).json()).webhook).toBeNull();
+});
+
+test("pages have no WCAG 2.1 AA violations", async ({ page }) => {
+  const v = await createVideoViaApi(page, "Accessible video");
+  const paths = ["/", "/login", "/home", "/create", "/videos", `/videos/${v.id}`, "/templates", "/batch", "/avatars", "/voices", "/translate", "/brand", "/settings", `/share/${v.id}`];
+  const report: string[] = [];
+  for (const path of paths) {
+    await page.goto(path);
+    await page.waitForLoadState("networkidle").catch(() => {});
+    const result = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+    for (const vio of result.violations) report.push(`${path}: ${vio.id} (${vio.impact}) x${vio.nodes.length} ${vio.nodes[0]?.target.join(" ")}`);
+  }
+  expect(report, report.join("\n")).toEqual([]);
 });

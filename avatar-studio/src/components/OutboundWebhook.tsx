@@ -71,7 +71,7 @@ export function OutboundWebhook() {
         <Webhook className="h-4 w-4 text-slate-400" /> Webhook notifications
       </h3>
       <p className="mt-1 text-xs text-slate-500">
-        A signed <code className="rounded bg-slate-100 px-1 py-0.5">POST</code> is sent to your endpoint when a render completes or fails (events <code className="rounded bg-slate-100 px-1 py-0.5">video.completed</code>, <code className="rounded bg-slate-100 px-1 py-0.5">video.failed</code>). Verify <code className="rounded bg-slate-100 px-1 py-0.5">X-Studio-Signature</code> as HMAC-SHA256 of <code className="rounded bg-slate-100 px-1 py-0.5">{"<timestamp>.<body>"}</code> with your secret. Private and local hosts are rejected.
+        A signed <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">POST</code> is sent to your endpoint when a render completes or fails (events <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">video.completed</code>, <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">video.failed</code>). Verify <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">X-Studio-Signature</code> as HMAC-SHA256 of <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">{"<timestamp>.<body>"}</code> with your secret. Private and local hosts are rejected.
       </p>
       <ErrorBanner message={error ?? err} />
       {note && <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">{note}</div>}

@@ -57,7 +57,7 @@ export default function SettingsPage() {
               <div>
                 <div className="text-sm font-medium text-slate-900">{r.label}</div>
                 <div className="mt-0.5 text-xs text-slate-500">
-                  <code className="rounded bg-slate-100 px-1 py-0.5">{r.env}</code> · options: {r.options}
+                  <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">{r.env}</code> · options: {r.options}
                 </div>
               </div>
               <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${live ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
@@ -71,7 +71,7 @@ export default function SettingsPage() {
         <div>
           <div className="text-sm font-medium text-slate-900">Render allowance</div>
           <div className="mt-0.5 text-xs text-slate-500">
-            <code className="rounded bg-slate-100 px-1 py-0.5">RENDER_LIMIT_PER_MONTH</code> · caps renders per account per calendar month (UTC); failed starts do not count
+            <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">RENDER_LIMIT_PER_MONTH</code> · caps renders per account per calendar month (UTC); failed starts do not count
           </div>
         </div>
         <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${limit ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
@@ -82,7 +82,7 @@ export default function SettingsPage() {
         <div>
           <div className="text-sm font-medium text-slate-900">Access</div>
           <div className="mt-0.5 text-xs text-slate-500">
-            <code className="rounded bg-slate-100 px-1 py-0.5">NEXT_PUBLIC_SUPABASE_URL</code> + <code className="rounded bg-slate-100 px-1 py-0.5">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> for per-user accounts, or <code className="rounded bg-slate-100 px-1 py-0.5">STUDIO_PASSWORD</code> for one shared password · landing, login, and share pages stay public
+            <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">NEXT_PUBLIC_SUPABASE_URL</code> + <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> for per-user accounts, or <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">STUDIO_PASSWORD</code> for one shared password · landing, login, and share pages stay public
           </div>
         </div>
         <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${data?.authEnabled ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>

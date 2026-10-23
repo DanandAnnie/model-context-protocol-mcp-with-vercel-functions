@@ -13,14 +13,14 @@ D-ID, ElevenLabs, or in a fully offline **demo mode** with no keys at all.
 | Area | What you get |
 |---|---|
 | Home | Quick actions, recent videos |
-| Create video | Multi-scene script editor (up to 20 scenes, each with its own background), word/duration counter, AI script writer, avatar picker, voice picker with live preview, background color/image, 16:9 / 9:16 / 1:1, captions, speaking speed, live stage preview |
-| My videos | Library with search and status filters, player, download, SRT captions, share link, delete, "Edit a copy" |
+| Create video | Draft autosave (survives a refresh), multi-scene script editor (up to 20 scenes, each with its own background), word/duration counter, AI script writer, avatar picker, voice picker with live preview, background color/image, 16:9 / 9:16 / 1:1, captions, speaking speed, live stage preview |
+| My videos | Library with search and status filters, player, inline rename, download, SRT captions, share link, delete, "Edit a copy" |
 | Share page | Public, sidebar-free player at `/share/:id` |
 | Templates | Script templates by category (real estate, marketing, training, support, social) that pre-fill the editor |
 | Avatars | Library presenters + photo avatars created from an uploaded portrait or image URL |
 | Voices | Searchable voice library with previews (provider audio, provider sample, or browser speech in demo mode) |
 | Video translate | Submit a video URL + target language, track dubbing jobs |
-| Settings | Shows which provider backs each capability, access mode, and how to configure it |
+| Settings | Usage summary (videos, completed, processing, failed, seconds rendered), which provider backs each capability, access mode, and how to configure it |
 | Access | Optional `STUDIO_PASSWORD` gate (sign-in page, 30-day session cookie); landing, login, share pages, and provider webhooks stay public |
 | API | REST routes under `/api/*`, provider webhooks under `/api/webhooks/:provider` |
 

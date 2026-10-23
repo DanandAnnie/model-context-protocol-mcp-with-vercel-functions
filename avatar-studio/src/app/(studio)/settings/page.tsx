@@ -1,7 +1,8 @@
 "use client";
 import { Card, SectionTitle } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
-import type { ProviderStatus } from "@/lib/types";
+import { formatSeconds } from "@/lib/client";
+import type { ProviderStatus, Video } from "@/lib/types";
 
 const ROWS: Array<{ key: keyof Omit<ProviderStatus, "mode" | "authEnabled">; label: string; env: string; options: string }> = [
   { key: "avatar", label: "Avatar rendering", env: "AVATAR_PROVIDER + HEYGEN_API_KEY / DID_API_KEY", options: "heygen, did, mock" },
@@ -11,11 +12,37 @@ const ROWS: Array<{ key: keyof Omit<ProviderStatus, "mode" | "authEnabled">; lab
   { key: "persistence", label: "Storage", env: "SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY", options: "supabase, memory" },
 ];
 
+function summarize(videos: Video[]) {
+  return {
+    total: videos.length,
+    completed: videos.filter((v) => v.status === "completed").length,
+    processing: videos.filter((v) => v.status === "processing" || v.status === "queued").length,
+    failed: videos.filter((v) => v.status === "failed").length,
+    seconds: videos.reduce((n, v) => n + (v.status === "completed" ? v.durationSec ?? 0 : 0), 0),
+  };
+}
+
 export default function SettingsPage() {
   const { data } = useApi<ProviderStatus>("/api/status");
+  const { data: videoData } = useApi<{ videos: Video[] }>("/api/videos");
+  const usage = summarize(videoData?.videos ?? []);
   return (
     <>
       <SectionTitle title="Settings" subtitle="Providers are configured with environment variables on the server, never from the browser." />
+      <Card className="mb-6 grid grid-cols-2 divide-x divide-slate-100 sm:grid-cols-5">
+        {[
+          ["Videos", String(usage.total)],
+          ["Completed", String(usage.completed)],
+          ["Processing", String(usage.processing)],
+          ["Failed", String(usage.failed)],
+          ["Rendered", formatSeconds(usage.seconds)],
+        ].map(([label, value]) => (
+          <div key={label} className="px-5 py-4">
+            <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
+            <div className="mt-1 text-xl font-semibold text-slate-900">{videoData ? value : "…"}</div>
+          </div>
+        ))}
+      </Card>
       <Card className="divide-y divide-slate-100">
         {ROWS.map((r) => {
           const value = data?.[r.key] ?? "…";

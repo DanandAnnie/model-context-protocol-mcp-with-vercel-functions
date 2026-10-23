@@ -1,6 +1,6 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Captions, Clapperboard, Image as ImageIcon, Layers, Mic2, Palette, Play, Plus, Square, Trash2, Users, Wand2, X } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { VoiceRow } from "@/components/VoicePicker";
@@ -14,6 +14,38 @@ import { MAX_SCENES, type AspectRatio, type Avatar, type Background, type Scene,
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
+const DRAFT_KEY = "avatar-studio:draft";
+
+interface Draft {
+  title: string;
+  scenes: Scene[];
+  aspect: AspectRatio;
+  captions: boolean;
+  speed: number;
+  avatarId?: string;
+  voiceId?: string;
+  savedAt: string;
+}
+
+function readDraft(): Draft | null {
+  try {
+    const raw = window.localStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    const d = JSON.parse(raw) as Draft;
+    return Array.isArray(d.scenes) && d.scenes.length ? d : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeDraft(d: Draft | null) {
+  try {
+    if (d) window.localStorage.setItem(DRAFT_KEY, JSON.stringify(d));
+    else window.localStorage.removeItem(DRAFT_KEY);
+  } catch {
+    // Storage can be unavailable (private mode); drafts are a convenience only.
+  }
+}
 const newScene = (script = "", background: Background = DEFAULT_BG): Scene => ({ script, background });
 const TONES = ["friendly", "professional", "formal", "energetic", "calm"] as const;
 type Tab = "avatar" | "voice" | "background" | "settings";
@@ -66,8 +98,48 @@ function CreateInner() {
   const [voiceQuery, setVoiceQuery] = useState("");
 
   const [prefill, setPrefill] = useState<{ avatarId?: string; voiceId?: string } | null>(null);
+  const [draftRestored, setDraftRestored] = useState<string | null>(null);
+  const hydrated = useRef(false);
   const templateId = params.get("template");
   const fromId = params.get("from");
+
+  // Restore an unsent draft on a plain visit (not when a template or copy is requested).
+  useEffect(() => {
+    if (hydrated.current) return;
+    hydrated.current = true;
+    if (templateId || fromId) return;
+    const d = readDraft();
+    if (!d) return;
+    setTitle(d.title);
+    setScenes(d.scenes.map((sc) => newScene(sc.script, sc.background)));
+    setActiveIdx(0);
+    setAspect(d.aspect);
+    setCaptions(d.captions);
+    setSpeed(d.speed);
+    setPrefill({ avatarId: d.avatarId, voiceId: d.voiceId });
+    setDraftRestored(d.savedAt);
+  }, [templateId, fromId]);
+
+  // Autosave the editor state (debounced) so a refresh never loses work.
+  useEffect(() => {
+    if (!hydrated.current) return;
+    const empty = scenes.every((sc) => !sc.script.trim()) && title === "Untitled video";
+    const t = setTimeout(() => {
+      writeDraft(empty ? null : { title, scenes, aspect, captions, speed, avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [title, scenes, aspect, captions, speed, avatar, voice]);
+
+  function discardDraft() {
+    writeDraft(null);
+    setTitle("Untitled video");
+    setScenes([newScene()]);
+    setActiveIdx(0);
+    setAspect("16:9");
+    setCaptions(false);
+    setSpeed(1);
+    setDraftRestored(null);
+  }
 
   // Pre-fill from a template (?template=) or an existing video (?from=).
   useEffect(() => {
@@ -131,6 +203,7 @@ function CreateInner() {
         method: "POST",
         body: JSON.stringify({ title, scenes, avatarId: avatar.id, voiceId: voice.id, aspect, captions, speed }),
       });
+      writeDraft(null);
       router.push(`/videos/${video.id}`);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not start the render");
@@ -153,6 +226,14 @@ function CreateInner() {
         }
       />
       <ErrorBanner message={err ?? avatarsError ?? voicesError} />
+      {draftRestored && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
+          <span>Restored your unsent draft from {new Date(draftRestored).toLocaleString()}.</span>
+          <button type="button" onClick={discardDraft} className="font-medium underline hover:no-underline">
+            Discard draft
+          </button>
+        </div>
+      )}
 
       <div className="grid gap-6 xl:grid-cols-[1.1fr_1fr]">
         {/* Left column: stage + script */}

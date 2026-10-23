@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
-import { ArrowLeft, Captions, Check, Copy, Download, Languages, Link2, Trash2 } from "lucide-react";
+import { ArrowLeft, Captions, Check, Copy, Download, Languages, Link2, Pencil, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate, formatSeconds, isDarkHex } from "@/lib/client";
@@ -13,11 +13,31 @@ export default function VideoDetailPage() {
   const router = useRouter();
   const [deleting, setDeleting] = useState(false);
   const [copied, setCopied] = useState(false);
-  const { data, loading, error } = useApi<{ video: Video }>(`/api/videos/${id}`, {
+  const [editing, setEditing] = useState(false);
+  const [draftTitle, setDraftTitle] = useState("");
+  const [renameErr, setRenameErr] = useState<string | null>(null);
+  const { data, loading, error, setData } = useApi<{ video: Video }>(`/api/videos/${id}`, {
     pollMs: 5000,
     pollWhile: (d) => d.video.status === "processing" || d.video.status === "queued",
   });
   const video = data?.video;
+
+  async function saveTitle() {
+    if (!video) return;
+    const title = draftTitle.trim();
+    if (!title || title === video.title) {
+      setEditing(false);
+      return;
+    }
+    try {
+      const res = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify({ title }) });
+      setData({ video: { ...video, title: res.video.title } });
+      setRenameErr(null);
+      setEditing(false);
+    } catch (e) {
+      setRenameErr(e instanceof Error ? e.message : "Could not rename");
+    }
+  }
 
   async function copyShareLink() {
     if (!video) return;
@@ -47,13 +67,41 @@ export default function VideoDetailPage() {
       <Link href="/videos" className="mb-4 inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900">
         <ArrowLeft className="h-4 w-4" /> All videos
       </Link>
-      <ErrorBanner message={error} />
+      <ErrorBanner message={error ?? renameErr} />
       {loading || !video ? (
         <Skeleton className="aspect-video w-full" />
       ) : (
         <>
           <SectionTitle
-            title={video.title}
+            title={
+              editing ? (
+                <input
+                  autoFocus
+                  value={draftTitle}
+                  onChange={(e) => setDraftTitle(e.target.value)}
+                  onBlur={saveTitle}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") saveTitle();
+                    if (e.key === "Escape") setEditing(false);
+                  }}
+                  aria-label="Video title"
+                  className="w-full max-w-xl rounded-lg border border-brand-300 px-2 py-1 text-2xl font-semibold tracking-tight text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-100"
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraftTitle(video.title);
+                    setEditing(true);
+                  }}
+                  className="group inline-flex items-center gap-2 text-left"
+                  title="Rename"
+                >
+                  {video.title}
+                  <Pencil className="h-4 w-4 text-slate-300 group-hover:text-slate-600" />
+                </button>
+              )
+            }
             subtitle={`Created ${formatDate(video.createdAt)} · ${video.aspect} · ${video.provider}`}
             action={
               <div className="flex items-center gap-2">

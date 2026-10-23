@@ -174,6 +174,14 @@ export async function getVideo(id: string, refresh = true): Promise<Video> {
   }
 }
 
+export const videoPatchSchema = z.object({ title: z.string().trim().min(1).max(120) });
+
+export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSchema>): Promise<Video> {
+  const existing = await getStore().get<Video>("video", id);
+  if (!existing) throw new NotFoundError(`Video ${id} not found`);
+  return getStore().put("video", { ...existing, ...patch, updatedAt: nowIso() });
+}
+
 export async function deleteVideo(id: string): Promise<void> {
   const existing = await getStore().get<Video>("video", id);
   if (!existing) throw new NotFoundError(`Video ${id} not found`);

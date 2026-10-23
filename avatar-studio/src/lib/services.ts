@@ -425,6 +425,28 @@ export async function recordView(id: string, gate: () => boolean = () => true): 
   return { views, counted: true };
 }
 
+export const bulkVideoSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("delete"), ids: z.array(z.string().min(1)).min(1).max(200) }),
+  z.object({ action: z.literal("move"), ids: z.array(z.string().min(1)).min(1).max(200), folder: z.string().trim().max(MAX_FOLDER_NAME) }),
+]);
+
+/** Delete or move many videos at once. Ids that are missing or belong to someone else are reported, not failed. */
+export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId: string = LOCAL_OWNER): Promise<{ done: number; missing: string[] }> {
+  const missing: string[] = [];
+  let done = 0;
+  for (const id of Array.from(new Set(input.ids))) {
+    const existing = await getStore().get<Video>("video", id);
+    if (!existing || (existing.ownerId ?? LOCAL_OWNER) !== ownerId) {
+      missing.push(id);
+      continue;
+    }
+    if (input.action === "delete") await getStore().remove("video", id);
+    else await updateVideo(id, { folder: input.folder }, ownerId);
+    done += 1;
+  }
+  return { done, missing };
+}
+
 export async function deleteVideo(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
   owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
   await getStore().remove("video", id);

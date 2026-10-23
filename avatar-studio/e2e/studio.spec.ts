@@ -228,3 +228,28 @@ test("folders filter the library and share views are counted once per viewer", a
   await expect(page.getByRole("button", { name: "Move to a folder" })).toContainText("Archive");
   expect((await (await page.request.get(`/api/videos/${a.id}`)).json()).video.folder).toBe("Archive");
 });
+
+test("library multi-select moves and deletes videos in bulk", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const a = await createVideoViaApi(page, `Bulk one ${tag}`);
+  const b = await createVideoViaApi(page, `Bulk two ${tag}`);
+  page.on("dialog", (d) => d.accept(`Bulk ${tag}`));
+
+  await page.goto("/videos");
+  await page.getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: `Select Bulk one ${tag}` }).click();
+  await page.getByRole("button", { name: `Select Bulk two ${tag}` }).click();
+  await expect(page.getByTestId("bulk-bar")).toContainText("2 selected");
+  await page.getByRole("button", { name: "Move to folder" }).click();
+  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+  expect((await (await page.request.get(`/api/videos/${a.id}`)).json()).video.folder).toBe(`Bulk ${tag}`);
+  expect((await (await page.request.get(`/api/videos/${b.id}`)).json()).video.folder).toBe(`Bulk ${tag}`);
+
+  await page.getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: `Select Bulk two ${tag}` }).click();
+  await page.getByRole("button", { name: "Delete" }).click();
+  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+  expect((await page.request.get(`/api/videos/${b.id}`)).status()).toBe(404);
+  expect((await page.request.get(`/api/videos/${a.id}`)).status()).toBe(200);
+  expect((await page.request.post("/api/videos/bulk", { data: { action: "move", ids: [] } })).status()).toBe(400);
+});

@@ -5,6 +5,8 @@ import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import {
   brandKitSchema,
+  bulkVideoSchema,
+  bulkVideos,
   createAvatar,
   createAvatarSchema,
   deleteBrandKit,
@@ -474,5 +476,24 @@ describe("folders and share views", () => {
     assert.equal((await recordView(v.id)).views, 2);
     assert.ok((await getVideo(v.id, undefined, false)).lastViewedAt);
     await assert.rejects(recordView("vid_missing"), /not found/);
+  });
+});
+
+describe("bulk actions", () => {
+  const req = { title: "B", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9" as const, background: { type: "color" as const, value: "#fff" }, captions: false, speed: 1 };
+
+  it("moves and deletes many videos, skipping foreign and unknown ids", async () => {
+    const a = await createVideo(req, "u1");
+    const b = await createVideo(req, "u1");
+    const theirs = await createVideo(req, "u2");
+    const moved = await bulkVideos(bulkVideoSchema.parse({ action: "move", ids: [a.id, b.id, theirs.id, "vid_nope", a.id], folder: "Q4" }), "u1");
+    assert.deepEqual(moved, { done: 2, missing: [theirs.id, "vid_nope"] });
+    assert.equal((await getVideo(a.id, "u1", false)).folder, "Q4");
+    assert.equal((await getVideo(theirs.id, "u2", false)).folder, undefined);
+    const deleted = await bulkVideos({ action: "delete", ids: [a.id, theirs.id] }, "u1");
+    assert.deepEqual(deleted, { done: 1, missing: [theirs.id] });
+    assert.equal((await listVideos("u1")).length, 1);
+    assert.equal((await listVideos("u2")).length, 1);
+    assert.throws(() => bulkVideoSchema.parse({ action: "move", ids: [] }));
   });
 });

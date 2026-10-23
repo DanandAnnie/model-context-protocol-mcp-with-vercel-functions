@@ -2,9 +2,10 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
-import { Clapperboard } from "lucide-react";
+import { CheckSquare, Clapperboard, FolderInput, Trash2, X } from "lucide-react";
+import { api } from "@/lib/client";
 import { VideoCard } from "@/components/VideoCard";
-import { EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
+import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import type { Video, VideoStatus } from "@/lib/types";
 
@@ -23,7 +24,7 @@ function VideosInner() {
   const batch = params.get("batch");
   const skipped = Number(params.get("skipped") ?? 0);
   const failedCount = Number(params.get("failed") ?? 0);
-  const { data, loading, error } = useApi<{ videos: Video[] }>("/api/videos", {
+  const { data, loading, error, refetch } = useApi<{ videos: Video[] }>("/api/videos", {
     pollMs: 6000,
     pollWhile: (d) => d.videos.some((v) => v.status === "processing" || v.status === "queued"),
   });
@@ -44,6 +45,47 @@ function VideosInner() {
   }, [data, q, status, batch, folder]);
   const hasAny = (data?.videos.length ?? 0) > 0;
 
+  // Multi-select: move the chosen videos to a folder or delete them in one request.
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [bulkErr, setBulkErr] = useState<string | null>(null);
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function stopSelecting() {
+    setSelecting(false);
+    setSelected(new Set());
+  }
+  async function bulk(action: "delete" | "move") {
+    const ids = Array.from(selected);
+    if (!ids.length) return;
+    let targetFolder: string | undefined;
+    if (action === "move") {
+      const answer = window.prompt("Folder name (leave empty to move to Unfiled)", "");
+      if (answer === null) return;
+      targetFolder = answer;
+    } else if (!window.confirm(`Delete ${ids.length} ${ids.length === 1 ? "video" : "videos"}? This cannot be undone.`)) {
+      return;
+    }
+    setBusy(true);
+    setBulkErr(null);
+    try {
+      await api("/api/videos/bulk", { method: "POST", body: JSON.stringify(action === "move" ? { action, ids, folder: targetFolder } : { action, ids }) });
+      await refetch();
+      stopSelecting();
+    } catch (e) {
+      setBulkErr(e instanceof Error ? e.message : "Could not update the videos");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <>
       <SectionTitle
@@ -55,7 +97,7 @@ function VideosInner() {
           </Link>
         }
       />
-      <ErrorBanner message={error} />
+      <ErrorBanner message={error ?? bulkErr} />
       {batch && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm text-brand-900">
           <span>
@@ -78,6 +120,28 @@ function VideosInner() {
                 </option>
               ))}
             </select>
+          )}
+          <span className="flex-1" />
+          {selecting ? (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1" data-testid="bulk-bar">
+              <span className="px-1 text-xs font-medium text-slate-700">{selected.size} selected</span>
+              <button type="button" onClick={() => setSelected(new Set(videos.map((v) => v.id)))} className="text-xs text-brand-700 hover:underline">
+                Select all shown
+              </button>
+              <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => bulk("move")} disabled={!selected.size || busy}>
+                <FolderInput className="h-3.5 w-3.5" /> Move to folder
+              </Button>
+              <Button variant="danger" className="px-2.5 py-1 text-xs" onClick={() => bulk("delete")} disabled={!selected.size || busy} loading={busy}>
+                <Trash2 className="h-3.5 w-3.5" /> Delete
+              </Button>
+              <button type="button" onClick={stopSelecting} aria-label="Done selecting" className="rounded p-1 text-slate-500 hover:bg-slate-100">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ) : (
+            <Button variant="secondary" className="px-3 py-1.5 text-xs" onClick={() => setSelecting(true)}>
+              <CheckSquare className="h-3.5 w-3.5" /> Select
+            </Button>
           )}
           {STATUSES.map((s) => (
             <button
@@ -105,7 +169,7 @@ function VideosInner() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {videos.map((v) => (
-            <VideoCard key={v.id} video={v} />
+            <VideoCard key={v.id} video={v} selectable={selecting} selected={selected.has(v.id)} onToggle={() => toggle(v.id)} />
           ))}
         </div>
       )}

@@ -1,6 +1,9 @@
 // Library analytics computed client-side from the owner's videos. Pure, so it is unit-tested directly.
 import type { Video } from "./types";
 
+const DAY_MS = 86_400_000;
+const dayKey = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
 export interface DayCount {
   /** UTC calendar day, YYYY-MM-DD. */
   day: string;
@@ -30,10 +33,37 @@ export function finishRateOf(video: Pick<Video, "views" | "watch">): number | nu
   return Math.min(1, (video.watch?.q100 ?? 0) / video.views);
 }
 
-export const ANALYTICS_COLUMNS = ["id", "title", "status", "created", "folder", "duration_sec", "views", "last_viewed", "watched_25", "watched_50", "watched_75", "watched_100", "finish_rate", "cta_clicks", "share_link"] as const;
+/** How many days of per-day views a video keeps; older days are dropped when a view lands. */
+export const VIEW_HISTORY_DAYS = 90;
+
+/** Returns the per-day view map with one more view on `now`'s UTC day and days older than the history window dropped. */
+export function bumpViewsByDay(existing: Record<string, number> | undefined, now = Date.now()): Record<string, number> {
+  const today = dayKey(now);
+  const oldest = dayKey(now - (VIEW_HISTORY_DAYS - 1) * DAY_MS);
+  const next: Record<string, number> = {};
+  for (const [day, n] of Object.entries(existing ?? {})) if (day >= oldest && day !== today && n > 0) next[day] = n;
+  next[today] = (existing?.[today] ?? 0) + 1;
+  return next;
+}
+
+/** A video's views per UTC day for the last `days` days, oldest first, always `days` entries. */
+export function viewsPerDay(video: Pick<Video, "viewsByDay">, now = Date.now(), days = 14): DayCount[] {
+  const start = Math.floor(now / DAY_MS) * DAY_MS - (days - 1) * DAY_MS;
+  return Array.from({ length: days }, (_, i) => {
+    const day = dayKey(start + i * DAY_MS);
+    return { day, count: video.viewsByDay?.[day] ?? 0 };
+  });
+}
+
+/** Views in the last `days` UTC days including today. */
+export function viewsInLast(video: Pick<Video, "viewsByDay">, days: number, now = Date.now()): number {
+  return viewsPerDay(video, now, days).reduce((n, d) => n + d.count, 0);
+}
+
+export const ANALYTICS_COLUMNS = ["id", "title", "status", "created", "folder", "duration_sec", "views", "views_7d", "last_viewed", "watched_25", "watched_50", "watched_75", "watched_100", "finish_rate", "cta_clicks", "share_link"] as const;
 
 /** One spreadsheet row per video: what the owner sees on the video page, in a form that sorts and sums. */
-export function analyticsRows(videos: Video[], base: string): Array<Record<(typeof ANALYTICS_COLUMNS)[number], string | number | undefined>> {
+export function analyticsRows(videos: Video[], base: string, now = Date.now()): Array<Record<(typeof ANALYTICS_COLUMNS)[number], string | number | undefined>> {
   const origin = base.replace(/\/$/, "");
   return videos.map((v) => {
     const rate = finishRateOf(v);
@@ -45,6 +75,7 @@ export function analyticsRows(videos: Video[], base: string): Array<Record<(type
       folder: v.folder,
       duration_sec: v.durationSec,
       views: v.views ?? 0,
+      views_7d: viewsInLast(v, 7, now),
       last_viewed: v.lastViewedAt,
       watched_25: v.watch?.q25 ?? 0,
       watched_50: v.watch?.q50 ?? 0,
@@ -56,9 +87,6 @@ export function analyticsRows(videos: Video[], base: string): Array<Record<(type
     };
   });
 }
-
-const DAY_MS = 86_400_000;
-const dayKey = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
 export function computeInsights(videos: Video[], now = Date.now(), days = 14): Insights {
   const start = Math.floor(now / DAY_MS) * DAY_MS - (days - 1) * DAY_MS;

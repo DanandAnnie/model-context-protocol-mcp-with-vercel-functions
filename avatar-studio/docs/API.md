@@ -85,7 +85,7 @@ Query parameters, all optional: `q` (matches title, script, avatar, and voice), 
 
 ### `GET /api/videos/analytics` — the library's share analytics as a CSV download
 
-One row per video, newest first: `id`, `title`, `status`, `created`, `folder`, `duration_sec`, `views`, `last_viewed`, `watched_25` … `watched_100`, `finish_rate` (percent of views that played to the end; empty before any view), `cta_clicks`, and `share_link` (built from `APP_URL` when set). Cells are quoted and formula-safe, with a byte-order mark for Excel.
+One row per video, newest first: `id`, `title`, `status`, `created`, `folder`, `duration_sec`, `views`, `views_7d` (views in the last seven UTC days including today), `last_viewed`, `watched_25` … `watched_100`, `finish_rate` (percent of views that played to the end; empty before any view), `cta_clicks`, and `share_link` (built from `APP_URL` when set). Cells are quoted and formula-safe, with a byte-order mark for Excel.
 
 ### `GET /api/templates`, `POST /api/templates`, `GET /api/templates/:id`, `DELETE /api/templates/:id` — saved templates
 
@@ -105,7 +105,7 @@ Submits a **failed** render again as a new video with the same scenes, presenter
 
 ### `GET /api/videos/:id/cover` — the custom poster image (public under the share page's rules: `404` while the link is offline, for a password-protected link without the unlock cookie, and when no cover is set; `?v=` responses are immutable, and `public` only for a link that is neither offline nor password-protected, with a lifetime capped at the link's expiry)
 ### `GET /api/videos/:id/captions` — SRT; add `?format=vtt` for WebVTT (public; while the share link is offline only the owner's own request gets them, and a password-protected link needs the unlock cookie or the owner)
-### `POST /api/videos/:id/view` — share-page view beacon (public; one per viewer per 10 minutes, 600 per video; counts only once the render completed)
+### `POST /api/videos/:id/view` — share-page view beacon (public; one per viewer per 10 minutes, 600 per video; counts only once the render completed; the video carries `views`, `lastViewedAt`, and `viewsByDay`, a `YYYY-MM-DD` → count map of the last 90 UTC days)
 ### `POST /api/videos/:id/watch` — `{ "quarter": 25 | 50 | 75 | 100 }` share-player progress beacon with the furthest point reached (public; every quarter up to it counts once per viewer per 10 minutes, 600 per quarter per video; counts only once the render completed; the video carries `watch: { q25, q50, q75, q100 }`)
 ### `POST /api/videos/:id/cta` — call-to-action click beacon (public; one per viewer per 10 minutes, 300 per video; counts only while a completed video carries a button)
 ### `POST /api/videos/:id/unlock` — `{ "password" }` for a password-protected share link (public; 5 attempts per client per video, 30 per client across all videos, and 100 per video per 15 minutes, `429` with `Retry-After` past that; `401` on a wrong password). A correct password sets an `httpOnly` cookie for that video, valid for 30 days or until the password changes (`SameSite=None; Secure` in production so a share page embedded on another site can unlock too; browsers that block third-party cookies cannot unlock inside a frame).

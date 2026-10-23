@@ -146,6 +146,8 @@ export interface Video extends VideoRequest {
   /** Share page views (completed videos only; one per viewer per window). */
   views?: number;
   lastViewedAt?: string;
+  /** Views per UTC calendar day (`YYYY-MM-DD` → count) for the last 90 days, so the page can show views over time. */
+  viewsByDay?: Record<string, number>;
   /** How far share-page viewers got: viewers who passed a quarter, half, three quarters, and the end (one per viewer per window). */
   watch?: WatchCounts;
   /** Clicks on the share-page call to action (one per viewer per window). */

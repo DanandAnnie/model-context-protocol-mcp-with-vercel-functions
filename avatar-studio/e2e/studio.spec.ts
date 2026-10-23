@@ -367,6 +367,11 @@ test("share page offers a download only when the owner allows it", async ({ page
   expect((await watch(100)).watch).toEqual({ q25: 1, q50: 1, q75: 1, q100: 1 });
   await page.goto(`/videos/${v.id}`);
   await expect(page.getByTestId("cta-clicks")).toHaveText("1");
+  // Views land on today's bar of the per-day sparkline.
+  const views = (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.views as number;
+  expect(views).toBeGreaterThan(0);
+  await expect(page.getByTestId("views-by-day")).toHaveAttribute("data-total", String(views));
+  await expect(page.getByTestId("views-by-day")).toContainText(`${views} in 14 days`);
   await expect(page.getByTestId("watch-through")).toContainText("25% 1");
   await expect(page.getByTestId("watch-through")).toContainText("100% 1");
   // The row stays readable rather than ellipsised at laptop widths.
@@ -387,10 +392,11 @@ test("share page offers a download only when the owner allows it", async ({ page
   const analytics = await page.request.get("/api/videos/analytics");
   expect(analytics.headers()["content-type"]).toContain("text/csv");
   const sheet = parseCsv(await analytics.text());
-  expect(sheet.columns).toEqual(["id", "title", "status", "created", "folder", "duration_sec", "views", "last_viewed", "watched_25", "watched_50", "watched_75", "watched_100", "finish_rate", "cta_clicks", "share_link"]);
+  expect(sheet.columns).toEqual(["id", "title", "status", "created", "folder", "duration_sec", "views", "views_7d", "last_viewed", "watched_25", "watched_50", "watched_75", "watched_100", "finish_rate", "cta_clicks", "share_link"]);
   const row = sheet.rows.find((r) => r.id === v.id)!;
   expect([row.watched_25, row.watched_50, row.watched_75, row.watched_100, row.cta_clicks]).toEqual(["1", "1", "1", "1", "1"]);
   expect(Number(row.views)).toBeGreaterThan(0);
+  expect(row.views_7d).toBe(row.views);
   expect(Number(row.finish_rate)).toBeGreaterThan(0);
   expect(row.share_link).toContain(`/share/${v.id}`);
   await page.goto(`/share/${v.id}`);

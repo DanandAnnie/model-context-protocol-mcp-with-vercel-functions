@@ -50,7 +50,7 @@ import { MockAvatarProvider } from "../providers/avatar/mock";
 import { API_KEY_PREFIX, MAX_API_KEYS, createApiKey, listApiKeys, ownerForApiKey, revokeApiKey } from "../api-keys";
 import { createHmac } from "node:crypto";
 import { parseCsv, toCsv } from "../csv";
-import { ANALYTICS_COLUMNS, analyticsRows, computeInsights, finishRateOf } from "../insights";
+import { ANALYTICS_COLUMNS, analyticsRows, bumpViewsByDay, computeInsights, finishRateOf, viewsInLast, viewsPerDay } from "../insights";
 import { acceptInvite, canManageAccount, createInvite, createWorkspace, deleteWorkspace, findInvite, listWorkspaces, removeMember, revokeInvite, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
 import type { Video } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
@@ -866,8 +866,33 @@ describe("folders and share views", () => {
     assert.deepEqual(await recordView(v.id), { views: 1, counted: true });
     assert.deepEqual(await recordView(v.id, () => false), { views: 1, counted: false }, "gated repeat is not counted");
     assert.equal((await recordView(v.id)).views, 2);
-    assert.ok((await getVideo(v.id, undefined, false)).lastViewedAt);
+    const counted = await getVideo(v.id, undefined, false);
+    assert.ok(counted.lastViewedAt);
+    const today = new Date().toISOString().slice(0, 10);
+    assert.deepEqual(counted.viewsByDay, { [today]: 2 }, "every counted view lands on today's UTC day");
     await assert.rejects(recordView("vid_missing"), /not found/);
+  });
+
+  it("keeps views per day for ninety days and sums the recent window", () => {
+    const now = Date.UTC(2026, 9, 23, 12);
+    const day = (ago: number) => new Date(now - ago * 86_400_000).toISOString().slice(0, 10);
+    const history = { [day(0)]: 2, [day(1)]: 5, [day(6)]: 1, [day(7)]: 4, [day(89)]: 3, [day(90)]: 9, "bogus": 0 };
+    const bumped = bumpViewsByDay(history, now);
+    assert.equal(bumped[day(0)], 3, "today gains one");
+    assert.equal(bumped[day(89)], 3, "the ninetieth day is still kept");
+    assert.equal(day(90) in bumped, false, "the ninety-first day is dropped");
+    assert.equal("bogus" in bumped, false, "zero and junk entries are dropped");
+    assert.deepEqual(bumpViewsByDay(undefined, now), { [day(0)]: 1 });
+    const video = { viewsByDay: bumped };
+    const perDay = viewsPerDay(video, now, 14);
+    assert.equal(perDay.length, 14);
+    assert.deepEqual(perDay[13], { day: day(0), count: 3 });
+    assert.deepEqual(perDay[12], { day: day(1), count: 5 });
+    assert.equal(perDay[0].day, day(13));
+    assert.equal(viewsInLast(video, 7, now), 9, "today and the six days before it");
+    assert.equal(viewsInLast(video, 8, now), 13);
+    assert.equal(viewsInLast({}, 7, now), 0);
+    assert.equal(analyticsRows([{ id: "v", title: "t", status: "completed", createdAt: new Date(now).toISOString(), views: 13, viewsByDay: bumped } as never], "https://x.test", now)[0].views_7d, 9);
   });
 
   it("counts how far viewers get, once per quarter, under the share rules", async () => {

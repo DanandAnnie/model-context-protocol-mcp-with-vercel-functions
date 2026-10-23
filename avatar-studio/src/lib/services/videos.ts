@@ -15,6 +15,7 @@ import { PUBLIC_ACCESS, owned, scheduleNotification, stripUndefined } from "./sh
 import { SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, clearShareLock, setShareLock, shareUnlocked } from "../share-lock";
 import { clearCover, setCover } from "../cover";
 import { shareOffline } from "../client";
+import { bumpViewsByDay } from "../insights";
 
 export const backgroundSchema = z.object({ type: z.enum(["color", "image"]), value: z.string().min(1) });
 
@@ -381,7 +382,7 @@ function withCounterLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
 }
 
 /** The counters that beacons own; an owner edit or provider update must never roll them back. */
-const COUNTER_FIELDS = ["views", "lastViewedAt", "watch", "ctaClicks", "lastCtaClickAt"] as const;
+const COUNTER_FIELDS = ["views", "lastViewedAt", "viewsByDay", "watch", "ctaClicks", "lastCtaClickAt"] as const;
 
 /**
  * Writes a video built from `base` while keeping whatever counters the stored record holds by
@@ -410,7 +411,8 @@ export function recordView(id: string, gate: () => boolean = () => true, shareCo
     if (!video || shareOffline(video)) throw new NotFoundError(`Video ${id} not found`);
     if (video.status !== "completed" || !(await shareUnlocked(video, shareCookie)) || !gate()) return { views: video.views ?? 0, counted: false };
     const views = (video.views ?? 0) + 1;
-    await getStore().put("video", { ...video, views, lastViewedAt: nowIso() });
+    const now = Date.now();
+    await getStore().put("video", { ...video, views, lastViewedAt: new Date(now).toISOString(), viewsByDay: bumpViewsByDay(video.viewsByDay, now) });
     return { views, counted: true };
   });
 }

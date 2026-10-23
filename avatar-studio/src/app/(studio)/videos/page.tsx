@@ -100,7 +100,12 @@ function VideosInner() {
       const { missing } = await api<{ done: number; missing: string[] }>("/api/videos/bulk", { method: "POST", body: JSON.stringify(body) });
       await refetch();
       // Videos deleted elsewhere since the page loaded are skipped by the server; say so rather than pretend.
-      if (missing.length) setBulkErr(`${missing.length} of the selected ${missing.length === 1 ? "video was" : "videos were"} no longer there and ${missing.length === 1 ? "was" : "were"} skipped.`);
+      // For a delete that is the outcome asked for, so it reads as "already deleted" rather than a skip.
+      if (missing.length) {
+        const which = ids.length === 1 ? "The selected video" : `${missing.length} of the ${ids.length} selected videos`;
+        const verb = missing.length === 1 ? "was" : "were";
+        setBulkErr(action === "delete" ? `${which} had already been deleted.` : `${which} ${verb} no longer there and ${verb} skipped.`);
+      }
       stopSelecting();
     } catch (e) {
       setBulkErr(e instanceof Error ? e.message : "Could not update the videos");
@@ -148,7 +153,7 @@ function VideosInner() {
           {selecting ? (
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1" data-testid="bulk-bar">
               <span className="px-1 text-xs font-medium text-slate-700">{selected.size} selected</span>
-              <button type="button" onClick={() => setSelected(new Set(videos.map((v) => v.id)))} className="text-xs text-brand-700 hover:underline">
+              <button type="button" onClick={() => setSelected(new Set(videos.map((v) => v.id)))} disabled={busy !== null} className="text-xs text-brand-700 hover:underline disabled:opacity-50">
                 Select all shown
               </button>
               <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => bulk("move")} disabled={!selected.size || busy !== null} loading={busy === "move"}>
@@ -163,7 +168,7 @@ function VideosInner() {
               <Button variant="danger" className="px-2.5 py-1 text-xs" onClick={() => bulk("delete")} disabled={!selected.size || busy !== null} loading={busy === "delete"}>
                 <Trash2 className="h-3.5 w-3.5" /> Delete
               </Button>
-              <button type="button" onClick={stopSelecting} aria-label="Done selecting" className="rounded p-1 text-slate-500 hover:bg-slate-100">
+              <button type="button" onClick={stopSelecting} disabled={busy !== null} aria-label="Done selecting" className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-50">
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -205,7 +210,7 @@ function VideosInner() {
         <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {videos.map((v) => (
-              <VideoCard key={v.id} video={v} selectable={selecting} selected={selected.has(v.id)} onToggle={() => toggle(v.id)} />
+              <VideoCard key={v.id} video={v} selectable={selecting} selected={selected.has(v.id)} onToggle={() => busy === null && toggle(v.id)} />
             ))}
           </div>
           {remaining > 0 && (

@@ -4,6 +4,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { ArrowLeft, Captions, Check, Clock, Code2, Copy, Download, Eye, FolderOpen, Languages, LayoutTemplate, Link2, Lock, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge, inputClass } from "@/components/ui";
+import { ViewSparkline } from "@/components/ViewSparkline";
 import { useApi } from "@/hooks/useApi";
 import { ApiError, api, formatDate, formatSeconds, isDarkHex, posterUrl, shareExpired } from "@/lib/client";
 import type { Video } from "@/lib/types";
@@ -507,6 +508,11 @@ export default function VideoDetailPage() {
                       {video.views ?? 0}
                     </span>
                   </Row>
+                  {video.status === "completed" && (
+                    <Row label="Views by day" wrap>
+                      <ViewSparkline video={video} />
+                    </Row>
+                  )}
                   {video.status === "completed" && (
                     <Row label="Watch-through" wrap>
                       <span

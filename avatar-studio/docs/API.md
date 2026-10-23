@@ -165,8 +165,8 @@ Returns `{ "reply": "…" }`.
 
 ### Shared presenters (agents)
 
-- `GET /api/agents`, `POST /api/agents` → `{ "name", "avatarId", "voiceId"?, "instructions"?, "language"?, "isPublic"? }` → `201 { "agent" }` (20 per account)
-- `GET | PATCH | DELETE /api/agents/:id` (`PATCH` takes any subset of the fields above)
+- `GET /api/agents`, `POST /api/agents` → `{ "name", "avatarId", "voiceId"?, "instructions"?, "knowledgeUrl"?, "language"?, "isPublic"?, "collectEmail"? }` → `201 { "agent" }` (20 per account). `knowledgeUrl` names a public web page that is read once (same public-host, HTML-only, 1 MB rules as the script writer's page import; a page that cannot be read is a `400`); its readable text is kept on the agent as `knowledge` with `knowledgeUpdatedAt` and handed to the model as reference material after the instructions. Visitors never see it
+- `GET | PATCH | DELETE /api/agents/:id` (`PATCH` takes any subset of the fields above; `knowledgeUrl` reads the page again, `null` forgets it)
 - Public, no key: `GET /api/talk/:id` → the visitor-safe view (name, avatar, language, brand; never instructions) and `POST /api/talk/:id` → `{ "messages": [...], "conversationId"? }` → `{ "reply", "conversationId" }` (send the id back on later turns so the visit is one transcript), limited to 30 turns per 10 minutes per client and 600 per hour per agent. `404` when the agent is private or deleted. The page `/talk/:id` is embeddable in an iframe.
 - `POST /api/talk/:id/lead` → `{ "conversationId", "email", "name"? }` records a visitor's contact details on the conversation (shown when the agent has `collectEmail`) and sends `lead.captured` to the owner's webhook; 5 per 10 minutes per client
 - `POST /api/prefs/favorites` → `{ "kind": "avatar" | "voice", "id", "on": boolean }` stars or unstars an avatar or voice for the owner (newest 50 per kind kept); `GET /api/prefs` returns them as `favoriteAvatarIds` and `favoriteVoiceIds`, and every picker lists starred items first

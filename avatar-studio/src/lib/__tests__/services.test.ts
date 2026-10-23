@@ -1808,6 +1808,53 @@ describe("plans and billing", () => {
 });
 
 describe("interactive avatar", () => {
+  it("a shared presenter can be briefed by a public page, kept from visitors and used in replies", async () => {
+    const { withKnowledge, KNOWLEDGE_MARKER, agentPatchSchema } = await import("../services/agents");
+    const page = `<!doctype html><html><head><title>Hillcrest Dental</title></head><body><nav>Home</nav><main>
+      <h1>Hillcrest Dental</h1><p>We are open Monday to Saturday from 8 am to 6 pm, and we take walk-ins before noon.</p>
+      <p>Parking is free behind the building. Our hygienists speak English and Spanish, and whitening appointments take ninety minutes.</p>
+      </main><footer>Copyright</footer></body></html>`;
+    let reads = 0;
+    const fake = (async (input: string | URL | Request) => {
+      reads += 1;
+      return String(input).endsWith("/about") ? new Response(page, { status: 200, headers: { "content-type": "text/html" } }) : new Response("nope", { status: 404 });
+    }) as typeof fetch;
+    const input = agentSchema.parse({ name: "Dana", avatarId: "stock_1", instructions: "You represent Hillcrest Dental.", knowledgeUrl: "https://203.0.113.5/about", isPublic: true });
+    const agent = await createAgent(input, "u-know", fake);
+    assert.equal(agent.knowledgeUrl, "https://203.0.113.5/about");
+    assert.match(agent.knowledge ?? "", /walk-ins before noon/);
+    assert.doesNotMatch(agent.knowledge ?? "", /Copyright/, "page chrome is dropped");
+    assert.ok(agent.knowledgeUpdatedAt);
+    assert.equal(reads, 1);
+    const pub = await publicAgent(agent.id);
+    assert.equal(JSON.stringify(pub).includes("walk-ins"), false, "the page text never reaches the visitor view");
+    assert.ok(withKnowledge(agent).startsWith("You represent Hillcrest Dental.\n\n" + KNOWLEDGE_MARKER));
+    assert.equal(withKnowledge({ instructions: "Plain", knowledgeUrl: undefined, knowledge: undefined }), "Plain");
+
+    const hello = await talkToAgent(agent.id, { messages: [{ role: "user", content: "Hi" }] });
+    assert.match(hello.reply, /I'm with Hillcrest Dental/, "the owner's own first sentence still introduces the presenter");
+    const parking = await talkToAgent(agent.id, { conversationId: hello.conversationId, messages: [{ role: "user", content: "Hi" }, { role: "assistant", content: hello.reply }, { role: "user", content: "Is there parking nearby?" }] });
+    assert.match(parking.reply, /^From the page: Parking is free behind the building\./);
+    const other = await talkToAgent(agent.id, { conversationId: hello.conversationId, messages: [{ role: "user", content: "Hi" }, { role: "assistant", content: hello.reply }, { role: "user", content: "Do you do braces?" }] });
+    assert.doesNotMatch(other.reply, /^From the page/, "a question the page does not cover gets the usual reply");
+
+    await assert.rejects(createAgent(agentSchema.parse({ ...input, knowledgeUrl: "http://127.0.0.1/about" }), "u-know"), /public host/);
+    await assert.rejects(createAgent(agentSchema.parse({ ...input, knowledgeUrl: "https://203.0.113.5/missing" }), "u-know", fake), /returned 404/);
+    assert.throws(() => agentSchema.parse({ ...input, knowledgeUrl: "ftp://x" }), /http/);
+
+    const again = await updateAgent(agent.id, agentPatchSchema.parse({ knowledgeUrl: "https://203.0.113.5/about" }), "u-know", fake);
+    assert.equal(reads, 3, "the same URL is read again on request");
+    assert.ok((again.knowledgeUpdatedAt ?? "") >= (agent.knowledgeUpdatedAt ?? ""));
+    const renamed = await updateAgent(agent.id, { name: "Dana 2" }, "u-know", fake);
+    assert.equal(reads, 3, "other edits leave the page alone");
+    assert.match(renamed.knowledge ?? "", /walk-ins/);
+    const forgot = await updateAgent(agent.id, agentPatchSchema.parse({ knowledgeUrl: null }), "u-know", fake);
+    assert.equal("knowledge" in forgot, false);
+    assert.equal("knowledgeUrl" in forgot, false);
+    assert.equal("knowledgeUpdatedAt" in forgot, false);
+    assert.doesNotMatch((await talkToAgent(agent.id, { messages: [{ role: "user", content: "Is there parking nearby?" }] })).reply, /^From the page/);
+  });
+
   it("answers in character from the demo provider and validates the turn", async () => {
     const hello = await chatWithAvatar(chatSchema.parse({ avatarId: "stock_1", instructions: "Open houses in Hillsboro. Book showings online.", messages: [{ role: "user", content: "Hi there" }] }));
     assert.match(hello, /^Hi, I'm /);

@@ -689,7 +689,7 @@ export async function applyAvatarWebhook(providerName: string, body: unknown): P
 // Library queries: filtering, sorting, and paging for GET /api/videos.
 
 export const videoQuerySchema = z.object({
-  /** Case-insensitive match on title, script, avatar, and voice names. */
+  /** Case-insensitive match on title, description, script, avatar, and voice names. */
   q: z.string().trim().max(200).default(""),
   /** "processing" also covers queued renders. */
   status: z.enum(["all", "processing", "completed", "failed"]).default("all"),

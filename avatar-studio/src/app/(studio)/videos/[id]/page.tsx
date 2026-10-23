@@ -51,7 +51,7 @@ export default function VideoDetailPage() {
    * description, a link turned back on) must disappear too, or the control flips back until the
    * refetch lands.
    */
-  const OPTIONAL_KEYS = ["description", "folder", "shareDisabled", "shareDownload", "shareLocked", "shareCta", "shareExpiresAt"] as const;
+  const OPTIONAL_KEYS = ["description", "folder", "cover", "shareDisabled", "shareDownload", "shareLocked", "shareCta", "shareExpiresAt"] as const;
   function applyServer(next: Video) {
     setData((d) => {
       const merged = { ...d?.video, ...next } as Video;
@@ -68,6 +68,7 @@ export default function VideoDetailPage() {
     try {
       const res = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify({ folder }) });
       applyServer(res.video);
+      void refetch();
       setFolderErr(null);
     } catch (e) {
       setFolderErr(e instanceof Error ? e.message : "Could not move the video");
@@ -85,6 +86,7 @@ export default function VideoDetailPage() {
     try {
       const res = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify({ title }) });
       applyServer(res.video);
+      void refetch();
       setRenameErr(null);
       setEditing(false);
     } catch (e) {

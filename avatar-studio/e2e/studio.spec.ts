@@ -1063,6 +1063,12 @@ test("shared presenter: save from the interactive page, talk publicly, turn off"
   const tag = Date.now().toString(36);
   await page.goto("/interactive");
   await page.getByLabel("Agent name").fill(`Dana ${tag}`);
+  // A knowledge page is read with the same guard as the script writer's page import: a private host is refused from the form.
+  await page.getByLabel("Knowledge page URL").fill("http://127.0.0.1:3100/home");
+  await page.getByRole("button", { name: "Save and get link" }).click();
+  await expect(page.getByText(/public host/)).toBeVisible();
+  expect((await page.request.post("/api/agents", { data: { name: "Bad", avatarId: "stock_1", knowledgeUrl: "notaurl" } })).status()).toBe(400);
+  await page.getByLabel("Knowledge page URL").fill("");
   await page.getByRole("button", { name: "Save and get link" }).click();
   const link = (await page.getByTestId("agent-link").locator("code").innerText()).trim();
   const id = link.split("/talk/")[1];

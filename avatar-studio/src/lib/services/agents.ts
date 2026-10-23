@@ -13,21 +13,50 @@ import { getAvatar } from "./avatars";
 import { listVoices } from "./voices";
 import { getBrandKit } from "./brand";
 import { chatSchema } from "./scripts";
+import { fetchPageText } from "../webpage";
+import type { FetchLike } from "../safe-fetch";
 
 export const MAX_AGENTS = 20;
+
+const knowledgeUrlSchema = z
+  .string()
+  .trim()
+  .max(2000)
+  .refine((v) => /^https?:\/\/[^\s]+$/i.test(v), "The knowledge page must start with http:// or https://");
 
 export const agentSchema = z.object({
   name: z.string().trim().min(1).max(60),
   avatarId: z.string().min(1),
   voiceId: z.string().min(1).optional(),
   instructions: z.string().trim().max(2000).default(""),
+  /** A public page read once and kept as reference material for replies (see `readKnowledge`). */
+  knowledgeUrl: knowledgeUrlSchema.optional(),
   language: z.string().trim().min(2).max(40).default("English"),
   isPublic: z.boolean().default(true),
   /** Ask visitors for an email after the first reply. */
   collectEmail: z.boolean().default(false),
 });
 
-export const agentPatchSchema = agentSchema.partial();
+/** `knowledgeUrl: null` forgets the page; a URL (the same one included) reads it again. */
+export const agentPatchSchema = agentSchema.partial().extend({ knowledgeUrl: knowledgeUrlSchema.nullable().optional() });
+
+/** Marks where the owner's instructions end and the page text begins in the persona handed to the model. */
+export const KNOWLEDGE_MARKER = "Reference material from the page at ";
+
+/** Reads a public page's text (same guard, size, and length limits as the script writer's page import). */
+async function readKnowledge(url: string, fetchImpl?: FetchLike): Promise<Pick<Agent, "knowledgeUrl" | "knowledge" | "knowledgeUpdatedAt">> {
+  try {
+    const page = await fetchPageText(url, fetchImpl);
+    return { knowledgeUrl: url, knowledge: page.text, knowledgeUpdatedAt: nowIso() };
+  } catch (err) {
+    throw new ValidationError(err instanceof Error ? err.message : "The knowledge page could not be read");
+  }
+}
+
+/** The instructions the model sees: the owner's text, then the page text when there is one. */
+export function withKnowledge(agent: Pick<Agent, "instructions" | "knowledgeUrl" | "knowledge">): string {
+  return agent.knowledge ? `${agent.instructions}\n\n${KNOWLEDGE_MARKER}${agent.knowledgeUrl}:\n${agent.knowledge}` : agent.instructions;
+}
 
 export const leadSchema = z.object({
   conversationId: z.string().regex(/^conv_[a-z0-9]+$/),
@@ -78,17 +107,27 @@ async function presenterSnapshot(avatarId: string, voiceId: string | undefined, 
   return { avatarName: avatar.name, avatarImageUrl: avatar.imageUrl, voiceLanguage };
 }
 
-export async function createAgent(input: z.infer<typeof agentSchema>, ownerId: string = LOCAL_OWNER): Promise<Agent> {
+export async function createAgent(input: z.infer<typeof agentSchema>, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<Agent> {
   if ((await listAgents(ownerId)).length >= MAX_AGENTS) throw new ValidationError(`At most ${MAX_AGENTS} agents per account`);
   const snapshot = await presenterSnapshot(input.avatarId, input.voiceId, ownerId);
+  const { knowledgeUrl, ...rest } = input;
+  const knowledge = knowledgeUrl ? await readKnowledge(knowledgeUrl, fetchImpl) : {};
   const now = nowIso();
-  return getStore().put("agent", { id: newId("agent"), ownerId, ...input, ...snapshot, conversations: 0, messages: 0, createdAt: now, updatedAt: now });
+  return getStore().put("agent", { id: newId("agent"), ownerId, ...rest, ...snapshot, ...knowledge, conversations: 0, messages: 0, createdAt: now, updatedAt: now });
 }
 
-export async function updateAgent(id: string, patch: z.infer<typeof agentPatchSchema>, ownerId: string = LOCAL_OWNER): Promise<Agent> {
+export async function updateAgent(id: string, patch: z.infer<typeof agentPatchSchema>, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<Agent> {
   const existing = await getAgent(id, ownerId);
-  const next = { ...existing, ...patch };
+  const { knowledgeUrl, ...rest } = patch;
+  const next: Agent = { ...existing, ...rest };
   const snapshot = patch.avatarId || patch.voiceId ? await presenterSnapshot(next.avatarId, next.voiceId, ownerId) : {};
+  if (knowledgeUrl === null) {
+    delete next.knowledgeUrl;
+    delete next.knowledge;
+    delete next.knowledgeUpdatedAt;
+  } else if (knowledgeUrl) {
+    Object.assign(next, await readKnowledge(knowledgeUrl, fetchImpl));
+  }
   return getStore().put("agent", { ...next, ...snapshot, updatedAt: nowIso() });
 }
 
@@ -131,7 +170,7 @@ export async function talkToAgent(id: string, input: z.infer<typeof talkSchema>)
   if (!agent || !agent.isPublic) throw new NotFoundError("This presenter is not available");
   const last = input.messages[input.messages.length - 1];
   if (last.role !== "user") throw new ValidationError("The last message must be from the visitor");
-  const reply = await getScriptProvider().chat({ persona: { name: agent.avatarName, instructions: agent.instructions, language: agent.language }, messages: input.messages });
+  const reply = await getScriptProvider().chat({ persona: { name: agent.avatarName, instructions: withKnowledge(agent), language: agent.language }, messages: input.messages });
 
   const now = nowIso();
   let conversation = input.conversationId ? await getStore().get<Conversation>("conversation", input.conversationId) : null;

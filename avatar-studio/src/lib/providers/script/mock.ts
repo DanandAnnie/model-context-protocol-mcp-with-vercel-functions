@@ -48,13 +48,22 @@ export class MockScriptProvider implements ScriptProvider {
   async chat({ persona, messages }: { persona: ChatPersona; messages: ChatMessage[] }) {
     const last = [...messages].reverse().find((m) => m.role === "user")?.content.trim() ?? "";
     const turn = messages.filter((m) => m.role === "user").length;
+    // The owner's own text comes first; a knowledge page, when one was read, follows a marker line.
+    const [own = "", reference = ""] = persona.instructions.split(/\n\nReference material from the page at [^\n]*\n/);
     // First sentence of the instructions. A "You represent the X" lead-in becomes "I'm with the X";
     // anything else is treated as the subject the visitor can ask about.
-    const first = persona.instructions.split(/[.\n]/)[0]?.trim() ?? "";
+    const first = own.split(/[.\n]/)[0]?.trim() ?? "";
     const represents = /^you (represent|work for|are part of)\s+/i.exec(first);
     const topic = represents ? first.slice(represents[0].length).trim() : first;
     const intro = represents ? `I'm with ${topic}.` : topic ? `Ask me anything about ${topic.toLowerCase()}.` : "What can I help you with today?";
     if (/^(hi|hello|hey)\b/i.test(last)) return `Hi, I'm ${persona.name}. ${intro}`;
+    // A question that shares a word of five letters or more with the page is answered from the page.
+    if (reference) {
+      const words = last.toLowerCase().match(/[a-z][a-z'-]{4,}/g) ?? [];
+      const sentences = reference.split(/(?<=[.!?])\s+|\n+/).map((s) => s.trim()).filter(Boolean);
+      const hit = sentences.find((s) => words.some((w) => s.toLowerCase().includes(w)));
+      if (hit) return `From the page: ${hit.length > 220 ? `${hit.slice(0, 219)}…` : hit}`;
+    }
     if (/\b(price|cost|how much)\b/i.test(last)) return `Good question. Pricing depends on what you need, so tell me a little more and I'll point you to the right option.`;
     if (/\b(thanks|thank you)\b/i.test(last)) return `You're welcome. Is there anything else I can help with?`;
     if (/\?$/.test(last)) return `Here's the short answer: it depends on what you're looking for, and I'm happy to walk you through the options. Want me to go deeper?`;

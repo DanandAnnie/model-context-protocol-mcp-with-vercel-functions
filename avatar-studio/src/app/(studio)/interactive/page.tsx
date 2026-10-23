@@ -27,6 +27,7 @@ export default function InteractivePage() {
   const [language, setLanguage] = useState("English");
   const [agentName, setAgentName] = useState("");
   const [collectEmail, setCollectEmail] = useState(false);
+  const [knowledgeUrl, setKnowledgeUrl] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
   const [savedLink, setSavedLink] = useState<string | null>(null);
@@ -85,10 +86,11 @@ export default function InteractivePage() {
     try {
       const { agent } = await api<{ agent: Agent }>("/api/agents", {
         method: "POST",
-        body: JSON.stringify({ name: agentName.trim() || avatar.name, avatarId: avatar.id, voiceId: voice?.id, instructions, language, isPublic: true, collectEmail }),
+        body: JSON.stringify({ name: agentName.trim() || avatar.name, avatarId: avatar.id, voiceId: voice?.id, instructions, language, isPublic: true, collectEmail, ...(knowledgeUrl.trim() ? { knowledgeUrl: knowledgeUrl.trim() } : {}) }),
       });
       setSavedLink(`${window.location.origin}/talk/${agent.id}`);
       setAgentName("");
+      setKnowledgeUrl("");
       await refetchAgents();
     } catch (e) {
       setSaveErr(e instanceof Error ? e.message : "Could not save the presenter");
@@ -179,6 +181,9 @@ export default function InteractivePage() {
             <Field label="Reply language">
               <input value={language} onChange={(e) => setLanguage(e.target.value)} className={inputClass} maxLength={40} />
             </Field>
+            <Field label="Knowledge page (optional)" hint="A public web page read once when the presenter is saved; its text becomes reference material for replies and is never shown to visitors.">
+              <input aria-label="Knowledge page URL" value={knowledgeUrl} onChange={(e) => setKnowledgeUrl(e.target.value)} placeholder="https://…/about-us" className={inputClass} maxLength={2000} type="url" />
+            </Field>
           </div>
           <div className="mt-4 border-t border-slate-100 pt-4">
             <ErrorBanner message={saveErr} />
@@ -218,6 +223,7 @@ export default function InteractivePage() {
                     <div className="truncate text-sm font-medium text-slate-900">{a.name}</div>
                     <div className="text-xs text-slate-500">
                       {a.conversations} {a.conversations === 1 ? "conversation" : "conversations"} · {a.messages} {a.messages === 1 ? "message" : "messages"} · {a.isPublic ? "link on" : "link off"} · {formatDate(a.createdAt)}
+                      {a.knowledgeUrl && <> · knows {(() => { try { return new URL(a.knowledgeUrl).hostname; } catch { return "a page"; } })()}</>}
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5">

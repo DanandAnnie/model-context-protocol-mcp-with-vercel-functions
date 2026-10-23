@@ -338,6 +338,10 @@ export interface Agent {
   avatarImageUrl: string;
   voiceLanguage?: string;
   instructions: string;
+  /** A public web page whose readable text is kept as reference material for replies; never shown to visitors. */
+  knowledgeUrl?: string;
+  knowledge?: string;
+  knowledgeUpdatedAt?: string;
   language: string;
   /** Visitors can open /talk/:id without signing in. */
   isPublic: boolean;

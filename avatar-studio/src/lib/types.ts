@@ -10,6 +10,9 @@ export const ASPECT_DIMENSIONS: Record<AspectRatio, { width: number; height: num
 
 export type AvatarSource = "stock" | "custom" | "provider";
 
+/** Upper bound on scenes per video, shared by the editor and the request schema. */
+export const MAX_SCENES = 20;
+
 export interface Avatar {
   id: string;
   name: string;
@@ -22,6 +25,8 @@ export interface Avatar {
   provider: string;
   gender?: "male" | "female" | "neutral";
   tags?: string[];
+  /** Ids assigned by rendering providers after uploading a custom portrait, keyed by provider name. */
+  providerAssetIds?: Record<string, string>;
   createdAt?: string;
 }
 

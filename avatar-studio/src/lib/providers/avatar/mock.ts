@@ -23,6 +23,7 @@ export class MockAvatarProvider implements AvatarProvider {
   }
 
   async getStatus(providerJobId: string): Promise<AvatarJobStatus> {
+    if (!/^mock_\d+_\d+$/.test(providerJobId)) throw new Error(`Not a demo job id: ${providerJobId}`);
     const [, startedAt, duration] = providerJobId.split("_");
     const elapsed = Date.now() - Number(startedAt);
     if (elapsed < MockAvatarProvider.RENDER_MS) return { status: "processing" };

@@ -5,7 +5,7 @@ import { useState } from "react";
 import { ArrowLeft, Captions, Check, Copy, Download, Languages, Link2, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
-import { api, formatDate, formatSeconds } from "@/lib/client";
+import { api, formatDate, formatSeconds, isDarkHex } from "@/lib/client";
 import type { Video } from "@/lib/types";
 
 export default function VideoDetailPage() {
@@ -150,13 +150,6 @@ export default function VideoDetailPage() {
       )}
     </>
   );
-}
-
-function isDarkHex(hex: string): boolean {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
-  if (!m) return false;
-  const n = parseInt(m[1], 16);
-  return (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255 < 0.5;
 }
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {

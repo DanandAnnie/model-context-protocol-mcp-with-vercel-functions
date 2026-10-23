@@ -33,9 +33,9 @@ export class MemoryStore implements Store {
     this.bucket(kind).delete(id);
   }
 
-  async find<T>(kind: ItemKind, predicate: (item: T) => boolean): Promise<T | null> {
+  async findBy<T>(kind: ItemKind, field: string, value: string): Promise<T | null> {
     for (const v of this.bucket(kind).values()) {
-      if (predicate(v as T)) return v as T;
+      if ((v as Record<string, unknown>)[field] === value) return v as T;
     }
     return null;
   }

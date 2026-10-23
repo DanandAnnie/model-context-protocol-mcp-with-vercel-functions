@@ -1,5 +1,6 @@
 import { ASPECT_DIMENSIONS, type Avatar, type VideoRequest, type Voice } from "../../types";
 import { webhookUrl } from "../../config";
+import { loadImage } from "../image";
 import { HeyGenClient } from "../heygen-client";
 import type { AvatarJobStatus, AvatarProvider } from "../types";
 
@@ -34,16 +35,28 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     return avatars.filter((a) => a.imageUrl);
   }
 
+  /** Custom portraits must be uploaded once as a HeyGen talking photo. */
+  async prepareAvatar(avatar: Avatar): Promise<Avatar> {
+    if (avatar.source !== "custom" || avatar.providerAssetIds?.[this.name]) return avatar;
+    const { bytes, mimeType } = await loadImage(avatar.imageUrl);
+    const id = await this.client.uploadTalkingPhoto(bytes, mimeType);
+    return { ...avatar, providerAssetIds: { ...avatar.providerAssetIds, [this.name]: id } };
+  }
+
   async createVideo(req: VideoRequest, avatar: Avatar, voice: Voice | null) {
-    const isPhoto = avatar.tags?.includes("photo avatar") || avatar.source === "custom";
-    const character = isPhoto
-      ? { type: "talking_photo", talking_photo_id: avatar.id, talking_photo_style: "square" }
+    if (voice && voice.provider !== this.name) {
+      throw new Error(`HeyGen renders need a HeyGen voice; "${voice.name}" comes from ${voice.provider}.`);
+    }
+    const photoId = avatar.source === "custom" ? avatar.providerAssetIds?.[this.name] : avatar.tags?.includes("photo avatar") ? avatar.id : undefined;
+    if (avatar.source === "custom" && !photoId) throw new Error("Custom avatar has not been uploaded to HeyGen yet.");
+    const character = photoId
+      ? { type: "talking_photo", talking_photo_id: photoId, talking_photo_style: "square" }
       : { type: "avatar", avatar_id: avatar.id, avatar_style: "normal" };
     const scenes = req.scenes?.length ? req.scenes : [{ script: req.script, background: req.background }];
     const body = {
       title: req.title,
       caption: req.captions,
-      callback_url: webhookUrl("heygen"),
+      ...(webhookUrl("heygen") ? { callback_url: webhookUrl("heygen") } : {}),
       dimension: ASPECT_DIMENSIONS[req.aspect],
       video_inputs: scenes.map((scene) => ({
         character,

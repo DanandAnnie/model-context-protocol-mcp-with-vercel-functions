@@ -48,8 +48,16 @@ export class SupabaseStore implements Store {
     if (error) throw new Error(`supabase remove failed: ${error.message}`);
   }
 
-  async find<T>(kind: ItemKind, predicate: (item: T) => boolean): Promise<T | null> {
-    const all = await this.list<T>(kind);
-    return all.find(predicate) ?? null;
+  async findBy<T>(kind: ItemKind, field: string, value: string): Promise<T | null> {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(field)) throw new Error(`invalid field name: ${field}`);
+    const { data, error } = await this.client
+      .from(TABLE)
+      .select("data")
+      .eq("kind", kind)
+      .eq(`data->>${field}`, value)
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(`supabase findBy failed: ${error.message}`);
+    return (data?.data as T | undefined) ?? null;
   }
 }

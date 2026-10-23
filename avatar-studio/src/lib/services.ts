@@ -10,7 +10,7 @@ import {
   getTtsProvider,
 } from "./providers";
 import { getStore } from "./store";
-import type { Avatar, Translation, Video, VideoRequest, Voice } from "./types";
+import { MAX_SCENES, type Avatar, type Translation, type Video, type VideoRequest, type Voice } from "./types";
 
 export class NotFoundError extends Error {}
 export class ValidationError extends Error {}
@@ -88,8 +88,6 @@ export async function generateScript(input: z.infer<typeof scriptSchema>): Promi
 
 const backgroundSchema = z.object({ type: z.enum(["color", "image"]), value: z.string().min(1) });
 
-export const MAX_SCENES = 20;
-
 export const videoRequestSchema = z
   .object({
     title: z.string().trim().min(1).max(120),
@@ -120,9 +118,10 @@ export const videoRequestSchema = z
   });
 
 export async function createVideo(req: VideoRequest): Promise<Video> {
-  const avatar = await getAvatar(req.avatarId);
+  let avatar = await getAvatar(req.avatarId);
   const voices = await listVoices();
   const voice = voices.find((v) => v.id === req.voiceId) ?? null;
+  if (!voice) throw new ValidationError(`Voice ${req.voiceId} is not available with the current voice provider`);
   const provider = getAvatarProvider();
 
   const base: Video = {
@@ -137,6 +136,10 @@ export async function createVideo(req: VideoRequest): Promise<Video> {
   };
 
   try {
+    if (provider.prepareAvatar && avatar.source === "custom") {
+      const prepared = await provider.prepareAvatar(avatar);
+      if (prepared !== avatar) avatar = await getStore().put("avatar", prepared);
+    }
     const { providerJobId } = await provider.createVideo(req, avatar, voice);
     base.providerJobId = providerJobId;
     base.status = "processing";
@@ -181,10 +184,20 @@ export async function applyAvatarWebhook(providerName: string, body: unknown): P
   const provider = getAvatarProviderByName(providerName);
   const parsed = provider.parseWebhook?.(body);
   if (!parsed) return null;
-  const video = await getStore().find<Video>("video", (v) => v.providerJobId === parsed.providerJobId);
+  const video = await getStore().findBy<Video>("video", "providerJobId", parsed.providerJobId);
   if (!video) return null;
   const next: Video = { ...video, ...stripUndefined(parsed.update), updatedAt: nowIso() };
   return getStore().put("video", next);
+}
+
+export async function applyTranslationWebhook(providerName: string, body: unknown): Promise<Translation | null> {
+  const provider = getTranslateProviderByName(providerName);
+  const parsed = provider.parseWebhook?.(body);
+  if (!parsed) return null;
+  const item = await getStore().findBy<Translation>("translation", "providerJobId", parsed.providerJobId);
+  if (!item) return null;
+  const next: Translation = { ...item, ...stripUndefined(parsed.update), updatedAt: nowIso() };
+  return getStore().put("translation", next);
 }
 
 // ---------- Translations ----------

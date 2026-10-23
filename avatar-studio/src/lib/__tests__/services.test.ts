@@ -190,3 +190,42 @@ describe("scenes", () => {
     assert.throws(() => videoRequestSchema.parse({ title: "x", avatarId: "a", voiceId: "v", scenes: [] }));
   });
 });
+
+describe("review fixes", () => {
+  it("rejects a voice the current provider does not list", async () => {
+    await assert.rejects(
+      createVideo(videoRequestSchema.parse({ title: "x", script: "hi there", avatarId: STOCK_AVATARS[0].id, voiceId: "not_a_voice" })),
+      /not available/,
+    );
+  });
+
+  it("store findBy matches a top-level field", async () => {
+    const store = globalThis.__avatarStudioStore!;
+    const v = await createVideo(videoRequestSchema.parse({ title: "x", script: "hi there", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }));
+    const found = await store.findBy<{ id: string }>("video", "providerJobId", v.providerJobId!);
+    assert.equal(found?.id, v.id);
+    assert.equal(await store.findBy("video", "providerJobId", "missing"), null);
+  });
+
+  it("mock providers refuse foreign job ids instead of completing them", async () => {
+    const { MockTranslateProvider } = await import("../providers/translate/mock");
+    await assert.rejects(new MockAvatarProvider().getStatus("heygen-job-123"), /Not a demo job id/);
+    await assert.rejects(new MockTranslateProvider().getStatus("abc"), /Not a demo job id/);
+  });
+
+  it("HeyGen translate webhook parsing recognises success and failure", async () => {
+    const { HeyGenTranslateProvider } = await import("../providers/translate/heygen");
+    const p = new HeyGenTranslateProvider("key");
+    assert.deepEqual(p.parseWebhook({ event_type: "video_translate.success", event_data: { video_translate_id: "t1", url: "https://x/v.mp4" } }), {
+      providerJobId: "t1",
+      update: { status: "completed", videoUrl: "https://x/v.mp4" },
+    });
+    assert.equal(p.parseWebhook({ event_type: "video_translate.fail", event_data: { video_translate_id: "t2", msg: "bad" } })?.update.status, "failed");
+    assert.equal(p.parseWebhook({ event_type: "other" }), null);
+  });
+
+  it("webhook URLs are only built when a secret is configured", async () => {
+    const { webhookUrl } = await import("../config");
+    assert.equal(webhookUrl("heygen"), undefined);
+  });
+});

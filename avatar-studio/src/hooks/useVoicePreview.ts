@@ -11,9 +11,19 @@ export function useVoicePreview() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  const objectUrl = useRef<string | null>(null);
+
+  const releaseObjectUrl = () => {
+    if (objectUrl.current) {
+      URL.revokeObjectURL(objectUrl.current);
+      objectUrl.current = null;
+    }
+  };
+
   const stop = useCallback(() => {
     audioRef.current?.pause();
     audioRef.current = null;
+    releaseObjectUrl();
     if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
     setPlayingId(null);
   }, []);
@@ -59,8 +69,12 @@ export function useVoicePreview() {
           }
         } else if (res.ok) {
           const blob = await res.blob();
-          const audio = new Audio(URL.createObjectURL(blob));
-          audio.onended = () => setPlayingId(null);
+          objectUrl.current = URL.createObjectURL(blob);
+          const audio = new Audio(objectUrl.current);
+          audio.onended = () => {
+            setPlayingId(null);
+            releaseObjectUrl();
+          };
           audioRef.current = audio;
           await audio.play();
         } else {

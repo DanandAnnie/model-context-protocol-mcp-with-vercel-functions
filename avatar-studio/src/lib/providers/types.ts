@@ -21,6 +21,12 @@ export interface AvatarJobStatus {
 export interface AvatarProvider {
   readonly name: string;
   listAvatars(): Promise<Avatar[]>;
+  /**
+   * Make a custom (uploaded) avatar usable by this provider, e.g. by uploading
+   * the portrait. Returns the avatar with `providerAssetIds[provider]` set, or
+   * the same avatar when nothing is needed. The caller persists the result.
+   */
+  prepareAvatar?(avatar: Avatar): Promise<Avatar>;
   /** Kick off a render. Returns the provider's job id. */
   createVideo(req: VideoRequest, avatar: Avatar, voice: Voice | null): Promise<{ providerJobId: string }>;
   getStatus(providerJobId: string): Promise<AvatarJobStatus>;
@@ -38,4 +44,5 @@ export interface TranslateProvider {
   createTranslation(input: { sourceVideoUrl: string; targetLanguage: string; title: string }): Promise<{ providerJobId: string }>;
   getStatus(providerJobId: string): Promise<Pick<Translation, "status" | "videoUrl" | "error">>;
   supportedLanguages(): string[];
+  parseWebhook?(body: unknown): { providerJobId: string; update: Pick<Translation, "status" | "videoUrl" | "error"> } | null;
 }

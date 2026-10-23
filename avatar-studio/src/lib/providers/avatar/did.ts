@@ -1,5 +1,6 @@
 import type { Avatar, VideoRequest, Voice } from "../../types";
 import { webhookUrl } from "../../config";
+import { loadImage } from "../image";
 import type { AvatarJobStatus, AvatarProvider } from "../types";
 
 const BASE = "https://api.d-id.com";
@@ -10,7 +11,7 @@ const BASE = "https://api.d-id.com";
  */
 export class DidAvatarProvider implements AvatarProvider {
   readonly name = "did";
-  constructor(private apiKey: string, private ttsProviderName: string) {}
+  constructor(private apiKey: string) {}
 
   private headers(extra: Record<string, string> = {}) {
     // D-ID API keys are used as HTTP Basic credentials ("email:key" or a bare key).
@@ -39,27 +40,33 @@ export class DidAvatarProvider implements AvatarProvider {
     })).filter((a) => a.imageUrl);
   }
 
-  /** D-ID needs a fetchable image URL; upload data URLs first. */
-  private async resolveSourceUrl(avatar: Avatar): Promise<string> {
-    if (!avatar.imageUrl.startsWith("data:")) return avatar.imageUrl;
-    const [meta, b64] = avatar.imageUrl.split(",");
-    const mime = /data:([^;]+)/.exec(meta)?.[1] ?? "image/png";
+  /** D-ID needs a fetchable image URL; upload custom portraits once and remember the hosted URL. */
+  async prepareAvatar(avatar: Avatar): Promise<Avatar> {
+    if (avatar.source !== "custom" || avatar.providerAssetIds?.[this.name]) return avatar;
+    const { bytes, mimeType } = await loadImage(avatar.imageUrl);
     const form = new FormData();
-    form.append("image", new Blob([Buffer.from(b64, "base64")], { type: mime }), `avatar.${mime.split("/")[1] ?? "png"}`);
+    form.append("image", new Blob([bytes as BlobPart], { type: mimeType }), `avatar.${mimeType.split("/")[1] ?? "png"}`);
     const res = await fetch(`${BASE}/images`, { method: "POST", headers: this.headers(), body: form });
     if (!res.ok) throw new Error(`D-ID image upload failed: ${res.status} ${await res.text()}`);
     const json = (await res.json()) as { url: string };
-    return json.url;
+    return { ...avatar, providerAssetIds: { ...avatar.providerAssetIds, [this.name]: json.url } };
+  }
+
+  /** Demo voices are not D-ID voices; map them to Microsoft neural voices by gender. */
+  private resolveVoice(voice: Voice | null): { type: string; voice_id: string } {
+    if (voice?.provider === "elevenlabs") return { type: "elevenlabs", voice_id: voice.id };
+    const female = (voice?.gender ?? "female") !== "male";
+    return { type: "microsoft", voice_id: female ? "en-US-JennyNeural" : "en-US-GuyNeural" };
   }
 
   async createVideo(req: VideoRequest, avatar: Avatar, voice: Voice | null) {
-    const providerType = this.ttsProviderName === "elevenlabs" ? "elevenlabs" : "microsoft";
-    const voiceId = voice?.id ?? (providerType === "microsoft" ? "en-US-JennyNeural" : req.voiceId);
+    const sourceUrl = avatar.source === "custom" ? avatar.providerAssetIds?.[this.name] : avatar.imageUrl;
+    if (!sourceUrl) throw new Error("Custom avatar has not been uploaded to D-ID yet.");
     const body = {
-      source_url: await this.resolveSourceUrl(avatar),
-      script: { type: "text", input: req.script, provider: { type: providerType, voice_id: voiceId } },
+      source_url: sourceUrl,
+      script: { type: "text", input: req.script, provider: this.resolveVoice(voice) },
       config: { stitch: true, result_format: "mp4" },
-      webhook: webhookUrl("did"),
+      ...(webhookUrl("did") ? { webhook: webhookUrl("did") } : {}),
       name: req.title,
     };
     const data = await this.request<{ id: string }>("/talks", {

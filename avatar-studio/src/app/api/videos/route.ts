@@ -16,7 +16,8 @@ export async function POST(req: Request) {
   try {
     const input = videoRequestSchema.parse(await readJson(req));
     const video = await createVideo(input);
-    return json({ video }, { status: video.status === "failed" ? 502 : 201 });
+    if (video.status === "failed") return json({ video, error: video.error ?? "The render could not be started" }, { status: 502 });
+    return json({ video }, { status: 201 });
   } catch (err) {
     return errorResponse(err);
   }

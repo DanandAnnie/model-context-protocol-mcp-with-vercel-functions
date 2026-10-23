@@ -10,6 +10,10 @@ create table if not exists public.studio_items (
 create index if not exists studio_items_kind_created_idx
   on public.studio_items (kind, created_at desc);
 
+-- Provider webhooks look jobs up by their provider job id.
+create index if not exists studio_items_provider_job_idx
+  on public.studio_items (kind, (data->>'providerJobId'));
+
 -- The app talks to this table with the service-role key only, so RLS can stay
 -- enabled with no policies: anonymous clients get nothing.
 alter table public.studio_items enable row level security;

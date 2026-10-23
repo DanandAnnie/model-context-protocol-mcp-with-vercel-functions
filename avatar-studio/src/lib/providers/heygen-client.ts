@@ -39,6 +39,21 @@ export class HeyGenClient {
     }>(`${V2}/voices`);
   }
 
+  /** Upload a portrait as a talking photo; returns HeyGen's talking_photo_id. */
+  async uploadTalkingPhoto(bytes: Uint8Array, mimeType: string): Promise<string> {
+    const res = await fetch("https://upload.heygen.com/v1/talking_photo", {
+      method: "POST",
+      headers: { "X-Api-Key": this.apiKey, "Content-Type": mimeType },
+      body: bytes as BodyInit,
+    });
+    const text = await res.text();
+    if (!res.ok) throw new Error(`HeyGen talking photo upload failed: ${res.status} ${text}`);
+    const json = JSON.parse(text) as { data?: { talking_photo_id?: string }; error?: unknown };
+    const id = json.data?.talking_photo_id;
+    if (!id) throw new Error(`HeyGen talking photo upload returned no id: ${text}`);
+    return id;
+  }
+
   generateVideo(body: Record<string, unknown>) {
     return this.request<{ video_id: string }>(`${V2}/video/generate`, { method: "POST", body: JSON.stringify(body) });
   }

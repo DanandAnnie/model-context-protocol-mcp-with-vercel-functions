@@ -28,7 +28,7 @@ export class AnthropicScriptProvider implements ScriptProvider {
 
     const response = await this.client.beta.messages.create({
       model: "claude-opus-5-5",
-      max_tokens: 2048,
+      max_tokens: 16000,
       system: SYSTEM,
       output_config: { effort: "low" },
       betas: ["server-side-fallback-2026-07-01"],
@@ -38,6 +38,9 @@ export class AnthropicScriptProvider implements ScriptProvider {
 
     if (response.stop_reason === "refusal") {
       throw new Error("The script writer declined this request. Try rephrasing the topic.");
+    }
+    if (response.stop_reason === "max_tokens") {
+      throw new Error("The script writer ran out of room. Try a shorter target length.");
     }
     const text = response.content
       .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text")

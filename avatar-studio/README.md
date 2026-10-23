@@ -55,9 +55,15 @@ private in the meantime.
 CI: `.github/workflows/avatar-studio.yml` runs typecheck, tests, and the
 production build on every push or PR that touches this folder.
 
-Set `APP_URL` to the public URL of the deployment so providers can call back
-`/api/webhooks/<provider>`; polling also works, so a missed webhook never
-strands a job. Add `WEBHOOK_SECRET` to require `?secret=` on callbacks.
+Voices follow the renderer: HeyGen rendering always lists HeyGen voices (its
+API accepts no others); D-ID uses ElevenLabs voices when configured, otherwise
+its built-in Microsoft voices, which the demo voice list maps onto by gender.
+Custom photo avatars are uploaded to the renderer on first use and the
+returned asset id is cached on the avatar.
+
+Set `WEBHOOK_SECRET` and `APP_URL` to enable provider callbacks to
+`/api/webhooks/<provider>`; without a secret the callback endpoint stays
+disabled and the app relies on polling, which works either way.
 
 Adding a provider means implementing one interface in `src/lib/providers/types.ts`
 and registering it in `src/lib/providers/index.ts`.

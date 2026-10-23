@@ -14,7 +14,7 @@ export class HeyGenTranslateProvider implements TranslateProvider {
       video_url: input.sourceVideoUrl,
       output_language: input.targetLanguage,
       title: input.title,
-      callback_url: webhookUrl("heygen-translate"),
+      ...(webhookUrl("heygen-translate") ? { callback_url: webhookUrl("heygen-translate") } : {}),
     });
     return { providerJobId: data.video_translate_id };
   }
@@ -26,5 +26,15 @@ export class HeyGenTranslateProvider implements TranslateProvider {
   }
   supportedLanguages() {
     return LANGUAGES.map((l) => l.code);
+  }
+  /** Tolerant parser for HeyGen translate callbacks (event_type contains success/fail). */
+  parseWebhook(body: unknown) {
+    const b = body as { event_type?: string; event_data?: { video_translate_id?: string; id?: string; url?: string; msg?: string; message?: string } };
+    const id = b?.event_data?.video_translate_id ?? b?.event_data?.id;
+    const type = b?.event_type ?? "";
+    if (!id) return null;
+    if (/success|complete/i.test(type)) return { providerJobId: id, update: { status: "completed" as const, videoUrl: b.event_data?.url } };
+    if (/fail|error/i.test(type)) return { providerJobId: id, update: { status: "failed" as const, error: b.event_data?.msg ?? b.event_data?.message ?? "Translation failed" } };
+    return null;
   }
 }

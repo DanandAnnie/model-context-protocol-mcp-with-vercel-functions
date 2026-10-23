@@ -7,14 +7,13 @@ import { VoiceRow } from "@/components/VoicePicker";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useVoicePreview } from "@/hooks/useVoicePreview";
-import { api, estimateSeconds, formatSeconds, wordCount } from "@/lib/client";
+import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib/client";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
-import type { AspectRatio, Avatar, Background, Scene, Video, Voice } from "@/lib/types";
+import { MAX_SCENES, type AspectRatio, type Avatar, type Background, type Scene, type Video, type Voice } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
-const MAX_SCENES = 20;
 const newScene = (script = "", background: Background = DEFAULT_BG): Scene => ({ script, background });
 const TONES = ["friendly", "professional", "formal", "energetic", "calm"] as const;
 type Tab = "avatar" | "voice" | "background" | "settings";
@@ -140,7 +139,7 @@ function CreateInner() {
   }
 
   const stageAspect = aspect === "9:16" ? "aspect-[9/16]" : aspect === "1:1" ? "aspect-square" : "aspect-video";
-  const bgIsDark = background.type === "color" && isDark(background.value);
+  const bgIsDark = background.type === "color" && isDarkHex(background.value);
 
   return (
     <>
@@ -234,7 +233,7 @@ function CreateInner() {
                   <Button
                     variant="secondary"
                     className="px-3 py-1.5"
-                    disabled={!script.trim()}
+                    disabled={!active.script.trim()}
                     loading={busyId === voice.id}
                     onClick={() => play(voice, active.script.slice(0, 400), speed).catch((e) => setErr(e.message))}
                   >
@@ -437,10 +436,3 @@ function ScriptWriter({ onScript, onClose }: { onScript: (s: string) => void; on
   );
 }
 
-function isDark(hex: string): boolean {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
-  if (!m) return false;
-  const n = parseInt(m[1], 16);
-  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.5;
-}

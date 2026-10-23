@@ -32,6 +32,15 @@ export function estimateSeconds(text: string, speed = 1): number {
   return Math.round(wordCount(text) / 2.5 / speed);
 }
 
+/** True when a hex color is dark enough to need light text on top of it. */
+export function isDarkHex(hex: string): boolean {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return false;
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.5;
+}
+
 export function formatSeconds(total: number): string {
   const m = Math.floor(total / 60);
   const s = total % 60;

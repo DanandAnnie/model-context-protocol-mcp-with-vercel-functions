@@ -16,7 +16,8 @@ export async function POST(req: Request) {
   try {
     const input = translationRequestSchema.parse(await readJson(req));
     const translation = await createTranslation(input);
-    return json({ translation }, { status: translation.status === "failed" ? 502 : 201 });
+    if (translation.status === "failed") return json({ translation, error: translation.error ?? "The translation could not be started" }, { status: 502 });
+    return json({ translation }, { status: 201 });
   } catch (err) {
     return errorResponse(err);
   }

@@ -37,6 +37,7 @@ function TranslateInner() {
       refetch();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Translation failed");
+      refetch();
     } finally {
       setSubmitting(false);
     }

@@ -19,9 +19,14 @@ export const config = {
   webhookSecret: env("WEBHOOK_SECRET"),
 };
 
-/** Public callback URL a provider should POST to when a job finishes. */
-export function webhookUrl(provider: string): string {
+/**
+ * Public callback URL a provider should POST to when a job finishes.
+ * Returns undefined when no WEBHOOK_SECRET is configured: an unauthenticated
+ * callback endpoint could be used to overwrite any video, and polling covers
+ * status updates without it.
+ */
+export function webhookUrl(provider: string): string | undefined {
+  if (!config.webhookSecret) return undefined;
   const base = config.appUrl.replace(/\/$/, "");
-  const secret = config.webhookSecret ? `?secret=${encodeURIComponent(config.webhookSecret)}` : "";
-  return `${base}/api/webhooks/${provider}${secret}`;
+  return `${base}/api/webhooks/${provider}?secret=${encodeURIComponent(config.webhookSecret)}`;
 }

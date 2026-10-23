@@ -10,8 +10,8 @@ export interface Store {
   get<T>(kind: ItemKind, id: string): Promise<T | null>;
   put<T extends { id: string }>(kind: ItemKind, item: T): Promise<T>;
   remove(kind: ItemKind, id: string): Promise<void>;
-  /** Find the first item whose predicate matches. Used for webhook lookups by provider job id. */
-  find<T>(kind: ItemKind, predicate: (item: T) => boolean): Promise<T | null>;
+  /** Find the first item whose top-level `field` equals `value` (used for webhook lookups by provider job id). */
+  findBy<T>(kind: ItemKind, field: string, value: string): Promise<T | null>;
 }
 
 declare global {

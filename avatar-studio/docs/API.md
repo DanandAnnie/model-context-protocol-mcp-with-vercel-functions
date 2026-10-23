@@ -79,7 +79,7 @@ Returns `201` with `{ "video": Video }`. The video starts as `queued` or `proces
 
 When completed the video also carries `videoUrl`, `thumbnailUrl`, and `durationSec`; when failed, `error`.
 
-### `GET /api/videos` — list (newest first)
+
 ### `GET /api/videos/:id` — fetch; refreshes the status from the provider while rendering
 ### `PATCH /api/videos/:id` — `{ "title"?: string, "folder"?: string, "shareDownload"?: boolean }` (empty `folder` means unfiled; `shareDownload` shows a download button on the public share page)
 ### `DELETE /api/videos/:id`

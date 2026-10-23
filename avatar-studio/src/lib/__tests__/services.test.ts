@@ -51,6 +51,7 @@ import { createHmac } from "node:crypto";
 import { computeInsights } from "../insights";
 import { acceptInvite, canManageAccount, createInvite, createWorkspace, deleteWorkspace, findInvite, listWorkspaces, removeMember, revokeInvite, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
 import type { Video } from "../types";
+import { LOCAL_OWNER } from "../owner-id";
 import { MockEmailProvider, inviteEmail, setEmailProvider } from "../providers/email";
 import { forgetMemo, memo } from "../cache";
 import { extractReadableText, fetchPageText } from "../webpage";
@@ -139,6 +140,18 @@ describe("videos", () => {
     await deleteVideo(a.id);
     assert.equal((await listVideos()).length, 1);
     await assert.rejects(deleteVideo(a.id), /not found/);
+  });
+
+  it("the library refreshes in-flight renders without a detail visit", async () => {
+    const video = await createVideo(videoRequestSchema.parse({ ...base, title: "Rendering" }));
+    const [, , duration] = video.providerJobId!.split("_");
+    await globalThis.__avatarStudioStore!.put("video", { ...video, providerJobId: `mock_${Date.now() - 60_000}_${duration}` });
+    assert.equal((await listVideos(LOCAL_OWNER, false)).find((v) => v.id === video.id)?.status, "processing", "refresh can be skipped");
+    const listed = (await listVideos()).find((v) => v.id === video.id)!;
+    assert.equal(listed.status, "completed");
+    assert.ok(listed.videoUrl);
+    // The change was stored, so the next read needs no provider call.
+    assert.equal((await getVideo(video.id, LOCAL_OWNER, false)).status, "completed");
   });
 
   it("estimates duration from script length and speed", async () => {

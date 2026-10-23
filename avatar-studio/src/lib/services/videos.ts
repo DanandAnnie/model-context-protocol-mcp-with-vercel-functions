@@ -117,10 +117,26 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
   return getStore().put("video", base);
 }
 
-export async function listVideos(ownerId: string = LOCAL_OWNER): Promise<Video[]> {
+/** How many in-flight renders one library request may check with the provider. */
+export const REFRESH_PER_LIST = 10;
+
+function isPending(video: Video): boolean {
+  return !!video.providerJobId && (video.status === "processing" || video.status === "queued");
+}
+
+/**
+ * The owner's videos, newest first. In-flight renders (newest `REFRESH_PER_LIST`) are
+ * refreshed from the provider on the way out, so the library's polling sees completions
+ * without a webhook or a visit to the detail page.
+ */
+export async function listVideos(ownerId: string = LOCAL_OWNER, refresh = true): Promise<Video[]> {
   const videos = await getStore().list<Video>("video", ownerId);
   videos.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return videos;
+  if (!refresh) return videos;
+  const pending = videos.filter(isPending).slice(0, REFRESH_PER_LIST);
+  if (pending.length === 0) return videos;
+  const refreshed = new Map((await Promise.all(pending.map((v) => refreshStatus(v)))).map((v) => [v.id, v]));
+  return videos.map((v) => refreshed.get(v.id) ?? v);
 }
 
 /**
@@ -129,10 +145,14 @@ export async function listVideos(ownerId: string = LOCAL_OWNER): Promise<Video[]
  */
 export async function getVideo(id: string, ownerId: string | null = LOCAL_OWNER, refresh = true): Promise<Video> {
   const video = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
-  if (!refresh || !video.providerJobId || (video.status !== "processing" && video.status !== "queued")) return video;
+  return refresh ? refreshStatus(video) : video;
+}
 
+/** Asks the provider for the latest status of an in-flight render and stores any change. Never throws. */
+export async function refreshStatus(video: Video): Promise<Video> {
+  if (!isPending(video)) return video;
   try {
-    const update = await getAvatarProviderByName(video.provider).getStatus(video.providerJobId);
+    const update = await getAvatarProviderByName(video.provider).getStatus(video.providerJobId!);
     const next: Video = { ...video, ...stripUndefined(update), updatedAt: nowIso() };
     if (next.status !== video.status || next.videoUrl !== video.videoUrl) {
       await getStore().put("video", next);
@@ -141,12 +161,10 @@ export async function getVideo(id: string, ownerId: string | null = LOCAL_OWNER,
     return next;
   } catch (err) {
     // Transient provider errors should not flip the job to failed; surface in logs only.
-    console.error(`status refresh failed for ${id}:`, err);
+    console.error(`status refresh failed for ${video.id}:`, err);
     return video;
   }
 }
-
-
 
 export const MAX_FOLDER_NAME = 40;
 

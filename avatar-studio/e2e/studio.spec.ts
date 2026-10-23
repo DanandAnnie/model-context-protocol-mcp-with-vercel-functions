@@ -52,6 +52,18 @@ test("write with AI, pick a voice, generate, reach Completed", async ({ page }) 
   await expect(page.getByRole("link", { name: /Captions \(\.srt\)/ })).toBeVisible();
 });
 
+test("the library shows a render completing on its own", async ({ page }) => {
+  const v = await createVideoViaApi(page, "Library watch");
+  await page.goto("/videos");
+  const card = page.getByRole("link", { name: /Library watch/ }).first();
+  await expect(card.getByText("Processing")).toBeVisible();
+  // Only the list is polled here (6s cadence); the detail route is never requested.
+  const detailHits: string[] = [];
+  page.on("request", (req) => { if (req.url().includes(`/api/videos/${v.id}`)) detailHits.push(req.url()); });
+  await expect(card.getByText("Completed")).toBeVisible({ timeout: 30_000 });
+  expect(detailHits).toEqual([]);
+});
+
 test("templates pre-fill the editor and edit-a-copy restores settings", async ({ page }) => {
   await page.goto("/templates");
   await page.getByRole("button", { name: "Real estate" }).click();
@@ -131,6 +143,9 @@ test("library sorts by date, title, and views", async ({ page }) => {
   // Views only accrue on completed renders; the share beacon counts one for the older video.
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${older.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
   expect((await page.request.post(`/api/videos/${older.id}/view`)).status()).toBe(200);
+  // Polling stops once every render has finished, so a fresh load picks up the view count.
+  await page.reload();
+  await page.getByPlaceholder(/Search title/).fill("sortcheck");
   await page.getByLabel("Sort videos").selectOption("views");
   await expect(titles.first()).toHaveText("Zulu sortcheck");
 });

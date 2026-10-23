@@ -49,7 +49,7 @@ import { MockAvatarProvider } from "../providers/avatar/mock";
 import { API_KEY_PREFIX, MAX_API_KEYS, createApiKey, listApiKeys, ownerForApiKey, revokeApiKey } from "../api-keys";
 import { createHmac } from "node:crypto";
 import { computeInsights } from "../insights";
-import { acceptInvite, createInvite, createWorkspace, deleteWorkspace, findInvite, listWorkspaces, removeMember, revokeInvite, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
+import { acceptInvite, canManageAccount, createInvite, createWorkspace, deleteWorkspace, findInvite, listWorkspaces, removeMember, revokeInvite, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
 import type { Video } from "../types";
 import { MockEmailProvider, inviteEmail, setEmailProvider } from "../providers/email";
 import { forgetMemo, memo } from "../cache";
@@ -699,6 +699,11 @@ describe("workspaces", () => {
 
     // Editors cannot manage members; the sole owner cannot be removed or demoted.
     await assert.rejects(removeMember(ws.id, alice.id, bob), /Only workspace owners/);
+    // Account-level actions (wipe, billing) inside the workspace are for owners; personal space is always manageable.
+    assert.equal(canManageAccount(ws, alice.id), true);
+    assert.equal(canManageAccount(ws, bob.id), false);
+    assert.equal(canManageAccount(ws, "stranger"), false);
+    assert.equal(canManageAccount(null, bob.id), true);
     await assert.rejects(removeMember(ws.id, alice.id, alice), /at least one owner/);
     await assert.rejects(setMemberRole(ws.id, alice.id, "editor", alice), /at least one owner/);
     const pendingForOwner = await createInvite(ws.id, { role: "editor" }, alice);

@@ -27,6 +27,11 @@ export function memberOf(ws: Workspace, userId: string) {
   return ws.members.find((m) => m.userId === userId) ?? null;
 }
 
+/** Account-level actions (wiping all data, billing) inside a workspace are for its owners only. */
+export function canManageAccount(ws: Workspace | null, userId: string): boolean {
+  return !ws || memberOf(ws, userId)?.role === "owner";
+}
+
 const membershipId = (workspaceId: string, userId: string) => `mem_${workspaceId}_${userId}`;
 
 async function putMembership(ws: Workspace, userId: string, role: WorkspaceRole, joinedAt: string) {

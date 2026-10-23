@@ -33,6 +33,10 @@ function summarize(videos: Video[]) {
 export default function SettingsPage() {
   const { data, refetch } = useApi<ProviderStatus>("/api/status");
   const { data: videoData } = useApi<{ videos: Video[] }>("/api/videos");
+  const { data: spaces } = useApi<{ activeId: string; workspaces: Array<{ id: string; role: string | null }> }>("/api/workspaces");
+  // Inside a team workspace only owners may change the plan or wipe its data; editors see why instead of a 403.
+  const activeSpace = spaces?.workspaces.find((w) => w.id === spaces.activeId);
+  const canManage = !activeSpace || activeSpace.role === "owner";
   const usage = summarize(videoData?.videos ?? []);
   const limit = data?.renderLimitPerMonth ?? null;
   const thisMonth = data?.usage?.rendersThisMonth ?? 0;
@@ -96,12 +100,12 @@ export default function SettingsPage() {
         </span>
       </Card>
       <Suspense>
-        <PlanCard status={data} onChanged={refetch} />
+        <PlanCard status={data} onChanged={refetch} canManage={canManage} />
       </Suspense>
       <ApiKeys />
       <OutboundWebhook />
       <EmailPrefs />
-      <AccountData />
+      <AccountData canManage={canManage} />
       <Card className="mt-6 p-5 text-sm text-slate-600">
         <h3 className="mb-2 font-semibold text-slate-900">How to go live</h3>
         <ol className="list-decimal space-y-1 pl-5">

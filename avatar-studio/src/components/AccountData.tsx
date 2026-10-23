@@ -5,7 +5,8 @@ import { Button, Card, ErrorBanner, inputClass } from "@/components/ui";
 import { api } from "@/lib/client";
 
 /** Settings section: export everything as JSON, or delete everything in the active account or workspace. */
-export function AccountData() {
+/** `canManage` is false for workspace editors: they can export but not wipe the workspace. */
+export function AccountData({ canManage = true }: { canManage?: boolean } = {}) {
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -41,10 +42,18 @@ export function AccountData() {
           <Download className="h-4 w-4" /> Export JSON
         </a>
         <span className="flex-1" />
-        <input aria-label="Type DELETE to confirm" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Type DELETE" className={`${inputClass} w-36`} />
-        <Button variant="danger" onClick={wipe} loading={busy} disabled={confirm !== "DELETE"}>
-          <Trash2 className="h-4 w-4" /> Delete all data
-        </Button>
+        {canManage ? (
+          <>
+            <input aria-label="Type DELETE to confirm" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Type DELETE" className={`${inputClass} w-36`} />
+            <Button variant="danger" onClick={wipe} loading={busy} disabled={confirm !== "DELETE"}>
+              <Trash2 className="h-4 w-4" /> Delete all data
+            </Button>
+          </>
+        ) : (
+          <span className="text-xs text-slate-500" data-testid="data-owner-only">
+            Only workspace owners can delete the workspace&apos;s data.
+          </span>
+        )}
       </div>
     </Card>
   );

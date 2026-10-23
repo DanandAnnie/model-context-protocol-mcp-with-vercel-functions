@@ -4,7 +4,7 @@ import { ownerForApiKey } from "./api-keys";
 import { SESSION_COOKIE, authMode, isValidSession } from "./auth";
 import { ForbiddenError, UnauthorizedError } from "./errors";
 import { createSupabaseServer } from "./supabase/server";
-import { WORKSPACE_COOKIE, isWorkspaceId, memberOf, workspaceForMember, type User } from "./workspaces";
+import { WORKSPACE_COOKIE, canManageAccount, isWorkspaceId, workspaceForMember, type User } from "./workspaces";
 
 import { LOCAL_OWNER } from "./owner-id";
 export { LOCAL_OWNER };
@@ -69,6 +69,6 @@ export async function requireAccountOwner(): Promise<string> {
   const id = (await cookies()).get(WORKSPACE_COOKIE)?.value;
   const ws = id && isWorkspaceId(id) ? await workspaceForMember(id, user.id) : null;
   if (!ws) return user.id;
-  if (memberOf(ws, user.id)?.role !== "owner") throw new ForbiddenError("Only workspace owners can do that");
+  if (!canManageAccount(ws, user.id)) throw new ForbiddenError("Only workspace owners can do that");
   return ws.id;
 }

@@ -7,7 +7,8 @@ import { api, formatDate } from "@/lib/client";
 import type { ProviderStatus } from "@/lib/types";
 
 /** Current plan, allowance, and upgrade / manage actions. */
-export function PlanCard({ status, onChanged }: { status: ProviderStatus | null; onChanged: () => void }) {
+/** `canManage` is false for workspace editors: the plan is shown but only owners can change it. */
+export function PlanCard({ status, onChanged, canManage = true }: { status: ProviderStatus | null; onChanged: () => void; canManage?: boolean }) {
   const params = useSearchParams();
   const flash = params.get("billing");
   const [busy, setBusy] = useState(false);
@@ -60,7 +61,11 @@ export function PlanCard({ status, onChanged }: { status: ProviderStatus | null;
           {flash === "cancelled" && <div className="mt-2 text-xs font-medium text-slate-700">Subscription cancelled; you are on the Free plan.</div>}
         </div>
         <div className="flex flex-col items-end gap-2">
-          {plan === "pro" ? (
+          {!canManage ? (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="plan-owner-only">
+              Only workspace owners can change the plan.
+            </div>
+          ) : plan === "pro" ? (
             <Button variant="secondary" onClick={() => go("portal")} loading={busy}>
               Manage subscription
             </Button>

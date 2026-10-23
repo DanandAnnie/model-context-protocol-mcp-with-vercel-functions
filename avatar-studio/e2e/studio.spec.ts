@@ -475,3 +475,27 @@ test("website embed script adds a launcher that opens the talk page", async ({ p
     await page.request.delete(`/api/agents/${agent.id}`);
   }
 });
+
+test("voice cloning saves a private voice that renders and can be deleted", async ({ page }) => {
+  const sample = "data:audio/webm;base64," + Buffer.from("tiny sample bytes for the demo clone").toString("base64");
+  const created = await page.request.post("/api/voices/clone", { data: { name: "My voice", samples: [sample] } });
+  expect(created.status()).toBe(201);
+  const voice = (await created.json()).voice as { id: string };
+  try {
+    const voices = (await (await page.request.get("/api/voices")).json()).voices as Array<{ id: string; source?: string }>;
+    expect(voices[0].id).toBe(voice.id);
+    expect(voices[0].source).toBe("custom");
+    await page.goto("/voices");
+    await expect(page.getByTestId("voice-cloner")).toBeVisible();
+    await expect(page.getByText("My voice")).toBeVisible();
+    const made = await page.request.post("/api/videos", { data: { title: "Cloned", script: "Hi.", avatarId: "stock_1", voiceId: voice.id, aspect: "16:9" } });
+    expect(made.status()).toBe(201);
+    expect((await made.json()).video.voiceName).toBe("My voice");
+    expect((await page.request.post("/api/voices/clone", { data: { name: "bad", samples: ["data:image/png;base64,AAAA"] } })).status()).toBe(400);
+    page.once("dialog", (d) => d.accept());
+    await page.getByRole("button", { name: "Delete My voice" }).click();
+    await expect(page.getByText("My voice")).toHaveCount(0);
+  } finally {
+    await page.request.delete(`/api/voices/${voice.id}`);
+  }
+});

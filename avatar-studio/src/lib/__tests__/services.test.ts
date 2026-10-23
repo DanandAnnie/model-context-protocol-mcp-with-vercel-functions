@@ -33,6 +33,10 @@ import {
   MAX_TRANSCRIPT_MESSAGES,
   captureLead,
   listVoices,
+  cloneVoice,
+  cloneVoiceSchema,
+  deleteClonedVoice,
+  MAX_CLONED_VOICES,
   recordView,
   scriptSchema,
   updateVideo,
@@ -984,5 +988,34 @@ describe("live avatar sessions", () => {
       setStreamingProvider(undefined);
       resetLiveSessions();
     }
+  });
+});
+
+describe("voice cloning", () => {
+  const sample = `data:audio/webm;base64,${Buffer.from("not really audio, but bytes").toString("base64")}`;
+
+  it("clones with the provider, lists the voice first for its owner, renders with it, and deletes", async () => {
+    const voice = await cloneVoice(cloneVoiceSchema.parse({ name: "Dana", samples: [sample], language: "en-US" }), "u1");
+    assert.match(voice.id, /^clone_/);
+    assert.equal(voice.source, "custom");
+    const mine = await listVoices("u1");
+    assert.equal(mine[0].id, voice.id, "cloned voices come first");
+    assert.equal((await listVoices("u2")).some((v) => v.id === voice.id), false, "private to the owner");
+    assert.equal((await listVoices()).some((v) => v.id === voice.id), false, "provider list alone has no clones");
+
+    const video = await createVideo({ title: "V", script: "Hi.", avatarId: "stock_1", voiceId: voice.id, aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, "u1");
+    assert.equal(video.voiceName, "Dana");
+    await assert.rejects(createVideo({ title: "V", script: "Hi.", avatarId: "stock_1", voiceId: voice.id, aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, "u2"), /not available/);
+
+    await assert.rejects(cloneVoice(cloneVoiceSchema.parse({ name: "x", samples: ["data:image/png;base64,AAAA"] }), "u1"), /audio recordings or files/);
+    assert.throws(() => cloneVoiceSchema.parse({ name: "x", samples: [] }));
+    await assert.rejects(deleteClonedVoice(voice.id, "u2"), /not found/);
+    await deleteClonedVoice(voice.id, "u1");
+    assert.equal((await listVoices("u1")).some((v) => v.id === voice.id), false);
+  });
+
+  it("caps cloned voices per account", async () => {
+    for (let i = 0; i < MAX_CLONED_VOICES; i++) await cloneVoice(cloneVoiceSchema.parse({ name: `v${i}`, samples: [sample] }), "u3");
+    await assert.rejects(cloneVoice(cloneVoiceSchema.parse({ name: "one more", samples: [sample] }), "u3"), /At most/);
   });
 });

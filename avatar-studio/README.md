@@ -20,6 +20,7 @@ D-ID, ElevenLabs, or in a fully offline **demo mode** with no keys at all.
 | Personalize | One script with `{column}` placeholders plus a CSV of recipients produces one video per row (up to 100), with live preview, missing-column checks, and the monthly allowance respected |
 | Templates | Script templates by category (real estate, marketing, training, support, social) that pre-fill the editor |
 | Avatars | Library presenters + photo avatars created from an uploaded portrait, a webcam capture, or an image URL |
+| Voice cloning | Record about a minute or upload audio files; the clone (ElevenLabs instant cloning, or a demo stand-in) is private to the account, listed first, and usable in every video |
 | Voices | Searchable voice library with previews (provider audio, provider sample, or browser speech in demo mode) |
 | Video translate | Submit a video URL + target language, track dubbing jobs |
 | Folders and share views | Move videos into folders from the detail page or in bulk from the library (multi-select move and delete) and filter the library by folder; public share pages count one view per viewer per 10 minutes, shown on the detail page and library cards |

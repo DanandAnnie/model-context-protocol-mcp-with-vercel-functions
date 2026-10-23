@@ -1,5 +1,5 @@
 "use client";
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import type { VideoStatus } from "@/lib/types";
 
@@ -31,8 +31,12 @@ export function Button({
   );
 }
 
-export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <div className={`rounded-xl border border-slate-200 bg-white shadow-sm ${className}`}>{children}</div>;
+export function Card({ children, className = "", ...rest }: { children: ReactNode; className?: string } & HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div {...rest} className={`rounded-xl border border-slate-200 bg-white shadow-sm ${className}`}>
+      {children}
+    </div>
+  );
 }
 
 export function SectionTitle({ title, subtitle, action }: { title: ReactNode; subtitle?: string; action?: ReactNode }) {

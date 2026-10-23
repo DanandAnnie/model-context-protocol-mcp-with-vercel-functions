@@ -8,6 +8,9 @@ export interface TtsProvider {
    * server-side (demo mode); the client then falls back to browser TTS.
    */
   synthesize(voiceId: string, text: string, speed: number): Promise<{ audio: Uint8Array; mimeType: string } | null>;
+  /** Clone a voice from audio samples; returns the provider's voice id. Absent when the provider cannot clone. */
+  cloneVoice?(input: { name: string; samples: Array<{ bytes: Uint8Array; mimeType: string; filename: string }> }): Promise<{ voiceId: string }>;
+  deleteVoice?(voiceId: string): Promise<void>;
 }
 
 export interface AvatarJobStatus {

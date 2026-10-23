@@ -149,7 +149,8 @@ Returns `{ "reply": "…" }`.
 - `GET /api/avatars` → `{ "avatars": [...] }` (custom photo avatars first, then the library)
 - `POST /api/avatars` → `{ "name", "imageUrl", "gender"? }` where `imageUrl` is an https URL or a `data:image/…` upload (≤ 6 MB). Private and local hosts are rejected.
 - `DELETE /api/avatars/:id`
-- `GET /api/voices` → `{ "voices": [...] }`
+- `GET /api/voices` → `{ "voices": [...] }` (the account's cloned voices first, `source: "custom"`)
+- `POST /api/voices/clone` → `{ "name", "samples": ["data:audio/webm;base64,…"], "language"? }` (one to five audio data URLs, 10 MB total, five clones per account) → `201 { "voice" }`; `DELETE /api/voices/:id` removes a clone. Cloning runs on ElevenLabs when it is the voice provider; the demo provider saves the clone and previews use the browser voice
 - `POST /api/voices/preview` → `{ "voiceId", "text", "speed" }`; returns audio, or `204` with `x-tts-fallback: browser` in demo mode
 
 ## Translation

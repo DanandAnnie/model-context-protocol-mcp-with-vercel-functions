@@ -17,6 +17,7 @@ import { after } from "next/server";
 import { dispatchNotification, getNotifySettings, notifyVideoTransition } from "./notifications";
 import { renderLimitFor } from "./billing";
 import { memo } from "./cache";
+import { decodeDataUrl } from "./providers/image";
 import { LimitError, NotFoundError, ValidationError } from "./errors";
 export { NotFoundError, ValidationError, UnauthorizedError, LimitError } from "./errors";
 import { config } from "./config";
@@ -90,9 +91,55 @@ export async function deleteAvatar(id: string, ownerId: string = LOCAL_OWNER): P
 
 // ---------- Voices ----------
 
-export async function listVoices(): Promise<Voice[]> {
+/** Provider voices (memoised) plus the owner's cloned voices, which are listed first. */
+export async function listVoices(ownerId?: string): Promise<Voice[]> {
   const p = getTtsProvider();
-  return memo(`voices:${p.name}`, LIST_TTL_MS, () => p.listVoices());
+  const provider = await memo(`voices:${p.name}`, LIST_TTL_MS, () => p.listVoices());
+  if (!ownerId) return provider;
+  const custom = (await getStore().list<Voice>("voice", ownerId)).filter((v) => v.provider === p.name);
+  custom.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+  return [...custom, ...provider];
+}
+
+export const MAX_VOICE_SAMPLE_BYTES = 10 * 1024 * 1024;
+export const MAX_CLONED_VOICES = 5;
+
+export const cloneVoiceSchema = z.object({
+  name: z.string().trim().min(1).max(60),
+  /** Audio samples as data URLs (audio/*), one to five, 10 MB in total. */
+  samples: z.array(z.string().min(1).max(14_000_000)).min(1).max(5),
+  language: z.string().trim().max(40).optional(),
+});
+
+export function voiceCloningAvailable(): boolean {
+  return typeof getTtsProvider().cloneVoice === "function";
+}
+
+/** Clones a voice with the TTS provider and keeps it as a custom voice of the owner. */
+export async function cloneVoice(input: z.infer<typeof cloneVoiceSchema>, ownerId: string = LOCAL_OWNER): Promise<Voice> {
+  const provider = getTtsProvider();
+  if (!provider.cloneVoice) throw new ValidationError(`Voice cloning is not available with the ${provider.name} voice provider`);
+  const mine = (await getStore().list<Voice>("voice", ownerId)).filter((v) => v.provider === provider.name);
+  if (mine.length >= MAX_CLONED_VOICES) throw new ValidationError(`At most ${MAX_CLONED_VOICES} cloned voices per account`);
+  let total = 0;
+  const samples = input.samples.map((dataUrl, i) => {
+    if (!dataUrl.startsWith("data:audio/")) throw new ValidationError("Samples must be audio recordings or files");
+    const { bytes, mimeType } = decodeDataUrl(dataUrl);
+    total += bytes.byteLength;
+    if (total > MAX_VOICE_SAMPLE_BYTES) throw new ValidationError("Samples must be under 10 MB in total");
+    const ext = mimeType.includes("webm") ? "webm" : mimeType.includes("wav") ? "wav" : mimeType.includes("ogg") ? "ogg" : mimeType.includes("mp4") || mimeType.includes("m4a") ? "m4a" : "mp3";
+    return { bytes, mimeType, filename: `sample-${i + 1}.${ext}` };
+  });
+  const { voiceId } = await provider.cloneVoice({ name: input.name, samples });
+  const voice: Voice = { id: voiceId, name: input.name, provider: provider.name, language: input.language, source: "custom", ownerId, tags: ["your voice"], createdAt: nowIso() };
+  return getStore().put("voice", voice);
+}
+
+export async function deleteClonedVoice(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
+  const voice = owned(await getStore().get<Voice>("voice", id), ownerId, `Voice ${id}`);
+  const provider = getTtsProvider();
+  if (provider.name === voice.provider) await provider.deleteVoice?.(id);
+  await getStore().remove("voice", id);
 }
 
 export async function previewVoice(voiceId: string, text: string, speed: number) {
@@ -128,7 +175,7 @@ export async function getBrandKit(ownerId: string = LOCAL_OWNER): Promise<BrandK
 
 export async function saveBrandKit(input: z.infer<typeof brandKitSchema>, ownerId: string = LOCAL_OWNER): Promise<BrandKit> {
   if (input.defaultAvatarId) await getAvatar(input.defaultAvatarId, ownerId); // throws NotFound for foreign or unknown ids
-  if (input.defaultVoiceId && !(await listVoices()).some((v) => v.id === input.defaultVoiceId)) {
+  if (input.defaultVoiceId && !(await listVoices(ownerId)).some((v) => v.id === input.defaultVoiceId)) {
     throw new ValidationError(`Voice ${input.defaultVoiceId} is not available`);
   }
   const kit: BrandKit = {
@@ -263,7 +310,7 @@ async function presenterSnapshot(avatarId: string, voiceId: string | undefined, 
   const avatar = await getAvatar(avatarId, ownerId);
   let voiceLanguage: string | undefined;
   if (voiceId) {
-    const voice = (await listVoices()).find((v) => v.id === voiceId);
+    const voice = (await listVoices(ownerId)).find((v) => v.id === voiceId);
     if (!voice) throw new ValidationError(`Voice ${voiceId} is not available`);
     voiceLanguage = voice.language;
   }
@@ -420,7 +467,7 @@ interface RenderContext {
 }
 
 async function resolveRenderContext(req: Pick<VideoRequest, "avatarId" | "voiceId">, ownerId: string): Promise<RenderContext> {
-  const [avatar, voices] = await Promise.all([getAvatar(req.avatarId, ownerId), listVoices()]);
+  const [avatar, voices] = await Promise.all([getAvatar(req.avatarId, ownerId), listVoices(ownerId)]);
   const voice = voices.find((v) => v.id === req.voiceId) ?? null;
   if (!voice) throw new ValidationError(`Voice ${req.voiceId} is not available with the current voice provider`);
   return { avatar, voice };

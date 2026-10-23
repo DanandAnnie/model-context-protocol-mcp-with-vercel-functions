@@ -40,6 +40,10 @@ export interface Voice {
   gender?: "male" | "female" | "neutral";
   previewUrl?: string;
   tags?: string[];
+  /** "custom" for a cloned voice owned by an account; absent for provider voices. */
+  source?: "provider" | "custom";
+  ownerId?: string;
+  createdAt?: string;
 }
 
 export type VideoStatus = "queued" | "processing" | "completed" | "failed";
@@ -274,6 +278,8 @@ export interface ProviderStatus {
   billing: string;
   /** Live video for the interactive avatar: "heygen" or "mock" (portrait only). */
   streaming: string;
+  /** Whether the voice provider can clone a voice from samples. */
+  voiceCloning: boolean;
   /** Present when the request carried an owner (signed in, or open/password mode). */
   usage?: { rendersThisMonth: number; plan: PlanId; proRendersPerMonth: number | null; proPriceLabel: string; subscriptionStatus?: string; endsAt?: string };
 }

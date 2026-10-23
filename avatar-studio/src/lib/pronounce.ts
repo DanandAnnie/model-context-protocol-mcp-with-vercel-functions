@@ -14,7 +14,7 @@ export function applyPronunciations(text: string, rules: Pronunciation[]): strin
   for (const rule of [...rules].sort((a, b) => b.word.length - a.word.length)) {
     if (!rule.word.trim()) continue;
     const re = new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(rule.word.trim())}(?![\\p{L}\\p{N}])`, "giu");
-    out = out.replace(re, rule.sayAs);
+    out = out.replace(re, () => rule.sayAs); // a function, so "$&" or "$1" in the spelling is spoken literally
   }
   return out;
 }

@@ -70,6 +70,12 @@ export default function BrandPage() {
   const accentValid = accent === "" || HEX.test(accent);
 
   async function save() {
+    const rules = parsePronunciations(pronunciations);
+    const badRule = rules.find((r) => r.word.length > 40 || r.sayAs.length > 80);
+    if (badRule) {
+      setErr(`Pronunciation "${badRule.word.slice(0, 20)}": the word is at most 40 characters and the spelling at most 80.`);
+      return;
+    }
     setSaving(true);
     setErr(null);
     try {
@@ -81,7 +87,7 @@ export default function BrandPage() {
           primaryColor: primary,
           accentColor: accent || undefined,
           defaultBackground: bgType && bgUrl.trim() ? { type: bgType, value: bgUrl.trim() } : undefined,
-          pronunciations: parsePronunciations(pronunciations),
+          pronunciations: rules,
           defaultAvatarId: avatarId || undefined,
           defaultVoiceId: voiceId || undefined,
           defaultAspect: aspect || undefined,

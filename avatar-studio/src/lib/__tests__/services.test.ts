@@ -1086,6 +1086,7 @@ describe("brand kit", () => {
     assert.equal(applyPronunciations("Priya Nair flew to Nairobi. nair's SaaS (saas) plan.", rules), "Priya Nye-er flew to Nye-ROH-bee. Nye-er's sass (sass) plan.");
     assert.equal(applyPronunciations("Unchanged.", []), "Unchanged.");
     assert.equal(applyPronunciations("C++ rocks", [{ word: "C++", sayAs: "see plus plus" }]), "see plus plus rocks", "a word is matched literally");
+    assert.equal(applyPronunciations("Nair here", [{ word: "Nair", sayAs: "$&-ish $1" }]), "$&-ish $1 here", "a spelling is spoken literally, replacement patterns included");
     assert.deepEqual(parsePronunciations("Nair = Nye-er\nno rule here\n = empty\nSaaS=sass "), [{ word: "Nair", sayAs: "Nye-er" }, { word: "SaaS", sayAs: "sass" }]);
     assert.equal(formatPronunciations(rules.slice(0, 2)), "Nair = Nye-er\nNairobi = Nye-ROH-bee");
     const copy = spokenCopy({ script: "Hi Nair.", scenes: [{ script: "Bye Nair.", background: { type: "color" as const, value: "#fff" } }] }, rules);

@@ -8,6 +8,7 @@ import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } 
 import { useApi } from "@/hooks/useApi";
 import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib/client";
+import { languageLabel } from "@/lib/language";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
 import { MAX_SCENES, RESOLUTIONS, type AspectRatio, type Avatar, type Background, type BrandKit, type Resolution, type Scene, type Video, type Voice } from "@/lib/types";
@@ -254,11 +255,17 @@ function CreateInner() {
     setPrefill(null);
   }, [prefill, avatarData, voiceData]);
 
+  const [voiceLanguage, setVoiceLanguage] = useState("all");
+  const voiceLanguages = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const v of voiceData?.voices ?? []) if (v.language && !seen.has(v.language)) seen.set(v.language, languageLabel(v.language));
+    return Array.from(seen, ([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [voiceData]);
   const voices = useMemo(() => {
     const all = voiceData?.voices ?? [];
     const q = voiceQuery.trim().toLowerCase();
-    return q ? all.filter((v) => [v.name, v.language, v.gender, ...(v.tags ?? [])].filter(Boolean).join(" ").toLowerCase().includes(q)) : all;
-  }, [voiceData, voiceQuery]);
+    return all.filter((v) => (voiceLanguage === "all" || v.language === voiceLanguage) && (!q || [v.name, v.language, v.gender, ...(v.tags ?? [])].filter(Boolean).join(" ").toLowerCase().includes(q)));
+  }, [voiceData, voiceQuery, voiceLanguage]);
 
   const words = wordCount(script);
   const seconds = estimateSeconds(script, speed);
@@ -502,7 +509,17 @@ function CreateInner() {
 
             {tab === "voice" && (
               <div className="space-y-2">
-                <input className={inputClass} placeholder="Search voices" value={voiceQuery} onChange={(e) => setVoiceQuery(e.target.value)} />
+                <div className="flex gap-2">
+                  <input className={inputClass} placeholder="Search voices" value={voiceQuery} onChange={(e) => setVoiceQuery(e.target.value)} />
+                  {voiceLanguages.length > 1 && (
+                    <select aria-label="Voice language" value={voiceLanguage} onChange={(e) => setVoiceLanguage(e.target.value)} className={`${inputClass} w-auto max-w-[45%]`}>
+                      <option value="all">All languages</option>
+                      {voiceLanguages.map((l) => (
+                        <option key={l.value} value={l.value}>{l.label}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
                 {voicesLoading
                   ? Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-14" />)
                   : voices.map((v) => (

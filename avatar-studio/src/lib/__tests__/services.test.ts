@@ -9,6 +9,7 @@ import {
   bulkVideos,
   createAvatar,
   createAvatarSchema,
+  getAvatar,
   deleteBrandKit,
   getBrandKit,
   saveBrandKit,
@@ -505,6 +506,31 @@ describe("personalized batches", () => {
     assert.deepEqual(t.rows, [{ name: "Smith, Jo", note: 'Says "hi"' }, { name: "Amy", note: "plain" }]);
     assert.equal(fillTemplate("Hi {name}: {note} {missing}", t.rows[0]), 'Hi Smith, Jo: Says "hi" {missing}');
     assert.deepEqual(placeholdersIn("{a} {b} {a}"), ["a", "b"]);
+  });
+
+  it("prepares a custom portrait once for a whole batch", async () => {
+    const { createBatch } = await import("../services");
+    const custom = await createAvatar({ name: "Me", imageUrl: "https://example.com/me.jpg" }, "batch-prep");
+    let uploads = 0;
+    const proto = MockAvatarProvider.prototype as unknown as { prepareAvatar?: (a: typeof custom) => Promise<typeof custom> };
+    proto.prepareAvatar = async (a) => {
+      if (a.providerAssetIds?.mock) return a;
+      uploads += 1;
+      return { ...a, providerAssetIds: { ...a.providerAssetIds, mock: "asset_1" } };
+    };
+    try {
+      const result = await createBatch(
+        { title: "Hi", scriptTemplate: "Hi {name}.", csv: "name\nA\nB\nC", avatarId: custom.id, voiceId: STOCK_VOICES[0].id, aspect: "16:9", resolution: "1080p", background: { type: "color", value: "#fff" }, captions: false, speed: 1 },
+        "batch-prep",
+      );
+      assert.equal(result.videos.length, 3);
+      assert.ok(result.videos.every((v) => v.status === "processing"));
+      assert.equal(uploads, 1, "the portrait is uploaded for the first row and reused");
+      const stored = await getAvatar(custom.id, "batch-prep");
+      assert.equal(stored.providerAssetIds?.mock, "asset_1", "the prepared avatar is persisted");
+    } finally {
+      delete proto.prepareAvatar;
+    }
   });
 
   it("creates one video per row with substituted scripts and a shared batch id", async () => {

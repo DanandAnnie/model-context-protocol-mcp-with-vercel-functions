@@ -5,7 +5,7 @@ import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import { getStore } from "../store";
 import { MAX_SCENES } from "../types";
 import type { Avatar, Scene, Video, VideoRequest, Voice } from "../types";
-import type { RenderCast } from "../providers/types";
+import type { AvatarProvider, RenderCast } from "../providers/types";
 import { LOCAL_OWNER } from "../owner-id";
 import { renderLimitFor } from "../billing";
 import { ConflictError, LimitError, NotFoundError, ValidationError } from "../errors";
@@ -109,7 +109,9 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
   const resolved = ctx ?? (await resolveRenderContext(req, ownerId));
   let avatar = resolved.avatar;
   const voice = resolved.voice;
-  const cast: RenderCast = { avatars: { ...resolved.cast.avatars }, voices: { ...resolved.cast.voices } };
+  // Shared with the caller on purpose: a batch passes one context for every row, so a custom
+  // portrait prepared (uploaded) for the first row is reused by the rest.
+  const cast = resolved.cast;
   const provider = getAvatarProvider();
 
   // Scenes keep the names of their own presenter and voice for the library and detail page.
@@ -137,9 +139,7 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
   try {
     if (provider.prepareAvatar) {
       for (const a of Object.values(cast.avatars)) {
-        if (a.source !== "custom") continue;
-        const prepared = await provider.prepareAvatar(a);
-        if (prepared !== a) cast.avatars[a.id] = await getStore().put("avatar", prepared);
+        if (a.source === "custom") cast.avatars[a.id] = await prepareOnce(provider, a);
       }
       avatar = cast.avatars[avatar.id] ?? avatar;
     }
@@ -175,6 +175,21 @@ export function isRefreshDeferred(videoId: string, now = Date.now()): boolean {
  * any whose last check failed recently) are refreshed from the provider on the way out, so
  * the library's polling sees completions without a webhook or a visit to the detail page.
  */
+/** Uploads in flight, so rows rendering side by side wait for one upload instead of each starting their own. */
+const preparing = new Map<string, Promise<Avatar>>();
+
+/** Makes a custom portrait usable by the provider (uploading it once) and persists the result. */
+function prepareOnce(provider: AvatarProvider, avatar: Avatar): Promise<Avatar> {
+  const running = preparing.get(avatar.id);
+  if (running) return running;
+  const run = (async () => {
+    const prepared = await provider.prepareAvatar!(avatar);
+    return prepared === avatar ? avatar : getStore().put("avatar", prepared);
+  })().finally(() => preparing.delete(avatar.id));
+  preparing.set(avatar.id, run);
+  return run;
+}
+
 export async function listVideos(ownerId: string = LOCAL_OWNER, refresh = true): Promise<Video[]> {
   const videos = await getStore().list<Video>("video", ownerId);
   videos.sort((a, b) => b.createdAt.localeCompare(a.createdAt));

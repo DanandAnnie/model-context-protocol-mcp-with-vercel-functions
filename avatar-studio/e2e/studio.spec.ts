@@ -43,6 +43,9 @@ test("write with AI, pick a voice, generate, reach Completed", async ({ page }) 
   await page.getByRole("button", { name: "Write script" }).click();
   await expect(page.locator("textarea")).not.toHaveValue("");
   await page.getByRole("button", { name: "Voice" }).click();
+  await page.getByLabel("Voice language").selectOption({ label: "British English" });
+  await expect(page.getByText("James")).toHaveCount(0);
+  await page.getByLabel("Voice language").selectOption("all");
   await page.getByText("James").click();
   await page.getByRole("button", { name: "Settings" }).click();
   await page.getByRole("button", { name: /9:16/ }).click();

@@ -126,6 +126,13 @@ test("mobile drawer opens, navigates, and closes", async ({ browser }) => {
   await ctx.close();
 });
 
+test("script writer refuses private page URLs", async ({ request }) => {
+  const res = await request.post("/api/script", { data: { url: "http://127.0.0.1:3100/home" } });
+  expect(res.status()).toBe(400);
+  expect((await res.json()).error).toMatch(/public host/);
+  expect((await request.post("/api/script", { data: { topic: "" } })).status()).toBe(400);
+});
+
 test("API validation and webhook guard", async ({ request }) => {
   expect((await request.post("/api/videos", { data: { title: "", script: "" } })).status()).toBe(400);
   const badVoice = await request.post("/api/videos", { data: { title: "t", script: "hi", avatarId: "stock_1", voiceId: "zzz" } });

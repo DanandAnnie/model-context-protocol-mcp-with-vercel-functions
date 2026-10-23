@@ -109,6 +109,12 @@ When completed the video also carries `videoUrl`, `thumbnailUrl`, and `durationS
 { "topic": "Why staged homes sell faster", "tone": "professional", "lengthSec": 45, "language": "English", "audience": "home sellers" }
 ```
 
+Or write from a public web page (`url`; the topic defaults to the page title; private hosts, redirects, non-HTML, and pages over 1 MB are rejected):
+
+```json
+{ "url": "https://example.com/listings/12-maple-st", "lengthSec": 45 }
+```
+
 ```json
 { "action": "shorten", "script": "…" }
 { "action": "tone", "script": "…", "tone": "energetic" }

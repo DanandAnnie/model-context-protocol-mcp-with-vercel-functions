@@ -38,7 +38,7 @@ export type ScriptAction = "shorten" | "expand" | "tone" | "translate" | "polish
 
 export interface ScriptProvider {
   readonly name: string;
-  generate(input: { topic: string; tone: string; lengthSec: number; language: string; audience?: string }): Promise<string>;
+  generate(input: { topic: string; tone: string; lengthSec: number; language: string; audience?: string; source?: string }): Promise<string>;
   /** Transform an existing script: shorten, expand, change tone, translate, or polish. */
   revise(input: { script: string; action: ScriptAction; tone?: string; language?: string }): Promise<string>;
   /** One conversational turn for the interactive avatar: the presenter answers in character, briefly, for speech. */

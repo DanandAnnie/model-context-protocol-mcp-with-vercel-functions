@@ -47,6 +47,8 @@ import { acceptInvite, createInvite, createWorkspace, deleteWorkspace, findInvit
 import type { Video } from "../types";
 import { MockEmailProvider, inviteEmail, setEmailProvider } from "../providers/email";
 import { forgetMemo, memo } from "../cache";
+import { extractReadableText, fetchPageText } from "../webpage";
+import { generateScript } from "../services";
 import { MockBillingProvider, applyStripeEvent, getPlan, renderLimitFor, setBillingProvider, setPlan, verifyStripeSignature } from "../billing";
 import { config } from "../config";
 import { dispatchNotification, getNotifySettings, notifyVideoTransition, saveNotifySettings, setNotificationFetch, signPayload } from "../notifications";
@@ -889,5 +891,46 @@ describe("lead capture and list memo", () => {
     assert.equal(await memo("t:err", 1000, async () => "recovered"), "recovered", "a failure is not cached");
     assert.ok((await listVoices()).length > 0);
     forgetMemo();
+  });
+});
+
+describe("script from a web page", () => {
+  const HTML = `<!doctype html><html><head><title>12 Maple St &amp; more</title><style>p{}</style><script>var x = "<p>no</p>";</script></head>
+<body><nav><a href="/">Home</a> <a href="/about">About</a></nav>
+<main><h1>Open house this Saturday</h1><p>This three&#8209;bedroom home sits on a quiet street near the park.</p>
+<p>The kitchen was renovated in 2024 with new appliances &amp; quartz counters. Showings start at 10&nbsp;am.</p></main>
+<footer>Copyright</footer></body></html>`;
+
+  it("extracts the title and readable text, dropping chrome and scripts", () => {
+    const out = extractReadableText(HTML);
+    assert.equal(out.title, "12 Maple St & more");
+    assert.match(out.text, /^Open house this Saturday\n/);
+    assert.match(out.text, /quartz counters/);
+    assert.match(out.text, /10 am/);
+    assert.doesNotMatch(out.text, /Home|About|Copyright|var x|p\{\}/);
+  });
+
+  it("fetches only public HTML pages within limits and feeds the writer", async () => {
+    const fake = (async (input: string | URL | Request, _init?: RequestInit) => {
+      const u = String(input);
+      if (u.endsWith("/listing")) return new Response(HTML, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
+      if (u.endsWith("/pdf")) return new Response("%PDF", { status: 200, headers: { "content-type": "application/pdf" } });
+      if (u.endsWith("/big")) return new Response("x", { status: 200, headers: { "content-type": "text/html", "content-length": "5000000" } });
+      if (u.endsWith("/tiny")) return new Response("<html><body>hi</body></html>", { status: 200, headers: { "content-type": "text/html" } });
+      return new Response("nope", { status: 404 });
+    }) as typeof fetch;
+    const page = await fetchPageText("https://203.0.113.5/listing", fake);
+    assert.equal(page.title, "12 Maple St & more");
+    await assert.rejects(fetchPageText("http://localhost:3000/listing", fake), /public host/);
+    await assert.rejects(fetchPageText("https://203.0.113.5/pdf", fake), /not an HTML page/);
+    await assert.rejects(fetchPageText("https://203.0.113.5/big", fake), /too large/);
+    await assert.rejects(fetchPageText("https://203.0.113.5/tiny", fake), /too little readable text/);
+    await assert.rejects(fetchPageText("https://203.0.113.5/missing", fake), /returned 404/);
+
+    const script = await generateScript(scriptSchema.parse({ url: "https://203.0.113.5/listing", lengthSec: 45 }), fake);
+    assert.match(script, /12 Maple St & more/, "topic defaults to the page title");
+    assert.match(script, /quiet street near the park/, "demo writer reads from the page");
+    assert.throws(() => scriptSchema.parse({ topic: "" }), /topic or a page URL/);
+    assert.ok(scriptSchema.parse({ url: "https://example.com/x" }));
   });
 });

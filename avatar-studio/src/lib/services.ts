@@ -21,6 +21,7 @@ import { LimitError, NotFoundError, ValidationError } from "./errors";
 export { NotFoundError, ValidationError, UnauthorizedError, LimitError } from "./errors";
 import { config } from "./config";
 import { fillTemplate, parseCsv, placeholdersIn } from "./csv";
+import { fetchPageText } from "./webpage";
 
 /** Pass as the owner to skip the ownership check (public share pages). */
 export const PUBLIC_ACCESS = null;
@@ -151,15 +152,29 @@ export async function deleteBrandKit(ownerId: string = LOCAL_OWNER): Promise<voi
 
 // ---------- Scripts ----------
 
-export const scriptSchema = z.object({
-  topic: z.string().trim().min(3).max(500),
-  tone: z.enum(["friendly", "professional", "formal", "energetic", "calm"]).default("friendly"),
-  lengthSec: z.number().int().min(10).max(300).default(45),
-  language: z.string().trim().min(2).max(40).default("English"),
-  audience: z.string().trim().max(120).optional(),
-});
+export const scriptSchema = z
+  .object({
+    topic: z.string().trim().max(500).default(""),
+    /** A public web page to write from; the topic defaults to its title. */
+    url: z.string().trim().url().max(2000).optional(),
+    tone: z.enum(["friendly", "professional", "formal", "energetic", "calm"]).default("friendly"),
+    lengthSec: z.number().int().min(10).max(300).default(45),
+    language: z.string().trim().min(2).max(40).default("English"),
+    audience: z.string().trim().max(120).optional(),
+  })
+  .refine((v) => v.topic.length >= 3 || !!v.url, { path: ["topic"], message: "Give a topic or a page URL" });
 
-export async function generateScript(input: z.infer<typeof scriptSchema>): Promise<string> {
+export async function generateScript(input: z.infer<typeof scriptSchema>, fetchImpl: typeof fetch = fetch): Promise<string> {
+  if (input.url) {
+    let page: { title: string; text: string };
+    try {
+      page = await fetchPageText(input.url, fetchImpl);
+    } catch (err) {
+      throw new ValidationError(err instanceof Error ? err.message : "The page could not be read");
+    }
+    const topic = input.topic.length >= 3 ? input.topic : page.title || "this page";
+    return getScriptProvider().generate({ ...input, topic, source: page.text });
+  }
   return getScriptProvider().generate(input);
 }
 
@@ -221,7 +236,7 @@ export async function captureLead(agentId: string, input: z.infer<typeof leadSch
   await getStore().put("conversation", { ...conversation, visitor: { email: input.email, name: input.name }, updatedAt: now });
   const settings = await getNotifySettings(agent.ownerId).catch(() => null);
   if (settings) {
-    await dispatchNotification(settings, "lead.captured", {
+    await afterResponse(() => dispatchNotification(settings, "lead.captured", {
       agentId: agent.id,
       agentName: agent.name,
       conversationId: conversation.id,
@@ -229,7 +244,7 @@ export async function captureLead(agentId: string, input: z.infer<typeof leadSch
       name: input.name,
       lastMessage: conversation.messages.filter((m) => m.role === "user").at(-1)?.content,
       capturedAt: now,
-    });
+    }));
   }
 }
 
@@ -579,7 +594,12 @@ export async function getVideo(id: string, ownerId: string | null = LOCAL_OWNER,
  * third-party endpoint. Outside a request (tests, scripts) the delivery runs inline.
  */
 async function scheduleNotification(prev: Video, next: Video): Promise<void> {
-  const run = () => notifyVideoTransition(prev, next).catch((err) => console.error("webhook delivery failed:", err));
+  await afterResponse(() => notifyVideoTransition(prev, next));
+}
+
+/** Runs work after the response is sent (Next's after()); inline when there is no request scope. */
+async function afterResponse(work: () => Promise<unknown>): Promise<void> {
+  const run = () => work().catch((err) => console.error("deferred work failed:", err));
   try {
     after(run);
   } catch {

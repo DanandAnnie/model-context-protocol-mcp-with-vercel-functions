@@ -22,6 +22,7 @@ export function ChatPanel({
   dark = false,
   compact = false,
   aside,
+  onReset,
 }: {
   name: string;
   imageUrl: string;
@@ -33,6 +34,8 @@ export function ChatPanel({
   compact?: boolean;
   /** Extra controls rendered under the portrait (e.g. a voice picker). */
   aside?: React.ReactNode;
+  /** Called when the visitor starts over, so the host can drop its transcript id. */
+  onReset?: () => void;
 }) {
   const [messages, setMessages] = useState<ChatTurn[]>([]);
   const [draft, setDraft] = useState("");
@@ -86,6 +89,7 @@ export function ChatPanel({
     setSpeaking(false);
     setMessages([]);
     setErr(null);
+    onReset?.();
   }
 
   // Not the shared Card: its bg-white would compete with the dark surface in the stylesheet order.

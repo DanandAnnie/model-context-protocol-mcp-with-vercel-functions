@@ -25,7 +25,7 @@ export class AnthropicScriptProvider implements ScriptProvider {
     return this.complete(`${instruction[input.action]}\n\nScript:\n${input.script}`);
   }
 
-  async generate(input: { topic: string; tone: string; lengthSec: number; language: string; audience?: string }) {
+  async generate(input: { topic: string; tone: string; lengthSec: number; language: string; audience?: string; source?: string }) {
     const words = Math.round(input.lengthSec * 2.5);
     const prompt = [
       `Topic: ${input.topic}`,
@@ -33,6 +33,7 @@ export class AnthropicScriptProvider implements ScriptProvider {
       `Language: ${input.language}`,
       input.audience ? `Audience: ${input.audience}` : null,
       `Target length: about ${words} words (${input.lengthSec} seconds spoken).`,
+      input.source ? `\nSource material (use only facts from it; do not invent details):\n"""\n${input.source}\n"""` : null,
     ]
       .filter(Boolean)
       .join("\n");

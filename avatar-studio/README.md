@@ -13,7 +13,7 @@ D-ID, ElevenLabs, or in a fully offline **demo mode** with no keys at all.
 | Area | What you get |
 |---|---|
 | Home | Quick actions, recent videos |
-| Create video | Draft autosave (survives a refresh), multi-scene script editor (up to 20 scenes, each with its own background), word/duration counter, AI script writer plus an Improve menu (polish, shorten, expand, change tone, translate), avatar picker, voice picker with live preview, background color/image, 16:9 / 9:16 / 1:1, captions, speaking speed, live stage preview |
+| Create video | Draft autosave (survives a refresh), multi-scene script editor (up to 20 scenes, each with its own background), word/duration counter, AI script writer from a topic or a public web page URL plus an Improve menu (polish, shorten, expand, change tone, translate), avatar picker, voice picker with live preview, background color/image, 16:9 / 9:16 / 1:1, captions, speaking speed, live stage preview |
 | My videos | Library with search and status filters, player, inline rename, download, SRT captions, share link, delete, "Edit a copy" |
 | Share page | Public, sidebar-free player at `/share/:id` with a native subtitle track; "Embed" copies an iframe snippet |
 | Hardening | Password sign-in is rate limited (5 attempts per 15 minutes per IP); security headers on every response; only share pages may be framed |

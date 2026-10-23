@@ -3,8 +3,14 @@ import type { ChatMessage, ChatPersona, ScriptAction, ScriptProvider } from "../
 /** Template-based script writer used when no LLM key is configured. */
 export class MockScriptProvider implements ScriptProvider {
   readonly name = "mock";
-  async generate({ topic, tone, lengthSec, audience }: { topic: string; tone: string; lengthSec: number; audience?: string }) {
+  async generate({ topic, tone, lengthSec, audience, source }: { topic: string; tone: string; lengthSec: number; audience?: string; source?: string }) {
     const who = audience ? ` for ${audience}` : "";
+    if (source) {
+      // Demo: open with the topic, then read the first sentences of the page, then close.
+      const sentences = source.replace(/\s+/g, " ").split(/(?<=[.!?])\s+/).filter((x) => x.length > 20);
+      const take = Math.max(1, Math.min(sentences.length, Math.round(lengthSec / 15)));
+      return [`Here's what you need to know about ${topic}.`, ...sentences.slice(0, take), "Want the details? The full page is linked below."].join(" ");
+    }
     const sentences = [
       `Hi there! Today I want to talk about ${topic}${who}.`,
       `Here is the short version: ${topic} matters because it changes how you get results day to day.`,

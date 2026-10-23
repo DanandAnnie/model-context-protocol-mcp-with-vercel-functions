@@ -548,6 +548,7 @@ function CreateInner() {
 
 function ScriptWriter({ onScript, onClose }: { onScript: (s: string) => void; onClose: () => void }) {
   const [topic, setTopic] = useState("");
+  const [url, setUrl] = useState("");
   const [tone, setTone] = useState<(typeof TONES)[number]>("friendly");
   const [lengthSec, setLength] = useState(45);
   const [language, setLanguage] = useState("English");
@@ -561,7 +562,7 @@ function ScriptWriter({ onScript, onClose }: { onScript: (s: string) => void; on
     try {
       const { script } = await api<{ script: string }>("/api/script", {
         method: "POST",
-        body: JSON.stringify({ topic, tone, lengthSec, language, audience: audience || undefined }),
+        body: JSON.stringify({ topic, url: url.trim() || undefined, tone, lengthSec, language, audience: audience || undefined }),
       });
       onScript(script);
     } catch (e) {
@@ -579,6 +580,7 @@ function ScriptWriter({ onScript, onClose }: { onScript: (s: string) => void; on
       </div>
       <div className="space-y-3">
         <input className={inputClass} placeholder="What is the video about? e.g. Welcome new tenants to our property portal" value={topic} onChange={(e) => setTopic(e.target.value)} />
+        <input className={inputClass} type="url" aria-label="Page URL" placeholder="Or paste a public web page to write from (a listing, a blog post, a product page)" value={url} onChange={(e) => setUrl(e.target.value)} />
         <div className="grid gap-3 sm:grid-cols-3">
           <select className={inputClass} value={tone} onChange={(e) => setTone(e.target.value as typeof tone)}>
             {TONES.map((t) => <option key={t} value={t}>{t[0].toUpperCase() + t.slice(1)}</option>)}
@@ -591,7 +593,7 @@ function ScriptWriter({ onScript, onClose }: { onScript: (s: string) => void; on
         <input className={inputClass} placeholder="Audience (optional), e.g. first-time landlords" value={audience} onChange={(e) => setAudience(e.target.value)} />
         <ErrorBanner message={err} />
         <div className="flex justify-end">
-          <Button onClick={run} loading={busy} disabled={topic.trim().length < 3}>Write script</Button>
+          <Button onClick={run} loading={busy} disabled={topic.trim().length < 3 && !url.trim()}>Write script</Button>
         </div>
       </div>
     </div>

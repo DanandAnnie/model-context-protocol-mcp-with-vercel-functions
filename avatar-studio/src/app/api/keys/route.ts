@@ -2,7 +2,7 @@ import { z } from "zod";
 import { createApiKey, listApiKeys } from "@/lib/api-keys";
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { ValidationError } from "@/lib/errors";
-import { presentedApiKey, requireOwner } from "@/lib/owner";
+import { currentUser, presentedApiKey, requireOwner } from "@/lib/owner";
 
 export const dynamic = "force-dynamic";
 
@@ -20,10 +20,10 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     if (await presentedApiKey()) return json({ error: "Sign in to create API keys" }, { status: 403 });
-    const owner = await requireOwner();
+    const [owner, user] = await Promise.all([requireOwner(), currentUser()]);
     const { name } = createSchema.parse(await readJson(req));
     try {
-      return json(await createApiKey(name, owner), { status: 201 });
+      return json(await createApiKey(name, owner, user.id), { status: 201 });
     } catch (e) {
       throw new ValidationError(e instanceof Error ? e.message : "Could not create the key");
     }

@@ -1,6 +1,8 @@
 // Team workspaces: a shared owner id with members. Membership is joined through invite links.
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
+import { revokeApiKeysFor } from "./api-keys";
+import { deleteNotifySettings } from "./notifications";
 import { NotFoundError, ValidationError } from "./errors";
 import { newId, nowIso } from "./ids";
 import { getStore } from "./store";
@@ -71,9 +73,14 @@ export async function renameWorkspace(id: string, name: string, user: User): Pro
   return getStore().put("workspace", { ...ws, name, updatedAt: nowIso() });
 }
 
-/** Deletes the workspace record only; its videos and settings stay in the store under its id but are no longer reachable. */
+/**
+ * Deletes the workspace record, every API key minted under it, and its outbound webhook, so nothing
+ * can act as the workspace afterwards. Its videos and brand kit stay in the store but are unreachable.
+ */
 export async function deleteWorkspace(id: string, user: User): Promise<void> {
   await requireRole(id, user, ["owner"]);
+  await revokeApiKeysFor(id);
+  await deleteNotifySettings(id);
   await getStore().remove("workspace", id);
 }
 
@@ -123,7 +130,10 @@ export async function removeMember(id: string, userId: string, user: User): Prom
   if (target.role === "owner" && ws.members.filter((m) => m.role === "owner").length === 1) {
     throw new ValidationError("A workspace needs at least one owner; delete it or promote someone first");
   }
-  return getStore().put("workspace", { ...ws, members: ws.members.filter((m) => m.userId !== userId), updatedAt: nowIso() });
+  const next = await getStore().put("workspace", { ...ws, members: ws.members.filter((m) => m.userId !== userId), updatedAt: nowIso() });
+  // Keys the departing member minted under this workspace must not outlive their membership.
+  await revokeApiKeysFor(id, userId);
+  return next;
 }
 
 export async function setMemberRole(id: string, userId: string, role: WorkspaceRole, user: User): Promise<Workspace> {

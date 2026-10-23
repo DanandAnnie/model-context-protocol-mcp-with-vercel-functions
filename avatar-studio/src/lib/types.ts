@@ -139,6 +139,8 @@ export interface ApiKey {
   /** First characters of the secret, for recognising a key in the list. */
   prefix: string;
   hash: string;
+  /** Personal id of the person who minted it (differs from ownerId inside a workspace). */
+  createdBy?: string;
   createdAt: string;
   lastUsedAt?: string;
 }

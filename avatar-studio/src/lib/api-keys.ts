@@ -26,7 +26,7 @@ export async function listApiKeys(ownerId: string): Promise<Omit<ApiKey, "hash">
 }
 
 /** Creates a key and returns the one-time secret alongside its public record. */
-export async function createApiKey(name: string, ownerId: string): Promise<{ key: Omit<ApiKey, "hash">; secret: string }> {
+export async function createApiKey(name: string, ownerId: string, createdBy: string = ownerId): Promise<{ key: Omit<ApiKey, "hash">; secret: string }> {
   const existing = await getStore().list<ApiKey>("apikey", ownerId);
   if (existing.length >= MAX_API_KEYS) throw new Error(`At most ${MAX_API_KEYS} API keys per account; revoke one first`);
   const secret = `${API_KEY_PREFIX}${randomBytes(24).toString("base64url")}`;
@@ -36,6 +36,7 @@ export async function createApiKey(name: string, ownerId: string): Promise<{ key
     name,
     prefix: secret.slice(0, API_KEY_PREFIX.length + 6),
     hash: hashApiKey(secret),
+    createdBy,
     createdAt: nowIso(),
   };
   await getStore().put("apikey", key);
@@ -59,4 +60,19 @@ export async function ownerForApiKey(secret: string): Promise<string | null> {
     getStore().put("apikey", { ...key, lastUsedAt: nowIso() }).catch(() => {});
   }
   return key.ownerId;
+}
+
+/**
+ * Revokes every key of an owner, or only those minted by one person. Used when a member leaves a
+ * workspace (their keys must not outlive their membership) and when a workspace is deleted.
+ */
+export async function revokeApiKeysFor(ownerId: string, createdBy?: string): Promise<number> {
+  const keys = await getStore().list<ApiKey>("apikey", ownerId);
+  let n = 0;
+  for (const key of keys) {
+    if (createdBy && (key.createdBy ?? key.ownerId) !== createdBy) continue;
+    await getStore().remove("apikey", key.id);
+    n += 1;
+  }
+  return n;
 }

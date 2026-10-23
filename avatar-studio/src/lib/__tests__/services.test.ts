@@ -660,4 +660,20 @@ describe("workspaces", () => {
     await deleteWorkspace(ws.id, alice);
     assert.deepEqual(await listWorkspaces(alice.id), []);
   });
+
+  it("revokes a departing member's workspace keys and every key on deletion", async () => {
+    const ws = await createWorkspace("Keys", alice);
+    const inv = await createInvite(ws.id, { role: "editor" }, alice);
+    await acceptInvite(inv.token, bob);
+    const bobKey = await createApiKey("bob-ci", ws.id, bob.id);
+    const aliceKey = await createApiKey("alice-ci", ws.id, alice.id);
+    const personal = await createApiKey("bob-personal", bob.id, bob.id);
+    assert.equal(await ownerForApiKey(bobKey.secret), ws.id);
+    await removeMember(ws.id, bob.id, alice);
+    assert.equal(await ownerForApiKey(bobKey.secret), null, "removed member's workspace key is revoked");
+    assert.equal(await ownerForApiKey(aliceKey.secret), ws.id, "other members' keys survive");
+    assert.equal(await ownerForApiKey(personal.secret), bob.id, "personal keys are untouched");
+    await deleteWorkspace(ws.id, alice);
+    assert.equal(await ownerForApiKey(aliceKey.secret), null, "deletion revokes every workspace key");
+  });
 });

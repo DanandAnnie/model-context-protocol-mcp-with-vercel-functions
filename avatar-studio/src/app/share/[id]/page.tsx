@@ -5,6 +5,7 @@ import { NotFoundError, PUBLIC_ACCESS, getBrandKit, getVideo } from "@/lib/servi
 import { LOCAL_OWNER } from "@/lib/owner";
 import { formatSeconds, isDarkHex } from "@/lib/client";
 import { ViewBeacon } from "@/components/ViewBeacon";
+import { ShareCta } from "@/components/ShareCta";
 
 export const dynamic = "force-dynamic";
 
@@ -63,18 +64,7 @@ export default async function SharePage({ params }: { params: Promise<{ id: stri
         </div>
         {(video.shareCta || (video.shareDownload && video.status === "completed" && video.videoUrl)) && (
           <p className="mt-4 flex flex-wrap items-center gap-3">
-            {video.shareCta && (
-              <a
-                href={video.shareCta.url}
-                target="_blank"
-                rel="noreferrer noopener"
-                data-testid="share-cta"
-                className="inline-flex max-w-full items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold shadow-sm [overflow-wrap:anywhere] hover:opacity-90"
-                style={{ background: ctaBackground, color: isDarkHex(ctaBackground) ? "#fff" : "#0f172a" }}
-              >
-                {video.shareCta.label}
-              </a>
-            )}
+            {video.shareCta && <ShareCta videoId={video.id} label={video.shareCta.label} url={video.shareCta.url} background={ctaBackground} dark={isDarkHex(ctaBackground)} />}
             {video.shareDownload && video.status === "completed" && video.videoUrl && (
               <a href={video.videoUrl} download target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-700">
                 Download video

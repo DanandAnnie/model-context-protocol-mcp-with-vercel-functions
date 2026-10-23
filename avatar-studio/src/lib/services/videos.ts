@@ -308,6 +308,19 @@ export async function recordView(id: string, gate: () => boolean = () => true): 
   return { views, counted: true };
 }
 
+/**
+ * Count a click on the share-page call to action. Public, like `recordView`; only a completed
+ * video that still carries a button counts, and `gate` applies the route's per-viewer window.
+ */
+export async function recordCtaClick(id: string, gate: () => boolean = () => true): Promise<{ clicks: number; counted: boolean }> {
+  const video = await getStore().get<Video>("video", id);
+  if (!video) throw new NotFoundError(`Video ${id} not found`);
+  if (video.status !== "completed" || !video.shareCta || !gate()) return { clicks: video.ctaClicks ?? 0, counted: false };
+  const clicks = (video.ctaClicks ?? 0) + 1;
+  await getStore().put("video", { ...video, ctaClicks: clicks, lastCtaClickAt: nowIso() });
+  return { clicks, counted: true };
+}
+
 export const bulkVideoSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("delete"), ids: z.array(z.string().min(1)).min(1).max(200) }),
   z.object({ action: z.literal("move"), ids: z.array(z.string().min(1)).min(1).max(200), folder: z.string().trim().max(MAX_FOLDER_NAME) }),

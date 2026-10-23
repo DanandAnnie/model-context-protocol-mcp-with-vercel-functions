@@ -134,6 +134,9 @@ export interface Video extends VideoRequest {
   /** Share page views (completed videos only; one per viewer per window). */
   views?: number;
   lastViewedAt?: string;
+  /** Clicks on the share-page call to action (one per viewer per window). */
+  ctaClicks?: number;
+  lastCtaClickAt?: string;
   provider: string;
   providerJobId?: string;
   videoUrl?: string;

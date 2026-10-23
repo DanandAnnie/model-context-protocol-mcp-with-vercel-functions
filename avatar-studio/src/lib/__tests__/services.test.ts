@@ -855,6 +855,23 @@ describe("folders and share views", () => {
     assert.ok((await getVideo(v.id, undefined, false)).lastViewedAt);
     await assert.rejects(recordView("vid_missing"), /not found/);
   });
+
+  it("counts call-to-action clicks only while a completed video carries the button", async () => {
+    const { recordCtaClick, updateVideo, videoPatchSchema } = await import("../services/videos");
+    const v = await createVideo(req);
+    await updateVideo(v.id, videoPatchSchema.parse({ shareCta: { label: "Book", url: "https://example.com" } }));
+    assert.deepEqual(await recordCtaClick(v.id), { clicks: 0, counted: false }, "not counted while rendering");
+    const fresh = await getVideo(v.id, undefined, false);
+    globalThis.__avatarStudioStore!.put("video", { ...fresh, status: "completed" });
+    assert.deepEqual(await recordCtaClick(v.id), { clicks: 1, counted: true });
+    assert.deepEqual(await recordCtaClick(v.id, () => false), { clicks: 1, counted: false }, "gated repeat is not counted");
+    assert.equal((await recordCtaClick(v.id)).clicks, 2);
+    assert.ok((await getVideo(v.id, undefined, false)).lastCtaClickAt);
+    const removed = await updateVideo(v.id, videoPatchSchema.parse({ shareCta: null }));
+    assert.equal(removed.ctaClicks, 2, "the count survives removing the button");
+    assert.deepEqual(await recordCtaClick(v.id), { clicks: 2, counted: false }, "no button, no click");
+    await assert.rejects(recordCtaClick("vid_missing"), /not found/);
+  });
 });
 
 describe("bulk actions", () => {

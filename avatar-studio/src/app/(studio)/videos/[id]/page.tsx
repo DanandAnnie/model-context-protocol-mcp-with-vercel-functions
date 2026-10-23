@@ -313,6 +313,11 @@ export default function VideoDetailPage() {
                       {video.views ?? 0}
                     </span>
                   </Row>
+                  {(video.shareCta || (video.ctaClicks ?? 0) > 0) && (
+                    <Row label="Button clicks">
+                      <span data-testid="cta-clicks" title={video.lastCtaClickAt ? `Last clicked ${formatDate(video.lastCtaClickAt)}` : "No clicks yet"}>{video.ctaClicks ?? 0}</span>
+                    </Row>
+                  )}
                   <Row label="Folder">
                     {folderDraft === null ? (
                       <button

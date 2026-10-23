@@ -16,7 +16,7 @@ Authorization: Bearer as_live_…
 - Keys minted inside a workspace are revoked when that member leaves or is removed, and when the workspace is deleted.
 - Unknown or revoked keys get `401`. Only tokens that start with `as_live_` are treated as keys; any other bearer value falls back to the normal session check.
 
-Public routes need no key: `/api/videos/:id/captions`, `/api/videos/:id/view`, `/api/talk/:id`, `/api/webhooks/:provider`, `/api/auth/*`, `/share/:id`.
+Public routes need no key: `/api/videos/:id/captions`, `/api/videos/:id/view`, `/api/videos/:id/cta`, `/api/talk/:id`, `/api/webhooks/:provider`, `/api/auth/*`, `/share/:id`.
 
 ## Conventions
 
@@ -97,6 +97,7 @@ Submits a **failed** render again as a new video with the same scenes, presenter
 
 ### `GET /api/videos/:id/captions` — SRT; add `?format=vtt` for WebVTT (public)
 ### `POST /api/videos/:id/view` — share-page view beacon (public; one per viewer per 10 minutes)
+### `POST /api/videos/:id/cta` — call-to-action click beacon (public; one per viewer per 10 minutes; counts only while the video carries a button)
 
 ### Personalized batch
 

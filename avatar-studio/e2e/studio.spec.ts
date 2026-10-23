@@ -345,8 +345,18 @@ test("share page offers a download only when the owner allows it", async ({ page
   await expect(page.getByRole("button", { name: "Remove" })).toBeVisible();
   await page.goto(`/share/${v.id}`);
   const cta = page.getByTestId("share-cta");
-  await expect(cta).toHaveText("Book a showing");
+  await expect(cta).toHaveText(/^Book a showing/);
   await expect(cta).toHaveAttribute("href", "https://example.com/book");
+  // Clicking opens the link in a new tab and counts one click per viewer; a second click is not counted.
+  await page.context().route("https://example.com/**", (r) => r.fulfill({ status: 200, contentType: "text/html", body: "<p>ok</p>" }));
+  for (let i = 0; i < 2; i++) {
+    const [popup] = await Promise.all([page.waitForEvent("popup"), cta.click()]);
+    await popup.close();
+  }
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.ctaClicks).toBe(1);
+  await page.goto(`/videos/${v.id}`);
+  await expect(page.getByTestId("cta-clicks")).toHaveText("1");
+  await page.goto(`/share/${v.id}`);
   expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareCta: { label: "Go", url: "javascript:alert(1)" } } })).status()).toBe(400);
   expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareCta: null } })).status()).toBe(200);
   await page.goto(`/share/${v.id}`);

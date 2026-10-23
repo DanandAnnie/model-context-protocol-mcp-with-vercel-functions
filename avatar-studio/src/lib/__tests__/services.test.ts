@@ -18,6 +18,8 @@ import {
   getVideo,
   listAvatars,
   listVideos,
+  chatSchema,
+  chatWithAvatar,
   recordView,
   scriptSchema,
   updateVideo,
@@ -755,5 +757,18 @@ describe("plans and billing", () => {
     await setPlan("u9", { plan: "pro" });
     assert.equal(await applyStripeEvent({ type: "customer.subscription.updated", data: { object: { id: "sub_2", status: "unpaid", metadata: { ownerId: "u9" } } } }), "u9");
     assert.equal((await getPlan("u9")).plan, "free", "unpaid subscriptions drop to free");
+  });
+});
+
+describe("interactive avatar", () => {
+  it("answers in character from the demo provider and validates the turn", async () => {
+    const hello = await chatWithAvatar(chatSchema.parse({ avatarId: "stock_1", instructions: "Open houses in Hillsboro. Book showings online.", messages: [{ role: "user", content: "Hi there" }] }));
+    assert.match(hello, /^Hi, I'm /);
+    assert.match(hello, /open houses in hillsboro/i, "uses the first sentence of the instructions as the topic");
+    const price = await chatWithAvatar(chatSchema.parse({ avatarId: "stock_1", messages: [{ role: "user", content: "Hello" }, { role: "assistant", content: "Hi" }, { role: "user", content: "How much does it cost?" }] }));
+    assert.match(price, /pricing/i);
+    await assert.rejects(chatWithAvatar(chatSchema.parse({ avatarId: "stock_1", messages: [{ role: "user", content: "Hi" }, { role: "assistant", content: "Hello" }] })), /last message must be from the visitor/);
+    await assert.rejects(chatWithAvatar(chatSchema.parse({ avatarId: "nope", messages: [{ role: "user", content: "Hi" }] })), /not found/);
+    assert.throws(() => chatSchema.parse({ avatarId: "stock_1", messages: [] }));
   });
 });

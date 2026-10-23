@@ -1,4 +1,4 @@
-import type { ScriptAction, ScriptProvider } from "../types";
+import type { ChatMessage, ChatPersona, ScriptAction, ScriptProvider } from "../types";
 
 /** Template-based script writer used when no LLM key is configured. */
 export class MockScriptProvider implements ScriptProvider {
@@ -36,5 +36,17 @@ export class MockScriptProvider implements ScriptProvider {
       default:
         return sentences.map((s) => s[0].toUpperCase() + s.slice(1)).join(" ");
     }
+  }
+
+  /** Canned but context-aware replies so the interactive demo feels alive without an LLM key. */
+  async chat({ persona, messages }: { persona: ChatPersona; messages: ChatMessage[] }) {
+    const last = [...messages].reverse().find((m) => m.role === "user")?.content.trim() ?? "";
+    const turn = messages.filter((m) => m.role === "user").length;
+    const topic = persona.instructions.split(/[.\n]/)[0]?.trim();
+    if (/^(hi|hello|hey)\b/i.test(last)) return `Hi, I'm ${persona.name}. ${topic ? `Ask me anything about ${topic.toLowerCase()}.` : "What can I help you with today?"}`;
+    if (/\b(price|cost|how much)\b/i.test(last)) return `Good question. Pricing depends on what you need, so tell me a little more and I'll point you to the right option.`;
+    if (/\b(thanks|thank you)\b/i.test(last)) return `You're welcome. Is there anything else I can help with?`;
+    if (/\?$/.test(last)) return `Here's the short answer: ${topic ? `it comes down to ${topic.toLowerCase()}.` : "it depends on your goals, and I'm happy to walk you through the options."} Want me to go deeper?`;
+    return turn === 1 ? `Thanks for stopping by. I'm ${persona.name}, and I'm here to help. What would you like to know?` : `Got it. Tell me a bit more and I'll give you a clear next step.`;
   }
 }

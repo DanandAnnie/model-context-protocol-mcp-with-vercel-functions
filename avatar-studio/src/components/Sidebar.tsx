@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { useMobileNav } from "@/components/MobileNav";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
-import { Clapperboard, Home, Languages, Layers3, LayoutTemplate, LogOut, Mic2, Palette, Settings, Users, Video, Sparkles, X } from "lucide-react";
+import { Clapperboard, Home, Languages, Layers3, LayoutTemplate, LogOut, MessageSquare, Mic2, Palette, Settings, Users, Video, Sparkles, X } from "lucide-react";
 import { useApi } from "@/hooks/useApi";
 import type { ProviderStatus } from "@/lib/types";
 
@@ -17,6 +17,7 @@ const NAV = [
   { href: "/avatars", label: "Avatars", icon: Users },
   { href: "/voices", label: "Voices", icon: Mic2 },
   { href: "/translate", label: "Video translate", icon: Languages },
+  { href: "/interactive", label: "Interactive avatar", icon: MessageSquare },
   { href: "/brand", label: "Brand kit", icon: Palette },
   { href: "/settings", label: "Settings", icon: Settings },
 ];

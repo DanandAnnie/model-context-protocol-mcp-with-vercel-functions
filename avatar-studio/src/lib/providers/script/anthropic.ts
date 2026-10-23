@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { ScriptAction, ScriptProvider } from "../types";
+import type { ChatMessage, ChatPersona, ScriptAction, ScriptProvider } from "../types";
 
 const SYSTEM = `You write spoken scripts for short AI avatar videos. Rules:
 - Output only the words the presenter says. No headings, stage directions, markdown, or quotes.
@@ -40,15 +40,23 @@ export class AnthropicScriptProvider implements ScriptProvider {
     return this.complete(prompt);
   }
 
-  private async complete(prompt: string): Promise<string> {
+  async chat({ persona, messages }: { persona: ChatPersona; messages: ChatMessage[] }) {
+    const system = `You are ${persona.name}, a presenter speaking live to a visitor through an interactive avatar. Reply in ${persona.language}.
+Rules: answer in one to three short spoken sentences; no markdown, lists, or stage directions; stay in character; if you do not know, say so briefly and offer what you can.
+Background and instructions from the owner:
+${persona.instructions || "(none provided: be a friendly, helpful presenter)"}`;
+    return this.complete(messages, system, 400);
+  }
+
+  private async complete(prompt: string | ChatMessage[], system: string = SYSTEM, maxTokens = 16000): Promise<string> {
     const response = await this.client.beta.messages.create({
       model: "claude-opus-5-5",
-      max_tokens: 16000,
-      system: SYSTEM,
+      max_tokens: maxTokens,
+      system,
       output_config: { effort: "low" },
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
-      messages: [{ role: "user", content: prompt }],
+      messages: typeof prompt === "string" ? [{ role: "user", content: prompt }] : prompt.map((m) => ({ role: m.role, content: m.content })),
     });
 
     if (response.stop_reason === "refusal") {

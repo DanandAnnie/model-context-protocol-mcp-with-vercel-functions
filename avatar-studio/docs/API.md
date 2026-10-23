@@ -117,6 +117,17 @@ When completed the video also carries `videoUrl`, `thumbnailUrl`, and `durationS
 
 Actions: `shorten`, `expand`, `tone`, `translate`, `polish`. Returns `{ "script": "…" }`.
 
+## Interactive avatar
+
+`POST /api/chat` returns one spoken-style reply in character. Keep the last 20 messages; the last one must be from the visitor. Rate limited to 60 turns per 10 minutes per client.
+
+```json
+{ "avatarId": "stock_1", "instructions": "You represent Acme Realty…", "language": "English",
+  "messages": [{ "role": "user", "content": "Do you have open houses this weekend?" }] }
+```
+
+Returns `{ "reply": "…" }`.
+
 ## Avatars and voices
 
 - `GET /api/avatars` → `{ "avatars": [...] }` (custom photo avatars first, then the library)

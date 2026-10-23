@@ -167,6 +167,20 @@ export async function reviseScript(input: z.infer<typeof reviseSchema>): Promise
   return getScriptProvider().revise(input);
 }
 
+export const chatSchema = z.object({
+  avatarId: z.string().min(1),
+  instructions: z.string().trim().max(2000).default(""),
+  language: z.string().trim().min(2).max(40).default("English"),
+  messages: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().trim().min(1).max(2000) })).min(1).max(40),
+});
+
+/** One reply from the interactive avatar; the last message must come from the visitor. */
+export async function chatWithAvatar(input: z.infer<typeof chatSchema>, ownerId: string = LOCAL_OWNER): Promise<string> {
+  if (input.messages[input.messages.length - 1].role !== "user") throw new ValidationError("The last message must be from the visitor");
+  const avatar = await getAvatar(input.avatarId, ownerId);
+  return getScriptProvider().chat({ persona: { name: avatar.name, instructions: input.instructions, language: input.language }, messages: input.messages });
+}
+
 // ---------- Videos ----------
 
 const backgroundSchema = z.object({ type: z.enum(["color", "image"]), value: z.string().min(1) });

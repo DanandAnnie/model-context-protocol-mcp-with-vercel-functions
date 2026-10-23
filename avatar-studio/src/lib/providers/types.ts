@@ -41,6 +41,21 @@ export interface ScriptProvider {
   generate(input: { topic: string; tone: string; lengthSec: number; language: string; audience?: string }): Promise<string>;
   /** Transform an existing script: shorten, expand, change tone, translate, or polish. */
   revise(input: { script: string; action: ScriptAction; tone?: string; language?: string }): Promise<string>;
+  /** One conversational turn for the interactive avatar: the presenter answers in character, briefly, for speech. */
+  chat(input: { persona: ChatPersona; messages: ChatMessage[] }): Promise<string>;
+}
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface ChatPersona {
+  /** Presenter name shown to the visitor. */
+  name: string;
+  /** What the presenter knows and how it should behave, written by the owner. */
+  instructions: string;
+  language: string;
 }
 
 export interface TranslateProvider {

@@ -283,7 +283,7 @@ test("webhook settings reject private hosts and show the signing secret", async 
 
 test("pages have no WCAG 2.1 AA violations", async ({ page }) => {
   const v = await createVideoViaApi(page, "Accessible video");
-  const paths = ["/", "/login", "/home", "/create", "/videos", `/videos/${v.id}`, "/templates", "/batch", "/avatars", "/voices", "/translate", "/brand", "/settings", `/share/${v.id}`];
+  const paths = ["/", "/login", "/home", "/create", "/videos", `/videos/${v.id}`, "/templates", "/batch", "/avatars", "/voices", "/translate", "/interactive", "/brand", "/settings", `/share/${v.id}`];
   const report: string[] = [];
   for (const path of paths) {
     await page.goto(path);
@@ -351,4 +351,17 @@ test("demo billing upgrades to Pro and back from Settings", async ({ page }) => 
   await page.getByRole("button", { name: "Manage subscription" }).click();
   await expect(page.getByTestId("plan-name")).toHaveText("Free");
   expect((await (await page.request.get("/api/status")).json()).usage.plan).toBe("free");
+});
+
+test("interactive avatar answers a visitor in character", async ({ page }) => {
+  await page.goto("/interactive");
+  await page.getByLabel("Your message").fill("Hi there");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.locator("[data-testid=chat-log] [data-role=assistant]")).toHaveCount(1);
+  await expect(page.locator("[data-testid=chat-log] [data-role=assistant]").first()).toContainText(/^Hi, I'm /);
+  await page.getByLabel("Your message").fill("How much does it cost?");
+  await page.keyboard.press("Enter");
+  await expect(page.locator("[data-testid=chat-log] [data-role=assistant]")).toHaveCount(2);
+  await expect(page.locator("[data-testid=chat-log] [data-role=assistant]").nth(1)).toContainText(/pricing/i);
+  expect((await page.request.post("/api/chat", { data: { avatarId: "stock_1", messages: [] } })).status()).toBe(400);
 });

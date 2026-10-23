@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { Camera, Clapperboard, Languages, Layers3, LayoutTemplate, Wand2 } from "lucide-react";
+import { Camera, Clapperboard, Languages, Layers3, LayoutTemplate, MessageSquare, Wand2 } from "lucide-react";
 import { Insights } from "@/components/Insights";
 import { VideoCard } from "@/components/VideoCard";
 import { EmptyState, SectionTitle, Skeleton } from "@/components/ui";
@@ -14,6 +14,7 @@ const QUICK = [
   { href: "/batch", icon: Layers3, title: "Personalize at scale", body: "One script, a CSV of recipients, one video each.", accent: "bg-rose-600" },
   { href: "/avatars?new=1", icon: Camera, title: "Photo avatar", body: "Turn a portrait into a presenter.", accent: "bg-sky-600" },
   { href: "/translate", icon: Languages, title: "Translate a video", body: "Dub an existing video into another language.", accent: "bg-emerald-600" },
+  { href: "/interactive", icon: MessageSquare, title: "Interactive avatar", body: "Talk to a presenter live; it answers in character.", accent: "bg-slate-800" },
 ];
 
 export default function HomePage() {
@@ -24,7 +25,7 @@ export default function HomePage() {
     <>
       <SectionTitle title="Home" subtitle="What do you want to make today?" />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {QUICK.map(({ href, icon: Icon, title, body, accent }) => (
           <Link key={title} href={href} className="rounded-xl border border-slate-200 bg-white p-5 transition hover:border-slate-300 hover:shadow-sm">
             <span className={`flex h-10 w-10 items-center justify-center rounded-lg text-white ${accent}`}>

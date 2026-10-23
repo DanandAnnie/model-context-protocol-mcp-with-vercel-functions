@@ -887,19 +887,24 @@ describe("folders and share views", () => {
     assert.equal(JSON.stringify(locked).includes("sesame"), false, "the password never sits on the video");
     const lock = await getShareLock(v.id);
     assert.ok(lock && lock.hash.length === 64 && lock.salt.length === 32);
+    // Supabase keeps every kind in one table keyed by id alone: the lock must never share the video's id.
+    assert.equal(lock!.id, `sharelock_${v.id}`);
+    assert.equal(lock!.videoId, v.id);
+    assert.equal((await getVideo(v.id, undefined, false)).shareLocked, true, "the video row survives the lock write");
     assert.equal(await verifySharePassword(v.id, "wrong"), null);
-    assert.equal((await verifySharePassword(v.id, "open sesame"))?.id, v.id);
+    assert.equal((await verifySharePassword(v.id, "open sesame"))?.videoId, v.id);
     const cookie = shareCookieValue(lock!);
     assert.equal(await shareUnlocked(locked, undefined), false);
     assert.equal(await shareUnlocked(locked, "nope"), false);
     assert.equal(await shareUnlocked(locked, cookie), true);
+    assert.equal(await shareUnlocked({ id: "vid_orphan", shareLocked: true }, cookie), false, "marked locked with no lock record stays closed");
     assert.deepEqual(await recordView(v.id), { views: 0, counted: false }, "a beacon without the cookie is not counted");
     assert.deepEqual(await recordView(v.id, () => true, cookie), { views: 1, counted: true });
     // Changing the password invalidates every cookie handed out for the old one.
     await updateVideo(v.id, videoPatchSchema.parse({ sharePassword: "different one" }));
     assert.equal(await shareUnlocked(locked, cookie), false);
     const exported = await exportOwnerData(LOCAL_OWNER);
-    const row = exported.sharelock.find((r) => r.id === v.id)!;
+    const row = exported.sharelock.find((r) => r.videoId === v.id)!;
     assert.ok(row && !("hash" in row) && !("salt" in row), "the export redacts the hash and salt");
     const open = await updateVideo(v.id, videoPatchSchema.parse({ sharePassword: null }));
     assert.equal("shareLocked" in open, false);

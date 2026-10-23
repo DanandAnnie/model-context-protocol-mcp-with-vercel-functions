@@ -8,7 +8,13 @@ import { nowIso } from "./ids";
 import { getStore } from "./store";
 import type { Video } from "./types";
 
-export type ShareLock = { id: string; ownerId?: string; salt: string; hash: string; createdAt: string };
+export type ShareLock = { id: string; videoId: string; ownerId?: string; salt: string; hash: string; createdAt: string };
+
+/**
+ * Every kind shares one table keyed by id alone in Supabase, so the lock must not reuse the
+ * video's id (it would overwrite the video row); prefixed like the plan, brand, and prefs records.
+ */
+export const shareLockId = (videoId: string) => `sharelock_${videoId}`;
 
 export const SHARE_PASSWORD_MIN = 4;
 export const SHARE_PASSWORD_MAX = 64;
@@ -23,16 +29,16 @@ function scrypt(password: string, salt: string): Promise<string> {
 
 export async function setShareLock(video: Pick<Video, "id" | "ownerId">, password: string): Promise<ShareLock> {
   const salt = randomBytes(16).toString("hex");
-  const lock: ShareLock = { id: video.id, ownerId: video.ownerId, salt, hash: await scrypt(password, salt), createdAt: nowIso() };
+  const lock: ShareLock = { id: shareLockId(video.id), videoId: video.id, ownerId: video.ownerId, salt, hash: await scrypt(password, salt), createdAt: nowIso() };
   return getStore().put("sharelock", lock);
 }
 
 export function clearShareLock(videoId: string): Promise<void> {
-  return getStore().remove("sharelock", videoId);
+  return getStore().remove("sharelock", shareLockId(videoId));
 }
 
 export function getShareLock(videoId: string): Promise<ShareLock | null> {
-  return getStore().get<ShareLock>("sharelock", videoId);
+  return getStore().get<ShareLock>("sharelock", shareLockId(videoId));
 }
 
 /** The lock when `password` opens it, else null (also null when the video has no lock). */
@@ -48,13 +54,17 @@ export function shareCookieName(videoId: string): string {
 
 /** Derived from the stored hash, so it reveals nothing about the password and dies with it. */
 export function shareCookieValue(lock: ShareLock): string {
-  return createHash("sha256").update(`avatar-studio:share:${lock.id}:${lock.hash}`).digest("hex");
+  return createHash("sha256").update(`avatar-studio:share:${lock.videoId}:${lock.hash}`).digest("hex");
 }
 
-/** True when the video has no password, or `cookie` is the value handed out for its current password. */
+/**
+ * True when the video has no password, or `cookie` is the value handed out for its current
+ * password. A video marked locked whose lock record is missing stays closed: that is the state a
+ * half-finished save leaves behind, and nobody should get in on the strength of it.
+ */
 export async function shareUnlocked(video: Pick<Video, "id" | "shareLocked">, cookie: string | undefined): Promise<boolean> {
   if (!video.shareLocked) return true;
   const lock = await getShareLock(video.id);
-  if (!lock) return true;
+  if (!lock) return false;
   return !!cookie && timingSafeEqual(cookie, shareCookieValue(lock));
 }

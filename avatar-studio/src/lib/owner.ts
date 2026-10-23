@@ -5,8 +5,8 @@ import { authMode } from "./auth";
 import { UnauthorizedError } from "./errors";
 import { createSupabaseServer } from "./supabase/server";
 
-/** Owner id used when there are no per-user accounts (open or password mode). */
-export const LOCAL_OWNER = "local";
+import { LOCAL_OWNER } from "./owner-id";
+export { LOCAL_OWNER };
 
 /** The bearer secret on this request, if any. */
 export async function presentedApiKey(): Promise<string | null> {

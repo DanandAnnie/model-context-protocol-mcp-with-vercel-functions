@@ -253,3 +253,19 @@ test("library multi-select moves and deletes videos in bulk", async ({ page }) =
   expect((await page.request.get(`/api/videos/${a.id}`)).status()).toBe(200);
   expect((await page.request.post("/api/videos/bulk", { data: { action: "move", ids: [] } })).status()).toBe(400);
 });
+
+test("webhook settings reject private hosts and show the signing secret", async ({ page }) => {
+  await page.goto("/settings");
+  const url = page.getByLabel("Webhook URL");
+  await url.fill("http://localhost:9/hook");
+  await page.getByRole("button", { name: "Save webhook" }).click();
+  await expect(page.getByText(/public host/)).toBeVisible();
+  await url.fill("https://203.0.113.5/hooks/studio");
+  await page.getByRole("button", { name: "Save webhook" }).click();
+  await expect(page.getByTestId("webhook-secret")).toContainText("whsec_");
+  expect((await (await page.request.get("/api/notifications")).json()).webhook.url).toBe("https://203.0.113.5/hooks/studio");
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: "Remove webhook" }).click();
+  await expect(page.getByTestId("webhook-secret")).toHaveCount(0);
+  expect((await (await page.request.get("/api/notifications")).json()).webhook).toBeNull();
+});

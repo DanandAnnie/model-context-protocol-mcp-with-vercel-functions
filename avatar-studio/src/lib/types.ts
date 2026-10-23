@@ -143,6 +143,21 @@ export interface ApiKey {
   lastUsedAt?: string;
 }
 
+export type NotifyEvent = "video.completed" | "video.failed" | "test";
+
+/** Outbound webhook: one endpoint per owner, called when a render finishes. */
+export interface NotifySettings {
+  /** `notify_<ownerId>` */
+  id: string;
+  ownerId: string;
+  url: string;
+  /** HMAC-SHA256 signing secret, shown in Settings. */
+  secret: string;
+  createdAt: string;
+  updatedAt: string;
+  lastDelivery?: { at: string; event: NotifyEvent; ok: boolean; status?: number; error?: string };
+}
+
 export interface ProviderStatus {
   mode: "demo" | "live";
   avatar: string;

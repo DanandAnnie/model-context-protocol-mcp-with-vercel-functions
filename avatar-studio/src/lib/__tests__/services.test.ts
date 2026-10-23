@@ -26,6 +26,8 @@ import {
 } from "../services";
 import { MockAvatarProvider } from "../providers/avatar/mock";
 import { API_KEY_PREFIX, MAX_API_KEYS, createApiKey, listApiKeys, ownerForApiKey, revokeApiKey } from "../api-keys";
+import { createHmac } from "node:crypto";
+import { dispatchNotification, getNotifySettings, notifyVideoTransition, saveNotifySettings, setNotificationFetch, signPayload } from "../notifications";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import { SCRIPT_TEMPLATES, findTemplate } from "../templates";
 
@@ -520,5 +522,58 @@ describe("api keys", () => {
   it("caps the number of keys per owner", async () => {
     for (let i = 0; i < MAX_API_KEYS; i++) await createApiKey(`k${i}`, "u3");
     await assert.rejects(createApiKey("one more", "u3"), /At most/);
+  });
+});
+
+describe("outbound webhooks", () => {
+  const HOOK = "https://203.0.113.5/hooks/studio";
+
+  it("rejects private hosts and keeps the secret across URL changes", async () => {
+    await assert.rejects(saveNotifySettings({ url: "http://localhost:9/hook" }, "u1"), /public host/);
+    await assert.rejects(saveNotifySettings({ url: "ftp://203.0.113.5/x" }, "u1"), /http or https/);
+    const first = await saveNotifySettings({ url: HOOK }, "u1");
+    assert.ok(first.secret.startsWith("whsec_"));
+    const second = await saveNotifySettings({ url: `${HOOK}2` }, "u1");
+    assert.equal(second.secret, first.secret);
+    assert.equal(await getNotifySettings("u2"), null);
+  });
+
+  it("signs deliveries, records the outcome, and fires only on final transitions", async () => {
+    const calls: Array<{ url: string; headers: Record<string, string>; body: string }> = [];
+    setNotificationFetch(async (input, init) => {
+      calls.push({ url: String(input), headers: init?.headers as Record<string, string>, body: String(init?.body) });
+      return new Response("ok", { status: 200 });
+    });
+    try {
+      const settings = await saveNotifySettings({ url: HOOK }, "u1");
+      const result = await dispatchNotification(settings, "test", { hello: 1 });
+      assert.equal(result.ok, true);
+      assert.equal(calls.length, 1);
+      const [call] = calls;
+      const expected = createHmac("sha256", settings.secret).update(`${call.headers["X-Studio-Timestamp"]}.${call.body}`).digest("hex");
+      assert.equal(call.headers["X-Studio-Signature"], `sha256=${expected}`);
+      assert.equal(signPayload(settings.secret, call.headers["X-Studio-Timestamp"], call.body), expected);
+      assert.equal(JSON.parse(call.body).event, "test");
+      assert.equal((await getNotifySettings("u1"))?.lastDelivery?.ok, true);
+
+      const base = { ...(await createVideo({ title: "N", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, "u1")) };
+      await notifyVideoTransition(base, { ...base, status: "processing" });
+      assert.equal(calls.length, 1, "processing is not a final state");
+      await notifyVideoTransition({ ...base, status: "processing" }, { ...base, status: "completed", videoUrl: "https://cdn/x.mp4" });
+      assert.equal(calls.length, 2);
+      assert.equal(JSON.parse(calls[1].body).event, "video.completed");
+      assert.equal(JSON.parse(calls[1].body).data.id, base.id);
+      await notifyVideoTransition({ ...base, status: "completed" }, { ...base, status: "completed" });
+      assert.equal(calls.length, 2, "no change, no delivery");
+      await notifyVideoTransition({ ...base, status: "processing", ownerId: "u2" }, { ...base, status: "failed", ownerId: "u2" });
+      assert.equal(calls.length, 2, "owners without a webhook are skipped");
+
+      setNotificationFetch(async () => new Response("nope", { status: 500 }));
+      const failed = await dispatchNotification(settings, "test", {});
+      assert.equal(failed.ok, false);
+      assert.match(failed.error ?? "", /500/);
+    } finally {
+      setNotificationFetch(null);
+    }
   });
 });

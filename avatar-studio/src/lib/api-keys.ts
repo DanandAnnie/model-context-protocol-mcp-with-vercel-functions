@@ -6,6 +6,7 @@ import type { ApiKey } from "./types";
 
 export const API_KEY_PREFIX = "as_live_";
 export const MAX_API_KEYS = 10;
+const LAST_USED_WRITE_INTERVAL_MS = 60_000;
 
 export function hashApiKey(secret: string): string {
   return createHash("sha256").update(secret).digest("hex");
@@ -53,7 +54,9 @@ export async function ownerForApiKey(secret: string): Promise<string | null> {
   if (!secret.startsWith(API_KEY_PREFIX)) return null;
   const key = await getStore().findBy<ApiKey>("apikey", "hash", hashApiKey(secret));
   if (!key) return null;
-  // Best effort: a failed timestamp write must not block the request.
-  getStore().put("apikey", { ...key, lastUsedAt: nowIso() }).catch(() => {});
+  // Best effort, at most once a minute per key: a failed or skipped timestamp write never blocks the request.
+  if (!key.lastUsedAt || Date.now() - Date.parse(key.lastUsedAt) > LAST_USED_WRITE_INTERVAL_MS) {
+    getStore().put("apikey", { ...key, lastUsedAt: nowIso() }).catch(() => {});
+  }
   return key.ownerId;
 }

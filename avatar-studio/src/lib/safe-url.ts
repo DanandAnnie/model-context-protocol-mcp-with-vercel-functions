@@ -27,24 +27,24 @@ export function isPrivateAddress(ip: string): boolean {
  * Throws unless `url` is an http(s) URL whose host resolves only to public
  * addresses. Used before the server fetches anything a user typed in.
  */
-export async function assertPublicHttpUrl(url: string): Promise<URL> {
+export async function assertPublicHttpUrl(url: string, what = "Image URL"): Promise<URL> {
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
-    throw new Error("Image URL is not valid");
+    throw new Error(`${what} is not valid`);
   }
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new Error("Image URL must use http or https");
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new Error(`${what} must use http or https`);
   const host = parsed.hostname.replace(/^\[|\]$/g, "");
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) {
-    throw new Error("Image URL must point to a public host");
+    throw new Error(`${what} must point to a public host`);
   }
   if (isIP(host)) {
-    if (isPrivateAddress(host)) throw new Error("Image URL must point to a public host");
+    if (isPrivateAddress(host)) throw new Error(`${what} must point to a public host`);
     return parsed;
   }
   const addresses = await lookup(host, { all: true }).catch(() => []);
-  if (addresses.length === 0) throw new Error("Image URL host could not be resolved");
-  if (addresses.some((a) => isPrivateAddress(a.address))) throw new Error("Image URL must point to a public host");
+  if (addresses.length === 0) throw new Error(`${what} host could not be resolved`);
+  if (addresses.some((a) => isPrivateAddress(a.address))) throw new Error(`${what} must point to a public host`);
   return parsed;
 }

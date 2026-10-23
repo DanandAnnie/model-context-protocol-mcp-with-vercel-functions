@@ -12,7 +12,8 @@ import {
 import { getStore } from "./store";
 import { MAX_SCENES, type Avatar, type BrandKit, type Translation, type Video, type VideoRequest, type Voice } from "./types";
 
-import { LOCAL_OWNER } from "./owner";
+import { LOCAL_OWNER } from "./owner-id";
+import { notifyVideoTransition } from "./notifications";
 import { LimitError, NotFoundError, ValidationError } from "./errors";
 export { NotFoundError, ValidationError, UnauthorizedError, LimitError } from "./errors";
 import { config } from "./config";
@@ -381,7 +382,10 @@ export async function getVideo(id: string, ownerId: string | null = LOCAL_OWNER,
   try {
     const update = await getAvatarProviderByName(video.provider).getStatus(video.providerJobId);
     const next: Video = { ...video, ...stripUndefined(update), updatedAt: nowIso() };
-    if (next.status !== video.status || next.videoUrl !== video.videoUrl) await getStore().put("video", next);
+    if (next.status !== video.status || next.videoUrl !== video.videoUrl) {
+      await getStore().put("video", next);
+      await notifyVideoTransition(video, next);
+    }
     return next;
   } catch (err) {
     // Transient provider errors should not flip the job to failed; surface in logs only.
@@ -459,7 +463,9 @@ export async function applyAvatarWebhook(providerName: string, body: unknown): P
   const video = await getStore().findBy<Video>("video", "providerJobId", parsed.providerJobId);
   if (!video) return null;
   const next: Video = { ...video, ...stripUndefined(parsed.update), updatedAt: nowIso() };
-  return getStore().put("video", next);
+  await getStore().put("video", next);
+  await notifyVideoTransition(video, next);
+  return next;
 }
 
 export async function applyTranslationWebhook(providerName: string, body: unknown): Promise<Translation | null> {

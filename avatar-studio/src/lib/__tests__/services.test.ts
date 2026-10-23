@@ -361,8 +361,17 @@ describe("personalized batches", () => {
     assert.equal(preview.rowCount, 2);
     assert.deepEqual(preview.missing, []);
     assert.equal(preview.samples[1].script, "Hi Priya from Denver.");
+    const store = (await import("../store")).getStore();
+    const originalPut = store.put.bind(store);
+    let videoPuts = 0;
+    store.put = async (kind, item) => {
+      if (kind === "video") videoPuts += 1;
+      return originalPut(kind, item);
+    };
     const result = await createBatch({ title: "Welcome", scriptTemplate: "Hi {name} from {city}.", csv, avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, aspect: "16:9", resolution: "1080p", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, "batch-user");
+    store.put = originalPut;
     assert.equal(result.videos.length, 2);
+    assert.equal(videoPuts, 2, "each batch row is written once, with its batch id and row label");
     assert.ok(result.videos.every((v) => v.batchId === result.batchId));
     assert.equal(result.videos[0].title, "Welcome – Jordan");
     assert.equal(result.videos[0].script, "Hi Jordan from Austin.");
@@ -1049,7 +1058,21 @@ describe("retrying a failed render", () => {
     const failed: Video = { ...ok, id: "vid_failed", status: "failed", error: "provider hiccup", providerJobId: undefined, folder: "Q4", batchId: "batch_1", rowLabel: "Ann", resolution: "720p", scenes: [{ script: "Hi.", background: ok.background }] };
     await getStore().put("video", failed);
 
-    const again = await retryVideo("vid_failed", "u1");
+    // One store write per retry: a provider webhook can arrive as soon as the job exists, so no second put may overwrite it.
+    const store = getStore();
+    const originalPut = store.put.bind(store);
+    let videoPuts = 0;
+    store.put = async (kind, item) => {
+      if (kind === "video") videoPuts += 1;
+      return originalPut(kind, item);
+    };
+    let again: Video;
+    try {
+      again = await retryVideo("vid_failed", "u1");
+    } finally {
+      store.put = originalPut;
+    }
+    assert.equal(videoPuts, 1, "retry writes the new video once");
     assert.notEqual(again.id, failed.id);
     assert.equal(again.status, "processing");
     assert.equal(again.title, "Fine");

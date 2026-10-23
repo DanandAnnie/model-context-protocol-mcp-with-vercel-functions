@@ -4,7 +4,7 @@ import { Palette, Trash2, Upload } from "lucide-react";
 import { Button, Card, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, isDarkHex } from "@/lib/client";
-import type { AspectRatio, Avatar, BrandKit, Voice } from "@/lib/types";
+import type { AspectRatio, Avatar, BrandKit, Resolution, Voice } from "@/lib/types";
 
 const DEFAULT_PRIMARY = "#4f46e5";
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -22,6 +22,7 @@ export default function BrandPage() {
   const [avatarId, setAvatarId] = useState("");
   const [voiceId, setVoiceId] = useState("");
   const [aspect, setAspect] = useState<AspectRatio | "">("");
+  const [resolution, setResolution] = useState<Resolution | "">("");
   const [captions, setCaptions] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
@@ -42,6 +43,7 @@ export default function BrandPage() {
     setAvatarId(b.defaultAvatarId ?? "");
     setVoiceId(b.defaultVoiceId ?? "");
     setAspect(b.defaultAspect ?? "");
+    setResolution(b.defaultResolution ?? "");
     setCaptions(!!b.captionsByDefault);
     setSavedAt(b.updatedAt);
   }, [brandData]);
@@ -74,6 +76,7 @@ export default function BrandPage() {
           defaultAvatarId: avatarId || undefined,
           defaultVoiceId: voiceId || undefined,
           defaultAspect: aspect || undefined,
+          defaultResolution: resolution || undefined,
           captionsByDefault: captions,
         }),
       });
@@ -203,6 +206,13 @@ export default function BrandPage() {
                 <option value="1:1">1:1 square</option>
               </select>
             </Field>
+            <Field label="Default output quality">
+              <select value={resolution} onChange={(e) => setResolution(e.target.value as Resolution | "")} className={inputClass}>
+                <option value="">1080p (app default)</option>
+                <option value="720p">720p · HD, faster and smaller</option>
+                <option value="1080p">1080p · Full HD</option>
+              </select>
+            </Field>
             <label className="flex items-center gap-3 self-end rounded-lg border border-slate-200 px-3 py-2">
               <input type="checkbox" checked={captions} onChange={(e) => setCaptions(e.target.checked)} className="h-5 w-5 accent-brand-600" />
               <span className="text-sm text-slate-700">Captions on by default</span>
@@ -246,6 +256,7 @@ export default function BrandPage() {
               <li>Avatar: {avatarName ?? "first in the library"}</li>
               <li>Voice: {voiceName ?? "first in the library"}</li>
               <li>Aspect: {aspect || "16:9"}</li>
+              <li>Quality: {resolution || "1080p"}</li>
               <li>Captions: {captions ? "on" : "off"}</li>
               <li>Background: {primaryValid ? primary : DEFAULT_PRIMARY}</li>
             </ul>

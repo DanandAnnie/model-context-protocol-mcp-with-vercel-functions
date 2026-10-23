@@ -147,6 +147,7 @@ export interface BrandKit {
   defaultAvatarId?: string;
   defaultVoiceId?: string;
   defaultAspect?: AspectRatio;
+  defaultResolution?: Resolution;
   captionsByDefault?: boolean;
   updatedAt: string;
 }

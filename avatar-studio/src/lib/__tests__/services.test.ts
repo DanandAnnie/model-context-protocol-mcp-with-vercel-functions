@@ -1029,6 +1029,15 @@ describe("voice cloning", () => {
   });
 });
 
+describe("brand kit default quality", () => {
+  it("stores a default output quality and rejects unknown values", async () => {
+    await saveBrandKit(brandKitSchema.parse({ primaryColor: "#0f766e", defaultResolution: "720p" }), "u-brand-q");
+    assert.equal((await getBrandKit("u-brand-q"))?.defaultResolution, "720p");
+    assert.equal(brandKitSchema.safeParse({ primaryColor: "#0f766e", defaultResolution: "4k" }).success, false);
+    await deleteBrandKit("u-brand-q");
+  });
+});
+
 describe("retrying a failed render", () => {
   it("submits the same request as a new video, keeps folder and batch row, and refuses other states", async () => {
     const { retryVideo, ConflictError, NotFoundError } = await import("../services");

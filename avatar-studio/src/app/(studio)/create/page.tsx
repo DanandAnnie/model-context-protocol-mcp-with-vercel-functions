@@ -178,6 +178,7 @@ function CreateInner() {
     if (!b || fromId || draftRestored) return;
     if (b.captionsByDefault != null) setCaptions(b.captionsByDefault);
     if (b.defaultAvatarId || b.defaultVoiceId) setPrefill({ avatarId: b.defaultAvatarId, voiceId: b.defaultVoiceId });
+    if (b.defaultResolution) setResolution(b.defaultResolution);
     if (templateId) return;
     if (b.defaultAspect) setAspect(b.defaultAspect);
     setScenes((prev) => prev.map((sc) => (sc.script.trim() ? sc : { ...sc, background: { type: "color", value: b.primaryColor } })));

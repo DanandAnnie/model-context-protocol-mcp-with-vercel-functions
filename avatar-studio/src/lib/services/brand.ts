@@ -22,6 +22,7 @@ export const brandKitSchema = z.object({
   defaultAvatarId: z.string().trim().max(200).optional(),
   defaultVoiceId: z.string().trim().max(200).optional(),
   defaultAspect: z.enum(["16:9", "9:16", "1:1"]).optional(),
+  defaultResolution: z.enum(["720p", "1080p"]).optional(),
   captionsByDefault: z.boolean().optional(),
 });
 
@@ -48,6 +49,7 @@ export async function saveBrandKit(input: z.infer<typeof brandKitSchema>, ownerI
     defaultAvatarId: input.defaultAvatarId || undefined,
     defaultVoiceId: input.defaultVoiceId || undefined,
     defaultAspect: input.defaultAspect,
+    defaultResolution: input.defaultResolution,
     captionsByDefault: input.captionsByDefault,
     updatedAt: nowIso(),
   };

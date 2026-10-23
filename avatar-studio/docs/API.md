@@ -166,7 +166,7 @@ Returns `{ "reply": "…" }`.
 ## Brand kit
 
 - `GET /api/brand` → `{ "brand": BrandKit | null }`
-- `PUT /api/brand` → `{ "name", "logoUrl", "primaryColor": "#0f766e", "accentColor"?, "defaultAvatarId"?, "defaultVoiceId"?, "defaultAspect"?, "captionsByDefault"? }`
+- `PUT /api/brand` → `{ "name", "logoUrl", "primaryColor": "#0f766e", "accentColor"?, "defaultAvatarId"?, "defaultVoiceId"?, "defaultAspect"?, "defaultResolution"? (`720p` | `1080p`), "captionsByDefault"? }`
 - `DELETE /api/brand`
 
 ## Workspaces

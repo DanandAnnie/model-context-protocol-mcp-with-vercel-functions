@@ -237,11 +237,14 @@ test("brand kit pre-fills the editor and brands the share page", async ({ page }
     await page.getByLabel("Primary color", { exact: true }).fill("#0f766e");
     await page.getByLabel("Default voice").selectOption("stock_voice_3");
     await page.getByLabel("Captions on by default").check();
+    await page.getByLabel("Default output quality").selectOption("720p");
     await page.getByRole("button", { name: "Save brand kit" }).click();
     await expect(page.getByText(/^Saved /)).toBeVisible();
 
     await page.goto("/create");
     await expect(page.getByText(/· Olivia · 16:9 · 1 scene · captions on$/)).toBeVisible({ timeout: 10_000 });
+    await page.getByRole("button", { name: "Settings" }).click();
+    await expect(page.getByRole("button", { name: /^720p/ })).toHaveAttribute("aria-pressed", "true");
 
     const v = await createVideoViaApi(page, "Branded video");
     await page.goto(`/share/${v.id}`);

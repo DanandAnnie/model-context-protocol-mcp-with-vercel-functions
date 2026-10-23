@@ -324,6 +324,64 @@ describe("scenes", () => {
     assert.equal(parsed.scenes?.length, 2);
   });
 
+  it("scenes can name their own presenter and voice", async () => {
+    const { resolveRenderContext } = await import("../services/videos");
+    const req = videoRequestSchema.parse({
+      title: "Two presenters",
+      avatarId: STOCK_AVATARS[0].id,
+      voiceId: STOCK_VOICES[0].id,
+      scenes: [
+        { script: "Ava opens.", background: { type: "color", value: "#000000" } },
+        { script: "Marcus closes.", background: { type: "color", value: "#ffffff" }, avatarId: STOCK_AVATARS[1].id, voiceId: STOCK_VOICES[1].id },
+      ],
+    });
+    const ctx = await resolveRenderContext(req, LOCAL_OWNER);
+    assert.equal(ctx.avatar.id, STOCK_AVATARS[0].id);
+    assert.deepEqual(Object.keys(ctx.cast.avatars).sort(), [STOCK_AVATARS[0].id, STOCK_AVATARS[1].id].sort());
+    assert.deepEqual(Object.keys(ctx.cast.voices).sort(), [STOCK_VOICES[0].id, STOCK_VOICES[1].id].sort());
+    const video = await createVideo(req);
+    assert.equal(video.status, "processing");
+    assert.equal(video.scenes?.[0].avatarName, undefined, "a scene on the video's presenter carries no name of its own");
+    assert.equal(video.scenes?.[1].avatarName, STOCK_AVATARS[1].name);
+    assert.equal(video.scenes?.[1].voiceName, STOCK_VOICES[1].name);
+    assert.equal(video.avatarName, STOCK_AVATARS[0].name);
+    await assert.rejects(
+      resolveRenderContext({ ...req, scenes: [{ ...req.scenes![1], voiceId: "ghost" }] }, LOCAL_OWNER),
+      /Voice ghost is not available/,
+    );
+    await assert.rejects(resolveRenderContext({ ...req, scenes: [{ ...req.scenes![1], avatarId: "ghost" }] }, LOCAL_OWNER), /not found/);
+  });
+
+  it("HeyGen renders one input per scene with that scene's presenter; D-ID refuses a second presenter", async () => {
+    const { HeyGenAvatarProvider } = await import("../providers/avatar/heygen");
+    const { DidAvatarProvider } = await import("../providers/avatar/did");
+    const heygen = new HeyGenAvatarProvider("key");
+    let sent: { video_inputs: Array<{ character: { avatar_id?: string }; voice: { voice_id: string } }> } | null = null;
+    (heygen as unknown as { client: { generateVideo: (b: unknown) => Promise<{ video_id: string }> } }).client.generateVideo = async (b) => {
+      sent = b as typeof sent;
+      return { video_id: "hg_1" };
+    };
+    const ava = { ...STOCK_AVATARS[0], id: "ava_hg", provider: "heygen", source: "provider" as const };
+    const marcus = { ...STOCK_AVATARS[1], id: "marcus_hg", provider: "heygen", source: "provider" as const };
+    const emma = { ...STOCK_VOICES[0], id: "emma_hg", provider: "heygen" };
+    const james = { ...STOCK_VOICES[1], id: "james_hg", provider: "heygen" };
+    const req = videoRequestSchema.parse({
+      title: "Two presenters",
+      avatarId: ava.id,
+      voiceId: emma.id,
+      scenes: [
+        { script: "Ava opens.", background: { type: "color", value: "#000000" } },
+        { script: "Marcus closes.", background: { type: "color", value: "#ffffff" }, avatarId: marcus.id, voiceId: james.id },
+      ],
+    });
+    const cast = { avatars: { [ava.id]: ava, [marcus.id]: marcus }, voices: { [emma.id]: emma, [james.id]: james } };
+    assert.equal((await heygen.createVideo(req, ava, emma, cast)).providerJobId, "hg_1");
+    assert.deepEqual(sent!.video_inputs.map((i) => [i.character.avatar_id, i.voice.voice_id]), [[ava.id, emma.id], [marcus.id, james.id]]);
+    // A scene voice from another provider is refused like the video's voice would be.
+    await assert.rejects(heygen.createVideo(req, ava, emma, { ...cast, voices: { ...cast.voices, [james.id]: { ...james, provider: "elevenlabs" } } }), /HeyGen voice/);
+    await assert.rejects(new DidAvatarProvider("key").createVideo(req, ava, emma), /one presenter and one voice per video/);
+  });
+
   it("requires a script when no scenes are given", () => {
     assert.throws(() => videoRequestSchema.parse({ title: "x", avatarId: "a", voiceId: "v" }), /Script is required/);
     assert.throws(() => videoRequestSchema.parse({ title: "x", avatarId: "a", voiceId: "v", scenes: [] }));

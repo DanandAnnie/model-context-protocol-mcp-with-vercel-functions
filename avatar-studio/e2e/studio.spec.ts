@@ -123,13 +123,25 @@ test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page 
   await page.getByRole("button", { name: "Background" }).click();
   await page.getByLabel("Background #0f172a").click();
   await expect(page.getByText(/2 scenes/)).toBeVisible();
+  // The second scene gets its own presenter and voice; the stage preview follows the choice.
+  await page.getByLabel("Scene avatar").selectOption({ label: "Marcus Hill" });
+  await page.getByLabel("Scene voice").selectOption({ label: "Olivia" });
+  await expect(page.locator("img[alt='Marcus Hill']").first()).toBeVisible();
   await page.getByRole("button", { name: "Generate video" }).click();
   await page.waitForURL(/\/videos\/vid_/);
   const id = page.url().split("/").pop()!;
   const video = (await (await page.request.get(`/api/videos/${id}`)).json()).video;
   expect(video.scenes).toHaveLength(2);
   expect(video.script).toBe("Scene one says hello.\n\nScene two says goodbye.");
+  expect(video.scenes[0].avatarName).toBeUndefined();
+  expect(video.scenes[1]).toMatchObject({ avatarId: "stock_2", avatarName: "Marcus Hill", voiceId: "stock_voice_3", voiceName: "Olivia" });
   await expect(page.getByText("Script · 2 scenes")).toBeVisible();
+  await expect(page.getByText("Marcus Hill · Olivia")).toBeVisible();
+  // Edit a copy keeps the scene's presenter.
+  await page.goto(`/create?from=${id}`);
+  await expect(page.getByText(/2 scenes/)).toBeVisible();
+  await page.getByRole("button", { name: "2", exact: true }).click();
+  await expect(page.getByLabel("Scene voice")).toHaveValue("stock_voice_3");
 });
 
 test("captions, share page, rename, and library filters", async ({ page }) => {

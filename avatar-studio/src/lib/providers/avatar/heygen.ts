@@ -2,7 +2,7 @@ import { dimensionsFor, type Avatar, type VideoRequest, type Voice } from "../..
 import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
 import { HeyGenClient } from "../heygen-client";
-import type { AvatarJobStatus, AvatarProvider } from "../types";
+import type { AvatarJobStatus, AvatarProvider, RenderCast } from "../types";
 
 export class HeyGenAvatarProvider implements AvatarProvider {
   readonly name = "heygen";
@@ -43,32 +43,44 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     return { ...avatar, providerAssetIds: { ...avatar.providerAssetIds, [this.name]: id } };
   }
 
-  async createVideo(req: VideoRequest, avatar: Avatar, voice: Voice | null) {
-    if (voice && voice.provider !== this.name) {
-      throw new Error(`HeyGen renders need a HeyGen voice; "${voice.name}" comes from ${voice.provider}.`);
-    }
-    const photoId = avatar.source === "custom" ? avatar.providerAssetIds?.[this.name] : avatar.tags?.includes("photo avatar") ? avatar.id : undefined;
-    if (avatar.source === "custom" && !photoId) throw new Error("Custom avatar has not been uploaded to HeyGen yet.");
-    const character = photoId
-      ? { type: "talking_photo", talking_photo_id: photoId, talking_photo_style: "square" }
-      : { type: "avatar", avatar_id: avatar.id, avatar_style: "normal" };
+  async createVideo(req: VideoRequest, avatar: Avatar, voice: Voice | null, cast?: RenderCast) {
     const scenes = req.scenes?.length ? req.scenes : [{ script: req.script, background: req.background }];
     const body = {
       title: req.title,
       caption: req.captions,
       ...(webhookUrl("heygen") ? { callback_url: webhookUrl("heygen") } : {}),
       dimension: dimensionsFor(req.aspect, req.resolution),
-      video_inputs: scenes.map((scene) => ({
-        character,
-        voice: { type: "text", input_text: scene.script, voice_id: voice?.id ?? req.voiceId, speed: req.speed },
-        background:
-          scene.background.type === "image"
-            ? { type: "image", url: scene.background.value }
-            : { type: "color", value: scene.background.value },
-      })),
+      // One input per scene, each with its own presenter and voice when the scene names them.
+      video_inputs: scenes.map((scene) => {
+        const sceneAvatar = (scene.avatarId && cast?.avatars[scene.avatarId]) || avatar;
+        const sceneVoice = (scene.voiceId && cast?.voices[scene.voiceId]) || voice;
+        return {
+          character: this.character(sceneAvatar),
+          voice: { type: "text", input_text: scene.script, voice_id: this.voiceId(sceneVoice, req.voiceId), speed: req.speed },
+          background:
+            scene.background.type === "image"
+              ? { type: "image", url: scene.background.value }
+              : { type: "color", value: scene.background.value },
+        };
+      }),
     };
     const data = await this.client.generateVideo(body);
     return { providerJobId: data.video_id };
+  }
+
+  private character(avatar: Avatar) {
+    const photoId = avatar.source === "custom" ? avatar.providerAssetIds?.[this.name] : avatar.tags?.includes("photo avatar") ? avatar.id : undefined;
+    if (avatar.source === "custom" && !photoId) throw new Error(`Custom avatar "${avatar.name}" has not been uploaded to HeyGen yet.`);
+    return photoId
+      ? { type: "talking_photo", talking_photo_id: photoId, talking_photo_style: "square" }
+      : { type: "avatar", avatar_id: avatar.id, avatar_style: "normal" };
+  }
+
+  private voiceId(voice: Voice | null, fallback: string): string {
+    if (voice && voice.provider !== this.name) {
+      throw new Error(`HeyGen renders need a HeyGen voice; "${voice.name}" comes from ${voice.provider}.`);
+    }
+    return voice?.id ?? fallback;
   }
 
   async getStatus(providerJobId: string): Promise<AvatarJobStatus> {

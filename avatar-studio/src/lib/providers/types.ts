@@ -21,6 +21,12 @@ export interface AvatarJobStatus {
   error?: string;
 }
 
+/** Avatars and voices referenced by a request's scenes, keyed by id. */
+export interface RenderCast {
+  avatars: Record<string, Avatar>;
+  voices: Record<string, Voice>;
+}
+
 export interface AvatarProvider {
   readonly name: string;
   listAvatars(): Promise<Avatar[]>;
@@ -30,8 +36,12 @@ export interface AvatarProvider {
    * the same avatar when nothing is needed. The caller persists the result.
    */
   prepareAvatar?(avatar: Avatar): Promise<Avatar>;
-  /** Kick off a render. Returns the provider's job id. */
-  createVideo(req: VideoRequest, avatar: Avatar, voice: Voice | null): Promise<{ providerJobId: string }>;
+  /**
+   * Kick off a render. Returns the provider's job id. `cast` holds every avatar and voice a
+   * scene names (by id, custom avatars already prepared) for providers that render one
+   * presenter per scene; others use `avatar` and `voice` throughout.
+   */
+  createVideo(req: VideoRequest, avatar: Avatar, voice: Voice | null, cast?: RenderCast): Promise<{ providerJobId: string }>;
   getStatus(providerJobId: string): Promise<AvatarJobStatus>;
   /** Parse an inbound webhook body into a job update, or null if unrecognised. */
   parseWebhook?(body: unknown): { providerJobId: string; update: AvatarJobStatus } | null;

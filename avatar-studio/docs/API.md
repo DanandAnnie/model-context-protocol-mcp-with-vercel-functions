@@ -41,13 +41,13 @@ Public routes need no key: `/api/videos/:id/captions`, `/api/videos/:id/view`, `
 }
 ```
 
-Instead of `script`, send `scenes` (1 to 20), each with its own `script` and `background`; the combined script must stay under 5000 characters:
+Instead of `script`, send `scenes` (1 to 20), each with its own `script` and `background`, and optionally its own `avatarId` and `voiceId` (the video's are used when omitted); the combined script must stay under 5000 characters. HeyGen renders one presenter per scene; D-ID refuses a scene that names another presenter or voice, and the demo renderer ignores the choice:
 
 ```json
 { "title": "Two scenes", "avatarId": "stock_1", "voiceId": "stock_voice_1",
   "scenes": [
     { "script": "First scene.", "background": { "type": "color", "value": "#0f172a" } },
-    { "script": "Second scene.", "background": { "type": "image", "value": "https://example.com/bg.jpg" } }
+    { "script": "Second scene.", "background": { "type": "image", "value": "https://example.com/bg.jpg" }, "avatarId": "stock_2", "voiceId": "stock_voice_2" }
   ] }
 ```
 
@@ -55,7 +55,7 @@ Instead of `script`, send `scenes` (1 to 20), each with its own `script` and `ba
 |---|---|---|
 | `title` | string, 1–120 | |
 | `script` | string, ≤5000 | required unless `scenes` is given |
-| `scenes` | array | each `{ script, background }` |
+| `scenes` | array | each `{ script, background, avatarId?, voiceId? }`; stored scenes also carry `avatarName` and `voiceName` |
 | `avatarId` | string | from `GET /api/avatars` |
 | `voiceId` | string | from `GET /api/voices` |
 | `aspect` | `16:9` \| `9:16` \| `1:1` | default `16:9` |

@@ -4,7 +4,8 @@ import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import { getStore } from "../store";
 import { MAX_SCENES } from "../types";
-import type { Avatar, Video, VideoRequest, Voice } from "../types";
+import type { Avatar, Scene, Video, VideoRequest, Voice } from "../types";
+import type { RenderCast } from "../providers/types";
 import { LOCAL_OWNER } from "../owner-id";
 import { renderLimitFor } from "../billing";
 import { ConflictError, LimitError, NotFoundError, ValidationError } from "../errors";
@@ -19,7 +20,19 @@ export const videoRequestSchema = z
     title: z.string().trim().min(1).max(120),
     /** Optional when `scenes` is given; derived from them otherwise. */
     script: z.string().trim().max(5000).optional(),
-    scenes: z.array(z.object({ script: z.string().trim().min(1).max(5000), background: backgroundSchema })).min(1).max(MAX_SCENES).optional(),
+    scenes: z
+      .array(
+        z.object({
+          script: z.string().trim().min(1).max(5000),
+          background: backgroundSchema,
+          /** Presenter and voice for this scene; the video's when omitted. */
+          avatarId: z.string().min(1).optional(),
+          voiceId: z.string().min(1).optional(),
+        }),
+      )
+      .min(1)
+      .max(MAX_SCENES)
+      .optional(),
     avatarId: z.string().min(1),
     voiceId: z.string().min(1),
     aspect: z.enum(["16:9", "9:16", "1:1"]).default("16:9"),
@@ -66,13 +79,22 @@ export async function enforceRenderLimit(ownerId: string): Promise<void> {
 export interface RenderContext {
   avatar: Avatar;
   voice: Voice;
+  /** The video's avatar and voice plus every one a scene names, keyed by id. */
+  cast: RenderCast;
 }
 
-export async function resolveRenderContext(req: Pick<VideoRequest, "avatarId" | "voiceId">, ownerId: string): Promise<RenderContext> {
-  const [avatar, voices] = await Promise.all([getAvatar(req.avatarId, ownerId), listVoices(ownerId)]);
-  const voice = voices.find((v) => v.id === req.voiceId) ?? null;
-  if (!voice) throw new ValidationError(`Voice ${req.voiceId} is not available with the current voice provider`);
-  return { avatar, voice };
+export async function resolveRenderContext(req: Pick<VideoRequest, "avatarId" | "voiceId"> & { scenes?: Array<Pick<Scene, "avatarId" | "voiceId">> }, ownerId: string): Promise<RenderContext> {
+  const avatarIds = Array.from(new Set([req.avatarId, ...(req.scenes ?? []).map((s) => s.avatarId).filter((id): id is string => !!id)]));
+  const [avatarList, voices] = await Promise.all([Promise.all(avatarIds.map((id) => getAvatar(id, ownerId))), listVoices(ownerId)]);
+  const avatars = Object.fromEntries(avatarList.map((a) => [a.id, a]));
+  const voiceIds = Array.from(new Set([req.voiceId, ...(req.scenes ?? []).map((s) => s.voiceId).filter((id): id is string => !!id)]));
+  const cast: RenderCast = { avatars, voices: {} };
+  for (const id of voiceIds) {
+    const voice = voices.find((v) => v.id === id);
+    if (!voice) throw new ValidationError(`Voice ${id} is not available with the current voice provider`);
+    cast.voices[id] = voice;
+  }
+  return { avatar: avatars[req.avatarId], voice: cast.voices[req.voiceId], cast };
 }
 
 /**
@@ -87,10 +109,20 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
   const resolved = ctx ?? (await resolveRenderContext(req, ownerId));
   let avatar = resolved.avatar;
   const voice = resolved.voice;
+  const cast: RenderCast = { avatars: { ...resolved.cast.avatars }, voices: { ...resolved.cast.voices } };
   const provider = getAvatarProvider();
 
+  // Scenes keep the names of their own presenter and voice for the library and detail page.
+  const scenes = req.scenes?.map((sc) =>
+    stripUndefined({
+      ...sc,
+      avatarName: sc.avatarId ? cast.avatars[sc.avatarId]?.name : undefined,
+      voiceName: sc.voiceId ? cast.voices[sc.voiceId]?.name : undefined,
+    }),
+  );
   const base: Video = {
     ...req,
+    ...(scenes ? { scenes } : {}),
     ...stripUndefined(extras),
     id: newId("vid"),
     ownerId,
@@ -103,11 +135,15 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
   };
 
   try {
-    if (provider.prepareAvatar && avatar.source === "custom") {
-      const prepared = await provider.prepareAvatar(avatar);
-      if (prepared !== avatar) avatar = await getStore().put("avatar", prepared);
+    if (provider.prepareAvatar) {
+      for (const a of Object.values(cast.avatars)) {
+        if (a.source !== "custom") continue;
+        const prepared = await provider.prepareAvatar(a);
+        if (prepared !== a) cast.avatars[a.id] = await getStore().put("avatar", prepared);
+      }
+      avatar = cast.avatars[avatar.id] ?? avatar;
     }
-    const { providerJobId } = await provider.createVideo(req, avatar, voice);
+    const { providerJobId } = await provider.createVideo(base, avatar, voice, cast);
     base.providerJobId = providerJobId;
     base.status = "processing";
   } catch (err) {

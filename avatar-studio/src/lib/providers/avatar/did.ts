@@ -60,6 +60,9 @@ export class DidAvatarProvider implements AvatarProvider {
   }
 
   async createVideo(req: VideoRequest, avatar: Avatar, voice: Voice | null) {
+    // A D-ID talk has one presenter and one voice; a scene asking for another cannot be honoured.
+    const other = req.scenes?.find((sc) => (sc.avatarId && sc.avatarId !== req.avatarId) || (sc.voiceId && sc.voiceId !== req.voiceId));
+    if (other) throw new Error("D-ID renders one presenter and one voice per video; remove the per-scene presenter or switch to HeyGen.");
     const sourceUrl = avatar.source === "custom" ? avatar.providerAssetIds?.[this.name] : avatar.imageUrl;
     if (!sourceUrl) throw new Error("Custom avatar has not been uploaded to D-ID yet.");
     const body = {

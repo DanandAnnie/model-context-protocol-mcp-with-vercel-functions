@@ -322,7 +322,12 @@ export default function VideoDetailPage() {
                         <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-black/10 text-[10px] font-semibold text-slate-700" style={sc.background.type === "color" ? { background: sc.background.value, color: isDarkHex(sc.background.value) ? "#fff" : undefined } : undefined}>
                           {i + 1}
                         </span>
-                        <p className="whitespace-pre-wrap leading-relaxed text-slate-700">{sc.script}</p>
+                        <div className="min-w-0">
+                          {(sc.avatarName || sc.voiceName) && (
+                            <div className="mb-0.5 text-xs text-slate-500">{[sc.avatarName, sc.voiceName].filter(Boolean).join(" · ")}</div>
+                          )}
+                          <p className="whitespace-pre-wrap leading-relaxed text-slate-700">{sc.script}</p>
+                        </div>
                       </li>
                     ))}
                   </ol>

@@ -69,6 +69,13 @@ export interface Scene {
   /** Spoken text for this scene. */
   script: string;
   background: Background;
+  /** Presenter for this scene; the video's avatar when absent. */
+  avatarId?: string;
+  /** Voice for this scene; the video's voice when absent. */
+  voiceId?: string;
+  /** Display names filled in when the video is created. */
+  avatarName?: string;
+  voiceName?: string;
 }
 
 export interface VideoRequest {

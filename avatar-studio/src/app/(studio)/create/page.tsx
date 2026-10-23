@@ -47,7 +47,12 @@ function writeDraft(d: Draft | null) {
     // Storage can be unavailable (private mode); drafts are a convenience only.
   }
 }
-const newScene = (script = "", background: Background = DEFAULT_BG): Scene => ({ script, background });
+const newScene = (script = "", background: Background = DEFAULT_BG, presenter: Pick<Scene, "avatarId" | "voiceId"> = {}): Scene => ({
+  script,
+  background,
+  ...(presenter.avatarId ? { avatarId: presenter.avatarId } : {}),
+  ...(presenter.voiceId ? { voiceId: presenter.voiceId } : {}),
+});
 const TONES = ["friendly", "professional", "formal", "energetic", "calm"] as const;
 type Tab = "avatar" | "voice" | "background" | "settings";
 
@@ -90,6 +95,9 @@ function CreateInner() {
   }
   const [avatar, setAvatar] = useState<Avatar | null>(null);
   const [voice, setVoice] = useState<Voice | null>(null);
+  // A scene may name its own presenter and voice; otherwise it uses the video's.
+  const sceneAvatar = (active.avatarId && avatarData?.avatars.find((a) => a.id === active.avatarId)) || avatar;
+  const sceneVoice = (active.voiceId && voiceData?.voices.find((v) => v.id === active.voiceId)) || voice;
   const [aspect, setAspect] = useState<AspectRatio>("16:9");
   const [resolution, setResolution] = useState<Resolution>("1080p");
   const [captions, setCaptions] = useState(false);
@@ -136,7 +144,7 @@ function CreateInner() {
     const d = readDraft();
     if (!d) return;
     setTitle(d.title);
-    setScenes(d.scenes.map((sc) => newScene(sc.script, sc.background)));
+    setScenes(d.scenes.map((sc) => newScene(sc.script, sc.background, sc)));
     setActiveIdx(0);
     setAspect(d.aspect);
     setResolution(d.resolution ?? "1080p");
@@ -199,7 +207,7 @@ function CreateInner() {
     api<{ video: Video }>(`/api/videos/${fromId}`)
       .then(({ video }) => {
         setTitle(`${video.title} (copy)`);
-        setScenes(video.scenes?.length ? video.scenes.map((sc) => newScene(sc.script, sc.background)) : [newScene(video.script, video.background)]);
+        setScenes(video.scenes?.length ? video.scenes.map((sc) => newScene(sc.script, sc.background, sc)) : [newScene(video.script, video.background)]);
         setActiveIdx(0);
         setAspect(video.aspect);
         setResolution(video.resolution ?? "1080p");
@@ -299,17 +307,17 @@ function CreateInner() {
 
           <Card className="overflow-hidden">
             <div className={`relative mx-auto w-full ${stageAspect} ${aspect === "9:16" ? "max-h-[520px]" : ""} flex items-end justify-center overflow-hidden`} style={background.type === "color" ? { background: background.value } : { backgroundImage: `url(${background.value})`, backgroundSize: "cover", backgroundPosition: "center" }}>
-              {avatar ? (
+              {sceneAvatar ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={avatar.imageUrl}
-                  alt={avatar.name}
+                  src={sceneAvatar.imageUrl}
+                  alt={sceneAvatar.name}
                   className={`${aspect === "16:9" ? "h-[92%]" : "h-[80%]"} max-w-[80%] object-contain object-bottom drop-shadow-xl`}
                   onError={(e) => {
                     const img = e.currentTarget;
                     if (!img.dataset.fallback) {
                       img.dataset.fallback = "1";
-                      img.src = portraitSvg(avatar.name, avatar.name.length);
+                      img.src = portraitSvg(sceneAvatar.name, sceneAvatar.name.length);
                     }
                   }}
                 />
@@ -358,6 +366,23 @@ function CreateInner() {
                 </button>
               )}
             </div>
+            {scenes.length > 1 && (
+              <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="scene-presenter">
+                <span className="font-medium">Scene {activeIdx + 1} presenter</span>
+                <select aria-label="Scene avatar" className={`${inputClass} w-auto py-1 text-xs`} value={active.avatarId ?? ""} onChange={(e) => updateScene(activeIdx, { avatarId: e.target.value || undefined })}>
+                  <option value="">{avatar ? `Video avatar (${avatar.name})` : "Video avatar"}</option>
+                  {(avatarData?.avatars ?? []).map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+                <select aria-label="Scene voice" className={`${inputClass} w-auto py-1 text-xs`} value={active.voiceId ?? ""} onChange={(e) => updateScene(activeIdx, { voiceId: e.target.value || undefined })}>
+                  <option value="">{voice ? `Video voice (${voice.name})` : "Video voice"}</option>
+                  {(voiceData?.voices ?? []).map((v) => (
+                    <option key={v.id} value={v.id}>{v.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-semibold text-slate-900">{scenes.length > 1 ? `Scene ${activeIdx + 1} script` : "Script"}</h3>
               <div className="flex flex-wrap items-center gap-2">
@@ -397,16 +422,16 @@ function CreateInner() {
                     </div>
                   )}
                 </div>
-                {voice && (
+                {sceneVoice && (
                   <Button
                     variant="secondary"
                     className="px-3 py-1.5"
                     disabled={!active.script.trim()}
-                    loading={busyId === voice.id}
-                    onClick={() => play(voice, active.script.slice(0, 400), speed).catch((e) => setErr(e.message))}
+                    loading={busyId === sceneVoice.id}
+                    onClick={() => play(sceneVoice, active.script.slice(0, 400), speed).catch((e) => setErr(e.message))}
                   >
-                    {playingId === voice.id ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                    {playingId === voice.id ? "Stop" : "Listen"}
+                    {playingId === sceneVoice.id ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                    {playingId === sceneVoice.id ? "Stop" : "Listen"}
                   </Button>
                 )}
               </div>

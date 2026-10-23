@@ -729,7 +729,7 @@ export default function VideoDetailPage() {
                   </form>
                 </Card>
               )}
-              <SubtitleLanguages video={video} onUpdated={applyServer} />
+              {!video.deletedAt && <SubtitleLanguages video={video} onUpdated={applyServer} />}
               <Card className="p-4" data-testid="share-description-card">
                 <h3 className="text-sm font-semibold text-slate-900">Description</h3>
                 <p className="mt-1 text-xs text-slate-500">Shown under the player on the share page and in link previews. Leave it empty to show nothing.</p>

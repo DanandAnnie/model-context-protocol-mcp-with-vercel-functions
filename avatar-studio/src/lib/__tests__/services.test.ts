@@ -513,6 +513,16 @@ describe("captions", () => {
     const { buildCues } = await import("../captions");
     assert.deepEqual(buildCues("   ", 10), []);
     assert.deepEqual(buildCues("Hi.", 0), []);
+    // Scripts without spaces split at their own sentence and clause marks, and long runs by character.
+    const ja = buildCues("今日は新しい家をご紹介します。広いリビングと、明るいキッチンがあります。ぜひご覧ください！", 12);
+    assert.deepEqual(
+      ja.map((c) => c.text),
+      ["今日は新しい家をご紹介します。", "広いリビングと、明るいキッチンがあります。", "ぜひご覧ください！"],
+    );
+    assert.equal(ja.at(-1)!.endMs, 12_000);
+    assert.ok(ja[1].endMs - ja[1].startMs > ja[2].endMs - ja[2].startMs, "a longer sentence gets more time");
+    const run = buildCues("あ".repeat(100), 10);
+    assert.deepEqual(run.map((c) => Array.from(c.text).length), [40, 40, 20]);
   });
 });
 
@@ -687,12 +697,57 @@ describe("translated subtitles", () => {
     assert.equal("French" in (fewer.subtitles ?? {}), false);
     await assert.rejects(removeSubtitles(v.id, "French", "u-sub"), /No French subtitles/);
     assert.throws(() => subtitleSchema.parse({ language: "x" }));
-    // An edit landing during the translation is kept, and counters stay on the record.
+    assert.throws(() => subtitleSchema.parse({ language: "__proto__" }), "an object key is not a language");
+    assert.throws(() => subtitleSchema.parse({ language: "12" }));
+    assert.equal(subtitleSchema.parse({ language: " Portuguese (Brazil) " }).language, "Portuguese (Brazil)");
+    // Edits and counters that land during the translation are kept.
     const { getStore } = await import("../store");
-    await getStore().put("video", { ...(await getVideo(v.id, "u-sub", false)), title: "Renamed meanwhile" });
-    assert.equal((await addSubtitles(v.id, "Polish", "u-sub")).title, "Renamed meanwhile");
+    const during = async (script: string, language: string) => {
+      const stored = (await getStore().get<Video>("video", v.id))!;
+      await getStore().put("video", { ...stored, title: "Renamed meanwhile", views: 7 });
+      return `[${language}] ${script}`;
+    };
+    const polish = await addSubtitles(v.id, "Polish", "u-sub", during);
+    assert.equal(polish.title, "Renamed meanwhile");
+    assert.equal(polish.views, 7, "counters written during the translation stay");
+    assert.equal(polish.subtitles?.Polish, "[Polish] Welcome home.");
     for (const l of Object.keys((await getVideo(v.id, "u-sub", false)).subtitles ?? {})) await removeSubtitles(v.id, l, "u-sub");
     assert.equal("subtitles" in (await getVideo(v.id, "u-sub", false)), false, "the last removal clears the field");
+    // A trashed video takes no new translation; the library listing leaves the text off its cards.
+    const { queryVideos, videoQuerySchema } = await import("../services/videos");
+    await addSubtitles(v.id, "Spanish", "u-sub");
+    const listed = (await queryVideos("u-sub", videoQuerySchema.parse({}))).videos.find((x) => x.id === v.id)!;
+    assert.equal("subtitles" in listed, false);
+    await deleteVideo(v.id, "u-sub");
+    await assert.rejects(addSubtitles(v.id, "French", "u-sub"), /Restore the video/);
+  });
+
+  it("decides the language and the cap on the record as stored, so overlapping adds cannot double a track or pass the cap", async () => {
+    const { addSubtitles, MAX_SUBTITLE_LANGUAGES } = await import("../services/videos");
+    const v = await createVideo(videoRequestSchema.parse({ title: "Race", script: "Hello.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }), "u-race");
+    // Both translations finish only once both requests have passed their early checks.
+    const gate = () => {
+      let waiting = 0;
+      let open!: () => void;
+      const opened = new Promise<void>((r) => (open = r));
+      return async (script: string, language: string) => {
+        if (++waiting === 2) open();
+        await opened;
+        return `[${language}] ${script}`;
+      };
+    };
+    const both = gate();
+    const results = await Promise.all([addSubtitles(v.id, "Spanish", "u-race", both), addSubtitles(v.id, "spanish", "u-race", both)]);
+    const last = results.find((r) => Object.keys(r.subtitles ?? {}).length === 1 && r.updatedAt === results.map((x) => x.updatedAt).sort().at(-1))!;
+    assert.deepEqual(Object.keys(last.subtitles ?? {}).length, 1, "one track for one language");
+    assert.equal(Object.keys((await getVideo(v.id, "u-race", false)).subtitles ?? {}).length, 1);
+    for (const l of ["French", "German", "Italian"]) await addSubtitles(v.id, l, "u-race");
+    const two = gate();
+    const settled = await Promise.allSettled([addSubtitles(v.id, "Dutch", "u-race", two), addSubtitles(v.id, "Polish", "u-race", two)]);
+    assert.deepEqual(settled.map((r) => r.status).sort(), ["fulfilled", "rejected"], "the cap holds against overlapping adds");
+    const rejected = settled.find((r) => r.status === "rejected") as PromiseRejectedResult;
+    assert.match(String(rejected.reason), /At most/);
+    assert.equal(Object.keys((await getVideo(v.id, "u-race", false)).subtitles ?? {}).length, MAX_SUBTITLE_LANGUAGES);
   });
 });
 

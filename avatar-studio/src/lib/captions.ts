@@ -9,6 +9,35 @@ export interface Cue {
 }
 
 const MAX_CUE_CHARS = 90;
+/** A run with no spaces to break at (Chinese, Japanese, Thai) is cut into pieces this long. */
+const MAX_UNSPACED_CUE_CHARS = 40;
+/** Sentence ends: Western punctuation followed by space, or an East Asian full stop, question, or exclamation mark. */
+const SENTENCE_END = /(?<=[.!?])\s+|(?<=[。！？])/u;
+/** Clause ends, for breaking a long sentence. */
+const CLAUSE_END = /(?<=,)\s+|(?<=[，、])/u;
+const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}]/u;
+
+/** Joins two cue pieces: no space after East Asian punctuation, which carries its own spacing. */
+function join(a: string, b: string): string {
+  if (!a) return b;
+  return /[，、。！？]$/u.test(a) ? a + b : `${a} ${b}`;
+}
+
+/** Cuts a run that has no spaces into readable pieces by character. */
+function cutUnspaced(text: string): string[] {
+  const chars = Array.from(text);
+  const out: string[] = [];
+  for (let i = 0; i < chars.length; i += MAX_UNSPACED_CUE_CHARS) out.push(chars.slice(i, i + MAX_UNSPACED_CUE_CHARS).join(""));
+  return out;
+}
+
+/**
+ * The timing weight of a cue. Spaced languages weigh a word each; a script written without
+ * spaces weighs about half a word per character, which is close to how long it takes to say.
+ */
+function weight(text: string): number {
+  return text.split(/\s+/).reduce((n, token) => n + (CJK.test(token) ? Math.max(1, Array.from(token).length / 2) : 1), 0);
+}
 
 /** HeyGen writes captions into the file itself unless a caption style asks for the share page's track alone. */
 export function heygenBurnsCaptions(req: { captions?: boolean; captionStyle?: unknown }): boolean {
@@ -21,40 +50,43 @@ export function captionsBurnedIn(video: { captions?: boolean; captionStyle?: unk
 }
 
 function splitSentences(script: string): string[] {
-  const sentences = script
-    .replace(/\s+/g, " ")
-    .trim()
-    .split(/(?<=[.!?])\s+/)
-    .filter(Boolean);
-  // Break very long sentences at commas so cues stay readable.
+  const sentences = script.replace(/\s+/g, " ").trim().split(SENTENCE_END).map((s) => s.trim()).filter(Boolean);
+  // Break very long sentences at commas so cues stay readable, and cut runs with no spaces by character.
   const out: string[] = [];
   for (const s of sentences) {
-    if (s.length <= MAX_CUE_CHARS) {
+    if (s.length <= MAX_CUE_CHARS && (s.includes(" ") || Array.from(s).length <= MAX_UNSPACED_CUE_CHARS)) {
       out.push(s);
       continue;
     }
     let current = "";
-    for (const part of s.split(/(?<=,)\s+/)) {
-      if ((current + " " + part).trim().length > MAX_CUE_CHARS && current) {
-        out.push(current.trim());
-        current = part;
+    for (const clause of s.split(CLAUSE_END).map((c) => c.trim()).filter(Boolean)) {
+      if (!clause.includes(" ") && Array.from(clause).length > MAX_UNSPACED_CUE_CHARS) {
+        // A run cut by character stays in its pieces: joining them back would undo the cut.
+        if (current) out.push(current);
+        out.push(...cutUnspaced(clause));
+        current = "";
+        continue;
+      }
+      if (join(current, clause).length > MAX_CUE_CHARS && current) {
+        out.push(current);
+        current = clause;
       } else {
-        current = (current + " " + part).trim();
+        current = join(current, clause);
       }
     }
-    if (current) out.push(current.trim());
+    if (current) out.push(current);
   }
   return out;
 }
 
 export function buildCues(script: string, durationSec: number): Cue[] {
   const sentences = splitSentences(script);
-  const totalWords = sentences.reduce((n, s) => n + s.split(" ").length, 0);
+  const totalWords = sentences.reduce((n, s) => n + weight(s), 0);
   if (!sentences.length || totalWords === 0 || durationSec <= 0) return [];
   const totalMs = Math.round(durationSec * 1000);
   let cursor = 0;
   return sentences.map((text, i) => {
-    const words = text.split(" ").length;
+    const words = weight(text);
     const span = i === sentences.length - 1 ? totalMs - cursor : Math.round((words / totalWords) * totalMs);
     const cue = { index: i + 1, startMs: cursor, endMs: cursor + span, text };
     cursor += span;

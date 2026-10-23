@@ -175,7 +175,18 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
 
 /** Translated subtitle tracks a video may carry. */
 export const MAX_SUBTITLE_LANGUAGES = 5;
-export const subtitleSchema = z.object({ language: z.string().trim().min(2).max(40) });
+/** A language name: letters (any script), with spaces, brackets, apostrophes, and hyphens; never a bare symbol or an object key like `__proto__`. */
+export const subtitleSchema = z.object({
+  language: z
+    .string()
+    .trim()
+    .min(2)
+    .max(40)
+    .regex(/^\p{L}[\p{L}\p{M}\s().'-]*$/u, "Name the language in letters, like Spanish or Portuguese (Brazil)"),
+});
+/** Translates a script into a language; the default asks the script provider. Injectable for tests. */
+export type Translator = (script: string, language: string) => Promise<string>;
+const translateWithProvider: Translator = (script, language) => reviseScript({ script, action: "translate", language });
 
 /** The stored key for a language, matched without regard to case so "spanish" and "Spanish" are one track. */
 function subtitleKey(video: Video, language: string): string | undefined {
@@ -187,32 +198,41 @@ function subtitleKey(video: Video, language: string): string | undefined {
  * (the share page offers it, `GET /api/videos/:id/captions?lang=` serves it). Asking again for a
  * language the video already has translates it afresh.
  */
-export async function addSubtitles(id: string, language: string, ownerId: string = LOCAL_OWNER): Promise<Video> {
+export async function addSubtitles(id: string, language: string, ownerId: string = LOCAL_OWNER, translate: Translator = translateWithProvider): Promise<Video> {
+  // Refuse early, before a provider call, what the write below would refuse anyway.
   const video = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
   if (purgeDue(video, Date.now())) throw new NotFoundError(`Video ${id} not found`);
-  const existing = subtitleKey(video, language);
-  if (!existing && Object.keys(video.subtitles ?? {}).length >= MAX_SUBTITLE_LANGUAGES) {
+  if (video.deletedAt) throw new ConflictError("Restore the video from the trash before adding subtitles");
+  if (!subtitleKey(video, language) && Object.keys(video.subtitles ?? {}).length >= MAX_SUBTITLE_LANGUAGES) {
     throw new ValidationError(`At most ${MAX_SUBTITLE_LANGUAGES} subtitle languages per video`);
   }
-  const text = await reviseScript({ script: video.script, action: "translate", language });
-  // The translation took a while; build on the stored record so edits made meanwhile are kept.
-  const current = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
-  const subtitles = { ...current.subtitles };
-  if (existing) delete subtitles[existing];
-  subtitles[language] = text;
-  return putKeepingCounters({ ...current, subtitles, updatedAt: nowIso() });
+  const text = await translate(video.script, language);
+  // The translation took a while: build on the record as stored under the lock, so edits made
+  // meanwhile are kept and a track added or removed by a concurrent request is seen. The language
+  // and the cap are decided again there, so two overlapping adds cannot store one language twice
+  // or pass the cap together.
+  return updateKeepingCounters(id, ownerId, (current) => {
+    if (current.deletedAt) throw new ConflictError("Restore the video from the trash before adding subtitles");
+    const subtitles = { ...current.subtitles };
+    const existing = subtitleKey(current, language);
+    if (existing) delete subtitles[existing];
+    else if (Object.keys(subtitles).length >= MAX_SUBTITLE_LANGUAGES) throw new ValidationError(`At most ${MAX_SUBTITLE_LANGUAGES} subtitle languages per video`);
+    subtitles[language] = text;
+    return { ...current, subtitles, updatedAt: nowIso() };
+  });
 }
 
-export async function removeSubtitles(id: string, language: string, ownerId: string = LOCAL_OWNER): Promise<Video> {
-  const video = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
-  const key = subtitleKey(video, language);
-  if (!key) throw new NotFoundError(`No ${language} subtitles on this video`);
-  const subtitles = { ...video.subtitles };
-  delete subtitles[key];
-  const next: Video = { ...video, updatedAt: nowIso() };
-  if (Object.keys(subtitles).length) next.subtitles = subtitles;
-  else delete next.subtitles;
-  return putKeepingCounters(next);
+export function removeSubtitles(id: string, language: string, ownerId: string = LOCAL_OWNER): Promise<Video> {
+  return updateKeepingCounters(id, ownerId, (video) => {
+    const key = subtitleKey(video, language);
+    if (!key) throw new NotFoundError(`No ${language} subtitles on this video`);
+    const subtitles = { ...video.subtitles };
+    delete subtitles[key];
+    const next: Video = { ...video, updatedAt: nowIso() };
+    if (Object.keys(subtitles).length) next.subtitles = subtitles;
+    else delete next.subtitles;
+    return next;
+  });
 }
 
 /** The subtitle text for a language the video carries, matched without regard to case; undefined when it has none. */
@@ -541,6 +561,23 @@ function putKeepingCounters(base: Video): Promise<Video> {
 }
 
 /**
+ * Writes a video derived from the record as stored at the moment of the write, under the counter
+ * lock: `build` sees every edit, track, and counter that landed before it, so a decision that
+ * depends on the current record (a key already present, a cap) is made on fresh data. A record
+ * that is gone, trashed past retention, or someone else's is not found.
+ */
+function updateKeepingCounters(id: string, ownerId: string, build: (stored: Video) => Video): Promise<Video> {
+  return withCounterLock(id, async () => {
+    const stored = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
+    if (purgeDue(stored, Date.now())) throw new NotFoundError(`Video ${id} not found`);
+    const next = build(stored);
+    const counters: Partial<Video> = {};
+    for (const field of COUNTER_FIELDS) if (stored[field] !== undefined) Object.assign(counters, { [field]: stored[field] });
+    return getStore().put("video", { ...next, ...counters });
+  });
+}
+
+/**
  * Count a share-page view. Public: no owner check. Only completed videos accumulate views,
  * so a page opened while rendering is not a view. `gate` runs only for a countable view
  * (the route's per-viewer window), so an early visit does not use up the viewer's slot.
@@ -809,7 +846,8 @@ export async function queryVideos(ownerId: string = LOCAL_OWNER, query: VideoQue
   const matched = query.trash && query.sort === "newest" ? filtered.sort((a, b) => b.deletedAt!.localeCompare(a.deletedAt!) || b.createdAt.localeCompare(a.createdAt)) : filtered;
   const videos = query.limit ? matched.slice(0, query.limit) : matched;
   return {
-    videos,
+    // Subtitle text is for the video page and the share player, not for a card: it is left off the page.
+    videos: videos.map(({ subtitles: _subtitles, ...rest }) => rest),
     matched: matched.length,
     total: live.length,
     hasMore: videos.length < matched.length,

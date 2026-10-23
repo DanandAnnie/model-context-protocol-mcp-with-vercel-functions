@@ -42,11 +42,16 @@ export class MockScriptProvider implements ScriptProvider {
   async chat({ persona, messages }: { persona: ChatPersona; messages: ChatMessage[] }) {
     const last = [...messages].reverse().find((m) => m.role === "user")?.content.trim() ?? "";
     const turn = messages.filter((m) => m.role === "user").length;
-    const topic = persona.instructions.split(/[.\n]/)[0]?.trim();
-    if (/^(hi|hello|hey)\b/i.test(last)) return `Hi, I'm ${persona.name}. ${topic ? `Ask me anything about ${topic.toLowerCase()}.` : "What can I help you with today?"}`;
+    // First sentence of the instructions. A "You represent the X" lead-in becomes "I'm with the X";
+    // anything else is treated as the subject the visitor can ask about.
+    const first = persona.instructions.split(/[.\n]/)[0]?.trim() ?? "";
+    const represents = /^you (represent|work for|are part of)\s+/i.exec(first);
+    const topic = represents ? first.slice(represents[0].length).trim() : first;
+    const intro = represents ? `I'm with ${topic}.` : topic ? `Ask me anything about ${topic.toLowerCase()}.` : "What can I help you with today?";
+    if (/^(hi|hello|hey)\b/i.test(last)) return `Hi, I'm ${persona.name}. ${intro}`;
     if (/\b(price|cost|how much)\b/i.test(last)) return `Good question. Pricing depends on what you need, so tell me a little more and I'll point you to the right option.`;
     if (/\b(thanks|thank you)\b/i.test(last)) return `You're welcome. Is there anything else I can help with?`;
-    if (/\?$/.test(last)) return `Here's the short answer: ${topic ? `it comes down to ${topic.toLowerCase()}.` : "it depends on your goals, and I'm happy to walk you through the options."} Want me to go deeper?`;
+    if (/\?$/.test(last)) return `Here's the short answer: it depends on what you're looking for, and I'm happy to walk you through the options. Want me to go deeper?`;
     return turn === 1 ? `Thanks for stopping by. I'm ${persona.name}, and I'm here to help. What would you like to know?` : `Got it. Tell me a bit more and I'll give you a clear next step.`;
   }
 }

@@ -1,13 +1,50 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Sparkles } from "lucide-react";
 import { NotFoundError, PUBLIC_ACCESS, getBrandKit, getVideo } from "@/lib/services";
 import { LOCAL_OWNER } from "@/lib/owner";
+import { config } from "@/lib/config";
 import { formatSeconds, isDarkHex } from "@/lib/client";
+import { excerpt } from "@/lib/text";
+import { dimensionsFor } from "@/lib/types";
 import { ViewBeacon } from "@/components/ViewBeacon";
 import { ShareCta } from "@/components/ShareCta";
 
 export const dynamic = "force-dynamic";
+
+/** Link previews (Slack, LinkedIn, iMessage): title, script excerpt, thumbnail, and the video itself once rendered. */
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  let video;
+  try {
+    video = await getVideo(id, PUBLIC_ACCESS, false);
+  } catch (err) {
+    if (err instanceof NotFoundError) return { title: "Video not found", robots: { index: false, follow: false } };
+    throw err;
+  }
+  const brand = await getBrandKit(video.ownerId ?? LOCAL_OWNER);
+  const siteName = brand?.name || "Avatar Studio";
+  const description = excerpt(video.script) || `A video from ${siteName}`;
+  const base = config.appUrl.replace(/\/$/, "");
+  const ready = video.status === "completed" && !!video.videoUrl;
+  const images = video.thumbnailUrl ? [{ url: video.thumbnailUrl, alt: video.title }] : undefined;
+  const { width, height } = dimensionsFor(video.aspect, video.resolution);
+  return {
+    title: `${video.title} · ${siteName}`,
+    description,
+    openGraph: {
+      title: video.title,
+      description,
+      url: `${base}/share/${video.id}`,
+      siteName,
+      type: ready ? "video.other" : "website",
+      images,
+      videos: ready && video.videoUrl ? [{ url: video.videoUrl, type: "video/mp4", width, height }] : undefined,
+    },
+    twitter: { card: images ? "summary_large_image" : "summary", title: video.title, description, images: images?.map((i) => i.url) },
+  };
+}
 
 /** Public, sidebar-free player page for sharing a finished video. */
 export default async function SharePage({ params }: { params: Promise<{ id: string }> }) {

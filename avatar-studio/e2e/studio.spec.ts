@@ -370,7 +370,14 @@ test("share page offers a download only when the owner allows it", async ({ page
 test("the owner can take a share link offline and back", async ({ page }) => {
   const v = await createVideoViaApi(page, `Offline ${Date.now().toString(36)}`);
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
-  expect((await page.request.get(`/share/${v.id}`)).status()).toBe(200);
+  const html = await (await page.request.get(`/share/${v.id}`)).text();
+  // Link previews: the title, a script excerpt, the thumbnail, and the rendered video.
+  const meta = (prop: string) => new RegExp(`<meta property="${prop}" content="([^"]*)"`).exec(html)?.[1];
+  expect(meta("og:title")).toContain("Offline ");
+  expect(meta("og:description")).toContain("Hello there.");
+  expect(meta("og:image")).toMatch(/^https?:\/\//);
+  expect(meta("og:video")).toMatch(/^https?:\/\//);
+  expect(meta("og:type")).toBe("video.other");
   // A beacon sent from another site does not count and does not use up the viewer's slot.
   const beacon = async (headers?: Record<string, string>) => ((await (await page.request.post(`/api/videos/${v.id}/view`, { headers })).json()) as { counted: boolean }).counted;
   expect(await beacon({ "sec-fetch-site": "cross-site" })).toBe(false);
@@ -380,7 +387,9 @@ test("the owner can take a share link offline and back", async ({ page }) => {
   await page.getByLabel("Share link is live").uncheck();
   await expect(page.getByTestId("share-off-note")).toBeVisible();
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.shareDisabled).toBe(true);
-  expect((await page.request.get(`/share/${v.id}`)).status()).toBe(404);
+  const gone = await page.request.get(`/share/${v.id}`);
+  expect(gone.status()).toBe(404);
+  expect(await gone.text()).not.toContain('property="og:video"');
   expect(((await (await page.request.post(`/api/videos/${v.id}/view`)).json()) as { counted: boolean }).counted).toBe(false);
   // The owner's own captions download keeps working (open mode: every request is the owner's).
   expect((await page.request.get(`/api/videos/${v.id}/captions`)).status()).toBe(200);

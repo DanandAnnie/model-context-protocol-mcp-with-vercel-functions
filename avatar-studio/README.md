@@ -13,7 +13,7 @@ D-ID, ElevenLabs, or in a fully offline **demo mode** with no keys at all.
 | Area | What you get |
 |---|---|
 | Home | Quick actions, recent videos |
-| Create video | Script editor with word/duration counter, AI script writer, avatar picker, voice picker with live preview, background color/image, 16:9 / 9:16 / 1:1, captions, speaking speed, live stage preview |
+| Create video | Multi-scene script editor (up to 20 scenes, each with its own background), word/duration counter, AI script writer, avatar picker, voice picker with live preview, background color/image, 16:9 / 9:16 / 1:1, captions, speaking speed, live stage preview |
 | My videos | Library with search and status filters, player, download, SRT captions, share link, delete, "Edit a copy" |
 | Share page | Public, sidebar-free player at `/share/:id` |
 | Templates | Script templates by category (real estate, marketing, training, support, social) that pre-fill the editor |
@@ -83,5 +83,4 @@ supabase/schema.sql     one-table JSON store
 
 ## Not included (yet)
 
-Per-user accounts and workspaces (only a shared password gate today), billing/credits, a timeline editor with
-multiple scenes, interactive real-time avatars, and avatar training from video.
+Per-user accounts and workspaces (only a shared password gate today), billing/credits, interactive real-time avatars, and avatar training from video.

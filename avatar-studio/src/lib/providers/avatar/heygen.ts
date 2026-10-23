@@ -39,21 +39,20 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     const character = isPhoto
       ? { type: "talking_photo", talking_photo_id: avatar.id, talking_photo_style: "square" }
       : { type: "avatar", avatar_id: avatar.id, avatar_style: "normal" };
+    const scenes = req.scenes?.length ? req.scenes : [{ script: req.script, background: req.background }];
     const body = {
       title: req.title,
       caption: req.captions,
       callback_url: webhookUrl("heygen"),
       dimension: ASPECT_DIMENSIONS[req.aspect],
-      video_inputs: [
-        {
-          character,
-          voice: { type: "text", input_text: req.script, voice_id: voice?.id ?? req.voiceId, speed: req.speed },
-          background:
-            req.background.type === "image"
-              ? { type: "image", url: req.background.value }
-              : { type: "color", value: req.background.value },
-        },
-      ],
+      video_inputs: scenes.map((scene) => ({
+        character,
+        voice: { type: "text", input_text: scene.script, voice_id: voice?.id ?? req.voiceId, speed: req.speed },
+        background:
+          scene.background.type === "image"
+            ? { type: "image", url: scene.background.value }
+            : { type: "color", value: scene.background.value },
+      })),
     };
     const data = await this.client.generateVideo(body);
     return { providerJobId: data.video_id };

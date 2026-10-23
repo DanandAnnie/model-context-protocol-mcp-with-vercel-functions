@@ -128,8 +128,21 @@ export default function VideoDetailPage() {
                 </dl>
               </Card>
               <Card className="p-4">
-                <h3 className="text-sm font-semibold text-slate-900">Script</h3>
-                <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{video.script}</p>
+                <h3 className="text-sm font-semibold text-slate-900">{video.scenes && video.scenes.length > 1 ? `Script · ${video.scenes.length} scenes` : "Script"}</h3>
+                {video.scenes && video.scenes.length > 1 ? (
+                  <ol className="mt-2 space-y-3">
+                    {video.scenes.map((sc, i) => (
+                      <li key={i} className="flex gap-3 text-sm">
+                        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-black/10 text-[10px] font-semibold text-slate-700" style={sc.background.type === "color" ? { background: sc.background.value, color: isDarkHex(sc.background.value) ? "#fff" : undefined } : undefined}>
+                          {i + 1}
+                        </span>
+                        <p className="whitespace-pre-wrap leading-relaxed text-slate-700">{sc.script}</p>
+                      </li>
+                    ))}
+                  </ol>
+                ) : (
+                  <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{video.script}</p>
+                )}
               </Card>
             </div>
           </div>
@@ -137,6 +150,13 @@ export default function VideoDetailPage() {
       )}
     </>
   );
+}
+
+function isDarkHex(hex: string): boolean {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return false;
+  const n = parseInt(m[1], 16);
+  return (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255 < 0.5;
 }
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {

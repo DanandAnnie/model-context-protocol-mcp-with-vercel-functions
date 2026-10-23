@@ -42,9 +42,18 @@ export interface Background {
   value: string;
 }
 
+export interface Scene {
+  /** Spoken text for this scene. */
+  script: string;
+  background: Background;
+}
+
 export interface VideoRequest {
   title: string;
+  /** Full spoken script. When `scenes` is present this is their scripts joined in order. */
   script: string;
+  /** Optional per-scene breakdown; providers that support multiple inputs render one per scene. */
+  scenes?: Scene[];
   avatarId: string;
   voiceId: string;
   aspect: AspectRatio;

@@ -1,7 +1,7 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { Captions, Clapperboard, Image as ImageIcon, Mic2, Palette, Play, Square, Users, Wand2, X } from "lucide-react";
+import { Captions, Clapperboard, Image as ImageIcon, Layers, Mic2, Palette, Play, Plus, Square, Trash2, Users, Wand2, X } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { VoiceRow } from "@/components/VoicePicker";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -10,9 +10,12 @@ import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { api, estimateSeconds, formatSeconds, wordCount } from "@/lib/client";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
-import type { AspectRatio, Avatar, Background, Video, Voice } from "@/lib/types";
+import type { AspectRatio, Avatar, Background, Scene, Video, Voice } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
+const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
+const MAX_SCENES = 20;
+const newScene = (script = "", background: Background = DEFAULT_BG): Scene => ({ script, background });
 const TONES = ["friendly", "professional", "formal", "energetic", "calm"] as const;
 type Tab = "avatar" | "voice" | "background" | "settings";
 
@@ -32,11 +35,29 @@ function CreateInner() {
   const { play, playingId, busyId } = useVoicePreview();
 
   const [title, setTitle] = useState("Untitled video");
-  const [script, setScript] = useState("");
+  const [scenes, setScenes] = useState<Scene[]>([newScene()]);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const active = scenes[Math.min(activeIdx, scenes.length - 1)];
+  const script = scenes.map((s) => s.script).join("\n\n");
+  const background = active.background;
+  const setScript = (value: string) => updateScene(activeIdx, { script: value });
+  const setBackground = (value: Background) => updateScene(activeIdx, { background: value });
+  function updateScene(idx: number, patch: Partial<Scene>) {
+    setScenes((prev) => prev.map((sc, i) => (i === idx ? { ...sc, ...patch } : sc)));
+  }
+  function addScene() {
+    if (scenes.length >= MAX_SCENES) return;
+    setScenes((prev) => [...prev, newScene("", prev[prev.length - 1].background)]);
+    setActiveIdx(scenes.length);
+  }
+  function removeScene(idx: number) {
+    if (scenes.length <= 1) return;
+    setScenes((prev) => prev.filter((_, i) => i !== idx));
+    setActiveIdx(Math.max(0, idx - 1));
+  }
   const [avatar, setAvatar] = useState<Avatar | null>(null);
   const [voice, setVoice] = useState<Voice | null>(null);
   const [aspect, setAspect] = useState<AspectRatio>("16:9");
-  const [background, setBackground] = useState<Background>({ type: "color", value: "#f1f5f9" });
   const [captions, setCaptions] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [tab, setTab] = useState<Tab>("avatar");
@@ -54,7 +75,8 @@ function CreateInner() {
     const t = findTemplate(templateId);
     if (t) {
       setTitle(t.title);
-      setScript(t.script);
+      setScenes([newScene(t.script)]);
+      setActiveIdx(0);
       setAspect(t.aspect);
     }
   }, [templateId]);
@@ -63,9 +85,9 @@ function CreateInner() {
     api<{ video: Video }>(`/api/videos/${fromId}`)
       .then(({ video }) => {
         setTitle(`${video.title} (copy)`);
-        setScript(video.script);
+        setScenes(video.scenes?.length ? video.scenes.map((sc) => newScene(sc.script, sc.background)) : [newScene(video.script, video.background)]);
+        setActiveIdx(0);
         setAspect(video.aspect);
-        setBackground(video.background);
         setCaptions(video.captions);
         setSpeed(video.speed);
         setPrefill({ avatarId: video.avatarId, voiceId: video.voiceId });
@@ -98,7 +120,8 @@ function CreateInner() {
 
   const words = wordCount(script);
   const seconds = estimateSeconds(script, speed);
-  const canGenerate = !!avatar && !!voice && script.trim().length > 0 && title.trim().length > 0 && !submitting;
+  const allScenesFilled = scenes.every((sc) => sc.script.trim().length > 0);
+  const canGenerate = !!avatar && !!voice && allScenesFilled && title.trim().length > 0 && !submitting;
 
   async function generate() {
     if (!avatar || !voice) return;
@@ -107,7 +130,7 @@ function CreateInner() {
     try {
       const { video } = await api<{ video: Video }>("/api/videos", {
         method: "POST",
-        body: JSON.stringify({ title, script, avatarId: avatar.id, voiceId: voice.id, aspect, background, captions, speed }),
+        body: JSON.stringify({ title, scenes, avatarId: avatar.id, voiceId: voice.id, aspect, captions, speed }),
       });
       router.push(`/videos/${video.id}`);
     } catch (e) {
@@ -156,21 +179,53 @@ function CreateInner() {
               ) : (
                 <Skeleton className="h-3/4 w-1/3" />
               )}
-              {captions && script.trim() && (
+              {captions && active.script.trim() && (
                 <div className={`absolute bottom-4 left-1/2 max-w-[85%] -translate-x-1/2 rounded-md px-3 py-1.5 text-center text-sm font-medium ${bgIsDark ? "bg-white/90 text-slate-900" : "bg-black/80 text-white"}`}>
-                  {script.trim().split(/(?<=[.!?])\s+/)[0].slice(0, 90)}
+                  {active.script.trim().split(/(?<=[.!?])\s+/)[0].slice(0, 90)}
                 </div>
               )}
-              <span className={`absolute left-3 top-3 rounded px-2 py-0.5 text-[11px] font-medium ${bgIsDark ? "bg-white/15 text-white" : "bg-black/10 text-slate-800"}`}>{aspect} preview</span>
+              <span className={`absolute left-3 top-3 rounded px-2 py-0.5 text-[11px] font-medium ${bgIsDark ? "bg-white/15 text-white" : "bg-black/10 text-slate-800"}`}>
+                {aspect} preview{scenes.length > 1 ? ` · scene ${activeIdx + 1}` : ""}
+              </span>
             </div>
           </Card>
 
           <Card className="p-4">
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <span className="mr-1 inline-flex items-center gap-1 text-xs font-medium text-slate-500"><Layers className="h-3.5 w-3.5" /> Scenes</span>
+              {scenes.map((sc, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => setActiveIdx(i)}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${
+                    i === activeIdx ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  <span className="h-2.5 w-2.5 rounded-full border border-black/10" style={sc.background.type === "color" ? { background: sc.background.value } : { background: "linear-gradient(135deg,#94a3b8,#cbd5e1)" }} />
+                  {i + 1}
+                  {!sc.script.trim() && <span className="text-amber-500" title="Empty scene">•</span>}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={addScene}
+                disabled={scenes.length >= MAX_SCENES}
+                className="inline-flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:border-brand-400 hover:text-brand-700 disabled:opacity-50"
+              >
+                <Plus className="h-3.5 w-3.5" /> Add scene
+              </button>
+              {scenes.length > 1 && (
+                <button type="button" onClick={() => removeScene(activeIdx)} aria-label="Remove scene" className="ml-auto inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs text-slate-500 hover:bg-rose-50 hover:text-rose-600">
+                  <Trash2 className="h-3.5 w-3.5" /> Remove scene {activeIdx + 1}
+                </button>
+              )}
+            </div>
             <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-slate-900">Script</h3>
+              <h3 className="text-sm font-semibold text-slate-900">{scenes.length > 1 ? `Scene ${activeIdx + 1} script` : "Script"}</h3>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-slate-500">
-                  {words} words · ~{formatSeconds(seconds)}
+                  {words} words · ~{formatSeconds(seconds)}{scenes.length > 1 ? " total" : ""}
                 </span>
                 <Button variant="secondary" className="px-3 py-1.5" onClick={() => setWriterOpen((v) => !v)}>
                   <Wand2 className="h-4 w-4" /> Write with AI
@@ -181,7 +236,7 @@ function CreateInner() {
                     className="px-3 py-1.5"
                     disabled={!script.trim()}
                     loading={busyId === voice.id}
-                    onClick={() => play(voice, script.slice(0, 400), speed).catch((e) => setErr(e.message))}
+                    onClick={() => play(voice, active.script.slice(0, 400), speed).catch((e) => setErr(e.message))}
                   >
                     {playingId === voice.id ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                     {playingId === voice.id ? "Stop" : "Listen"}
@@ -191,10 +246,11 @@ function CreateInner() {
             </div>
             {writerOpen && <ScriptWriter onClose={() => setWriterOpen(false)} onScript={(s) => { setScript(s); setWriterOpen(false); }} />}
             <textarea
+              key={activeIdx}
               className={`${inputClass} min-h-[220px] resize-y leading-relaxed`}
-              value={script}
+              value={active.script}
               onChange={(e) => setScript(e.target.value)}
-              placeholder="Type what your avatar should say, or click “Write with AI”."
+              placeholder={scenes.length > 1 ? `What the avatar says in scene ${activeIdx + 1}.` : "Type what your avatar should say, or click “Write with AI”."}
               maxLength={5000}
             />
           </Card>
@@ -253,6 +309,7 @@ function CreateInner() {
 
             {tab === "background" && (
               <div className="space-y-5">
+                {scenes.length > 1 && <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">Editing the background for scene {activeIdx + 1}. Each scene keeps its own background.</p>}
                 <div>
                   <div className="mb-2 text-sm font-medium text-slate-700">Solid color</div>
                   <div className="flex flex-wrap gap-2">
@@ -280,7 +337,7 @@ function CreateInner() {
                       className={inputClass}
                       placeholder="https://…/background.jpg"
                       value={background.type === "image" ? background.value : ""}
-                      onChange={(e) => setBackground(e.target.value ? { type: "image", value: e.target.value } : { type: "color", value: "#f1f5f9" })}
+                      onChange={(e) => setBackground(e.target.value ? { type: "image", value: e.target.value } : DEFAULT_BG)}
                     />
                     <span className="flex items-center text-slate-400"><ImageIcon className="h-5 w-5" /></span>
                   </div>
@@ -320,7 +377,7 @@ function CreateInner() {
           </div>
 
           <div className="border-t border-slate-200 p-4 text-xs text-slate-500">
-            {avatar ? `${avatar.name}` : "No avatar"} · {voice ? voice.name : "No voice"} · {aspect} · {captions ? "captions on" : "no captions"}
+            {avatar ? `${avatar.name}` : "No avatar"} · {voice ? voice.name : "No voice"} · {aspect} · {scenes.length} {scenes.length === 1 ? "scene" : "scenes"} · {captions ? "captions on" : "no captions"}
           </div>
         </Card>
       </div>

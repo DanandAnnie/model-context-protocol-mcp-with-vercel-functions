@@ -168,3 +168,25 @@ describe("auth", () => {
     delete process.env.STUDIO_PASSWORD;
   });
 });
+
+describe("scenes", () => {
+  it("derives the full script and background from scenes", () => {
+    const parsed = videoRequestSchema.parse({
+      title: "Multi",
+      avatarId: "stock_1",
+      voiceId: "stock_voice_1",
+      scenes: [
+        { script: "Scene one.", background: { type: "color", value: "#000000" } },
+        { script: "Scene two.", background: { type: "color", value: "#ffffff" } },
+      ],
+    });
+    assert.equal(parsed.script, "Scene one.\n\nScene two.");
+    assert.deepEqual(parsed.background, { type: "color", value: "#000000" });
+    assert.equal(parsed.scenes?.length, 2);
+  });
+
+  it("requires a script when no scenes are given", () => {
+    assert.throws(() => videoRequestSchema.parse({ title: "x", avatarId: "a", voiceId: "v" }), /Script is required/);
+    assert.throws(() => videoRequestSchema.parse({ title: "x", avatarId: "a", voiceId: "v", scenes: [] }));
+  });
+});

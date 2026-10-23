@@ -86,18 +86,38 @@ export async function generateScript(input: z.infer<typeof scriptSchema>): Promi
 
 // ---------- Videos ----------
 
-export const videoRequestSchema = z.object({
-  title: z.string().trim().min(1).max(120),
-  script: z.string().trim().min(1).max(5000),
-  avatarId: z.string().min(1),
-  voiceId: z.string().min(1),
-  aspect: z.enum(["16:9", "9:16", "1:1"]).default("16:9"),
-  background: z
-    .object({ type: z.enum(["color", "image"]), value: z.string().min(1) })
-    .default({ type: "color", value: "#f1f5f9" }),
-  captions: z.boolean().default(false),
-  speed: z.number().min(0.5).max(1.5).default(1),
-});
+const backgroundSchema = z.object({ type: z.enum(["color", "image"]), value: z.string().min(1) });
+
+export const MAX_SCENES = 20;
+
+export const videoRequestSchema = z
+  .object({
+    title: z.string().trim().min(1).max(120),
+    /** Optional when `scenes` is given; derived from them otherwise. */
+    script: z.string().trim().max(5000).optional(),
+    scenes: z.array(z.object({ script: z.string().trim().min(1).max(5000), background: backgroundSchema })).min(1).max(MAX_SCENES).optional(),
+    avatarId: z.string().min(1),
+    voiceId: z.string().min(1),
+    aspect: z.enum(["16:9", "9:16", "1:1"]).default("16:9"),
+    background: backgroundSchema.default({ type: "color", value: "#f1f5f9" }),
+    captions: z.boolean().default(false),
+    speed: z.number().min(0.5).max(1.5).default(1),
+  })
+  .transform((v, ctx) => {
+    if (v.scenes) {
+      const script = v.scenes.map((s) => s.script).join("\n\n");
+      if (script.length > 5000) {
+        ctx.addIssue({ code: "custom", path: ["scenes"], message: "Combined scene scripts must be 5000 characters or fewer" });
+        return z.NEVER;
+      }
+      return { ...v, script, background: v.scenes[0].background };
+    }
+    if (!v.script) {
+      ctx.addIssue({ code: "custom", path: ["script"], message: "Script is required" });
+      return z.NEVER;
+    }
+    return { ...v, script: v.script };
+  });
 
 export async function createVideo(req: VideoRequest): Promise<Video> {
   const avatar = await getAvatar(req.avatarId);

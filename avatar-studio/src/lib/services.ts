@@ -14,8 +14,9 @@ import { MAX_SCENES, type Agent, type Avatar, type Conversation, type BrandKit, 
 
 import { LOCAL_OWNER } from "./owner-id";
 import { after } from "next/server";
-import { notifyVideoTransition } from "./notifications";
+import { dispatchNotification, getNotifySettings, notifyVideoTransition } from "./notifications";
 import { renderLimitFor } from "./billing";
+import { memo } from "./cache";
 import { LimitError, NotFoundError, ValidationError } from "./errors";
 export { NotFoundError, ValidationError, UnauthorizedError, LimitError } from "./errors";
 import { config } from "./config";
@@ -33,11 +34,16 @@ function owned<T extends { ownerId?: string }>(item: T | null, ownerId: string |
 
 // ---------- Avatars ----------
 
+const LIST_TTL_MS = 5 * 60 * 1000;
+
+/** Provider avatar list, memoised per provider for a few minutes. */
+function providerAvatars(): Promise<Avatar[]> {
+  const p = getAvatarProvider();
+  return memo(`avatars:${p.name}`, LIST_TTL_MS, () => p.listAvatars());
+}
+
 export async function listAvatars(ownerId: string = LOCAL_OWNER): Promise<Avatar[]> {
-  const [provider, custom] = await Promise.all([
-    getAvatarProvider().listAvatars(),
-    getStore().list<Avatar>("avatar", ownerId),
-  ]);
+  const [provider, custom] = await Promise.all([providerAvatars(), getStore().list<Avatar>("avatar", ownerId)]);
   custom.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
   return [...custom, ...provider];
 }
@@ -45,7 +51,7 @@ export async function listAvatars(ownerId: string = LOCAL_OWNER): Promise<Avatar
 export async function getAvatar(id: string, ownerId: string = LOCAL_OWNER): Promise<Avatar> {
   const custom = await getStore().get<Avatar>("avatar", id);
   if (custom) return owned(custom, ownerId, `Avatar ${id}`);
-  const match = (await getAvatarProvider().listAvatars()).find((a) => a.id === id);
+  const match = (await providerAvatars()).find((a) => a.id === id);
   if (!match) throw new NotFoundError(`Avatar ${id} not found`);
   return match;
 }
@@ -83,7 +89,8 @@ export async function deleteAvatar(id: string, ownerId: string = LOCAL_OWNER): P
 // ---------- Voices ----------
 
 export async function listVoices(): Promise<Voice[]> {
-  return getTtsProvider().listVoices();
+  const p = getTtsProvider();
+  return memo(`voices:${p.name}`, LIST_TTL_MS, () => p.listVoices());
 }
 
 export async function previewVoice(voiceId: string, text: string, speed: number) {
@@ -192,9 +199,39 @@ export const agentSchema = z.object({
   instructions: z.string().trim().max(2000).default(""),
   language: z.string().trim().min(2).max(40).default("English"),
   isPublic: z.boolean().default(true),
+  /** Ask visitors for an email after the first reply. */
+  collectEmail: z.boolean().default(false),
 });
 
 export const agentPatchSchema = agentSchema.partial();
+
+export const leadSchema = z.object({
+  conversationId: z.string().regex(/^conv_[a-z0-9]+$/),
+  email: z.string().trim().email().max(200),
+  name: z.string().trim().max(80).optional(),
+});
+
+/** A visitor leaves contact details on a conversation. Notifies the owner's webhook as lead.captured. */
+export async function captureLead(agentId: string, input: z.infer<typeof leadSchema>): Promise<void> {
+  const agent = await getStore().get<Agent>("agent", agentId);
+  if (!agent || !agent.isPublic) throw new NotFoundError("This presenter is not available");
+  const conversation = await getStore().get<Conversation>("conversation", input.conversationId);
+  if (!conversation || conversation.agentId !== agentId) throw new NotFoundError("Conversation not found");
+  const now = nowIso();
+  await getStore().put("conversation", { ...conversation, visitor: { email: input.email, name: input.name }, updatedAt: now });
+  const settings = await getNotifySettings(agent.ownerId).catch(() => null);
+  if (settings) {
+    await dispatchNotification(settings, "lead.captured", {
+      agentId: agent.id,
+      agentName: agent.name,
+      conversationId: conversation.id,
+      email: input.email,
+      name: input.name,
+      lastMessage: conversation.messages.filter((m) => m.role === "user").at(-1)?.content,
+      capturedAt: now,
+    });
+  }
+}
 
 export async function listAgents(ownerId: string = LOCAL_OWNER): Promise<Agent[]> {
   const agents = await getStore().list<Agent>("agent", ownerId);
@@ -205,18 +242,30 @@ export async function getAgent(id: string, ownerId: string | null = LOCAL_OWNER)
   return owned(await getStore().get<Agent>("agent", id), ownerId, `Agent ${id}`);
 }
 
+/** Presenter details copied onto the agent so public turns and views never need a provider call. */
+async function presenterSnapshot(avatarId: string, voiceId: string | undefined, ownerId: string) {
+  const avatar = await getAvatar(avatarId, ownerId);
+  let voiceLanguage: string | undefined;
+  if (voiceId) {
+    const voice = (await listVoices()).find((v) => v.id === voiceId);
+    if (!voice) throw new ValidationError(`Voice ${voiceId} is not available`);
+    voiceLanguage = voice.language;
+  }
+  return { avatarName: avatar.name, avatarImageUrl: avatar.imageUrl, voiceLanguage };
+}
+
 export async function createAgent(input: z.infer<typeof agentSchema>, ownerId: string = LOCAL_OWNER): Promise<Agent> {
   if ((await listAgents(ownerId)).length >= MAX_AGENTS) throw new ValidationError(`At most ${MAX_AGENTS} agents per account`);
-  await getAvatar(input.avatarId, ownerId);
-  if (input.voiceId && !(await listVoices()).some((v) => v.id === input.voiceId)) throw new ValidationError(`Voice ${input.voiceId} is not available`);
+  const snapshot = await presenterSnapshot(input.avatarId, input.voiceId, ownerId);
   const now = nowIso();
-  return getStore().put("agent", { id: newId("agent"), ownerId, ...input, conversations: 0, messages: 0, createdAt: now, updatedAt: now });
+  return getStore().put("agent", { id: newId("agent"), ownerId, ...input, ...snapshot, conversations: 0, messages: 0, createdAt: now, updatedAt: now });
 }
 
 export async function updateAgent(id: string, patch: z.infer<typeof agentPatchSchema>, ownerId: string = LOCAL_OWNER): Promise<Agent> {
   const existing = await getAgent(id, ownerId);
-  if (patch.avatarId) await getAvatar(patch.avatarId, ownerId);
-  return getStore().put("agent", { ...existing, ...patch, updatedAt: nowIso() });
+  const next = { ...existing, ...patch };
+  const snapshot = patch.avatarId || patch.voiceId ? await presenterSnapshot(next.avatarId, next.voiceId, ownerId) : {};
+  return getStore().put("agent", { ...next, ...snapshot, updatedAt: nowIso() });
 }
 
 export async function deleteAgent(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
@@ -229,14 +278,14 @@ export async function deleteAgent(id: string, ownerId: string = LOCAL_OWNER): Pr
 export async function publicAgent(id: string) {
   const agent = await getStore().get<Agent>("agent", id);
   if (!agent || !agent.isPublic) throw new NotFoundError("This presenter is not available");
-  const avatar = await getAvatar(agent.avatarId, agent.ownerId);
   const brand = await getBrandKit(agent.ownerId);
   return {
     id: agent.id,
     name: agent.name,
     language: agent.language,
-    avatar: { id: avatar.id, name: avatar.name, imageUrl: avatar.imageUrl },
-    voiceLanguage: agent.voiceId ? (await listVoices()).find((v) => v.id === agent.voiceId)?.language : undefined,
+    avatar: { id: agent.avatarId, name: agent.avatarName, imageUrl: agent.avatarImageUrl },
+    voiceLanguage: agent.voiceLanguage,
+    collectEmail: agent.collectEmail ?? false,
     brand: brand ? { name: brand.name, logoUrl: brand.logoUrl, primaryColor: brand.primaryColor, accentColor: brand.accentColor } : null,
   };
 }
@@ -257,8 +306,7 @@ export async function talkToAgent(id: string, input: z.infer<typeof talkSchema>)
   if (!agent || !agent.isPublic) throw new NotFoundError("This presenter is not available");
   const last = input.messages[input.messages.length - 1];
   if (last.role !== "user") throw new ValidationError("The last message must be from the visitor");
-  const avatar = await getAvatar(agent.avatarId, agent.ownerId);
-  const reply = await getScriptProvider().chat({ persona: { name: avatar.name, instructions: agent.instructions, language: agent.language }, messages: input.messages });
+  const reply = await getScriptProvider().chat({ persona: { name: agent.avatarName, instructions: agent.instructions, language: agent.language }, messages: input.messages });
 
   const now = nowIso();
   let conversation = input.conversationId ? await getStore().get<Conversation>("conversation", input.conversationId) : null;

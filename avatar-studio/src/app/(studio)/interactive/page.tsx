@@ -25,6 +25,7 @@ export default function InteractivePage() {
   const [instructions, setInstructions] = useState(DEFAULT_INSTRUCTIONS);
   const [language, setLanguage] = useState("English");
   const [agentName, setAgentName] = useState("");
+  const [collectEmail, setCollectEmail] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
   const [savedLink, setSavedLink] = useState<string | null>(null);
@@ -75,7 +76,7 @@ export default function InteractivePage() {
     try {
       const { agent } = await api<{ agent: Agent }>("/api/agents", {
         method: "POST",
-        body: JSON.stringify({ name: agentName.trim() || avatar.name, avatarId: avatar.id, voiceId: voice?.id, instructions, language, isPublic: true }),
+        body: JSON.stringify({ name: agentName.trim() || avatar.name, avatarId: avatar.id, voiceId: voice?.id, instructions, language, isPublic: true, collectEmail }),
       });
       setSavedLink(`${window.location.origin}/talk/${agent.id}`);
       setAgentName("");
@@ -109,10 +110,10 @@ export default function InteractivePage() {
     }
   }
 
-  async function togglePublic(agent: Agent) {
+  async function patchAgent(agent: Agent, patch: Partial<Pick<Agent, "isPublic" | "collectEmail">>) {
     setSaveErr(null);
     try {
-      await api(`/api/agents/${agent.id}`, { method: "PATCH", body: JSON.stringify({ isPublic: !agent.isPublic }) });
+      await api(`/api/agents/${agent.id}`, { method: "PATCH", body: JSON.stringify(patch) });
       await refetchAgents();
     } catch (e) {
       setSaveErr(e instanceof Error ? e.message : "Could not update the presenter");
@@ -178,6 +179,10 @@ export default function InteractivePage() {
                 <Link2 className="h-4 w-4" /> Save and get link
               </Button>
             </div>
+            <label className="mt-3 flex items-center gap-2 text-xs text-slate-700">
+              <input type="checkbox" checked={collectEmail} onChange={(e) => setCollectEmail(e.target.checked)} className="h-4 w-4 accent-brand-600" />
+              Ask visitors for an email after the first reply (sent to your webhook as <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">lead.captured</code>)
+            </label>
             {savedLink && (
               <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900" data-testid="agent-link">
                 <code className="break-all">{savedLink}</code>
@@ -220,8 +225,11 @@ export default function InteractivePage() {
                     <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => openTranscripts(a)} aria-label={`Transcripts for ${a.name}`}>
                       <MessagesSquare className="h-3.5 w-3.5" /> Transcripts
                     </Button>
-                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => togglePublic(a)} aria-label={`${a.isPublic ? "Turn off" : "Turn on"} link for ${a.name}`}>
+                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => patchAgent(a, { isPublic: !a.isPublic })} aria-label={`${a.isPublic ? "Turn off" : "Turn on"} link for ${a.name}`}>
                       {a.isPublic ? "Turn off" : "Turn on"}
+                    </Button>
+                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => patchAgent(a, { collectEmail: !a.collectEmail })} aria-label={`${a.collectEmail ? "Stop collecting" : "Collect"} emails for ${a.name}`} title="Ask visitors for an email after the first reply">
+                      {a.collectEmail ? "Emails on" : "Emails off"}
                     </Button>
                     <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => remove(a)} aria-label={`Delete ${a.name}`}>
                       <Trash2 className="h-3.5 w-3.5" />
@@ -257,7 +265,8 @@ export default function InteractivePage() {
                     <li key={c.id}>
                       <details className="rounded-lg border border-slate-200 bg-white">
                         <summary className="cursor-pointer select-none px-3 py-2 text-xs text-slate-700">
-                          {formatDate(c.startedAt)} · {c.messages.length} {c.messages.length === 1 ? "message" : "messages"} · <span className="text-slate-500">{c.messages[0]?.content.slice(0, 80)}</span>
+                          {formatDate(c.startedAt)} · {c.messages.length} {c.messages.length === 1 ? "message" : "messages"}
+                          {c.visitor?.email && <span className="ml-1 rounded bg-emerald-100 px-1.5 py-0.5 font-medium text-emerald-800">{c.visitor.name ? `${c.visitor.name} · ` : ""}{c.visitor.email}</span>} · <span className="text-slate-500">{c.messages[0]?.content.slice(0, 80)}</span>
                         </summary>
                         <ol className="space-y-1.5 border-t border-slate-100 px-3 py-2 text-xs">
                           {c.messages.map((m, i) => (

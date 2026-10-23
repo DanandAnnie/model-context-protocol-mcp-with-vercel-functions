@@ -31,6 +31,8 @@ import {
   listConversations,
   clearConversations,
   MAX_TRANSCRIPT_MESSAGES,
+  captureLead,
+  listVoices,
   recordView,
   scriptSchema,
   updateVideo,
@@ -44,6 +46,7 @@ import { computeInsights } from "../insights";
 import { acceptInvite, createInvite, createWorkspace, deleteWorkspace, findInvite, listWorkspaces, removeMember, revokeInvite, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
 import type { Video } from "../types";
 import { MockEmailProvider, inviteEmail, setEmailProvider } from "../providers/email";
+import { forgetMemo, memo } from "../cache";
 import { MockBillingProvider, applyStripeEvent, getPlan, renderLimitFor, setBillingProvider, setPlan, verifyStripeSignature } from "../billing";
 import { config } from "../config";
 import { dispatchNotification, getNotifySettings, notifyVideoTransition, saveNotifySettings, setNotificationFetch, signPayload } from "../notifications";
@@ -798,8 +801,13 @@ describe("shared agents", () => {
 
     const pub = await publicAgent(agent.id);
     assert.equal(pub.name, "Dana");
-    assert.equal(pub.avatar.name, "Ava Chen");
+    assert.equal(pub.avatar.name, "Ava Chen", "snapshot of the presenter is stored on the agent");
+    assert.equal(agent.avatarImageUrl.startsWith("data:image/svg+xml"), true);
     assert.equal(pub.voiceLanguage, "en-US");
+    assert.equal(pub.collectEmail, false);
+    const switched = await updateAgent(agent.id, { avatarId: "stock_2" }, "u1");
+    assert.equal(switched.avatarName, "Marcus Hill", "changing the avatar refreshes the snapshot");
+    assert.equal((await updateAgent(agent.id, { avatarId: "stock_1" }, "u1")).avatarName, "Ava Chen");
     assert.equal("instructions" in pub, false, "instructions never leave the server");
     assert.equal("ownerId" in pub, false);
 
@@ -834,5 +842,52 @@ describe("shared agents", () => {
     await assert.rejects(createAgent(agentSchema.parse({ name: "X", avatarId: "stock_1", voiceId: "nope" }), "u1"), /not available/);
     await deleteAgent(agent.id, "u1");
     await assert.rejects(publicAgent(agent.id), /not available/);
+  });
+});
+
+describe("lead capture and list memo", () => {
+  it("stores the visitor on the conversation and notifies the owner's webhook", async () => {
+    const calls: string[] = [];
+    setNotificationFetch(async (_input, init) => {
+      calls.push(String(init?.body));
+      return new Response("ok", { status: 200 });
+    });
+    try {
+      await saveNotifySettings({ url: "https://203.0.113.5/hooks/studio" }, "u1");
+      const agent = await createAgent(agentSchema.parse({ name: "Dana", avatarId: "stock_1", collectEmail: true }), "u1");
+      const turn = await talkToAgent(agent.id, { messages: [{ role: "user", content: "Any open houses?" }] });
+      await assert.rejects(captureLead(agent.id, { conversationId: "conv_nope", email: "a@b.co" }), /Conversation not found/);
+      await captureLead(agent.id, { conversationId: turn.conversationId, email: "sam@example.com", name: "Sam" });
+      const [conv] = await listConversations(agent.id, "u1");
+      assert.deepEqual(conv.visitor, { email: "sam@example.com", name: "Sam" });
+      assert.equal(calls.length, 1);
+      const body = JSON.parse(calls[0]);
+      assert.equal(body.event, "lead.captured");
+      assert.equal(body.data.email, "sam@example.com");
+      assert.equal(body.data.lastMessage, "Any open houses?");
+      await updateAgent(agent.id, { isPublic: false }, "u1");
+      await assert.rejects(captureLead(agent.id, { conversationId: turn.conversationId, email: "x@y.co" }), /not available/);
+    } finally {
+      setNotificationFetch(null);
+    }
+  });
+
+  it("memoises provider lists for the TTL and dedupes concurrent calls", async () => {
+    forgetMemo();
+    let n = 0;
+    const fn = async () => {
+      n += 1;
+      return n;
+    };
+    const [a, b] = await Promise.all([memo("t:x", 1000, fn), memo("t:x", 1000, fn)]);
+    assert.equal(a, 1);
+    assert.equal(b, 1, "concurrent callers share one fetch");
+    assert.equal(await memo("t:x", 1000, fn), 1, "cached within the TTL");
+    forgetMemo("t:");
+    assert.equal(await memo("t:x", 1000, fn), 2, "refetched after forget");
+    await assert.rejects(memo("t:err", 1000, async () => { throw new Error("boom"); }), /boom/);
+    assert.equal(await memo("t:err", 1000, async () => "recovered"), "recovered", "a failure is not cached");
+    assert.ok((await listVoices()).length > 0);
+    forgetMemo();
   });
 });

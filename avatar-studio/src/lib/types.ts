@@ -145,7 +145,7 @@ export interface ApiKey {
   lastUsedAt?: string;
 }
 
-export type NotifyEvent = "video.completed" | "video.failed" | "test";
+export type NotifyEvent = "video.completed" | "video.failed" | "lead.captured" | "test";
 
 /** Outbound webhook: one endpoint per owner, called when a render finishes. */
 export interface NotifySettings {
@@ -209,10 +209,16 @@ export interface Agent {
   name: string;
   avatarId: string;
   voiceId?: string;
+  /** Snapshot of the presenter so public pages and turns need no provider call. */
+  avatarName: string;
+  avatarImageUrl: string;
+  voiceLanguage?: string;
   instructions: string;
   language: string;
   /** Visitors can open /talk/:id without signing in. */
   isPublic: boolean;
+  /** Ask visitors for an email after the first reply. */
+  collectEmail?: boolean;
   /** Visitor conversations started (first message of a session). */
   conversations: number;
   messages: number;
@@ -227,6 +233,8 @@ export interface Conversation {
   ownerId: string;
   agentId: string;
   messages: Array<{ role: "user" | "assistant"; content: string; at: string }>;
+  /** Contact details the visitor chose to leave. */
+  visitor?: { email: string; name?: string };
   startedAt: string;
   updatedAt: string;
 }

@@ -133,6 +133,7 @@ Returns `{ "reply": "…" }`.
 - `GET /api/agents`, `POST /api/agents` → `{ "name", "avatarId", "voiceId"?, "instructions"?, "language"?, "isPublic"? }` → `201 { "agent" }` (20 per account)
 - `GET | PATCH | DELETE /api/agents/:id` (`PATCH` takes any subset of the fields above)
 - Public, no key: `GET /api/talk/:id` → the visitor-safe view (name, avatar, language, brand; never instructions) and `POST /api/talk/:id` → `{ "messages": [...], "conversationId"? }` → `{ "reply", "conversationId" }` (send the id back on later turns so the visit is one transcript), limited to 30 turns per 10 minutes per client and 600 per hour per agent. `404` when the agent is private or deleted. The page `/talk/:id` is embeddable in an iframe.
+- `POST /api/talk/:id/lead` → `{ "conversationId", "email", "name"? }` records a visitor's contact details on the conversation (shown when the agent has `collectEmail`) and sends `lead.captured` to the owner's webhook; 5 per 10 minutes per client
 - `GET /api/agents/:id/conversations` → the owner's transcripts (newest first, up to 50 visits of 40 messages); `DELETE` clears them. Transcripts are also removed when the agent is deleted.
 - Website embed: `<script src="https://<app>/embed/agent.js?id=agent_…" async></script>` adds a floating launcher that opens the talk page; options `position=left|right`, `color=%23hex`, `label=…`.
 
@@ -183,7 +184,7 @@ Save an endpoint in **Settings → Webhook notifications**. Each delivery is a `
 
 ```
 Content-Type: application/json
-X-Studio-Event: video.completed | video.failed | test
+X-Studio-Event: video.completed | video.failed | lead.captured | test
 X-Studio-Timestamp: 1761199200          (unix seconds)
 X-Studio-Signature: sha256=<hex HMAC-SHA256 of "<timestamp>.<raw body>" with your signing secret>
 ```

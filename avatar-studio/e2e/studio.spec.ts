@@ -380,11 +380,25 @@ test("shared presenter: save from the interactive page, talk publicly, turn off"
   expect((await visitor.get(`/talk/${id}`)).headers()["x-frame-options"]).toBeUndefined();
   expect((await visitor.get(`/api/agents/${id}`)).status()).toBe(200); // open mode: owner routes need no session
 
+  // Lead capture: turn it on, a visitor sees the form after the first reply, the owner sees the email.
+  expect((await page.request.patch(`/api/agents/${id}`, { data: { collectEmail: true } })).status()).toBe(200);
+  const visitorPage = await page.context().newPage();
+  await visitorPage.goto(`/talk/${id}`);
+  await expect(visitorPage.getByTestId("lead-form")).toHaveCount(0);
+  await visitorPage.getByLabel("Your message").fill("Hello");
+  await visitorPage.getByRole("button", { name: "Send" }).click();
+  await expect(visitorPage.locator("[data-testid=chat-log] [data-role=assistant]")).toHaveCount(1);
+  await visitorPage.getByLabel("Your email").fill(`sam-${tag}@example.com`);
+  await visitorPage.getByRole("button", { name: "Send", exact: true }).last().click();
+  await expect(visitorPage.getByTestId("lead-form")).toContainText(`follow up at sam-${tag}@example.com`);
+  await visitorPage.close();
+
   await page.reload();
-  await expect(page.getByTestId("agent-list")).toContainText("1 conversation");
+  await expect(page.getByTestId("agent-list")).toContainText("2 conversations");
   await page.getByRole("button", { name: `Transcripts for Dana ${tag}` }).click();
   await expect(page.getByTestId("transcripts")).toContainText("Any open houses?");
-  await expect(page.getByTestId("transcripts").locator("summary")).toHaveCount(1);
+  await expect(page.getByTestId("transcripts")).toContainText(`sam-${tag}@example.com`);
+  await expect(page.getByTestId("transcripts").locator("summary")).toHaveCount(2);
   await page.getByRole("button", { name: `Turn off link for Dana ${tag}` }).click();
   await expect(page.getByTestId("agent-list")).toContainText("link off");
   expect((await visitor.get(`/api/talk/${id}`)).status()).toBe(404);

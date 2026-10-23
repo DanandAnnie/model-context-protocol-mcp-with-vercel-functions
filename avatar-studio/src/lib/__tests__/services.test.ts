@@ -278,6 +278,9 @@ describe("rename", () => {
   it("updates the title and bumps updatedAt", async () => {
     const { updateVideo } = await import("../services");
     const v = await createVideo(videoRequestSchema.parse({ title: "Old", script: "hi there", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }));
+    assert.equal((await updateVideo(v.id, { shareDownload: true })).shareDownload, true);
+    assert.equal("shareDownload" in (await updateVideo(v.id, { shareDownload: false })), false, "off is stored as absent");
+    assert.equal(videoPatchSchema.safeParse({}).success, false, "an empty patch is rejected");
     const renamed = await updateVideo(v.id, { title: "New" });
     assert.equal(renamed.title, "New");
     assert.ok(renamed.updatedAt >= v.updatedAt);

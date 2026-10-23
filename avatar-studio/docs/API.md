@@ -81,7 +81,7 @@ When completed the video also carries `videoUrl`, `thumbnailUrl`, and `durationS
 
 ### `GET /api/videos` — list (newest first)
 ### `GET /api/videos/:id` — fetch; refreshes the status from the provider while rendering
-### `PATCH /api/videos/:id` — `{ "title"?: string, "folder"?: string }` (empty `folder` means unfiled)
+### `PATCH /api/videos/:id` — `{ "title"?: string, "folder"?: string, "shareDownload"?: boolean }` (empty `folder` means unfiled; `shareDownload` shows a download button on the public share page)
 ### `DELETE /api/videos/:id`
 ### `POST /api/videos/bulk` — `{ "action": "move", "ids": [...], "folder": "Q4" }` or `{ "action": "delete", "ids": [...] }` → `{ "done", "missing" }`
 ### `POST /api/videos/:id/retry`

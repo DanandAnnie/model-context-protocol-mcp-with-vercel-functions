@@ -15,7 +15,7 @@ D-ID, ElevenLabs, or in a fully offline **demo mode** with no keys at all.
 | Home | Quick actions, recent videos |
 | Create video | Draft autosave (survives a refresh), multi-scene script editor (up to 20 scenes, each with its own background), word/duration counter, AI script writer from a topic or a public web page URL plus an Improve menu (polish, shorten, expand, change tone, translate), avatar picker, voice picker with live preview, background color/image, 16:9 / 9:16 / 1:1 at 720p or 1080p, captions, speaking speed, live stage preview |
 | My videos | Library with search, status filters, and sorting (newest, oldest, title, most viewed), player, inline rename, download, SRT captions, share link, delete, retry a failed render with one click, "Edit a copy" |
-| Share page | Public, sidebar-free player at `/share/:id` with a native subtitle track; "Embed" copies an iframe snippet |
+| Share page | Public, sidebar-free player at `/share/:id` with a native subtitle track and an optional download button (owner toggle); "Embed" copies an iframe snippet |
 | Hardening | Password sign-in is rate limited (5 attempts per 15 minutes per IP); security headers on every response; only share pages may be framed |
 | Personalize | One script with `{column}` placeholders plus a CSV of recipients produces one video per row (up to 100), with live preview, missing-column checks, and the monthly allowance respected |
 | Templates | Script templates by category (real estate, marketing, training, support, social) that pre-fill the editor |

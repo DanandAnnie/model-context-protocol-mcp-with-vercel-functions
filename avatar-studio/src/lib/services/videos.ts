@@ -151,8 +151,10 @@ export const videoPatchSchema = z
     title: z.string().trim().min(1).max(120).optional(),
     /** Folder name; an empty string moves the video back to "unfiled". */
     folder: z.string().trim().max(MAX_FOLDER_NAME).optional(),
+    /** Whether the public share page offers a download link. */
+    shareDownload: z.boolean().optional(),
   })
-  .refine((p) => p.title !== undefined || p.folder !== undefined, "Nothing to update");
+  .refine((p) => p.title !== undefined || p.folder !== undefined || p.shareDownload !== undefined, "Nothing to update");
 
 export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSchema>, ownerId: string = LOCAL_OWNER): Promise<Video> {
   const existing = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
@@ -161,6 +163,10 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
   if (patch.folder !== undefined) {
     if (patch.folder) next.folder = patch.folder;
     else delete next.folder;
+  }
+  if (patch.shareDownload !== undefined) {
+    if (patch.shareDownload) next.shareDownload = true;
+    else delete next.shareDownload;
   }
   return getStore().put("video", next);
 }

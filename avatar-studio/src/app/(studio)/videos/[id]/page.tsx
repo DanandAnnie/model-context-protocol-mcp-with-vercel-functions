@@ -76,6 +76,18 @@ export default function VideoDetailPage() {
     }
   }
 
+  const [shareErr, setShareErr] = useState<string | null>(null);
+  async function setShareDownload(on: boolean) {
+    if (!video) return;
+    setShareErr(null);
+    try {
+      const { video: next } = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify({ shareDownload: on }) });
+      setData({ video: next });
+    } catch (e) {
+      setShareErr(e instanceof Error ? e.message : "Could not update sharing");
+    }
+  }
+
   async function copyEmbed() {
     if (!video) return;
     const w = video.aspect === "9:16" ? 360 : video.aspect === "1:1" ? 480 : 640;
@@ -176,6 +188,11 @@ export default function VideoDetailPage() {
                     <Button variant="secondary" onClick={copyEmbed} title="Copy an iframe snippet for your site">
                       {embedCopied ? <Check className="h-4 w-4 text-emerald-600" /> : <Code2 className="h-4 w-4" />} {embedCopied ? "Embed copied" : "Embed"}
                     </Button>
+                    <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700" title="Show a download button on the share page">
+                      <input type="checkbox" checked={!!video.shareDownload} onChange={(e) => setShareDownload(e.target.checked)} className="accent-brand-600" />
+                      Viewers can download
+                    </label>
+                    {shareErr && <span className="text-xs text-rose-600">{shareErr}</span>}
                   </>
                 )}
                 {video.videoUrl && (

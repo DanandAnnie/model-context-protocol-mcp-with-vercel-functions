@@ -135,6 +135,23 @@ test("library sorts by date, title, and views", async ({ page }) => {
   await expect(titles.first()).toHaveText("Zulu sortcheck");
 });
 
+test("share page offers a download only when the owner allows it", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Downloadable ${Date.now().toString(36)}`);
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  await page.goto(`/share/${v.id}`);
+  await expect(page.getByRole("link", { name: "Download video" })).toHaveCount(0);
+
+  await page.goto(`/videos/${v.id}`);
+  await page.getByLabel("Viewers can download").check();
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.shareDownload).toBe(true);
+  await page.goto(`/share/${v.id}`);
+  await expect(page.getByRole("link", { name: "Download video" })).toBeVisible();
+
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareDownload: false } })).status()).toBe(200);
+  await page.reload();
+  await expect(page.getByRole("link", { name: "Download video" })).toHaveCount(0);
+});
+
 test("draft autosave survives a reload and clears after generating", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Draft title");
   await page.locator("textarea").fill("Draft script survives reload.");

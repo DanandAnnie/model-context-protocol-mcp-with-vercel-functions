@@ -101,6 +101,8 @@ export interface Video extends VideoRequest {
   folder?: string;
   /** Id of the failed render this one was retried from. */
   retryOf?: string;
+  /** Share page offers a download link when true (off by default). */
+  shareDownload?: boolean;
   /** Share page views (completed videos only; one per viewer per window). */
   views?: number;
   lastViewedAt?: string;

@@ -37,6 +37,8 @@ import {
   cloneVoiceSchema,
   deleteClonedVoice,
   MAX_CLONED_VOICES,
+  exportOwnerData,
+  deleteOwnerData,
   recordView,
   scriptSchema,
   updateVideo,
@@ -1014,8 +1016,39 @@ describe("voice cloning", () => {
     assert.equal((await listVoices("u1")).some((v) => v.id === voice.id), false);
   });
 
+  it("shared presenters can use a cloned voice", async () => {
+    const voice = await cloneVoice(cloneVoiceSchema.parse({ name: "Dana", samples: [sample], language: "en-GB" }), "u1");
+    const agent = await createAgent(agentSchema.parse({ name: "Dana live", avatarId: "stock_1", voiceId: voice.id }), "u1");
+    assert.equal(agent.voiceLanguage, "en-GB");
+    await assert.rejects(createAgent(agentSchema.parse({ name: "x", avatarId: "stock_1", voiceId: voice.id }), "u2"), /not available/, "another account cannot use it");
+  });
+
   it("caps cloned voices per account", async () => {
     for (let i = 0; i < MAX_CLONED_VOICES; i++) await cloneVoice(cloneVoiceSchema.parse({ name: `v${i}`, samples: [sample] }), "u3");
     await assert.rejects(cloneVoice(cloneVoiceSchema.parse({ name: "one more", samples: [sample] }), "u3"), /At most/);
+  });
+});
+
+describe("account data", () => {
+  it("exports every kind with secrets redacted and deletes everything for the owner only", async () => {
+    await createVideo({ title: "Mine", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, "u1");
+    await createVideo({ title: "Theirs", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, "u2");
+    await createApiKey("ci", "u1");
+    await saveNotifySettings({ url: "https://203.0.113.5/hooks" }, "u1");
+    await cloneVoice(cloneVoiceSchema.parse({ name: "v", samples: [`data:audio/webm;base64,${Buffer.from("x").toString("base64")}`] }), "u1");
+    const exported = await exportOwnerData("u1");
+    assert.equal(exported.ownerId, "u1");
+    assert.equal(exported.video.length, 1);
+    assert.equal((exported.video[0] as { title: string }).title, "Mine");
+    assert.equal("hash" in exported.apikey[0], false, "key hashes are redacted");
+    assert.equal("secret" in exported.notify[0], false, "webhook secret is redacted");
+    assert.equal(exported.voice.length, 1);
+    const counts = await deleteOwnerData("u1");
+    assert.equal(counts.video, 1);
+    assert.equal(counts.apikey, 1);
+    assert.equal(counts.voice, 1);
+    assert.deepEqual(await listVideos("u1"), []);
+    assert.equal((await listVideos("u2")).length, 1, "other owners are untouched");
+    assert.equal((await exportOwnerData("u1")).video.length, 0);
   });
 });

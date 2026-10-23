@@ -186,6 +186,11 @@ Returns `{ "reply": "…" }`.
 - `POST /api/webhooks/stripe` receives Stripe events (`checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`), verified with `STRIPE_WEBHOOK_SECRET`
 - `GET /api/status` reports `renderLimitPerMonth` for the active owner and `usage.plan`
 
+## Account data
+
+- `GET /api/account/export` downloads everything stored for the active account or workspace as JSON (key hashes and the webhook secret are left out). Session only; `403` with a key.
+- `DELETE /api/account` with `{ "confirm": "DELETE" }` removes every record of the active account or workspace (cloned voices are deleted at the provider too) and returns counts per kind. Session only. Workspace membership is unaffected.
+
 ## Outbound webhooks
 
 Save an endpoint in **Settings → Webhook notifications**. Each delivery is a `POST` with:

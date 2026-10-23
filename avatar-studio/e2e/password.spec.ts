@@ -59,3 +59,26 @@ test("API keys grant script access without a session; minting needs a session", 
   expect((await script.get("/api/videos", { headers: auth })).status()).toBe(401);
   await script.dispose();
 });
+
+test("data export and deletion need a session and a typed confirmation", async ({ request, playwright }) => {
+  await request.post("/api/auth/login", { data: { password: "hunter2" } });
+  const made = await request.post("/api/videos", { data: { title: "Export me", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9" } });
+  expect(made.status()).toBe(201);
+  const exported = await request.get("/api/account/export");
+  expect(exported.status()).toBe(200);
+  expect(exported.headers()["content-disposition"]).toContain("avatar-studio-export-");
+  const body = (await exported.json()) as { video: Array<{ title: string }> };
+  expect(body.video.some((v) => v.title === "Export me")).toBe(true);
+
+  const key = (await (await request.post("/api/keys", { data: { name: "k" } })).json()) as { secret: string };
+  const script = await playwright.request.newContext({ baseURL: "http://localhost:3102" });
+  expect((await script.get("/api/account/export", { headers: { Authorization: `Bearer ${key.secret}` } })).status()).toBe(403);
+  expect((await script.delete("/api/account", { headers: { Authorization: `Bearer ${key.secret}` }, data: { confirm: "DELETE" } })).status()).toBe(403);
+  await script.dispose();
+
+  expect((await request.delete("/api/account", { data: { confirm: "nope" } })).status()).toBe(400);
+  const wiped = await request.delete("/api/account", { data: { confirm: "DELETE" } });
+  expect(wiped.status()).toBe(200);
+  expect(((await wiped.json()).deleted as Record<string, number>).video).toBeGreaterThanOrEqual(1);
+  expect(((await (await request.get("/api/videos")).json()).videos as unknown[]).length).toBe(0);
+});

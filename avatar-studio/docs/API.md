@@ -100,11 +100,11 @@ Submits a **failed** render again as a new video with the same scenes, presenter
   "title": "Welcome, {first_name}",
   "scriptTemplate": "Hi {first_name}, thanks for visiting {property}.",
   "csv": "first_name,property\nDana,12 Maple St\nSam,4 Oak Ave",
-  "avatarId": "stock_1", "voiceId": "stock_voice_1", "aspect": "9:16"
+  "avatarId": "stock_1", "voiceId": "stock_voice_1", "aspect": "9:16", "resolution": "720p", "captions": true
 }
 ```
 
-`POST` returns `{ "batchId", "videos", "skipped", "failed" }`. Rows beyond the monthly allowance are skipped; rows the provider rejected are reported in `failed`. Up to 100 rows per batch.
+`background`, `captions`, `speed`, and `resolution` take the same values and defaults as a single video. `POST` returns `{ "batchId", "videos", "skipped", "failed" }`. Rows beyond the monthly allowance are skipped; rows the provider rejected are reported in `failed`. Up to 100 rows per batch.
 
 ## Scripts
 

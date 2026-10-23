@@ -214,13 +214,14 @@ function CreateInner() {
   }
 
   // Brand kit defaults for a fresh editor: avatar, voice, captions, and (without a template) aspect and background.
-  // Restored drafts and copies keep what they had.
+  // Restored drafts, copies, and saved templates keep what they had: a saved template carries its own
+  // presenter, voice, captions, and quality, and loads at the same time as the kit.
   const brandApplied = useRef(false);
   useEffect(() => {
     if (brandApplied.current || !brandData) return;
     brandApplied.current = true;
     const b = brandData.brand;
-    if (!b || fromId || draftRestored) return;
+    if (!b || fromId || draftRestored || templateId?.startsWith("tpl_")) return;
     if (b.captionsByDefault != null) setCaptions(b.captionsByDefault);
     if (b.defaultAvatarId || b.defaultVoiceId) setPrefill({ avatarId: b.defaultAvatarId, voiceId: b.defaultVoiceId });
     if (b.defaultResolution) setResolution(b.defaultResolution);

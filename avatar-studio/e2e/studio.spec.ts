@@ -120,14 +120,22 @@ test("a video can be saved as a template and reopened from it", async ({ page })
   const mine = page.getByTestId("my-templates");
   await expect(mine.getByText("Listing opener")).toBeVisible();
   await expect(mine.getByText("9:16 · 2 scenes")).toBeVisible();
-  await mine.getByRole("link", { name: "Use template" }).first().click();
-  await page.waitForURL(/\/create\?template=tpl_/);
-  await expect(page.locator("input[placeholder='Video title']")).toHaveValue("Listing opener");
-  await expect(page.getByText(/2 scenes/)).toBeVisible();
-  await expect(page.locator("textarea")).toHaveValue("First scene text.");
-  await page.getByRole("button", { name: "2", exact: true }).click();
-  await expect(page.getByLabel("Scene voice")).toHaveValue("stock_voice_3");
-  await expect(page.getByText(/Emma · 9:16 · 2 scenes · captions on/)).toBeVisible();
+  // A brand kit with different defaults must not win over the template, whichever request lands last.
+  expect((await page.request.put("/api/brand", { data: { name: "Acme", primaryColor: "#0f766e", defaultVoiceId: "stock_voice_2", defaultResolution: "720p", captionsByDefault: false } })).ok()).toBe(true);
+  try {
+    await mine.getByRole("link", { name: "Use template" }).first().click();
+    await page.waitForURL(/\/create\?template=tpl_/);
+    await expect(page.locator("input[placeholder='Video title']")).toHaveValue("Listing opener");
+    await expect(page.getByText(/2 scenes/)).toBeVisible();
+    await expect(page.locator("textarea")).toHaveValue("First scene text.");
+    await page.getByRole("button", { name: "2", exact: true }).click();
+    await expect(page.getByLabel("Scene voice")).toHaveValue("stock_voice_3");
+    await expect(page.getByText(/Emma · 9:16 · 2 scenes · captions on/)).toBeVisible();
+    await page.getByRole("button", { name: "Settings" }).click();
+    await expect(page.getByRole("button", { name: /^1080p/ })).toHaveAttribute("aria-pressed", "true");
+  } finally {
+    await page.request.delete("/api/brand");
+  }
   // Delete it again from the Templates page.
   await page.goto("/templates");
   page.once("dialog", (d) => d.accept());

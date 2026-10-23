@@ -390,7 +390,7 @@ test("the owner can take a share link offline and back", async ({ page }) => {
   const gone = await page.request.get(`/share/${v.id}`);
   expect(gone.status()).toBe(404);
   expect(await gone.text()).not.toContain('property="og:video"');
-  expect(((await (await page.request.post(`/api/videos/${v.id}/view`)).json()) as { counted: boolean }).counted).toBe(false);
+  expect((await page.request.post(`/api/videos/${v.id}/view`)).status()).toBe(404);
   // The owner's own captions download keeps working (open mode: every request is the owner's).
   expect((await page.request.get(`/api/videos/${v.id}/captions`)).status()).toBe(200);
   await page.reload();
@@ -398,6 +398,44 @@ test("the owner can take a share link offline and back", async ({ page }) => {
   await page.getByLabel("Share link is live").check();
   await expect(page.getByTestId("share-off-note")).toHaveCount(0);
   await expect.poll(async () => (await (await page.request.get(`/share/${v.id}`)).status())).toBe(200);
+});
+
+test("a share link can require a password", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Locked ${Date.now().toString(36)}`);
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  await page.goto(`/videos/${v.id}`);
+  await page.getByLabel("Share password").fill("abc");
+  await page.getByRole("button", { name: "Protect" }).click();
+  await expect(page.getByTestId("share-password")).toContainText("at least 4 characters");
+  await page.getByLabel("Share password").fill("open sesame");
+  await page.getByRole("button", { name: "Protect" }).click();
+  await expect(page.getByTestId("share-locked")).toBeVisible();
+  const record = (await (await page.request.get(`/api/videos/${v.id}`)).json()).video as Record<string, unknown>;
+  expect(record.shareLocked).toBe(true);
+  expect(JSON.stringify(record)).not.toContain("sesame");
+
+  // Visitors see the password form and no player; the preview carries no excerpt or thumbnail.
+  const html = await (await page.request.get(`/share/${v.id}`)).text();
+  expect(html).toContain("password protected");
+  expect(html).not.toContain('property="og:image"');
+  await page.goto(`/share/${v.id}`);
+  await expect(page.getByTestId("share-unlock")).toBeVisible();
+  await expect(page.locator("video")).toHaveCount(0);
+  await page.getByLabel("Password").fill("wrong");
+  await page.getByRole("button", { name: "Watch video" }).click();
+  await expect(page.getByTestId("share-unlock").getByRole("alert")).toHaveText("Incorrect password");
+  await page.getByLabel("Password").fill("open sesame");
+  await page.getByRole("button", { name: "Watch video" }).click();
+  await expect(page.locator("video")).toBeVisible();
+  await expect(page.getByTestId("share-unlock")).toHaveCount(0);
+  // The unlocked visit is counted (the beacon carries the cookie).
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.views).toBe(1);
+
+  await page.goto(`/videos/${v.id}`);
+  await page.getByRole("button", { name: "Remove password" }).click();
+  await expect(page.getByTestId("share-locked")).toHaveCount(0);
+  await page.goto(`/share/${v.id}`);
+  await expect(page.locator("video")).toBeVisible();
 });
 
 test("draft autosave survives a reload and clears after generating", async ({ page }) => {

@@ -12,6 +12,7 @@ import { ConflictError, LimitError, NotFoundError, ValidationError } from "../er
 import { getAvatar } from "./avatars";
 import { listVoices } from "./voices";
 import { PUBLIC_ACCESS, owned, scheduleNotification, stripUndefined } from "./shared";
+import { SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, clearShareLock, setShareLock, shareUnlocked } from "../share-lock";
 
 export const backgroundSchema = z.object({ type: z.enum(["color", "image"]), value: z.string().min(1) });
 
@@ -207,7 +208,8 @@ export async function listVideos(ownerId: string = LOCAL_OWNER, refresh = true):
  */
 export async function getVideo(id: string, ownerId: string | null = LOCAL_OWNER, refresh = true): Promise<Video> {
   const video = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
-  // A share link the owner switched off is indistinguishable from a missing video to the public.
+  // A share link the owner switched off is indistinguishable from a missing video to the public
+  // (the beacons make the same distinction themselves, since they read the store directly).
   if (ownerId === PUBLIC_ACCESS && video.shareDisabled) throw new NotFoundError(`Video ${id} not found`);
   return refresh ? refreshStatus(video) : video;
 }
@@ -263,6 +265,13 @@ export const videoPatchSchema = z
     /** Whether the public share page offers a download link. */
     shareDownload: z.boolean().optional(),
     shareDisabled: z.boolean().optional(),
+    sharePassword: z
+      .string()
+      .trim()
+      .min(SHARE_PASSWORD_MIN, `The share password needs at least ${SHARE_PASSWORD_MIN} characters`)
+      .max(SHARE_PASSWORD_MAX, `The share password can have at most ${SHARE_PASSWORD_MAX} characters`)
+      .nullable()
+      .optional(),
     /** A call-to-action button on the share page; null removes it. */
     shareCta: z
       .object({
@@ -276,7 +285,10 @@ export const videoPatchSchema = z
       .nullable()
       .optional(),
   })
-  .refine((p) => p.title !== undefined || p.folder !== undefined || p.shareDownload !== undefined || p.shareDisabled !== undefined || p.shareCta !== undefined, "Nothing to update");
+  .refine(
+    (p) => p.title !== undefined || p.folder !== undefined || p.shareDownload !== undefined || p.shareDisabled !== undefined || p.sharePassword !== undefined || p.shareCta !== undefined,
+    "Nothing to update",
+  );
 
 export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSchema>, ownerId: string = LOCAL_OWNER): Promise<Video> {
   const existing = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
@@ -298,6 +310,15 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
     if (patch.shareCta) next.shareCta = patch.shareCta;
     else delete next.shareCta;
   }
+  if (patch.sharePassword !== undefined) {
+    if (patch.sharePassword) {
+      await setShareLock(next, patch.sharePassword);
+      next.shareLocked = true;
+    } else {
+      await clearShareLock(next.id);
+      delete next.shareLocked;
+    }
+  }
   return getStore().put("video", next);
 }
 
@@ -306,10 +327,10 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
  * so a page opened while rendering is not a view. `gate` runs only for a countable view
  * (the route's per-viewer window), so an early visit does not use up the viewer's slot.
  */
-export async function recordView(id: string, gate: () => boolean = () => true): Promise<{ views: number; counted: boolean }> {
+export async function recordView(id: string, gate: () => boolean = () => true, shareCookie?: string): Promise<{ views: number; counted: boolean }> {
   const video = await getStore().get<Video>("video", id);
-  if (!video) throw new NotFoundError(`Video ${id} not found`);
-  if (video.status !== "completed" || video.shareDisabled || !gate()) return { views: video.views ?? 0, counted: false };
+  if (!video || video.shareDisabled) throw new NotFoundError(`Video ${id} not found`);
+  if (video.status !== "completed" || !(await shareUnlocked(video, shareCookie)) || !gate()) return { views: video.views ?? 0, counted: false };
   const views = (video.views ?? 0) + 1;
   await getStore().put("video", { ...video, views, lastViewedAt: nowIso() });
   return { views, counted: true };
@@ -319,10 +340,12 @@ export async function recordView(id: string, gate: () => boolean = () => true): 
  * Count a click on the share-page call to action. Public, like `recordView`; only a completed
  * video that still carries a button counts, and `gate` applies the route's per-viewer window.
  */
-export async function recordCtaClick(id: string, gate: () => boolean = () => true): Promise<{ clicks: number; counted: boolean }> {
+export async function recordCtaClick(id: string, gate: () => boolean = () => true, shareCookie?: string): Promise<{ clicks: number; counted: boolean }> {
   const video = await getStore().get<Video>("video", id);
-  if (!video) throw new NotFoundError(`Video ${id} not found`);
-  if (video.status !== "completed" || video.shareDisabled || !video.shareCta || !gate()) return { clicks: video.ctaClicks ?? 0, counted: false };
+  if (!video || video.shareDisabled) throw new NotFoundError(`Video ${id} not found`);
+  if (video.status !== "completed" || !video.shareCta || !(await shareUnlocked(video, shareCookie)) || !gate()) {
+    return { clicks: video.ctaClicks ?? 0, counted: false };
+  }
   const clicks = (video.ctaClicks ?? 0) + 1;
   await getStore().put("video", { ...video, ctaClicks: clicks, lastCtaClickAt: nowIso() });
   return { clicks, counted: true };
@@ -343,7 +366,10 @@ export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId
       missing.push(id);
       continue;
     }
-    if (input.action === "delete") await getStore().remove("video", id);
+    if (input.action === "delete") {
+      await getStore().remove("video", id);
+      await clearShareLock(id);
+    }
     else await updateVideo(id, { folder: input.folder }, ownerId);
     done += 1;
   }
@@ -376,6 +402,7 @@ export async function retryVideo(id: string, ownerId: string = LOCAL_OWNER): Pro
 export async function deleteVideo(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
   owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
   await getStore().remove("video", id);
+  await clearShareLock(id);
 }
 
 export async function applyAvatarWebhook(providerName: string, body: unknown): Promise<Video | null> {

@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import { ArrowLeft, Captions, Check, Code2, Copy, Download, Eye, FolderOpen, Languages, LayoutTemplate, Link2, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowLeft, Captions, Check, Code2, Copy, Download, Eye, FolderOpen, Languages, LayoutTemplate, Link2, Lock, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { ApiError, api, formatDate, formatSeconds, isDarkHex } from "@/lib/client";
@@ -100,7 +100,8 @@ export default function VideoDetailPage() {
     setShareDraft((d) => ({ ...d, ...patch }));
     try {
       const { video: next } = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify(patch) });
-      setData({ video: next });
+      // Merge: two saves in flight (download, then live) must not let the earlier response undo the later one.
+      setData((d) => ({ video: { ...d?.video, ...next } }));
       // A status poll that started before the save would land after it with the old record.
       void refetch();
     } catch (e) {
@@ -114,6 +115,26 @@ export default function VideoDetailPage() {
     }
   }
   const shareLive = !(shareDraft.shareDisabled ?? !!video?.shareDisabled);
+
+  // Share password: set or change it from one input, remove it with a button; never shown back.
+  const [sharePw, setSharePw] = useState("");
+  const [pwBusy, setPwBusy] = useState<"save" | "remove" | null>(null);
+  const [pwErr, setPwErr] = useState<string | null>(null);
+  async function saveSharePassword(remove = false) {
+    if (!video || pwBusy) return;
+    setPwErr(null);
+    setPwBusy(remove ? "remove" : "save");
+    try {
+      const { video: next } = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify({ sharePassword: remove ? null : sharePw.trim() }) });
+      setData({ video: next });
+      setSharePw("");
+      void refetch();
+    } catch (e) {
+      setPwErr(e instanceof Error ? e.message : "Could not update the password");
+    } finally {
+      setPwBusy(null);
+    }
+  }
 
   // Call to action shown under the share-page player.
   const [ctaLabel, setCtaLabel] = useState<string | null>(null);
@@ -254,6 +275,39 @@ export default function VideoDetailPage() {
                       Viewers can download
                     </label>
                     {!shareLive && <span className="text-xs text-slate-500" data-testid="share-off-note">Share link off: the share page and embed answer “not found”.</span>}
+                    <form
+                      className="inline-flex flex-wrap items-center gap-2"
+                      data-testid="share-password"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        if (sharePw.trim()) void saveSharePassword();
+                      }}
+                    >
+                      {video.shareLocked && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800" data-testid="share-locked">
+                          <Lock className="h-3 w-3" /> Password protected
+                        </span>
+                      )}
+                      <input
+                        type="password"
+                        aria-label="Share password"
+                        autoComplete="new-password"
+                        className={`${inputClass} w-44 py-1.5 text-xs`}
+                        placeholder={video.shareLocked ? "Change password" : "Set a password"}
+                        maxLength={64}
+                        value={sharePw}
+                        onChange={(e) => setSharePw(e.target.value)}
+                      />
+                      <Button type="submit" variant="secondary" className="px-3 py-1.5 text-xs" loading={pwBusy === "save"} disabled={!sharePw.trim() || pwBusy === "remove"}>
+                        {video.shareLocked ? "Change" : "Protect"}
+                      </Button>
+                      {video.shareLocked && (
+                        <Button type="button" variant="secondary" className="px-3 py-1.5 text-xs" onClick={() => saveSharePassword(true)} loading={pwBusy === "remove"} disabled={pwBusy === "save"}>
+                          Remove password
+                        </Button>
+                      )}
+                      {pwErr && <span className="text-xs text-rose-600">{pwErr}</span>}
+                    </form>
                     {shareErr && <span className="text-xs text-rose-600">{shareErr}</span>}
                   </>
                 )}

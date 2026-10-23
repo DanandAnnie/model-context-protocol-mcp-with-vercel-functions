@@ -1,6 +1,8 @@
-import { errorResponse } from "@/lib/api-utils";
+import { cookies } from "next/headers";
+import { errorResponse, json } from "@/lib/api-utils";
 import { buildSrt, buildVtt } from "@/lib/captions";
-import { optionalOwner } from "@/lib/owner";
+import { LOCAL_OWNER, optionalOwner } from "@/lib/owner";
+import { shareCookieName, shareUnlocked } from "@/lib/share-lock";
 import { NotFoundError, PUBLIC_ACCESS, getVideo } from "@/lib/services";
 import type { Video } from "@/lib/types";
 
@@ -14,12 +16,22 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     // Captions are derived from the script, which the public share page already shows. When the
     // owner has switched the share link off, only the owner's own download still works.
     let video: Video;
+    let isOwner = false;
     try {
       video = await getVideo(id, PUBLIC_ACCESS, false);
     } catch (err) {
       const owner = err instanceof NotFoundError ? await optionalOwner() : null;
       if (!owner) throw err;
       video = await getVideo(id, owner, false);
+      isOwner = true;
+    }
+    // A password-protected share link hands its captions only to visitors who entered the password, and to the owner.
+    if (video.shareLocked && !isOwner) {
+      const owner = await optionalOwner();
+      isOwner = !!owner && (video.ownerId ?? LOCAL_OWNER) === owner;
+      if (!isOwner && !(await shareUnlocked(video, (await cookies()).get(shareCookieName(id))?.value))) {
+        return json({ error: "Password required" }, { status: 401 });
+      }
     }
     // Fall back to a reading-speed estimate when the provider did not report a duration.
     const words = video.script.trim().split(/\s+/).filter(Boolean).length;

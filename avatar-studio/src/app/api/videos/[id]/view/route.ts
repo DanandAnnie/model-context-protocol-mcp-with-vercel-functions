@@ -1,5 +1,7 @@
 import { errorResponse, json } from "@/lib/api-utils";
+import { cookies } from "next/headers";
 import { beaconAllowed } from "@/lib/beacon";
+import { shareCookieName } from "@/lib/share-lock";
 import { recordView } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +16,8 @@ const VIEWS_PER_VIDEO = 600;
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await ctx.params;
-    return json(await recordView(id, () => beaconAllowed(req, "view", id, VIEWS_PER_VIDEO, VIEW_WINDOW_MS)));
+    const unlock = (await cookies()).get(shareCookieName(id))?.value;
+    return json(await recordView(id, () => beaconAllowed(req, "view", id, VIEWS_PER_VIDEO, VIEW_WINDOW_MS), unlock));
   } catch (err) {
     return errorResponse(err);
   }

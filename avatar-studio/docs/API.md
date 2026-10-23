@@ -16,7 +16,7 @@ Authorization: Bearer as_live_…
 - Keys minted inside a workspace are revoked when that member leaves or is removed, and when the workspace is deleted.
 - Unknown or revoked keys get `401`. Only tokens that start with `as_live_` are treated as keys; any other bearer value falls back to the normal session check.
 
-Public routes need no key: `/api/videos/:id/captions`, `/api/videos/:id/view`, `/api/videos/:id/cta`, `/api/talk/:id`, `/api/webhooks/:provider`, `/api/auth/*`, `/share/:id`.
+Public routes need no key: `/api/videos/:id/captions`, `/api/videos/:id/view`, `/api/videos/:id/cta`, `/api/videos/:id/unlock`, `/api/talk/:id`, `/api/webhooks/:provider`, `/api/auth/*`, `/share/:id`.
 
 ## Conventions
 
@@ -88,18 +88,19 @@ Query parameters, all optional: `q` (matches title, script, avatar, and voice), 
 A template is a starting point for the editor: scenes (with any per-scene presenter), avatar, voice, aspect, quality, captions, and speed, up to 50 per account. Create one from a video you own with `{ "fromVideoId", "title"?, "description"? }` (the title defaults to the video's), or spell it out with `{ "title", "scenes", "avatarId"?, "voiceId"?, "aspect"?, "resolution"?, "captions"?, "speed"? }`. `GET /api/templates` returns `{ "templates" }`, newest first; the editor opens one at `/create?template=<id>`.
 
 ### `GET /api/videos/:id` — fetch; refreshes the status from the provider while rendering
-### `PATCH /api/videos/:id` — `{ "title"?: string, "folder"?: string, "shareDownload"?: boolean, "shareDisabled"?: boolean, "shareCta"?: { "label", "url" } | null }` (empty `folder` means unfiled; `shareDownload` shows a download button on the public share page; `shareDisabled` takes the share link offline: the share page, its captions, and the view and click beacons answer `404` to the public while the owner keeps full access; `shareCta` puts a call-to-action button under the share-page player, label up to 40 characters and an http(s) link, `null` removes it)
+### `PATCH /api/videos/:id` — `{ "title"?: string, "folder"?: string, "shareDownload"?: boolean, "shareDisabled"?: boolean, "shareCta"?: { "label", "url" } | null }` (empty `folder` means unfiled; `shareDownload` shows a download button on the public share page; `shareDisabled` takes the share link offline: the share page, its captions, and the view and click beacons answer `404` to the public while the owner keeps full access; `sharePassword` (4–64 characters, or `null` to remove) protects the share link: visitors must enter it before the page plays, captions and beacons need the resulting cookie, and the video carries `shareLocked: true` while the password itself is kept only as a salted hash in its own record; `shareCta` puts a call-to-action button under the share-page player, label up to 40 characters and an http(s) link, `null` removes it)
 ### `DELETE /api/videos/:id`
 ### `POST /api/videos/bulk` — `{ "action": "move", "ids": [...], "folder": "Q4" }` or `{ "action": "delete", "ids": [...] }` → `{ "done", "missing" }`
 ### `POST /api/videos/:id/retry`
 
 Submits a **failed** render again as a new video with the same scenes, presenter, look, and quality; the new video keeps the original's folder and batch row and carries `retryOf` with the original id. Returns `201 { video }` (or `502` when the provider refuses the start again). `409` when the video is not failed, `404` when it is not yours.
 
-### `GET /api/videos/:id/captions` — SRT; add `?format=vtt` for WebVTT (public)
+### `GET /api/videos/:id/captions` — SRT; add `?format=vtt` for WebVTT (public; while the share link is offline only the owner's own request gets them, and a password-protected link needs the unlock cookie or the owner)
 ### `POST /api/videos/:id/view` — share-page view beacon (public; one per viewer per 10 minutes, 600 per video; counts only once the render completed)
 ### `POST /api/videos/:id/cta` — call-to-action click beacon (public; one per viewer per 10 minutes, 300 per video; counts only while a completed video carries a button)
+### `POST /api/videos/:id/unlock` — `{ "password" }` for a password-protected share link (public; 5 attempts per client and 100 per video per 15 minutes, `429` with `Retry-After` past that; `401` on a wrong password). A correct password sets an `httpOnly` cookie for that video, valid for 30 days or until the password changes.
 
-Both beacons answer `{ "views" | "clicks", "counted" }` and never fail on repeats. A browser request from another site (`Sec-Fetch-Site` other than `same-origin`) is not counted, so a page elsewhere cannot count for visitors who never opened the share page.
+Both beacons answer `{ "views" | "clicks", "counted" }` and never fail on repeats; while the share link is offline they answer `404` like the share page, and a password-protected link counts only requests carrying the unlock cookie. A browser request from another site (`Sec-Fetch-Site` other than `same-origin`) is not counted, so a page elsewhere cannot count for visitors who never opened the share page.
 
 ### Personalized batch
 

@@ -131,6 +131,8 @@ export interface Video extends VideoRequest {
   shareDownload?: boolean;
   /** The share page, its captions, and the beacons answer "not found" while true. */
   shareDisabled?: boolean;
+  /** Visitors must enter a password (kept as a salted hash in its own record) before the share page plays. */
+  shareLocked?: boolean;
   /** A button under the share-page player: "Book a showing" → https://… */
   shareCta?: { label: string; url: string };
   /** Share page views (completed videos only; one per viewer per window). */

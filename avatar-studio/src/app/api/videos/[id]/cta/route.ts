@@ -1,5 +1,7 @@
 import { errorResponse, json } from "@/lib/api-utils";
+import { cookies } from "next/headers";
 import { beaconAllowed } from "@/lib/beacon";
+import { shareCookieName } from "@/lib/share-lock";
 import { recordCtaClick } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +16,8 @@ const CLICKS_PER_VIDEO = 300;
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await ctx.params;
-    return json(await recordCtaClick(id, () => beaconAllowed(req, "cta", id, CLICKS_PER_VIDEO, CLICK_WINDOW_MS)));
+    const unlock = (await cookies()).get(shareCookieName(id))?.value;
+    return json(await recordCtaClick(id, () => beaconAllowed(req, "cta", id, CLICKS_PER_VIDEO, CLICK_WINDOW_MS), unlock));
   } catch (err) {
     return errorResponse(err);
   }

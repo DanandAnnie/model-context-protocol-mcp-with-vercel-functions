@@ -85,6 +85,31 @@ test("an offline share link is hidden from the public but not from the owner", a
   await anon.dispose();
 });
 
+test("a password-protected share link opens only with the password or for the owner", async ({ request, playwright }) => {
+  expect((await request.post("/api/auth/login", { data: { password: "hunter2" } })).status()).toBe(200);
+  const made = await request.post("/api/videos", { data: { title: "Members only", script: "Hi there.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9" } });
+  expect(made.status()).toBe(201);
+  const id = ((await made.json()) as { video: { id: string } }).video.id;
+  const locked = await request.patch(`/api/videos/${id}`, { data: { sharePassword: "letmein1" } });
+  expect(locked.status()).toBe(200);
+  expect(((await locked.json()) as { video: { shareLocked?: boolean } }).video.shareLocked).toBe(true);
+
+  const anon = await playwright.request.newContext({ baseURL: "http://localhost:3102" });
+  expect(await (await anon.get(`/share/${id}`)).text()).toContain('data-testid="share-unlock"');
+  expect((await anon.get(`/api/videos/${id}/captions`)).status()).toBe(401);
+  expect((await anon.post(`/api/videos/${id}/unlock`, { data: { password: "wrong" } })).status()).toBe(401);
+  expect((await anon.post(`/api/videos/${id}/unlock`, { data: { password: "letmein1" } })).status()).toBe(200);
+  // The anonymous context now carries the unlock cookie.
+  expect((await anon.get(`/api/videos/${id}/captions`)).status()).toBe(200);
+  expect(await (await anon.get(`/share/${id}`)).text()).not.toContain('data-testid="share-unlock"');
+  // The owner never needs it.
+  expect((await request.get(`/api/videos/${id}/captions`)).status()).toBe(200);
+  // Changing the password signs the visitor out again.
+  expect((await request.patch(`/api/videos/${id}`, { data: { sharePassword: "another-1" } })).status()).toBe(200);
+  expect((await anon.get(`/api/videos/${id}/captions`)).status()).toBe(401);
+  await anon.dispose();
+});
+
 test("a made-up bearer token is not a session", async ({ request }) => {
   // The proxy only lets real API keys past the session check; everything else needs the cookie.
   const bogus = { Authorization: "Bearer x" };

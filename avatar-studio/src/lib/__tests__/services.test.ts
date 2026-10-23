@@ -866,12 +866,48 @@ describe("folders and share views", () => {
     assert.equal(off.shareDisabled, true);
     await assert.rejects(getVideo(v.id, null, false), /not found/, "public after the switch");
     assert.equal((await getVideo(v.id, undefined, false)).id, v.id, "the owner still sees it");
-    assert.deepEqual(await recordView(v.id), { views: 0, counted: false });
-    assert.deepEqual(await recordCtaClick(v.id), { clicks: 0, counted: false });
+    await assert.rejects(recordView(v.id), /not found/, "beacons answer like the share page");
+    await assert.rejects(recordCtaClick(v.id), /not found/);
     const on = await updateVideo(v.id, videoPatchSchema.parse({ shareDisabled: false }));
     assert.equal("shareDisabled" in on, false);
     assert.equal((await getVideo(v.id, null, false)).id, v.id);
     assert.deepEqual(await recordView(v.id), { views: 1, counted: true });
+  });
+
+  it("protects a share link with a password kept only as a hash", async () => {
+    const { updateVideo, videoPatchSchema } = await import("../services/videos");
+    const { getShareLock, shareCookieValue, shareUnlocked, verifySharePassword } = await import("../share-lock");
+    const { exportOwnerData } = await import("../services/account");
+    const v = await createVideo(req);
+    const fresh = await getVideo(v.id, undefined, false);
+    globalThis.__avatarStudioStore!.put("video", { ...fresh, status: "completed" });
+    assert.throws(() => videoPatchSchema.parse({ sharePassword: "abc" }), /at least 4/);
+    const locked = await updateVideo(v.id, videoPatchSchema.parse({ sharePassword: "  open sesame " }));
+    assert.equal(locked.shareLocked, true);
+    assert.equal(JSON.stringify(locked).includes("sesame"), false, "the password never sits on the video");
+    const lock = await getShareLock(v.id);
+    assert.ok(lock && lock.hash.length === 64 && lock.salt.length === 32);
+    assert.equal(await verifySharePassword(v.id, "wrong"), null);
+    assert.equal((await verifySharePassword(v.id, "open sesame"))?.id, v.id);
+    const cookie = shareCookieValue(lock!);
+    assert.equal(await shareUnlocked(locked, undefined), false);
+    assert.equal(await shareUnlocked(locked, "nope"), false);
+    assert.equal(await shareUnlocked(locked, cookie), true);
+    assert.deepEqual(await recordView(v.id), { views: 0, counted: false }, "a beacon without the cookie is not counted");
+    assert.deepEqual(await recordView(v.id, () => true, cookie), { views: 1, counted: true });
+    // Changing the password invalidates every cookie handed out for the old one.
+    await updateVideo(v.id, videoPatchSchema.parse({ sharePassword: "different one" }));
+    assert.equal(await shareUnlocked(locked, cookie), false);
+    const exported = await exportOwnerData(LOCAL_OWNER);
+    const row = exported.sharelock.find((r) => r.id === v.id)!;
+    assert.ok(row && !("hash" in row) && !("salt" in row), "the export redacts the hash and salt");
+    const open = await updateVideo(v.id, videoPatchSchema.parse({ sharePassword: null }));
+    assert.equal("shareLocked" in open, false);
+    assert.equal(await getShareLock(v.id), null);
+    assert.equal(await shareUnlocked(open, undefined), true);
+    await updateVideo(v.id, videoPatchSchema.parse({ sharePassword: "back again" }));
+    await deleteVideo(v.id);
+    assert.equal(await getShareLock(v.id), null, "deleting the video removes its lock");
   });
 
   it("counts call-to-action clicks only while a completed video carries the button", async () => {

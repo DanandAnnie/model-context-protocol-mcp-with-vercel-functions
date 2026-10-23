@@ -1,8 +1,9 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import { Clapperboard, Home, Languages, Layers3, LayoutTemplate, LogOut, Menu, Mic2, Palette, Settings, Users, Video, Sparkles, X } from "lucide-react";
+import { useEffect } from "react";
+import { useMobileNav } from "@/components/MobileNav";
+import { Clapperboard, Home, Languages, Layers3, LayoutTemplate, LogOut, Mic2, Palette, Settings, Users, Video, Sparkles, X } from "lucide-react";
 import { useApi } from "@/hooks/useApi";
 import type { ProviderStatus } from "@/lib/types";
 
@@ -29,21 +30,13 @@ export function Sidebar() {
     router.replace("/login");
     router.refresh();
   }
-  const [open, setOpen] = useState(false);
+  const { open, setOpen } = useMobileNav();
 
   // Close the drawer on navigation.
-  useEffect(() => setOpen(false), [pathname]);
+  useEffect(() => setOpen(false), [pathname, setOpen]);
 
   return (
     <>
-      <button
-        type="button"
-        aria-label="Open menu"
-        onClick={() => setOpen(true)}
-        className="fixed left-3 top-3 z-40 rounded-lg border border-slate-200 bg-white p-2 text-slate-700 shadow-sm lg:hidden"
-      >
-        <Menu className="h-5 w-5" />
-      </button>
       {open && <div className="fixed inset-0 z-40 bg-slate-900/40 lg:hidden" onClick={() => setOpen(false)} />}
     <aside
       className={`fixed inset-y-0 left-0 z-50 flex h-full w-64 shrink-0 flex-col border-r border-slate-200 bg-white transition-transform lg:static lg:translate-x-0 ${

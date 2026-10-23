@@ -21,8 +21,16 @@ export const config = {
   emailProvider: (env("EMAIL_PROVIDER") ?? "mock").toLowerCase(),
   resendApiKey: env("RESEND_API_KEY"),
   emailFrom: env("EMAIL_FROM") ?? "Avatar Studio <onboarding@resend.dev>",
-  /** Optional cap on renders per owner per calendar month (UTC). Unset = unlimited. */
+  /** Free-plan cap on renders per owner per calendar month (UTC). Unset = unlimited. */
   renderLimitPerMonth: parsePositiveInt(env("RENDER_LIMIT_PER_MONTH")),
+  /** Pro-plan cap; unset = unlimited. Only meaningful with a billing provider or in demo mode. */
+  proRendersPerMonth: parsePositiveInt(env("PLAN_PRO_RENDERS")),
+  proPriceLabel: env("PLAN_PRO_PRICE_LABEL") ?? "$29 / month",
+  /** "stripe" with the keys below, otherwise a mock that upgrades instantly (demo). */
+  billingProvider: (env("BILLING_PROVIDER") ?? "mock").toLowerCase(),
+  stripeSecretKey: env("STRIPE_SECRET_KEY"),
+  stripeWebhookSecret: env("STRIPE_WEBHOOK_SECRET"),
+  stripePricePro: env("STRIPE_PRICE_PRO"),
 };
 
 function parsePositiveInt(v: string | undefined): number | undefined {

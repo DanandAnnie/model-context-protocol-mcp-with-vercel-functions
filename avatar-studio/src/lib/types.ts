@@ -189,6 +189,24 @@ export interface Workspace {
   updatedAt: string;
 }
 
+export type PlanId = "free" | "pro";
+
+/** Billing plan of an owner (person or workspace). Absent means free. */
+export interface Plan {
+  /** `plan_<ownerId>` */
+  id: string;
+  ownerId: string;
+  plan: PlanId;
+  /** Billing provider state, when a paid subscription backs the plan. */
+  provider?: string;
+  customerId?: string;
+  subscriptionId?: string;
+  status?: string;
+  /** When the current paid period ends, if the subscription has been cancelled. */
+  endsAt?: string;
+  updatedAt: string;
+}
+
 export interface ProviderStatus {
   mode: "demo" | "live";
   avatar: string;
@@ -200,8 +218,10 @@ export interface ProviderStatus {
   email: string;
   authEnabled: boolean;
   authMode: "open" | "password" | "supabase";
-  /** Renders allowed per owner per calendar month, or null when unlimited. */
+  /** Renders allowed for the current owner per calendar month, or null when unlimited. */
   renderLimitPerMonth: number | null;
+  /** Billing backend: "stripe" or "mock" (instant upgrades for demos). */
+  billing: string;
   /** Present when the request carried an owner (signed in, or open/password mode). */
-  usage?: { rendersThisMonth: number };
+  usage?: { rendersThisMonth: number; plan: PlanId; proRendersPerMonth: number | null; proPriceLabel: string; subscriptionStatus?: string; endsAt?: string };
 }

@@ -27,6 +27,7 @@ D-ID, ElevenLabs, or in a fully offline **demo mode** with no keys at all.
 | Brand kit | Logo, primary and accent colors, default avatar, voice, aspect ratio, and captions; applied to every new video and shown on shared pages |
 | Developer API | Personal API keys (created and revoked from Settings, secret shown once) let scripts call every `/api/*` endpoint with `Authorization: Bearer <key>` in any auth mode |
 | Webhook notifications | One signed outbound webhook per account (HMAC-SHA256 over `timestamp.body`) fired on `video.completed` and `video.failed`, with a test button and last-delivery status; private hosts rejected |
+| Plans | Free and Pro plans per account or workspace; the plan sets the monthly render allowance (`RENDER_LIMIT_PER_MONTH`, `PLAN_PRO_RENDERS`); upgrade and manage from Settings via Stripe Checkout and the Billing Portal, or instantly with the demo provider |
 | Settings | Usage summary (videos, completed, processing, failed, seconds rendered, this month vs allowance), which provider backs each capability, access mode, and how to configure it |
 | Allowance | Optional `RENDER_LIMIT_PER_MONTH` caps renders per account per calendar month; exceeding it returns 429 with a clear message |
 | Accounts | Per-user accounts with Supabase Auth (email + password sign up / sign in, email confirmation); each user sees only their own videos, avatars, and translations. Falls back to a shared `STUDIO_PASSWORD` gate, then open mode. Landing, login, share pages, and provider webhooks stay public |
@@ -56,6 +57,7 @@ after ~12 seconds using a sample clip.
 | Script writer | `SCRIPT_PROVIDER` = `anthropic` \| `mock` | Claude via the Anthropic SDK |
 | Translation | automatic when `HEYGEN_API_KEY` is set | HeyGen Video Translate |
 | Persistence | `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` | Supabase (`supabase/schema.sql`), else in-memory |
+| Billing | `BILLING_PROVIDER` = `stripe` \| `mock` + `STRIPE_SECRET_KEY` + `STRIPE_PRICE_PRO` + `STRIPE_WEBHOOK_SECRET` | Stripe Checkout, Billing Portal, and webhooks; with `mock` upgrades apply instantly |
 | Invite email | `EMAIL_PROVIDER` = `resend` \| `mock` + `RESEND_API_KEY` + `EMAIL_FROM` | Resend; with `mock` invites are link-only |
 
 Access control: set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`

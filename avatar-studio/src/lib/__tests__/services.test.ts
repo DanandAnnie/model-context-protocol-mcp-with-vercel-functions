@@ -31,6 +31,8 @@ import { computeInsights } from "../insights";
 import { acceptInvite, createInvite, createWorkspace, deleteWorkspace, findInvite, listWorkspaces, removeMember, revokeInvite, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
 import type { Video } from "../types";
 import { MockEmailProvider, inviteEmail, setEmailProvider } from "../providers/email";
+import { MockBillingProvider, applyStripeEvent, getPlan, renderLimitFor, setBillingProvider, setPlan, verifyStripeSignature } from "../billing";
+import { config } from "../config";
 import { dispatchNotification, getNotifySettings, notifyVideoTransition, saveNotifySettings, setNotificationFetch, signPayload } from "../notifications";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import { SCRIPT_TEMPLATES, findTemplate } from "../templates";
@@ -697,5 +699,61 @@ describe("invite emails", () => {
     } finally {
       setEmailProvider(undefined);
     }
+  });
+});
+
+describe("plans and billing", () => {
+  const req = { title: "P", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9" as const, background: { type: "color" as const, value: "#fff" }, captions: false, speed: 1 };
+
+  it("plan decides the allowance and the mock provider switches plans", async () => {
+    const original = { free: config.renderLimitPerMonth, pro: config.proRendersPerMonth };
+    (config as { renderLimitPerMonth?: number }).renderLimitPerMonth = 1;
+    (config as { proRendersPerMonth?: number }).proRendersPerMonth = 3;
+    setBillingProvider(new MockBillingProvider());
+    try {
+      assert.equal((await getPlan("u1")).plan, "free");
+      assert.equal(await renderLimitFor("u1"), 1);
+      await createVideo(req, "u1");
+      await assert.rejects(createVideo(req, "u1"), /Monthly render limit reached \(1 of 1\)/);
+      const { url } = await new MockBillingProvider().checkout("u1", "https://x/settings");
+      assert.match(url, /billing=upgraded/);
+      assert.equal((await getPlan("u1")).plan, "pro");
+      assert.equal(await renderLimitFor("u1"), 3);
+      await createVideo(req, "u1");
+      await new MockBillingProvider().portal("u1", "https://x/settings");
+      assert.equal((await getPlan("u1")).plan, "free");
+      assert.equal((await getPlan("u1")).status, undefined, "downgrade clears subscription state");
+      assert.equal((await getPlan("u2")).plan, "free", "plans are per owner");
+    } finally {
+      (config as { renderLimitPerMonth?: number }).renderLimitPerMonth = original.free;
+      (config as { proRendersPerMonth?: number }).proRendersPerMonth = original.pro;
+      setBillingProvider(undefined);
+    }
+  });
+
+  it("verifies Stripe signatures and applies subscription events", async () => {
+    const secret = "whsec_test";
+    const body = JSON.stringify({ type: "checkout.session.completed", data: { object: { client_reference_id: "u9", customer: "cus_1", subscription: "sub_1" } } });
+    const t = Math.floor(Date.now() / 1000);
+    const v1 = createHmac("sha256", secret).update(`${t}.${body}`).digest("hex");
+    assert.equal(verifyStripeSignature(body, `t=${t},v1=${v1}`, secret), true);
+    assert.equal(verifyStripeSignature(body, `t=${t},v1=${v1}`, "other"), false);
+    assert.equal(verifyStripeSignature(body, `t=${t - 1000},v1=${v1}`, secret), false, "stale timestamp");
+    assert.equal(verifyStripeSignature(body, null, secret), false);
+
+    assert.equal(await applyStripeEvent(JSON.parse(body)), "u9");
+    const plan = await getPlan("u9");
+    assert.equal(plan.plan, "pro");
+    assert.equal(plan.customerId, "cus_1");
+    assert.equal(plan.subscriptionId, "sub_1");
+    assert.equal(await applyStripeEvent({ type: "customer.subscription.updated", data: { object: { id: "sub_1", status: "active", cancel_at_period_end: true, current_period_end: 1800000000, metadata: { ownerId: "u9" } } } }), "u9");
+    assert.equal((await getPlan("u9")).endsAt, new Date(1800000000 * 1000).toISOString());
+    assert.equal(await applyStripeEvent({ type: "customer.subscription.deleted", data: { object: { id: "sub_1", status: "canceled", metadata: { ownerId: "u9" } } } }), "u9");
+    assert.equal((await getPlan("u9")).plan, "free");
+    assert.equal((await getPlan("u9")).customerId, "cus_1", "customer id kept for re-subscribing");
+    assert.equal(await applyStripeEvent({ type: "invoice.paid", data: { object: {} } }), null);
+    await setPlan("u9", { plan: "pro" });
+    assert.equal(await applyStripeEvent({ type: "customer.subscription.updated", data: { object: { id: "sub_2", status: "unpaid", metadata: { ownerId: "u9" } } } }), "u9");
+    assert.equal((await getPlan("u9")).plan, "free", "unpaid subscriptions drop to free");
   });
 });

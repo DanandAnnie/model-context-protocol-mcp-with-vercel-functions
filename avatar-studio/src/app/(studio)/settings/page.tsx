@@ -1,4 +1,6 @@
 "use client";
+import { Suspense } from "react";
+import { PlanCard } from "@/components/PlanCard";
 import { ApiKeys } from "@/components/ApiKeys";
 import { OutboundWebhook } from "@/components/OutboundWebhook";
 import { Card, SectionTitle } from "@/components/ui";
@@ -13,6 +15,7 @@ const ROWS: Array<{ key: keyof Omit<ProviderStatus, "mode" | "authEnabled" | "au
   { key: "translate", label: "Video translation", env: "HEYGEN_API_KEY", options: "heygen, mock" },
   { key: "persistence", label: "Storage", env: "SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY", options: "supabase, memory" },
   { key: "email", label: "Invite emails", env: "EMAIL_PROVIDER + RESEND_API_KEY + EMAIL_FROM", options: "resend, mock (links only)" },
+  { key: "billing", label: "Billing", env: "BILLING_PROVIDER + STRIPE_SECRET_KEY + STRIPE_PRICE_PRO + STRIPE_WEBHOOK_SECRET", options: "stripe, mock (instant upgrades)" },
 ];
 
 function summarize(videos: Video[]) {
@@ -26,7 +29,7 @@ function summarize(videos: Video[]) {
 }
 
 export default function SettingsPage() {
-  const { data } = useApi<ProviderStatus>("/api/status");
+  const { data, refetch } = useApi<ProviderStatus>("/api/status");
   const { data: videoData } = useApi<{ videos: Video[] }>("/api/videos");
   const usage = summarize(videoData?.videos ?? []);
   const limit = data?.renderLimitPerMonth ?? null;
@@ -72,7 +75,7 @@ export default function SettingsPage() {
         <div>
           <div className="text-sm font-medium text-slate-900">Render allowance</div>
           <div className="mt-0.5 text-xs text-slate-500">
-            <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">RENDER_LIMIT_PER_MONTH</code> · caps renders per account per calendar month (UTC); failed starts do not count
+            <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">RENDER_LIMIT_PER_MONTH</code> (Free) and <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">PLAN_PRO_RENDERS</code> (Pro) · per account per calendar month (UTC); failed starts do not count
           </div>
         </div>
         <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${limit ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
@@ -90,6 +93,9 @@ export default function SettingsPage() {
           {data ? (data.authMode === "supabase" ? "accounts" : data.authMode === "password" ? "password required" : "open") : "…"}
         </span>
       </Card>
+      <Suspense>
+        <PlanCard status={data} onChanged={refetch} />
+      </Suspense>
       <ApiKeys />
       <OutboundWebhook />
       <Card className="mt-6 p-5 text-sm text-slate-600">

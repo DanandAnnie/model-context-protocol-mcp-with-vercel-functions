@@ -2,6 +2,7 @@
 // implementations whenever a key is missing so the app always boots.
 import { config } from "../config";
 import { getEmailProvider } from "./email";
+import { getBillingProvider } from "../billing";
 import type { ProviderStatus } from "../types";
 import { persistenceKind } from "../store";
 import { authEnabled, authMode } from "../auth";
@@ -75,6 +76,7 @@ export function providerStatus(): ProviderStatus {
     translate,
     persistence: persistenceKind(),
     email: getEmailProvider().name,
+    billing: getBillingProvider().name,
     authEnabled: authEnabled(),
     authMode: authMode(),
     renderLimitPerMonth: config.renderLimitPerMonth ?? null,

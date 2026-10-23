@@ -151,6 +151,13 @@ Actions: `shorten`, `expand`, `tone`, `translate`, `polish`. Returns `{ "script"
 - `GET /api/keys`, `POST /api/keys` → `{ "name" }` → `201 { "key", "secret" }`, `DELETE /api/keys/:id`
 - `GET | PUT | DELETE /api/notifications` (`PUT` → `{ "url" }`), `POST /api/notifications/test`
 
+## Billing
+
+- `POST /api/billing/checkout` → `{ "url" }` to start a Pro upgrade (Stripe Checkout, or an instant upgrade with the mock); browser sessions only (`403` with a key)
+- `POST /api/billing/portal` → `{ "url" }` for the Stripe Billing Portal (the mock downgrades to Free)
+- `POST /api/webhooks/stripe` receives Stripe events (`checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`), verified with `STRIPE_WEBHOOK_SECRET`
+- `GET /api/status` reports `renderLimitPerMonth` for the active owner and `usage.plan`
+
 ## Outbound webhooks
 
 Save an endpoint in **Settings → Webhook notifications**. Each delivery is a `POST` with:

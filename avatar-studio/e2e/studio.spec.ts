@@ -340,3 +340,15 @@ test("workspaces: create, switch, isolate content, invite, join, leave, delete",
     expect((await page.request.delete(`/api/workspaces/${ws.id}`)).status()).toBe(204);
   }
 });
+
+test("demo billing upgrades to Pro and back from Settings", async ({ page }) => {
+  await page.goto("/settings");
+  await expect(page.getByTestId("plan-name")).toHaveText("Free");
+  await page.getByRole("button", { name: "Upgrade to Pro" }).click();
+  await expect(page.getByTestId("plan-name")).toHaveText("Pro");
+  expect((await (await page.request.get("/api/status")).json()).usage.plan).toBe("pro");
+  expect((await page.request.post("/api/webhooks/stripe", { data: {} })).status()).toBe(503);
+  await page.getByRole("button", { name: "Manage subscription" }).click();
+  await expect(page.getByTestId("plan-name")).toHaveText("Free");
+  expect((await (await page.request.get("/api/status")).json()).usage.plan).toBe("free");
+});

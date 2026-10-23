@@ -15,6 +15,7 @@ import { MAX_SCENES, type Avatar, type BrandKit, type Translation, type Video, t
 import { LOCAL_OWNER } from "./owner-id";
 import { after } from "next/server";
 import { notifyVideoTransition } from "./notifications";
+import { renderLimitFor } from "./billing";
 import { LimitError, NotFoundError, ValidationError } from "./errors";
 export { NotFoundError, ValidationError, UnauthorizedError, LimitError } from "./errors";
 import { config } from "./config";
@@ -210,7 +211,7 @@ export async function rendersThisMonth(ownerId: string): Promise<number> {
 }
 
 async function enforceRenderLimit(ownerId: string): Promise<void> {
-  const limit = config.renderLimitPerMonth;
+  const limit = await renderLimitFor(ownerId);
   if (!limit) return;
   const used = await rendersThisMonth(ownerId);
   if (used >= limit) {
@@ -317,7 +318,7 @@ export async function createBatch(input: z.infer<typeof batchRequestSchema>, own
   // Resolve avatar and voice once (they may cost provider round-trips) and reserve
   // the allowance for the whole batch before starting any row.
   const ctx = await resolveRenderContext(input, ownerId);
-  const limit = config.renderLimitPerMonth;
+  const limit = await renderLimitFor(ownerId);
   const used = limit ? await rendersThisMonth(ownerId) : 0;
   const allowedRows = limit ? Math.max(0, Math.min(table.rows.length, limit - used)) : table.rows.length;
   const skipped: BatchResult["skipped"] = [];

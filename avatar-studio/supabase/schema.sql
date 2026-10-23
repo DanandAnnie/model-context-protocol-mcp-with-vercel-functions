@@ -1,4 +1,4 @@
--- Avatar Studio persistence. One JSON document per video / avatar / translation / brand kit / API key / webhook settings / workspace.
+-- Avatar Studio persistence. One JSON document per video / avatar / translation / brand kit / API key / webhook settings / workspace / plan.
 create table if not exists public.studio_items (
   id          text primary key,
   kind        text not null,
@@ -10,7 +10,7 @@ create table if not exists public.studio_items (
 -- Allowed kinds. Re-running this file after an upgrade refreshes the list.
 alter table public.studio_items drop constraint if exists studio_items_kind_check;
 alter table public.studio_items
-  add constraint studio_items_kind_check check (kind in ('video', 'avatar', 'translation', 'brand', 'apikey', 'notify', 'workspace'));
+  add constraint studio_items_kind_check check (kind in ('video', 'avatar', 'translation', 'brand', 'apikey', 'notify', 'workspace', 'plan'));
 
 create index if not exists studio_items_kind_created_idx
   on public.studio_items (kind, created_at desc);

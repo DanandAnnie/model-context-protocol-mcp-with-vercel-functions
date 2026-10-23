@@ -1043,7 +1043,7 @@ describe("insights", () => {
       updatedAt: new Date(now).toISOString(),
       ...extra,
     });
-    const videos = [mk(0), mk(0, { title: "b", views: 7 }), mk(13, { views: 2 }), mk(14), mk(20, { status: "failed" }), mk(40), mk(3, { folder: "Listings" }), mk(2, { folder: "Listings", status: "failed" })];
+    const videos = [mk(0), mk(0, { title: "b", views: 7, ctaClicks: 3 }), mk(13, { views: 2 }), mk(14), mk(20, { status: "failed" }), mk(40), mk(3, { folder: "Listings" }), mk(2, { folder: "Listings", status: "failed" })];
     const r = computeInsights(videos, now);
     assert.equal(r.perDay.length, 14);
     assert.equal(r.perDay[13].day, "2026-10-23");
@@ -1054,6 +1054,9 @@ describe("insights", () => {
     assert.equal(r.totalPrevious, 2, "14 and 20 days ago fall in the previous window; 40 is older");
     assert.equal(r.completionRate, 6 / 8);
     assert.equal(r.totalViews, 9);
+    assert.equal(r.totalClicks, 3);
+    assert.equal(r.clickRate, 3 / 9);
+    assert.equal(computeInsights([], now).clickRate, null, "no views, no rate");
     assert.deepEqual(r.topViewed.map((v) => v.views), [7, 2]);
     assert.deepEqual(r.folders, [{ name: "Listings", count: 2 }]);
     assert.equal(computeInsights([], now).completionRate, null);

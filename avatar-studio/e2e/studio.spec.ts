@@ -356,6 +356,9 @@ test("share page offers a download only when the owner allows it", async ({ page
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.ctaClicks).toBe(1);
   await page.goto(`/videos/${v.id}`);
   await expect(page.getByTestId("cta-clicks")).toHaveText("1");
+  // Home insights total the clicks across the library next to share views.
+  await page.goto("/home");
+  await expect(page.getByTestId("cta-click-summary")).toContainText(/button clicks?/);
   await page.goto(`/share/${v.id}`);
   expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareCta: { label: "Go", url: "javascript:alert(1)" } } })).status()).toBe(400);
   expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareCta: null } })).status()).toBe(200);

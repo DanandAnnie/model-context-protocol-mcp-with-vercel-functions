@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { Eye } from "lucide-react";
+import { Eye, MousePointerClick } from "lucide-react";
 import { Card } from "@/components/ui";
 import { computeInsights } from "@/lib/insights";
 import type { Video } from "@/lib/types";
@@ -98,6 +98,12 @@ export function Insights({ videos }: { videos: Video[] }) {
         <Card className="p-5">
           <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Share views</div>
           <div className="mt-1 text-2xl font-semibold text-slate-900">{data.totalViews}</div>
+          {data.totalClicks > 0 && (
+            <div className="mt-1 text-xs text-slate-500" data-testid="cta-click-summary">
+              {data.totalClicks} {data.totalClicks === 1 ? "button click" : "button clicks"}
+              {data.clickRate !== null && ` · ${Math.round(data.clickRate * 100)}% of views`}
+            </div>
+          )}
           {data.topViewed.length > 0 ? (
             <ul className="mt-2 space-y-1 text-xs">
               {data.topViewed.map((v) => (
@@ -105,8 +111,9 @@ export function Insights({ videos }: { videos: Video[] }) {
                   <Link href={`/videos/${v.id}`} className="truncate text-slate-700 hover:underline">
                     {v.title}
                   </Link>
-                  <span className="inline-flex shrink-0 items-center gap-1 text-slate-500">
-                    <Eye className="h-3 w-3" /> {v.views}
+                  <span className="inline-flex shrink-0 items-center gap-2 text-slate-500">
+                    <span className="inline-flex items-center gap-1"><Eye className="h-3 w-3" /> {v.views}</span>
+                    {(v.ctaClicks ?? 0) > 0 && <span className="inline-flex items-center gap-1" title="Call-to-action clicks"><MousePointerClick className="h-3 w-3" /> {v.ctaClicks}</span>}
                   </span>
                 </li>
               ))}

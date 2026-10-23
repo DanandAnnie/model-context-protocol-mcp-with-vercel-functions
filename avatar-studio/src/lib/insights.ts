@@ -14,6 +14,10 @@ export interface Insights {
   totalPrevious: number;
   completionRate: number | null;
   totalViews: number;
+  /** Clicks on share-page call-to-action buttons across the library. */
+  totalClicks: number;
+  /** Clicks per view across the library, null until something has been viewed. */
+  clickRate: number | null;
   topViewed: Video[];
   folders: Array<{ name: string; count: number }>;
 }
@@ -35,6 +39,8 @@ export function computeInsights(videos: Video[], now = Date.now(), days = 14): I
   }
   const completed = videos.filter((v) => v.status === "completed").length;
   const failed = videos.filter((v) => v.status === "failed").length;
+  const totalViews = videos.reduce((n, v) => n + (v.views ?? 0), 0);
+  const totalClicks = videos.reduce((n, v) => n + (v.ctaClicks ?? 0), 0);
   const folderCounts = new Map<string, number>();
   for (const v of videos) if (v.folder) folderCounts.set(v.folder, (folderCounts.get(v.folder) ?? 0) + 1);
   return {
@@ -42,7 +48,9 @@ export function computeInsights(videos: Video[], now = Date.now(), days = 14): I
     totalLast: perDay.reduce((n, d) => n + d.count, 0),
     totalPrevious,
     completionRate: completed + failed ? completed / (completed + failed) : null,
-    totalViews: videos.reduce((n, v) => n + (v.views ?? 0), 0),
+    totalViews,
+    totalClicks,
+    clickRate: totalViews ? totalClicks / totalViews : null,
     topViewed: videos
       .filter((v) => (v.views ?? 0) > 0)
       .sort((a, b) => (b.views ?? 0) - (a.views ?? 0))

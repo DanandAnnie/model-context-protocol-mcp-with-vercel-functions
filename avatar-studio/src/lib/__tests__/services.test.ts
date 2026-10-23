@@ -49,7 +49,7 @@ import {
 import { MockAvatarProvider } from "../providers/avatar/mock";
 import { API_KEY_PREFIX, MAX_API_KEYS, createApiKey, listApiKeys, ownerForApiKey, revokeApiKey } from "../api-keys";
 import { createHmac } from "node:crypto";
-import { computeInsights } from "../insights";
+import { computeInsights, finishRateOf } from "../insights";
 import { acceptInvite, canManageAccount, createInvite, createWorkspace, deleteWorkspace, findInvite, listWorkspaces, removeMember, revokeInvite, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
 import type { Video } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
@@ -1272,7 +1272,7 @@ describe("insights", () => {
       updatedAt: new Date(now).toISOString(),
       ...extra,
     });
-    const videos = [mk(0), mk(0, { title: "b", views: 7, ctaClicks: 3 }), mk(13, { views: 2 }), mk(14), mk(20, { status: "failed" }), mk(40), mk(3, { folder: "Listings" }), mk(2, { folder: "Listings", status: "failed" })];
+    const videos = [mk(0), mk(0, { title: "b", views: 7, ctaClicks: 3, watch: { q25: 6, q50: 5, q75: 4, q100: 3 } }), mk(13, { views: 2 }), mk(14), mk(20, { status: "failed" }), mk(40), mk(3, { folder: "Listings" }), mk(2, { folder: "Listings", status: "failed" })];
     const r = computeInsights(videos, now);
     assert.equal(r.perDay.length, 14);
     assert.equal(r.perDay[13].day, "2026-10-23");
@@ -1286,6 +1286,12 @@ describe("insights", () => {
     assert.equal(r.totalClicks, 3);
     assert.equal(r.clickRate, 3 / 9);
     assert.equal(computeInsights([], now).clickRate, null, "no views, no rate");
+    assert.equal(r.finishRate, 3 / 9, "finishes across the library over views across the library");
+    assert.equal(computeInsights([], now).finishRate, null);
+    assert.equal(finishRateOf(videos[1]), 3 / 7);
+    assert.equal(finishRateOf({ views: 0 }), null);
+    assert.equal(finishRateOf({ views: 2, watch: { q25: 9, q50: 9, q75: 9, q100: 9 } }), 1, "never above one when counters disagree");
+    assert.equal(computeInsights([mk(0, { views: 1, watch: { q25: 5, q50: 5, q75: 5, q100: 5 } })], now).finishRate, 1);
     assert.deepEqual(r.topViewed.map((v) => v.views), [7, 2]);
     assert.deepEqual(r.folders, [{ name: "Listings", count: 2 }]);
     assert.equal(computeInsights([], now).completionRate, null);

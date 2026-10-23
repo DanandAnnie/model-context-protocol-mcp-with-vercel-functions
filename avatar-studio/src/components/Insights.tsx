@@ -1,9 +1,9 @@
 "use client";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { Eye, MousePointerClick } from "lucide-react";
+import { CheckCircle2, Eye, MousePointerClick } from "lucide-react";
 import { Card } from "@/components/ui";
-import { computeInsights } from "@/lib/insights";
+import { computeInsights, finishRateOf } from "@/lib/insights";
 import type { Video } from "@/lib/types";
 
 const W = 800;
@@ -104,6 +104,11 @@ export function Insights({ videos }: { videos: Video[] }) {
               {data.clickRate !== null && ` · ${Math.round(data.clickRate * 100)}% of views`}
             </div>
           )}
+          {data.finishRate !== null && (
+            <div className="mt-1 text-xs text-slate-500" data-testid="finish-rate-summary" title="Viewers who played a shared video to the end, as a share of views">
+              {Math.round(data.finishRate * 100)}% watched to the end
+            </div>
+          )}
           {data.topViewed.length > 0 ? (
             <ul className="mt-2 space-y-1 text-xs">
               {data.topViewed.map((v) => (
@@ -113,6 +118,11 @@ export function Insights({ videos }: { videos: Video[] }) {
                   </Link>
                   <span className="inline-flex shrink-0 items-center gap-2 text-slate-500">
                     <span className="inline-flex items-center gap-1"><Eye className="h-3 w-3" /> {v.views}</span>
+                    {(v.watch?.q100 ?? 0) > 0 && (
+                      <span className="inline-flex items-center gap-1" title="Viewers who watched to the end, as a share of views" data-testid="finish-rate">
+                        <CheckCircle2 className="h-3 w-3" /> {Math.round((finishRateOf(v) ?? 0) * 100)}%
+                      </span>
+                    )}
                     {(v.ctaClicks ?? 0) > 0 && <span className="inline-flex items-center gap-1" title="Call-to-action clicks"><MousePointerClick className="h-3 w-3" /> {v.ctaClicks}</span>}
                   </span>
                 </li>

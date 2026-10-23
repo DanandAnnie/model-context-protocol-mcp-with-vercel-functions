@@ -371,9 +371,11 @@ test("share page offers a download only when the owner allows it", async ({ page
   // The row stays readable rather than ellipsised at laptop widths.
   const cell = page.getByTestId("watch-through");
   expect(await cell.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
-  // Home insights total the clicks across the library next to share views.
+  // Home insights total the clicks and finishes across the library next to share views.
   await page.goto("/home");
   await expect(page.getByTestId("cta-click-summary")).toContainText(/button clicks?/);
+  await expect(page.getByTestId("finish-rate-summary")).toContainText(/\d+% watched to the end/);
+  await expect(page.getByTestId("finish-rate").first()).toContainText(/\d+%/);
   await page.goto(`/share/${v.id}`);
   expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareCta: { label: "Go", url: "javascript:alert(1)" } } })).status()).toBe(400);
   expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareCta: null } })).status()).toBe(200);

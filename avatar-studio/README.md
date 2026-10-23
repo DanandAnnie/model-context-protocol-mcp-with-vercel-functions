@@ -30,6 +30,7 @@ D-ID, ElevenLabs, or in a fully offline **demo mode** with no keys at all.
 | Developer API | Personal API keys (created and revoked from Settings, secret shown once) let scripts call every `/api/*` endpoint with `Authorization: Bearer <key>` in any auth mode |
 | Webhook notifications | One signed outbound webhook per account (HMAC-SHA256 over `timestamp.body`) fired on `video.completed` and `video.failed`, with a test button and last-delivery status; private hosts rejected |
 | Plans | Free and Pro plans per account or workspace; the plan sets the monthly render allowance (`RENDER_LIMIT_PER_MONTH`, `PLAN_PRO_RENDERS`); upgrade and manage from Settings via Stripe Checkout and the Billing Portal, or instantly with the demo provider |
+| Email on completion | One email per video when it completes or fails, through the email provider; `/api/health` for uptime monitors |
 | Your data | Export everything for the account or workspace as JSON (secrets redacted) or delete all of it with a typed confirmation; both need a signed-in session |
 | Settings | Usage summary (videos, completed, processing, failed, seconds rendered, this month vs allowance), which provider backs each capability, access mode, and how to configure it |
 | Allowance | Optional `RENDER_LIMIT_PER_MONTH` caps renders per account per calendar month; exceeding it returns 429 with a clear message |

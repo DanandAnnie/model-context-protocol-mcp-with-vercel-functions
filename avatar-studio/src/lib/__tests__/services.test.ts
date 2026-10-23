@@ -59,7 +59,7 @@ import type { StreamingProvider } from "../providers/types";
 import { generateScript } from "../services";
 import { MockBillingProvider, applyStripeEvent, getPlan, renderLimitFor, setBillingProvider, setPlan, verifyStripeSignature } from "../billing";
 import { config } from "../config";
-import { dispatchNotification, getNotifySettings, notifyVideoTransition, saveNotifySettings, setNotificationFetch, signPayload } from "../notifications";
+import { dispatchNotification, emailVideoResult, getNotifySettings, notifyVideoTransition, savePrefs, saveNotifySettings, setNotificationFetch, signPayload } from "../notifications";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import { SCRIPT_TEMPLATES, findTemplate } from "../templates";
 
@@ -1050,5 +1050,33 @@ describe("account data", () => {
     assert.deepEqual(await listVideos("u1"), []);
     assert.equal((await listVideos("u2")).length, 1, "other owners are untouched");
     assert.equal((await exportOwnerData("u1")).video.length, 0);
+  });
+});
+
+describe("render result emails", () => {
+  it("emails the owner on completion and failure when an address is set, and stays quiet otherwise", async () => {
+    const mock = new MockEmailProvider();
+    setEmailProvider(mock);
+    try {
+      const video = await createVideo({ title: "Tour <b>", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, "u1");
+      await notifyVideoTransition(video, { ...video, status: "completed", videoUrl: "https://cdn/x.mp4", durationSec: 12 });
+      assert.equal(mock.sent.length, 0, "no address, no email");
+      await savePrefs({ emailOnComplete: "dana@example.com" }, "u1");
+      await notifyVideoTransition(video, { ...video, status: "completed", videoUrl: "https://cdn/x.mp4", durationSec: 12 });
+      assert.equal(mock.sent.length, 1);
+      assert.equal(mock.sent[0].to, "dana@example.com");
+      assert.match(mock.sent[0].subject, /is ready/);
+      assert.match(mock.sent[0].text, /\/videos\/vid_/);
+      assert.match(mock.sent[0].html, /Tour &lt;b&gt;/, "html escapes the title");
+      assert.equal(await emailVideoResult({ ...video, status: "failed", error: "Provider quota exceeded" }), true);
+      assert.match(mock.sent[1].subject, /could not be rendered/);
+      assert.match(mock.sent[1].text, /Provider quota exceeded/);
+      await savePrefs({}, "u1");
+      assert.equal(await emailVideoResult({ ...video, status: "completed" }), false, "turned off");
+      await notifyVideoTransition({ ...video, status: "completed" }, { ...video, status: "completed" });
+      assert.equal(mock.sent.length, 2, "no transition, no email");
+    } finally {
+      setEmailProvider(undefined);
+    }
   });
 });

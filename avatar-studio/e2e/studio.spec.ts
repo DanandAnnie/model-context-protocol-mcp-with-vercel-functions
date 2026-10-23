@@ -16,6 +16,21 @@ test.beforeEach(async ({ page }) => {
   await page.evaluate(() => localStorage.removeItem("avatar-studio:draft"));
 });
 
+test("health endpoint and email preferences", async ({ request }) => {
+  const health = await request.get("/api/health");
+  expect(health.status()).toBe(200);
+  const h = await health.json();
+  expect(h.ok).toBe(true);
+  expect(h.providers.avatar).toBe("mock");
+  expect((await request.put("/api/prefs", { data: { emailOnComplete: "not-an-email" } })).status()).toBe(400);
+  expect((await request.put("/api/prefs", { data: { emailOnComplete: "dana@example.com" } })).status()).toBe(200);
+  const prefs = await (await request.get("/api/prefs")).json();
+  expect(prefs.prefs.emailOnComplete).toBe("dana@example.com");
+  expect(prefs.emailDelivers).toBe(false);
+  expect((await request.put("/api/prefs", { data: {} })).status()).toBe(200);
+  expect((await (await request.get("/api/prefs")).json()).prefs.emailOnComplete).toBeUndefined();
+});
+
 test("status reports demo mode", async ({ request }) => {
   const status = await (await request.get("/api/status")).json();
   expect(status.mode).toBe("demo");

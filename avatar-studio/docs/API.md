@@ -186,6 +186,11 @@ Returns `{ "reply": "…" }`.
 - `POST /api/webhooks/stripe` receives Stripe events (`checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`), verified with `STRIPE_WEBHOOK_SECRET`
 - `GET /api/status` reports `renderLimitPerMonth` for the active owner and `usage.plan`
 
+## Preferences and health
+
+- `GET /api/prefs` → `{ "prefs", "suggestedEmail", "emailDelivers" }`; `PUT /api/prefs` → `{ "emailOnComplete"?: "you@example.com" }` (omit to turn off). When set, one email per video on completion or failure, with a link to open it; sent through the email provider.
+- `GET /api/health` (public) → `{ "ok", "store", "persistence", "providers", "latencyMs", "time" }`, `503` when the store is unreachable. For uptime monitors.
+
 ## Account data
 
 - `GET /api/account/export` downloads everything stored for the active account or workspace as JSON (key hashes and the webhook secret are left out). Session only; `403` with a key.

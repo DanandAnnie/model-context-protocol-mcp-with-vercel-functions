@@ -164,6 +164,16 @@ export interface NotifySettings {
   lastDelivery?: { at: string; event: NotifyEvent; ok: boolean; status?: number; error?: string };
 }
 
+/** Per-owner preferences that are not provider settings. */
+export interface Prefs {
+  /** `prefs_<ownerId>` */
+  id: string;
+  ownerId: string;
+  /** Send an email when a render completes or fails. */
+  emailOnComplete?: string;
+  updatedAt: string;
+}
+
 export type WorkspaceRole = "owner" | "editor";
 
 export interface WorkspaceMember {

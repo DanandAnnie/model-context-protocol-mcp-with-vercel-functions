@@ -84,6 +84,11 @@ export default function InteractivePage() {
 
   async function saveAgent() {
     if (!avatar) return;
+    const tooLong = starterList.find((s) => s.length > 80);
+    if (tooLong) {
+      setSaveErr(`Each suggested question is at most 80 characters ("${tooLong.slice(0, 30)}…" is ${tooLong.length})`);
+      return;
+    }
     setSaving(true);
     setSaveErr(null);
     try {
@@ -186,7 +191,7 @@ export default function InteractivePage() {
             <Field label="Opening line (optional)" hint="Shown as the presenter's first message on the talk page, before the visitor types.">
               <input aria-label="Opening line" value={greeting} onChange={(e) => setGreeting(e.target.value)} placeholder="Hi, I'm here to help with open houses and showings. What are you looking for?" className={inputClass} maxLength={200} />
             </Field>
-            <Field label="Suggested questions (optional)" hint="Up to three, one per line, offered as chips until the visitor's first message.">
+            <Field label="Suggested questions (optional)" hint="Up to three, one per line and 80 characters each, offered as chips until the visitor's first message.">
               <textarea aria-label="Suggested questions" value={starters} onChange={(e) => setStarters(e.target.value)} rows={3} placeholder={"What are your hours?\nHow do I book a showing?"} className={inputClass} maxLength={300} />
             </Field>
             <Field label="Reply language">

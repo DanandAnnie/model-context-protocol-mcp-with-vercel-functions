@@ -181,15 +181,16 @@ export function ChatPanel({
     if (!content || busy) return;
     const next: ChatTurn[] = [...messages, { role: "user", content }];
     setMessages(next);
-    setDraft("");
+    // A chip sends its own text; whatever the visitor had typed stays in the box.
+    setDraft((d) => (d.trim() === content ? "" : d));
     setBusy(true);
     setErr(null);
     try {
       // The last 20 turns; once the transcript outgrows that, the window starts at a visitor turn so the
       // model never sees a mid-conversation reply as the presenter's opening.
-      const window = next.slice(-20);
-      const firstUser = window.findIndex((m) => m.role === "user");
-      const reply = await ask(next.length > 20 && firstUser > 0 ? window.slice(firstUser) : window);
+      const recent = next.slice(-20);
+      const firstUser = recent.findIndex((m) => m.role === "user");
+      const reply = await ask(next.length > 20 && firstUser > 0 ? recent.slice(firstUser) : recent);
       setMessages([...next, { role: "assistant", content: reply }]);
       if (!(live && (await live.speak(reply)))) speak(reply);
     } catch (e) {
@@ -297,13 +298,18 @@ export function ChatPanel({
           )}
         </div>
         {starters.length > 0 && messages.length === openingTurns.length && (
-          <div className="flex flex-wrap gap-2 px-4 pb-3" data-testid="chat-starters">
-            {starters.map((s) => (
+          <div className="flex flex-wrap gap-2 px-4 pb-3" data-testid="chat-starters" role="group" aria-label="Suggested questions">
+            {starters.map((s, i) => (
               <button
-                key={s}
+                key={i}
                 type="button"
-                onClick={() => send(s)}
-                disabled={busy}
+                onClick={() => {
+                  // A chip ends any push-to-talk in progress so what was heard is not sent as a second message.
+                  dropRecognizer();
+                  setListening(false);
+                  send(s);
+                }}
+                disabled={busy || listening}
                 className={`rounded-full border px-3 py-1 text-xs ${dark ? "border-slate-700 text-slate-200 hover:bg-slate-800" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}
               >
                 {s}

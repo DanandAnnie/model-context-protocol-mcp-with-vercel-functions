@@ -1,19 +1,35 @@
 "use client";
-import { Check } from "lucide-react";
+import { useState } from "react";
+import { Check, Play } from "lucide-react";
 import { FavoriteStar } from "@/components/FavoriteStar";
 import { portraitSvg } from "@/lib/stock";
 import type { Avatar } from "@/lib/types";
 
 export function AvatarTile({ avatar, selected, onSelect, compact }: { avatar: Avatar; selected?: boolean; onSelect?: () => void; compact?: boolean }) {
+  // A presenter with a preview clip plays it, muted, while the tile is hovered or focused.
+  const [previewing, setPreviewing] = useState(false);
+  const preview = avatar.previewVideoUrl;
   return (
     <button
       type="button"
       onClick={onSelect}
+      onMouseEnter={() => preview && setPreviewing(true)}
+      onMouseLeave={() => setPreviewing(false)}
+      onFocus={() => preview && setPreviewing(true)}
+      onBlur={() => setPreviewing(false)}
       className={`group relative block w-full overflow-hidden rounded-xl border bg-white text-left transition ${
         selected ? "border-brand-500 ring-2 ring-brand-200" : "border-slate-200 hover:border-slate-300"
       }`}
     >
-      <div className={`${compact ? "aspect-[4/5]" : "aspect-[4/5]"} w-full overflow-hidden bg-slate-100`}>
+      <div className={`${compact ? "aspect-[4/5]" : "aspect-[4/5]"} relative w-full overflow-hidden bg-slate-100`}>
+        {preview && previewing && (
+          <video src={preview} muted loop autoPlay playsInline aria-hidden="true" data-testid="avatar-preview" className="absolute inset-0 z-10 h-full w-full object-cover" />
+        )}
+        {preview && !previewing && (
+          <span className="absolute bottom-2 right-2 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/50 text-white" title="Hover to preview" data-testid="avatar-preview-badge">
+            <Play className="h-3 w-3" />
+          </span>
+        )}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={avatar.imageUrl}

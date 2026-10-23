@@ -181,6 +181,13 @@ test("scenes can be duplicated and reordered", async ({ page }) => {
 test("the avatar library filters by gender and name", async ({ page }) => {
   await page.goto("/avatars");
   await expect(page.getByRole("img", { name: "Ava Chen" })).toBeVisible();
+  // Library presenters with a preview clip play it, muted, while hovered; others show nothing.
+  await expect(page.getByTestId("avatar-preview-badge")).toHaveCount(2);
+  await page.getByRole("img", { name: "Ava Chen" }).hover();
+  await expect(page.getByTestId("avatar-preview")).toHaveAttribute("src", /ForBiggerEscapes\.mp4$/);
+  await expect(page.getByTestId("avatar-preview")).toHaveJSProperty("muted", true);
+  await page.getByRole("img", { name: "Sofia Reyes" }).hover();
+  await expect(page.getByTestId("avatar-preview")).toHaveCount(0);
   await page.getByLabel("Gender").selectOption("male");
   await expect(page.getByRole("img", { name: "Marcus Hill" })).toBeVisible();
   await expect(page.getByRole("img", { name: "Ava Chen" })).toHaveCount(0);
@@ -1083,6 +1090,10 @@ test("shared presenter: save from the interactive page, talk publicly, turn off"
   await expect(page.getByText(/public host/)).toBeVisible();
   expect((await page.request.post("/api/agents", { data: { name: "Bad", avatarId: "stock_1", knowledgeUrl: "notaurl" } })).status()).toBe(400);
   await page.getByLabel("Knowledge page URL").fill("");
+  await page.getByLabel("Suggested questions").fill("x".repeat(81));
+  await page.getByRole("button", { name: "Save and get link" }).click();
+  await expect(page.getByText(/at most 80 characters/)).toBeVisible();
+  await page.getByLabel("Suggested questions").fill("");
   await page.getByRole("button", { name: "Save and get link" }).click();
   const link = (await page.getByTestId("agent-link").locator("code").innerText()).trim();
   const id = link.split("/talk/")[1];

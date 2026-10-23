@@ -100,8 +100,14 @@ export default function VideoDetailPage() {
     setShareDraft((d) => ({ ...d, ...patch }));
     try {
       const { video: next } = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify(patch) });
-      // Merge: two saves in flight (download, then live) must not let the earlier response undo the later one.
-      setData((d) => ({ video: { ...d?.video, ...next } }));
+      // Merge so two saves in flight (download, then live) cannot let the earlier response undo the
+      // later one; share flags the server has dropped (turning the link back on deletes the key)
+      // must disappear too, or the box would flip back until the refetch lands.
+      setData((d) => {
+        const merged = { ...d?.video, ...next } as Video;
+        for (const key of ["shareDisabled", "shareDownload", "shareLocked", "shareCta"] as const) if (!(key in next)) delete merged[key];
+        return { video: merged };
+      });
       // A status poll that started before the save would land after it with the old record.
       void refetch();
     } catch (e) {

@@ -5,7 +5,7 @@ import { parseCsv, toCsv } from "../csv";
 describe("toCsv", () => {
   it("quotes every cell, escapes quotes, and neutralises formulas", () => {
     const out = toCsv(["email", "note"], [{ email: "a@example.com", note: 'Says "hi", twice' }, { email: "=HYPERLINK(\"x\")", note: undefined }]);
-    assert.equal(out, '"email","note"\r\n"a@example.com","Says ""hi"", twice"\r\n"\'=HYPERLINK(""x"")",""\r\n');
+    assert.equal(out, '\uFEFF"email","note"\r\n"a@example.com","Says ""hi"", twice"\r\n"\'=HYPERLINK(""x"")",""\r\n');
   });
 
   it("round-trips through the parser", () => {

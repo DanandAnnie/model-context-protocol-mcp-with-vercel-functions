@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/client";
 import type { Prefs } from "@/lib/types";
@@ -11,21 +11,27 @@ export function useFavorites() {
   const { data, setData } = useApi<{ prefs: Prefs | null }>("/api/prefs");
   const avatarIds = useMemo(() => new Set(data?.prefs?.favoriteAvatarIds ?? []), [data]);
   const voiceIds = useMemo(() => new Set(data?.prefs?.favoriteVoiceIds ?? []), [data]);
+  // Saves run one after another: the server rewrites the whole preferences record, so two
+  // overlapping requests would let the later one drop the earlier star.
+  const queue = useRef<Promise<void>>(Promise.resolve());
 
   const toggle = useCallback(
-    async (kind: FavoriteKind, id: string) => {
+    (kind: FavoriteKind, id: string) => {
+      if (data === null) return; // stars render only once the list is known; a click before that would race the first load
       const field = kind === "avatar" ? "favoriteAvatarIds" : "favoriteVoiceIds";
-      const before = data?.prefs;
+      const before = data.prefs;
       const current = before?.[field] ?? [];
       const on = !current.includes(id);
       const optimistic = on ? [...current, id] : current.filter((x) => x !== id);
       setData((d) => ({ ...(d ?? {}), prefs: { ...(d?.prefs ?? ({} as Prefs)), [field]: optimistic } as Prefs }));
-      try {
-        const { prefs } = await api<{ prefs: Prefs }>("/api/prefs/favorites", { method: "POST", body: JSON.stringify({ kind, id, on }) });
-        setData((d) => ({ ...(d ?? {}), prefs }));
-      } catch {
-        setData((d) => ({ ...(d ?? {}), prefs: before ?? null }));
-      }
+      queue.current = queue.current.then(async () => {
+        try {
+          const { prefs } = await api<{ prefs: Prefs }>("/api/prefs/favorites", { method: "POST", body: JSON.stringify({ kind, id, on }) });
+          setData((d) => ({ ...(d ?? {}), prefs }));
+        } catch {
+          setData((d) => ({ ...(d ?? {}), prefs: before ?? null }));
+        }
+      });
     },
     [data, setData],
   );

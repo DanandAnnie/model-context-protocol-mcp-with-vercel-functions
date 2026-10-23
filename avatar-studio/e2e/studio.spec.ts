@@ -398,6 +398,10 @@ test("the owner can take a share link offline and back", async ({ page }) => {
   expect((await page.request.get(`/api/videos/${v.id}/captions`)).status()).toBe(200);
   await page.reload();
   await expect(page.getByLabel("Share link is live")).not.toBeChecked();
+  // The library card says so.
+  await page.goto("/videos");
+  await expect(page.locator(`a[href="/videos/${v.id}"]`).getByTestId("share-badges")).toContainText("Link off");
+  await page.goto(`/videos/${v.id}`);
   await page.getByLabel("Share link is live").check();
   await expect(page.getByTestId("share-off-note")).toHaveCount(0);
   await expect.poll(async () => (await (await page.request.get(`/share/${v.id}`)).status())).toBe(200);
@@ -416,6 +420,8 @@ test("a share link can require a password", async ({ page }) => {
   const record = (await (await page.request.get(`/api/videos/${v.id}`)).json()).video as Record<string, unknown>;
   expect(record.shareLocked).toBe(true);
   expect(JSON.stringify(record)).not.toContain("sesame");
+  await page.goto("/videos");
+  await expect(page.locator(`a[href="/videos/${v.id}"]`).getByTestId("share-badges")).toContainText("Password");
 
   // Visitors see the password form and no player; the preview carries no excerpt or thumbnail.
   const html = await (await page.request.get(`/share/${v.id}`)).text();
@@ -832,7 +838,7 @@ test("shared presenter: save from the interactive page, talk publicly, turn off"
   const csvRes = await page.request.get(`/api/agents/${id}/conversations?format=csv`);
   expect(csvRes.headers()["content-type"]).toContain("text/csv");
   const csv = await csvRes.text();
-  expect(csv.split("\r\n")[0]).toBe('"started","last_message","email","name","messages","first_question","last_reply"');
+  expect(csv.replace(/^\uFEFF/, "").split("\r\n")[0]).toBe('"started","last_message","email","name","messages","first_question","last_reply"');
   expect(csv).toContain(`sam-${tag}@example.com`);
   expect(csv).toContain('"Hi there"');
   await page.getByRole("button", { name: `Turn off link for Dana ${tag}` }).click();

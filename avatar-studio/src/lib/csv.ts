@@ -73,5 +73,6 @@ export function toCsv(columns: string[], rows: Array<Record<string, string | num
   };
   const lines = [columns.map(cell).join(",")];
   for (const row of rows) lines.push(columns.map((c) => cell(row[c])).join(","));
-  return `${lines.join("\r\n")}\r\n`;
+  // The byte-order mark makes Excel read the file as UTF-8, so accented names survive; the parser strips it.
+  return `\uFEFF${lines.join("\r\n")}\r\n`;
 }

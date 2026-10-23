@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { Film } from "lucide-react";
+import { Film, LinkIcon, Lock } from "lucide-react";
 import { StatusBadge } from "./ui";
 import { formatDate, formatSeconds } from "@/lib/client";
 import type { Video } from "@/lib/types";
@@ -31,6 +31,20 @@ export function VideoCard({ video, selectable = false, selected = false, onToggl
         )}
         {video.durationSec != null && (
           <span className="absolute bottom-2 right-2 rounded bg-black/70 px-1.5 py-0.5 text-xs text-white">{formatSeconds(video.durationSec)}</span>
+        )}
+        {(video.shareDisabled || video.shareLocked) && (
+          <span className="absolute bottom-2 left-2 flex gap-1" data-testid="share-badges">
+            {video.shareDisabled && (
+              <span className="inline-flex items-center gap-1 rounded bg-black/70 px-1.5 py-0.5 text-xs text-white" title="The share link is off">
+                <LinkIcon className="h-3 w-3" /> Link off
+              </span>
+            )}
+            {video.shareLocked && (
+              <span className="inline-flex items-center gap-1 rounded bg-black/70 px-1.5 py-0.5 text-xs text-white" title="Visitors need a password">
+                <Lock className="h-3 w-3" /> Password
+              </span>
+            )}
+          </span>
         )}
       </div>
       <div className="p-3">

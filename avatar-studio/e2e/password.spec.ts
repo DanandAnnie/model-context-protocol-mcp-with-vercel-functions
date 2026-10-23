@@ -7,6 +7,8 @@ test("pages redirect, API rejects, public paths stay open", async ({ request }) 
   expect(home.status()).toBe(307);
   expect(home.headers()["location"]).toContain("/login?next=%2Fhome");
   expect((await request.get("/api/videos")).status()).toBe(401);
+  // The library spreadsheet is not public.
+  expect((await request.get("/api/videos/analytics")).status()).toBe(401);
   expect((await request.get("/")).status()).toBe(200);
   expect((await request.get("/login")).status()).toBe(200);
 });

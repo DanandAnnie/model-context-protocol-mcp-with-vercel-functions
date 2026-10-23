@@ -49,6 +49,7 @@ import {
 import { MockAvatarProvider } from "../providers/avatar/mock";
 import { API_KEY_PREFIX, MAX_API_KEYS, createApiKey, listApiKeys, ownerForApiKey, revokeApiKey } from "../api-keys";
 import { createHmac } from "node:crypto";
+import { parseCsv, toCsv } from "../csv";
 import { ANALYTICS_COLUMNS, analyticsRows, computeInsights, finishRateOf } from "../insights";
 import { acceptInvite, canManageAccount, createInvite, createWorkspace, deleteWorkspace, findInvite, listWorkspaces, removeMember, revokeInvite, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
 import type { Video } from "../types";
@@ -1318,7 +1319,10 @@ describe("insights", () => {
     assert.equal(computeInsights([mk(0, { views: 4, watch: { q25: 1, q50: 0, q75: 0, q100: 0 } })], now).finishRate, 0, "a mark without a finish is a real 0%");
     // The CSV rows carry the same numbers in spreadsheet form.
     const rows = analyticsRows([videos[1], videos[0]], "https://studio.example.com/");
-    assert.deepEqual(Object.keys(rows[0]), [...ANALYTICS_COLUMNS], "columns in order");
+    const sheet = parseCsv(toCsv([...ANALYTICS_COLUMNS], rows));
+    assert.deepEqual(sheet.columns, [...ANALYTICS_COLUMNS], "the file carries the columns in order");
+    assert.equal(sheet.rows[1].finish_rate, "", "no views, empty cell in the file");
+    assert.equal(sheet.rows[0].finish_rate, "43");
     assert.equal(rows[0].views, 7);
     assert.equal(rows[0].watched_100, 3);
     assert.equal(rows[0].finish_rate, 43, "percent, rounded");

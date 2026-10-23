@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { AxeBuilder } from "@axe-core/playwright";
+import { parseCsv } from "../src/lib/csv";
 
 // Demo-mode flows. The mock renderer completes ~12s after submission.
 
@@ -385,14 +386,13 @@ test("share page offers a download only when the owner allows it", async ({ page
   await expect(page.getByTestId("analytics-csv")).toBeVisible();
   const analytics = await page.request.get("/api/videos/analytics");
   expect(analytics.headers()["content-type"]).toContain("text/csv");
-  const sheet = (await analytics.text()).replace(/^\uFEFF/, "").split("\r\n");
-  expect(sheet[0]).toBe('"id","title","status","created","folder","duration_sec","views","last_viewed","watched_25","watched_50","watched_75","watched_100","finish_rate","cta_clicks","share_link"');
-  const row = sheet.find((l) => l.startsWith(`"${v.id}"`))!.slice(1, -1).split('","');
-  const col = (name: string) => row[sheet[0].slice(1, -1).split('","').indexOf(name)];
-  expect([col("watched_25"), col("watched_50"), col("watched_75"), col("watched_100"), col("cta_clicks")]).toEqual(["1", "1", "1", "1", "1"]);
-  expect(Number(col("views"))).toBeGreaterThan(0);
-  expect(Number(col("finish_rate"))).toBeGreaterThan(0);
-  expect(col("share_link")).toContain(`/share/${v.id}`);
+  const sheet = parseCsv(await analytics.text());
+  expect(sheet.columns).toEqual(["id", "title", "status", "created", "folder", "duration_sec", "views", "last_viewed", "watched_25", "watched_50", "watched_75", "watched_100", "finish_rate", "cta_clicks", "share_link"]);
+  const row = sheet.rows.find((r) => r.id === v.id)!;
+  expect([row.watched_25, row.watched_50, row.watched_75, row.watched_100, row.cta_clicks]).toEqual(["1", "1", "1", "1", "1"]);
+  expect(Number(row.views)).toBeGreaterThan(0);
+  expect(Number(row.finish_rate)).toBeGreaterThan(0);
+  expect(row.share_link).toContain(`/share/${v.id}`);
   await page.goto(`/share/${v.id}`);
   expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareCta: { label: "Go", url: "javascript:alert(1)" } } })).status()).toBe(400);
   expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareCta: null } })).status()).toBe(200);

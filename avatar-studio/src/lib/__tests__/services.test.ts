@@ -151,3 +151,20 @@ describe("captions", () => {
     assert.deepEqual(buildCues("Hi.", 0), []);
   });
 });
+
+describe("auth", () => {
+  it("is open without a password and validates tokens with one", async () => {
+    const { authEnabled, isValidSession, sessionToken, timingSafeEqual } = await import("../auth");
+    delete process.env.STUDIO_PASSWORD;
+    assert.equal(authEnabled(), false);
+    assert.equal(await isValidSession(undefined), true);
+    process.env.STUDIO_PASSWORD = "hunter2";
+    assert.equal(authEnabled(), true);
+    assert.equal(await isValidSession(undefined), false);
+    assert.equal(await isValidSession("wrong"), false);
+    assert.equal(await isValidSession(await sessionToken("hunter2")), true);
+    assert.notEqual(await sessionToken("hunter2"), await sessionToken("hunter3"));
+    assert.equal(timingSafeEqual("abc", "abd"), false);
+    delete process.env.STUDIO_PASSWORD;
+  });
+});

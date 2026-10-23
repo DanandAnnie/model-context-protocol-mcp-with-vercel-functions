@@ -3,7 +3,7 @@ import { Card, SectionTitle } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import type { ProviderStatus } from "@/lib/types";
 
-const ROWS: Array<{ key: keyof Omit<ProviderStatus, "mode">; label: string; env: string; options: string }> = [
+const ROWS: Array<{ key: keyof Omit<ProviderStatus, "mode" | "authEnabled">; label: string; env: string; options: string }> = [
   { key: "avatar", label: "Avatar rendering", env: "AVATAR_PROVIDER + HEYGEN_API_KEY / DID_API_KEY", options: "heygen, did, mock" },
   { key: "tts", label: "Voices / text-to-speech", env: "TTS_PROVIDER + ELEVENLABS_API_KEY / HEYGEN_API_KEY", options: "elevenlabs, heygen, mock" },
   { key: "script", label: "AI script writer", env: "SCRIPT_PROVIDER + ANTHROPIC_API_KEY", options: "anthropic, mock" },
@@ -34,6 +34,17 @@ export default function SettingsPage() {
             </div>
           );
         })}
+      </Card>
+      <Card className="mt-6 flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+        <div>
+          <div className="text-sm font-medium text-slate-900">Access</div>
+          <div className="mt-0.5 text-xs text-slate-500">
+            <code className="rounded bg-slate-100 px-1 py-0.5">STUDIO_PASSWORD</code> · when set, every page except the landing page, login, and share pages requires sign-in
+          </div>
+        </div>
+        <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${data?.authEnabled ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
+          {data ? (data.authEnabled ? "password required" : "open") : "…"}
+        </span>
       </Card>
       <Card className="mt-6 p-5 text-sm text-slate-600">
         <h3 className="mb-2 font-semibold text-slate-900">How to go live</h3>

@@ -93,4 +93,5 @@ export interface ProviderStatus {
   script: string;
   translate: string;
   persistence: "memory" | "supabase";
+  authEnabled: boolean;
 }

@@ -20,7 +20,8 @@ D-ID, ElevenLabs, or in a fully offline **demo mode** with no keys at all.
 | Avatars | Library presenters + photo avatars created from an uploaded portrait or image URL |
 | Voices | Searchable voice library with previews (provider audio, provider sample, or browser speech in demo mode) |
 | Video translate | Submit a video URL + target language, track dubbing jobs |
-| Settings | Shows which provider backs each capability and how to configure it |
+| Settings | Shows which provider backs each capability, access mode, and how to configure it |
+| Access | Optional `STUDIO_PASSWORD` gate (sign-in page, 30-day session cookie); landing, login, share pages, and provider webhooks stay public |
 | API | REST routes under `/api/*`, provider webhooks under `/api/webhooks/:provider` |
 
 ## Quick start
@@ -46,6 +47,10 @@ after ~12 seconds using a sample clip.
 | Script writer | `SCRIPT_PROVIDER` = `anthropic` \| `mock` | Claude via the Anthropic SDK |
 | Translation | automatic when `HEYGEN_API_KEY` is set | HeyGen Video Translate |
 | Persistence | `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` | Supabase (`supabase/schema.sql`), else in-memory |
+
+Set `STUDIO_PASSWORD` to require sign-in before deploying anywhere public.
+Real per-user accounts are a follow-up; this gate keeps a shared instance
+private in the meantime.
 
 CI: `.github/workflows/avatar-studio.yml` runs typecheck, tests, and the
 production build on every push or PR that touches this folder.
@@ -78,5 +83,5 @@ supabase/schema.sql     one-table JSON store
 
 ## Not included (yet)
 
-User accounts and per-user workspaces, billing/credits, a timeline editor with
+Per-user accounts and workspaces (only a shared password gate today), billing/credits, a timeline editor with
 multiple scenes, interactive real-time avatars, and avatar training from video.

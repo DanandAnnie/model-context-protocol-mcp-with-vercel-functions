@@ -1,8 +1,8 @@
 "use client";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Clapperboard, Home, Languages, LayoutTemplate, Menu, Mic2, Settings, Users, Video, Sparkles, X } from "lucide-react";
+import { Clapperboard, Home, Languages, LayoutTemplate, LogOut, Menu, Mic2, Settings, Users, Video, Sparkles, X } from "lucide-react";
 import { useApi } from "@/hooks/useApi";
 import type { ProviderStatus } from "@/lib/types";
 
@@ -19,7 +19,13 @@ const NAV = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { data: status } = useApi<ProviderStatus>("/api/status");
+
+  async function signOut() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.replace("/login");
+  }
   const [open, setOpen] = useState(false);
 
   // Close the drawer on navigation.
@@ -93,6 +99,11 @@ export function Sidebar() {
             Configure providers
           </Link>
         </div>
+        {status?.authEnabled && (
+          <button onClick={signOut} className="mt-2 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100">
+            <LogOut className="h-3.5 w-3.5" /> Sign out
+          </button>
+        )}
       </div>
     </aside>
     </>

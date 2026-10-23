@@ -84,6 +84,10 @@ When completed the video also carries `videoUrl`, `thumbnailUrl`, and `durationS
 ### `PATCH /api/videos/:id` — `{ "title"?: string, "folder"?: string }` (empty `folder` means unfiled)
 ### `DELETE /api/videos/:id`
 ### `POST /api/videos/bulk` — `{ "action": "move", "ids": [...], "folder": "Q4" }` or `{ "action": "delete", "ids": [...] }` → `{ "done", "missing" }`
+### `POST /api/videos/:id/retry`
+
+Submits a **failed** render again as a new video with the same scenes, presenter, look, and quality; the new video keeps the original's folder and batch row and carries `retryOf` with the original id. Returns `201 { video }` (or `502` when the provider refuses the start again). `409` when the video is not failed, `404` when it is not yours.
+
 ### `GET /api/videos/:id/captions` — SRT; add `?format=vtt` for WebVTT (public)
 ### `POST /api/videos/:id/view` — share-page view beacon (public; one per viewer per 10 minutes)
 

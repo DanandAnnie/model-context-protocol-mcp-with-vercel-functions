@@ -1029,6 +1029,31 @@ describe("voice cloning", () => {
   });
 });
 
+describe("retrying a failed render", () => {
+  it("submits the same request as a new video, keeps folder and batch row, and refuses other states", async () => {
+    const { retryVideo, ConflictError, NotFoundError } = await import("../services");
+    const { getStore } = await import("../store");
+    const ok = await createVideo({ title: "Fine", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, "u1");
+    const failed: Video = { ...ok, id: "vid_failed", status: "failed", error: "provider hiccup", providerJobId: undefined, folder: "Q4", batchId: "batch_1", rowLabel: "Ann", resolution: "720p", scenes: [{ script: "Hi.", background: ok.background }] };
+    await getStore().put("video", failed);
+
+    const again = await retryVideo("vid_failed", "u1");
+    assert.notEqual(again.id, failed.id);
+    assert.equal(again.status, "processing");
+    assert.equal(again.title, "Fine");
+    assert.equal(again.resolution, "720p");
+    assert.deepEqual(again.scenes, failed.scenes);
+    assert.equal(again.folder, "Q4");
+    assert.equal(again.batchId, "batch_1");
+    assert.equal(again.rowLabel, "Ann");
+    assert.equal(again.retryOf, "vid_failed");
+    assert.equal((await getVideo("vid_failed", "u1", false)).status, "failed", "the original is kept");
+
+    await assert.rejects(retryVideo(ok.id, "u1"), ConflictError);
+    await assert.rejects(retryVideo("vid_failed", "u2"), NotFoundError);
+  });
+});
+
 describe("account data", () => {
   it("exports every kind with secrets redacted and deletes everything for the owner only", async () => {
     await createVideo({ title: "Mine", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, "u1");

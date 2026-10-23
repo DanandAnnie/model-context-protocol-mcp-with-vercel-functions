@@ -7,7 +7,7 @@ import { MAX_SCENES } from "../types";
 import type { Avatar, Video, VideoRequest, Voice } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { renderLimitFor } from "../billing";
-import { LimitError, NotFoundError, ValidationError } from "../errors";
+import { ConflictError, LimitError, NotFoundError, ValidationError } from "../errors";
 import { getAvatar } from "./avatars";
 import { listVoices } from "./voices";
 import { owned, scheduleNotification, stripUndefined } from "./shared";
@@ -199,6 +199,30 @@ export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId
     done += 1;
   }
   return { done, missing };
+}
+
+/**
+ * Submit a failed render again with the same request (scenes, presenter, look, quality) as a new
+ * video, keeping its folder and batch row. Only failed videos can be retried; the original stays.
+ */
+export async function retryVideo(id: string, ownerId: string = LOCAL_OWNER): Promise<Video> {
+  const failed = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
+  if (failed.status !== "failed") throw new ConflictError("Only failed renders can be retried");
+  const req: VideoRequest = {
+    title: failed.title,
+    script: failed.script,
+    scenes: failed.scenes,
+    avatarId: failed.avatarId,
+    voiceId: failed.voiceId,
+    aspect: failed.aspect,
+    resolution: failed.resolution,
+    background: failed.background,
+    captions: failed.captions,
+    speed: failed.speed,
+  };
+  const video = await createVideo(req, ownerId);
+  const carried = stripUndefined({ folder: failed.folder, batchId: failed.batchId, rowLabel: failed.rowLabel, retryOf: failed.id });
+  return Object.keys(carried).length ? getStore().put("video", { ...video, ...carried }) : video;
 }
 
 export async function deleteVideo(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {

@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import { ArrowLeft, Captions, Check, Code2, Copy, Download, Eye, FolderOpen, Languages, Link2, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, Captions, Check, Code2, Copy, Download, Eye, FolderOpen, Languages, Link2, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate, formatSeconds, isDarkHex } from "@/lib/client";
@@ -87,6 +87,21 @@ export default function VideoDetailPage() {
       setTimeout(() => setEmbedCopied(false), 2000);
     } catch {
       window.prompt("Copy this embed code", snippet);
+    }
+  }
+
+  const [retrying, setRetrying] = useState(false);
+  const [retryErr, setRetryErr] = useState<string | null>(null);
+  async function retry() {
+    if (!video) return;
+    setRetrying(true);
+    setRetryErr(null);
+    try {
+      const { video: next } = await api<{ video: Video }>(`/api/videos/${video.id}/retry`, { method: "POST" });
+      router.push(`/videos/${next.id}`);
+    } catch (e) {
+      setRetryErr(e instanceof Error ? e.message : "Could not retry the render");
+      setRetrying(false);
     }
   }
 
@@ -188,6 +203,15 @@ export default function VideoDetailPage() {
                   <div className="p-8 text-center text-sm text-rose-200">
                     <p className="font-medium">Render failed</p>
                     <p className="mt-1 text-rose-300/80">{video.error}</p>
+                    <button
+                      type="button"
+                      onClick={retry}
+                      disabled={retrying}
+                      className="mt-4 inline-flex items-center gap-2 rounded-lg bg-white/10 px-4 py-2 text-sm font-medium text-white hover:bg-white/20 disabled:opacity-60"
+                    >
+                      <RotateCcw className="h-4 w-4" /> {retrying ? "Submitting…" : "Retry render"}
+                    </button>
+                    {retryErr && <p className="mt-2 text-xs text-rose-300">{retryErr}</p>}
                   </div>
                 ) : (
                   <div className="p-8 text-center text-slate-300">

@@ -164,6 +164,9 @@ test("API validation and webhook guard", async ({ request }) => {
   expect((await hd.json()).video.resolution).toBe("720p");
   const full = await request.post("/api/videos", { data: base });
   expect((await full.json()).video.resolution).toBe("1080p");
+  // Retry is only for failed renders; a healthy one is refused and an unknown id is not found.
+  expect((await request.post(`/api/videos/${(await full.json()).video.id}/retry`)).status()).toBe(409);
+  expect((await request.post("/api/videos/vid_nope/retry")).status()).toBe(404);
   expect((await request.post("/api/webhooks/heygen", { data: {} })).status()).toBe(503);
   const preview = await request.post("/api/voices/preview", { data: { voiceId: "stock_voice_1", text: "hi" } });
   expect(preview.status()).toBe(204);

@@ -99,6 +99,8 @@ export interface Video extends VideoRequest {
   voiceName?: string;
   /** Library folder name; unfiled when absent. */
   folder?: string;
+  /** Id of the failed render this one was retried from. */
+  retryOf?: string;
   /** Share page views (completed videos only; one per viewer per window). */
   views?: number;
   lastViewedAt?: string;

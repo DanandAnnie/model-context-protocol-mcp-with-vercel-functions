@@ -19,6 +19,8 @@ export default function BrandPage() {
   const [logoUrl, setLogoUrl] = useState("");
   const [primary, setPrimary] = useState(DEFAULT_PRIMARY);
   const [accent, setAccent] = useState("");
+  const [bgType, setBgType] = useState<"" | "image" | "video">("");
+  const [bgUrl, setBgUrl] = useState("");
   const [avatarId, setAvatarId] = useState("");
   const [voiceId, setVoiceId] = useState("");
   const [aspect, setAspect] = useState<AspectRatio | "">("");
@@ -40,6 +42,8 @@ export default function BrandPage() {
     setLogoUrl(b.logoUrl ?? "");
     setPrimary(b.primaryColor);
     setAccent(b.accentColor ?? "");
+    setBgType(b.defaultBackground && b.defaultBackground.type !== "color" ? b.defaultBackground.type : "");
+    setBgUrl(b.defaultBackground && b.defaultBackground.type !== "color" ? b.defaultBackground.value : "");
     setAvatarId(b.defaultAvatarId ?? "");
     setVoiceId(b.defaultVoiceId ?? "");
     setAspect(b.defaultAspect ?? "");
@@ -73,6 +77,7 @@ export default function BrandPage() {
           logoUrl,
           primaryColor: primary,
           accentColor: accent || undefined,
+          defaultBackground: bgType && bgUrl.trim() ? { type: bgType, value: bgUrl.trim() } : undefined,
           defaultAvatarId: avatarId || undefined,
           defaultVoiceId: voiceId || undefined,
           defaultAspect: aspect || undefined,
@@ -196,6 +201,20 @@ export default function BrandPage() {
                 ))}
               </select>
             </Field>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Default background" hint="What sits behind the presenter in every new video. A video loops on HeyGen; other renderers use their default.">
+              <select aria-label="Default background" value={bgType} onChange={(e) => setBgType(e.target.value as typeof bgType)} className={inputClass}>
+                <option value="">Primary colour</option>
+                <option value="image">Image URL</option>
+                <option value="video">Video URL</option>
+              </select>
+            </Field>
+            {bgType && (
+              <Field label={bgType === "video" ? "Background video URL" : "Background image URL"} hint="A public URL.">
+                <input aria-label="Default background URL" value={bgUrl} onChange={(e) => setBgUrl(e.target.value)} placeholder={bgType === "video" ? "https://…/loop.mp4" : "https://…/background.jpg"} className={inputClass} maxLength={2000} />
+              </Field>
+            )}
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Default aspect ratio">

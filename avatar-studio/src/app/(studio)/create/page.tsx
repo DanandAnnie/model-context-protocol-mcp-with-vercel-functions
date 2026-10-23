@@ -244,7 +244,7 @@ function CreateInner() {
     if (b.defaultResolution) setResolution(b.defaultResolution);
     if (templateId) return;
     if (b.defaultAspect) setAspect(b.defaultAspect);
-    setScenes((prev) => prev.map((sc) => (sc.script.trim() ? sc : { ...sc, background: { type: "color", value: b.primaryColor } })));
+    setScenes((prev) => prev.map((sc) => (sc.script.trim() ? sc : { ...sc, background: b.defaultBackground ?? { type: "color", value: b.primaryColor } })));
   }, [brandData, fromId, templateId, draftRestored]);
 
   // Pre-fill from a template (?template=) or an existing video (?from=).
@@ -397,7 +397,7 @@ function CreateInner() {
           <input className={`${inputClass} text-base font-medium`} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Video title" />
 
           <Card className="overflow-hidden">
-            <div className={`relative mx-auto w-full ${stageAspect} ${aspect === "9:16" ? "max-h-[520px]" : ""} flex items-end justify-center overflow-hidden`} style={background.type === "color" ? { background: background.value } : background.type === "image" ? { backgroundImage: `url(${background.value})`, backgroundSize: "cover", backgroundPosition: "center" } : { background: "#0f172a" }}>
+            <div data-testid="stage" className={`relative mx-auto w-full ${stageAspect} ${aspect === "9:16" ? "max-h-[520px]" : ""} flex items-end justify-center overflow-hidden`} style={background.type === "color" ? { background: background.value } : background.type === "image" ? { backgroundImage: `url(${background.value})`, backgroundSize: "cover", backgroundPosition: "center" } : { background: "#0f172a" }}>
               {/* Only a complete URL is previewed, so a half-typed one is not requested keystroke by keystroke. */}
               {background.type === "video" && /^https?:\/\/\S+\.\S+/.test(background.value) && (
                 <video key={background.value} src={background.value} muted loop autoPlay playsInline aria-hidden="true" data-testid="stage-video" className="absolute inset-0 h-full w-full object-cover" />

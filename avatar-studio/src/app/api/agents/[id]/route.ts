@@ -3,6 +3,8 @@ import { requireOwner } from "@/lib/owner";
 import { agentPatchSchema, deleteAgent, getAgent, updateAgent } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
+/** Creating or editing may read a knowledge page (10 s fetch budget). */
+export const maxDuration = 60;
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function GET(_req: Request, ctx: Ctx) {

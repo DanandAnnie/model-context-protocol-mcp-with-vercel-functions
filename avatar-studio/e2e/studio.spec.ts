@@ -810,11 +810,16 @@ test("brand kit pre-fills the editor and brands the share page", async ({ page }
     await page.getByLabel("Default voice").selectOption("stock_voice_3");
     await page.getByLabel("Captions on by default").check();
     await page.getByLabel("Default output quality").selectOption("720p");
+    await page.getByLabel("Default background").selectOption("image");
+    await page.getByLabel("Default background URL").fill("https://example.com/brand-bg.jpg");
     await page.getByRole("button", { name: "Save brand kit" }).click();
     await expect(page.getByText(/^Saved /)).toBeVisible();
+    expect((await (await page.request.get("/api/brand")).json()).brand.defaultBackground).toEqual({ type: "image", value: "https://example.com/brand-bg.jpg" });
 
     await page.goto("/create");
     await expect(page.getByText(/· Olivia · 16:9 · 1 scene · captions on$/)).toBeVisible({ timeout: 10_000 });
+    // The kit's background sits behind the first scene.
+    await expect(page.getByTestId("stage")).toHaveCSS("background-image", /brand-bg\.jpg/);
     await page.getByRole("button", { name: "Settings" }).click();
     await expect(page.getByRole("button", { name: /^720p/ })).toHaveAttribute("aria-pressed", "true");
 
@@ -1092,6 +1097,10 @@ test("shared presenter: save from the interactive page, talk publicly, turn off"
 
   // Lead capture: turn it on, a visitor sees the form after the first reply, the owner sees the email.
   expect((await page.request.patch(`/api/agents/${id}`, { data: { collectEmail: true } })).status()).toBe(200);
+  // Editing one field leaves the rest alone: the instructions (and the greeting built from them) survive the patch.
+  const afterPatch = (await (await page.request.get(`/api/agents/${id}`)).json()).agent as { instructions: string; isPublic: boolean };
+  expect(afterPatch.instructions).toContain("real estate team");
+  expect(afterPatch.isPublic).toBe(true);
   const visitorPage = await page.context().newPage();
   await visitorPage.goto(`/talk/${id}`);
   await expect(visitorPage.getByTestId("lead-form")).toHaveCount(0);

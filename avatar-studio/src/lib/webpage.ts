@@ -38,7 +38,7 @@ export function extractReadableText(html: string): { title: string; text: string
 }
 
 /** Fetches a public page (no redirects, size and time capped) and returns its readable text. */
-export async function fetchPageText(url: string, fetchImpl?: FetchLike): Promise<{ title: string; text: string }> {
+export async function fetchPageText(url: string, fetchImpl?: FetchLike, what = "Page URL"): Promise<{ title: string; text: string }> {
   const res = await safeFetch(
     url,
     {
@@ -46,7 +46,7 @@ export async function fetchPageText(url: string, fetchImpl?: FetchLike): Promise
       signal: AbortSignal.timeout(10_000),
       headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "AvatarStudio-ScriptWriter/1.0" },
     },
-    "Page URL",
+    what,
     fetchImpl,
     { maxBytes: MAX_PAGE_BYTES },
   ).catch((err) => {

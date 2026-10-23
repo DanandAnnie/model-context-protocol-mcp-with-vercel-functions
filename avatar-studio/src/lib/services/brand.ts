@@ -7,6 +7,7 @@ import { LOCAL_OWNER } from "../owner-id";
 import { ValidationError } from "../errors";
 import { getAvatar } from "./avatars";
 import { listVoices } from "./voices";
+import { backgroundSchema } from "./videos";
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
@@ -19,6 +20,8 @@ export const brandKitSchema = z.object({
     .default(""),
   primaryColor: z.string().regex(HEX_COLOR, "Use a 6-digit hex color like #4f46e5"),
   accentColor: z.string().regex(HEX_COLOR, "Use a 6-digit hex color like #4f46e5").optional(),
+  /** Image or video behind new scenes; a colour here is the same as leaving it out and using the primary colour. */
+  defaultBackground: backgroundSchema.optional(),
   defaultAvatarId: z.string().trim().max(200).optional(),
   defaultVoiceId: z.string().trim().max(200).optional(),
   defaultAspect: z.enum(["16:9", "9:16", "1:1"]).optional(),
@@ -46,6 +49,7 @@ export async function saveBrandKit(input: z.infer<typeof brandKitSchema>, ownerI
     logoUrl: input.logoUrl || undefined,
     primaryColor: input.primaryColor.toLowerCase(),
     accentColor: input.accentColor?.toLowerCase(),
+    ...(input.defaultBackground && input.defaultBackground.type !== "color" ? { defaultBackground: input.defaultBackground } : {}),
     defaultAvatarId: input.defaultAvatarId || undefined,
     defaultVoiceId: input.defaultVoiceId || undefined,
     defaultAspect: input.defaultAspect,

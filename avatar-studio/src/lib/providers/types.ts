@@ -66,9 +66,21 @@ export interface ChatMessage {
 export interface ChatPersona {
   /** Presenter name shown to the visitor. */
   name: string;
-  /** What the presenter knows and how it should behave, written by the owner. */
+  /** What the presenter knows and how it should behave, written by the owner; a knowledge page, when read, follows `KNOWLEDGE_MARKER`. */
   instructions: string;
   language: string;
+}
+
+/** Marks where the owner's instructions end and a knowledge page's text begins in `ChatPersona.instructions`. */
+export const KNOWLEDGE_MARKER = "Reference material from the page at ";
+
+/** Splits a persona's instructions into the owner's own text and the page text (empty without a page). */
+export function splitKnowledge(instructions: string): { own: string; reference: string } {
+  const at = instructions.indexOf(`\n\n${KNOWLEDGE_MARKER}`);
+  if (at < 0) return { own: instructions, reference: "" };
+  const rest = instructions.slice(at + 2 + KNOWLEDGE_MARKER.length);
+  const nl = rest.indexOf("\n");
+  return { own: instructions.slice(0, at), reference: nl < 0 ? "" : rest.slice(nl + 1) };
 }
 
 export interface TranslateProvider {

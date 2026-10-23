@@ -44,7 +44,7 @@ export class AnthropicScriptProvider implements ScriptProvider {
   async chat({ persona, messages }: { persona: ChatPersona; messages: ChatMessage[] }) {
     const system = `You are ${persona.name}, a presenter speaking live to a visitor through an interactive avatar. Reply in ${persona.language}.
 Rules: answer in one to three short spoken sentences; no markdown, lists, or stage directions; stay in character; if you do not know, say so briefly and offer what you can.
-Background and instructions from the owner:
+Background and instructions from the owner, followed by any reference page they named:
 ${persona.instructions || "(none provided: be a friendly, helpful presenter)"}`;
     // A reply cut off at the token cap is still a usable spoken answer; the writer paths keep throwing.
     return this.complete(messages, system, 400, true);

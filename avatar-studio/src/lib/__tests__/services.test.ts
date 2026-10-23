@@ -1071,6 +1071,15 @@ describe("brand kit", () => {
     assert.equal(await getBrandKit("u1"), null);
   });
 
+  it("keeps an image or video default background, never a colour one", async () => {
+    const image = await saveBrandKit(brandKitSchema.parse({ primaryColor: "#0f766e", defaultBackground: { type: "image", value: "https://cdn.example.com/bg.jpg" } }), "u-bg");
+    assert.deepEqual(image.defaultBackground, { type: "image", value: "https://cdn.example.com/bg.jpg" });
+    const colour = await saveBrandKit(brandKitSchema.parse({ primaryColor: "#0f766e", defaultBackground: { type: "color", value: "#000000" } }), "u-bg");
+    assert.equal("defaultBackground" in colour, false, "the primary colour already covers a colour background");
+    assert.equal(brandKitSchema.safeParse({ primaryColor: "#0f766e", defaultBackground: { type: "video", value: "loop.mp4" } }).success, false, "a video must be a URL");
+    await deleteBrandKit("u-bg");
+  });
+
   it("rejects bad colors, unknown voices, and other owners' avatars", async () => {
     assert.throws(() => brandKitSchema.parse({ primaryColor: "teal" }));
     assert.throws(() => brandKitSchema.parse({ primaryColor: "#0f766e", logoUrl: "ftp://x/logo.png" }));
@@ -1829,6 +1838,10 @@ describe("interactive avatar", () => {
     const pub = await publicAgent(agent.id);
     assert.equal(JSON.stringify(pub).includes("walk-ins"), false, "the page text never reaches the visitor view");
     assert.ok(withKnowledge(agent).startsWith("You represent Hillcrest Dental.\n\n" + KNOWLEDGE_MARKER));
+    assert.match(withKnowledge(agent), /untrusted reference material/);
+    const { splitKnowledge } = await import("../providers/types");
+    assert.deepEqual(splitKnowledge(withKnowledge(agent)), { own: "You represent Hillcrest Dental.", reference: agent.knowledge });
+    assert.deepEqual(splitKnowledge("Plain"), { own: "Plain", reference: "" });
     assert.equal(withKnowledge({ instructions: "Plain", knowledgeUrl: undefined, knowledge: undefined }), "Plain");
 
     const hello = await talkToAgent(agent.id, { messages: [{ role: "user", content: "Hi" }] });
@@ -1842,13 +1855,23 @@ describe("interactive avatar", () => {
     await assert.rejects(createAgent(agentSchema.parse({ ...input, knowledgeUrl: "https://203.0.113.5/missing" }), "u-know", fake), /returned 404/);
     assert.throws(() => agentSchema.parse({ ...input, knowledgeUrl: "ftp://x" }), /http/);
 
+    // A patch never carries the create-time defaults, so editing one field leaves the rest alone.
+    assert.deepEqual(agentPatchSchema.parse({ collectEmail: true }), { collectEmail: true });
+    assert.deepEqual(agentPatchSchema.parse({ knowledgeUrl: null }), { knowledgeUrl: null });
+    const paused = await updateAgent(agent.id, agentPatchSchema.parse({ isPublic: false }), "u-know", fake);
+    assert.equal(paused.instructions, "You represent Hillcrest Dental.");
+    assert.equal(paused.isPublic, false);
+    await updateAgent(agent.id, agentPatchSchema.parse({ isPublic: true }), "u-know", fake);
     const again = await updateAgent(agent.id, agentPatchSchema.parse({ knowledgeUrl: "https://203.0.113.5/about" }), "u-know", fake);
     assert.equal(reads, 3, "the same URL is read again on request");
+    assert.equal(again.instructions, "You represent Hillcrest Dental.");
+    assert.equal(again.isPublic, true);
     assert.ok((again.knowledgeUpdatedAt ?? "") >= (agent.knowledgeUpdatedAt ?? ""));
     const renamed = await updateAgent(agent.id, { name: "Dana 2" }, "u-know", fake);
     assert.equal(reads, 3, "other edits leave the page alone");
     assert.match(renamed.knowledge ?? "", /walk-ins/);
     const forgot = await updateAgent(agent.id, agentPatchSchema.parse({ knowledgeUrl: null }), "u-know", fake);
+    assert.equal(forgot.instructions, "You represent Hillcrest Dental.", "forgetting the page keeps the owner's text");
     assert.equal("knowledge" in forgot, false);
     assert.equal("knowledgeUrl" in forgot, false);
     assert.equal("knowledgeUpdatedAt" in forgot, false);

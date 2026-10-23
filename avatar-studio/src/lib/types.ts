@@ -231,9 +231,11 @@ export interface BrandKit {
   name: string;
   /** Logo as an https URL or an uploaded data URL. */
   logoUrl?: string;
-  /** Hex colors. Primary becomes the default scene background and the share page accent. */
+  /** Hex colors. Primary becomes the default scene background (unless `defaultBackground` is set) and the share page accent. */
   primaryColor: string;
   accentColor?: string;
+  /** An image or video behind every new video's scenes instead of the primary colour. */
+  defaultBackground?: Background;
   defaultAvatarId?: string;
   defaultVoiceId?: string;
   defaultAspect?: AspectRatio;

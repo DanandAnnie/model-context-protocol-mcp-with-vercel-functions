@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatPersona, ScriptAction, ScriptProvider } from "../types";
+import { splitKnowledge, type ChatMessage, type ChatPersona, type ScriptAction, type ScriptProvider } from "../types";
 
 /** Template-based script writer used when no LLM key is configured. */
 export class MockScriptProvider implements ScriptProvider {
@@ -48,8 +48,8 @@ export class MockScriptProvider implements ScriptProvider {
   async chat({ persona, messages }: { persona: ChatPersona; messages: ChatMessage[] }) {
     const last = [...messages].reverse().find((m) => m.role === "user")?.content.trim() ?? "";
     const turn = messages.filter((m) => m.role === "user").length;
-    // The owner's own text comes first; a knowledge page, when one was read, follows a marker line.
-    const [own = "", reference = ""] = persona.instructions.split(/\n\nReference material from the page at [^\n]*\n/);
+    // The owner's own text comes first; a knowledge page, when one was read, follows the marker line.
+    const { own, reference } = splitKnowledge(persona.instructions);
     // First sentence of the instructions. A "You represent the X" lead-in becomes "I'm with the X";
     // anything else is treated as the subject the visitor can ask about.
     const first = own.split(/[.\n]/)[0]?.trim() ?? "";

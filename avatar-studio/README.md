@@ -100,17 +100,20 @@ Every route is documented in [docs/API.md](docs/API.md): authentication with per
 ## Project layout
 
 ```
-src/app/(studio)/*      pages: home, create, batch, videos, templates, avatars, voices, translate, settings
-src/app/api/*           route handlers
-src/lib/providers/*     HeyGen, D-ID, ElevenLabs, Anthropic, and demo adapters
-src/lib/services.ts     orchestration + validation (zod)
+src/app/(studio)/*      pages: home, create, batch, videos, templates, avatars, voices, translate, interactive, brand, workspace, settings
+src/app/share/*         public share page; src/app/talk/* public presenter chat; src/app/embed/* website launcher script
+src/app/api/*           route handlers (thin: validate, resolve the owner, call a service)
+src/lib/services/*      one module per domain (videos, batches, avatars, voices, brand, scripts, agents, translations, account) with zod schemas; `@/lib/services` re-exports them all
+src/lib/providers/*     HeyGen, D-ID, ElevenLabs, Anthropic, Resend, HeyGen Streaming, and demo adapters behind one interface each
+src/lib/workspaces.ts   team spaces, invites, memberships      src/lib/billing.ts        plans and Stripe
+src/lib/notifications.ts signed webhooks and result emails    src/lib/api-keys.ts       hashed developer keys
+src/lib/streaming.ts    live avatar session registry           src/lib/insights.ts       home statistics
 src/lib/templates.ts    script templates
-src/lib/__tests__/*     unit tests
-e2e/*                   Playwright end-to-end specs (playwright.config.ts starts both servers)
-src/lib/store/*         Supabase / in-memory persistence
-supabase/schema.sql     one-table JSON store
+src/lib/store/*         Supabase / in-memory persistence       supabase/schema.sql       one-table JSON store
+src/lib/__tests__/*     unit tests (node:test)
+e2e/*                   Playwright end-to-end specs (playwright.config.ts starts the open and password servers)
 ```
 
 ## Not included (yet)
 
-Team workspaces and sharing between accounts, paid billing (only a monthly render allowance today), interactive real-time avatars, and avatar training from video.
+Avatar training from video (no provider API in this app). The HeyGen Streaming adapter follows the v1 streaming docs but has not been run against the live API.

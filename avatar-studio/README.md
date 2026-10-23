@@ -32,6 +32,7 @@ npm install
 cp .env.example .env.local   # optional: add keys to leave demo mode
 npm run dev                  # http://localhost:3000
 npm test                     # service-layer tests (node:test via tsx)
+npm run build && npm run e2e # Playwright end-to-end suite (open + password modes)
 ```
 
 With no keys the app runs in demo mode: stock illustrated avatars, browser
@@ -54,8 +55,9 @@ this deployment; confirmation links return via `/auth/callback`). Without those,
 `STUDIO_PASSWORD` gives a single shared password. Items are stored with an
 `ownerId` (the Supabase user id, or `local`), so switching modes later keeps data.
 
-CI: `.github/workflows/avatar-studio.yml` runs typecheck, tests, and the
-production build on every push or PR that touches this folder.
+CI: `.github/workflows/avatar-studio.yml` runs typecheck, unit tests, the
+production build, and the Playwright end-to-end suite on every push or PR that
+touches this folder.
 
 Voices follow the renderer: HeyGen rendering always lists HeyGen voices (its
 API accepts no others); D-ID uses ElevenLabs voices when configured, otherwise
@@ -85,6 +87,7 @@ src/lib/providers/*     HeyGen, D-ID, ElevenLabs, Anthropic, and demo adapters
 src/lib/services.ts     orchestration + validation (zod)
 src/lib/templates.ts    script templates
 src/lib/__tests__/*     unit tests
+e2e/*                   Playwright end-to-end specs (playwright.config.ts starts both servers)
 src/lib/store/*         Supabase / in-memory persistence
 supabase/schema.sql     one-table JSON store
 ```

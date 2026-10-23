@@ -389,6 +389,12 @@ test("share page offers a download only when the owner allows it", async ({ page
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.shareDownload).toBe(true);
   await page.goto(`/share/${v.id}`);
   await expect(page.getByRole("link", { name: "Download video" })).toBeVisible();
+  // Embeds may ask the page to start muted and repeat; the plain link does neither.
+  await expect(page.getByTestId("share-player")).not.toHaveAttribute("autoplay", "");
+  await page.goto(`/share/${v.id}?autoplay=1&loop=1`);
+  await expect(page.getByTestId("share-player")).toHaveAttribute("autoplay", "");
+  await expect(page.getByTestId("share-player")).toHaveAttribute("loop", "");
+  await expect(page.getByTestId("share-player")).toHaveJSProperty("muted", true);
 
   // A description saved from the video page shows under the share-page player and in the link preview.
   await page.goto(`/videos/${v.id}`);

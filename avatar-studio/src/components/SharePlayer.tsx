@@ -7,7 +7,26 @@ import type { CaptionSize, WatchQuarter } from "@/lib/types";
  * three quarters, the end), once per marker per mount and one request at a time: the server
  * counts every marker up to the one reported, so a seek past three markers is one beacon.
  */
-export function SharePlayer({ videoId, src, poster, captions, captionSize = "medium", trackDefault = true }: { videoId: string; src: string; poster?: string; captions: boolean; captionSize?: CaptionSize; trackDefault?: boolean }) {
+export function SharePlayer({
+  videoId,
+  src,
+  poster,
+  captions,
+  captionSize = "medium",
+  trackDefault = true,
+  autoplay = false,
+  loop = false,
+}: {
+  videoId: string;
+  src: string;
+  poster?: string;
+  captions: boolean;
+  captionSize?: CaptionSize;
+  trackDefault?: boolean;
+  /** Start muted on load (browsers allow muted autoplay only); used by embeds. */
+  autoplay?: boolean;
+  loop?: boolean;
+}) {
   const reported = useRef<WatchQuarter | 0>(0);
   const queue = useRef<Promise<void>>(Promise.resolve());
   const report = (quarter: WatchQuarter) => {
@@ -22,7 +41,9 @@ export function SharePlayer({ videoId, src, poster, captions, captionSize = "med
       src={src}
       poster={poster}
       controls
-      autoPlay={false}
+      autoPlay={autoplay}
+      muted={autoplay}
+      loop={loop}
       playsInline
       className={`h-full w-full cue-${captionSize}`}
       data-testid="share-player"
@@ -30,7 +51,8 @@ export function SharePlayer({ videoId, src, poster, captions, captionSize = "med
         const el = e.currentTarget;
         if (!Number.isFinite(el.duration) || el.duration <= 0) return;
         const pct = (el.currentTime / el.duration) * 100;
-        const reached = pct >= 75 ? 75 : pct >= 50 ? 50 : pct >= 25 ? 25 : 0;
+        // A looping video never ends, so the last half second counts as the end.
+        const reached = loop && el.duration - el.currentTime < 0.5 ? 100 : pct >= 75 ? 75 : pct >= 50 ? 50 : pct >= 25 ? 25 : 0;
         if (reached) report(reached);
       }}
       onEnded={() => report(100)}

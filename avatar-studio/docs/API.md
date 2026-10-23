@@ -16,7 +16,7 @@ Authorization: Bearer as_live_…
 - Keys minted inside a workspace are revoked when that member leaves or is removed, and when the workspace is deleted.
 - Unknown or revoked keys get `401`. Only tokens that start with `as_live_` are treated as keys; any other bearer value falls back to the normal session check.
 
-Public routes need no key: `/api/videos/:id/captions`, `/api/videos/:id/cover`, `/api/videos/:id/view`, `/api/videos/:id/watch`, `/api/videos/:id/cta`, `/api/videos/:id/unlock`, `/api/talk/:id`, `/api/webhooks/:provider`, `/api/auth/*`, `/share/:id`.
+Public routes need no key: `/api/videos/:id/captions`, `/api/videos/:id/cover`, `/api/videos/:id/view`, `/api/videos/:id/watch`, `/api/videos/:id/cta`, `/api/videos/:id/unlock`, `/api/talk/:id`, `/api/webhooks/:provider`, `/api/auth/*`, `/share/:id` (which takes `?autoplay=1` to start muted and `?loop=1` to repeat, the options the video page's Embed button offers).
 
 ## Conventions
 

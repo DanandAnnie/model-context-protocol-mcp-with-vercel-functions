@@ -15,6 +15,8 @@ export default function VideoDetailPage() {
   const [deleting, setDeleting] = useState(false);
   const [copied, setCopied] = useState(false);
   const [embedCopied, setEmbedCopied] = useState(false);
+  const [embedAutoplay, setEmbedAutoplay] = useState(false);
+  const [embedLoop, setEmbedLoop] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
   const [renameErr, setRenameErr] = useState<string | null>(null);
@@ -289,7 +291,9 @@ export default function VideoDetailPage() {
     if (!video) return;
     const w = video.aspect === "9:16" ? 360 : video.aspect === "1:1" ? 480 : 640;
     const h = video.aspect === "9:16" ? 640 : video.aspect === "1:1" ? 480 : 360;
-    const snippet = `<iframe src="${window.location.origin}/share/${video.id}" width="${w}" height="${h}" style="border:0;max-width:100%" allow="fullscreen" title="${video.title.replace(/"/g, "&quot;")}"></iframe>`;
+    const query = [embedAutoplay ? "autoplay=1" : "", embedLoop ? "loop=1" : ""].filter(Boolean).join("&");
+    const src = `${window.location.origin}/share/${video.id}${query ? `?${query}` : ""}`;
+    const snippet = `<iframe src="${src}" width="${w}" height="${h}" style="border:0;max-width:100%" allow="${embedAutoplay ? "autoplay; " : ""}fullscreen" title="${video.title.replace(/"/g, "&quot;")}"></iframe>`;
     try {
       await navigator.clipboard.writeText(snippet);
       setEmbedCopied(true);
@@ -421,6 +425,16 @@ export default function VideoDetailPage() {
                     <Button variant="secondary" onClick={copyEmbed} title="Copy an iframe snippet for your site">
                       {embedCopied ? <Check className="h-4 w-4 text-emerald-600" /> : <Code2 className="h-4 w-4" />} {embedCopied ? "Embed copied" : "Embed"}
                     </Button>
+                    <span className="inline-flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700" title="Options for the embed snippet; the share link itself is unchanged">
+                      <label className="inline-flex items-center gap-1.5">
+                        <input type="checkbox" checked={embedAutoplay} onChange={(e) => setEmbedAutoplay(e.target.checked)} className="accent-brand-600" aria-label="Embed autoplays muted" />
+                        Autoplay (muted)
+                      </label>
+                      <label className="inline-flex items-center gap-1.5">
+                        <input type="checkbox" checked={embedLoop} onChange={(e) => setEmbedLoop(e.target.checked)} className="accent-brand-600" aria-label="Embed loops" />
+                        Loop
+                      </label>
+                    </span>
                     <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700" title="Turn off to make the share page and embed unavailable; views and clicks stop counting">
                       <input type="checkbox" checked={shareLive} onChange={(e) => patchShare({ shareDisabled: !e.target.checked })} className="accent-brand-600" />
                       Share link is live

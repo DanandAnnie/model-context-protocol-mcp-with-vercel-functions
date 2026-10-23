@@ -7,6 +7,22 @@ const SYSTEM = `You write spoken scripts for short AI avatar videos. Rules:
 - Open with a hook in the first sentence; close with one clear call to action.
 - Match the requested tone, language, audience, and target length (about 2.5 words per second).`;
 
+/**
+ * The Messages API wants the first turn from the user and one turn per side in sequence. A transcript
+ * that opens with the presenter's greeting gets a short visitor turn in front, and neighbouring turns
+ * from one side are joined, so the conversation is sent as the API expects it.
+ */
+export function conversationFor(messages: ChatMessage[]): ChatMessage[] {
+  const out: ChatMessage[] = [];
+  for (const m of messages) {
+    const last = out[out.length - 1];
+    if (last && last.role === m.role) out[out.length - 1] = { role: m.role, content: `${last.content}\n\n${m.content}` };
+    else out.push({ role: m.role, content: m.content });
+  }
+  if (out[0]?.role === "assistant") out.unshift({ role: "user", content: "(The visitor has just opened the page.)" });
+  return out;
+}
+
 export class AnthropicScriptProvider implements ScriptProvider {
   readonly name = "anthropic";
   private client: Anthropic;
@@ -42,6 +58,7 @@ export class AnthropicScriptProvider implements ScriptProvider {
   }
 
   async chat({ persona, messages }: { persona: ChatPersona; messages: ChatMessage[] }) {
+    messages = conversationFor(messages);
     const system = `You are ${persona.name}, a presenter speaking live to a visitor through an interactive avatar. Reply in ${persona.language}.
 Rules: answer in one to three short spoken sentences; no markdown, lists, or stage directions; stay in character; if you do not know, say so briefly and offer what you can.
 Background and instructions from the owner, followed by any reference page they named:

@@ -1886,6 +1886,21 @@ describe("interactive avatar", () => {
     assert.doesNotMatch((await talkToAgent(agent.id, { messages: [{ role: "user", content: "Is there parking nearby?" }] })).reply, /^From the page/);
   });
 
+  it("sends the live model a conversation that starts with the visitor and alternates sides", async () => {
+    const { conversationFor } = await import("../providers/script/anthropic");
+    assert.deepEqual(conversationFor([{ role: "assistant", content: "Welcome." }, { role: "user", content: "Hi" }]), [
+      { role: "user", content: "(The visitor has just opened the page.)" },
+      { role: "assistant", content: "Welcome." },
+      { role: "user", content: "Hi" },
+    ]);
+    assert.deepEqual(conversationFor([{ role: "user", content: "One" }, { role: "user", content: "Two" }, { role: "assistant", content: "A" }, { role: "user", content: "Three" }]), [
+      { role: "user", content: "One\n\nTwo" },
+      { role: "assistant", content: "A" },
+      { role: "user", content: "Three" },
+    ]);
+    assert.deepEqual(conversationFor([{ role: "user", content: "Hi" }]), [{ role: "user", content: "Hi" }], "a plain transcript is unchanged");
+  });
+
   it("answers in character from the demo provider and validates the turn", async () => {
     const hello = await chatWithAvatar(chatSchema.parse({ avatarId: "stock_1", instructions: "Open houses in Hillsboro. Book showings online.", messages: [{ role: "user", content: "Hi there" }] }));
     assert.match(hello, /^Hi, I'm /);

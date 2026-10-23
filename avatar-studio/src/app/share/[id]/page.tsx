@@ -92,13 +92,18 @@ export async function generateMetadata({
   };
 }
 
-/** Public, sidebar-free player page for sharing a finished video. */
+/** Public, sidebar-free player page for sharing a finished video. `?autoplay=1` starts it muted and `?loop=1` repeats it (for embeds). */
 export default async function SharePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ autoplay?: string; loop?: string }>;
 }) {
   const { id } = await params;
+  const query = await searchParams;
+  const autoplay = query.autoplay === "1";
+  const loop = query.loop === "1";
   let video;
   try {
     video = await getVideo(id, PUBLIC_ACCESS);
@@ -173,7 +178,7 @@ export default async function SharePage({
               className={`mx-auto w-full overflow-hidden rounded-xl bg-black ${frame}`}
             >
               {video.status === "completed" && video.videoUrl ? (
-                <SharePlayer videoId={video.id} src={video.videoUrl} poster={posterUrl(video)} captions={!!video.captions} captionSize={video.captionStyle?.size} trackDefault={!captionsBurnedIn(video)} />
+                <SharePlayer videoId={video.id} src={video.videoUrl} poster={posterUrl(video)} captions={!!video.captions} captionSize={video.captionStyle?.size} trackDefault={!captionsBurnedIn(video)} autoplay={autoplay} loop={loop} />
               ) : (
                 <div className="flex h-full w-full items-center justify-center p-10 text-center text-sm text-slate-400">
                   {video.status === "failed"

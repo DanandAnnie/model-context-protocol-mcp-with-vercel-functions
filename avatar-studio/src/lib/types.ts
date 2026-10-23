@@ -340,6 +340,8 @@ export interface Agent {
   avatarImageUrl: string;
   voiceLanguage?: string;
   instructions: string;
+  /** Opening line shown as the presenter's first message on the talk page (and sent with the transcript). */
+  greeting?: string;
   /** A public web page whose readable text is kept as reference material for replies; never shown to visitors. */
   knowledgeUrl?: string;
   knowledge?: string;

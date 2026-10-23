@@ -28,6 +28,7 @@ export default function InteractivePage() {
   const [agentName, setAgentName] = useState("");
   const [collectEmail, setCollectEmail] = useState(false);
   const [knowledgeUrl, setKnowledgeUrl] = useState("");
+  const [greeting, setGreeting] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
   const [savedLink, setSavedLink] = useState<string | null>(null);
@@ -86,11 +87,12 @@ export default function InteractivePage() {
     try {
       const { agent } = await api<{ agent: Agent }>("/api/agents", {
         method: "POST",
-        body: JSON.stringify({ name: agentName.trim() || avatar.name, avatarId: avatar.id, voiceId: voice?.id, instructions, language, isPublic: true, collectEmail, ...(knowledgeUrl.trim() ? { knowledgeUrl: knowledgeUrl.trim() } : {}) }),
+        body: JSON.stringify({ name: agentName.trim() || avatar.name, avatarId: avatar.id, voiceId: voice?.id, instructions, language, isPublic: true, collectEmail, ...(greeting.trim() ? { greeting: greeting.trim() } : {}), ...(knowledgeUrl.trim() ? { knowledgeUrl: knowledgeUrl.trim() } : {}) }),
       });
       setSavedLink(`${window.location.origin}/talk/${agent.id}`);
       setAgentName("");
       setKnowledgeUrl("");
+      setGreeting("");
       await refetchAgents();
     } catch (e) {
       setSaveErr(e instanceof Error ? e.message : "Could not save the presenter");
@@ -177,6 +179,9 @@ export default function InteractivePage() {
           <div className="mt-4 space-y-3">
             <Field label="Instructions" hint="What the presenter knows and how it should behave. Visitors never see this text.">
               <textarea value={instructions} onChange={(e) => setInstructions(e.target.value)} rows={4} maxLength={2000} className={inputClass} />
+            </Field>
+            <Field label="Opening line (optional)" hint="Shown as the presenter's first message on the talk page, before the visitor types.">
+              <input aria-label="Opening line" value={greeting} onChange={(e) => setGreeting(e.target.value)} placeholder="Hi, I'm here to help with open houses and showings. What are you looking for?" className={inputClass} maxLength={200} />
             </Field>
             <Field label="Reply language">
               <input value={language} onChange={(e) => setLanguage(e.target.value)} className={inputClass} maxLength={40} />

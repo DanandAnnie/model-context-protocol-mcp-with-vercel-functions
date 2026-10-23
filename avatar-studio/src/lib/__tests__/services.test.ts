@@ -1837,6 +1837,14 @@ describe("interactive avatar", () => {
     assert.equal(reads, 1);
     const pub = await publicAgent(agent.id);
     assert.equal(JSON.stringify(pub).includes("walk-ins"), false, "the page text never reaches the visitor view");
+    // An opening line is shown to visitors; an empty one is stored as absent and a blank patch removes it.
+    assert.equal("greeting" in pub, false);
+    const greeted = await updateAgent(agent.id, agentPatchSchema.parse({ greeting: "  Hi, ask me about hours.  " }), "u-know", fake);
+    assert.equal(greeted.greeting, "Hi, ask me about hours.");
+    assert.equal((await publicAgent(agent.id)).greeting, "Hi, ask me about hours.");
+    assert.equal("greeting" in (await updateAgent(agent.id, agentPatchSchema.parse({ greeting: "" }), "u-know", fake)), false);
+    assert.equal("greeting" in (await createAgent(agentSchema.parse({ name: "Mute", avatarId: "stock_1", greeting: "   " }), "u-know")), false);
+    assert.throws(() => agentSchema.parse({ name: "x", avatarId: "stock_1", greeting: "g".repeat(201) }));
     assert.ok(withKnowledge(agent).startsWith("You represent Hillcrest Dental.\n\n" + KNOWLEDGE_MARKER));
     assert.match(withKnowledge(agent), /untrusted reference material/);
     const { splitKnowledge } = await import("../providers/types");

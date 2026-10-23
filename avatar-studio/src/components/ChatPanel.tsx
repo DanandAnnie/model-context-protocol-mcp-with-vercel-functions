@@ -48,6 +48,7 @@ export function ChatPanel({
   voiceLanguage,
   ask,
   emptyHint = "Say hello to get started.",
+  opening,
   dark = false,
   compact = false,
   aside,
@@ -59,6 +60,8 @@ export function ChatPanel({
   voiceLanguage?: string;
   ask: (messages: ChatTurn[]) => Promise<string>;
   emptyHint?: string;
+  /** The presenter's first message, shown before the visitor says anything and kept in the transcript. */
+  opening?: string;
   dark?: boolean;
   /** Single column with a small portrait, for the website embed. */
   compact?: boolean;
@@ -69,7 +72,8 @@ export function ChatPanel({
   /** Live video session; when connected, replies are spoken by the stream instead of the browser. */
   live?: { status: LiveStatus; videoRef: React.RefObject<HTMLVideoElement | null>; speak: (text: string) => Promise<boolean> };
 }) {
-  const [messages, setMessages] = useState<ChatTurn[]>([]);
+  const openingTurns: ChatTurn[] = opening ? [{ role: "assistant", content: opening }] : [];
+  const [messages, setMessages] = useState<ChatTurn[]>(openingTurns);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [speaking, setSpeaking] = useState(false);
@@ -195,7 +199,7 @@ export function ChatPanel({
     dropRecognizer();
     setListening(false);
     setSpeaking(false);
-    setMessages([]);
+    setMessages(openingTurns);
     setErr(null);
     onReset?.();
   }
@@ -265,7 +269,7 @@ export function ChatPanel({
           <h3 className={`flex items-center gap-2 text-sm font-semibold ${dark ? "text-slate-100" : "text-slate-900"}`}>
             <MessageSquare className="h-4 w-4 text-slate-400" /> Conversation
           </h3>
-          <button type="button" onClick={reset} className={`text-xs ${muted500} hover:underline`} disabled={!messages.length}>
+          <button type="button" onClick={reset} className={`text-xs ${muted500} hover:underline`} disabled={messages.length <= openingTurns.length}>
             Start over
           </button>
         </div>
@@ -274,7 +278,7 @@ export function ChatPanel({
           {messages.length === 0 && <p className={`text-sm ${muted500}`}>{emptyHint}</p>}
           {messages.map((m, i) => (
             <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-              <div className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm ${m.role === "user" ? "bg-brand-600 text-white" : bubbleBot}`} data-role={m.role}>
+              <div className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm ${m.role === "user" ? "bg-brand-600 text-white" : bubbleBot}`} data-role={m.role} data-opening={opening && i === 0 ? "true" : undefined}>
                 {m.content}
               </div>
             </div>

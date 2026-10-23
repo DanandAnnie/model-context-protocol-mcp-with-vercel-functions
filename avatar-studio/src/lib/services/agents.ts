@@ -32,6 +32,8 @@ const agentFields = {
   avatarId: z.string().min(1),
   voiceId: z.string().min(1).optional(),
   instructions: z.string().trim().max(2000),
+  /** Shown to visitors as the presenter's first message; an empty string removes it. */
+  greeting: z.string().trim().max(200),
   /** A public page read once and kept as reference material for replies (see `readKnowledge`). */
   knowledgeUrl: knowledgeUrlSchema,
   language: z.string().trim().min(2).max(40),
@@ -43,6 +45,7 @@ const agentFields = {
 export const agentSchema = z.object({
   ...agentFields,
   instructions: agentFields.instructions.default(""),
+  greeting: agentFields.greeting.optional(),
   knowledgeUrl: agentFields.knowledgeUrl.optional(),
   language: agentFields.language.default("English"),
   isPublic: agentFields.isPublic.default(true),
@@ -126,16 +129,18 @@ async function presenterSnapshot(avatarId: string, voiceId: string | undefined, 
 export async function createAgent(input: z.infer<typeof agentSchema>, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<Agent> {
   if ((await listAgents(ownerId)).length >= MAX_AGENTS) throw new ValidationError(`At most ${MAX_AGENTS} agents per account`);
   const snapshot = await presenterSnapshot(input.avatarId, input.voiceId, ownerId);
-  const { knowledgeUrl, ...rest } = input;
+  const { knowledgeUrl, greeting, ...rest } = input;
   const knowledge = knowledgeUrl ? await readKnowledge(knowledgeUrl, fetchImpl) : {};
   const now = nowIso();
-  return getStore().put("agent", { id: newId("agent"), ownerId, ...rest, ...snapshot, ...knowledge, conversations: 0, messages: 0, createdAt: now, updatedAt: now });
+  return getStore().put("agent", { id: newId("agent"), ownerId, ...rest, ...(greeting ? { greeting } : {}), ...snapshot, ...knowledge, conversations: 0, messages: 0, createdAt: now, updatedAt: now });
 }
 
 export async function updateAgent(id: string, patch: z.infer<typeof agentPatchSchema>, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<Agent> {
   const existing = await getAgent(id, ownerId);
-  const { knowledgeUrl, ...rest } = patch;
+  const { knowledgeUrl, greeting, ...rest } = patch;
   const next: Agent = { ...existing, ...rest };
+  if (greeting === "") delete next.greeting;
+  else if (greeting) next.greeting = greeting;
   const snapshot = patch.avatarId || patch.voiceId ? await presenterSnapshot(next.avatarId, next.voiceId, ownerId) : {};
   if (knowledgeUrl === null) {
     delete next.knowledgeUrl;
@@ -164,6 +169,7 @@ export async function publicAgent(id: string) {
     language: agent.language,
     avatar: { id: agent.avatarId, name: agent.avatarName, imageUrl: agent.avatarImageUrl },
     voiceLanguage: agent.voiceLanguage,
+    ...(agent.greeting ? { greeting: agent.greeting } : {}),
     collectEmail: agent.collectEmail ?? false,
     liveVideo: getStreamingProvider().available,
     brand: brand ? { name: brand.name, logoUrl: brand.logoUrl, primaryColor: brand.primaryColor, accentColor: brand.accentColor } : null,

@@ -15,6 +15,7 @@ interface PublicAgent {
   language: string;
   avatar: { id: string; name: string; imageUrl: string };
   voiceLanguage?: string;
+  greeting?: string;
   collectEmail: boolean;
   liveVideo: boolean;
   brand: { name: string; logoUrl?: string; primaryColor: string; accentColor?: string } | null;
@@ -113,6 +114,7 @@ function TalkInner() {
               dark
               compact={embed}
               emptyHint={`Say hello to ${agent.avatar.name}.`}
+              opening={agent.greeting}
               onReset={() => {
                 conversationId.current = undefined;
                 setTurns(0);

@@ -1113,12 +1113,25 @@ test("shared presenter: save from the interactive page, talk publicly, turn off"
   await expect(visitorPage.getByTestId("lead-form")).toContainText(`follow up at sam-${tag}@example.com`);
   await visitorPage.close();
 
+  // An opening line greets the next visitor before they type, counts as the presenter's first turn, and survives "Start over".
+  expect((await page.request.patch(`/api/agents/${id}`, { data: { greeting: `Welcome ${tag}. Ask me about open houses.` } })).status()).toBe(200);
+  const greetedPage = await page.context().newPage();
+  await greetedPage.goto(`/talk/${id}`);
+  await expect(greetedPage.locator("[data-testid=chat-log] [data-opening]")).toHaveText(`Welcome ${tag}. Ask me about open houses.`);
+  await expect(greetedPage.getByRole("button", { name: "Start over" })).toBeDisabled();
+  await greetedPage.getByLabel("Your message").fill("Hello");
+  await greetedPage.getByRole("button", { name: "Send" }).click();
+  await expect(greetedPage.locator("[data-testid=chat-log] [data-role=assistant]")).toHaveCount(2);
+  await greetedPage.getByRole("button", { name: "Start over" }).click();
+  await expect(greetedPage.locator("[data-testid=chat-log] [data-role=assistant]")).toHaveCount(1);
+  await greetedPage.close();
+
   await page.reload();
-  await expect(page.getByTestId("agent-list")).toContainText("2 conversations");
+  await expect(page.getByTestId("agent-list")).toContainText("3 conversations");
   await page.getByRole("button", { name: `Transcripts for Dana ${tag}` }).click();
   await expect(page.getByTestId("transcripts")).toContainText("Any open houses?");
   await expect(page.getByTestId("transcripts")).toContainText(`sam-${tag}@example.com`);
-  await expect(page.getByTestId("transcripts").locator("summary")).toHaveCount(2);
+  await expect(page.getByTestId("transcripts").locator("summary")).toHaveCount(3);
   // The same conversations download as a lead list.
   await expect(page.getByTestId("transcripts").getByRole("link", { name: "Download CSV" })).toBeVisible();
   const csvRes = await page.request.get(`/api/agents/${id}/conversations?format=csv`);

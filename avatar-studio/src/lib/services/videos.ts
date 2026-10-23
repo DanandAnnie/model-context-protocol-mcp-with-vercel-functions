@@ -21,6 +21,7 @@ import { backgroundSchema, captionStyleSchema, pitchSchema, sceneLayoutSchema } 
 import { getBrandKit } from "./brand";
 import { spokenCopy } from "../pronounce";
 import { clearComments } from "./comments";
+import { reviseScript } from "./scripts";
 export { backgroundSchema, captionStyleSchema, pitchSchema, sceneLayoutSchema };
 
 export const videoRequestSchema = z
@@ -170,6 +171,54 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
     base.error = err instanceof Error ? err.message : String(err);
   }
   return getStore().put("video", base);
+}
+
+/** Translated subtitle tracks a video may carry. */
+export const MAX_SUBTITLE_LANGUAGES = 5;
+export const subtitleSchema = z.object({ language: z.string().trim().min(2).max(40) });
+
+/** The stored key for a language, matched without regard to case so "spanish" and "Spanish" are one track. */
+function subtitleKey(video: Video, language: string): string | undefined {
+  return Object.keys(video.subtitles ?? {}).find((k) => k.toLowerCase() === language.toLowerCase());
+}
+
+/**
+ * Translates the script into a language with the script provider and keeps it as a subtitle track
+ * (the share page offers it, `GET /api/videos/:id/captions?lang=` serves it). Asking again for a
+ * language the video already has translates it afresh.
+ */
+export async function addSubtitles(id: string, language: string, ownerId: string = LOCAL_OWNER): Promise<Video> {
+  const video = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
+  if (purgeDue(video, Date.now())) throw new NotFoundError(`Video ${id} not found`);
+  const existing = subtitleKey(video, language);
+  if (!existing && Object.keys(video.subtitles ?? {}).length >= MAX_SUBTITLE_LANGUAGES) {
+    throw new ValidationError(`At most ${MAX_SUBTITLE_LANGUAGES} subtitle languages per video`);
+  }
+  const text = await reviseScript({ script: video.script, action: "translate", language });
+  // The translation took a while; build on the stored record so edits made meanwhile are kept.
+  const current = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
+  const subtitles = { ...current.subtitles };
+  if (existing) delete subtitles[existing];
+  subtitles[language] = text;
+  return putKeepingCounters({ ...current, subtitles, updatedAt: nowIso() });
+}
+
+export async function removeSubtitles(id: string, language: string, ownerId: string = LOCAL_OWNER): Promise<Video> {
+  const video = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
+  const key = subtitleKey(video, language);
+  if (!key) throw new NotFoundError(`No ${language} subtitles on this video`);
+  const subtitles = { ...video.subtitles };
+  delete subtitles[key];
+  const next: Video = { ...video, updatedAt: nowIso() };
+  if (Object.keys(subtitles).length) next.subtitles = subtitles;
+  else delete next.subtitles;
+  return putKeepingCounters(next);
+}
+
+/** The subtitle text for a language the video carries, matched without regard to case; undefined when it has none. */
+export function subtitlesFor(video: Pick<Video, "subtitles">, language: string): { language: string; text: string } | undefined {
+  const key = Object.keys(video.subtitles ?? {}).find((k) => k.toLowerCase() === language.toLowerCase());
+  return key ? { language: key, text: video.subtitles![key] } : undefined;
 }
 
 /** How many in-flight renders one library request may check with the provider. */

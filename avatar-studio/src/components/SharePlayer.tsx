@@ -16,6 +16,7 @@ export function SharePlayer({
   trackDefault = true,
   autoplay = false,
   loop = false,
+  tracks = [],
 }: {
   videoId: string;
   src: string;
@@ -26,6 +27,8 @@ export function SharePlayer({
   /** Start muted on load (browsers allow muted autoplay only); used by embeds. */
   autoplay?: boolean;
   loop?: boolean;
+  /** Translated subtitle tracks the video carries, offered in the CC menu. */
+  tracks?: Array<{ language: string; code?: string }>;
 }) {
   const reported = useRef<WatchQuarter | 0>(0);
   const queue = useRef<Promise<void>>(Promise.resolve());
@@ -59,6 +62,9 @@ export function SharePlayer({
     >
       {/* `default` switches the track on without a trip to the CC menu; it stays off when the file already carries captions. */}
       {captions && <track default={trackDefault} kind="subtitles" srcLang="en" label="Captions" src={`/api/videos/${videoId}/captions?format=vtt`} />}
+      {tracks.map((t) => (
+        <track key={t.language} kind="subtitles" srcLang={t.code ?? "und"} label={t.language} src={`/api/videos/${videoId}/captions?format=vtt&lang=${encodeURIComponent(t.language)}`} />
+      ))}
     </video>
   );
 }

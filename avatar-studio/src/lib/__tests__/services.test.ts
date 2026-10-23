@@ -669,6 +669,33 @@ describe("share call to action", () => {
   });
 });
 
+describe("translated subtitles", () => {
+  it("keeps up to five translated tracks per video, served by language", async () => {
+    const { addSubtitles, removeSubtitles, subtitlesFor, subtitleSchema, MAX_SUBTITLE_LANGUAGES } = await import("../services/videos");
+    const v = await createVideo(videoRequestSchema.parse({ title: "Sub", script: "Welcome home.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }), "u-sub");
+    const withEs = await addSubtitles(v.id, "Spanish", "u-sub");
+    assert.deepEqual(withEs.subtitles, { Spanish: "[Spanish] Welcome home." });
+    assert.deepEqual(subtitlesFor(withEs, "spanish"), { language: "Spanish", text: "[Spanish] Welcome home." }, "matched without regard to case");
+    assert.equal(subtitlesFor(withEs, "French"), undefined);
+    const again = await addSubtitles(v.id, "spanish", "u-sub");
+    assert.deepEqual(Object.keys(again.subtitles ?? {}), ["spanish"], "asking again replaces the track under the new spelling");
+    await assert.rejects(addSubtitles(v.id, "Spanish", "u-else"), /not found/);
+    for (const l of ["French", "German", "Italian", "Dutch"]) await addSubtitles(v.id, l, "u-sub");
+    await assert.rejects(addSubtitles(v.id, "Polish", "u-sub"), /At most/);
+    assert.equal(Object.keys((await addSubtitles(v.id, "Dutch", "u-sub")).subtitles ?? {}).length, MAX_SUBTITLE_LANGUAGES, "a known language can still be refreshed at the cap");
+    const fewer = await removeSubtitles(v.id, "FRENCH", "u-sub");
+    assert.equal("French" in (fewer.subtitles ?? {}), false);
+    await assert.rejects(removeSubtitles(v.id, "French", "u-sub"), /No French subtitles/);
+    assert.throws(() => subtitleSchema.parse({ language: "x" }));
+    // An edit landing during the translation is kept, and counters stay on the record.
+    const { getStore } = await import("../store");
+    await getStore().put("video", { ...(await getVideo(v.id, "u-sub", false)), title: "Renamed meanwhile" });
+    assert.equal((await addSubtitles(v.id, "Polish", "u-sub")).title, "Renamed meanwhile");
+    for (const l of Object.keys((await getVideo(v.id, "u-sub", false)).subtitles ?? {})) await removeSubtitles(v.id, l, "u-sub");
+    assert.equal("subtitles" in (await getVideo(v.id, "u-sub", false)), false, "the last removal clears the field");
+  });
+});
+
 describe("video comments", () => {
   it("lets the owner's team leave notes the share page never shows, and deletes them with the video", async () => {
     const { addComment, listComments, deleteComment, commentSchema, MAX_COMMENTS_PER_VIDEO } = await import("../services/comments");

@@ -417,6 +417,22 @@ test("share page offers a download only when the owner allows it", async ({ page
   expect((await page.request.post(`/api/videos/${v.id}/comments`, { data: { text: "" } })).status()).toBe(400);
   await page.getByRole("button", { name: "Delete comment" }).click();
   await expect(page.getByTestId("comment-list")).toHaveCount(0);
+  // Translated subtitle tracks: added from the video page, served by language, offered on the share page.
+  await page.goto(`/videos/${v.id}`);
+  await page.getByLabel("Subtitle language").fill("Spanish");
+  await page.getByRole("button", { name: "Add subtitles" }).click();
+  await expect(page.getByTestId("subtitle-list")).toContainText("Spanish");
+  const esVtt = await page.request.get(`/api/videos/${v.id}/captions?format=vtt&lang=spanish`);
+  expect(esVtt.status()).toBe(200);
+  expect(await esVtt.text()).toContain("[Spanish]");
+  expect(esVtt.headers()["content-disposition"]).toContain(".spanish.vtt");
+  expect((await page.request.get(`/api/videos/${v.id}/captions?lang=French`)).status()).toBe(404);
+  await page.goto(`/share/${v.id}`);
+  await expect(page.getByTestId("share-player").locator("track[srclang='es']")).toHaveAttribute("label", "Spanish");
+  await page.goto(`/videos/${v.id}`);
+  await page.getByRole("button", { name: "Remove Spanish subtitles" }).click();
+  await expect(page.getByTestId("subtitle-list")).toHaveCount(0);
+  expect((await page.request.get(`/api/videos/${v.id}/captions?lang=Spanish`)).status()).toBe(404);
   // A description saved from the video page shows under the share-page player and in the link preview.
   await page.goto(`/videos/${v.id}`);
   await expect(page.getByRole("button", { name: "Save description" })).toBeDisabled();

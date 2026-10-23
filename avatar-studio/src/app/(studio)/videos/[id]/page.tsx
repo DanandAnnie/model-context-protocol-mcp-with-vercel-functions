@@ -6,9 +6,10 @@ import { ArchiveRestore, ArrowLeft, Captions, Check, Clock, Code2, Copy, Downloa
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge, inputClass } from "@/components/ui";
 import { ViewSparkline } from "@/components/ViewSparkline";
 import { VideoComments } from "@/components/VideoComments";
+import { SubtitleLanguages } from "@/components/SubtitleLanguages";
 import { useApi } from "@/hooks/useApi";
 import { ApiError, api, formatDate, formatSeconds, isDarkHex, posterUrl, purgeAt, shareExpired } from "@/lib/client";
-import { TRASH_RETENTION_DAYS, type Video, type VideoComment } from "@/lib/types";
+import { TRASH_RETENTION_DAYS, type Video } from "@/lib/types";
 
 export default function VideoDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -54,7 +55,7 @@ export default function VideoDetailPage() {
    * description, a link turned back on) must disappear too, or the control flips back until the
    * refetch lands.
    */
-  const OPTIONAL_KEYS = ["description", "folder", "cover", "shareDisabled", "shareDownload", "shareLocked", "shareCta", "shareExpiresAt"] as const;
+  const OPTIONAL_KEYS = ["description", "folder", "cover", "subtitles", "shareDisabled", "shareDownload", "shareLocked", "shareCta", "shareExpiresAt"] as const;
   function applyServer(next: Video) {
     setData((d) => {
       const merged = { ...d?.video, ...next } as Video;
@@ -728,6 +729,7 @@ export default function VideoDetailPage() {
                   </form>
                 </Card>
               )}
+              <SubtitleLanguages video={video} onUpdated={applyServer} />
               <Card className="p-4" data-testid="share-description-card">
                 <h3 className="text-sm font-semibold text-slate-900">Description</h3>
                 <p className="mt-1 text-xs text-slate-500">Shown under the player on the share page and in link previews. Leave it empty to show nothing.</p>

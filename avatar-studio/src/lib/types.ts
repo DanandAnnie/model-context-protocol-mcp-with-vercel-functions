@@ -164,6 +164,8 @@ export interface Video extends VideoRequest {
   ownerId?: string;
   /** Shown under the share-page player and used as the link preview's description; absent when empty. */
   description?: string;
+  /** Translated scripts keyed by language name, offered as extra subtitle tracks on the share page. */
+  subtitles?: Record<string, string>;
   /** Set when the video was produced by a personalized batch; `rowLabel` identifies the row. */
   batchId?: string;
   rowLabel?: string;

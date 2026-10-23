@@ -1200,6 +1200,14 @@ describe("bulk actions", () => {
     assert.equal((await listVideos("u1")).length, 1);
     assert.equal((await listVideos("u2")).length, 1);
     assert.throws(() => bulkVideoSchema.parse({ action: "move", ids: [] }));
+    // Share links switch off and on in bulk, never for someone else's video.
+    const off = await bulkVideos(bulkVideoSchema.parse({ action: "share", ids: [b.id, theirs.id], shareDisabled: true }), "u1");
+    assert.deepEqual(off, { done: 1, missing: [theirs.id] });
+    assert.equal((await getVideo(b.id, "u1", false)).shareDisabled, true);
+    assert.equal((await getVideo(theirs.id, "u2", false)).shareDisabled, undefined);
+    await bulkVideos({ action: "share", ids: [b.id], shareDisabled: false }, "u1");
+    assert.equal("shareDisabled" in (await getVideo(b.id, "u1", false)), false, "on is stored as absent");
+    assert.throws(() => bulkVideoSchema.parse({ action: "share", ids: [b.id] }), "the switch is required");
   });
 });
 

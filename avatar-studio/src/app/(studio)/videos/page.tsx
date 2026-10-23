@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { CheckSquare, Clapperboard, FolderInput, Trash2, X } from "lucide-react";
+import { CheckSquare, Clapperboard, FolderInput, Link2, Link2Off, Trash2, X } from "lucide-react";
 import { api } from "@/lib/client";
 import { VideoCard } from "@/components/VideoCard";
 import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -79,7 +79,7 @@ function VideosInner() {
   }
   // A new filter hides cards; drop the selection so bulk actions only ever touch what is visible.
   useEffect(() => setSelected(new Set()), [q, status, folder, batch]);
-  async function bulk(action: "delete" | "move") {
+  async function bulk(action: "delete" | "move" | "share-off" | "share-on") {
     const ids = Array.from(selected);
     if (!ids.length) return;
     let targetFolder: string | undefined;
@@ -93,7 +93,9 @@ function VideosInner() {
     setBusy(true);
     setBulkErr(null);
     try {
-      await api("/api/videos/bulk", { method: "POST", body: JSON.stringify(action === "move" ? { action, ids, folder: targetFolder } : { action, ids }) });
+      const body =
+        action === "move" ? { action, ids, folder: targetFolder } : action === "delete" ? { action, ids } : { action: "share", ids, shareDisabled: action === "share-off" };
+      await api("/api/videos/bulk", { method: "POST", body: JSON.stringify(body) });
       await refetch();
       stopSelecting();
     } catch (e) {
@@ -147,6 +149,12 @@ function VideosInner() {
               </button>
               <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => bulk("move")} disabled={!selected.size || busy}>
                 <FolderInput className="h-3.5 w-3.5" /> Move to folder
+              </Button>
+              <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => bulk("share-off")} disabled={!selected.size || busy} title="The share pages and embeds of the selected videos answer “not found” until turned back on">
+                <Link2Off className="h-3.5 w-3.5" /> Links off
+              </Button>
+              <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => bulk("share-on")} disabled={!selected.size || busy} title="Turn the share links of the selected videos back on">
+                <Link2 className="h-3.5 w-3.5" /> Links on
               </Button>
               <Button variant="danger" className="px-2.5 py-1 text-xs" onClick={() => bulk("delete")} disabled={!selected.size || busy} loading={busy}>
                 <Trash2 className="h-3.5 w-3.5" /> Delete

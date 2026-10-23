@@ -466,9 +466,11 @@ export function recordCtaClick(id: string, gate: () => boolean = () => true, sha
 export const bulkVideoSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("delete"), ids: z.array(z.string().min(1)).min(1).max(200) }),
   z.object({ action: z.literal("move"), ids: z.array(z.string().min(1)).min(1).max(200), folder: z.string().trim().max(MAX_FOLDER_NAME) }),
+  /** Switch the share links of many videos off (`shareDisabled: true`) or back on. */
+  z.object({ action: z.literal("share"), ids: z.array(z.string().min(1)).min(1).max(200), shareDisabled: z.boolean() }),
 ]);
 
-/** Delete or move many videos at once. Ids that are missing or belong to someone else are reported, not failed. */
+/** Delete, move, or switch the share links of many videos at once. Ids that are missing or belong to someone else are reported, not failed. */
 export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId: string = LOCAL_OWNER): Promise<{ done: number; missing: string[] }> {
   const missing: string[] = [];
   let done = 0;
@@ -483,7 +485,8 @@ export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId
       await clearShareLock(id);
       await clearCover(id);
     }
-    else await updateVideo(id, { folder: input.folder }, ownerId);
+    else if (input.action === "move") await updateVideo(id, { folder: input.folder }, ownerId);
+    else await updateVideo(id, { shareDisabled: input.shareDisabled }, ownerId);
     done += 1;
   }
   return { done, missing };

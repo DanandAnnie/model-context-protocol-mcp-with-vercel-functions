@@ -788,6 +788,24 @@ test("library multi-select moves and deletes videos in bulk", async ({ page }) =
   expect((await (await page.request.get(`/api/videos/${a.id}`)).json()).video.folder).toBe(`Bulk ${tag}`);
   expect((await (await page.request.get(`/api/videos/${b.id}`)).json()).video.folder).toBe(`Bulk ${tag}`);
 
+  // Share links switch off and on for the selection; the cards show the badge.
+  await page.getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: `Select Bulk one ${tag}` }).click();
+  await page.getByRole("button", { name: `Select Bulk two ${tag}` }).click();
+  await page.getByRole("button", { name: "Links off" }).click();
+  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+  const badgeOn = (id: string) => page.locator(`a[href="/videos/${id}"]`).getByTestId("share-badges");
+  await expect(badgeOn(a.id)).toContainText("Link off");
+  await expect(badgeOn(b.id)).toContainText("Link off");
+  expect((await page.request.get(`/share/${a.id}`)).status()).toBe(404);
+  await page.getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: `Select Bulk one ${tag}` }).click();
+  await page.getByRole("button", { name: "Links on" }).click();
+  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+  await expect(badgeOn(a.id)).toHaveCount(0);
+  await expect(badgeOn(b.id)).toContainText("Link off");
+  expect((await page.request.get(`/share/${a.id}`)).status()).toBe(200);
+
   await page.getByRole("button", { name: "Select" }).click();
   await page.getByRole("button", { name: `Select Bulk two ${tag}` }).click();
   await page.getByRole("button", { name: "Delete" }).click();

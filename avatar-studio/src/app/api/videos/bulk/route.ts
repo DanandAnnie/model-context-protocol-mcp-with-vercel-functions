@@ -4,7 +4,7 @@ import { bulkVideoSchema, bulkVideos } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 
-/** Bulk delete or move-to-folder for the library's multi-select. */
+/** Bulk delete, move-to-folder, or share-link switch for the library's multi-select. */
 export async function POST(req: Request) {
   try {
     const owner = await requireOwner();

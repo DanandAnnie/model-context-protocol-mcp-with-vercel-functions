@@ -389,6 +389,53 @@ describe("scenes", () => {
   });
 });
 
+describe("saved templates", () => {
+  it("saves a video as a template and reopens it", async () => {
+    const { createTemplate, deleteTemplate, getTemplate, listTemplates, templateInputSchema, MAX_TEMPLATES } = await import("../services/templates");
+    const video = await createVideo(
+      videoRequestSchema.parse({
+        title: "Open house",
+        avatarId: STOCK_AVATARS[0].id,
+        voiceId: STOCK_VOICES[0].id,
+        aspect: "9:16",
+        resolution: "720p",
+        captions: true,
+        speed: 1.1,
+        scenes: [
+          { script: "Welcome.", background: { type: "color", value: "#000000" } },
+          { script: "Goodbye.", background: { type: "color", value: "#ffffff" }, avatarId: STOCK_AVATARS[1].id, voiceId: STOCK_VOICES[1].id },
+        ],
+      }),
+    );
+    const t = await createTemplate(templateInputSchema.parse({ fromVideoId: video.id, description: "Listing opener" }));
+    assert.equal(t.title, "Open house");
+    assert.equal(t.description, "Listing opener");
+    assert.equal(t.sourceVideoId, video.id);
+    assert.deepEqual(t.scenes.map((sc) => sc.script), ["Welcome.", "Goodbye."]);
+    assert.equal(t.scenes[1].avatarId, STOCK_AVATARS[1].id);
+    assert.equal(t.scenes[1].voiceId, STOCK_VOICES[1].id);
+    assert.equal((t.scenes[1] as { avatarName?: string }).avatarName, undefined, "display names are not copied; the render fills them in");
+    assert.deepEqual([t.avatarId, t.voiceId, t.aspect, t.resolution, t.captions, t.speed], [STOCK_AVATARS[0].id, STOCK_VOICES[0].id, "9:16", "720p", true, 1.1]);
+    assert.equal((await getTemplate(t.id)).id, t.id);
+    assert.deepEqual((await listTemplates()).map((x) => x.id), [t.id]);
+    // Another owner can neither copy the video nor read the template.
+    await assert.rejects(createTemplate({ fromVideoId: video.id }, "someone-else"), /not found/);
+    await assert.rejects(getTemplate(t.id, "someone-else"), /not found/);
+    await assert.rejects(createTemplate({ fromVideoId: "vid_missing" }), /not found/);
+    // Spelled out: title and scenes are required, settings default.
+    await assert.rejects(createTemplate(templateInputSchema.parse({ title: "No scenes" })), /at least one scene/);
+    const plain = await createTemplate(templateInputSchema.parse({ title: "Plain", scenes: [{ script: "Hi.", background: { type: "color", value: "#fff" } }] }));
+    assert.deepEqual([plain.aspect, plain.captions, plain.speed, plain.avatarId], ["16:9", false, 1, undefined]);
+    await deleteTemplate(plain.id);
+    await assert.rejects(deleteTemplate(plain.id), /not found/);
+    assert.equal((await listTemplates()).length, 1);
+    // The cap.
+    for (let i = 1; i < MAX_TEMPLATES; i++) await createTemplate({ fromVideoId: video.id, title: `T${i}` });
+    await assert.rejects(createTemplate({ fromVideoId: video.id }), /up to 50 templates/);
+    assert.equal((await listTemplates()).length, MAX_TEMPLATES);
+  });
+});
+
 describe("review fixes", () => {
   it("rejects a voice the current provider does not list", async () => {
     await assert.rejects(

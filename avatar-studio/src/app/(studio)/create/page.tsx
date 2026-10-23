@@ -11,7 +11,7 @@ import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib
 import { languageLabel } from "@/lib/language";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
-import { MAX_SCENES, RESOLUTIONS, type AspectRatio, type Avatar, type Background, type BrandKit, type Resolution, type Scene, type Video, type Voice } from "@/lib/types";
+import { MAX_SCENES, RESOLUTIONS, type AspectRatio, type Avatar, type Background, type BrandKit, type Resolution, type Scene, type Video, type VideoTemplate, type Voice } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -237,7 +237,27 @@ function CreateInner() {
       setScenes([newScene(t.script)]);
       setActiveIdx(0);
       setAspect(t.aspect);
+      return;
     }
+    // A saved template (tpl_…) brings its scenes, presenter, voice, and settings.
+    if (!templateId?.startsWith("tpl_")) return;
+    let cancelled = false;
+    api<{ template: VideoTemplate }>(`/api/templates/${templateId}`)
+      .then(({ template }) => {
+        if (cancelled) return;
+        setTitle(template.title);
+        setScenes(template.scenes.map((sc) => newScene(sc.script, sc.background, sc)));
+        setActiveIdx(0);
+        setAspect(template.aspect);
+        setResolution(template.resolution ?? "1080p");
+        setCaptions(template.captions);
+        setSpeed(template.speed);
+        setPrefill({ avatarId: template.avatarId, voiceId: template.voiceId });
+      })
+      .catch((e) => setErr(e instanceof Error ? e.message : "Could not load the template"));
+    return () => {
+      cancelled = true;
+    };
   }, [templateId]);
   useEffect(() => {
     if (!fromId) return;

@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import { ArrowLeft, Captions, Check, Code2, Copy, Download, Eye, FolderOpen, Languages, Link2, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowLeft, Captions, Check, Code2, Copy, Download, Eye, FolderOpen, Languages, LayoutTemplate, Link2, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { ApiError, api, formatDate, formatSeconds, isDarkHex } from "@/lib/client";
@@ -17,6 +17,20 @@ export default function VideoDetailPage() {
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
   const [renameErr, setRenameErr] = useState<string | null>(null);
+  const [savedTemplate, setSavedTemplate] = useState<string | null>(null);
+  const [templateErr, setTemplateErr] = useState<string | null>(null);
+  async function saveAsTemplate() {
+    if (!video) return;
+    const title = window.prompt("Template name", video.title);
+    if (title === null) return;
+    setTemplateErr(null);
+    try {
+      const { template } = await api<{ template: { id: string } }>("/api/templates", { method: "POST", body: JSON.stringify({ fromVideoId: video.id, title: title.trim() || video.title }) });
+      setSavedTemplate(template.id);
+    } catch (e) {
+      setTemplateErr(e instanceof Error ? e.message : "Could not save the template");
+    }
+  }
   const { data, loading, error, setData } = useApi<{ video: Video }>(`/api/videos/${id}`, {
     pollMs: 5000,
     pollWhile: (d) => d.video.status === "processing" || d.video.status === "queued",
@@ -214,6 +228,16 @@ export default function VideoDetailPage() {
                 <Link href={`/create?from=${video.id}`} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50">
                   <Copy className="h-4 w-4" /> Edit a copy
                 </Link>
+                {savedTemplate ? (
+                  <Link href="/templates" className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100">
+                    <Check className="h-4 w-4" /> Saved · View templates
+                  </Link>
+                ) : (
+                  <Button variant="secondary" onClick={saveAsTemplate}>
+                    <LayoutTemplate className="h-4 w-4" /> Save as template
+                  </Button>
+                )}
+                {templateErr && <span className="text-xs text-rose-600">{templateErr}</span>}
                 <Button variant="danger" onClick={remove} loading={deleting}>
                   <Trash2 className="h-4 w-4" /> Delete
                 </Button>

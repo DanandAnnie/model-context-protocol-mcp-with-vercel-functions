@@ -4,7 +4,7 @@ import { getTtsProvider } from "../providers";
 import { getStore } from "../store";
 import { LOCAL_OWNER } from "../owner-id";
 
-const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice"] as const;
+const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template"] as const;
 
 /** Everything stored under an owner id, for a data export. Secrets (key hashes, webhook secret) are redacted. */
 export type OwnerExport = { ownerId: string; exportedAt: string } & Record<(typeof OWNER_KINDS)[number], Record<string, unknown>[]>;

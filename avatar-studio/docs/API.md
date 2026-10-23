@@ -83,6 +83,10 @@ When completed the video also carries `videoUrl`, `thumbnailUrl`, and `durationS
 
 Query parameters, all optional: `q` (matches title, script, avatar, and voice), `status` (`processing`, which includes queued, `completed`, or `failed`), `folder` (a name; pass it empty for unfiled videos), `batch`, `sort` (`newest`, `oldest`, `title`, `views`), and `limit` (1–200; omit it to receive every match). Returns `{ "videos", "matched", "total", "hasMore", "folders", "rendering" }`: `matched` counts the query's results before `limit`, `total` the whole library, `folders` the names in use, and `rendering` the renders still in flight. The newest ten in-flight renders are refreshed from the provider on the way out, so polling the list is enough to see completions.
 
+### `GET /api/templates`, `POST /api/templates`, `GET /api/templates/:id`, `DELETE /api/templates/:id` — saved templates
+
+A template is a starting point for the editor: scenes (with any per-scene presenter), avatar, voice, aspect, quality, captions, and speed, up to 50 per account. Create one from a video you own with `{ "fromVideoId", "title"?, "description"? }` (the title defaults to the video's), or spell it out with `{ "title", "scenes", "avatarId"?, "voiceId"?, "aspect"?, "resolution"?, "captions"?, "speed"? }`. `GET /api/templates` returns `{ "templates" }`, newest first; the editor opens one at `/create?template=<id>`.
+
 ### `GET /api/videos/:id` — fetch; refreshes the status from the provider while rendering
 ### `PATCH /api/videos/:id` — `{ "title"?: string, "folder"?: string, "shareDownload"?: boolean }` (empty `folder` means unfiled; `shareDownload` shows a download button on the public share page)
 ### `DELETE /api/videos/:id`

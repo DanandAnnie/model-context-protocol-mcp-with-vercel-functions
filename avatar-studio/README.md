@@ -18,7 +18,7 @@ D-ID, ElevenLabs, or in a fully offline **demo mode** with no keys at all.
 | Share page | Public, sidebar-free player at `/share/:id` with a native subtitle track and an optional download button (owner toggle); "Embed" copies an iframe snippet |
 | Hardening | Password sign-in is rate limited (5 attempts per 15 minutes per IP); security headers on every response; only share and talk pages may be framed; server-side fetches (page import, avatar images, webhooks) refuse private, loopback, link-local and IPv4-mapped IPv6 hosts and connect only to the addresses that passed the check (no DNS rebinding); post-login redirects stay on the site |
 | Personalize | One script with `{column}` placeholders plus a CSV of recipients produces one video per row (up to 100), with live preview, missing-column checks, and the monthly allowance respected |
-| Templates | Script templates by category (real estate, marketing, training, support, social) that pre-fill the editor |
+| Templates | Script templates by category (real estate, marketing, training, support, social) that pre-fill the editor, plus "My templates": save any video as a template (scenes, presenters, voice, and settings) and start new videos from it |
 | Avatars | Library presenters + photo avatars created from an uploaded portrait, a webcam capture, or an image URL |
 | Voice cloning | Record about a minute or upload audio files; the clone (ElevenLabs instant cloning, or a demo stand-in) is private to the account, listed first, and usable in every video |
 | Voices | Searchable voice library with previews (provider audio, provider sample, or browser speech in demo mode) |

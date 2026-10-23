@@ -60,6 +60,25 @@ export interface Voice {
 
 export type VideoStatus = "queued" | "processing" | "completed" | "failed";
 
+/** A reusable starting point saved by the account: scenes, presenter, and settings, no render. */
+export interface VideoTemplate {
+  id: string;
+  ownerId?: string;
+  title: string;
+  description?: string;
+  scenes: Scene[];
+  avatarId?: string;
+  voiceId?: string;
+  aspect: AspectRatio;
+  resolution?: Resolution;
+  captions: boolean;
+  speed: number;
+  /** The video it was saved from, when it was. */
+  sourceVideoId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Background {
   type: "color" | "image";
   value: string;

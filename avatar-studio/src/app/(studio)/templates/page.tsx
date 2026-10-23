@@ -1,9 +1,12 @@
 "use client";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { LayoutTemplate } from "lucide-react";
-import { Card, SectionTitle } from "@/components/ui";
+import { LayoutTemplate, Trash2 } from "lucide-react";
+import { Card, ErrorBanner, SectionTitle } from "@/components/ui";
+import { useApi } from "@/hooks/useApi";
+import { api } from "@/lib/client";
 import { SCRIPT_TEMPLATES, type ScriptTemplate } from "@/lib/templates";
+import type { VideoTemplate } from "@/lib/types";
 
 const CATEGORIES = ["All", ...Array.from(new Set(SCRIPT_TEMPLATES.map((t) => t.category)))];
 
@@ -14,9 +17,57 @@ export default function TemplatesPage() {
     [category],
   );
 
+  const { data: mine, error, refetch } = useApi<{ templates: VideoTemplate[] }>("/api/templates");
+  const [removeErr, setRemoveErr] = useState<string | null>(null);
+  async function remove(t: VideoTemplate) {
+    if (!window.confirm(`Delete the template "${t.title}"?`)) return;
+    setRemoveErr(null);
+    try {
+      await api(`/api/templates/${t.id}`, { method: "DELETE" });
+      await refetch();
+    } catch (e) {
+      setRemoveErr(e instanceof Error ? e.message : "Could not delete the template");
+    }
+  }
+
   return (
     <>
       <SectionTitle title="Templates" subtitle="Start from a proven script. Placeholders in {braces} are yours to fill in." />
+      <ErrorBanner message={error ?? removeErr} />
+      <section className="mb-8" data-testid="my-templates">
+        <h2 className="mb-1 text-sm font-semibold text-slate-900">My templates</h2>
+        <p className="mb-4 text-xs text-slate-500">Save any video as a template from its page: scenes, presenter, voice, and settings come along.</p>
+        {mine && mine.templates.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-6 text-center text-sm text-slate-500">No saved templates yet.</p>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {(mine?.templates ?? []).map((t) => (
+              <Card key={t.id} className="flex flex-col p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
+                    <LayoutTemplate className="h-4 w-4" />
+                  </span>
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                    {t.aspect} · {t.scenes.length} {t.scenes.length === 1 ? "scene" : "scenes"}
+                  </span>
+                </div>
+                <h3 className="mt-3 text-sm font-semibold text-slate-900">{t.title}</h3>
+                {t.description && <p className="mt-1 text-xs text-slate-500">{t.description}</p>}
+                <p className="mt-3 line-clamp-4 flex-1 text-xs leading-relaxed text-slate-600">{t.scenes[0]?.script}</p>
+                <div className="mt-4 flex items-center gap-2">
+                  <Link href={`/create?template=${t.id}`} className="inline-flex flex-1 items-center justify-center rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700">
+                    Use template
+                  </Link>
+                  <button type="button" onClick={() => remove(t)} aria-label={`Delete template ${t.title}`} className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-rose-50 hover:text-rose-700">
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </section>
+      <h2 className="mb-3 text-sm font-semibold text-slate-900">Script templates</h2>
       <div className="mb-5 flex flex-wrap gap-2">
         {CATEGORIES.map((c) => (
           <button

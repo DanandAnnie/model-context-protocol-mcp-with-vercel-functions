@@ -95,6 +95,47 @@ test("the library pages large batches and filters on the server", async ({ page 
   await expect(cards).toHaveCount(10);
 });
 
+test("a video can be saved as a template and reopened from it", async ({ page }) => {
+  const made = await page.request.post("/api/videos", {
+    data: {
+      title: "Template source",
+      avatarId: "stock_1",
+      voiceId: "stock_voice_1",
+      aspect: "9:16",
+      captions: true,
+      scenes: [
+        { script: "First scene text.", background: { type: "color", value: "#0f172a" } },
+        { script: "Second scene text.", background: { type: "color", value: "#ffffff" }, voiceId: "stock_voice_3" },
+      ],
+    },
+  });
+  expect(made.status()).toBe(201);
+  const { video } = (await made.json()) as { video: { id: string } };
+  await page.goto(`/videos/${video.id}`);
+  page.once("dialog", (d) => d.accept("Listing opener"));
+  await page.getByRole("button", { name: "Save as template" }).click();
+  await expect(page.getByRole("link", { name: /View templates/ })).toBeVisible();
+  await page.getByRole("link", { name: /View templates/ }).click();
+  await page.waitForURL(/\/templates/);
+  const mine = page.getByTestId("my-templates");
+  await expect(mine.getByText("Listing opener")).toBeVisible();
+  await expect(mine.getByText("9:16 · 2 scenes")).toBeVisible();
+  await mine.getByRole("link", { name: "Use template" }).first().click();
+  await page.waitForURL(/\/create\?template=tpl_/);
+  await expect(page.locator("input[placeholder='Video title']")).toHaveValue("Listing opener");
+  await expect(page.getByText(/2 scenes/)).toBeVisible();
+  await expect(page.locator("textarea")).toHaveValue("First scene text.");
+  await page.getByRole("button", { name: "2", exact: true }).click();
+  await expect(page.getByLabel("Scene voice")).toHaveValue("stock_voice_3");
+  await expect(page.getByText(/Emma · 9:16 · 2 scenes · captions on/)).toBeVisible();
+  // Delete it again from the Templates page.
+  await page.goto("/templates");
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: "Delete template Listing opener" }).click();
+  await expect(page.getByTestId("my-templates").getByText("Listing opener")).toHaveCount(0);
+  expect(((await (await page.request.get("/api/templates")).json()).templates as unknown[]).length).toBe(0);
+});
+
 test("scenes can be duplicated and reordered", async ({ page }) => {
   await page.goto("/create");
   await page.locator("textarea").fill("A.");

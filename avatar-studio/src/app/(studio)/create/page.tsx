@@ -408,13 +408,19 @@ function CreateInner() {
                   key={i}
                   type="button"
                   onClick={() => setActiveIdx(i)}
+                  aria-label={`Scene ${i + 1}${sc.script.trim() ? `, about ${formatSeconds(estimateSeconds(sc.script, speed))}` : ", empty"}`}
+                  aria-current={i === activeIdx ? "true" : undefined}
                   className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${
                     i === activeIdx ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                   }`}
                 >
                   <span className="h-2.5 w-2.5 rounded-full border border-black/10" style={sc.background.type === "color" ? { background: sc.background.value } : { background: "linear-gradient(135deg,#94a3b8,#cbd5e1)" }} />
                   {i + 1}
-                  {!sc.script.trim() && <span className="text-amber-500" title="Empty scene">•</span>}
+                  {sc.script.trim() ? (
+                    <span className="font-normal text-slate-400" data-testid="scene-duration">~{formatSeconds(estimateSeconds(sc.script, speed))}</span>
+                  ) : (
+                    <span className="text-amber-500" title="Empty scene">•</span>
+                  )}
                 </button>
               ))}
               <button
@@ -466,8 +472,10 @@ function CreateInner() {
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-semibold text-slate-900">{scenes.length > 1 ? `Scene ${activeIdx + 1} script` : "Script"}</h3>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs text-slate-500">
-                  {words} words · ~{formatSeconds(seconds)}{scenes.length > 1 ? " total" : ""}
+                <span className="text-xs text-slate-500" data-testid="script-length">
+                  {scenes.length > 1
+                    ? `${wordCount(active.script)} words · ~${formatSeconds(estimateSeconds(active.script, speed))} this scene · ~${formatSeconds(seconds)} total`
+                    : `${words} words · ~${formatSeconds(seconds)}`}
                 </span>
                 <Button variant="secondary" className="px-3 py-1.5" onClick={() => setWriterOpen((v) => !v)}>
                   <Wand2 className="h-4 w-4" /> Write with AI

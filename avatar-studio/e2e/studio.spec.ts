@@ -128,7 +128,7 @@ test("a video can be saved as a template and reopened from it", async ({ page })
     await expect(page.locator("input[placeholder='Video title']")).toHaveValue("Listing opener");
     await expect(page.getByText(/2 scenes/)).toBeVisible();
     await expect(page.locator("textarea")).toHaveValue("First scene text.");
-    await page.getByRole("button", { name: "2", exact: true }).click();
+    await page.getByRole("button", { name: /^Scene 2,/ }).click();
     await expect(page.getByLabel("Scene voice")).toHaveValue("stock_voice_3");
     await expect(page.getByText(/Emma · 9:16 · 2 scenes · captions on/)).toBeVisible();
     await page.getByRole("button", { name: "Settings" }).click();
@@ -142,6 +142,18 @@ test("a video can be saved as a template and reopened from it", async ({ page })
   await page.getByRole("button", { name: "Delete template Listing opener" }).click();
   await expect(page.getByTestId("my-templates").getByText("Listing opener")).toHaveCount(0);
   expect(((await (await page.request.get("/api/templates")).json()).templates as unknown[]).length).toBe(0);
+});
+
+test("each scene shows its own running time", async ({ page }) => {
+  await page.goto("/create");
+  await page.locator("textarea").fill(Array.from({ length: 25 }, (_, i) => `word${i}`).join(" "));
+  await expect(page.getByTestId("script-length")).toHaveText("25 words · ~10s");
+  await page.getByRole("button", { name: "Add scene" }).click();
+  // The new, empty scene carries the empty marker, not a duration.
+  await expect(page.getByTestId("scene-duration")).toHaveCount(1);
+  await page.locator("textarea").fill("one two three four five");
+  await expect(page.getByTestId("scene-duration")).toHaveText(["~10s", "~2s"]);
+  await expect(page.getByTestId("script-length")).toHaveText("5 words · ~2s this scene · ~12s total");
 });
 
 test("scenes can be duplicated and reordered", async ({ page }) => {
@@ -228,9 +240,9 @@ test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page 
   await page.getByLabel("Scene avatar").selectOption({ label: "Marcus Hill" });
   await page.getByLabel("Scene voice").selectOption({ label: "Olivia" });
   await expect(page.getByTestId("stage-avatar")).toHaveAttribute("alt", "Marcus Hill");
-  await page.getByRole("button", { name: "1", exact: true }).click();
+  await page.getByRole("button", { name: /^Scene 1,/ }).click();
   await expect(page.getByTestId("stage-avatar")).not.toHaveAttribute("alt", "Marcus Hill");
-  await page.getByRole("button", { name: "2", exact: true }).click();
+  await page.getByRole("button", { name: /^Scene 2,/ }).click();
   await page.getByRole("button", { name: "Generate video" }).click();
   await page.waitForURL(/\/videos\/vid_/);
   const id = page.url().split("/").pop()!;
@@ -244,7 +256,7 @@ test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page 
   // Edit a copy keeps the scene's presenter.
   await page.goto(`/create?from=${id}`);
   await expect(page.getByText(/2 scenes/)).toBeVisible();
-  await page.getByRole("button", { name: "2", exact: true }).click();
+  await page.getByRole("button", { name: /^Scene 2,/ }).click();
   await expect(page.getByLabel("Scene voice")).toHaveValue("stock_voice_3");
   // A scene whose presenter was deleted since falls back to the video's and still renders.
   const custom = await page.request.post("/api/avatars", { data: { name: "Gone soon", imageUrl: "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%2F%3E" } });
@@ -257,7 +269,7 @@ test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page 
   const withCustomId = ((await withCustom.json()) as { video: { id: string } }).video.id;
   expect((await page.request.delete(`/api/avatars/${customId}`)).ok()).toBe(true);
   await page.goto(`/create?from=${withCustomId}`);
-  await page.getByRole("button", { name: "2", exact: true }).click();
+  await page.getByRole("button", { name: /^Scene 2,/ }).click();
   await expect(page.getByLabel("Scene avatar")).toHaveValue("");
   await page.getByRole("button", { name: "Generate video" }).click();
   await page.waitForURL(/\/videos\/vid_/);

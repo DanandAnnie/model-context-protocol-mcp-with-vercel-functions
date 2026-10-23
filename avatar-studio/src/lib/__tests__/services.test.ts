@@ -380,6 +380,16 @@ describe("captions", () => {
     assert.match(srt, /^1\n00:00:00,000 --> 00:00:0\d,\d{3}\nHello there\.\n\n2\n/);
   });
 
+  it("puts cues at the top of the frame when the video asks for it", async () => {
+    const { buildVtt } = await import("../captions");
+    assert.match(buildVtt("Hello there. Welcome!", 4, "top"), /^WEBVTT\n\n1\n00:00:00\.000 --> 00:00:0\d\.\d{3} line:5%\nHello there\.\n/);
+    assert.doesNotMatch(buildVtt("Hello there.", 4), /line:/, "the bottom is the player's default and needs no setting");
+    assert.doesNotMatch(buildVtt("Hello there.", 4, "bottom"), /line:/);
+    const { captionStyleSchema } = await import("../services/videos");
+    assert.deepEqual(captionStyleSchema.parse({ position: "top", size: "large" }), { position: "top", size: "large" });
+    assert.throws(() => captionStyleSchema.parse({ position: "middle", size: "large" }));
+  });
+
   it("returns nothing for empty input", async () => {
     const { buildCues } = await import("../captions");
     assert.deepEqual(buildCues("   ", 10), []);
@@ -480,6 +490,8 @@ describe("scenes", () => {
     assert.deepEqual([chars[0].scale, chars[0].offset], [1.2, { x: 0.25, y: -0.1 }]);
     assert.equal("scale" in chars[1], false);
     assert.throws(() => videoRequestSchema.parse({ ...req, scenes: [{ ...req.scenes![0], layout: { scale: 2, x: 0, y: 0 } }] }), "the scale is bounded");
+    const plain = await createVideo(videoRequestSchema.parse({ title: "Plain", avatarId: "stock_1", voiceId: "stock_voice_1", scenes: [{ script: "Hi.", background: { type: "color", value: "#fff" }, layout: { scale: 1, x: 0, y: 0 } }] }));
+    assert.equal("layout" in plain.scenes![0], false, "an explicit default layout is stored as absent");
     // A scene voice from another provider is refused like the video's voice would be.
     await assert.rejects(heygen.createVideo(req, ava, emma, { ...cast, voices: { ...cast.voices, [james.id]: { ...james, provider: "elevenlabs" } } }), /HeyGen voice/);
     await assert.rejects(new DidAvatarProvider("key").createVideo(req, ava, emma), /one presenter and one voice per video/);
@@ -982,20 +994,16 @@ describe("folders and share views", () => {
     await updateVideo(a.id, { folder: "Gone" }, "f1");
     await updateVideo(c.id, { folder: "Gone" }, "f1");
     const store = globalThis.__avatarStudioStore!;
-    const realPut = store.put.bind(store);
-    store.put = async (kind, item) => {
-      if (kind === "video" && (item as { id: string }).id === a.id) {
-        await store.remove("video", a.id);
-        throw new (await import("../errors")).NotFoundError("gone");
-      }
-      return realPut(kind, item);
-    };
+    const realGet = store.get.bind(store);
+    // The listing still has `a`, but by its turn the record is gone: the rename reads null, like after a purge.
+    store.get = async (kind, id) => (kind === "video" && id === a.id ? null : realGet(kind, id));
     try {
       assert.deepEqual(await renameFolder({ from: "Gone", to: "Kept" }, "f1"), { moved: 1 });
     } finally {
-      store.put = realPut;
+      store.get = realGet;
     }
     assert.equal((await getVideo(c.id, "f1", false)).folder, "Kept");
+    assert.equal((await getVideo(a.id, "f1", false)).folder, "Gone", "the vanished one was left alone");
   });
 
   it("counts share views only once the render completed", async () => {

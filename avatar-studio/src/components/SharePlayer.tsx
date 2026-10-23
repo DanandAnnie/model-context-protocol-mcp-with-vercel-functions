@@ -1,13 +1,13 @@
 "use client";
 import { useRef } from "react";
-import type { WatchQuarter } from "@/lib/types";
+import type { CaptionSize, WatchQuarter } from "@/lib/types";
 
 /**
  * The share page's player. Reports the furthest point the viewer reaches (a quarter, half,
  * three quarters, the end), once per marker per mount and one request at a time: the server
  * counts every marker up to the one reported, so a seek past three markers is one beacon.
  */
-export function SharePlayer({ videoId, src, poster, captions }: { videoId: string; src: string; poster?: string; captions: boolean }) {
+export function SharePlayer({ videoId, src, poster, captions, captionSize = "medium" }: { videoId: string; src: string; poster?: string; captions: boolean; captionSize?: CaptionSize }) {
   const reported = useRef<WatchQuarter | 0>(0);
   const queue = useRef<Promise<void>>(Promise.resolve());
   const report = (quarter: WatchQuarter) => {
@@ -24,7 +24,7 @@ export function SharePlayer({ videoId, src, poster, captions }: { videoId: strin
       controls
       autoPlay={false}
       playsInline
-      className="h-full w-full"
+      className={`h-full w-full cue-${captionSize}`}
       data-testid="share-player"
       onTimeUpdate={(e) => {
         const el = e.currentTarget;

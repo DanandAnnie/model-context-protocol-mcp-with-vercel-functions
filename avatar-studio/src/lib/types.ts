@@ -72,6 +72,7 @@ export interface VideoTemplate {
   aspect: AspectRatio;
   resolution?: Resolution;
   captions: boolean;
+  captionStyle?: CaptionStyle;
   speed: number;
   /** The video it was saved from, when it was. */
   sourceVideoId?: string;
@@ -121,9 +122,22 @@ export interface VideoRequest {
   resolution?: Resolution;
   background: Background;
   captions: boolean;
+  /** How captions look on the share page and in the WebVTT file; the default style when absent. */
+  captionStyle?: CaptionStyle;
   /** 0.5 - 1.5 speaking rate multiplier. */
   speed: number;
 }
+
+export const CAPTION_POSITIONS = ["bottom", "top"] as const;
+export const CAPTION_SIZES = ["small", "medium", "large"] as const;
+export type CaptionPosition = (typeof CAPTION_POSITIONS)[number];
+export type CaptionSize = (typeof CAPTION_SIZES)[number];
+/** Where subtitles sit and how big they read: a cue setting in the WebVTT file and a size class on the player. */
+export interface CaptionStyle {
+  position: CaptionPosition;
+  size: CaptionSize;
+}
+export const DEFAULT_CAPTION_STYLE: CaptionStyle = { position: "bottom", size: "medium" };
 
 export type WatchQuarter = 25 | 50 | 75 | 100;
 export type WatchCounts = { q25: number; q50: number; q75: number; q100: number };

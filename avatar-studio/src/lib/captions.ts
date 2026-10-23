@@ -65,9 +65,13 @@ export function formatVttTime(ms: number): string {
   return formatSrtTime(ms).replace(",", ".");
 }
 
-export function buildVtt(script: string, durationSec: number): string {
+/** A cue setting that puts subtitles near the top of the frame; the default (bottom) needs none. */
+const VTT_TOP = " line:5%";
+
+export function buildVtt(script: string, durationSec: number, position: "bottom" | "top" = "bottom"): string {
+  const setting = position === "top" ? VTT_TOP : "";
   const cues = buildCues(script, durationSec)
-    .map((c) => `${c.index}\n${formatVttTime(c.startMs)} --> ${formatVttTime(c.endMs)}\n${c.text}\n`)
+    .map((c) => `${c.index}\n${formatVttTime(c.startMs)} --> ${formatVttTime(c.endMs)}${setting}\n${c.text}\n`)
     .join("\n");
   return `WEBVTT\n\n${cues}`;
 }

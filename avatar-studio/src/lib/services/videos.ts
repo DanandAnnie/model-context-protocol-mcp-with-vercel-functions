@@ -3,7 +3,7 @@ import { z } from "zod";
 import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import { getStore } from "../store";
-import { EMPTY_WATCH, MAX_SCENES, TRASH_RETENTION_DAYS } from "../types";
+import { CAPTION_POSITIONS, CAPTION_SIZES, EMPTY_WATCH, MAX_SCENES, TRASH_RETENTION_DAYS } from "../types";
 import type { Avatar, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
 import type { AvatarProvider, RenderCast } from "../providers/types";
 import { LOCAL_OWNER } from "../owner-id";
@@ -18,6 +18,8 @@ import { shareOffline } from "../client";
 import { bumpViewsByDay } from "../insights";
 
 export const backgroundSchema = z.object({ type: z.enum(["color", "image"]), value: z.string().min(1) });
+/** How captions look on the share page; see `CaptionStyle`. */
+export const captionStyleSchema = z.object({ position: z.enum(CAPTION_POSITIONS), size: z.enum(CAPTION_SIZES) });
 /** Presenter size and position in the frame; see `SceneLayout`. */
 export const sceneLayoutSchema = z.object({ scale: z.number().min(0.5).max(1.5), x: z.number().min(-1).max(1), y: z.number().min(-1).max(1) });
 
@@ -46,6 +48,7 @@ export const videoRequestSchema = z
     resolution: z.enum(["720p", "1080p"]).default("1080p"),
     background: backgroundSchema.default({ type: "color", value: "#f1f5f9" }),
     captions: z.boolean().default(false),
+    captionStyle: captionStyleSchema.optional(),
     speed: z.number().min(0.5).max(1.5).default(1),
   })
   .transform((v, ctx) => {
@@ -125,6 +128,8 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
   const scenes = req.scenes?.map((sc) =>
     stripUndefined({
       ...sc,
+      // The renderer's default layout is stored as absent whichever client sent it, so the page and the provider see no customisation.
+      layout: sc.layout && (sc.layout.scale !== 1 || sc.layout.x !== 0 || sc.layout.y !== 0) ? sc.layout : undefined,
       avatarName: sc.avatarId ? cast.avatars[sc.avatarId]?.name : undefined,
       voiceName: sc.voiceId ? cast.voices[sc.voiceId]?.name : undefined,
     }),
@@ -616,6 +621,7 @@ export async function retryVideo(id: string, ownerId: string = LOCAL_OWNER): Pro
     resolution: failed.resolution,
     background: failed.background,
     captions: failed.captions,
+    ...(failed.captionStyle ? { captionStyle: failed.captionStyle } : {}),
     speed: failed.speed,
   };
   // One write: the provider's webhook can land as soon as the job exists, so nothing may overwrite the stored video afterwards.

@@ -36,7 +36,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     // Fall back to a reading-speed estimate when the provider did not report a duration.
     const words = video.script.trim().split(/\s+/).filter(Boolean).length;
     const duration = video.durationSec ?? Math.max(1, Math.round(words / 2.5 / video.speed));
-    const body = vtt ? buildVtt(video.script, duration) : buildSrt(video.script, duration);
+    const body = vtt ? buildVtt(video.script, duration, video.captionStyle?.position) : buildSrt(video.script, duration);
     const filename = `${video.title.replace(/[^\w.-]+/g, "_").slice(0, 60) || "captions"}.${vtt ? "vtt" : "srt"}`;
     return new Response(body, {
       headers: {

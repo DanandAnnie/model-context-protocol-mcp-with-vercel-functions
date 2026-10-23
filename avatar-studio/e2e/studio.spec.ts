@@ -245,7 +245,8 @@ test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page 
   await page.getByTestId("scene-layout").locator("summary").click();
   await page.getByLabel("Presenter size").fill("1.2");
   await page.getByLabel("Presenter horizontal position").fill("0.5");
-  await expect(page.getByTestId("stage-avatar")).toHaveCSS("transform", /matrix\(1\.2, 0, 0, 1\.2, .+\)/);
+  await expect(page.getByTestId("stage-avatar")).toHaveCSS("transform", /matrix\(1\.2, 0, 0, 1\.2, 0, 0\)/);
+  await expect(page.getByTestId("stage-presenter")).toHaveCSS("transform", /matrix\(1, 0, 0, 1, [1-9]\d*(\.\d+)?, 0\)/);
   await expect(page.getByTestId("scene-layout")).toContainText("120%, moved");
   await page.getByRole("button", { name: /^Scene 1,/ }).click();
   await expect(page.getByTestId("scene-layout")).not.toContainText("120%");
@@ -709,10 +710,14 @@ test("personalized batch creates one video per CSV row", async ({ page }) => {
 });
 
 test("captions are served as SRT and VTT, security headers are set", async ({ page, request }) => {
-  const v = await createVideoViaApi(page, "Caption formats", { captions: true });
+  const v = await createVideoViaApi(page, "Caption formats", { captions: true, captionStyle: { position: "top", size: "large" } });
   const vtt = await request.get(`/api/videos/${v.id}/captions?format=vtt`);
   expect(vtt.headers()["content-type"]).toContain("text/vtt");
   expect(await vtt.text()).toMatch(/^WEBVTT/);
+  // The chosen position rides along as a cue setting; the SRT has no such thing.
+  expect(await vtt.text()).toMatch(/--> 00:00:\d\d\.\d{3} line:5%\n/);
+  expect(await (await request.get(`/api/videos/${v.id}/captions`)).text()).not.toMatch(/line:/);
+  expect((await request.post("/api/videos", { data: { title: "Bad style", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", captions: true, captionStyle: { position: "middle", size: "large" } } })).status()).toBe(400);
   const home = await request.get("/home");
   expect(home.headers()["x-frame-options"]).toBe("DENY");
   expect(home.headers()["x-content-type-options"]).toBe("nosniff");
@@ -723,6 +728,18 @@ test("captions are served as SRT and VTT, security headers are set", async ({ pa
   const share = await request.get(`/share/${v.id}`);
   expect(share.headers()["x-frame-options"]).toBeUndefined();
   expect(await share.text()).toContain(`/api/videos/${v.id}/captions?format=vtt`);
+  // The player carries the size as a class, which the stylesheet turns into a cue font size.
+  await page.goto(`/share/${v.id}`);
+  await expect(page.getByTestId("share-player")).toHaveClass(/cue-large/);
+  await page.goto(`/videos/${v.id}`);
+  await expect(page.getByText("On · top, large")).toBeVisible();
+  // The editor offers the style once captions are on, previews it on the stage, and a copy keeps it.
+  await page.goto(`/create?from=${v.id}`);
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByRole("group", { name: "Caption position" }).getByRole("button", { name: "top" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("stage-caption")).toHaveClass(/top-4/);
+  await page.getByRole("group", { name: "Caption size" }).getByRole("button", { name: "small" }).click();
+  await expect(page.getByTestId("stage-caption")).toHaveClass(/text-xs/);
 });
 
 test("brand kit pre-fills the editor and brands the share page", async ({ page }) => {

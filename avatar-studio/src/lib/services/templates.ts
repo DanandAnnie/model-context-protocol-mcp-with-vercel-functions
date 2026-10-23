@@ -7,7 +7,7 @@ import type { Video, VideoTemplate } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { LimitError, NotFoundError, ValidationError } from "../errors";
 import { owned } from "./shared";
-import { backgroundSchema, sceneLayoutSchema } from "./videos";
+import { backgroundSchema, captionStyleSchema, sceneLayoutSchema } from "./videos";
 
 export const MAX_TEMPLATES = 50;
 
@@ -30,6 +30,7 @@ export const templateInputSchema = z.object({
   aspect: z.enum(["16:9", "9:16", "1:1"]).optional(),
   resolution: z.enum(["720p", "1080p"]).optional(),
   captions: z.boolean().optional(),
+  captionStyle: captionStyleSchema.optional(),
   speed: z.number().min(0.5).max(1.5).optional(),
 });
 export type TemplateInput = z.infer<typeof templateInputSchema>;
@@ -69,6 +70,7 @@ export async function createTemplate(input: TemplateInput, ownerId: string = LOC
       aspect: video.aspect,
       ...(video.resolution ? { resolution: video.resolution } : {}),
       captions: video.captions,
+      ...(video.captionStyle ? { captionStyle: video.captionStyle } : {}),
       speed: video.speed,
       sourceVideoId: video.id,
     };
@@ -83,6 +85,7 @@ export async function createTemplate(input: TemplateInput, ownerId: string = LOC
       aspect: input.aspect ?? "16:9",
       ...(input.resolution ? { resolution: input.resolution } : {}),
       captions: input.captions ?? false,
+      ...(input.captionStyle ? { captionStyle: input.captionStyle } : {}),
       speed: input.speed ?? 1,
     };
   }

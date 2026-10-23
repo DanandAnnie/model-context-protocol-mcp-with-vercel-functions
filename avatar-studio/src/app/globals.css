@@ -42,3 +42,8 @@ body {
   background-size: 800px 100%;
   animation: shimmer 1.4s infinite linear;
 }
+
+/* Subtitle size on the share player, chosen per video (see CaptionStyle). */
+video.cue-small::cue { font-size: 0.8em; }
+video.cue-medium::cue { font-size: 1em; }
+video.cue-large::cue { font-size: 1.4em; }

@@ -12,7 +12,7 @@ import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib
 import { languageLabel } from "@/lib/language";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
-import { DEFAULT_LAYOUT, MAX_SCENES, RESOLUTIONS, type AspectRatio, type Avatar, type Background, type BrandKit, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice } from "@/lib/types";
+import { CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, RESOLUTIONS, type AspectRatio, type Avatar, type Background, type BrandKit, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -24,6 +24,7 @@ interface Draft {
   aspect: AspectRatio;
   resolution?: Resolution;
   captions: boolean;
+  captionStyle?: CaptionStyle;
   speed: number;
   avatarId?: string;
   voiceId?: string;
@@ -145,6 +146,8 @@ function CreateInner() {
   const [aspect, setAspect] = useState<AspectRatio>("16:9");
   const [resolution, setResolution] = useState<Resolution>("1080p");
   const [captions, setCaptions] = useState(false);
+  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>(DEFAULT_CAPTION_STYLE);
+  const isDefaultCaptionStyle = captionStyle.position === DEFAULT_CAPTION_STYLE.position && captionStyle.size === DEFAULT_CAPTION_STYLE.size;
   const [speed, setSpeed] = useState(1);
   const [tab, setTab] = useState<Tab>("avatar");
   const [writerOpen, setWriterOpen] = useState(params.get("writer") === "1");
@@ -193,6 +196,7 @@ function CreateInner() {
     setAspect(d.aspect);
     setResolution(d.resolution ?? "1080p");
     setCaptions(d.captions);
+    setCaptionStyle(d.captionStyle ?? DEFAULT_CAPTION_STYLE);
     setSpeed(d.speed);
     setPrefill({ avatarId: d.avatarId, voiceId: d.voiceId });
     setDraftRestored(d.savedAt);
@@ -203,10 +207,10 @@ function CreateInner() {
     if (!hydrated.current) return;
     const empty = scenes.every((sc) => !sc.script.trim()) && title === "Untitled video";
     const t = setTimeout(() => {
-      writeDraft(empty ? null : { title, scenes, aspect, resolution, captions, speed, avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
+      writeDraft(empty ? null : { title, scenes, aspect, resolution, captions, ...(isDefaultCaptionStyle ? {} : { captionStyle }), speed, avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
     }, 400);
     return () => clearTimeout(t);
-  }, [title, scenes, aspect, resolution, captions, speed, avatar, voice]);
+  }, [title, scenes, aspect, resolution, captions, captionStyle, isDefaultCaptionStyle, speed, avatar, voice]);
 
   function discardDraft() {
     writeDraft(null);
@@ -259,6 +263,7 @@ function CreateInner() {
         setAspect(template.aspect);
         setResolution(template.resolution ?? "1080p");
         setCaptions(template.captions);
+        setCaptionStyle(template.captionStyle ?? DEFAULT_CAPTION_STYLE);
         setSpeed(template.speed);
         setPrefill({ avatarId: template.avatarId, voiceId: template.voiceId });
       })
@@ -277,6 +282,7 @@ function CreateInner() {
         setAspect(video.aspect);
         setResolution(video.resolution ?? "1080p");
         setCaptions(video.captions);
+        setCaptionStyle(video.captionStyle ?? DEFAULT_CAPTION_STYLE);
         setSpeed(video.speed);
         setPrefill({ avatarId: video.avatarId, voiceId: video.voiceId });
       })
@@ -327,7 +333,7 @@ function CreateInner() {
     try {
       const { video } = await api<{ video: Video }>("/api/videos", {
         method: "POST",
-        body: JSON.stringify({ title, scenes, avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, speed }),
+        body: JSON.stringify({ title, scenes, avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed }),
       });
       writeDraft(null);
       router.push(`/videos/${video.id}`);
@@ -348,7 +354,7 @@ function CreateInner() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canGenerate, title, scenes, avatar, voice, aspect, captions, speed]);
+  }, [canGenerate, title, scenes, avatar, voice, aspect, captions, captionStyle, isDefaultCaptionStyle, speed]);
 
   const stageAspect = aspect === "9:16" ? "aspect-[9/16]" : aspect === "1:1" ? "aspect-square" : "aspect-video";
   const bgIsDark = background.type === "color" && isDarkHex(background.value);
@@ -382,13 +388,15 @@ function CreateInner() {
           <Card className="overflow-hidden">
             <div className={`relative mx-auto w-full ${stageAspect} ${aspect === "9:16" ? "max-h-[520px]" : ""} flex items-end justify-center overflow-hidden`} style={background.type === "color" ? { background: background.value } : { backgroundImage: `url(${background.value})`, backgroundSize: "cover", backgroundPosition: "center" }}>
               {sceneAvatar ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
+                // The offset moves a frame-sized layer so one unit is half the frame on either axis; the scale stays on the portrait.
+                <div data-testid="stage-presenter" className="absolute inset-0 flex items-end justify-center" style={{ transform: `translate(${layout.x * 50}%, ${layout.y * 50}%)` }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
                   data-testid="stage-avatar"
                   src={sceneAvatar.imageUrl}
                   alt={sceneAvatar.name}
                   className={`${aspect === "16:9" ? "h-[92%]" : "h-[80%]"} max-w-[80%] object-contain object-bottom drop-shadow-xl`}
-                  style={{ transform: `translate(${layout.x * 50}%, ${layout.y * 50}%) scale(${layout.scale})`, transformOrigin: "bottom center" }}
+                  style={{ transform: `scale(${layout.scale})`, transformOrigin: "bottom center" }}
                   onError={(e) => {
                     const img = e.currentTarget;
                     if (!img.dataset.fallback) {
@@ -397,11 +405,15 @@ function CreateInner() {
                     }
                   }}
                 />
+                </div>
               ) : (
                 <Skeleton className="h-3/4 w-1/3" />
               )}
               {captions && active.script.trim() && (
-                <div className={`absolute bottom-4 left-1/2 max-w-[85%] -translate-x-1/2 rounded-md px-3 py-1.5 text-center text-sm font-medium ${bgIsDark ? "bg-white/90 text-slate-900" : "bg-black/80 text-white"}`}>
+                <div
+                  data-testid="stage-caption"
+                  className={`absolute ${captionStyle.position === "top" ? "top-4" : "bottom-4"} left-1/2 max-w-[85%] -translate-x-1/2 rounded-md px-3 py-1.5 text-center font-medium ${captionStyle.size === "small" ? "text-xs" : captionStyle.size === "large" ? "text-lg" : "text-sm"} ${bgIsDark ? "bg-white/90 text-slate-900" : "bg-black/80 text-white"}`}
+                >
                   {active.script.trim().split(/(?<=[.!?])\s+/)[0].slice(0, 90)}
                 </div>
               )}
@@ -719,6 +731,28 @@ function CreateInner() {
                   </span>
                   <input type="checkbox" checked={captions} onChange={(e) => setCaptions(e.target.checked)} className="h-5 w-5 accent-brand-600" />
                 </label>
+                {captions && (
+                  <div className="rounded-lg border border-slate-200 px-3 py-3" data-testid="caption-style">
+                    <div className="text-sm font-medium text-slate-800">Caption style</div>
+                    <div className="mt-0.5 text-xs text-slate-500">Where subtitles sit and how big they read on the share page and in the subtitle file.</div>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                      <div role="group" aria-label="Caption position" className="flex gap-1">
+                        {CAPTION_POSITIONS.map((pos) => (
+                          <button key={pos} type="button" aria-pressed={captionStyle.position === pos} onClick={() => setCaptionStyle({ ...captionStyle, position: pos })} className={`flex-1 rounded-lg border px-2 py-1.5 text-xs font-medium capitalize ${captionStyle.position === pos ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}>
+                            {pos}
+                          </button>
+                        ))}
+                      </div>
+                      <div role="group" aria-label="Caption size" className="flex gap-1">
+                        {CAPTION_SIZES.map((size) => (
+                          <button key={size} type="button" aria-pressed={captionStyle.size === size} onClick={() => setCaptionStyle({ ...captionStyle, size })} className={`flex-1 rounded-lg border px-2 py-1.5 text-xs font-medium capitalize ${captionStyle.size === size ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}>
+                            {size}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

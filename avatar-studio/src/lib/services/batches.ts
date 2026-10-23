@@ -7,7 +7,7 @@ import { LOCAL_OWNER } from "../owner-id";
 import { renderLimitFor } from "../billing";
 import { ValidationError } from "../errors";
 import { fillTemplate, parseCsv, placeholdersIn } from "../csv";
-import { backgroundSchema, createVideo, rendersThisMonth, resolveRenderContext } from "./videos";
+import { backgroundSchema, captionStyleSchema, createVideo, rendersThisMonth, resolveRenderContext } from "./videos";
 
 export const MAX_BATCH_ROWS = 100;
 
@@ -23,6 +23,7 @@ export const batchRequestSchema = z.object({
   resolution: z.enum(["720p", "1080p"]).default("1080p"),
   background: backgroundSchema.default({ type: "color", value: "#f1f5f9" }),
   captions: z.boolean().default(false),
+  captionStyle: captionStyleSchema.optional(),
   speed: z.number().min(0.5).max(1.5).default(1),
 });
 
@@ -80,6 +81,7 @@ export async function createBatch(input: z.infer<typeof batchRequestSchema>, own
         resolution: input.resolution,
         background: input.background,
         captions: input.captions,
+        ...(input.captionStyle ? { captionStyle: input.captionStyle } : {}),
         speed: input.speed,
       },
       ownerId,

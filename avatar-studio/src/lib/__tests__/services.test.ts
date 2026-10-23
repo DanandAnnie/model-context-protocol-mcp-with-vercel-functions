@@ -154,6 +154,39 @@ describe("videos", () => {
     assert.equal((await getVideo(video.id, LOCAL_OWNER, false)).status, "completed");
   });
 
+  it("queries the library with filters, sorting, and a page size", async () => {
+    const { filterVideos, queryVideos, videoQuerySchema } = await import("../services/videos");
+    const a = await createVideo(videoRequestSchema.parse({ ...base, title: "Zulu tour" }));
+    await new Promise((r) => setTimeout(r, 5));
+    const b = await createVideo(videoRequestSchema.parse({ ...base, title: "Alpha intro", script: "Welcome to the quartz kitchen." }));
+    await new Promise((r) => setTimeout(r, 5));
+    const c = await createVideo(videoRequestSchema.parse({ ...base, title: "Mike update" }));
+    await globalThis.__avatarStudioStore!.put("video", { ...b, folder: "Listings", views: 3 });
+    await globalThis.__avatarStudioStore!.put("video", { ...c, status: "failed", providerJobId: undefined });
+
+    const query = (raw: Record<string, string>) => videoQuerySchema.parse(raw);
+    const page = await queryVideos(LOCAL_OWNER, query({ limit: "2" }));
+    assert.deepEqual(page.videos.map((v) => v.title), ["Mike update", "Alpha intro"], "newest first, two per page");
+    assert.equal(page.matched, 3);
+    assert.equal(page.total, 3);
+    assert.equal(page.hasMore, true);
+    assert.deepEqual(page.folders, ["Listings"]);
+    assert.equal(page.rendering, 2);
+    assert.equal((await queryVideos(LOCAL_OWNER, query({}))).hasMore, false, "no limit returns everything");
+
+    const all = await listVideos(LOCAL_OWNER, false);
+    assert.deepEqual(filterVideos(all, query({ q: "QUARTZ" })).map((v) => v.id), [b.id], "search covers the script, case-insensitively");
+    assert.deepEqual(filterVideos(all, query({ folder: "Listings" })).map((v) => v.id), [b.id]);
+    assert.deepEqual(filterVideos(all, query({ folder: "" })).map((v) => v.id), [c.id, a.id], "an empty folder means unfiled");
+    assert.deepEqual(filterVideos(all, query({ status: "failed" })).map((v) => v.id), [c.id]);
+    assert.deepEqual(filterVideos(all, query({ status: "processing" })).map((v) => v.id), [b.id, a.id]);
+    assert.deepEqual(filterVideos(all, query({ sort: "title" })).map((v) => v.title), ["Alpha intro", "Mike update", "Zulu tour"]);
+    assert.deepEqual(filterVideos(all, query({ sort: "oldest" })).map((v) => v.id), [a.id, b.id, c.id]);
+    assert.deepEqual(filterVideos(all, query({ sort: "views" }))[0].id, b.id);
+    assert.throws(() => query({ limit: "0" }));
+    assert.throws(() => query({ sort: "random" }));
+  });
+
   it("estimates duration from script length and speed", async () => {
     const provider = new MockAvatarProvider();
     const words = Array.from({ length: 50 }, () => "word").join(" ");

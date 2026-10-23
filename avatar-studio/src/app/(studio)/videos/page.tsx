@@ -7,17 +7,13 @@ import { api } from "@/lib/client";
 import { VideoCard } from "@/components/VideoCard";
 import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
-import type { Video, VideoStatus } from "@/lib/types";
+import type { VideoPage, VideoQuery } from "@/lib/services/videos";
+import type { VideoStatus } from "@/lib/types";
 
 const STATUSES: Array<"all" | VideoStatus> = ["all", "processing", "completed", "failed"];
-
-type SortKey = "newest" | "oldest" | "title" | "views";
-const SORTERS: Record<SortKey, (a: Video, b: Video) => number> = {
-  newest: (a, b) => b.createdAt.localeCompare(a.createdAt),
-  oldest: (a, b) => a.createdAt.localeCompare(b.createdAt),
-  title: (a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }) || b.createdAt.localeCompare(a.createdAt),
-  views: (a, b) => (b.views ?? 0) - (a.views ?? 0) || b.createdAt.localeCompare(a.createdAt),
-};
+type SortKey = VideoQuery["sort"];
+/** Cards per request; "Show more" asks for another page's worth. */
+const PAGE = 48;
 
 export default function VideosPage() {
   return (
@@ -32,27 +28,35 @@ function VideosInner() {
   const batch = params.get("batch");
   const skipped = Number(params.get("skipped") ?? 0);
   const failedCount = Number(params.get("failed") ?? 0);
-  const { data, loading, error, refetch } = useApi<{ videos: Video[] }>("/api/videos", {
-    pollMs: 6000,
-    pollWhile: (d) => d.videos.some((v) => v.status === "processing" || v.status === "queued"),
-  });
   const [q, setQ] = useState("");
+  const [needle, setNeedle] = useState("");
   const [status, setStatus] = useState<"all" | VideoStatus>("all");
   const [folder, setFolder] = useState<string>("all"); // "all" | "unfiled" | folder name
   const [sort, setSort] = useState<SortKey>("newest");
-  const folders = useMemo(() => Array.from(new Set((data?.videos ?? []).map((v) => v.folder).filter((f): f is string => !!f))).sort(), [data]);
-  const videos = useMemo(() => {
-    const all = data?.videos ?? [];
-    const needle = q.trim().toLowerCase();
-    return all.filter((v) => {
-      if (batch && v.batchId !== batch) return false;
-      if (folder === "unfiled" ? !!v.folder : folder !== "all" && v.folder !== folder) return false;
-      const statusOk = status === "all" ? true : status === "processing" ? v.status === "processing" || v.status === "queued" : v.status === status;
-      const textOk = !needle || `${v.title} ${v.script} ${v.avatarName ?? ""} ${v.voiceName ?? ""}`.toLowerCase().includes(needle);
-      return statusOk && textOk;
-    }).sort(SORTERS[sort]);
-  }, [data, q, status, batch, folder, sort]);
-  const hasAny = (data?.videos.length ?? 0) > 0;
+  const [limit, setLimit] = useState(PAGE);
+  // Search as you type, one request per pause rather than per keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setNeedle(q.trim()), 250);
+    return () => clearTimeout(t);
+  }, [q]);
+  // A new filter starts again from the first page.
+  useEffect(() => setLimit(PAGE), [needle, status, folder, batch, sort]);
+  const path = useMemo(() => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (needle) params.set("q", needle);
+    if (status !== "all") params.set("status", status);
+    if (folder === "unfiled") params.set("folder", "");
+    else if (folder !== "all") params.set("folder", folder);
+    if (batch) params.set("batch", batch);
+    if (sort !== "newest") params.set("sort", sort);
+    return `/api/videos?${params}`;
+  }, [limit, needle, status, folder, batch, sort]);
+  // The filtering, sorting, and paging happen on the server; the page only holds what it shows.
+  const { data, loading, error, refetch } = useApi<VideoPage>(path, { pollMs: 6000, pollWhile: (d) => d.rendering > 0 });
+  const videos = data?.videos ?? [];
+  const folders = data?.folders ?? [];
+  const hasAny = (data?.total ?? 0) > 0;
+  const remaining = data ? data.matched - videos.length : 0;
 
   // Multi-select: move the chosen videos to a folder or delete them in one request.
   const [selecting, setSelecting] = useState(false);
@@ -171,7 +175,7 @@ function VideosInner() {
           </select>
         </div>
       )}
-      {loading ? (
+      {loading && !data ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {[0, 1, 2].map((i) => (
             <Skeleton key={i} className="aspect-[16/11]" />
@@ -184,11 +188,21 @@ function VideosInner() {
           body={hasAny ? "Try a different search, status, or folder." : "Your rendered videos will show up here."}
         />
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {videos.map((v) => (
-            <VideoCard key={v.id} video={v} selectable={selecting} selected={selected.has(v.id)} onToggle={() => toggle(v.id)} />
-          ))}
-        </div>
+        <>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {videos.map((v) => (
+              <VideoCard key={v.id} video={v} selectable={selecting} selected={selected.has(v.id)} onToggle={() => toggle(v.id)} />
+            ))}
+          </div>
+          {remaining > 0 && (
+            <div className="mt-6 flex flex-col items-center gap-2 text-sm text-slate-500">
+              <span>Showing {videos.length} of {data?.matched}</span>
+              <Button variant="secondary" onClick={() => setLimit((l) => l + PAGE)} loading={loading} data-testid="load-more">
+                Show {Math.min(remaining, PAGE)} more
+              </Button>
+            </div>
+          )}
+        </>
       )}
     </>
   );

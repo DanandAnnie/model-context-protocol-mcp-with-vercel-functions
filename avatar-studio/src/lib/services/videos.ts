@@ -268,3 +268,68 @@ export async function applyAvatarWebhook(providerName: string, body: unknown): P
   await scheduleNotification(video, next);
   return next;
 }
+
+// ---------------------------------------------------------------------------
+// Library queries: filtering, sorting, and paging for GET /api/videos.
+
+export const videoQuerySchema = z.object({
+  /** Case-insensitive match on title, script, avatar, and voice names. */
+  q: z.string().trim().max(200).default(""),
+  /** "processing" also covers queued renders. */
+  status: z.enum(["all", "processing", "completed", "failed"]).default("all"),
+  /** A folder name; an empty string means unfiled; absent means every folder. */
+  folder: z.string().trim().max(MAX_FOLDER_NAME).optional(),
+  batch: z.string().max(80).optional(),
+  sort: z.enum(["newest", "oldest", "title", "views"]).default("newest"),
+  /** Omit for every match (scripts); the library pages with it. */
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+});
+export type VideoQuery = z.infer<typeof videoQuerySchema>;
+
+export interface VideoPage {
+  videos: Video[];
+  /** Matches for the query, before `limit`. */
+  matched: number;
+  /** Every video the owner has, before filtering. */
+  total: number;
+  hasMore: boolean;
+  /** Folder names in use, for the filter control. */
+  folders: string[];
+  /** Renders still in flight, across the whole library. */
+  rendering: number;
+}
+
+const SORTERS: Record<VideoQuery["sort"], (a: Video, b: Video) => number> = {
+  newest: (a, b) => b.createdAt.localeCompare(a.createdAt),
+  oldest: (a, b) => a.createdAt.localeCompare(b.createdAt),
+  title: (a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }) || b.createdAt.localeCompare(a.createdAt),
+  views: (a, b) => (b.views ?? 0) - (a.views ?? 0) || b.createdAt.localeCompare(a.createdAt),
+};
+
+/** The videos matching `query`, sorted; `limit` is not applied here. */
+export function filterVideos(videos: Video[], query: VideoQuery): Video[] {
+  const needle = query.q.toLowerCase();
+  return videos
+    .filter((v) => {
+      if (query.batch && v.batchId !== query.batch) return false;
+      if (query.folder !== undefined && (v.folder ?? "") !== query.folder) return false;
+      if (query.status === "processing" ? v.status !== "processing" && v.status !== "queued" : query.status !== "all" && v.status !== query.status) return false;
+      return !needle || `${v.title} ${v.script} ${v.avatarName ?? ""} ${v.voiceName ?? ""}`.toLowerCase().includes(needle);
+    })
+    .sort(SORTERS[query.sort]);
+}
+
+/** One page of the owner's library (in-flight renders refreshed first; see listVideos). */
+export async function queryVideos(ownerId: string = LOCAL_OWNER, query: VideoQuery): Promise<VideoPage> {
+  const all = await listVideos(ownerId);
+  const matched = filterVideos(all, query);
+  const videos = query.limit ? matched.slice(0, query.limit) : matched;
+  return {
+    videos,
+    matched: matched.length,
+    total: all.length,
+    hasMore: videos.length < matched.length,
+    folders: Array.from(new Set(all.map((v) => v.folder).filter((f): f is string => !!f))).sort(),
+    rendering: all.filter((v) => v.status === "processing" || v.status === "queued").length,
+  };
+}

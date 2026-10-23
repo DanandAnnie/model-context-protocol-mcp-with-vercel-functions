@@ -64,6 +64,34 @@ test("the library shows a render completing on its own", async ({ page }) => {
   expect(detailHits).toEqual([]);
 });
 
+test("the library pages large batches and filters on the server", async ({ page }) => {
+  const rows = Array.from({ length: 50 }, (_, i) => `Guest ${String(i + 1).padStart(2, "0")}`);
+  const made = await page.request.post("/api/videos/batch", {
+    data: { title: "Paging", scriptTemplate: "Hello {name}, welcome aboard.", csv: `name\n${rows.join("\n")}`, avatarId: "stock_1", voiceId: "stock_voice_1" },
+  });
+  expect(made.status()).toBe(201);
+  const { batchId } = (await made.json()) as { batchId: string };
+
+  const first = (await (await page.request.get(`/api/videos?batch=${batchId}&limit=2&sort=title`)).json()) as { videos: Array<{ title: string }>; matched: number; hasMore: boolean };
+  expect(first.videos.map((v) => v.title)).toEqual(["Paging – Guest 01", "Paging – Guest 02"]);
+  expect(first.matched).toBe(50);
+  expect(first.hasMore).toBe(true);
+  expect((await page.request.get(`/api/videos?batch=${batchId}&q=guest%2007`)).ok()).toBe(true);
+  expect(((await (await page.request.get(`/api/videos?batch=${batchId}&q=guest%2007`)).json()).videos as unknown[]).length).toBe(1);
+  expect((await page.request.get("/api/videos?limit=0")).status()).toBe(400);
+
+  await page.goto(`/videos?batch=${batchId}`);
+  const cards = page.locator("a[href^='/videos/vid_']");
+  await expect(cards).toHaveCount(48);
+  await expect(page.getByText("Showing 48 of 50")).toBeVisible();
+  await page.getByTestId("load-more").click();
+  await expect(cards).toHaveCount(50);
+  await expect(page.getByTestId("load-more")).toHaveCount(0);
+  // Typing a search narrows the page without a reload.
+  await page.getByPlaceholder(/Search title/).fill("guest 4");
+  await expect(cards).toHaveCount(10);
+});
+
 test("templates pre-fill the editor and edit-a-copy restores settings", async ({ page }) => {
   await page.goto("/templates");
   await page.getByRole("button", { name: "Real estate" }).click();

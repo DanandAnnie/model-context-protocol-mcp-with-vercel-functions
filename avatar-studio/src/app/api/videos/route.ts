@@ -1,13 +1,15 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { requireOwner } from "@/lib/owner";
-import { createVideo, listVideos, videoRequestSchema } from "@/lib/services";
+import { createVideo, queryVideos, videoQuerySchema, videoRequestSchema } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    return json({ videos: await listVideos(await requireOwner()) });
+    const owner = await requireOwner();
+    const query = videoQuerySchema.parse(Object.fromEntries(new URL(req.url).searchParams));
+    return json(await queryVideos(owner, query));
   } catch (err) {
     return errorResponse(err);
   }

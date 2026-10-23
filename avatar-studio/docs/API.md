@@ -79,6 +79,9 @@ Returns `201` with `{ "video": Video }`. The video starts as `queued` or `proces
 
 When completed the video also carries `videoUrl`, `thumbnailUrl`, and `durationSec`; when failed, `error`.
 
+### `GET /api/videos` — list the library
+
+Query parameters, all optional: `q` (matches title, script, avatar, and voice), `status` (`processing`, which includes queued, `completed`, or `failed`), `folder` (a name; pass it empty for unfiled videos), `batch`, `sort` (`newest`, `oldest`, `title`, `views`), and `limit` (1–200; omit it to receive every match). Returns `{ "videos", "matched", "total", "hasMore", "folders", "rendering" }`: `matched` counts the query's results before `limit`, `total` the whole library, `folders` the names in use, and `rendering` the renders still in flight. The newest ten in-flight renders are refreshed from the provider on the way out, so polling the list is enough to see completions.
 
 ### `GET /api/videos/:id` — fetch; refreshes the status from the provider while rendering
 ### `PATCH /api/videos/:id` — `{ "title"?: string, "folder"?: string, "shareDownload"?: boolean }` (empty `folder` means unfiled; `shareDownload` shows a download button on the public share page)

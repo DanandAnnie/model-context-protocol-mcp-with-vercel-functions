@@ -355,7 +355,7 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
       delete next.shareLocked;
     }
   }
-  return getStore().put("video", next);
+  return putKeepingCounters(next);
 }
 
 // ---------------------------------------------------------------------------
@@ -369,11 +369,34 @@ const counterQueue = new Map<string, Promise<unknown>>();
 function withCounterLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
   const previous = counterQueue.get(id) ?? Promise.resolve();
   const run = previous.then(fn, fn);
-  counterQueue.set(id, run.catch(() => undefined));
-  void run.finally(() => {
-    if (counterQueue.get(id) === run) counterQueue.delete(id);
-  }).catch(() => undefined);
+  // The stored tail never rejects, so a refused beacon (404) cannot block the ones behind it.
+  // Once the tail settles with nobody chained behind it, the entry goes, so the map holds only
+  // videos with a write in flight.
+  const tail = run.catch(() => undefined);
+  counterQueue.set(id, tail);
+  void tail.then(() => {
+    if (counterQueue.get(id) === tail) counterQueue.delete(id);
+  });
   return run;
+}
+
+/** The counters that beacons own; an owner edit or provider update must never roll them back. */
+const COUNTER_FIELDS = ["views", "lastViewedAt", "watch", "ctaClicks", "lastCtaClickAt"] as const;
+
+/**
+ * Writes a video built from `base` while keeping whatever counters the stored record holds by
+ * then: an edit that read the record before a scrypt or a network round trip must not undo the
+ * views, watch marks, and clicks counted meanwhile. Runs under the video's counter lock.
+ */
+function putKeepingCounters(base: Video): Promise<Video> {
+  return withCounterLock(base.id, async () => {
+    const stored = await getStore().get<Video>("video", base.id);
+    const next: Video = { ...base };
+    for (const field of COUNTER_FIELDS) delete next[field];
+    const counters: Partial<Video> = {};
+    for (const field of COUNTER_FIELDS) if (stored?.[field] !== undefined) Object.assign(counters, { [field]: stored[field] });
+    return getStore().put("video", { ...next, ...counters });
+  });
 }
 
 /**
@@ -502,6 +525,9 @@ export async function applyAvatarWebhook(providerName: string, body: unknown): P
   if (!parsed) return null;
   const video = await getStore().findBy<Video>("video", "providerJobId", parsed.providerJobId);
   if (!video) return null;
+  // A late or repeated terminal webhook must not overwrite a recorded outcome (and the counts
+  // that landed on it since), nor announce the completion twice.
+  if (!isPending(video)) return video;
   const next: Video = { ...video, ...stripUndefined(parsed.update), updatedAt: nowIso() };
   await getStore().put("video", next);
   await scheduleNotification(video, next);

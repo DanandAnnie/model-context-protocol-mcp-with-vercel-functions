@@ -18,7 +18,7 @@ export interface Insights {
   totalClicks: number;
   /** Clicks per view across the library, null until something has been viewed. */
   clickRate: number | null;
-  /** Viewers who played a shared video to the end, as a share of views (0..1); null until something has been viewed. */
+  /** Viewers who played a shared video to the end, as a share of views (0..1); null until the player has reported anything. */
   finishRate: number | null;
   topViewed: Video[];
   folders: Array<{ name: string; count: number }>;
@@ -50,6 +50,8 @@ export function computeInsights(videos: Video[], now = Date.now(), days = 14): I
   const totalViews = videos.reduce((n, v) => n + (v.views ?? 0), 0);
   const totalClicks = videos.reduce((n, v) => n + (v.ctaClicks ?? 0), 0);
   const totalFinished = videos.reduce((n, v) => n + (v.watch?.q100 ?? 0), 0);
+  // Views predate watch marks, so a library with views but no marks at all is "no data", not 0%.
+  const anyWatch = videos.some((v) => v.watch && Object.values(v.watch).some((n) => n > 0));
   const folderCounts = new Map<string, number>();
   for (const v of videos) if (v.folder) folderCounts.set(v.folder, (folderCounts.get(v.folder) ?? 0) + 1);
   return {
@@ -60,7 +62,7 @@ export function computeInsights(videos: Video[], now = Date.now(), days = 14): I
     totalViews,
     totalClicks,
     clickRate: totalViews ? totalClicks / totalViews : null,
-    finishRate: totalViews ? Math.min(1, totalFinished / totalViews) : null,
+    finishRate: totalViews && anyWatch ? Math.min(1, totalFinished / totalViews) : null,
     topViewed: videos
       .filter((v) => (v.views ?? 0) > 0)
       .sort((a, b) => (b.views ?? 0) - (a.views ?? 0))

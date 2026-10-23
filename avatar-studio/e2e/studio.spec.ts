@@ -370,7 +370,12 @@ test("share page offers a download only when the owner allows it", async ({ page
   await expect(page.getByTestId("watch-through")).toContainText("100% 1");
   // The row stays readable rather than ellipsised at laptop widths.
   const cell = page.getByTestId("watch-through");
-  expect(await cell.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  expect(
+    await cell.evaluate((el) => {
+      const dd = el.closest("dd")!;
+      return dd.scrollWidth <= dd.clientWidth + 1 && getComputedStyle(dd).textOverflow !== "ellipsis";
+    }),
+  ).toBe(true);
   // Home insights total the clicks and finishes across the library next to share views.
   await page.goto("/home");
   await expect(page.getByTestId("cta-click-summary")).toContainText(/button clicks?/);

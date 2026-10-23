@@ -899,6 +899,32 @@ describe("folders and share views", () => {
     await assert.rejects(recordWatch("vid_missing", 25), /not found/);
   });
 
+  it("owner edits and late webhooks never roll the counters back", async () => {
+    const { applyAvatarWebhook, updateVideo, videoPatchSchema } = await import("../services/videos");
+    const v = await createVideo(req);
+    const fresh = await getVideo(v.id, undefined, false);
+    globalThis.__avatarStudioStore!.put("video", { ...fresh, status: "completed" });
+    // An edit reads the record, then a view lands before the edit writes: the view survives.
+    const [edited] = await Promise.all([updateVideo(v.id, videoPatchSchema.parse({ title: "Renamed" })), recordView(v.id)]);
+    assert.equal(edited.title, "Renamed");
+    assert.equal(edited.views, 1, "the edit carried the view counted while it was in flight");
+    const stored = await getVideo(v.id, undefined, false);
+    assert.equal(stored.title, "Renamed");
+    assert.equal(stored.views, 1);
+    // A provider webhook that repeats a recorded outcome is ignored rather than written over the counts.
+    const proto = MockAvatarProvider.prototype as unknown as { parseWebhook?: (body: unknown) => { providerJobId: string; update: { status: "completed" } } | null };
+    const original = proto.parseWebhook;
+    proto.parseWebhook = (body) => ({ providerJobId: (body as { id: string }).id, update: { status: "completed" } });
+    try {
+      const late = await applyAvatarWebhook("mock", { id: stored.providerJobId });
+      assert.equal(late?.views, 1);
+      assert.equal(late?.updatedAt, stored.updatedAt, "nothing was written");
+      assert.equal((await getVideo(v.id, undefined, false)).views, 1);
+    } finally {
+      proto.parseWebhook = original;
+    }
+  });
+
   it("takes the share link offline for the public only", async () => {
     const { recordCtaClick, updateVideo, videoPatchSchema } = await import("../services/videos");
     const v = await createVideo(req);
@@ -1288,6 +1314,8 @@ describe("insights", () => {
     assert.equal(computeInsights([], now).clickRate, null, "no views, no rate");
     assert.equal(r.finishRate, 3 / 9, "finishes across the library over views across the library");
     assert.equal(computeInsights([], now).finishRate, null);
+    assert.equal(computeInsights([mk(0, { views: 4 })], now).finishRate, null, "views without any watch marks are no data, not 0%");
+    assert.equal(computeInsights([mk(0, { views: 4, watch: { q25: 1, q50: 0, q75: 0, q100: 0 } })], now).finishRate, 0, "a mark without a finish is a real 0%");
     assert.equal(finishRateOf(videos[1]), 3 / 7);
     assert.equal(finishRateOf({ views: 0 }), null);
     assert.equal(finishRateOf({ views: 2, watch: { q25: 9, q50: 9, q75: 9, q100: 9 } }), 1, "never above one when counters disagree");

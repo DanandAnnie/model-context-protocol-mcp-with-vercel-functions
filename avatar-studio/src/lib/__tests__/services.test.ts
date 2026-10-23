@@ -647,7 +647,7 @@ describe("workspaces", () => {
     assert.equal(await findInvite("nope"), null);
     const joined = await acceptInvite(invite.token, bob);
     assert.equal(joined.members.length, 2);
-    assert.equal(joined.invites.length, 0, "invite consumed");
+    assert.equal(await findInvite(invite.token), null, "invite consumed");
     await assert.rejects(acceptInvite(invite.token, bob), /invalid or has expired/);
     assert.ok(await workspaceForMember(ws.id, bob.id));
 
@@ -660,11 +660,16 @@ describe("workspaces", () => {
     await assert.rejects(removeMember(ws.id, alice.id, bob), /Only workspace owners/);
     await assert.rejects(removeMember(ws.id, alice.id, alice), /at least one owner/);
     await assert.rejects(setMemberRole(ws.id, alice.id, "editor", alice), /at least one owner/);
-    assert.equal(workspaceView(ws, bob).invites.length, 0, "editors do not see invite tokens");
+    const pendingForOwner = await createInvite(ws.id, { role: "editor" }, alice);
+    assert.equal((await workspaceView(ws, bob)).invites.length, 0, "editors do not see invite tokens");
+    assert.equal((await workspaceView(ws, alice)).invites.some((i) => i.token === pendingForOwner.token), true, "owners do");
+    await revokeInvite(ws.id, pendingForOwner.token, alice);
     const promoted = await setMemberRole(ws.id, bob.id, "owner", alice);
     assert.equal(promoted.members.find((m) => m.userId === "bob")?.role, "owner");
+    assert.equal((await listWorkspaces(bob.id)).length, 1, "membership record lists the workspace for bob");
     const left = await removeMember(ws.id, bob.id, bob);
     assert.equal(left.members.length, 1);
+    assert.deepEqual(await listWorkspaces(bob.id), [], "leaving removes the membership record");
 
     const second = await createInvite(ws.id, { role: "owner" }, alice);
     await revokeInvite(ws.id, second.token, alice);

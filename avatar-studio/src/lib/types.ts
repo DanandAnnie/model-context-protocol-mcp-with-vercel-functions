@@ -169,13 +169,26 @@ export interface WorkspaceMember {
   joinedAt: string;
 }
 
+/** Stored as its own record (kind "invite") so a link resolves with one lookup. */
 export interface WorkspaceInvite {
-  /** Secret token in the invite link. */
+  /** Secret token in the invite link; doubles as the record id. */
+  id: string;
   token: string;
+  /** The workspace, stored as ownerId so it can be listed per workspace. */
+  ownerId: string;
   email?: string;
   role: WorkspaceRole;
   createdAt: string;
   expiresAt: string;
+}
+
+/** One per (workspace, user), owned by the user, so "my workspaces" is an indexed list. */
+export interface Membership {
+  id: string;
+  ownerId: string;
+  workspaceId: string;
+  role: WorkspaceRole;
+  joinedAt: string;
 }
 
 /** A shared owner id: every video, avatar, brand kit, key, and webhook created while it is active belongs to it. */
@@ -183,8 +196,8 @@ export interface Workspace {
   id: string;
   name: string;
   createdBy: string;
+  /** Authoritative member list (small); memberships mirror it for per-user listing. */
   members: WorkspaceMember[];
-  invites: WorkspaceInvite[];
   createdAt: string;
   updatedAt: string;
 }

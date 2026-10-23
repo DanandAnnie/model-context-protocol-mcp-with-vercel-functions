@@ -9,7 +9,7 @@ export async function GET() {
   try {
     const user = await currentUser();
     const [workspaces, active] = await Promise.all([listWorkspaces(user.id), activeWorkspaceId(user)]);
-    return json({ personalId: user.id, activeId: active ?? user.id, workspaces: workspaces.map((w) => workspaceView(w, user)) });
+    return json({ personalId: user.id, activeId: active ?? user.id, workspaces: await Promise.all(workspaces.map((w) => workspaceView(w, user))) });
   } catch (err) {
     return errorResponse(err);
   }
@@ -19,7 +19,7 @@ export async function POST(req: Request) {
   try {
     const user = await currentUser();
     const { name } = workspaceNameSchema.parse(await readJson(req));
-    return json({ workspace: workspaceView(await createWorkspace(name, user), user) }, { status: 201 });
+    return json({ workspace: await workspaceView(await createWorkspace(name, user), user) }, { status: 201 });
   } catch (err) {
     return errorResponse(err);
   }

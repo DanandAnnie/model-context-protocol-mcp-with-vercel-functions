@@ -23,7 +23,7 @@ export async function POST(_req: Request, ctx: Ctx) {
   try {
     const user = await currentUser();
     const ws = await acceptInvite((await ctx.params).token, user);
-    const res = NextResponse.json({ workspace: workspaceView(ws, user) });
+    const res = NextResponse.json({ workspace: await workspaceView(ws, user) });
     res.cookies.set(WORKSPACE_COOKIE, ws.id, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 365 });
     return res;
   } catch (err) {

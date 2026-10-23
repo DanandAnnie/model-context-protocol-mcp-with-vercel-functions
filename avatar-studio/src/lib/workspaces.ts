@@ -6,7 +6,7 @@ import { deleteNotifySettings } from "./notifications";
 import { NotFoundError, ValidationError } from "./errors";
 import { newId, nowIso } from "./ids";
 import { getStore } from "./store";
-import type { Workspace, WorkspaceRole } from "./types";
+import type { Membership, Workspace, WorkspaceInvite, WorkspaceRole } from "./types";
 
 export const WORKSPACE_COOKIE = "studio_workspace";
 export const MAX_WORKSPACES_PER_USER = 20;
@@ -27,10 +27,26 @@ export function memberOf(ws: Workspace, userId: string) {
   return ws.members.find((m) => m.userId === userId) ?? null;
 }
 
-/** Every workspace the user belongs to, newest first. */
+const membershipId = (workspaceId: string, userId: string) => `mem_${workspaceId}_${userId}`;
+
+async function putMembership(ws: Workspace, userId: string, role: WorkspaceRole, joinedAt: string) {
+  const m: Membership = { id: membershipId(ws.id, userId), ownerId: userId, workspaceId: ws.id, role, joinedAt };
+  await getStore().put("membership", m);
+}
+
+/** Every workspace the user belongs to, newest first. One indexed list plus one get per workspace. */
 export async function listWorkspaces(userId: string): Promise<Workspace[]> {
-  const all = await getStore().list<Workspace>("workspace");
-  return all.filter((w) => memberOf(w, userId)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const memberships = await getStore().list<Membership>("membership", userId);
+  const found = await Promise.all(memberships.map((m) => getStore().get<Workspace>("workspace", m.workspaceId)));
+  // A membership whose workspace is gone, or that the authoritative list no longer confirms, is ignored.
+  return found
+    .filter((w): w is Workspace => !!w && !!memberOf(w, userId))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+async function listInvites(workspaceId: string): Promise<WorkspaceInvite[]> {
+  const now = Date.now();
+  return (await getStore().list<WorkspaceInvite>("invite", workspaceId)).filter((i) => Date.parse(i.expiresAt) > now);
 }
 
 export async function getWorkspace(id: string): Promise<Workspace> {
@@ -61,11 +77,12 @@ export async function createWorkspace(name: string, user: User): Promise<Workspa
     name,
     createdBy: user.id,
     members: [{ userId: user.id, email: user.email, role: "owner", joinedAt: now }],
-    invites: [],
     createdAt: now,
     updatedAt: now,
   };
-  return getStore().put("workspace", ws);
+  await getStore().put("workspace", ws);
+  await putMembership(ws, user.id, "owner", now);
+  return ws;
 }
 
 export async function renameWorkspace(id: string, name: string, user: User): Promise<Workspace> {
@@ -78,36 +95,36 @@ export async function renameWorkspace(id: string, name: string, user: User): Pro
  * can act as the workspace afterwards. Its videos and brand kit stay in the store but are unreachable.
  */
 export async function deleteWorkspace(id: string, user: User): Promise<void> {
-  await requireRole(id, user, ["owner"]);
+  const ws = await requireRole(id, user, ["owner"]);
   await revokeApiKeysFor(id);
   await deleteNotifySettings(id);
+  for (const m of ws.members) await getStore().remove("membership", membershipId(id, m.userId));
+  for (const i of await getStore().list<WorkspaceInvite>("invite", id)) await getStore().remove("invite", i.id);
   await getStore().remove("workspace", id);
 }
 
-export async function createInvite(id: string, input: z.infer<typeof inviteSchema>, user: User) {
+export async function createInvite(id: string, input: z.infer<typeof inviteSchema>, user: User): Promise<WorkspaceInvite> {
   const ws = await requireRole(id, user, ["owner"]);
-  if (ws.members.length + ws.invites.length >= MAX_MEMBERS) throw new ValidationError(`At most ${MAX_MEMBERS} members per workspace`);
-  const now = Date.now();
-  const invite = { token: randomBytes(18).toString("base64url"), email: input.email, role: input.role, createdAt: nowIso(), expiresAt: new Date(now + INVITE_TTL_MS).toISOString() };
-  const invites = [...ws.invites.filter((i) => Date.parse(i.expiresAt) > now), invite];
-  await getStore().put("workspace", { ...ws, invites, updatedAt: nowIso() });
-  return invite;
+  const pending = await listInvites(id);
+  if (ws.members.length + pending.length >= MAX_MEMBERS) throw new ValidationError(`At most ${MAX_MEMBERS} members per workspace`);
+  const token = randomBytes(18).toString("base64url");
+  const invite: WorkspaceInvite = { id: token, token, ownerId: id, email: input.email, role: input.role, createdAt: nowIso(), expiresAt: new Date(Date.now() + INVITE_TTL_MS).toISOString() };
+  return getStore().put("invite", invite);
 }
 
 export async function revokeInvite(id: string, token: string, user: User): Promise<void> {
-  const ws = await requireRole(id, user, ["owner"]);
-  await getStore().put("workspace", { ...ws, invites: ws.invites.filter((i) => i.token !== token), updatedAt: nowIso() });
+  await requireRole(id, user, ["owner"]);
+  const invite = await getStore().get<WorkspaceInvite>("invite", token);
+  if (invite && invite.ownerId === id) await getStore().remove("invite", token);
 }
 
-/** Looks an invite up by token (for the join page). Expired invites read as not found. */
-export async function findInvite(token: string): Promise<{ workspace: Workspace; invite: Workspace["invites"][number] } | null> {
-  if (!token) return null;
-  const all = await getStore().list<Workspace>("workspace");
-  for (const workspace of all) {
-    const invite = workspace.invites.find((i) => i.token === token);
-    if (invite) return Date.parse(invite.expiresAt) > Date.now() ? { workspace, invite } : null;
-  }
-  return null;
+/** Looks an invite up by token (for the join page): one get. Expired invites read as not found. */
+export async function findInvite(token: string): Promise<{ workspace: Workspace; invite: WorkspaceInvite } | null> {
+  if (!token || token.length > 64) return null;
+  const invite = await getStore().get<WorkspaceInvite>("invite", token);
+  if (!invite || Date.parse(invite.expiresAt) <= Date.now()) return null;
+  const workspace = await getStore().get<Workspace>("workspace", invite.ownerId);
+  return workspace ? { workspace, invite } : null;
 }
 
 /** Joins the workspace named by the token. Joining twice is a no-op; the invite is consumed either way. */
@@ -115,8 +132,13 @@ export async function acceptInvite(token: string, user: User): Promise<Workspace
   const found = await findInvite(token);
   if (!found) throw new NotFoundError("This invite link is invalid or has expired");
   const { workspace, invite } = found;
-  const members = memberOf(workspace, user.id) ? workspace.members : [...workspace.members, { userId: user.id, email: user.email, role: invite.role, joinedAt: nowIso() }];
-  return getStore().put("workspace", { ...workspace, members, invites: workspace.invites.filter((i) => i.token !== token), updatedAt: nowIso() });
+  const joinedAt = nowIso();
+  const already = memberOf(workspace, user.id);
+  const members = already ? workspace.members : [...workspace.members, { userId: user.id, email: user.email, role: invite.role, joinedAt }];
+  const next = await getStore().put("workspace", { ...workspace, members, updatedAt: joinedAt });
+  if (!already) await putMembership(next, user.id, invite.role, joinedAt);
+  await getStore().remove("invite", token);
+  return next;
 }
 
 /** Removes a member. Owners can remove anyone but the last owner; anyone can remove themselves (leave). */
@@ -131,6 +153,7 @@ export async function removeMember(id: string, userId: string, user: User): Prom
     throw new ValidationError("A workspace needs at least one owner; delete it or promote someone first");
   }
   const next = await getStore().put("workspace", { ...ws, members: ws.members.filter((m) => m.userId !== userId), updatedAt: nowIso() });
+  await getStore().remove("membership", membershipId(id, userId));
   // Keys the departing member minted under this workspace must not outlive their membership.
   await revokeApiKeysFor(id, userId);
   return next;
@@ -143,18 +166,21 @@ export async function setMemberRole(id: string, userId: string, role: WorkspaceR
   if (target.role === "owner" && role !== "owner" && ws.members.filter((m) => m.role === "owner").length === 1) {
     throw new ValidationError("A workspace needs at least one owner");
   }
-  return getStore().put("workspace", { ...ws, members: ws.members.map((m) => (m.userId === userId ? { ...m, role } : m)), updatedAt: nowIso() });
+  const next = await getStore().put("workspace", { ...ws, members: ws.members.map((m) => (m.userId === userId ? { ...m, role } : m)), updatedAt: nowIso() });
+  await putMembership(next, userId, role, target.joinedAt);
+  return next;
 }
 
 /** Public view: member emails only for members, invite tokens only for owners. */
-export function workspaceView(ws: Workspace, user: User) {
+export async function workspaceView(ws: Workspace, user: User) {
   const me = memberOf(ws, user.id);
+  const invites = me?.role === "owner" ? await listInvites(ws.id) : [];
   return {
     id: ws.id,
     name: ws.name,
     role: me?.role ?? null,
     createdAt: ws.createdAt,
     members: ws.members.map((m) => ({ userId: m.userId, email: m.email, role: m.role, joinedAt: m.joinedAt, you: m.userId === user.id })),
-    invites: me?.role === "owner" ? ws.invites.filter((i) => Date.parse(i.expiresAt) > Date.now()) : [],
+    invites: invites.map((i) => ({ token: i.token, email: i.email, role: i.role, expiresAt: i.expiresAt })),
   };
 }

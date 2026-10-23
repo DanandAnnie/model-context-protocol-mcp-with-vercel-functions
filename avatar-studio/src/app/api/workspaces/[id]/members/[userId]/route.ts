@@ -11,7 +11,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     const user = await currentUser();
     const { id, userId } = await ctx.params;
     const { role } = z.object({ role: z.enum(["owner", "editor"]) }).parse(await readJson(req));
-    return json({ workspace: workspaceView(await setMemberRole(id, userId, role, user), user) });
+    return json({ workspace: await workspaceView(await setMemberRole(id, userId, role, user), user) });
   } catch (err) {
     return errorResponse(err);
   }
@@ -22,7 +22,7 @@ export async function DELETE(_req: Request, ctx: Ctx) {
   try {
     const user = await currentUser();
     const { id, userId } = await ctx.params;
-    return json({ workspace: workspaceView(await removeMember(id, userId, user), user) });
+    return json({ workspace: await workspaceView(await removeMember(id, userId, user), user) });
   } catch (err) {
     return errorResponse(err);
   }

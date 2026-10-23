@@ -11,7 +11,7 @@ export async function GET(_req: Request, ctx: Ctx) {
     const user = await currentUser();
     const ws = await getWorkspace((await ctx.params).id);
     if (!memberOf(ws, user.id)) throw new NotFoundError("Workspace not found");
-    return json({ workspace: workspaceView(ws, user) });
+    return json({ workspace: await workspaceView(ws, user) });
   } catch (err) {
     return errorResponse(err);
   }
@@ -21,7 +21,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
   try {
     const user = await currentUser();
     const { name } = workspaceNameSchema.parse(await readJson(req));
-    return json({ workspace: workspaceView(await renameWorkspace((await ctx.params).id, name, user), user) });
+    return json({ workspace: await workspaceView(await renameWorkspace((await ctx.params).id, name, user), user) });
   } catch (err) {
     return errorResponse(err);
   }

@@ -6,7 +6,8 @@ import { SupabaseStore } from "./supabase";
 export type ItemKind = "video" | "avatar" | "translation";
 
 export interface Store {
-  list<T>(kind: ItemKind): Promise<T[]>;
+  /** All items of a kind, optionally only those whose `ownerId` matches. */
+  list<T>(kind: ItemKind, ownerId?: string): Promise<T[]>;
   get<T>(kind: ItemKind, id: string): Promise<T | null>;
   put<T extends { id: string }>(kind: ItemKind, item: T): Promise<T>;
   remove(kind: ItemKind, id: string): Promise<void>;

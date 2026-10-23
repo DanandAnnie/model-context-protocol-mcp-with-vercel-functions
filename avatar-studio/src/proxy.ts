@@ -1,17 +1,30 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE, authEnabled, isValidSession } from "@/lib/auth";
+import { SESSION_COOKIE, authMode, isValidSession } from "@/lib/auth";
+import { refreshSupabaseSession } from "@/lib/supabase/proxy";
 
-// Paths that stay reachable without a session: the landing page, login, public
-// share pages, provider webhooks, and static assets.
-const PUBLIC_PREFIXES = ["/login", "/api/auth/", "/share/", "/api/webhooks/", "/_next/", "/favicon"];
+// Paths that stay reachable without a session: the landing page, login, auth
+// callbacks, public share pages, provider webhooks, and static assets.
+const PUBLIC_PREFIXES = ["/login", "/auth/", "/api/auth/", "/share/", "/api/webhooks/", "/_next/", "/favicon"];
 
 export async function proxy(req: NextRequest) {
-  if (!authEnabled()) return NextResponse.next();
+  const mode = authMode();
+  if (mode === "open") return NextResponse.next();
   const { pathname } = req.nextUrl;
-  if (pathname === "/" || PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) return NextResponse.next();
+  const isPublic = pathname === "/" || PUBLIC_PREFIXES.some((p) => pathname.startsWith(p));
 
+  if (mode === "supabase") {
+    // Always run the refresh so auth cookies stay current, even on public paths.
+    const { response, userId } = await refreshSupabaseSession(req);
+    if (isPublic || userId) return response;
+    return deny(req, pathname);
+  }
+
+  if (isPublic) return NextResponse.next();
   if (await isValidSession(req.cookies.get(SESSION_COOKIE)?.value)) return NextResponse.next();
+  return deny(req, pathname);
+}
 
+function deny(req: NextRequest, pathname: string) {
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

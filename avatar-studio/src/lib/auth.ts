@@ -1,4 +1,16 @@
-// Optional single-password gate. Uses Web Crypto so it also runs in the proxy (edge) runtime.
+// Access control. Three modes, picked from configuration:
+//   "supabase": per-user accounts via Supabase Auth (NEXT_PUBLIC_SUPABASE_URL + ANON_KEY)
+//   "password": one shared STUDIO_PASSWORD
+//   "open":     no sign-in (local development)
+// Uses Web Crypto so it also runs in the proxy (edge) runtime.
+import { supabaseAuthConfigured } from "./supabase/env";
+
+export type AuthMode = "open" | "password" | "supabase";
+
+export function authMode(): AuthMode {
+  if (supabaseAuthConfigured()) return "supabase";
+  return accessPassword() ? "password" : "open";
+}
 
 export const SESSION_COOKIE = "studio_session";
 export const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
@@ -9,7 +21,7 @@ export function accessPassword(): string | undefined {
 }
 
 export function authEnabled(): boolean {
-  return accessPassword() !== undefined;
+  return authMode() !== "open";
 }
 
 /** Deterministic session token derived from the password; rotating the password logs everyone out. */

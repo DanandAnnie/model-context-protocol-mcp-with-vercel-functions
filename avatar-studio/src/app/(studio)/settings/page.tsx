@@ -4,7 +4,7 @@ import { useApi } from "@/hooks/useApi";
 import { formatSeconds } from "@/lib/client";
 import type { ProviderStatus, Video } from "@/lib/types";
 
-const ROWS: Array<{ key: keyof Omit<ProviderStatus, "mode" | "authEnabled">; label: string; env: string; options: string }> = [
+const ROWS: Array<{ key: keyof Omit<ProviderStatus, "mode" | "authEnabled" | "authMode">; label: string; env: string; options: string }> = [
   { key: "avatar", label: "Avatar rendering", env: "AVATAR_PROVIDER + HEYGEN_API_KEY / DID_API_KEY", options: "heygen, did, mock" },
   { key: "tts", label: "Voices / text-to-speech", env: "TTS_PROVIDER + ELEVENLABS_API_KEY / HEYGEN_API_KEY", options: "elevenlabs, heygen, mock" },
   { key: "script", label: "AI script writer", env: "SCRIPT_PROVIDER + ANTHROPIC_API_KEY", options: "anthropic, mock" },
@@ -66,11 +66,11 @@ export default function SettingsPage() {
         <div>
           <div className="text-sm font-medium text-slate-900">Access</div>
           <div className="mt-0.5 text-xs text-slate-500">
-            <code className="rounded bg-slate-100 px-1 py-0.5">STUDIO_PASSWORD</code> · when set, every page except the landing page, login, and share pages requires sign-in
+            <code className="rounded bg-slate-100 px-1 py-0.5">NEXT_PUBLIC_SUPABASE_URL</code> + <code className="rounded bg-slate-100 px-1 py-0.5">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> for per-user accounts, or <code className="rounded bg-slate-100 px-1 py-0.5">STUDIO_PASSWORD</code> for one shared password · landing, login, and share pages stay public
           </div>
         </div>
         <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${data?.authEnabled ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
-          {data ? (data.authEnabled ? "password required" : "open") : "…"}
+          {data ? (data.authMode === "supabase" ? "accounts" : data.authMode === "password" ? "password required" : "open") : "…"}
         </span>
       </Card>
       <Card className="mt-6 p-5 text-sm text-slate-600">

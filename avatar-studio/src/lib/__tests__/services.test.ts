@@ -251,3 +251,28 @@ describe("script assistant", () => {
     assert.match(await reviseScript({ script, action: "translate", language: "Spanish" }), /^\[Spanish\]/);
   });
 });
+
+describe("owner isolation", () => {
+  const req = () => videoRequestSchema.parse({ title: "mine", script: "hi there", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id });
+  it("scopes videos, avatars, and translations to their owner", async () => {
+    const a = await createVideo(req(), "user-a");
+    await createVideo(req(), "user-b");
+    assert.deepEqual((await listVideos("user-a")).map((v) => v.id), [a.id]);
+    assert.equal((await listVideos("user-b")).length, 1);
+    await assert.rejects(getVideo(a.id, "user-b"), /not found/);
+    const { PUBLIC_ACCESS } = await import("../services");
+    assert.equal((await getVideo(a.id, PUBLIC_ACCESS)).id, a.id, "public access (share page) still works");
+    await assert.rejects(getVideo(a.id, undefined as unknown as string), /not found/, "undefined must not mean public");
+    await assert.rejects(deleteVideo(a.id, "user-b"), /not found/);
+
+    const av = await createAvatar({ name: "A", imageUrl: "https://example.com/a.jpg" }, "user-a");
+    assert.ok((await listAvatars("user-a")).some((x) => x.id === av.id));
+    assert.ok(!(await listAvatars("user-b")).some((x) => x.id === av.id));
+    await assert.rejects(createVideo(videoRequestSchema.parse({ ...req(), avatarId: av.id }), "user-b"), /not found/);
+
+    const t = await createTranslation({ title: "t", sourceVideoUrl: "https://example.com/v.mp4", targetLanguage: "French" }, "user-a");
+    assert.equal(t.ownerId, "user-a");
+    const { listTranslations } = await import("../services");
+    assert.equal((await listTranslations("user-b")).length, 0);
+  });
+});

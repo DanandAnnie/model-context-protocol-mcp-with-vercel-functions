@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Sparkles } from "lucide-react";
-import { NotFoundError, getVideo } from "@/lib/services";
+import { NotFoundError, PUBLIC_ACCESS, getVideo } from "@/lib/services";
 import { formatSeconds } from "@/lib/client";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +11,7 @@ export default async function SharePage({ params }: { params: Promise<{ id: stri
   const { id } = await params;
   let video;
   try {
-    video = await getVideo(id);
+    video = await getVideo(id, PUBLIC_ACCESS);
   } catch (err) {
     if (err instanceof NotFoundError) notFound();
     throw err;

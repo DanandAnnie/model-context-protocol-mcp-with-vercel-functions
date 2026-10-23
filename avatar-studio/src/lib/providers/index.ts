@@ -3,7 +3,7 @@
 import { config } from "../config";
 import type { ProviderStatus } from "../types";
 import { persistenceKind } from "../store";
-import { authEnabled } from "../auth";
+import { authEnabled, authMode } from "../auth";
 import { DidAvatarProvider } from "./avatar/did";
 import { HeyGenAvatarProvider } from "./avatar/heygen";
 import { MockAvatarProvider } from "./avatar/mock";
@@ -66,5 +66,5 @@ export function providerStatus(): ProviderStatus {
   const script = getScriptProvider().name;
   const translate = getTranslateProvider().name;
   const live = [avatar, tts, script, translate].some((n) => n !== "mock");
-  return { mode: live ? "live" : "demo", avatar, tts, script, translate, persistence: persistenceKind(), authEnabled: authEnabled() };
+  return { mode: live ? "live" : "demo", avatar, tts, script, translate, persistence: persistenceKind(), authEnabled: authEnabled(), authMode: authMode() };
 }

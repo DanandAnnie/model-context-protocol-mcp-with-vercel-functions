@@ -14,12 +14,10 @@ export class SupabaseStore implements Store {
     this.client = createClient(url, serviceRoleKey, { auth: { persistSession: false } });
   }
 
-  async list<T>(kind: ItemKind): Promise<T[]> {
-    const { data, error } = await this.client
-      .from(TABLE)
-      .select("data")
-      .eq("kind", kind)
-      .order("created_at", { ascending: false });
+  async list<T>(kind: ItemKind, ownerId?: string): Promise<T[]> {
+    let query = this.client.from(TABLE).select("data").eq("kind", kind);
+    if (ownerId !== undefined) query = query.eq("data->>ownerId", ownerId);
+    const { data, error } = await query.order("created_at", { ascending: false });
     if (error) throw new Error(`supabase list failed: ${error.message}`);
     return (data ?? []).map((r) => r.data as T);
   }

@@ -27,6 +27,8 @@ export interface Avatar {
   tags?: string[];
   /** Ids assigned by rendering providers after uploading a custom portrait, keyed by provider name. */
   providerAssetIds?: Record<string, string>;
+  /** Workspace that owns this avatar (user id with accounts, "local" otherwise). */
+  ownerId?: string;
   createdAt?: string;
 }
 
@@ -71,6 +73,7 @@ export interface VideoRequest {
 export interface Video extends VideoRequest {
   id: string;
   status: VideoStatus;
+  ownerId?: string;
   avatarName?: string;
   voiceName?: string;
   provider: string;
@@ -91,6 +94,7 @@ export interface TranslationRequest {
 
 export interface Translation extends TranslationRequest {
   id: string;
+  ownerId?: string;
   status: VideoStatus;
   provider: string;
   providerJobId?: string;
@@ -108,4 +112,5 @@ export interface ProviderStatus {
   translate: string;
   persistence: "memory" | "supabase";
   authEnabled: boolean;
+  authMode: "open" | "password" | "supabase";
 }

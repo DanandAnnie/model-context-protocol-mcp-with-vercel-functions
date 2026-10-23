@@ -16,8 +16,10 @@ export class MemoryStore implements Store {
     return b;
   }
 
-  async list<T>(kind: ItemKind): Promise<T[]> {
-    return [...this.bucket(kind).values()] as T[];
+  async list<T>(kind: ItemKind, ownerId?: string): Promise<T[]> {
+    const all = [...this.bucket(kind).values()] as T[];
+    if (ownerId === undefined) return all;
+    return all.filter((v) => ((v as { ownerId?: string }).ownerId ?? "local") === ownerId);
   }
 
   async get<T>(kind: ItemKind, id: string): Promise<T | null> {

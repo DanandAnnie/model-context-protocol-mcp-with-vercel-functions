@@ -25,6 +25,7 @@ export function Sidebar() {
   async function signOut() {
     await fetch("/api/auth/logout", { method: "POST" });
     router.replace("/login");
+    router.refresh();
   }
   const [open, setOpen] = useState(false);
 

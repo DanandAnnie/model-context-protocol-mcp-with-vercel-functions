@@ -1,5 +1,6 @@
 import { errorResponse } from "@/lib/api-utils";
 import { buildSrt } from "@/lib/captions";
+import { requireOwner } from "@/lib/owner";
 import { getVideo } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
@@ -8,7 +9,7 @@ export const dynamic = "force-dynamic";
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await ctx.params;
-    const video = await getVideo(id, false);
+    const video = await getVideo(id, await requireOwner(), false);
     // Fall back to a reading-speed estimate when the provider did not report a duration.
     const words = video.script.trim().split(/\s+/).filter(Boolean).length;
     const duration = video.durationSec ?? Math.max(1, Math.round(words / 2.5 / video.speed));

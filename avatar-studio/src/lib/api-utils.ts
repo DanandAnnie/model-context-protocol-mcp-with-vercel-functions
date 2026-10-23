@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
-import { NotFoundError, ValidationError } from "./services";
+import { NotFoundError, UnauthorizedError, ValidationError } from "./errors";
 
 export function json<T>(data: T, init?: ResponseInit) {
   return NextResponse.json(data, init);
@@ -11,6 +11,7 @@ export function errorResponse(err: unknown) {
     return NextResponse.json({ error: "Invalid request", issues: err.issues }, { status: 400 });
   }
   if (err instanceof ValidationError) return NextResponse.json({ error: err.message }, { status: 400 });
+  if (err instanceof UnauthorizedError) return NextResponse.json({ error: err.message }, { status: 401 });
   if (err instanceof NotFoundError) return NextResponse.json({ error: err.message }, { status: 404 });
   console.error(err);
   const message = err instanceof Error ? err.message : "Unexpected error";

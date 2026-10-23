@@ -12,23 +12,34 @@ import {
 import { getStore } from "./store";
 import { MAX_SCENES, type Avatar, type Translation, type Video, type VideoRequest, type Voice } from "./types";
 
-export class NotFoundError extends Error {}
-export class ValidationError extends Error {}
+import { LOCAL_OWNER } from "./owner";
+import { NotFoundError, ValidationError } from "./errors";
+export { NotFoundError, ValidationError, UnauthorizedError } from "./errors";
+
+/** Pass as the owner to skip the ownership check (public share pages). */
+export const PUBLIC_ACCESS = null;
+
+/** Throws NotFound when an item belongs to a different owner (missing ownerId counts as local). */
+function owned<T extends { ownerId?: string }>(item: T | null, ownerId: string | null, what: string): T {
+  if (!item) throw new NotFoundError(`${what} not found`);
+  if (ownerId !== PUBLIC_ACCESS && (item.ownerId ?? LOCAL_OWNER) !== ownerId) throw new NotFoundError(`${what} not found`);
+  return item;
+}
 
 // ---------- Avatars ----------
 
-export async function listAvatars(): Promise<Avatar[]> {
+export async function listAvatars(ownerId: string = LOCAL_OWNER): Promise<Avatar[]> {
   const [provider, custom] = await Promise.all([
     getAvatarProvider().listAvatars(),
-    getStore().list<Avatar>("avatar"),
+    getStore().list<Avatar>("avatar", ownerId),
   ]);
   custom.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
   return [...custom, ...provider];
 }
 
-export async function getAvatar(id: string): Promise<Avatar> {
+export async function getAvatar(id: string, ownerId: string = LOCAL_OWNER): Promise<Avatar> {
   const custom = await getStore().get<Avatar>("avatar", id);
-  if (custom) return custom;
+  if (custom) return owned(custom, ownerId, `Avatar ${id}`);
   const match = (await getAvatarProvider().listAvatars()).find((a) => a.id === id);
   if (!match) throw new NotFoundError(`Avatar ${id} not found`);
   return match;
@@ -40,9 +51,10 @@ export const createAvatarSchema = z.object({
   gender: z.enum(["male", "female", "neutral"]).optional(),
 });
 
-export async function createAvatar(input: z.infer<typeof createAvatarSchema>): Promise<Avatar> {
+export async function createAvatar(input: z.infer<typeof createAvatarSchema>, ownerId: string = LOCAL_OWNER): Promise<Avatar> {
   const avatar: Avatar = {
     id: newId("av"),
+    ownerId,
     name: input.name,
     imageUrl: input.imageUrl,
     gender: input.gender,
@@ -54,9 +66,8 @@ export async function createAvatar(input: z.infer<typeof createAvatarSchema>): P
   return getStore().put("avatar", avatar);
 }
 
-export async function deleteAvatar(id: string): Promise<void> {
-  const existing = await getStore().get<Avatar>("avatar", id);
-  if (!existing) throw new NotFoundError(`Avatar ${id} not found`);
+export async function deleteAvatar(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
+  owned(await getStore().get<Avatar>("avatar", id), ownerId, `Avatar ${id}`);
   await getStore().remove("avatar", id);
 }
 
@@ -128,8 +139,8 @@ export const videoRequestSchema = z
     return { ...v, script: v.script };
   });
 
-export async function createVideo(req: VideoRequest): Promise<Video> {
-  let avatar = await getAvatar(req.avatarId);
+export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWNER): Promise<Video> {
+  let avatar = await getAvatar(req.avatarId, ownerId);
   const voices = await listVoices();
   const voice = voices.find((v) => v.id === req.voiceId) ?? null;
   if (!voice) throw new ValidationError(`Voice ${req.voiceId} is not available with the current voice provider`);
@@ -138,6 +149,7 @@ export async function createVideo(req: VideoRequest): Promise<Video> {
   const base: Video = {
     ...req,
     id: newId("vid"),
+    ownerId,
     status: "queued",
     provider: provider.name,
     avatarName: avatar.name,
@@ -161,16 +173,18 @@ export async function createVideo(req: VideoRequest): Promise<Video> {
   return getStore().put("video", base);
 }
 
-export async function listVideos(): Promise<Video[]> {
-  const videos = await getStore().list<Video>("video");
+export async function listVideos(ownerId: string = LOCAL_OWNER): Promise<Video[]> {
+  const videos = await getStore().list<Video>("video", ownerId);
   videos.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return videos;
 }
 
-/** Fetch a video and, if it is still rendering, refresh its status from the provider. */
-export async function getVideo(id: string, refresh = true): Promise<Video> {
-  const video = await getStore().get<Video>("video", id);
-  if (!video) throw new NotFoundError(`Video ${id} not found`);
+/**
+ * Fetch a video and, if it is still rendering, refresh its status from the provider.
+ * Pass `PUBLIC_ACCESS` (null) for public access (share page); otherwise the video must belong to the owner.
+ */
+export async function getVideo(id: string, ownerId: string | null = LOCAL_OWNER, refresh = true): Promise<Video> {
+  const video = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
   if (!refresh || !video.providerJobId || (video.status !== "processing" && video.status !== "queued")) return video;
 
   try {
@@ -187,15 +201,13 @@ export async function getVideo(id: string, refresh = true): Promise<Video> {
 
 export const videoPatchSchema = z.object({ title: z.string().trim().min(1).max(120) });
 
-export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSchema>): Promise<Video> {
-  const existing = await getStore().get<Video>("video", id);
-  if (!existing) throw new NotFoundError(`Video ${id} not found`);
+export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSchema>, ownerId: string = LOCAL_OWNER): Promise<Video> {
+  const existing = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
   return getStore().put("video", { ...existing, ...patch, updatedAt: nowIso() });
 }
 
-export async function deleteVideo(id: string): Promise<void> {
-  const existing = await getStore().get<Video>("video", id);
-  if (!existing) throw new NotFoundError(`Video ${id} not found`);
+export async function deleteVideo(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
+  owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
   await getStore().remove("video", id);
 }
 
@@ -227,11 +239,12 @@ export const translationRequestSchema = z.object({
   targetLanguage: z.string().trim().min(2).max(40),
 });
 
-export async function createTranslation(req: z.infer<typeof translationRequestSchema>): Promise<Translation> {
+export async function createTranslation(req: z.infer<typeof translationRequestSchema>, ownerId: string = LOCAL_OWNER): Promise<Translation> {
   const provider = getTranslateProvider();
   const base: Translation = {
     ...req,
     id: newId("tr"),
+    ownerId,
     status: "queued",
     provider: provider.name,
     createdAt: nowIso(),
@@ -248,15 +261,14 @@ export async function createTranslation(req: z.infer<typeof translationRequestSc
   return getStore().put("translation", base);
 }
 
-export async function listTranslations(): Promise<Translation[]> {
-  const items = await getStore().list<Translation>("translation");
+export async function listTranslations(ownerId: string = LOCAL_OWNER): Promise<Translation[]> {
+  const items = await getStore().list<Translation>("translation", ownerId);
   items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return items;
 }
 
-export async function getTranslation(id: string): Promise<Translation> {
-  const item = await getStore().get<Translation>("translation", id);
-  if (!item) throw new NotFoundError(`Translation ${id} not found`);
+export async function getTranslation(id: string, ownerId: string = LOCAL_OWNER): Promise<Translation> {
+  const item = owned(await getStore().get<Translation>("translation", id), ownerId, `Translation ${id}`);
   if (!item.providerJobId || (item.status !== "processing" && item.status !== "queued")) return item;
   try {
     const update = await getTranslateProviderByName(item.provider).getStatus(item.providerJobId);

@@ -464,6 +464,54 @@ test("interactive avatar answers a visitor in character", async ({ page }) => {
   expect((await page.request.post("/api/chat", { data: { avatarId: "stock_1", messages: [] } })).status()).toBe(400);
 });
 
+test("interactive avatar takes a spoken question when the browser can transcribe", async ({ page }) => {
+  // Headless Chromium has no working recogniser; stand in a minimal Web Speech API that hears one sentence.
+  await page.addInitScript(() => {
+    class FakeRecognition {
+      lang = "";
+      interimResults = false;
+      continuous = false;
+      onresult: ((e: unknown) => void) | null = null;
+      onerror: ((e: unknown) => void) | null = null;
+      onend: (() => void) | null = null;
+      start() {
+        (window as unknown as { __recLang: string }).__recLang = this.lang;
+        setTimeout(() => {
+          const partial = Object.assign([{ transcript: "How much" }], { isFinal: false });
+          this.onresult?.({ results: [partial] });
+          const final = Object.assign([{ transcript: "How much does it cost?" }], { isFinal: true });
+          this.onresult?.({ results: [final] });
+          this.onend?.();
+        }, 50);
+      }
+      stop() {
+        this.onend?.();
+      }
+      abort() {}
+    }
+    (window as unknown as { SpeechRecognition: unknown }).SpeechRecognition = FakeRecognition;
+  });
+  await page.goto("/interactive");
+  const mic = page.getByRole("button", { name: "Speak a question" });
+  await expect(mic).toBeVisible();
+  await mic.click();
+  await expect(page.locator("[data-testid=chat-log] [data-role=user]").first()).toHaveText("How much does it cost?");
+  await expect(page.locator("[data-testid=chat-log] [data-role=assistant]").first()).toContainText(/pricing/i);
+  await expect(page.getByLabel("Your message")).toHaveValue("");
+  expect(await page.evaluate(() => (window as unknown as { __recLang: string }).__recLang)).toBeTruthy();
+});
+
+test("the microphone button is hidden when the browser cannot transcribe", async ({ page }) => {
+  await page.addInitScript(() => {
+    const w = window as unknown as Record<string, unknown>;
+    delete w.SpeechRecognition;
+    delete w.webkitSpeechRecognition;
+  });
+  await page.goto("/interactive");
+  await expect(page.getByLabel("Your message")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Speak a question" })).toHaveCount(0);
+});
+
 test("website embed script adds a launcher that opens the talk page", async ({ page }) => {
   const agent = (await (await page.request.post("/api/agents", { data: { name: "Embed agent", avatarId: "stock_2" } })).json()).agent as { id: string };
   try {

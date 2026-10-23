@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { MessageSquare, Send, Volume2, VolumeX } from "lucide-react";
+import { MessageSquare, Mic, Send, Square, Volume2, VolumeX } from "lucide-react";
 import { Button, ErrorBanner, inputClass } from "@/components/ui";
 import { portraitSvg } from "@/lib/stock";
 import type { LiveStatus } from "@/hooks/useLiveAvatar";
@@ -9,6 +9,33 @@ export interface ChatTurn {
   role: "user" | "assistant";
   content: string;
 }
+
+// Minimal typing for the Web Speech API recogniser (Chrome, Edge, Safari); absent elsewhere.
+interface Recognizer {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }> }) => void) | null;
+  onerror: ((e: { error: string }) => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+  stop(): void;
+  abort(): void;
+}
+type RecognizerCtor = new () => Recognizer;
+
+function recognizerCtor(): RecognizerCtor | null {
+  if (typeof window === "undefined") return null;
+  const w = window as unknown as { SpeechRecognition?: RecognizerCtor; webkitSpeechRecognition?: RecognizerCtor };
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
+}
+
+const MIC_ERRORS: Record<string, string> = {
+  "not-allowed": "Microphone access was blocked. Allow it in the browser and try again.",
+  "service-not-allowed": "Speech recognition is not available in this browser.",
+  "audio-capture": "No microphone was found.",
+  network: "Speech recognition needs a network connection.",
+};
 
 /**
  * Portrait plus conversation. Replies are spoken with Web Speech while the portrait animates.
@@ -47,12 +74,22 @@ export function ChatPanel({
   const [speaking, setSpeaking] = useState(false);
   const [muted, setMuted] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [canListen, setCanListen] = useState(false);
+  const [listening, setListening] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
+  const recognizer = useRef<Recognizer | null>(null);
+  const heard = useRef("");
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, busy]);
-  useEffect(() => () => window.speechSynthesis?.cancel(), []);
+  useEffect(() => {
+    setCanListen(recognizerCtor() !== null);
+    return () => {
+      window.speechSynthesis?.cancel();
+      recognizer.current?.abort();
+    };
+  }, []);
 
   function speak(text: string) {
     if (muted || typeof window === "undefined" || !("speechSynthesis" in window)) return;
@@ -67,8 +104,55 @@ export function ChatPanel({
     window.speechSynthesis.speak(utter);
   }
 
-  async function send() {
-    const content = draft.trim();
+  /** Push-to-talk: one utterance is transcribed into the box and sent when it ends. */
+  function toggleListening() {
+    if (listening) {
+      recognizer.current?.stop();
+      return;
+    }
+    const Ctor = recognizerCtor();
+    if (!Ctor) return;
+    window.speechSynthesis?.cancel();
+    setSpeaking(false);
+    setErr(null);
+    heard.current = "";
+    const rec = new Ctor();
+    rec.lang = voiceLanguage || navigator.language || "en-US";
+    rec.interimResults = true;
+    rec.continuous = false;
+    rec.onresult = (e) => {
+      let text = "";
+      let final = false;
+      for (let i = 0; i < e.results.length; i++) {
+        text += e.results[i][0].transcript;
+        if (e.results[i].isFinal) final = true;
+      }
+      setDraft(text);
+      if (final) heard.current = text;
+    };
+    rec.onerror = (e) => {
+      if (e.error !== "aborted" && e.error !== "no-speech") setErr(MIC_ERRORS[e.error] ?? "Could not hear you. Try again.");
+    };
+    rec.onend = () => {
+      setListening(false);
+      recognizer.current = null;
+      const text = heard.current.trim();
+      heard.current = "";
+      if (text) void send(text);
+    };
+    recognizer.current = rec;
+    setListening(true);
+    try {
+      rec.start();
+    } catch {
+      setListening(false);
+      recognizer.current = null;
+      setErr("Could not start the microphone.");
+    }
+  }
+
+  async function send(text = draft) {
+    const content = text.trim();
     if (!content || busy) return;
     const next: ChatTurn[] = [...messages, { role: "user", content }];
     setMessages(next);
@@ -90,6 +174,7 @@ export function ChatPanel({
 
   function reset() {
     window.speechSynthesis?.cancel();
+    recognizer.current?.abort();
     setSpeaking(false);
     setMessages([]);
     setErr(null);
@@ -135,7 +220,7 @@ export function ChatPanel({
             </span>
             <span className="inline-flex items-center gap-1.5" aria-live="polite">
               <span className={`h-2 w-2 rounded-full ${speaking ? "animate-pulse bg-emerald-400" : busy ? "animate-pulse bg-amber-300" : "bg-slate-300"}`} />
-              {speaking ? "Speaking" : busy ? "Thinking" : "Listening"}
+              {speaking ? "Speaking" : busy ? "Thinking" : listening ? "Hearing you" : "Listening"}
             </span>
           </div>
         </div>
@@ -188,8 +273,28 @@ export function ChatPanel({
             send();
           }}
         >
-          <input aria-label="Your message" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Type a message" maxLength={2000} className={inputClass} />
-          <Button type="submit" loading={busy} disabled={!draft.trim()}>
+          <input
+            aria-label="Your message"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={listening ? "Listening…" : "Type a message"}
+            maxLength={2000}
+            className={inputClass}
+          />
+          {canListen && (
+            <button
+              type="button"
+              onClick={toggleListening}
+              disabled={busy}
+              aria-label={listening ? "Stop listening" : "Speak a question"}
+              aria-pressed={listening}
+              title={listening ? "Stop listening" : "Speak a question"}
+              className={`rounded-lg p-2 ${listening ? "animate-pulse bg-rose-600 text-white" : dark ? "text-slate-300 hover:bg-slate-800" : "text-slate-600 hover:bg-slate-100"} disabled:opacity-50`}
+            >
+              {listening ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+            </button>
+          )}
+          <Button type="submit" loading={busy} disabled={!draft.trim() || listening}>
             <Send className="h-4 w-4" /> Send
           </Button>
         </form>

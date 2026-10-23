@@ -10,7 +10,7 @@ import {
   getTtsProvider,
 } from "./providers";
 import { getStore } from "./store";
-import { MAX_SCENES, type Avatar, type BrandKit, type Translation, type Video, type VideoRequest, type Voice } from "./types";
+import { MAX_SCENES, type Agent, type Avatar, type BrandKit, type Translation, type Video, type VideoRequest, type Voice } from "./types";
 
 import { LOCAL_OWNER } from "./owner-id";
 import { after } from "next/server";
@@ -179,6 +179,84 @@ export async function chatWithAvatar(input: z.infer<typeof chatSchema>, ownerId:
   if (input.messages[input.messages.length - 1].role !== "user") throw new ValidationError("The last message must be from the visitor");
   const avatar = await getAvatar(input.avatarId, ownerId);
   return getScriptProvider().chat({ persona: { name: avatar.name, instructions: input.instructions, language: input.language }, messages: input.messages });
+}
+
+// ---------- Agents (shareable interactive avatars) ----------
+
+export const MAX_AGENTS = 20;
+
+export const agentSchema = z.object({
+  name: z.string().trim().min(1).max(60),
+  avatarId: z.string().min(1),
+  voiceId: z.string().min(1).optional(),
+  instructions: z.string().trim().max(2000).default(""),
+  language: z.string().trim().min(2).max(40).default("English"),
+  isPublic: z.boolean().default(true),
+});
+
+export const agentPatchSchema = agentSchema.partial();
+
+export async function listAgents(ownerId: string = LOCAL_OWNER): Promise<Agent[]> {
+  const agents = await getStore().list<Agent>("agent", ownerId);
+  return agents.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export async function getAgent(id: string, ownerId: string | null = LOCAL_OWNER): Promise<Agent> {
+  return owned(await getStore().get<Agent>("agent", id), ownerId, `Agent ${id}`);
+}
+
+export async function createAgent(input: z.infer<typeof agentSchema>, ownerId: string = LOCAL_OWNER): Promise<Agent> {
+  if ((await listAgents(ownerId)).length >= MAX_AGENTS) throw new ValidationError(`At most ${MAX_AGENTS} agents per account`);
+  await getAvatar(input.avatarId, ownerId);
+  if (input.voiceId && !(await listVoices()).some((v) => v.id === input.voiceId)) throw new ValidationError(`Voice ${input.voiceId} is not available`);
+  const now = nowIso();
+  return getStore().put("agent", { id: newId("agent"), ownerId, ...input, conversations: 0, messages: 0, createdAt: now, updatedAt: now });
+}
+
+export async function updateAgent(id: string, patch: z.infer<typeof agentPatchSchema>, ownerId: string = LOCAL_OWNER): Promise<Agent> {
+  const existing = await getAgent(id, ownerId);
+  if (patch.avatarId) await getAvatar(patch.avatarId, ownerId);
+  return getStore().put("agent", { ...existing, ...patch, updatedAt: nowIso() });
+}
+
+export async function deleteAgent(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
+  await getAgent(id, ownerId);
+  await getStore().remove("agent", id);
+}
+
+/** Public view for the talk page: never exposes instructions or the owner. */
+export async function publicAgent(id: string) {
+  const agent = await getStore().get<Agent>("agent", id);
+  if (!agent || !agent.isPublic) throw new NotFoundError("This presenter is not available");
+  const avatar = await getAvatar(agent.avatarId, agent.ownerId);
+  const brand = await getBrandKit(agent.ownerId);
+  return {
+    id: agent.id,
+    name: agent.name,
+    language: agent.language,
+    avatar: { id: avatar.id, name: avatar.name, imageUrl: avatar.imageUrl },
+    voiceLanguage: agent.voiceId ? (await listVoices()).find((v) => v.id === agent.voiceId)?.language : undefined,
+    brand: brand ? { name: brand.name, logoUrl: brand.logoUrl, primaryColor: brand.primaryColor, accentColor: brand.accentColor } : null,
+  };
+}
+
+export const talkSchema = z.object({
+  messages: chatSchema.shape.messages,
+});
+
+/** A visitor's turn with a public agent. Counts conversations (first turn) and messages. */
+export async function talkToAgent(id: string, input: z.infer<typeof talkSchema>): Promise<string> {
+  const agent = await getStore().get<Agent>("agent", id);
+  if (!agent || !agent.isPublic) throw new NotFoundError("This presenter is not available");
+  if (input.messages[input.messages.length - 1].role !== "user") throw new ValidationError("The last message must be from the visitor");
+  const avatar = await getAvatar(agent.avatarId, agent.ownerId);
+  const reply = await getScriptProvider().chat({ persona: { name: avatar.name, instructions: agent.instructions, language: agent.language }, messages: input.messages });
+  const firstTurn = input.messages.filter((m) => m.role === "user").length === 1;
+  // Counters are best effort; a lost increment never fails the visitor's turn.
+  getStore()
+    .put("agent", { ...agent, conversations: agent.conversations + (firstTurn ? 1 : 0), messages: agent.messages + 1 })
+    .catch(() => {});
+  return reply;
 }
 
 // ---------- Videos ----------

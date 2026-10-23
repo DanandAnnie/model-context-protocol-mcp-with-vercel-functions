@@ -1,41 +1,34 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
-import { MessageSquare, Send, Volume2, VolumeX } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Check, Copy, Link2, Trash2 } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
+import { ChatPanel, type ChatTurn } from "@/components/ChatPanel";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
-import { api } from "@/lib/client";
-import { portraitSvg } from "@/lib/stock";
-import type { Avatar, ProviderStatus, Voice } from "@/lib/types";
-
-interface Msg {
-  role: "user" | "assistant";
-  content: string;
-}
+import { api, formatDate } from "@/lib/client";
+import type { Agent, Avatar, ProviderStatus, Voice } from "@/lib/types";
 
 const DEFAULT_INSTRUCTIONS = "You represent a real estate team. Help visitors with open houses, listings, and how to book a showing. Be warm and concise.";
 
 /**
- * Interactive avatar: a live conversation with a presenter. Replies come from the script
- * provider (Claude when configured); the browser speaks them with Web Speech while the portrait
- * animates. A streaming-video renderer (for example HeyGen Streaming) can replace the portrait
- * later behind the same chat endpoint.
+ * Interactive avatar: converse with a presenter here, then save it as a shareable agent that
+ * visitors can talk to at /talk/:id without signing in. Replies come from the script provider;
+ * the browser speaks them. A streaming renderer can replace the portrait behind /api/chat and /api/talk.
  */
 export default function InteractivePage() {
   const { data: avatarData, loading: avatarsLoading } = useApi<{ avatars: Avatar[] }>("/api/avatars");
   const { data: voiceData } = useApi<{ voices: Voice[] }>("/api/voices");
   const { data: status } = useApi<ProviderStatus>("/api/status");
+  const { data: agentData, refetch: refetchAgents } = useApi<{ agents: Agent[] }>("/api/agents");
   const [avatar, setAvatar] = useState<Avatar | null>(null);
   const [voice, setVoice] = useState<Voice | null>(null);
   const [instructions, setInstructions] = useState(DEFAULT_INSTRUCTIONS);
   const [language, setLanguage] = useState("English");
-  const [messages, setMessages] = useState<Msg[]>([]);
-  const [draft, setDraft] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [speaking, setSpeaking] = useState(false);
-  const [muted, setMuted] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const logRef = useRef<HTMLDivElement>(null);
+  const [agentName, setAgentName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState<string | null>(null);
+  const [savedLink, setSavedLink] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
 
   useEffect(() => {
     if (!avatar && avatarData?.avatars.length) setAvatar(avatarData.avatars[0]);
@@ -43,161 +36,164 @@ export default function InteractivePage() {
   useEffect(() => {
     if (!voice && voiceData?.voices.length) setVoice(voiceData.voices[0]);
   }, [voiceData, voice]);
-  useEffect(() => {
-    logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, busy]);
-  useEffect(() => () => window.speechSynthesis?.cancel(), []);
 
-  function speak(text: string) {
-    if (muted || typeof window === "undefined" || !("speechSynthesis" in window)) return;
-    window.speechSynthesis.cancel();
-    const utter = new SpeechSynthesisUtterance(text);
-    const voices = window.speechSynthesis.getVoices();
-    const match = voices.find((v) => voice?.language && v.lang.toLowerCase().startsWith(voice.language.toLowerCase().slice(0, 2)));
-    if (match) utter.voice = match;
-    utter.onstart = () => setSpeaking(true);
-    utter.onend = () => setSpeaking(false);
-    utter.onerror = () => setSpeaking(false);
-    window.speechSynthesis.speak(utter);
+  async function ask(messages: ChatTurn[]) {
+    if (!avatar) throw new Error("Pick a presenter first");
+    const { reply } = await api<{ reply: string }>("/api/chat", { method: "POST", body: JSON.stringify({ avatarId: avatar.id, instructions, language, messages }) });
+    return reply;
   }
 
-  async function send() {
-    const content = draft.trim();
-    if (!content || !avatar || busy) return;
-    const next: Msg[] = [...messages, { role: "user", content }];
-    setMessages(next);
-    setDraft("");
-    setBusy(true);
-    setErr(null);
+  async function saveAgent() {
+    if (!avatar) return;
+    setSaving(true);
+    setSaveErr(null);
     try {
-      const { reply } = await api<{ reply: string }>("/api/chat", {
+      const { agent } = await api<{ agent: Agent }>("/api/agents", {
         method: "POST",
-        body: JSON.stringify({ avatarId: avatar.id, instructions, language, messages: next.slice(-20) }),
+        body: JSON.stringify({ name: agentName.trim() || avatar.name, avatarId: avatar.id, voiceId: voice?.id, instructions, language, isPublic: true }),
       });
-      setMessages([...next, { role: "assistant", content: reply }]);
-      speak(reply);
+      setSavedLink(`${window.location.origin}/talk/${agent.id}`);
+      setAgentName("");
+      await refetchAgents();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "The avatar could not answer");
-      setMessages(messages);
-      setDraft(content);
+      setSaveErr(e instanceof Error ? e.message : "Could not save the presenter");
     } finally {
-      setBusy(false);
+      setSaving(false);
     }
   }
 
-  function reset() {
-    window.speechSynthesis?.cancel();
-    setSpeaking(false);
-    setMessages([]);
-    setErr(null);
+  async function copy(text: string, id: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(id);
+      setTimeout(() => setCopied(null), 2000);
+    } catch {
+      window.prompt("Copy this link", text);
+    }
+  }
+
+  async function remove(agent: Agent) {
+    if (!window.confirm(`Delete "${agent.name}"? Its public link stops working.`)) return;
+    setSaveErr(null);
+    try {
+      await api(`/api/agents/${agent.id}`, { method: "DELETE" });
+      if (savedLink?.endsWith(agent.id)) setSavedLink(null);
+      await refetchAgents();
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : "Could not delete the presenter");
+    }
+  }
+
+  async function togglePublic(agent: Agent) {
+    setSaveErr(null);
+    try {
+      await api(`/api/agents/${agent.id}`, { method: "PATCH", body: JSON.stringify({ isPublic: !agent.isPublic }) });
+      await refetchAgents();
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : "Could not update the presenter");
+    }
   }
 
   return (
     <>
       <SectionTitle
         title="Interactive avatar"
-        subtitle="Talk to a presenter in real time. Replies come from the AI script writer and are spoken by the browser; connect a streaming renderer to get live video."
+        subtitle="Talk to a presenter in real time, then share it: visitors get a public page where it answers in character."
       />
       <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-900">
         {status?.script === "mock"
           ? "Demo: replies are scripted. Set SCRIPT_PROVIDER=anthropic for real conversations."
           : "Live: replies are generated by the configured AI model. Keep instructions specific for the best answers."}
       </div>
-      <ErrorBanner message={err} />
-      <div className="grid gap-6 lg:grid-cols-[360px_1fr]">
-        <div className="space-y-4">
-          <Card className="overflow-hidden">
-            <div className="relative aspect-[4/5] bg-slate-100">
-              {avatar ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={avatar.imageUrl}
-                  alt={avatar.name}
-                  className={`h-full w-full object-cover transition-transform duration-300 ${speaking ? "scale-[1.03]" : ""}`}
-                  onError={(e) => {
-                    const img = e.currentTarget;
-                    if (!img.dataset.fallback) {
-                      img.dataset.fallback = "1";
-                      img.src = portraitSvg(avatar.name, avatar.name.length);
-                    }
-                  }}
-                />
-              ) : (
-                <Skeleton className="h-full w-full" />
-              )}
-              <div className={`pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between px-3 py-2 text-xs text-white ${speaking ? "bg-gradient-to-t from-brand-700/80" : "bg-gradient-to-t from-slate-900/70"}`}>
-                <span className="font-medium">{avatar?.name ?? "…"}</span>
-                <span className="inline-flex items-center gap-1.5" aria-live="polite">
-                  <span className={`h-2 w-2 rounded-full ${speaking ? "animate-pulse bg-emerald-400" : busy ? "animate-pulse bg-amber-300" : "bg-slate-300"}`} />
-                  {speaking ? "Speaking" : busy ? "Thinking" : "Listening"}
-                </span>
-              </div>
-            </div>
-            <div className="flex items-center justify-between gap-2 px-3 py-2">
-              <select aria-label="Voice" value={voice?.id ?? ""} onChange={(e) => setVoice(voiceData?.voices.find((v) => v.id === e.target.value) ?? null)} className={`${inputClass} py-1 text-xs`}>
-                {voiceData?.voices.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.name}
-                    {v.language ? ` · ${v.language}` : ""}
-                  </option>
-                ))}
-              </select>
-              <button type="button" onClick={() => { setMuted((m) => !m); window.speechSynthesis?.cancel(); setSpeaking(false); }} aria-label={muted ? "Unmute" : "Mute"} className="rounded-lg p-2 text-slate-600 hover:bg-slate-100">
-                {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-              </button>
-            </div>
-          </Card>
-          <Card className="p-4">
-            <Field label="Presenter" hint="Pick who answers.">
+      {avatar ? (
+        <ChatPanel
+          name={avatar.name}
+          imageUrl={avatar.imageUrl}
+          voiceLanguage={voice?.language}
+          ask={ask}
+          emptyHint="Say hello, or ask about an open house, pricing, or how to book a showing."
+          aside={
+            <select aria-label="Voice" value={voice?.id ?? ""} onChange={(e) => setVoice(voiceData?.voices.find((v) => v.id === e.target.value) ?? null)} className={`${inputClass} py-1 text-xs`}>
+              {voiceData?.voices.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.name}
+                  {v.language ? ` · ${v.language}` : ""}
+                </option>
+              ))}
+            </select>
+          }
+        />
+      ) : (
+        <Skeleton className="h-[480px]" />
+      )}
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-2">
+        <Card className="p-5">
+          <h3 className="text-sm font-semibold text-slate-900">Presenter setup</h3>
+          <div className="mt-3">
+            <Field label="Who answers">
               {avatarsLoading ? <Skeleton className="h-24" /> : <AvatarGrid avatars={avatarData?.avatars.slice(0, 6) ?? []} selectedId={avatar?.id} onSelect={setAvatar} compact />}
             </Field>
-            <div className="mt-4 space-y-3">
-              <Field label="Instructions" hint="What the presenter knows and how it should behave.">
-                <textarea value={instructions} onChange={(e) => setInstructions(e.target.value)} rows={4} maxLength={2000} className={inputClass} />
-              </Field>
-              <Field label="Reply language">
-                <input value={language} onChange={(e) => setLanguage(e.target.value)} className={inputClass} maxLength={40} />
-              </Field>
-            </div>
-          </Card>
-        </div>
-
-        <Card className="flex min-h-[520px] flex-col">
-          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-            <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-              <MessageSquare className="h-4 w-4 text-slate-400" /> Conversation
-            </h3>
-            <button type="button" onClick={reset} className="text-xs text-slate-500 hover:text-slate-900" disabled={!messages.length}>
-              Start over
-            </button>
           </div>
-          <div ref={logRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4" data-testid="chat-log" aria-live="polite">
-            {messages.length === 0 && <p className="text-sm text-slate-500">Say hello, or ask about an open house, pricing, or how to book a showing.</p>}
-            {messages.map((m, i) => (
-              <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm ${m.role === "user" ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-900"}`} data-role={m.role}>
-                  {m.content}
-                </div>
-              </div>
-            ))}
-            {busy && (
-              <div className="flex justify-start">
-                <div className="rounded-2xl bg-slate-100 px-3.5 py-2 text-sm text-slate-500">…</div>
+          <div className="mt-4 space-y-3">
+            <Field label="Instructions" hint="What the presenter knows and how it should behave. Visitors never see this text.">
+              <textarea value={instructions} onChange={(e) => setInstructions(e.target.value)} rows={4} maxLength={2000} className={inputClass} />
+            </Field>
+            <Field label="Reply language">
+              <input value={language} onChange={(e) => setLanguage(e.target.value)} className={inputClass} maxLength={40} />
+            </Field>
+          </div>
+          <div className="mt-4 border-t border-slate-100 pt-4">
+            <ErrorBanner message={saveErr} />
+            <div className="flex flex-wrap items-end gap-2">
+              <Field label="Share as" hint="Name shown to visitors.">
+                <input aria-label="Agent name" value={agentName} onChange={(e) => setAgentName(e.target.value)} placeholder={avatar?.name ?? "Presenter"} maxLength={60} className={`${inputClass} w-56`} />
+              </Field>
+              <Button onClick={saveAgent} loading={saving} disabled={!avatar}>
+                <Link2 className="h-4 w-4" /> Save and get link
+              </Button>
+            </div>
+            {savedLink && (
+              <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900" data-testid="agent-link">
+                <code className="break-all">{savedLink}</code>
+                <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => copy(savedLink, "new")}>
+                  {copied === "new" ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />} {copied === "new" ? "Copied" : "Copy"}
+                </Button>
               </div>
             )}
           </div>
-          <form
-            className="flex items-center gap-2 border-t border-slate-100 px-4 py-3"
-            onSubmit={(e) => {
-              e.preventDefault();
-              send();
-            }}
-          >
-            <input aria-label="Your message" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Type a message" maxLength={2000} className={inputClass} disabled={!avatar} />
-            <Button type="submit" loading={busy} disabled={!draft.trim() || !avatar}>
-              <Send className="h-4 w-4" /> Send
-            </Button>
-          </form>
+        </Card>
+
+        <Card className="p-5">
+          <h3 className="text-sm font-semibold text-slate-900">Shared presenters</h3>
+          <p className="mt-1 text-xs text-slate-500">Each one has a public page. Turn a link off to pause it without deleting the setup.</p>
+          <ul className="mt-3 divide-y divide-slate-100" data-testid="agent-list">
+            {agentData?.agents.length === 0 && <li className="py-3 text-xs text-slate-500">Nothing shared yet.</li>}
+            {agentData?.agents.map((a) => {
+              const url = typeof window === "undefined" ? `/talk/${a.id}` : `${window.location.origin}/talk/${a.id}`;
+              return (
+                <li key={a.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium text-slate-900">{a.name}</div>
+                    <div className="text-xs text-slate-500">
+                      {a.conversations} {a.conversations === 1 ? "conversation" : "conversations"} · {a.messages} {a.messages === 1 ? "message" : "messages"} · {a.isPublic ? "link on" : "link off"} · {formatDate(a.createdAt)}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => copy(url, a.id)} aria-label={`Copy link for ${a.name}`}>
+                      {copied === a.id ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />} Link
+                    </Button>
+                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => togglePublic(a)} aria-label={`${a.isPublic ? "Turn off" : "Turn on"} link for ${a.name}`}>
+                      {a.isPublic ? "Turn off" : "Turn on"}
+                    </Button>
+                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => remove(a)} aria-label={`Delete ${a.name}`}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         </Card>
       </div>
     </>

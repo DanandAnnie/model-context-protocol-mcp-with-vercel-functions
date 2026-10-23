@@ -189,6 +189,24 @@ export interface Workspace {
   updatedAt: string;
 }
 
+/** A saved interactive presenter that visitors can talk to on a public page. */
+export interface Agent {
+  id: string;
+  ownerId: string;
+  name: string;
+  avatarId: string;
+  voiceId?: string;
+  instructions: string;
+  language: string;
+  /** Visitors can open /talk/:id without signing in. */
+  isPublic: boolean;
+  /** Visitor conversations started (first message of a session). */
+  conversations: number;
+  messages: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type PlanId = "free" | "pro";
 
 /** Billing plan of an owner (person or workspace). Absent means free. */

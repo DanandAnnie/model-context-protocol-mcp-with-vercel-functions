@@ -45,10 +45,11 @@ export class AnthropicScriptProvider implements ScriptProvider {
 Rules: answer in one to three short spoken sentences; no markdown, lists, or stage directions; stay in character; if you do not know, say so briefly and offer what you can.
 Background and instructions from the owner:
 ${persona.instructions || "(none provided: be a friendly, helpful presenter)"}`;
-    return this.complete(messages, system, 400);
+    // A reply cut off at the token cap is still a usable spoken answer; the writer paths keep throwing.
+    return this.complete(messages, system, 400, true);
   }
 
-  private async complete(prompt: string | ChatMessage[], system: string = SYSTEM, maxTokens = 16000): Promise<string> {
+  private async complete(prompt: string | ChatMessage[], system: string = SYSTEM, maxTokens = 16000, allowTruncation = false): Promise<string> {
     const response = await this.client.beta.messages.create({
       model: "claude-opus-5-5",
       max_tokens: maxTokens,
@@ -62,7 +63,7 @@ ${persona.instructions || "(none provided: be a friendly, helpful presenter)"}`;
     if (response.stop_reason === "refusal") {
       throw new Error("The script writer declined this request. Try rephrasing the topic.");
     }
-    if (response.stop_reason === "max_tokens") {
+    if (response.stop_reason === "max_tokens" && !allowTruncation) {
       throw new Error("The script writer ran out of room. Try a shorter target length.");
     }
     const text = response.content

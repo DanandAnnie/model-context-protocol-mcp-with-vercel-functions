@@ -17,7 +17,7 @@ const nextConfig: NextConfig = {
       // Share pages may be embedded anywhere (the "Embed" snippet relies on it).
       { source: "/share/:path*", headers: common },
       // Everything else refuses to be framed.
-      { source: "/((?!share/).*)", headers: [...common, { key: "X-Frame-Options", value: "DENY" }] },
+      { source: "/((?!share/|talk/).*)", headers: [...common, { key: "X-Frame-Options", value: "DENY" }] },
     ];
   },
 };

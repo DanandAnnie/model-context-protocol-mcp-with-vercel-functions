@@ -20,6 +20,14 @@ import {
   listVideos,
   chatSchema,
   chatWithAvatar,
+  agentSchema,
+  createAgent,
+  deleteAgent,
+  getAgent,
+  listAgents,
+  publicAgent,
+  talkToAgent,
+  updateAgent,
   recordView,
   scriptSchema,
   updateVideo,
@@ -770,5 +778,36 @@ describe("interactive avatar", () => {
     await assert.rejects(chatWithAvatar(chatSchema.parse({ avatarId: "stock_1", messages: [{ role: "user", content: "Hi" }, { role: "assistant", content: "Hello" }] })), /last message must be from the visitor/);
     await assert.rejects(chatWithAvatar(chatSchema.parse({ avatarId: "nope", messages: [{ role: "user", content: "Hi" }] })), /not found/);
     assert.throws(() => chatSchema.parse({ avatarId: "stock_1", messages: [] }));
+  });
+});
+
+describe("shared agents", () => {
+  it("creates, exposes a safe public view, counts visitor turns, and hides private or deleted agents", async () => {
+    const agent = await createAgent(agentSchema.parse({ name: "Dana", avatarId: "stock_1", voiceId: "stock_voice_2", instructions: "Secret playbook. Open houses on Saturdays." }), "u1");
+    assert.equal((await listAgents("u1"))[0].id, agent.id);
+    assert.deepEqual(await listAgents("u2"), []);
+    await assert.rejects(getAgent(agent.id, "u2"), /not found/);
+
+    const pub = await publicAgent(agent.id);
+    assert.equal(pub.name, "Dana");
+    assert.equal(pub.avatar.name, "Ava Chen");
+    assert.equal(pub.voiceLanguage, "en-US");
+    assert.equal("instructions" in pub, false, "instructions never leave the server");
+    assert.equal("ownerId" in pub, false);
+
+    const first = await talkToAgent(agent.id, { messages: [{ role: "user", content: "Hi" }] });
+    assert.match(first, /Hi, I'm Ava Chen/);
+    await talkToAgent(agent.id, { messages: [{ role: "user", content: "Hi" }, { role: "assistant", content: first }, { role: "user", content: "When?" }] });
+    const counted = await getAgent(agent.id, "u1");
+    assert.equal(counted.conversations, 1);
+    assert.equal(counted.messages, 2);
+
+    await updateAgent(agent.id, { isPublic: false }, "u1");
+    await assert.rejects(publicAgent(agent.id), /not available/);
+    await assert.rejects(talkToAgent(agent.id, { messages: [{ role: "user", content: "Hi" }] }), /not available/);
+    await assert.rejects(updateAgent(agent.id, { isPublic: true }, "u2"), /not found/);
+    await assert.rejects(createAgent(agentSchema.parse({ name: "X", avatarId: "stock_1", voiceId: "nope" }), "u1"), /not available/);
+    await deleteAgent(agent.id, "u1");
+    await assert.rejects(publicAgent(agent.id), /not available/);
   });
 });

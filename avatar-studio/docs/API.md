@@ -16,7 +16,7 @@ Authorization: Bearer as_live_…
 - Keys minted inside a workspace are revoked when that member leaves or is removed, and when the workspace is deleted.
 - Unknown or revoked keys get `401`.
 
-Public routes need no key: `/api/videos/:id/captions`, `/api/videos/:id/view`, `/api/webhooks/:provider`, `/api/auth/*`, `/share/:id`.
+Public routes need no key: `/api/videos/:id/captions`, `/api/videos/:id/view`, `/api/talk/:id`, `/api/webhooks/:provider`, `/api/auth/*`, `/share/:id`.
 
 ## Conventions
 
@@ -127,6 +127,12 @@ Actions: `shorten`, `expand`, `tone`, `translate`, `polish`. Returns `{ "script"
 ```
 
 Returns `{ "reply": "…" }`.
+
+### Shared presenters (agents)
+
+- `GET /api/agents`, `POST /api/agents` → `{ "name", "avatarId", "voiceId"?, "instructions"?, "language"?, "isPublic"? }` → `201 { "agent" }` (20 per account)
+- `GET | PATCH | DELETE /api/agents/:id` (`PATCH` takes any subset of the fields above)
+- Public, no key: `GET /api/talk/:id` → the visitor-safe view (name, avatar, language, brand; never instructions) and `POST /api/talk/:id` → `{ "messages": [...] }` → `{ "reply" }`, limited to 30 turns per 10 minutes per client and 600 per hour per agent. `404` when the agent is private or deleted. The page `/talk/:id` is embeddable in an iframe.
 
 ## Avatars and voices
 

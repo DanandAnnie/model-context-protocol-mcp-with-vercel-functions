@@ -22,6 +22,7 @@ export class MockEmailProvider implements EmailProvider {
   sent: EmailMessage[] = [];
   async send(message: EmailMessage) {
     this.sent.push(message);
+    if (this.sent.length > 100) this.sent.shift();
     console.info(`[email:mock] to=${message.to} subject=${JSON.stringify(message.subject)}`);
   }
 }

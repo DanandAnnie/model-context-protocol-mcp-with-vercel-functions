@@ -283,7 +283,8 @@ test("webhook settings reject private hosts and show the signing secret", async 
 
 test("pages have no WCAG 2.1 AA violations", async ({ page }) => {
   const v = await createVideoViaApi(page, "Accessible video");
-  const paths = ["/", "/login", "/home", "/create", "/videos", `/videos/${v.id}`, "/templates", "/batch", "/avatars", "/voices", "/translate", "/interactive", "/brand", "/settings", `/share/${v.id}`];
+  const agent = (await (await page.request.post("/api/agents", { data: { name: "Axe agent", avatarId: "stock_1" } })).json()).agent as { id: string };
+  const paths = ["/", "/login", "/home", "/create", "/videos", `/videos/${v.id}`, "/templates", "/batch", "/avatars", "/voices", "/translate", "/interactive", "/brand", "/settings", `/share/${v.id}`, `/talk/${agent.id}`];
   const report: string[] = [];
   for (const path of paths) {
     await page.goto(path);
@@ -292,6 +293,7 @@ test("pages have no WCAG 2.1 AA violations", async ({ page }) => {
     for (const vio of result.violations) report.push(`${path}: ${vio.id} (${vio.impact}) x${vio.nodes.length} ${vio.nodes[0]?.target.join(" ")}`);
   }
   expect(report, report.join("\n")).toEqual([]);
+  await page.request.delete(`/api/agents/${agent.id}`);
 });
 
 test("workspaces: create, switch, isolate content, invite, join, leave, delete", async ({ page, playwright }) => {
@@ -351,6 +353,39 @@ test("demo billing upgrades to Pro and back from Settings", async ({ page }) => 
   await page.getByRole("button", { name: "Manage subscription" }).click();
   await expect(page.getByTestId("plan-name")).toHaveText("Free");
   expect((await (await page.request.get("/api/status")).json()).usage.plan).toBe("free");
+});
+
+test("shared presenter: save from the interactive page, talk publicly, turn off", async ({ page, playwright }) => {
+  const tag = Date.now().toString(36);
+  await page.goto("/interactive");
+  await page.getByLabel("Agent name").fill(`Dana ${tag}`);
+  await page.getByRole("button", { name: "Save and get link" }).click();
+  const link = (await page.getByTestId("agent-link").locator("code").innerText()).trim();
+  const id = link.split("/talk/")[1];
+  expect(id).toMatch(/^agent_/);
+  await expect(page.getByTestId("agent-list")).toContainText(`Dana ${tag}`);
+
+  // A visitor with no session can read the public view and talk; instructions are never exposed.
+  const visitor = await playwright.request.newContext({ baseURL: "http://localhost:3100" });
+  const info = await (await visitor.get(`/api/talk/${id}`)).json();
+  expect(info.agent.name).toBe(`Dana ${tag}`);
+  expect(JSON.stringify(info)).not.toContain("real estate team");
+  const turn = await visitor.post(`/api/talk/${id}`, { data: { messages: [{ role: "user", content: "Hi there" }] } });
+  expect(turn.status()).toBe(200);
+  expect((await turn.json()).reply).toMatch(/^Hi, I'm /);
+  expect((await visitor.get(`/talk/${id}`)).headers()["x-frame-options"]).toBeUndefined();
+  expect((await visitor.get(`/api/agents/${id}`)).status()).toBe(200); // open mode: owner routes need no session
+
+  await page.reload();
+  await expect(page.getByTestId("agent-list")).toContainText("1 conversation");
+  await page.getByRole("button", { name: `Turn off link for Dana ${tag}` }).click();
+  await expect(page.getByTestId("agent-list")).toContainText("link off");
+  expect((await visitor.get(`/api/talk/${id}`)).status()).toBe(404);
+  await visitor.dispose();
+
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: `Delete Dana ${tag}` }).click();
+  await expect(page.getByTestId("agent-list")).not.toContainText(`Dana ${tag}`);
 });
 
 test("interactive avatar answers a visitor in character", async ({ page }) => {

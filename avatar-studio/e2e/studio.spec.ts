@@ -217,6 +217,7 @@ test("personalized batch creates one video per CSV row", async ({ page }) => {
   await expect(page.getByRole("button", { name: /Generate/ })).toBeDisabled();
   await page.locator("textarea").first().fill("Hi {name}, see you at {property} on {move_in}.");
   await expect(page.getByRole("button", { name: "Generate 2 videos" })).toBeEnabled();
+  await page.getByLabel("Output quality").selectOption("720p");
   await page.screenshot({ path: "test-results/batch-page.png" });
   await page.getByRole("button", { name: "Generate 2 videos" }).click();
   await page.waitForURL(/\/videos\?batch=batch_/);
@@ -224,9 +225,10 @@ test("personalized batch creates one video per CSV row", async ({ page }) => {
   await expect(page.locator("a[href^='/videos/vid_']")).toHaveCount(2);
   await expect(page.getByText("Welcome video – Jordan")).toBeVisible();
   const batch = new URL(page.url()).searchParams.get("batch");
-  const videos = (await (await page.request.get("/api/videos")).json()).videos as Array<{ batchId?: string; script: string; rowLabel?: string }>;
+  const videos = (await (await page.request.get("/api/videos")).json()).videos as Array<{ batchId?: string; script: string; rowLabel?: string; resolution?: string }>;
   const mine = videos.filter((v) => v.batchId === batch);
   expect(mine.map((v) => v.rowLabel).sort()).toEqual(["Jordan", "Priya"]);
+  expect(mine.every((v) => v.resolution === "720p")).toBe(true);
   expect(mine.find((v) => v.rowLabel === "Priya")?.script).toBe("Hi Priya, see you at 48 Harbor View on November 15.");
 });
 

@@ -5,7 +5,7 @@ import { Layers3, Upload } from "lucide-react";
 import { Button, Card, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/client";
-import type { AspectRatio, Avatar, Voice } from "@/lib/types";
+import type { AspectRatio, Avatar, Resolution, Voice } from "@/lib/types";
 
 const SAMPLE_CSV = `name,property,move_in
 Jordan,12 Elm Street,November 1
@@ -29,6 +29,7 @@ export default function BatchPage() {
   const [avatarId, setAvatarId] = useState("");
   const [voiceId, setVoiceId] = useState("");
   const [aspect, setAspect] = useState<AspectRatio>("16:9");
+  const [resolution, setResolution] = useState<Resolution>("1080p");
   const [captions, setCaptions] = useState(false);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
@@ -62,7 +63,7 @@ export default function BatchPage() {
     try {
       const result = await api<{ batchId: string; videos: unknown[]; skipped: Array<{ row: number; reason: string }>; failed: Array<{ row: number; reason: string }> }>("/api/videos/batch", {
         method: "POST",
-        body: JSON.stringify({ title, scriptTemplate: template, csv, avatarId, voiceId, aspect, captions }),
+        body: JSON.stringify({ title, scriptTemplate: template, csv, avatarId, voiceId, aspect, resolution, captions }),
       });
       const note = `${result.skipped.length ? `&skipped=${result.skipped.length}` : ""}${result.failed.length ? `&failed=${result.failed.length}` : ""}`;
       router.push(`/videos?batch=${result.batchId}${note}`);
@@ -119,6 +120,12 @@ export default function BatchPage() {
                 <option value="16:9">16:9 Landscape</option>
                 <option value="9:16">9:16 Portrait</option>
                 <option value="1:1">1:1 Square</option>
+              </select>
+            </Field>
+            <Field label="Output quality">
+              <select className={inputClass} value={resolution} onChange={(e) => setResolution(e.target.value as Resolution)}>
+                <option value="1080p">1080p Full HD</option>
+                <option value="720p">720p HD</option>
               </select>
             </Field>
             <label className="flex items-center justify-between self-end rounded-lg border border-slate-200 px-3 py-2.5">

@@ -5,6 +5,7 @@ import { Suspense, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { ChatPanel, type ChatTurn } from "@/components/ChatPanel";
 import { useApi } from "@/hooks/useApi";
+import { useLiveAvatar } from "@/hooks/useLiveAvatar";
 import { api } from "@/lib/client";
 import { Button, inputClass } from "@/components/ui";
 
@@ -15,6 +16,7 @@ interface PublicAgent {
   avatar: { id: string; name: string; imageUrl: string };
   voiceLanguage?: string;
   collectEmail: boolean;
+  liveVideo: boolean;
   brand: { name: string; logoUrl?: string; primaryColor: string; accentColor?: string } | null;
 }
 
@@ -59,6 +61,13 @@ function TalkInner() {
     }
   }
   const showLead = !!agent?.collectEmail && turns >= 1 && leadState !== "dismissed";
+  const live = useLiveAvatar({
+    enabled: !!agent?.liveVideo,
+    openPath: `/api/talk/${id}/live`,
+    openBody: {},
+    sessionPath: (sid) => `/api/talk/${id}/live/${sid}`,
+    key: id,
+  });
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
@@ -100,6 +109,7 @@ function TalkInner() {
               imageUrl={agent.avatar.imageUrl}
               voiceLanguage={agent.voiceLanguage}
               ask={ask}
+              live={live}
               dark
               compact={embed}
               emptyHint={`Say hello to ${agent.avatar.name}.`}

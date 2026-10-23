@@ -17,6 +17,8 @@ export const config = {
   supabaseServiceRoleKey: env("SUPABASE_SERVICE_ROLE_KEY"),
   appUrl: env("APP_URL") ?? env("VERCEL_URL")?.replace(/^(?!https?:\/\/)/, "https://") ?? "http://localhost:3000",
   webhookSecret: env("WEBHOOK_SECRET"),
+  /** Live video for the interactive avatar (HeyGen Streaming) when the HeyGen key is set. */
+  streamingEnabled: (env("STREAMING_AVATAR") ?? "true").toLowerCase() !== "false",
   /** "resend" sends workspace invites by email; anything else only produces links. */
   emailProvider: (env("EMAIL_PROVIDER") ?? "mock").toLowerCase(),
   resendApiKey: env("RESEND_API_KEY"),

@@ -65,3 +65,13 @@ export interface TranslateProvider {
   supportedLanguages(): string[];
   parseWebhook?(body: unknown): { providerJobId: string; update: Pick<Translation, "status" | "videoUrl" | "error"> } | null;
 }
+
+/** Live video for the interactive avatar. The mock reports "unavailable" and pages fall back to the portrait. */
+export interface StreamingProvider {
+  readonly name: string;
+  readonly available: boolean;
+  /** Opens a session; the browser joins the room with the returned URL and token. */
+  createSession(input: { avatarId: string; voiceId?: string }): Promise<{ providerSessionId: string; url: string; accessToken: string }>;
+  speak(providerSessionId: string, text: string): Promise<void>;
+  stop(providerSessionId: string): Promise<void>;
+}

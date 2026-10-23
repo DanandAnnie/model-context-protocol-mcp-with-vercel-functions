@@ -48,6 +48,8 @@ import type { Video } from "../types";
 import { MockEmailProvider, inviteEmail, setEmailProvider } from "../providers/email";
 import { forgetMemo, memo } from "../cache";
 import { extractReadableText, fetchPageText } from "../webpage";
+import { MAX_SESSIONS_PER_SCOPE, SESSION_TTL_MS, closeLiveSession, openLiveSession, resetLiveSessions, setStreamingProvider, speakLive } from "../streaming";
+import type { StreamingProvider } from "../providers/types";
 import { generateScript } from "../services";
 import { MockBillingProvider, applyStripeEvent, getPlan, renderLimitFor, setBillingProvider, setPlan, verifyStripeSignature } from "../billing";
 import { config } from "../config";
@@ -932,5 +934,55 @@ describe("script from a web page", () => {
     assert.match(script, /quiet street near the park/, "demo writer reads from the page");
     assert.throws(() => scriptSchema.parse({ topic: "" }), /topic or a page URL/);
     assert.ok(scriptSchema.parse({ url: "https://example.com/x" }));
+  });
+});
+
+describe("live avatar sessions", () => {
+  it("reports unavailable in demo mode and scopes, caps, and expires sessions with a live provider", async () => {
+    resetLiveSessions();
+    setStreamingProvider(undefined);
+    assert.equal(await openLiveSession({ avatarId: "stock_1", scope: "agent_1", clientKey: "c1" }), null, "mock provider: no live video");
+
+    const spoken: string[] = [];
+    const stopped: string[] = [];
+    let n = 0;
+    const fake: StreamingProvider = {
+      name: "fake",
+      available: true,
+      async createSession() {
+        n += 1;
+        return { providerSessionId: `p${n}`, url: "wss://live.example", accessToken: `t${n}` };
+      },
+      async speak(id, text) {
+        spoken.push(`${id}:${text}`);
+      },
+      async stop(id) {
+        stopped.push(id);
+      },
+    };
+    setStreamingProvider(fake);
+    try {
+      const t0 = 1_000_000;
+      const s = await openLiveSession({ avatarId: "stock_1", scope: "agent_1", clientKey: "c1" }, t0);
+      assert.ok(s && s.sessionId.startsWith("live_") && s.url === "wss://live.example");
+      await speakLive(s!.sessionId, "agent_1", "Hello", t0 + 1000);
+      assert.deepEqual(spoken, ["p1:Hello"]);
+      await assert.rejects(speakLive(s!.sessionId, "agent_2", "Hi", t0 + 1000), /not found/, "another presenter cannot drive the session");
+      await assert.rejects(speakLive("live_nope", "agent_1", "Hi", t0 + 1000), /not found/);
+
+      for (let i = 1; i < MAX_SESSIONS_PER_SCOPE; i++) await openLiveSession({ avatarId: "stock_1", scope: "agent_1", clientKey: "c1" }, t0);
+      await assert.rejects(openLiveSession({ avatarId: "stock_1", scope: "agent_1", clientKey: "c1" }, t0), /Too many live sessions/);
+      assert.ok(await openLiveSession({ avatarId: "stock_1", scope: "agent_1", clientKey: "c2" }, t0), "another client is not affected");
+
+      await closeLiveSession(s!.sessionId, "agent_1", t0 + 2000);
+      assert.deepEqual(stopped, ["p1"]);
+      await assert.rejects(speakLive(s!.sessionId, "agent_1", "Hi", t0 + 2000), /not found/, "closed sessions are gone");
+
+      const late = await openLiveSession({ avatarId: "stock_1", scope: "agent_9", clientKey: "c9" }, t0);
+      await assert.rejects(speakLive(late!.sessionId, "agent_9", "Hi", t0 + SESSION_TTL_MS + 1), /not found/, "idle sessions expire");
+    } finally {
+      setStreamingProvider(undefined);
+      resetLiveSessions();
+    }
   });
 });

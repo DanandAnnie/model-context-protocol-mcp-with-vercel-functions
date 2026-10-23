@@ -416,6 +416,24 @@ test("shared presenter: save from the interactive page, talk publicly, turn off"
   await expect(page.getByTestId("agent-list")).not.toContainText(`Dana ${tag}`);
 });
 
+test("live video reports unavailable in demo mode and the portrait path still works", async ({ page }) => {
+  const open = await page.request.post("/api/live", { data: { avatarId: "stock_1" } });
+  expect(open.status()).toBe(200);
+  expect((await open.json()).available).toBe(false);
+  expect((await page.request.post("/api/live/live_nope", { data: { text: "hi" } })).status()).toBe(404);
+  const agent = (await (await page.request.post("/api/agents", { data: { name: "Live agent", avatarId: "stock_1" } })).json()).agent as { id: string };
+  try {
+    const pub = await page.request.post(`/api/talk/${agent.id}/live`);
+    expect((await pub.json()).available).toBe(false);
+    expect((await (await page.request.get(`/api/talk/${agent.id}`)).json()).agent.liveVideo).toBe(false);
+    await page.goto(`/talk/${agent.id}`);
+    await expect(page.getByText("Live", { exact: true })).toHaveCount(0);
+    await expect(page.getByTestId("talk-name")).toContainText("Live agent");
+  } finally {
+    await page.request.delete(`/api/agents/${agent.id}`);
+  }
+});
+
 test("interactive avatar answers a visitor in character", async ({ page }) => {
   await page.goto("/interactive");
   await page.getByLabel("Your message").fill("Hi there");

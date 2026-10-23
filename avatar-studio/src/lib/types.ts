@@ -272,6 +272,8 @@ export interface ProviderStatus {
   renderLimitPerMonth: number | null;
   /** Billing backend: "stripe" or "mock" (instant upgrades for demos). */
   billing: string;
+  /** Live video for the interactive avatar: "heygen" or "mock" (portrait only). */
+  streaming: string;
   /** Present when the request carried an owner (signed in, or open/password mode). */
   usage?: { rendersThisMonth: number; plan: PlanId; proRendersPerMonth: number | null; proPriceLabel: string; subscriptionStatus?: string; endsAt?: string };
 }

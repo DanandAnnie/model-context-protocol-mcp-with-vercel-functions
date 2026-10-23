@@ -22,6 +22,7 @@ export { NotFoundError, ValidationError, UnauthorizedError, LimitError } from ".
 import { config } from "./config";
 import { fillTemplate, parseCsv, placeholdersIn } from "./csv";
 import { fetchPageText } from "./webpage";
+import { getStreamingProvider } from "./streaming";
 
 /** Pass as the owner to skip the ownership check (public share pages). */
 export const PUBLIC_ACCESS = null;
@@ -301,6 +302,7 @@ export async function publicAgent(id: string) {
     avatar: { id: agent.avatarId, name: agent.avatarName, imageUrl: agent.avatarImageUrl },
     voiceLanguage: agent.voiceLanguage,
     collectEmail: agent.collectEmail ?? false,
+    liveVideo: getStreamingProvider().available,
     brand: brand ? { name: brand.name, logoUrl: brand.logoUrl, primaryColor: brand.primaryColor, accentColor: brand.accentColor } : null,
   };
 }

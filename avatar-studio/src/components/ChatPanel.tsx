@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { MessageSquare, Send, Volume2, VolumeX } from "lucide-react";
 import { Button, ErrorBanner, inputClass } from "@/components/ui";
 import { portraitSvg } from "@/lib/stock";
+import type { LiveStatus } from "@/hooks/useLiveAvatar";
 
 export interface ChatTurn {
   role: "user" | "assistant";
@@ -23,6 +24,7 @@ export function ChatPanel({
   compact = false,
   aside,
   onReset,
+  live,
 }: {
   name: string;
   imageUrl: string;
@@ -36,6 +38,8 @@ export function ChatPanel({
   aside?: React.ReactNode;
   /** Called when the visitor starts over, so the host can drop its transcript id. */
   onReset?: () => void;
+  /** Live video session; when connected, replies are spoken by the stream instead of the browser. */
+  live?: { status: LiveStatus; videoRef: React.RefObject<HTMLVideoElement | null>; speak: (text: string) => Promise<boolean> };
 }) {
   const [messages, setMessages] = useState<ChatTurn[]>([]);
   const [draft, setDraft] = useState("");
@@ -74,7 +78,7 @@ export function ChatPanel({
     try {
       const reply = await ask(next.slice(-20));
       setMessages([...next, { role: "assistant", content: reply }]);
-      speak(reply);
+      if (!(live && (await live.speak(reply)))) speak(reply);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "The presenter could not answer");
       setMessages(messages);
@@ -114,8 +118,21 @@ export function ChatPanel({
               }
             }}
           />
+          {live && (
+            <video
+              ref={live.videoRef}
+              autoPlay
+              playsInline
+              aria-label={`${name}, live video`}
+              className={`absolute inset-0 h-full w-full bg-slate-950 object-cover transition-opacity ${live.status === "live" ? "opacity-100" : "pointer-events-none opacity-0"}`}
+            />
+          )}
           <div className={`pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between px-3 py-2 text-xs text-white ${speaking ? "bg-gradient-to-t from-brand-700/80" : "bg-gradient-to-t from-slate-900/70"}`}>
-            <span className="font-medium">{name}</span>
+            <span className="font-medium">
+              {name}
+              {live?.status === "live" && <span className="ml-2 rounded bg-rose-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide">Live</span>}
+              {live?.status === "connecting" && <span className="ml-2 text-slate-300">connecting…</span>}
+            </span>
             <span className="inline-flex items-center gap-1.5" aria-live="polite">
               <span className={`h-2 w-2 rounded-full ${speaking ? "animate-pulse bg-emerald-400" : busy ? "animate-pulse bg-amber-300" : "bg-slate-300"}`} />
               {speaking ? "Speaking" : busy ? "Thinking" : "Listening"}

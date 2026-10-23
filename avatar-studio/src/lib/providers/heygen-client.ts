@@ -75,4 +75,31 @@ export class HeyGenClient {
   translationStatus(id: string) {
     return this.request<{ status: string; url?: string; message?: string }>(`${V2}/video_translate/${encodeURIComponent(id)}`);
   }
+
+  // ---- Streaming (Interactive Avatar) ----
+  // Shapes follow the v1 streaming API (streaming.new / start / task / stop); not exercised in tests.
+
+  /** Opens a LiveKit-backed streaming session for an avatar; returns the room URL and the visitor token. */
+  streamingNew(avatarId: string, voiceId?: string, quality: "low" | "medium" | "high" = "medium") {
+    return this.request<{ session_id: string; url: string; access_token: string }>(`${V1}/streaming.new`, {
+      method: "POST",
+      body: JSON.stringify({ version: "v2", quality, avatar_id: avatarId, ...(voiceId ? { voice: { voice_id: voiceId } } : {}) }),
+    });
+  }
+
+  streamingStart(sessionId: string) {
+    return this.request<unknown>(`${V1}/streaming.start`, { method: "POST", body: JSON.stringify({ session_id: sessionId }) });
+  }
+
+  /** Makes the avatar say the text verbatim (task_type "repeat"). */
+  streamingSpeak(sessionId: string, text: string) {
+    return this.request<{ task_id?: string; duration_ms?: number }>(`${V1}/streaming.task`, {
+      method: "POST",
+      body: JSON.stringify({ session_id: sessionId, text, task_type: "repeat" }),
+    });
+  }
+
+  streamingStop(sessionId: string) {
+    return this.request<unknown>(`${V1}/streaming.stop`, { method: "POST", body: JSON.stringify({ session_id: sessionId }) });
+  }
 }

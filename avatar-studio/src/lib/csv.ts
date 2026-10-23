@@ -59,3 +59,19 @@ export function fillTemplate(template: string, row: Record<string, string>): str
 export function placeholdersIn(template: string): string[] {
   return Array.from(new Set(Array.from(template.matchAll(/\{([^{}]+)\}/g), (m) => m[1].trim())));
 }
+
+/**
+ * Serialise rows for a download. Every cell is quoted; a cell that a spreadsheet would read as a
+ * formula (starting with =, +, -, @, tab, or CR) gets a leading apostrophe so visitor-typed text
+ * cannot run when the file is opened.
+ */
+export function toCsv(columns: string[], rows: Array<Record<string, string | number | undefined | null>>): string {
+  const cell = (value: string | number | undefined | null): string => {
+    let text = value == null ? "" : String(value);
+    if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+    return `"${text.replace(/"/g, '""')}"`;
+  };
+  const lines = [columns.map(cell).join(",")];
+  for (const row of rows) lines.push(columns.map((c) => cell(row[c])).join(","));
+  return `${lines.join("\r\n")}\r\n`;
+}

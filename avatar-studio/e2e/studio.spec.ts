@@ -789,6 +789,14 @@ test("shared presenter: save from the interactive page, talk publicly, turn off"
   await expect(page.getByTestId("transcripts")).toContainText("Any open houses?");
   await expect(page.getByTestId("transcripts")).toContainText(`sam-${tag}@example.com`);
   await expect(page.getByTestId("transcripts").locator("summary")).toHaveCount(2);
+  // The same conversations download as a lead list.
+  await expect(page.getByTestId("transcripts").getByRole("link", { name: "Download CSV" })).toBeVisible();
+  const csvRes = await page.request.get(`/api/agents/${id}/conversations?format=csv`);
+  expect(csvRes.headers()["content-type"]).toContain("text/csv");
+  const csv = await csvRes.text();
+  expect(csv.split("\r\n")[0]).toBe('"started","last_message","email","name","messages","first_question","last_reply"');
+  expect(csv).toContain(`sam-${tag}@example.com`);
+  expect(csv).toContain('"Hi there"');
   await page.getByRole("button", { name: `Turn off link for Dana ${tag}` }).click();
   await expect(page.getByTestId("agent-list")).toContainText("link off");
   expect((await visitor.get(`/api/talk/${id}`)).status()).toBe(404);

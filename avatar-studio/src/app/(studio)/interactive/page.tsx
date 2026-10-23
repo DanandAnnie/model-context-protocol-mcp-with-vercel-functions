@@ -256,6 +256,11 @@ export default function InteractivePage() {
                 <h4 className="text-sm font-semibold text-slate-900">Conversations with {transcriptsFor.name}</h4>
                 <div className="flex gap-2">
                   {transcripts && transcripts.length > 0 && (
+                    <a href={`/api/agents/${transcriptsFor.id}/conversations?format=csv`} download className="text-xs text-brand-700 hover:underline" title="Every conversation with its visitor's email, first question, and last reply">
+                      Download CSV
+                    </a>
+                  )}
+                  {transcripts && transcripts.length > 0 && (
                     <button type="button" onClick={() => clearTranscripts(transcriptsFor)} className="text-xs text-slate-500 hover:text-rose-700">
                       Delete all
                     </button>

@@ -384,6 +384,19 @@ export interface Conversation {
   updatedAt: string;
 }
 
+/** A note left on a video by someone with access to it (the owner, or a workspace member). */
+export interface VideoComment {
+  id: string;
+  /** The video's owner (person or workspace), so comments list with the owner index. */
+  ownerId: string;
+  videoId: string;
+  /** The person who wrote it; their email when the account mode knows one. */
+  authorId: string;
+  authorEmail?: string;
+  text: string;
+  createdAt: string;
+}
+
 export type PlanId = "free" | "pro";
 
 /** Billing plan of an owner (person or workspace). Absent means free. */

@@ -20,6 +20,7 @@ import { bumpViewsByDay } from "../insights";
 import { backgroundSchema, captionStyleSchema, pitchSchema, sceneLayoutSchema } from "./schemas";
 import { getBrandKit } from "./brand";
 import { spokenCopy } from "../pronounce";
+import { clearComments } from "./comments";
 export { backgroundSchema, captionStyleSchema, pitchSchema, sceneLayoutSchema };
 
 export const videoRequestSchema = z
@@ -218,11 +219,12 @@ function purgeDue(video: Video, now: number): boolean {
 }
 
 /** Removes a video and its side records for good. */
-async function purgeVideo(id: string): Promise<void> {
+async function purgeVideo(id: string, ownerId: string): Promise<void> {
   // Side records first and the video row last: a failure part-way leaves the video listed, so the
   // next listing retries the whole purge (every remove is idempotent) instead of orphaning a record.
   await clearShareLock(id);
   await clearCover(id);
+  await clearComments(id, ownerId);
   await getStore().remove("video", id);
 }
 
@@ -244,7 +246,7 @@ const purging = new Map<string, Promise<void>>();
 function purgeDueVideos(ownerId: string, due: Video[]): Promise<void> {
   const running = purging.get(ownerId);
   if (running) return running;
-  const run = Promise.allSettled(due.slice(0, PURGE_PER_LIST).map((v) => purgeVideo(v.id)))
+  const run = Promise.allSettled(due.slice(0, PURGE_PER_LIST).map((v) => purgeVideo(v.id, ownerId)))
     .then((results) => {
       for (const r of results) if (r.status === "rejected") console.error(`purge failed for a trashed video of ${ownerId}:`, r.reason);
     })
@@ -583,7 +585,7 @@ export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId
     }
     if (input.action === "delete") await deleteVideo(id, ownerId);
     else if (input.action === "restore") await restoreVideo(id, ownerId);
-    else if (input.action === "purge") await purgeVideo(id);
+    else if (input.action === "purge") await purgeVideo(id, ownerId);
     else if (input.action === "move") await updateVideo(id, { folder: input.folder }, ownerId);
     else await updateVideo(id, { shareDisabled: input.shareDisabled }, ownerId);
     done += 1;
@@ -655,7 +657,7 @@ export async function deleteVideo(id: string, ownerId: string = LOCAL_OWNER, per
   const video = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
   if (permanent) {
     if (!video.deletedAt) throw new ConflictError("Move the video to the trash first; deleting for good is offered from there");
-    return purgeVideo(id);
+    return purgeVideo(id, ownerId);
   }
   if (video.deletedAt) return;
   await putKeepingCounters({ ...video, deletedAt: nowIso(), updatedAt: nowIso() });

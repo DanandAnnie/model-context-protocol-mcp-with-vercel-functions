@@ -5,9 +5,10 @@ import { useRef, useState } from "react";
 import { ArchiveRestore, ArrowLeft, Captions, Check, Clock, Code2, Copy, Download, Eye, FolderOpen, Languages, LayoutTemplate, Link2, Lock, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge, inputClass } from "@/components/ui";
 import { ViewSparkline } from "@/components/ViewSparkline";
+import { VideoComments } from "@/components/VideoComments";
 import { useApi } from "@/hooks/useApi";
 import { ApiError, api, formatDate, formatSeconds, isDarkHex, posterUrl, purgeAt, shareExpired } from "@/lib/client";
-import { TRASH_RETENTION_DAYS, type Video } from "@/lib/types";
+import { TRASH_RETENTION_DAYS, type Video, type VideoComment } from "@/lib/types";
 
 export default function VideoDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -804,6 +805,7 @@ export default function VideoDetailPage() {
                   <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{video.script}</p>
                 )}
               </Card>
+              <VideoComments videoId={video.id} />
             </div>
           </div>
         </>

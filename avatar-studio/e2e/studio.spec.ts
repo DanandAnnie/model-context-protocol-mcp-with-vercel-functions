@@ -406,6 +406,17 @@ test("share page offers a download only when the owner allows it", async ({ page
   await page.goto(`/share/${v.id}`);
   await expect(page.getByRole("link", { name: "Download video" })).toBeVisible();
 
+  // Team comments live on the video page only; the author can remove their own.
+  await page.goto(`/videos/${v.id}`);
+  await page.getByLabel("New comment").fill("Tighten the intro.");
+  await page.getByRole("button", { name: "Post comment" }).click();
+  await expect(page.getByTestId("comment-list")).toContainText("Tighten the intro.");
+  await expect(page.getByTestId("comments")).toContainText("Comments · 1");
+  expect(await (await page.request.get(`/share/${v.id}`)).text()).not.toContain("Tighten the intro.");
+  expect((await page.request.post("/api/videos/vid_nope/comments", { data: { text: "x" } })).status()).toBe(404);
+  expect((await page.request.post(`/api/videos/${v.id}/comments`, { data: { text: "" } })).status()).toBe(400);
+  await page.getByRole("button", { name: "Delete comment" }).click();
+  await expect(page.getByTestId("comment-list")).toHaveCount(0);
   // A description saved from the video page shows under the share-page player and in the link preview.
   await page.goto(`/videos/${v.id}`);
   await expect(page.getByRole("button", { name: "Save description" })).toBeDisabled();

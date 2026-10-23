@@ -669,6 +669,38 @@ describe("share call to action", () => {
   });
 });
 
+describe("video comments", () => {
+  it("lets the owner's team leave notes the share page never shows, and deletes them with the video", async () => {
+    const { addComment, listComments, deleteComment, commentSchema, MAX_COMMENTS_PER_VIDEO } = await import("../services/comments");
+    const { exportOwnerData } = await import("../services/account");
+    const v = await createVideo(videoRequestSchema.parse({ title: "Notes", script: "Hi.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }), "ws_team");
+    const first = await addComment(v.id, commentSchema.parse({ text: "  Tighten the intro.  " }), "ws_team", { id: "u-ann", email: "ann@example.com" });
+    assert.equal(first.text, "Tighten the intro.");
+    assert.equal(first.authorEmail, "ann@example.com");
+    const second = await addComment(v.id, { text: "Agreed." }, "ws_team", { id: "u-bob" });
+    assert.deepEqual((await listComments(v.id, "ws_team")).map((c) => c.id), [first.id, second.id], "oldest first");
+    await assert.rejects(listComments(v.id, "someone-else"), /not found/, "another owner cannot read them");
+    await assert.rejects(addComment("vid_missing", { text: "x" }, "ws_team"), /not found/);
+    await assert.rejects(deleteComment(v.id, first.id, "ws_team", { id: "u-bob" }), /Only the author/);
+    await deleteComment(v.id, first.id, "ws_team", { id: "u-ann" });
+    assert.deepEqual((await listComments(v.id, "ws_team")).map((c) => c.id), [second.id]);
+    await assert.rejects(deleteComment(v.id, first.id, "ws_team", { id: "u-ann" }), /Comment not found/);
+    assert.throws(() => commentSchema.parse({ text: "   " }));
+    assert.throws(() => commentSchema.parse({ text: "x".repeat(1001) }));
+    // The export carries them; deleting the video for good removes them.
+    const exported = await exportOwnerData("ws_team");
+    assert.equal(exported.comment.length, 1);
+    await deleteVideo(v.id, "ws_team");
+    await deleteVideo(v.id, "ws_team", true);
+    const store = (await import("../store")).getStore();
+    assert.equal((await store.list("comment", "ws_team")).length, 0, "purging the video removes its comments");
+    // The cap holds per video.
+    const w = await createVideo(videoRequestSchema.parse({ title: "Busy", script: "Hi.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }), "ws_team");
+    for (let i = 0; i < MAX_COMMENTS_PER_VIDEO; i++) await addComment(w.id, { text: `n${i}` }, "ws_team");
+    await assert.rejects(addComment(w.id, { text: "one more" }, "ws_team"), /At most/);
+  });
+});
+
 describe("saved templates", () => {
   it("saves a video as a template and reopens it", async () => {
     const { createTemplate, deleteTemplate, getTemplate, listTemplates, templateInputSchema, MAX_TEMPLATES } = await import("../services/templates");

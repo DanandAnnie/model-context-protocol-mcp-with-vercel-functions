@@ -91,7 +91,7 @@ One row per video, newest first: `id`, `title`, `status`, `created`, `folder`, `
 
 ### `GET /api/templates`, `POST /api/templates`, `GET /api/templates/:id`, `DELETE /api/templates/:id` — saved templates
 
-A template is a starting point for the editor: scenes (with any per-scene presenter), avatar, voice, aspect, quality, captions, and speed, up to 50 per account. Create one from a video you own with `{ "fromVideoId", "title"?, "description"? }` (the title defaults to the video's), or spell it out with `{ "title", "scenes", "avatarId"?, "voiceId"?, "aspect"?, "resolution"?, "captions"?, "captionStyle"?, "speed"? }` (scenes may carry a `layout` like a video's). `GET /api/templates` returns `{ "templates" }`, newest first; the editor opens one at `/create?template=<id>`.
+A template is a starting point for the editor: scenes (with any per-scene presenter), avatar, voice, aspect, quality, captions, and speed, up to 50 per account. Create one from a video you own with `{ "fromVideoId", "title"?, "description"? }` (the title defaults to the video's), or spell it out with `{ "title", "scenes", "avatarId"?, "voiceId"?, "aspect"?, "resolution"?, "captions"?, "captionStyle"?, "speed"?, "pitch"? }` (scenes may carry a `layout` like a video's). `GET /api/templates` returns `{ "templates" }`, newest first; the editor opens one at `/create?template=<id>`.
 
 ### `GET /api/videos/:id` — fetch; refreshes the status from the provider while rendering
 ### `PATCH /api/videos/:id` — `{ "title"?: string, "description"?: string, "folder"?: string, "shareDownload"?: boolean, "shareDisabled"?: boolean, "shareExpiresAt"?: string | null, "cover"?: string | null, "sharePassword"?: string | null, "shareCta"?: { "label", "url" } | null }` (`description`, up to 500 characters, is shown under the share-page player and becomes the link preview's description in place of the script excerpt, an empty string removes it, and a retried render keeps it; empty `folder` means unfiled; `shareDownload` shows a download button on the public share page; `shareDisabled` takes the share link offline: the share page, its captions, and the view, watch, and click beacons answer `404` to the public while the owner keeps full access; `shareExpiresAt` (an ISO 8601 time with a UTC offset, e.g. `2030-06-01T10:00:00+02:00` or `...Z`, in the future, or `null` to clear) does the same automatically once that time passes, stored as a UTC instant; `cover` (a `data:image/...` URL, PNG/JPEG/WebP/GIF, 2 MB decoded, or `null` to remove) sets a custom poster kept in its own record and served by `GET /api/videos/:id/cover` (the video carries `cover: { updatedAt, mimeType, bytes }`; `updatedAt` versions the URL); `sharePassword` (4–64 characters, or `null` to remove) protects the share link: visitors must enter it before the page plays, captions and beacons need the resulting cookie, and the video carries `shareLocked: true` while the password itself is kept only as a salted hash in its own record; `shareCta` puts a call-to-action button under the share-page player, label up to 40 characters and an http(s) link, `null` removes it)
@@ -102,6 +102,9 @@ A template is a starting point for the editor: scenes (with any per-scene presen
 ### `POST /api/videos/:id/share` — `{ "to": ["jane@example.com", ...], "message"?: string }`
 
 Emails the share link of a **completed** video to up to 10 recipients (de-duplicated; `message` is an optional plain-text note of up to 500 characters shown above the link; a password-protected link tells the recipient a password is needed without including it). `404` for a video that is not yours, `409` while the render is not finished or the share link is off or expired, `429` beyond 60 recipients per sender per hour (600 per instance); a refused batch takes nothing from the allowance. The link uses `APP_URL` when it is set, otherwise the request's origin. Returns `{ "sent": [...], "failed": [{ "to", "error" }], "delivers" }`; `delivers` is `false` with the demo email provider, which only records the message. The status is `502` when no recipient could be sent to.
+
+### `GET | POST /api/videos/:id/comments`, `DELETE /api/videos/:id/comments/:commentId`
+Review notes on a video for its owner and workspace members; viewers of the share page never see them. `GET` → `{ "comments": [{ "id", "videoId", "authorId", "authorEmail"?, "text", "createdAt" }] }` oldest first; `POST { "text" }` (up to 1000 characters, 200 comments per video) → `201 { "comment" }`, credited to the signed-in person (a script with an API key is credited to the key's owner); `DELETE` removes the caller's own comment (`403` for someone else's, `404` for a comment on another video). Comments go with the video when it is deleted for good and are part of the account export.
 
 ### `POST /api/videos/:id/retry`
 
@@ -129,7 +132,7 @@ The beacons answer `{ "views" | "watch" | "clicks", "counted" }` and never fail 
 }
 ```
 
-`background`, `captions`, `captionStyle`, `speed`, and `resolution` take the same values and defaults as a single video. `POST` returns `{ "batchId", "videos", "skipped", "failed" }`. Rows beyond the monthly allowance are skipped; rows the provider rejected are reported in `failed`. Up to 100 rows per batch.
+`background`, `captions`, `captionStyle`, `speed`, `pitch`, and `resolution` take the same values and defaults as a single video. `POST` returns `{ "batchId", "videos", "skipped", "failed" }`. Rows beyond the monthly allowance are skipped; rows the provider rejected are reported in `failed`. Up to 100 rows per batch.
 
 ## Scripts
 

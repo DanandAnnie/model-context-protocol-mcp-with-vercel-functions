@@ -204,6 +204,35 @@ export default function VideoDetailPage() {
   }
 
   // Call to action shown under the share-page player.
+  // Send by email: recipients separated by commas, spaces, or new lines, plus an optional note.
+  const [mailTo, setMailTo] = useState("");
+  const [mailMsg, setMailMsg] = useState("");
+  const [mailBusy, setMailBusy] = useState(false);
+  const [mailStatus, setMailStatus] = useState<{ ok: boolean; text: string } | null>(null);
+  const mailRecipients = mailTo.split(/[\s,;]+/).filter(Boolean);
+  async function sendByEmail() {
+    if (!video || mailBusy || mailRecipients.length === 0) return;
+    setMailBusy(true);
+    setMailStatus(null);
+    try {
+      const res = await api<{ sent: string[]; failed: { to: string; error: string }[]; delivers: boolean }>(`/api/videos/${video.id}/share`, {
+        method: "POST",
+        body: JSON.stringify({ to: mailRecipients, message: mailMsg.trim() || undefined }),
+      });
+      const n = res.sent.length;
+      const note = res.delivers ? "" : " (demo: no email provider is configured, so nothing was delivered)";
+      const failed = res.failed.length ? ` ${res.failed.length} could not be sent: ${res.failed.map((f) => f.to).join(", ")}.` : "";
+      setMailStatus({ ok: res.failed.length === 0, text: `Sent to ${n} ${n === 1 ? "recipient" : "recipients"}${note}.${failed}` });
+      if (res.failed.length === 0) {
+        setMailTo("");
+        setMailMsg("");
+      }
+    } catch (e) {
+      setMailStatus({ ok: false, text: e instanceof Error ? e.message : "Could not send" });
+    } finally {
+      setMailBusy(false);
+    }
+  }
   const [ctaLabel, setCtaLabel] = useState<string | null>(null);
   const [ctaUrl, setCtaUrl] = useState<string | null>(null);
   const [ctaErr, setCtaErr] = useState<string | null>(null);
@@ -565,6 +594,42 @@ export default function VideoDetailPage() {
                   {coverErr && <span className="text-xs text-rose-600">{coverErr}</span>}
                 </div>
               </Card>
+              {video.status === "completed" && (
+                <Card className="p-4" data-testid="share-email-card">
+                  <h3 className="text-sm font-semibold text-slate-900">Send by email</h3>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Emails the share link to up to 10 people{video.shareLocked ? "; they will be told a password is needed (send it separately)" : ""}.
+                  </p>
+                  <form
+                    className="mt-3 space-y-2"
+                    noValidate
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void sendByEmail();
+                    }}
+                  >
+                    <textarea
+                      className={`${inputClass} min-h-[60px]`}
+                      aria-label="Recipients"
+                      placeholder="jane@example.com, sam@example.com"
+                      value={mailTo}
+                      onChange={(e) => setMailTo(e.target.value)}
+                    />
+                    <textarea className={`${inputClass} min-h-[60px]`} aria-label="Message" placeholder="A note for the recipients (optional)" maxLength={500} value={mailMsg} onChange={(e) => setMailMsg(e.target.value)} />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button type="submit" className="px-3 py-1.5 text-xs" loading={mailBusy} disabled={mailRecipients.length === 0 || !shareLive || shareExpired(video)}>
+                        Send link
+                      </Button>
+                      {(!shareLive || shareExpired(video)) && <span className="text-xs text-slate-500">Turn the share link on first.</span>}
+                      {mailStatus && (
+                        <span className={`text-xs ${mailStatus.ok ? "text-emerald-700" : "text-rose-600"}`} data-testid="share-email-status" role="status">
+                          {mailStatus.text}
+                        </span>
+                      )}
+                    </div>
+                  </form>
+                </Card>
+              )}
               <Card className="p-4" data-testid="share-cta-card">
                 <h3 className="text-sm font-semibold text-slate-900">Call to action</h3>
                 <p className="mt-1 text-xs text-slate-500">A button under the player on the share page, in your brand colour.</p>

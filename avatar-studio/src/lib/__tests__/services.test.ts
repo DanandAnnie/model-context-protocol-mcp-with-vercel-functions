@@ -974,6 +974,75 @@ describe("folders and share views", () => {
   });
 });
 
+describe("send by email", () => {
+  it("emails the share link of a live, finished video to de-duplicated recipients", async () => {
+    const { shareEmailSchema, shareVideoByEmail, SHARE_EMAILS_PER_HOUR } = await import("../share-email");
+    const { updateVideo, videoPatchSchema } = await import("../services/videos");
+    const mock = new MockEmailProvider();
+    setEmailProvider(mock);
+    try {
+      const v = await createVideo(videoRequestSchema.parse({ title: "Open <house>", script: "Hi.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }));
+      const input = shareEmailSchema.parse({ to: [" Jane@Example.com ", "sam@example.com", "jane@example.com"], message: "  Have a look <3 " });
+      assert.deepEqual(input.to, ["jane@example.com", "sam@example.com", "jane@example.com"], "trimmed and lower-cased");
+      assert.throws(() => shareEmailSchema.parse({ to: [] }), /at least one/);
+      assert.throws(() => shareEmailSchema.parse({ to: ["not-an-email"] }), /email address/);
+      assert.throws(() => shareEmailSchema.parse({ to: Array.from({ length: 11 }, (_, i) => `p${i}@example.com`) }), /At most 10/);
+      const ctx = { origin: "https://studio.example.com/", senderEmail: "alice@example.com", siteName: "Acme" };
+      await assert.rejects(shareVideoByEmail(v.id, input, LOCAL_OWNER, ctx), /finished/, "a render in progress has nothing to share yet");
+      const fresh = await getVideo(v.id, undefined, false);
+      globalThis.__avatarStudioStore!.put("video", { ...fresh, status: "completed", durationSec: 12.4 });
+      await updateVideo(v.id, videoPatchSchema.parse({ shareDisabled: true }));
+      await assert.rejects(shareVideoByEmail(v.id, input, LOCAL_OWNER, ctx), /off or expired/);
+      await updateVideo(v.id, videoPatchSchema.parse({ shareDisabled: false, sharePassword: "letmein1" }));
+      const result = await shareVideoByEmail(v.id, input, LOCAL_OWNER, ctx);
+      assert.deepEqual(result, { sent: ["jane@example.com", "sam@example.com"], failed: [], delivers: false });
+      assert.equal(mock.sent.length, 2);
+      const msg = mock.sent[0];
+      assert.equal(msg.subject, 'alice@example.com shared a video with you: "Open <house>"');
+      assert.match(msg.text, /https:\/\/studio\.example\.com\/share\/vid_/);
+      assert.match(msg.text, /\(12s\)/);
+      assert.match(msg.text, /Have a look <3/);
+      assert.match(msg.text, /password protected/);
+      assert.doesNotMatch(msg.text, /letmein1/, "the password never travels in the email");
+      assert.match(msg.html, /Open &lt;house&gt;/, "html escapes the title");
+      assert.match(msg.html, /Have a look &lt;3/, "html escapes the note");
+      assert.match(msg.html, /href="https:\/\/studio\.example\.com\/share\/vid_/);
+      await assert.rejects(shareVideoByEmail("vid_missing", input, LOCAL_OWNER, ctx), /not found/);
+      await assert.rejects(shareVideoByEmail(v.id, input, "someone-else", ctx), /not found/, "only the owner can send");
+      // The hourly allowance counts recipients.
+      const many = { to: Array.from({ length: 10 }, (_, i) => `r${i}@example.com`) };
+      for (let i = 0; i < Math.floor((SHARE_EMAILS_PER_HOUR - 2) / 10); i += 1) await shareVideoByEmail(v.id, many, LOCAL_OWNER, ctx);
+      await assert.rejects(shareVideoByEmail(v.id, many, LOCAL_OWNER, ctx), /per hour/);
+    } finally {
+      setEmailProvider(undefined);
+      (await import("../rate-limit")).resetRateLimit(`share-email:${LOCAL_OWNER}`);
+    }
+  });
+
+  it("reports recipients the provider refused without failing the rest", async () => {
+    const { shareVideoByEmail } = await import("../share-email");
+    const flaky = new MockEmailProvider();
+    flaky.send = async (m) => {
+      if (m.to.startsWith("bad@")) throw new Error("mailbox unavailable");
+      flaky.sent.push(m);
+    };
+    setEmailProvider(flaky);
+    try {
+      const v = await createVideo(videoRequestSchema.parse({ title: "Partial", script: "Hi.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }));
+      const fresh = await getVideo(v.id, undefined, false);
+      globalThis.__avatarStudioStore!.put("video", { ...fresh, status: "completed" });
+      const result = await shareVideoByEmail(v.id, { to: ["good@example.com", "bad@example.com"] }, LOCAL_OWNER, { origin: "http://localhost:3000" });
+      assert.deepEqual(result.sent, ["good@example.com"]);
+      assert.deepEqual(result.failed, [{ to: "bad@example.com", error: "mailbox unavailable" }]);
+      assert.equal(flaky.sent.length, 1);
+      assert.doesNotMatch(flaky.sent[0].text, /password/, "no password hint for an open link");
+      assert.match(flaky.sent[0].subject, /^Someone shared/);
+    } finally {
+      setEmailProvider(undefined);
+    }
+  });
+});
+
 describe("cover image", () => {
   const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 

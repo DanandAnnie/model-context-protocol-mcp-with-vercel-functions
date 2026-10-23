@@ -499,6 +499,31 @@ test("starred avatars and voices come first everywhere and persist", async ({ pa
   await expect(firstTile()).not.toContainText("Marcus Hill");
 });
 
+test("a finished video can be sent by email from its page", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Mail ${Date.now().toString(36)}`);
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  // The API validates recipients and refuses an offline link.
+  const bad = await page.request.post(`/api/videos/${v.id}/share`, { data: { to: ["nope"] } });
+  expect(bad.status()).toBe(400);
+  expect(((await bad.json()) as { issues: { message: string }[] }).issues[0].message).toContain("email address");
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareDisabled: true } })).status()).toBe(200);
+  expect((await page.request.post(`/api/videos/${v.id}/share`, { data: { to: ["jane@example.com"] } })).status()).toBe(409);
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareDisabled: false } })).status()).toBe(200);
+  await page.goto(`/videos/${v.id}`);
+  const card = page.getByTestId("share-email-card");
+  await expect(card.getByRole("button", { name: "Send link" })).toBeDisabled();
+  await card.getByLabel("Recipients").fill("jane@example.com, sam@example.com\njane@example.com");
+  await card.getByLabel("Message").fill("Here is the walkthrough.");
+  await card.getByRole("button", { name: "Send link" }).click();
+  await expect(page.getByTestId("share-email-status")).toContainText("Sent to 2 recipients");
+  await expect(page.getByTestId("share-email-status")).toContainText("demo");
+  await expect(card.getByLabel("Recipients")).toHaveValue("");
+  // The link going off disables the form rather than sending a dead link.
+  await page.getByLabel("Share link is live").uncheck();
+  await expect(card.getByText("Turn the share link on first.")).toBeVisible();
+  await expect(card.getByRole("button", { name: "Send link" })).toBeDisabled();
+});
+
 test("a custom cover image replaces the poster everywhere", async ({ page }) => {
   const v = await createVideoViaApi(page, `Cover ${Date.now().toString(36)}`);
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");

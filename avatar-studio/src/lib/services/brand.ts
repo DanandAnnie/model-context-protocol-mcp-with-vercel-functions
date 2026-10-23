@@ -7,7 +7,8 @@ import { LOCAL_OWNER } from "../owner-id";
 import { ValidationError } from "../errors";
 import { getAvatar } from "./avatars";
 import { listVoices } from "./voices";
-import { backgroundSchema } from "./videos";
+import { backgroundSchema } from "./schemas";
+import { MAX_PRONUNCIATIONS } from "../pronounce";
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
@@ -22,6 +23,8 @@ export const brandKitSchema = z.object({
   accentColor: z.string().regex(HEX_COLOR, "Use a 6-digit hex color like #4f46e5").optional(),
   /** Image or video behind new scenes; a colour here is the same as leaving it out and using the primary colour. */
   defaultBackground: backgroundSchema.optional(),
+  /** Up to 50 rules; a word is matched whole and case-insensitively in every script handed to the renderer. */
+  pronunciations: z.array(z.object({ word: z.string().trim().min(1).max(40), sayAs: z.string().trim().min(1).max(80) })).max(MAX_PRONUNCIATIONS).optional(),
   defaultAvatarId: z.string().trim().max(200).optional(),
   defaultVoiceId: z.string().trim().max(200).optional(),
   defaultAspect: z.enum(["16:9", "9:16", "1:1"]).optional(),
@@ -50,6 +53,7 @@ export async function saveBrandKit(input: z.infer<typeof brandKitSchema>, ownerI
     primaryColor: input.primaryColor.toLowerCase(),
     accentColor: input.accentColor?.toLowerCase(),
     ...(input.defaultBackground && input.defaultBackground.type !== "color" ? { defaultBackground: input.defaultBackground } : {}),
+    ...(input.pronunciations?.length ? { pronunciations: input.pronunciations } : {}),
     defaultAvatarId: input.defaultAvatarId || undefined,
     defaultVoiceId: input.defaultVoiceId || undefined,
     defaultAspect: input.defaultAspect,

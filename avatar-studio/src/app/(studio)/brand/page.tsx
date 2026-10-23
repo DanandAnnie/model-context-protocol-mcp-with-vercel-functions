@@ -4,6 +4,7 @@ import { Palette, Trash2, Upload } from "lucide-react";
 import { Button, Card, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, isDarkHex } from "@/lib/client";
+import { formatPronunciations, parsePronunciations } from "@/lib/pronounce";
 import type { AspectRatio, Avatar, BrandKit, Resolution, Voice } from "@/lib/types";
 
 const DEFAULT_PRIMARY = "#4f46e5";
@@ -21,6 +22,7 @@ export default function BrandPage() {
   const [accent, setAccent] = useState("");
   const [bgType, setBgType] = useState<"" | "image" | "video">("");
   const [bgUrl, setBgUrl] = useState("");
+  const [pronunciations, setPronunciations] = useState("");
   const [avatarId, setAvatarId] = useState("");
   const [voiceId, setVoiceId] = useState("");
   const [aspect, setAspect] = useState<AspectRatio | "">("");
@@ -44,6 +46,7 @@ export default function BrandPage() {
     setAccent(b.accentColor ?? "");
     setBgType(b.defaultBackground && b.defaultBackground.type !== "color" ? b.defaultBackground.type : "");
     setBgUrl(b.defaultBackground && b.defaultBackground.type !== "color" ? b.defaultBackground.value : "");
+    setPronunciations(formatPronunciations(b.pronunciations ?? []));
     setAvatarId(b.defaultAvatarId ?? "");
     setVoiceId(b.defaultVoiceId ?? "");
     setAspect(b.defaultAspect ?? "");
@@ -78,6 +81,7 @@ export default function BrandPage() {
           primaryColor: primary,
           accentColor: accent || undefined,
           defaultBackground: bgType && bgUrl.trim() ? { type: bgType, value: bgUrl.trim() } : undefined,
+          pronunciations: parsePronunciations(pronunciations),
           defaultAvatarId: avatarId || undefined,
           defaultVoiceId: voiceId || undefined,
           defaultAspect: aspect || undefined,
@@ -109,6 +113,7 @@ export default function BrandPage() {
       setResolution("");
       setBgType("");
       setBgUrl("");
+      setPronunciations("");
       setCaptions(false);
       setSavedAt(null);
     } catch (e) {
@@ -240,6 +245,9 @@ export default function BrandPage() {
               <span className="text-sm text-slate-700">Captions on by default</span>
             </label>
           </div>
+          <Field label="Pronunciation" hint="One per line, word = how to say it (for example Nair = Nye-er). Renders say it that way; scripts and captions keep the spelling. Up to 50.">
+            <textarea aria-label="Pronunciations" value={pronunciations} onChange={(e) => setPronunciations(e.target.value)} rows={3} placeholder={"Nair = Nye-er\nSaaS = sass"} className={`${inputClass} font-mono text-xs`} />
+          </Field>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
             <span className="text-xs text-slate-500">{savedAt ? `Saved ${new Date(savedAt).toLocaleString()}` : "Not saved yet"}</span>
             <Button onClick={save} loading={saving} disabled={!primaryValid || !accentValid || (!!bgType && !bgUrl.trim()) || loading}>

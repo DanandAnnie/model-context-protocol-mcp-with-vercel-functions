@@ -3,7 +3,7 @@ import { z } from "zod";
 import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import { getStore } from "../store";
-import { CAPTION_POSITIONS, CAPTION_SIZES, EMPTY_WATCH, MAX_SCENES, TRASH_RETENTION_DAYS, isDefaultCaptionStyle } from "../types";
+import { EMPTY_WATCH, MAX_SCENES, TRASH_RETENTION_DAYS, isDefaultCaptionStyle } from "../types";
 import type { Avatar, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
 import type { AvatarProvider, RenderCast } from "../providers/types";
 import { LOCAL_OWNER } from "../owner-id";
@@ -17,13 +17,10 @@ import { clearCover, setCover } from "../cover";
 import { shareOffline } from "../client";
 import { bumpViewsByDay } from "../insights";
 
-export const backgroundSchema = z
-  .object({ type: z.enum(["color", "image", "video"]), value: z.string().min(1).max(2000, "A background must be a colour or a URL of at most 2000 characters") })
-  .refine((b) => b.type !== "video" || /^https?:\/\//.test(b.value), "A video background must be a public http(s) URL");
-/** How captions look on the share page; see `CaptionStyle`. */
-export const captionStyleSchema = z.object({ position: z.enum(CAPTION_POSITIONS), size: z.enum(CAPTION_SIZES) });
-/** Presenter size and position in the frame; see `SceneLayout`. */
-export const sceneLayoutSchema = z.object({ scale: z.number().min(0.5).max(1.5), x: z.number().min(-1).max(1), y: z.number().min(-1).max(1) });
+import { backgroundSchema, captionStyleSchema, sceneLayoutSchema } from "./schemas";
+import { getBrandKit } from "./brand";
+import { spokenCopy } from "../pronounce";
+export { backgroundSchema, captionStyleSchema, sceneLayoutSchema };
 
 export const videoRequestSchema = z
   .object({
@@ -160,7 +157,9 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
       }
       avatar = cast.avatars[avatar.id] ?? avatar;
     }
-    const { providerJobId } = await provider.createVideo(base, avatar, voice, cast);
+    // The renderer speaks the brand kit's pronunciations; the stored script and its captions keep the spelling.
+    const rules = (await getBrandKit(ownerId))?.pronunciations ?? [];
+    const { providerJobId } = await provider.createVideo(spokenCopy(base, rules), avatar, voice, cast);
     base.providerJobId = providerJobId;
     base.status = "processing";
   } catch (err) {

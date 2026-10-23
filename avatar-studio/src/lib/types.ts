@@ -223,6 +223,12 @@ export interface Translation extends TranslationRequest {
 }
 
 /** Per-owner branding applied to new videos and the public share page. */
+/** A word the renderer should say differently, e.g. { word: "Nair", sayAs: "Nye-er" }. */
+export interface Pronunciation {
+  word: string;
+  sayAs: string;
+}
+
 export interface BrandKit {
   /** `brand_<ownerId>`; one kit per owner. */
   id: string;
@@ -236,6 +242,8 @@ export interface BrandKit {
   accentColor?: string;
   /** An image or video behind every new video's scenes instead of the primary colour. */
   defaultBackground?: Background;
+  /** How the renderer says particular words; the stored script and captions keep the spelling. */
+  pronunciations?: Pronunciation[];
   defaultAvatarId?: string;
   defaultVoiceId?: string;
   defaultAspect?: AspectRatio;

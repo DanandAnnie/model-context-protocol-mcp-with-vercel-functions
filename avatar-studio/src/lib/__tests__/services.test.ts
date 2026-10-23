@@ -1080,6 +1080,43 @@ describe("brand kit", () => {
     await deleteBrandKit("u-bg");
   });
 
+  it("pronunciation rules reach the renderer, not the stored script", async () => {
+    const { applyPronunciations, parsePronunciations, formatPronunciations, spokenCopy } = await import("../pronounce");
+    const rules = [{ word: "Nair", sayAs: "Nye-er" }, { word: "Nairobi", sayAs: "Nye-ROH-bee" }, { word: "SaaS", sayAs: "sass" }];
+    assert.equal(applyPronunciations("Priya Nair flew to Nairobi. nair's SaaS (saas) plan.", rules), "Priya Nye-er flew to Nye-ROH-bee. Nye-er's sass (sass) plan.");
+    assert.equal(applyPronunciations("Unchanged.", []), "Unchanged.");
+    assert.equal(applyPronunciations("C++ rocks", [{ word: "C++", sayAs: "see plus plus" }]), "see plus plus rocks", "a word is matched literally");
+    assert.deepEqual(parsePronunciations("Nair = Nye-er\nno rule here\n = empty\nSaaS=sass "), [{ word: "Nair", sayAs: "Nye-er" }, { word: "SaaS", sayAs: "sass" }]);
+    assert.equal(formatPronunciations(rules.slice(0, 2)), "Nair = Nye-er\nNairobi = Nye-ROH-bee");
+    const copy = spokenCopy({ script: "Hi Nair.", scenes: [{ script: "Bye Nair.", background: { type: "color" as const, value: "#fff" } }] }, rules);
+    assert.equal(copy.script, "Hi Nye-er.");
+    assert.equal(copy.scenes?.[0].script, "Bye Nye-er.");
+
+    await saveBrandKit(brandKitSchema.parse({ primaryColor: "#0f766e", pronunciations: [{ word: " Nair ", sayAs: "Nye-er" }] }), "u-say");
+    assert.deepEqual((await getBrandKit("u-say"))?.pronunciations, [{ word: "Nair", sayAs: "Nye-er" }]);
+    assert.equal(brandKitSchema.safeParse({ primaryColor: "#0f766e", pronunciations: Array.from({ length: 51 }, (_, i) => ({ word: `w${i}`, sayAs: "x" })) }).success, false);
+    const proto = MockAvatarProvider.prototype as unknown as { createVideo: (req: { script: string; scenes?: Array<{ script: string }> }) => Promise<{ providerJobId: string }> };
+    const realCreate = proto.createVideo;
+    let heard: { script: string; scenes?: Array<{ script: string }> } | null = null;
+    proto.createVideo = async function (this: unknown, req) {
+      heard = req;
+      return realCreate.call(this, req);
+    };
+    try {
+      const video = await createVideo(videoRequestSchema.parse({ title: "P", avatarId: "stock_1", voiceId: "stock_voice_1", scenes: [{ script: "Meet Nair today.", background: { type: "color", value: "#fff" } }] }), "u-say");
+      assert.equal(video.script, "Meet Nair today.", "the stored script keeps the spelling");
+      assert.equal(video.scenes?.[0].script, "Meet Nair today.");
+      assert.equal(heard!.script, "Meet Nye-er today.", "the renderer hears the rule");
+      assert.equal(heard!.scenes?.[0].script, "Meet Nye-er today.");
+      const other = await createVideo(videoRequestSchema.parse({ title: "P", script: "Meet Nair today.", avatarId: "stock_1", voiceId: "stock_voice_1" }), "u-other");
+      assert.equal(other.script, "Meet Nair today.");
+      assert.equal(heard!.script, "Meet Nair today.", "another account's kit does not apply");
+    } finally {
+      proto.createVideo = realCreate;
+      await deleteBrandKit("u-say");
+    }
+  });
+
   it("rejects bad colors, unknown voices, and other owners' avatars", async () => {
     assert.throws(() => brandKitSchema.parse({ primaryColor: "teal" }));
     assert.throws(() => brandKitSchema.parse({ primaryColor: "#0f766e", logoUrl: "ftp://x/logo.png" }));

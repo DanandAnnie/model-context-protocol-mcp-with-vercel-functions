@@ -33,14 +33,16 @@ function VideosInner() {
   const [status, setStatus] = useState<"all" | VideoStatus>("all");
   const [folder, setFolder] = useState<string>("all"); // "all" | "unfiled" | folder name
   const [sort, setSort] = useState<SortKey>("newest");
-  const [limit, setLimit] = useState(PAGE);
   // Search as you type, one request per pause rather than per keystroke.
   useEffect(() => {
     const t = setTimeout(() => setNeedle(q.trim()), 250);
     return () => clearTimeout(t);
   }, [q]);
-  // A new filter starts again from the first page.
-  useEffect(() => setLimit(PAGE), [needle, status, folder, batch, sort]);
+  // "Show more" extends the page for the current filters only: a new filter starts again
+  // from the first page in the same render, with no extra request for the old extent.
+  const filterKey = [needle, status, folder, batch ?? "", sort].join("\u0000");
+  const [extent, setExtent] = useState({ key: filterKey, limit: PAGE });
+  const limit = extent.key === filterKey ? extent.limit : PAGE;
   const path = useMemo(() => {
     const params = new URLSearchParams({ limit: String(limit) });
     if (needle) params.set("q", needle);
@@ -197,7 +199,7 @@ function VideosInner() {
           {remaining > 0 && (
             <div className="mt-6 flex flex-col items-center gap-2 text-sm text-slate-500">
               <span>Showing {videos.length} of {data?.matched}</span>
-              <Button variant="secondary" onClick={() => setLimit((l) => l + PAGE)} loading={loading} data-testid="load-more">
+              <Button variant="secondary" onClick={() => setExtent({ key: filterKey, limit: limit + PAGE })} loading={loading} data-testid="load-more">
                 Show {Math.min(remaining, PAGE)} more
               </Button>
             </div>

@@ -154,6 +154,55 @@ describe("videos", () => {
     assert.equal((await getVideo(video.id, LOCAL_OWNER, false)).status, "completed");
   });
 
+  it("concurrent refreshes record a completion once and keep edits made meanwhile", async () => {
+    const { refreshStatus } = await import("../services/videos");
+    const video = await createVideo(videoRequestSchema.parse({ ...base, title: "Race" }));
+    const [, , duration] = video.providerJobId!.split("_");
+    const stale = { ...video, providerJobId: `mock_${Date.now() - 60_000}_${duration}` };
+    // The library poll and the detail page both hold this snapshot; a folder move lands in between.
+    await globalThis.__avatarStudioStore!.put("video", { ...stale, folder: "Listings" });
+    const store = (await import("../store")).getStore();
+    const originalPut = store.put.bind(store);
+    let puts = 0;
+    store.put = async (kind, item) => {
+      if (kind === "video") puts += 1;
+      return originalPut(kind, item);
+    };
+    const [a, b] = await Promise.all([refreshStatus(stale), refreshStatus(stale)]);
+    store.put = originalPut;
+    assert.equal(a.status, "completed");
+    assert.equal(b.status, "completed");
+    assert.equal(puts, 1, "one refresher records (and announces) the transition");
+    assert.equal(a.folder, "Listings", "the write builds on the stored record, not the stale snapshot");
+    assert.equal((await getVideo(video.id, LOCAL_OWNER, false)).folder, "Listings");
+    // A later refresher with the old snapshot sees the stored outcome and writes nothing.
+    assert.equal((await refreshStatus(stale)).status, "completed");
+  });
+
+  it("a render whose provider check fails sits out of the list refresh for a while", async () => {
+    const { isRefreshDeferred, listVideos: list } = await import("../services/videos");
+    const video = await createVideo(videoRequestSchema.parse({ ...base, title: "Stuck" }));
+    await globalThis.__avatarStudioStore!.put("video", { ...video, providerJobId: "job-from-another-world" });
+    let checks = 0;
+    const proto = MockAvatarProvider.prototype;
+    const originalStatus = proto.getStatus;
+    proto.getStatus = async function (id: string) {
+      checks += 1;
+      return originalStatus.call(this, id);
+    };
+    try {
+      const first = (await list()).find((v) => v.id === video.id)!;
+      assert.equal(first.status, "processing", "a failed check does not flip the render");
+      assert.equal(checks, 1);
+      assert.equal(isRefreshDeferred(video.id), true);
+      await list();
+      assert.equal(checks, 1, "the next poll leaves it alone");
+      assert.equal(isRefreshDeferred(video.id, Date.now() + 61_000), false, "it is checked again later");
+    } finally {
+      proto.getStatus = originalStatus;
+    }
+  });
+
   it("queries the library with filters, sorting, and a page size", async () => {
     const { filterVideos, queryVideos, videoQuerySchema } = await import("../services/videos");
     const a = await createVideo(videoRequestSchema.parse({ ...base, title: "Zulu tour" }));

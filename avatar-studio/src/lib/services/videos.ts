@@ -119,21 +119,32 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
 
 /** How many in-flight renders one library request may check with the provider. */
 export const REFRESH_PER_LIST = 10;
+/** After a failed provider check, leave a render alone for this long so it cannot hog the refresh slots. */
+export const REFRESH_RETRY_MS = 60_000;
 
 function isPending(video: Video): boolean {
   return !!video.providerJobId && (video.status === "processing" || video.status === "queued");
 }
 
+/** Renders whose last provider check failed, and when they may be checked again (per instance). */
+const refreshRetryAt = new Map<string, number>();
+
+/** True while a render sits out of the list's refresh after a failed provider check. */
+export function isRefreshDeferred(videoId: string, now = Date.now()): boolean {
+  return (refreshRetryAt.get(videoId) ?? 0) > now;
+}
+
 /**
- * The owner's videos, newest first. In-flight renders (newest `REFRESH_PER_LIST`) are
- * refreshed from the provider on the way out, so the library's polling sees completions
- * without a webhook or a visit to the detail page.
+ * The owner's videos, newest first. In-flight renders (newest `REFRESH_PER_LIST`, skipping
+ * any whose last check failed recently) are refreshed from the provider on the way out, so
+ * the library's polling sees completions without a webhook or a visit to the detail page.
  */
 export async function listVideos(ownerId: string = LOCAL_OWNER, refresh = true): Promise<Video[]> {
   const videos = await getStore().list<Video>("video", ownerId);
   videos.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   if (!refresh) return videos;
-  const pending = videos.filter(isPending).slice(0, REFRESH_PER_LIST);
+  const now = Date.now();
+  const pending = videos.filter((v) => isPending(v) && !isRefreshDeferred(v.id, now)).slice(0, REFRESH_PER_LIST);
   if (pending.length === 0) return videos;
   const refreshed = new Map((await Promise.all(pending.map((v) => refreshStatus(v)))).map((v) => [v.id, v]));
   return videos.map((v) => refreshed.get(v.id) ?? v);
@@ -148,22 +159,45 @@ export async function getVideo(id: string, ownerId: string | null = LOCAL_OWNER,
   return refresh ? refreshStatus(video) : video;
 }
 
-/** Asks the provider for the latest status of an in-flight render and stores any change. Never throws. */
-export async function refreshStatus(video: Video): Promise<Video> {
-  if (!isPending(video)) return video;
+/**
+ * Asks the provider for the latest status of an in-flight render and stores any change.
+ * Never throws. The write builds on the record as stored now, not on the caller's snapshot,
+ * so an edit made while the provider was answering survives, and a transition that another
+ * request (a webhook, a second poll) has already recorded is not stored or announced twice.
+ */
+export function refreshStatus(video: Video): Promise<Video> {
+  if (!isPending(video)) return Promise.resolve(video);
+  // One check per render at a time within this instance: a library poll and a detail visit
+  // that land together share the same provider call and the same single write.
+  const running = inFlight.get(video.id);
+  if (running) return running;
+  const run = refreshNow(video).finally(() => inFlight.delete(video.id));
+  inFlight.set(video.id, run);
+  return run;
+}
+
+const inFlight = new Map<string, Promise<Video>>();
+
+async function refreshNow(video: Video): Promise<Video> {
+  let update: Partial<Video>;
   try {
-    const update = await getAvatarProviderByName(video.provider).getStatus(video.providerJobId!);
-    const next: Video = { ...video, ...stripUndefined(update), updatedAt: nowIso() };
-    if (next.status !== video.status || next.videoUrl !== video.videoUrl) {
-      await getStore().put("video", next);
-      await scheduleNotification(video, next);
-    }
-    return next;
+    update = await getAvatarProviderByName(video.provider).getStatus(video.providerJobId!);
+    refreshRetryAt.delete(video.id);
   } catch (err) {
     // Transient provider errors should not flip the job to failed; surface in logs only.
     console.error(`status refresh failed for ${video.id}:`, err);
+    refreshRetryAt.set(video.id, Date.now() + REFRESH_RETRY_MS);
     return video;
   }
+  const current = await getStore().get<Video>("video", video.id);
+  if (!current) return video; // deleted meanwhile; do not bring it back
+  if (!isPending(current)) return current; // someone else already recorded the outcome
+  const next: Video = { ...current, ...stripUndefined(update), updatedAt: nowIso() };
+  if (next.status !== current.status || next.videoUrl !== current.videoUrl) {
+    await getStore().put("video", next);
+    await scheduleNotification(current, next);
+  }
+  return next;
 }
 
 export const MAX_FOLDER_NAME = 40;

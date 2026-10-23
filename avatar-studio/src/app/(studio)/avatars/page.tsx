@@ -21,8 +21,16 @@ function AvatarsInner() {
   const { data, loading, error, refetch } = useApi<{ avatars: Avatar[] }>("/api/avatars");
   const [open, setOpen] = useState(params.get("new") === "1");
   const [filter, setFilter] = useState<"all" | "custom" | "library">("all");
+  const [gender, setGender] = useState<"all" | NonNullable<Avatar["gender"]>>("all");
+  const [q, setQ] = useState("");
   const [actionErr, setActionErr] = useState<string | null>(null);
-  const avatars = (data?.avatars ?? []).filter((a) => (filter === "all" ? true : filter === "custom" ? a.source === "custom" : a.source !== "custom"));
+  const genders = (["female", "male", "neutral"] as const).filter((g) => (data?.avatars ?? []).some((a) => a.gender === g));
+  const needle = q.trim().toLowerCase();
+  const avatars = (data?.avatars ?? []).filter((a) => {
+    if (filter === "custom" ? a.source !== "custom" : filter === "library" && a.source === "custom") return false;
+    if (gender !== "all" && a.gender !== gender) return false;
+    return !needle || [a.name, ...(a.tags ?? [])].join(" ").toLowerCase().includes(needle);
+  });
 
   async function remove(a: Avatar) {
     if (!confirm(`Delete avatar "${a.name}"?`)) return;
@@ -48,7 +56,7 @@ function AvatarsInner() {
       />
       <ErrorBanner message={error ?? actionErr} />
 
-      <div className="mb-5 flex gap-2">
+      <div className="mb-5 flex flex-wrap items-center gap-2">
         {(["all", "library", "custom"] as const).map((f) => (
           <button
             key={f}
@@ -58,6 +66,16 @@ function AvatarsInner() {
             {f === "all" ? "All" : f === "library" ? "Library" : "My avatars"}
           </button>
         ))}
+        {genders.length > 1 && (
+          <select aria-label="Gender" value={gender} onChange={(e) => setGender(e.target.value as typeof gender)} className={`${inputClass} w-auto py-1 text-xs`}>
+            <option value="all">Any gender</option>
+            {genders.map((g) => (
+              <option key={g} value={g}>{g[0].toUpperCase() + g.slice(1)}</option>
+            ))}
+          </select>
+        )}
+        <input className={`${inputClass} w-auto max-w-[220px] py-1 text-xs`} placeholder="Search by name or style" value={q} onChange={(e) => setQ(e.target.value)} />
+        {data && <span className="text-xs text-slate-500">{avatars.length} of {data.avatars.length}</span>}
       </div>
 
       {open && <CreateAvatarPanel onClose={() => setOpen(false)} onCreated={() => { setOpen(false); refetch(); }} />}

@@ -157,6 +157,18 @@ test("scenes can be duplicated and reordered", async ({ page }) => {
   expect(video.scenes.map((sc) => sc.script)).toEqual(["C.", "A.", "B."]);
 });
 
+test("the avatar library filters by gender and name", async ({ page }) => {
+  await page.goto("/avatars");
+  await expect(page.getByRole("img", { name: "Ava Chen" })).toBeVisible();
+  await page.getByLabel("Gender").selectOption("male");
+  await expect(page.getByRole("img", { name: "Marcus Hill" })).toBeVisible();
+  await expect(page.getByRole("img", { name: "Ava Chen" })).toHaveCount(0);
+  await page.getByPlaceholder(/Search by name or style/).fill("tech");
+  await expect(page.getByRole("img", { name: "Lucas Meyer" })).toBeVisible();
+  await expect(page.getByRole("img", { name: "Marcus Hill" })).toHaveCount(0);
+  await expect(page.getByText(/^1 of \d+$/)).toBeVisible();
+});
+
 test("the voice library filters by language and gender", async ({ page }) => {
   await page.goto("/voices");
   await expect(page.getByText("Emma", { exact: true })).toBeVisible();

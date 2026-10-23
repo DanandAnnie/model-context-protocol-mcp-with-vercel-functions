@@ -176,7 +176,7 @@ export default function VideoDetailPage() {
             }
             subtitle={`Created ${formatDate(video.createdAt)} · ${video.aspect}${video.resolution ? ` · ${video.resolution}` : ""} · ${video.provider}`}
             action={
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {video.videoUrl && (
                   <a href={video.videoUrl} download target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700">
                     <Download className="h-4 w-4" /> Download

@@ -9,6 +9,7 @@ import { useApi } from "@/hooks/useApi";
 import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { api, estimateSeconds, formatSeconds, wordCount } from "@/lib/client";
 import { portraitSvg } from "@/lib/stock";
+import { findTemplate } from "@/lib/templates";
 import type { AspectRatio, Avatar, Background, Video, Voice } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
@@ -44,6 +45,34 @@ function CreateInner() {
   const [err, setErr] = useState<string | null>(null);
   const [voiceQuery, setVoiceQuery] = useState("");
 
+  const [prefill, setPrefill] = useState<{ avatarId?: string; voiceId?: string } | null>(null);
+  const templateId = params.get("template");
+  const fromId = params.get("from");
+
+  // Pre-fill from a template (?template=) or an existing video (?from=).
+  useEffect(() => {
+    const t = findTemplate(templateId);
+    if (t) {
+      setTitle(t.title);
+      setScript(t.script);
+      setAspect(t.aspect);
+    }
+  }, [templateId]);
+  useEffect(() => {
+    if (!fromId) return;
+    api<{ video: Video }>(`/api/videos/${fromId}`)
+      .then(({ video }) => {
+        setTitle(`${video.title} (copy)`);
+        setScript(video.script);
+        setAspect(video.aspect);
+        setBackground(video.background);
+        setCaptions(video.captions);
+        setSpeed(video.speed);
+        setPrefill({ avatarId: video.avatarId, voiceId: video.voiceId });
+      })
+      .catch((e) => setErr(e instanceof Error ? e.message : "Could not load the original video"));
+  }, [fromId]);
+
   // Default selections once data arrives.
   useEffect(() => {
     if (!avatar && avatarData?.avatars.length) setAvatar(avatarData.avatars[0]);
@@ -51,6 +80,15 @@ function CreateInner() {
   useEffect(() => {
     if (!voice && voiceData?.voices.length) setVoice(voiceData.voices[0]);
   }, [voiceData, voice]);
+  // Apply a copied video's avatar/voice once both lists are loaded, then clear the prefill.
+  useEffect(() => {
+    if (!prefill || !avatarData || !voiceData) return;
+    const a = avatarData.avatars.find((x) => x.id === prefill.avatarId);
+    const v = voiceData.voices.find((x) => x.id === prefill.voiceId);
+    if (a) setAvatar(a);
+    if (v) setVoice(v);
+    setPrefill(null);
+  }, [prefill, avatarData, voiceData]);
 
   const voices = useMemo(() => {
     const all = voiceData?.voices ?? [];

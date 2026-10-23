@@ -14,7 +14,8 @@ D-ID, ElevenLabs, or in a fully offline **demo mode** with no keys at all.
 |---|---|
 | Home | Quick actions, recent videos |
 | Create video | Script editor with word/duration counter, AI script writer, avatar picker, voice picker with live preview, background color/image, 16:9 / 9:16 / 1:1, captions, speaking speed, live stage preview |
-| My videos | Library with status polling, player, download, delete |
+| My videos | Library with status polling, player, download, delete, "Edit a copy" |
+| Templates | Script templates by category (real estate, marketing, training, support, social) that pre-fill the editor |
 | Avatars | Library presenters + photo avatars created from an uploaded portrait or image URL |
 | Voices | Searchable voice library with previews (provider audio, provider sample, or browser speech in demo mode) |
 | Video translate | Submit a video URL + target language, track dubbing jobs |
@@ -28,6 +29,7 @@ cd avatar-studio
 npm install
 cp .env.example .env.local   # optional: add keys to leave demo mode
 npm run dev                  # http://localhost:3000
+npm test                     # service-layer tests (node:test via tsx)
 ```
 
 With no keys the app runs in demo mode: stock illustrated avatars, browser
@@ -43,6 +45,9 @@ after ~12 seconds using a sample clip.
 | Script writer | `SCRIPT_PROVIDER` = `anthropic` \| `mock` | Claude via the Anthropic SDK |
 | Translation | automatic when `HEYGEN_API_KEY` is set | HeyGen Video Translate |
 | Persistence | `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` | Supabase (`supabase/schema.sql`), else in-memory |
+
+CI: `.github/workflows/avatar-studio.yml` runs typecheck, tests, and the
+production build on every push or PR that touches this folder.
 
 Set `APP_URL` to the public URL of the deployment so providers can call back
 `/api/webhooks/<provider>`; polling also works, so a missed webhook never
@@ -60,10 +65,12 @@ in-memory store resets on every cold start.
 ## Project layout
 
 ```
-src/app/(studio)/*      pages: home, create, videos, avatars, voices, translate, settings
+src/app/(studio)/*      pages: home, create, videos, templates, avatars, voices, translate, settings
 src/app/api/*           route handlers
 src/lib/providers/*     HeyGen, D-ID, ElevenLabs, Anthropic, and demo adapters
 src/lib/services.ts     orchestration + validation (zod)
+src/lib/templates.ts    script templates
+src/lib/__tests__/*     unit tests
 src/lib/store/*         Supabase / in-memory persistence
 supabase/schema.sql     one-table JSON store
 ```

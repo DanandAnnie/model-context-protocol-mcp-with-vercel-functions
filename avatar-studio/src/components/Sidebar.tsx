@@ -1,7 +1,8 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Clapperboard, Home, Languages, Mic2, Settings, Users, Video, Sparkles } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Clapperboard, Home, Languages, LayoutTemplate, Menu, Mic2, Settings, Users, Video, Sparkles, X } from "lucide-react";
 import { useApi } from "@/hooks/useApi";
 import type { ProviderStatus } from "@/lib/types";
 
@@ -9,6 +10,7 @@ const NAV = [
   { href: "/home", label: "Home", icon: Home },
   { href: "/create", label: "Create video", icon: Clapperboard },
   { href: "/videos", label: "My videos", icon: Video },
+  { href: "/templates", label: "Templates", icon: LayoutTemplate },
   { href: "/avatars", label: "Avatars", icon: Users },
   { href: "/voices", label: "Voices", icon: Mic2 },
   { href: "/translate", label: "Video translate", icon: Languages },
@@ -18,9 +20,30 @@ const NAV = [
 export function Sidebar() {
   const pathname = usePathname();
   const { data: status } = useApi<ProviderStatus>("/api/status");
+  const [open, setOpen] = useState(false);
+
+  // Close the drawer on navigation.
+  useEffect(() => setOpen(false), [pathname]);
 
   return (
-    <aside className="flex h-full w-64 shrink-0 flex-col border-r border-slate-200 bg-white">
+    <>
+      <button
+        type="button"
+        aria-label="Open menu"
+        onClick={() => setOpen(true)}
+        className="fixed left-3 top-3 z-40 rounded-lg border border-slate-200 bg-white p-2 text-slate-700 shadow-sm lg:hidden"
+      >
+        <Menu className="h-5 w-5" />
+      </button>
+      {open && <div className="fixed inset-0 z-40 bg-slate-900/40 lg:hidden" onClick={() => setOpen(false)} />}
+    <aside
+      className={`fixed inset-y-0 left-0 z-50 flex h-full w-64 shrink-0 flex-col border-r border-slate-200 bg-white transition-transform lg:static lg:translate-x-0 ${
+        open ? "translate-x-0" : "-translate-x-full"
+      }`}
+    >
+      <button type="button" aria-label="Close menu" onClick={() => setOpen(false)} className="absolute right-3 top-4 rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 lg:hidden">
+        <X className="h-5 w-5" />
+      </button>
       <Link href="/home" className="flex items-center gap-2 px-5 py-5">
         <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white">
           <Sparkles className="h-4 w-4" />
@@ -72,5 +95,6 @@ export function Sidebar() {
         </div>
       </div>
     </aside>
+    </>
   );
 }

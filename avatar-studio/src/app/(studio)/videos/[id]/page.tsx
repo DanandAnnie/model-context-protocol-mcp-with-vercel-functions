@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
-import { ArrowLeft, Download, Languages, Trash2 } from "lucide-react";
+import { ArrowLeft, Copy, Download, Languages, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate, formatSeconds } from "@/lib/client";
@@ -54,6 +54,9 @@ export default function VideoDetailPage() {
                     <Languages className="h-4 w-4" /> Translate
                   </Link>
                 )}
+                <Link href={`/create?from=${video.id}`} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50">
+                  <Copy className="h-4 w-4" /> Edit a copy
+                </Link>
                 <Button variant="danger" onClick={remove} loading={deleting}>
                   <Trash2 className="h-4 w-4" /> Delete
                 </Button>

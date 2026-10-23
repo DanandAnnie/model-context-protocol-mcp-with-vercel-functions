@@ -61,6 +61,17 @@ export function formatSrtTime(ms: number): string {
   return `${pad(h)}:${pad(m)}:${pad(s)},${pad(r, 3)}`;
 }
 
+export function formatVttTime(ms: number): string {
+  return formatSrtTime(ms).replace(",", ".");
+}
+
+export function buildVtt(script: string, durationSec: number): string {
+  const cues = buildCues(script, durationSec)
+    .map((c) => `${c.index}\n${formatVttTime(c.startMs)} --> ${formatVttTime(c.endMs)}\n${c.text}\n`)
+    .join("\n");
+  return `WEBVTT\n\n${cues}`;
+}
+
 export function buildSrt(script: string, durationSec: number): string {
   return buildCues(script, durationSec)
     .map((c) => `${c.index}\n${formatSrtTime(c.startMs)} --> ${formatSrtTime(c.endMs)}\n${c.text}\n`)

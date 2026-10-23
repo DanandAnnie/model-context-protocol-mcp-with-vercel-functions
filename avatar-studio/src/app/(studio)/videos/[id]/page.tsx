@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
-import { ArrowLeft, Captions, Check, Copy, Download, Languages, Link2, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, Captions, Check, Code2, Copy, Download, Languages, Link2, Pencil, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate, formatSeconds, isDarkHex } from "@/lib/client";
@@ -13,6 +13,7 @@ export default function VideoDetailPage() {
   const router = useRouter();
   const [deleting, setDeleting] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [embedCopied, setEmbedCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
   const [renameErr, setRenameErr] = useState<string | null>(null);
@@ -48,6 +49,20 @@ export default function VideoDetailPage() {
       setTimeout(() => setCopied(false), 2000);
     } catch {
       window.prompt("Copy this link", url);
+    }
+  }
+
+  async function copyEmbed() {
+    if (!video) return;
+    const w = video.aspect === "9:16" ? 360 : video.aspect === "1:1" ? 480 : 640;
+    const h = video.aspect === "9:16" ? 640 : video.aspect === "1:1" ? 480 : 360;
+    const snippet = `<iframe src="${window.location.origin}/share/${video.id}" width="${w}" height="${h}" style="border:0;max-width:100%" allow="fullscreen" title="${video.title.replace(/"/g, "&quot;")}"></iframe>`;
+    try {
+      await navigator.clipboard.writeText(snippet);
+      setEmbedCopied(true);
+      setTimeout(() => setEmbedCopied(false), 2000);
+    } catch {
+      window.prompt("Copy this embed code", snippet);
     }
   }
 
@@ -112,11 +127,14 @@ export default function VideoDetailPage() {
                 )}
                 {video.status === "completed" && (
                   <>
-                    <a href={`/api/videos/${video.id}/captions`} download className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50">
+                    <a href={`/api/videos/${video.id}/captions`} download className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50" title="Also available as WebVTT with ?format=vtt">
                       <Captions className="h-4 w-4" /> Captions (.srt)
                     </a>
                     <Button variant="secondary" onClick={copyShareLink}>
                       {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Link2 className="h-4 w-4" />} {copied ? "Link copied" : "Share"}
+                    </Button>
+                    <Button variant="secondary" onClick={copyEmbed} title="Copy an iframe snippet for your site">
+                      {embedCopied ? <Check className="h-4 w-4 text-emerald-600" /> : <Code2 className="h-4 w-4" />} {embedCopied ? "Embed copied" : "Embed"}
                     </Button>
                   </>
                 )}

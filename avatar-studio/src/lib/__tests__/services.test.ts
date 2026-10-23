@@ -341,3 +341,23 @@ describe("personalized batches", () => {
     }
   });
 });
+
+describe("hardening", () => {
+  it("rate limiter allows a burst then blocks until the window resets", async () => {
+    const { rateLimit, resetRateLimit } = await import("../rate-limit");
+    const t0 = 1_000_000;
+    for (let i = 0; i < 5; i++) assert.equal(rateLimit("k", 5, 60_000, t0 + i).allowed, true);
+    const blocked = rateLimit("k", 5, 60_000, t0 + 10);
+    assert.equal(blocked.allowed, false);
+    assert.ok(blocked.retryAfterSec >= 59);
+    assert.equal(rateLimit("k", 5, 60_000, t0 + 60_001).allowed, true, "window reset");
+    resetRateLimit("k");
+    assert.equal(rateLimit("k", 1, 60_000, t0).remaining, 0);
+  });
+
+  it("builds WebVTT with dot separators and a header", async () => {
+    const { buildVtt } = await import("../captions");
+    const vtt = buildVtt("Hello there. Welcome!", 4);
+    assert.match(vtt, /^WEBVTT\n\n1\n00:00:00\.000 --> 00:00:0\d\.\d{3}\nHello there\.\n/);
+  });
+});

@@ -5,12 +5,14 @@ import { refreshSupabaseSession } from "@/lib/supabase/proxy";
 // Paths that stay reachable without a session: the landing page, login, auth
 // callbacks, public share pages, provider webhooks, and static assets.
 const PUBLIC_PREFIXES = ["/login", "/auth/", "/api/auth/", "/share/", "/api/webhooks/", "/_next/", "/favicon"];
+// Caption files back the public share player's subtitle track.
+const PUBLIC_PATTERNS = [/^\/api\/videos\/[^/]+\/captions$/];
 
 export async function proxy(req: NextRequest) {
   const mode = authMode();
   if (mode === "open") return NextResponse.next();
   const { pathname } = req.nextUrl;
-  const isPublic = pathname === "/" || PUBLIC_PREFIXES.some((p) => pathname.startsWith(p));
+  const isPublic = pathname === "/" || PUBLIC_PREFIXES.some((p) => pathname.startsWith(p)) || PUBLIC_PATTERNS.some((r) => r.test(pathname));
 
   if (mode === "supabase") {
     // Always run the refresh so auth cookies stay current, even on public paths.

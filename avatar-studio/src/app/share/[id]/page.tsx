@@ -34,7 +34,9 @@ export default async function SharePage({ params }: { params: Promise<{ id: stri
         <h1 className="mb-4 text-xl font-semibold">{video.title}</h1>
         <div className={`mx-auto w-full overflow-hidden rounded-xl bg-black ${frame}`}>
           {video.status === "completed" && video.videoUrl ? (
-            <video src={video.videoUrl} poster={video.thumbnailUrl} controls autoPlay={false} className="h-full w-full" />
+            <video src={video.videoUrl} poster={video.thumbnailUrl} controls autoPlay={false} crossOrigin="anonymous" className="h-full w-full">
+              {video.captions && <track kind="subtitles" srcLang="en" label="Captions" src={`/api/videos/${video.id}/captions?format=vtt`} />}
+            </video>
           ) : (
             <div className="flex h-full w-full items-center justify-center p-10 text-center text-sm text-slate-400">
               {video.status === "failed" ? "This video could not be rendered." : "This video is still rendering. Check back in a minute."}

@@ -155,3 +155,18 @@ test("personalized batch creates one video per CSV row", async ({ page }) => {
   expect(mine.map((v) => v.rowLabel).sort()).toEqual(["Jordan", "Priya"]);
   expect(mine.find((v) => v.rowLabel === "Priya")?.script).toBe("Hi Priya, see you at 48 Harbor View on November 15.");
 });
+
+test("captions are served as SRT and VTT, security headers are set", async ({ page, request }) => {
+  const v = await createVideoViaApi(page, "Caption formats", { captions: true });
+  const vtt = await request.get(`/api/videos/${v.id}/captions?format=vtt`);
+  expect(vtt.headers()["content-type"]).toContain("text/vtt");
+  expect(await vtt.text()).toMatch(/^WEBVTT/);
+  const home = await request.get("/home");
+  expect(home.headers()["x-frame-options"]).toBe("DENY");
+  expect(home.headers()["x-content-type-options"]).toBe("nosniff");
+  // The subtitle track renders once the (mock) render completes, ~12s after submission.
+  await expect.poll(async () => (await (await request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  const share = await request.get(`/share/${v.id}`);
+  expect(share.headers()["x-frame-options"]).toBeUndefined();
+  expect(await share.text()).toContain(`/api/videos/${v.id}/captions?format=vtt`);
+});

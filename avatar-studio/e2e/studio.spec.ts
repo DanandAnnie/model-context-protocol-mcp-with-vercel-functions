@@ -533,6 +533,8 @@ test("website embed script adds a launcher that opens the talk page", async ({ p
     await launcher.click();
     const frame = page.frameLocator("iframe[title='Chat with our presenter']");
     await expect(frame.getByTestId("talk-name")).toContainText("Embed agent");
+    // Spoken questions need the host page to delegate the microphone to the iframe.
+    await expect(page.locator("iframe[title='Chat with our presenter']")).toHaveAttribute("allow", "autoplay; microphone");
     await expect(page.getByRole("button", { name: "Close" })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("button", { name: "Ask Dana" })).toBeVisible();

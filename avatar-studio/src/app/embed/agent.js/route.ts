@@ -28,7 +28,7 @@ export function GET(req: Request) {
   var open = false;
   var frame = document.createElement("iframe");
   frame.title = "Chat with our presenter";
-  frame.allow = "autoplay";
+  frame.allow = "autoplay; microphone";
   frame.setAttribute("loading", "lazy");
   frame.style.cssText = "position:fixed;bottom:88px;" + side + ":20px;width:400px;max-width:calc(100vw - 40px);height:640px;max-height:calc(100vh - 110px);border:0;border-radius:16px;box-shadow:0 20px 60px rgba(2,6,23,.35);z-index:2147483646;display:none;background:#020617";
   var btn = document.createElement("button");

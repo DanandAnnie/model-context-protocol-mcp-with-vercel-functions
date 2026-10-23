@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
-import { ArrowLeft, Copy, Download, Languages, Trash2 } from "lucide-react";
+import { ArrowLeft, Captions, Check, Copy, Download, Languages, Link2, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate, formatSeconds } from "@/lib/client";
@@ -12,11 +12,24 @@ export default function VideoDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [deleting, setDeleting] = useState(false);
+  const [copied, setCopied] = useState(false);
   const { data, loading, error } = useApi<{ video: Video }>(`/api/videos/${id}`, {
     pollMs: 5000,
     pollWhile: (d) => d.video.status === "processing" || d.video.status === "queued",
   });
   const video = data?.video;
+
+  async function copyShareLink() {
+    if (!video) return;
+    const url = `${window.location.origin}/share/${video.id}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      window.prompt("Copy this link", url);
+    }
+  }
 
   async function remove() {
     if (!video || !confirm("Delete this video? This cannot be undone.")) return;
@@ -48,6 +61,16 @@ export default function VideoDetailPage() {
                   <a href={video.videoUrl} download target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700">
                     <Download className="h-4 w-4" /> Download
                   </a>
+                )}
+                {video.status === "completed" && (
+                  <>
+                    <a href={`/api/videos/${video.id}/captions`} download className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50">
+                      <Captions className="h-4 w-4" /> Captions (.srt)
+                    </a>
+                    <Button variant="secondary" onClick={copyShareLink}>
+                      {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Link2 className="h-4 w-4" />} {copied ? "Link copied" : "Share"}
+                    </Button>
+                  </>
                 )}
                 {video.videoUrl && (
                   <Link href={`/translate?source=${encodeURIComponent(video.videoUrl)}&title=${encodeURIComponent(video.title)}`} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50">

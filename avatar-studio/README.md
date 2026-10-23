@@ -14,7 +14,8 @@ D-ID, ElevenLabs, or in a fully offline **demo mode** with no keys at all.
 |---|---|
 | Home | Quick actions, recent videos |
 | Create video | Script editor with word/duration counter, AI script writer, avatar picker, voice picker with live preview, background color/image, 16:9 / 9:16 / 1:1, captions, speaking speed, live stage preview |
-| My videos | Library with status polling, player, download, delete, "Edit a copy" |
+| My videos | Library with search and status filters, player, download, SRT captions, share link, delete, "Edit a copy" |
+| Share page | Public, sidebar-free player at `/share/:id` |
 | Templates | Script templates by category (real estate, marketing, training, support, social) that pre-fill the editor |
 | Avatars | Library presenters + photo avatars created from an uploaded portrait or image URL |
 | Voices | Searchable voice library with previews (provider audio, provider sample, or browser speech in demo mode) |

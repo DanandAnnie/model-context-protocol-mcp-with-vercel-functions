@@ -131,3 +131,23 @@ describe("templates", () => {
     assert.equal(findTemplate("missing"), undefined);
   });
 });
+
+describe("captions", () => {
+  it("times cues proportionally and covers the full duration", async () => {
+    const { buildCues, buildSrt, formatSrtTime } = await import("../captions");
+    const cues = buildCues("One two three. Four five six seven eight nine.", 9);
+    assert.equal(cues.length, 2);
+    assert.equal(cues[0].startMs, 0);
+    assert.equal(cues[0].endMs, 3000);
+    assert.equal(cues[1].endMs, 9000);
+    assert.equal(formatSrtTime(3_723_456), "01:02:03,456");
+    const srt = buildSrt("Hello there. Welcome!", 4);
+    assert.match(srt, /^1\n00:00:00,000 --> 00:00:0\d,\d{3}\nHello there\.\n\n2\n/);
+  });
+
+  it("returns nothing for empty input", async () => {
+    const { buildCues } = await import("../captions");
+    assert.deepEqual(buildCues("   ", 10), []);
+    assert.deepEqual(buildCues("Hi.", 0), []);
+  });
+});

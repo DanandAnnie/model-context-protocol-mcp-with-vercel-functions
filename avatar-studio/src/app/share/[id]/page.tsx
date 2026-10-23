@@ -1,0 +1,48 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { Sparkles } from "lucide-react";
+import { NotFoundError, getVideo } from "@/lib/services";
+import { formatSeconds } from "@/lib/client";
+
+export const dynamic = "force-dynamic";
+
+/** Public, sidebar-free player page for sharing a finished video. */
+export default async function SharePage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  let video;
+  try {
+    video = await getVideo(id);
+  } catch (err) {
+    if (err instanceof NotFoundError) notFound();
+    throw err;
+  }
+
+  const frame = video.aspect === "9:16" ? "aspect-[9/16] max-w-[420px]" : video.aspect === "1:1" ? "aspect-square max-w-[640px]" : "aspect-video";
+
+  return (
+    <main className="min-h-screen bg-slate-950 text-slate-100">
+      <header className="mx-auto flex max-w-4xl items-center justify-between px-6 py-5">
+        <Link href="/" className="flex items-center gap-2 text-sm font-medium text-slate-300 hover:text-white">
+          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-brand-600 text-white">
+            <Sparkles className="h-3.5 w-3.5" />
+          </span>
+          Avatar Studio
+        </Link>
+        {video.durationSec != null && <span className="text-xs text-slate-400">{formatSeconds(video.durationSec)}</span>}
+      </header>
+      <section className="mx-auto max-w-4xl px-6 pb-16">
+        <h1 className="mb-4 text-xl font-semibold">{video.title}</h1>
+        <div className={`mx-auto w-full overflow-hidden rounded-xl bg-black ${frame}`}>
+          {video.status === "completed" && video.videoUrl ? (
+            <video src={video.videoUrl} poster={video.thumbnailUrl} controls autoPlay={false} className="h-full w-full" />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center p-10 text-center text-sm text-slate-400">
+              {video.status === "failed" ? "This video could not be rendered." : "This video is still rendering. Check back in a minute."}
+            </div>
+          )}
+        </div>
+        <p className="mt-6 whitespace-pre-wrap text-sm leading-relaxed text-slate-300">{video.script}</p>
+      </section>
+    </main>
+  );
+}

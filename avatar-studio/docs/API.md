@@ -231,7 +231,7 @@ export function verifyStudioWebhook(req, rawBody, secret, maxAgeSec = 300) {
 }
 ```
 
-Deliveries are attempted once, after the response that completed the render, with a 10-second timeout and no redirects. The last outcome is shown in Settings. Endpoints on private or local addresses are rejected.
+Deliveries are attempted once, after the response that completed the render, with a 10-second timeout and no redirects. The last outcome is shown in Settings. Endpoints on private or local addresses are rejected, and the delivery connects only to the addresses that passed that check.
 
 ## Provider webhooks (inbound)
 

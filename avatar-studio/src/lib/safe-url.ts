@@ -34,28 +34,44 @@ export function isPrivateAddress(ip: string): boolean {
   return true;
 }
 
+/** The URL failed the public-host check (as opposed to the fetch itself failing). */
+export class UnsafeUrlError extends Error {}
+
+export interface ResolvedAddress {
+  address: string;
+  family: 4 | 6;
+}
+
 /**
- * Throws unless `url` is an http(s) URL whose host resolves only to public
- * addresses. Used before the server fetches anything a user typed in.
+ * Throws unless `url` is an http(s) URL whose host resolves only to public addresses, and
+ * returns those addresses so the caller can connect to exactly what was vetted (see
+ * `safeFetch`): resolving again at connect time would let a rebinding name point the
+ * request somewhere else.
  */
-export async function assertPublicHttpUrl(url: string, what = "Image URL"): Promise<URL> {
+export async function resolvePublicHttpUrl(url: string, what = "Image URL"): Promise<{ url: URL; addresses: ResolvedAddress[] }> {
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
-    throw new Error(`${what} is not valid`);
+    throw new UnsafeUrlError(`${what} is not valid`);
   }
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new Error(`${what} must use http or https`);
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new UnsafeUrlError(`${what} must use http or https`);
   const host = parsed.hostname.replace(/^\[|\]$/g, "");
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) {
-    throw new Error(`${what} must point to a public host`);
+    throw new UnsafeUrlError(`${what} must point to a public host`);
   }
-  if (isIP(host)) {
-    if (isPrivateAddress(host)) throw new Error(`${what} must point to a public host`);
-    return parsed;
+  const literal = isIP(host);
+  if (literal) {
+    if (isPrivateAddress(host)) throw new UnsafeUrlError(`${what} must point to a public host`);
+    return { url: parsed, addresses: [{ address: host, family: literal === 6 ? 6 : 4 }] };
   }
-  const addresses = await lookup(host, { all: true }).catch(() => []);
-  if (addresses.length === 0) throw new Error(`${what} host could not be resolved`);
-  if (addresses.some((a) => isPrivateAddress(a.address))) throw new Error(`${what} must point to a public host`);
-  return parsed;
+  const found = await lookup(host, { all: true }).catch(() => []);
+  if (found.length === 0) throw new UnsafeUrlError(`${what} host could not be resolved`);
+  if (found.some((a) => isPrivateAddress(a.address))) throw new UnsafeUrlError(`${what} must point to a public host`);
+  return { url: parsed, addresses: found.map((a) => ({ address: a.address, family: a.family === 6 ? 6 : 4 })) };
+}
+
+/** `resolvePublicHttpUrl` for callers that only need the yes/no answer. */
+export async function assertPublicHttpUrl(url: string, what = "Image URL"): Promise<URL> {
+  return (await resolvePublicHttpUrl(url, what)).url;
 }

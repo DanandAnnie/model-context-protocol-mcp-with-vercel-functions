@@ -1,5 +1,6 @@
 // Turns a public web page into plain text for the script writer ("make a video from this page").
-import { assertPublicHttpUrl } from "./safe-url";
+import { safeFetch, type FetchLike } from "./safe-fetch";
+import { UnsafeUrlError } from "./safe-url";
 
 export const MAX_PAGE_BYTES = 1_000_000;
 export const MAX_SOURCE_CHARS = 6000;
@@ -37,13 +38,18 @@ export function extractReadableText(html: string): { title: string; text: string
 }
 
 /** Fetches a public page (no redirects, size and time capped) and returns its readable text. */
-export async function fetchPageText(url: string, fetchImpl: typeof fetch = fetch): Promise<{ title: string; text: string }> {
-  const parsed = await assertPublicHttpUrl(url, "Page URL");
-  const res = await fetchImpl(parsed.toString(), {
-    redirect: "error",
-    signal: AbortSignal.timeout(10_000),
-    headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "AvatarStudio-ScriptWriter/1.0" },
-  }).catch((err) => {
+export async function fetchPageText(url: string, fetchImpl?: FetchLike): Promise<{ title: string; text: string }> {
+  const res = await safeFetch(
+    url,
+    {
+      redirect: "error",
+      signal: AbortSignal.timeout(10_000),
+      headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "AvatarStudio-ScriptWriter/1.0" },
+    },
+    "Page URL",
+    fetchImpl,
+  ).catch((err) => {
+    if (err instanceof UnsafeUrlError) throw err;
     throw new Error(err instanceof Error && /redirect/i.test(err.message) ? "That address redirects; paste the final page URL" : "The page could not be fetched");
   });
   if (!res.ok) throw new Error(`The page returned ${res.status}`);

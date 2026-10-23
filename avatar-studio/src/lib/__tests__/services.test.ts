@@ -451,6 +451,37 @@ describe("second review fixes", () => {
     for (const ip of ["::ffff:8.8.8.8", "::ffff:808:808", "2606:4700::1111", "2001:4860:4860::8888"]) assert.equal(isPrivateAddress(ip), false, ip);
   });
 
+  it("pins server-side fetches to the addresses the host check saw", async () => {
+    const { resolvePublicHttpUrl } = await import("../safe-url");
+    const { pinnedLookup, safeFetch } = await import("../safe-fetch");
+    // Literals are their own answer, in both families.
+    assert.deepEqual((await resolvePublicHttpUrl("https://93.184.216.34/x")).addresses, [{ address: "93.184.216.34", family: 4 }]);
+    assert.deepEqual((await resolvePublicHttpUrl("https://[2606:4700::1111]/x")).addresses, [{ address: "2606:4700::1111", family: 6 }]);
+    // The socket-level lookup ignores the name and answers in whichever shape net.connect asks for.
+    const lookup = pinnedLookup([{ address: "93.184.216.34", family: 4 }, { address: "2606:4700::1111", family: 6 }]);
+    await new Promise<void>((resolve) => {
+      lookup("evil.example", { all: true }, ((err: unknown, list: Array<{ address: string; family: number }>) => {
+        assert.equal(err, null);
+        assert.deepEqual(list, [{ address: "93.184.216.34", family: 4 }, { address: "2606:4700::1111", family: 6 }]);
+        resolve();
+      }) as never);
+    });
+    await new Promise<void>((resolve) => {
+      lookup("evil.example", 4, ((err: unknown, address: string, family: number) => {
+        assert.equal(err, null);
+        assert.equal(address, "93.184.216.34");
+        assert.equal(family, 4);
+        resolve();
+      }) as never);
+    });
+    // An injected client still goes through the host check.
+    const calls: string[] = [];
+    const fake = async (input: string) => { calls.push(input); return new Response("ok"); };
+    await assert.rejects(safeFetch("http://[::ffff:7f00:1]/", {}, "Page URL", fake), /public host/);
+    assert.equal((await safeFetch("https://93.184.216.34/ok", {}, "Page URL", fake)).status, 200);
+    assert.deepEqual(calls, ["https://93.184.216.34/ok"]);
+  });
+
   it("decodes base64 and utf8 data URLs", async () => {
     const { decodeDataUrl } = await import("../providers/image");
     const b64 = decodeDataUrl("data:image/png;base64,aGVsbG8=");

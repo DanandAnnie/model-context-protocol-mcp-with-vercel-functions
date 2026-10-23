@@ -4,6 +4,7 @@ import { createHmac, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { nowIso } from "./ids";
 import { LOCAL_OWNER } from "./owner-id";
+import { safeFetch, type FetchLike } from "./safe-fetch";
 import { assertPublicHttpUrl } from "./safe-url";
 import { getStore } from "./store";
 import type { NotifyEvent, NotifySettings, Prefs, Video } from "./types";
@@ -44,11 +45,10 @@ export function signPayload(secret: string, timestamp: string, body: string): st
   return createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex");
 }
 
-type FetchLike = typeof fetch;
-let fetchImpl: FetchLike = (...args) => fetch(...args);
-/** Test hook: replace the HTTP client used for deliveries. */
+let fetchOverride: FetchLike | undefined;
+/** Test hook: replace the HTTP client used for deliveries (the host check still runs; pinning does not). */
 export function setNotificationFetch(impl: FetchLike | null) {
-  fetchImpl = impl ?? ((...args) => fetch(...args));
+  fetchOverride = impl ?? undefined;
 }
 
 /** Delivers one event and records the outcome on the settings. Never throws. */
@@ -57,9 +57,8 @@ export async function dispatchNotification(settings: NotifySettings, event: Noti
   const body = JSON.stringify({ event, timestamp: nowIso(), data });
   let result: NonNullable<NotifySettings["lastDelivery"]>;
   try {
-    // Re-check at send time: DNS can change between saving the URL and using it.
-    await assertPublicHttpUrl(settings.url, "Webhook URL");
-    const res = await fetchImpl(settings.url, {
+    // Re-checked at send time and pinned to the vetted address: DNS can change between saving the URL and using it.
+    const res = await safeFetch(settings.url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -71,7 +70,7 @@ export async function dispatchNotification(settings: NotifySettings, event: Noti
       body,
       redirect: "error",
       signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
-    });
+    }, "Webhook URL", fetchOverride);
     result = { at: nowIso(), event, ok: res.ok, status: res.status, error: res.ok ? undefined : `Endpoint returned ${res.status}` };
   } catch (err) {
     result = { at: nowIso(), event, ok: false, error: err instanceof Error ? err.message : "Delivery failed" };

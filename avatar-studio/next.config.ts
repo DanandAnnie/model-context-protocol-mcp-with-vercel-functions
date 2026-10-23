@@ -8,7 +8,7 @@ const nextConfig: NextConfig = {
     // Provider-hosted avatar thumbnails and rendered videos come from many hosts.
     remotePatterns: [{ protocol: "https", hostname: "**" }],
   },
-  serverExternalPackages: ["@anthropic-ai/sdk"],
+  serverExternalPackages: ["@anthropic-ai/sdk", "undici"],
   async headers() {
     const common = [
       { key: "X-Content-Type-Options", value: "nosniff" },

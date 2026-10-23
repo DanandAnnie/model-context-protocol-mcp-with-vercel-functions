@@ -776,7 +776,12 @@ test("library multi-select moves and deletes videos in bulk", async ({ page }) =
   const tag = Date.now().toString(36);
   const a = await createVideoViaApi(page, `Bulk one ${tag}`);
   const b = await createVideoViaApi(page, `Bulk two ${tag}`);
-  page.on("dialog", (d) => d.accept(`Bulk ${tag}`));
+  // Only Move (prompt) and Delete (confirm) may open a dialog; the share buttons must not.
+  const dialogs: string[] = [];
+  page.on("dialog", (d) => {
+    dialogs.push(d.message());
+    void d.accept(`Bulk ${tag}`);
+  });
 
   await page.goto("/videos");
   await page.getByRole("button", { name: "Select" }).click();
@@ -813,6 +818,7 @@ test("library multi-select moves and deletes videos in bulk", async ({ page }) =
   expect((await page.request.get(`/api/videos/${b.id}`)).status()).toBe(404);
   expect((await page.request.get(`/api/videos/${a.id}`)).status()).toBe(200);
   expect((await page.request.post("/api/videos/bulk", { data: { action: "move", ids: [] } })).status()).toBe(400);
+  expect(dialogs).toEqual(["Folder name (leave empty to move to Unfiled)", "Delete 1 video? This cannot be undone."]);
 });
 
 test("webhook settings reject private hosts and show the signing secret", async ({ page }) => {

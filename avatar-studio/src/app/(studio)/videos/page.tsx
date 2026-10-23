@@ -15,6 +15,8 @@ type SortKey = VideoQuery["sort"];
 /** Cards per request; "Show more" asks for another page's worth. */
 const PAGE = 48;
 
+type BulkAction = "delete" | "move" | "share-off" | "share-on";
+
 export default function VideosPage() {
   return (
     <Suspense>
@@ -63,7 +65,7 @@ function VideosInner() {
   // Multi-select: move the chosen videos to a folder or delete them in one request.
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<BulkAction | null>(null);
   const [bulkErr, setBulkErr] = useState<string | null>(null);
   function toggle(id: string) {
     setSelected((prev) => {
@@ -79,7 +81,7 @@ function VideosInner() {
   }
   // A new filter hides cards; drop the selection so bulk actions only ever touch what is visible.
   useEffect(() => setSelected(new Set()), [q, status, folder, batch]);
-  async function bulk(action: "delete" | "move" | "share-off" | "share-on") {
+  async function bulk(action: BulkAction) {
     const ids = Array.from(selected);
     if (!ids.length) return;
     let targetFolder: string | undefined;
@@ -87,21 +89,23 @@ function VideosInner() {
       const answer = window.prompt("Folder name (leave empty to move to Unfiled)", "");
       if (answer === null) return;
       targetFolder = answer;
-    } else if (!window.confirm(`Delete ${ids.length} ${ids.length === 1 ? "video" : "videos"}? This cannot be undone.`)) {
+    } else if (action === "delete" && !window.confirm(`Delete ${ids.length} ${ids.length === 1 ? "video" : "videos"}? This cannot be undone.`)) {
       return;
     }
-    setBusy(true);
+    setBusy(action);
     setBulkErr(null);
     try {
       const body =
         action === "move" ? { action, ids, folder: targetFolder } : action === "delete" ? { action, ids } : { action: "share", ids, shareDisabled: action === "share-off" };
-      await api("/api/videos/bulk", { method: "POST", body: JSON.stringify(body) });
+      const { missing } = await api<{ done: number; missing: string[] }>("/api/videos/bulk", { method: "POST", body: JSON.stringify(body) });
       await refetch();
+      // Videos deleted elsewhere since the page loaded are skipped by the server; say so rather than pretend.
+      if (missing.length) setBulkErr(`${missing.length} of the selected ${missing.length === 1 ? "video was" : "videos were"} no longer there and ${missing.length === 1 ? "was" : "were"} skipped.`);
       stopSelecting();
     } catch (e) {
       setBulkErr(e instanceof Error ? e.message : "Could not update the videos");
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
@@ -147,16 +151,16 @@ function VideosInner() {
               <button type="button" onClick={() => setSelected(new Set(videos.map((v) => v.id)))} className="text-xs text-brand-700 hover:underline">
                 Select all shown
               </button>
-              <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => bulk("move")} disabled={!selected.size || busy}>
+              <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => bulk("move")} disabled={!selected.size || busy !== null} loading={busy === "move"}>
                 <FolderInput className="h-3.5 w-3.5" /> Move to folder
               </Button>
-              <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => bulk("share-off")} disabled={!selected.size || busy} title="The share pages and embeds of the selected videos answer “not found” until turned back on">
+              <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => bulk("share-off")} disabled={!selected.size || busy !== null} loading={busy === "share-off"} title="The share pages and embeds of the selected videos answer “not found” until turned back on">
                 <Link2Off className="h-3.5 w-3.5" /> Links off
               </Button>
-              <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => bulk("share-on")} disabled={!selected.size || busy} title="Turn the share links of the selected videos back on">
+              <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => bulk("share-on")} disabled={!selected.size || busy !== null} loading={busy === "share-on"} title="Turn the share links of the selected videos back on. A password or expiry set on a video stays in place.">
                 <Link2 className="h-3.5 w-3.5" /> Links on
               </Button>
-              <Button variant="danger" className="px-2.5 py-1 text-xs" onClick={() => bulk("delete")} disabled={!selected.size || busy} loading={busy}>
+              <Button variant="danger" className="px-2.5 py-1 text-xs" onClick={() => bulk("delete")} disabled={!selected.size || busy !== null} loading={busy === "delete"}>
                 <Trash2 className="h-3.5 w-3.5" /> Delete
               </Button>
               <button type="button" onClick={stopSelecting} aria-label="Done selecting" className="rounded p-1 text-slate-500 hover:bg-slate-100">

@@ -118,6 +118,9 @@ export type WatchQuarter = 25 | 50 | 75 | 100;
 export type WatchCounts = { q25: number; q50: number; q75: number; q100: number };
 export const EMPTY_WATCH: WatchCounts = { q25: 0, q50: 0, q75: 0, q100: 0 };
 
+/** How long a trashed video can be restored before it is deleted for good. */
+export const TRASH_RETENTION_DAYS = 30;
+
 export interface Video extends VideoRequest {
   id: string;
   status: VideoStatus;
@@ -131,6 +134,8 @@ export interface Video extends VideoRequest {
   folder?: string;
   /** Id of the failed render this one was retried from. */
   retryOf?: string;
+  /** Set while the video sits in the trash; it is deleted for good `TRASH_RETENTION_DAYS` later unless restored. */
+  deletedAt?: string;
   /** Share page offers a download link when true (off by default). */
   shareDownload?: boolean;
   /** The share page, its captions, and the beacons answer "not found" while true. */

@@ -817,14 +817,44 @@ test("library multi-select moves and deletes videos in bulk", async ({ page }) =
   await expect(badgeOn(b.id)).toContainText("Link off");
   expect((await page.request.get(`/share/${a.id}`)).status()).toBe(200);
 
+  // Delete moves to the trash: gone from the library, 404 to the public, still the owner's to restore.
   await page.getByRole("button", { name: "Select" }).click();
   await page.getByRole("button", { name: `Select Bulk two ${tag}` }).click();
   await page.getByRole("button", { name: "Delete" }).click();
   await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+  await expect(page.locator(`a[href="/videos/${b.id}"]`)).toHaveCount(0);
+  const trashedB = (await (await page.request.get(`/api/videos/${b.id}`)).json()).video;
+  expect(typeof trashedB.deletedAt).toBe("string");
+  expect((await page.request.get(`/share/${b.id}`)).status()).toBe(404);
+  expect((await page.request.post(`/api/videos/${b.id}/view`)).status()).toBe(404);
+  expect((await page.request.get(`/api/videos/${a.id}`)).status()).toBe(200);
+  // The trash view lists it with the days left, and Restore brings it back to the library.
+  await page.getByTestId("trash-toggle").click();
+  await expect(page.getByTestId("trash-toggle")).toContainText(/Trash \(\d+\)/);
+  const trashCard = page.locator(`a[href="/videos/${b.id}"]`);
+  await expect(trashCard.getByTestId("trash-badge")).toContainText("30 days left");
+  await expect(page.locator(`a[href="/videos/${a.id}"]`)).toHaveCount(0);
+  await page.getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: `Select Bulk two ${tag}` }).click();
+  await page.getByRole("button", { name: "Restore" }).click();
+  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+  await expect(trashCard).toHaveCount(0);
+  expect((await (await page.request.get(`/api/videos/${b.id}`)).json()).video.deletedAt).toBeUndefined();
+  // Its own share switch is still off from above; once that is on again the public page is back.
+  expect((await page.request.patch(`/api/videos/${b.id}`, { data: { shareDisabled: false } })).status()).toBe(200);
+  expect((await page.request.get(`/share/${b.id}`)).status()).toBe(200);
+  // From the video page: trash, see the banner, delete for good.
+  expect((await page.request.delete(`/api/videos/${b.id}`)).status()).toBe(200);
+  await page.goto(`/videos/${b.id}`);
+  await expect(page.getByTestId("trash-banner")).toContainText("in the trash");
+  await page.getByRole("button", { name: "Delete forever" }).click();
+  await expect(page).toHaveURL(/\/videos$/);
   expect((await page.request.get(`/api/videos/${b.id}`)).status()).toBe(404);
+  // Purging only reaches the trash; a live video is reported, not deleted.
+  expect(await (await page.request.post("/api/videos/bulk", { data: { action: "purge", ids: [a.id] } })).json()).toEqual({ done: 0, missing: [a.id] });
   expect((await page.request.get(`/api/videos/${a.id}`)).status()).toBe(200);
   expect((await page.request.post("/api/videos/bulk", { data: { action: "move", ids: [] } })).status()).toBe(400);
-  expect(dialogs).toEqual(["Folder name (leave empty to move to Unfiled)", "Delete 1 video? This cannot be undone."]);
+  expect(dialogs).toEqual(["Folder name (leave empty to move to Unfiled)", "Move 1 video to the trash? You can restore them for 30 days.", "Delete this video for good? This cannot be undone."]);
 });
 
 test("webhook settings reject private hosts and show the signing secret", async ({ page }) => {

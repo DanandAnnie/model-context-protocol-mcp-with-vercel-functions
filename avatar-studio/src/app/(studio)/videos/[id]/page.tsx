@@ -2,12 +2,12 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import { ArrowLeft, Captions, Check, Clock, Code2, Copy, Download, Eye, FolderOpen, Languages, LayoutTemplate, Link2, Lock, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { ArchiveRestore, ArrowLeft, Captions, Check, Clock, Code2, Copy, Download, Eye, FolderOpen, Languages, LayoutTemplate, Link2, Lock, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge, inputClass } from "@/components/ui";
 import { ViewSparkline } from "@/components/ViewSparkline";
 import { useApi } from "@/hooks/useApi";
-import { ApiError, api, formatDate, formatSeconds, isDarkHex, posterUrl, shareExpired } from "@/lib/client";
-import type { Video } from "@/lib/types";
+import { ApiError, api, formatDate, formatSeconds, isDarkHex, posterUrl, purgeAt, shareExpired } from "@/lib/client";
+import { TRASH_RETENTION_DAYS, type Video } from "@/lib/types";
 
 export default function VideoDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -291,15 +291,30 @@ export default function VideoDetailPage() {
     }
   }
 
-  async function remove() {
-    if (!video || !confirm("Delete this video? This cannot be undone.")) return;
+  async function remove(permanent = false) {
+    if (!video) return;
+    if (!confirm(permanent ? "Delete this video for good? This cannot be undone." : `Move this video to the trash? You can restore it for ${TRASH_RETENTION_DAYS} days.`)) return;
     setDeleting(true);
     try {
-      await api(`/api/videos/${video.id}`, { method: "DELETE" });
+      await api(`/api/videos/${video.id}${permanent ? "?permanent=true" : ""}`, { method: "DELETE" });
       router.push("/videos");
     } catch (e) {
       setRenameErr(e instanceof Error ? e.message : "Could not delete the video");
       setDeleting(false);
+    }
+  }
+
+  const [restoring, setRestoring] = useState(false);
+  async function restore() {
+    if (!video) return;
+    setRestoring(true);
+    try {
+      const { video: back } = await api<{ video: Video }>(`/api/videos/${video.id}/restore`, { method: "POST" });
+      setData({ video: back });
+    } catch (e) {
+      setRenameErr(e instanceof Error ? e.message : "Could not restore the video");
+    } finally {
+      setRestoring(false);
     }
   }
 
@@ -309,6 +324,21 @@ export default function VideoDetailPage() {
         <ArrowLeft className="h-4 w-4" /> All videos
       </Link>
       <ErrorBanner message={error ?? renameErr ?? folderErr} />
+      {video?.deletedAt && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900" data-testid="trash-banner" role="status">
+          <span>
+            This video is in the trash. Its share link is off and it will be deleted for good on {formatDate(purgeAt(video)!)} unless you restore it.
+          </span>
+          <span className="flex gap-2">
+            <Button variant="secondary" className="px-3 py-1.5 text-xs" onClick={restore} loading={restoring}>
+              <ArchiveRestore className="h-3.5 w-3.5" /> Restore
+            </Button>
+            <Button variant="danger" className="px-3 py-1.5 text-xs" onClick={() => remove(true)} loading={deleting}>
+              <Trash2 className="h-3.5 w-3.5" /> Delete forever
+            </Button>
+          </span>
+        </div>
+      )}
       {loading || !video ? (
         <Skeleton className="aspect-video w-full" />
       ) : (
@@ -459,9 +489,11 @@ export default function VideoDetailPage() {
                   </Button>
                 )}
                 {templateErr && <span className="text-xs text-rose-600">{templateErr}</span>}
-                <Button variant="danger" onClick={remove} loading={deleting}>
-                  <Trash2 className="h-4 w-4" /> Delete
-                </Button>
+                {!video.deletedAt && (
+                  <Button variant="danger" onClick={() => remove()} loading={deleting} title={`Moves the video to the trash, where it can be restored for ${TRASH_RETENTION_DAYS} days`}>
+                    <Trash2 className="h-4 w-4" /> Delete
+                  </Button>
+                )}
               </div>
             }
           />

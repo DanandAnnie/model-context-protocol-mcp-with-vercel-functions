@@ -3,7 +3,7 @@ import { z } from "zod";
 import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import { getStore } from "../store";
-import { EMPTY_WATCH, MAX_SCENES } from "../types";
+import { EMPTY_WATCH, MAX_SCENES, TRASH_RETENTION_DAYS } from "../types";
 import type { Avatar, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
 import type { AvatarProvider, RenderCast } from "../providers/types";
 import { LOCAL_OWNER } from "../owner-id";
@@ -194,10 +194,39 @@ function prepareOnce(provider: AvatarProvider, avatar: Avatar): Promise<Avatar> 
   return run;
 }
 
-export async function listVideos(ownerId: string = LOCAL_OWNER, refresh = true): Promise<Video[]> {
+/** True once a trashed video has sat in the trash for the whole retention period. */
+function purgeDue(video: Video, now: number): boolean {
+  return !!video.deletedAt && Date.parse(video.deletedAt) + TRASH_RETENTION_DAYS * 86_400_000 <= now;
+}
+
+/** Removes a video and its side records for good. */
+async function purgeVideo(id: string): Promise<void> {
+  await getStore().remove("video", id);
+  await clearShareLock(id);
+  await clearCover(id);
+}
+
+/**
+ * The owner's videos split into the library and the trash, newest first (the trash by deletion
+ * time). Trashed videos past the retention period are deleted for good on the way, so the trash
+ * empties itself without a scheduler.
+ */
+async function loadVideos(ownerId: string): Promise<{ live: Video[]; trashed: Video[] }> {
   const videos = await getStore().list<Video>("video", ownerId);
-  videos.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  if (!refresh) return videos;
+  const now = Date.now();
+  const expired = videos.filter((v) => purgeDue(v, now));
+  for (const v of expired) await purgeVideo(v.id);
+  const kept = expired.length ? videos.filter((v) => !purgeDue(v, now)) : videos;
+  const live = kept.filter((v) => !v.deletedAt).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const trashed = kept.filter((v) => !!v.deletedAt).sort((a, b) => b.deletedAt!.localeCompare(a.deletedAt!) || b.createdAt.localeCompare(a.createdAt));
+  return { live, trashed };
+}
+
+/** The owner's library (or, with `trash`, the trash), newest first. See `loadVideos` for the purge. */
+export async function listVideos(ownerId: string = LOCAL_OWNER, refresh = true, trash = false): Promise<Video[]> {
+  const { live, trashed } = await loadVideos(ownerId);
+  const videos = trash ? trashed : live;
+  if (!refresh || trash) return videos;
   const now = Date.now();
   const pending = videos.filter((v) => isPending(v) && !isRefreshDeferred(v.id, now)).slice(0, REFRESH_PER_LIST);
   if (pending.length === 0) return videos;
@@ -466,27 +495,34 @@ export function recordCtaClick(id: string, gate: () => boolean = () => true, sha
 }
 
 export const bulkVideoSchema = z.discriminatedUnion("action", [
+  /** Move to the trash (restorable for `TRASH_RETENTION_DAYS`). */
   z.object({ action: z.literal("delete"), ids: z.array(z.string().min(1)).min(1).max(200) }),
+  /** Bring trashed videos back to the library. */
+  z.object({ action: z.literal("restore"), ids: z.array(z.string().min(1)).min(1).max(200) }),
+  /** Delete trashed videos for good; a video that is not in the trash is reported as missing. */
+  z.object({ action: z.literal("purge"), ids: z.array(z.string().min(1)).min(1).max(200) }),
   z.object({ action: z.literal("move"), ids: z.array(z.string().min(1)).min(1).max(200), folder: z.string().trim().max(MAX_FOLDER_NAME) }),
   /** Switch the share links of many videos off (`shareDisabled: true`) or back on. */
   z.object({ action: z.literal("share"), ids: z.array(z.string().min(1)).min(1).max(200), shareDisabled: z.boolean() }),
 ]);
 
-/** Delete, move, or switch the share links of many videos at once. Ids that are missing or belong to someone else are reported, not failed. */
+/**
+ * Trash, restore, purge, move, or switch the share links of many videos at once. Ids that are
+ * missing or belong to someone else are reported, not failed; so is a purge of a video that is
+ * not in the trash, since deleting for good is only offered from there.
+ */
 export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId: string = LOCAL_OWNER): Promise<{ done: number; missing: string[] }> {
   const missing: string[] = [];
   let done = 0;
   for (const id of Array.from(new Set(input.ids))) {
     const existing = await getStore().get<Video>("video", id);
-    if (!existing || (existing.ownerId ?? LOCAL_OWNER) !== ownerId) {
+    if (!existing || (existing.ownerId ?? LOCAL_OWNER) !== ownerId || (input.action === "purge" && !existing.deletedAt)) {
       missing.push(id);
       continue;
     }
-    if (input.action === "delete") {
-      await getStore().remove("video", id);
-      await clearShareLock(id);
-      await clearCover(id);
-    }
+    if (input.action === "delete") await deleteVideo(id, ownerId);
+    else if (input.action === "restore") await restoreVideo(id, ownerId);
+    else if (input.action === "purge") await purgeVideo(id);
     else if (input.action === "move") await updateVideo(id, { folder: input.folder }, ownerId);
     else await updateVideo(id, { shareDisabled: input.shareDisabled }, ownerId);
     done += 1;
@@ -501,6 +537,7 @@ export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId
 export async function retryVideo(id: string, ownerId: string = LOCAL_OWNER): Promise<Video> {
   const failed = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
   if (failed.status !== "failed") throw new ConflictError("Only failed renders can be retried");
+  if (failed.deletedAt) throw new ConflictError("Restore the video from the trash before retrying it");
   const req: VideoRequest = {
     title: failed.title,
     script: failed.script,
@@ -517,11 +554,25 @@ export async function retryVideo(id: string, ownerId: string = LOCAL_OWNER): Pro
   return createVideo(req, ownerId, undefined, false, { folder: failed.folder, batchId: failed.batchId, rowLabel: failed.rowLabel, retryOf: failed.id });
 }
 
-export async function deleteVideo(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
-  owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
-  await getStore().remove("video", id);
-  await clearShareLock(id);
-  await clearCover(id);
+/**
+ * Moves a video to the trash, where the public sees "not found" and the owner can restore it for
+ * `TRASH_RETENTION_DAYS`; with `permanent` it is deleted for good straight away, side records included.
+ * Trashing an already trashed video keeps its original deletion time.
+ */
+export async function deleteVideo(id: string, ownerId: string = LOCAL_OWNER, permanent = false): Promise<void> {
+  const video = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
+  if (permanent) return purgeVideo(id);
+  if (video.deletedAt) return;
+  await putKeepingCounters({ ...video, deletedAt: nowIso(), updatedAt: nowIso() });
+}
+
+/** Brings a trashed video back to the library; a video that is not in the trash is returned as is. */
+export async function restoreVideo(id: string, ownerId: string = LOCAL_OWNER): Promise<Video> {
+  const video = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
+  if (!video.deletedAt) return video;
+  const { deletedAt: _gone, ...rest } = video;
+  void _gone;
+  return putKeepingCounters({ ...rest, updatedAt: nowIso() });
 }
 
 export async function applyAvatarWebhook(providerName: string, body: unknown): Promise<Video | null> {
@@ -553,6 +604,11 @@ export const videoQuerySchema = z.object({
   sort: z.enum(["newest", "oldest", "title", "views"]).default("newest"),
   /** Omit for every match (scripts); the library pages with it. */
   limit: z.coerce.number().int().min(1).max(200).optional(),
+  /** `true` lists the trash (newest deletion first) instead of the library. */
+  trash: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
 });
 export type VideoQuery = z.infer<typeof videoQuerySchema>;
 
@@ -567,6 +623,8 @@ export interface VideoPage {
   folders: string[];
   /** Renders still in flight, across the whole library. */
   rendering: number;
+  /** Videos in the trash, so the library can offer the view. */
+  trashed: number;
 }
 
 const SORTERS: Record<VideoQuery["sort"], (a: Video, b: Video) => number> = {
@@ -589,10 +647,16 @@ export function filterVideos(videos: Video[], query: VideoQuery): Video[] {
     .sort(SORTERS[query.sort]);
 }
 
-/** One page of the owner's library (in-flight renders refreshed first; see listVideos). */
+/**
+ * One page of the owner's library (in-flight renders refreshed first; see listVideos), or of the
+ * trash with `query.trash`, where `sort: "newest"` orders by deletion time.
+ */
 export async function queryVideos(ownerId: string = LOCAL_OWNER, query: VideoQuery): Promise<VideoPage> {
-  const all = await listVideos(ownerId);
-  const matched = filterVideos(all, query);
+  const all = await listVideos(ownerId, !query.trash, query.trash);
+  const trashed = query.trash ? all.length : (await listVideos(ownerId, false, true)).length;
+  const filtered = filterVideos(all, query);
+  // The trash reads newest deletion first; `filterVideos` sorted by creation, so put the deletion order back.
+  const matched = query.trash && query.sort === "newest" ? filtered.sort((a, b) => b.deletedAt!.localeCompare(a.deletedAt!) || b.createdAt.localeCompare(a.createdAt)) : filtered;
   const videos = query.limit ? matched.slice(0, query.limit) : matched;
   return {
     videos,
@@ -601,5 +665,6 @@ export async function queryVideos(ownerId: string = LOCAL_OWNER, query: VideoQue
     hasMore: videos.length < matched.length,
     folders: Array.from(new Set(all.map((v) => v.folder).filter((f): f is string => !!f))).sort(),
     rendering: all.filter((v) => v.status === "processing" || v.status === "queued").length,
+    trashed,
   };
 }

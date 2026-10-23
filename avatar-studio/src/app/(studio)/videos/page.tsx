@@ -2,20 +2,20 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { CheckSquare, Clapperboard, FolderInput, Link2, Link2Off, Trash2, X } from "lucide-react";
+import { ArchiveRestore, CheckSquare, Clapperboard, FolderInput, Link2, Link2Off, Trash2, X } from "lucide-react";
 import { api } from "@/lib/client";
 import { VideoCard } from "@/components/VideoCard";
 import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import type { VideoPage, VideoQuery } from "@/lib/services/videos";
-import type { VideoStatus } from "@/lib/types";
+import { TRASH_RETENTION_DAYS, type VideoStatus } from "@/lib/types";
 
 const STATUSES: Array<"all" | VideoStatus> = ["all", "processing", "completed", "failed"];
 type SortKey = VideoQuery["sort"];
 /** Cards per request; "Show more" asks for another page's worth. */
 const PAGE = 48;
 
-type BulkAction = "delete" | "move" | "share-off" | "share-on";
+type BulkAction = "delete" | "move" | "share-off" | "share-on" | "restore" | "purge";
 
 export default function VideosPage() {
   return (
@@ -35,6 +35,8 @@ function VideosInner() {
   const [status, setStatus] = useState<"all" | VideoStatus>("all");
   const [folder, setFolder] = useState<string>("all"); // "all" | "unfiled" | folder name
   const [sort, setSort] = useState<SortKey>("newest");
+  // The trash is its own view of the same page: same search, status, and folder filters, different bulk actions.
+  const [trash, setTrash] = useState(false);
   // Search as you type, one request per pause rather than per keystroke.
   useEffect(() => {
     const t = setTimeout(() => setNeedle(q.trim()), 250);
@@ -42,7 +44,7 @@ function VideosInner() {
   }, [q]);
   // "Show more" extends the page for the current filters only: a new filter starts again
   // from the first page in the same render, with no extra request for the old extent.
-  const filterKey = [needle, status, folder, batch ?? "", sort].join("\u0000");
+  const filterKey = [needle, status, folder, batch ?? "", sort, trash ? "trash" : ""].join("\u0000");
   const [extent, setExtent] = useState({ key: filterKey, limit: PAGE });
   const limit = extent.key === filterKey ? extent.limit : PAGE;
   const path = useMemo(() => {
@@ -53,13 +55,15 @@ function VideosInner() {
     else if (folder !== "all") params.set("folder", folder);
     if (batch) params.set("batch", batch);
     if (sort !== "newest") params.set("sort", sort);
+    if (trash) params.set("trash", "true");
     return `/api/videos?${params}`;
-  }, [limit, needle, status, folder, batch, sort]);
+  }, [limit, needle, status, folder, batch, sort, trash]);
   // The filtering, sorting, and paging happen on the server; the page only holds what it shows.
   const { data, loading, error, refetch } = useApi<VideoPage>(path, { pollMs: 6000, pollWhile: (d) => d.rendering > 0 });
   const videos = data?.videos ?? [];
   const folders = data?.folders ?? [];
-  const hasAny = (data?.total ?? 0) > 0;
+  const hasAny = (data?.total ?? 0) > 0 || (data?.trashed ?? 0) > 0;
+  const trashed = data?.trashed ?? 0;
   const remaining = data ? data.matched - videos.length : 0;
 
   // Multi-select: move the chosen videos to a folder or delete them in one request.
@@ -80,7 +84,7 @@ function VideosInner() {
     setSelected(new Set());
   }
   // A new filter hides cards; drop the selection so bulk actions only ever touch what is visible.
-  useEffect(() => setSelected(new Set()), [q, status, folder, batch]);
+  useEffect(() => setSelected(new Set()), [q, status, folder, batch, trash]);
   async function bulk(action: BulkAction) {
     const ids = Array.from(selected);
     if (!ids.length) return;
@@ -89,14 +93,16 @@ function VideosInner() {
       const answer = window.prompt("Folder name (leave empty to move to Unfiled)", "");
       if (answer === null) return;
       targetFolder = answer;
-    } else if (action === "delete" && !window.confirm(`Delete ${ids.length} ${ids.length === 1 ? "video" : "videos"}? This cannot be undone.`)) {
+    } else if (action === "delete" && !window.confirm(`Move ${ids.length} ${ids.length === 1 ? "video" : "videos"} to the trash? You can restore them for ${TRASH_RETENTION_DAYS} days.`)) {
+      return;
+    } else if (action === "purge" && !window.confirm(`Delete ${ids.length} ${ids.length === 1 ? "video" : "videos"} for good? This cannot be undone.`)) {
       return;
     }
     setBusy(action);
     setBulkErr(null);
     try {
       const body =
-        action === "move" ? { action, ids, folder: targetFolder } : action === "delete" ? { action, ids } : { action: "share", ids, shareDisabled: action === "share-off" };
+        action === "move" ? { action, ids, folder: targetFolder } : action === "share-off" || action === "share-on" ? { action: "share", ids, shareDisabled: action === "share-off" } : { action, ids };
       const { missing } = await api<{ done: number; missing: string[] }>("/api/videos/bulk", { method: "POST", body: JSON.stringify(body) });
       await refetch();
       // Videos deleted elsewhere since the page loaded are skipped by the server; say so rather than pretend.
@@ -104,7 +110,7 @@ function VideosInner() {
       if (missing.length) {
         const which = ids.length === 1 ? "The selected video" : `${missing.length} of the ${ids.length} selected videos`;
         const verb = missing.length === 1 ? "was" : "were";
-        setBulkErr(action === "delete" ? `${which} had already been deleted.` : `${which} ${verb} no longer there and ${verb} skipped.`);
+        setBulkErr(action === "delete" || action === "purge" ? `${which} had already been deleted.` : `${which} ${verb} no longer there and ${verb} skipped.`);
       }
       stopSelecting();
     } catch (e) {
@@ -156,6 +162,17 @@ function VideosInner() {
               <button type="button" onClick={() => setSelected(new Set(videos.map((v) => v.id)))} disabled={busy !== null} className="text-xs text-brand-700 hover:underline disabled:opacity-50">
                 Select all shown
               </button>
+              {trash ? (
+                <>
+                  <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => bulk("restore")} disabled={!selected.size || busy !== null} loading={busy === "restore"}>
+                    <ArchiveRestore className="h-3.5 w-3.5" /> Restore
+                  </Button>
+                  <Button variant="danger" className="px-2.5 py-1 text-xs" onClick={() => bulk("purge")} disabled={!selected.size || busy !== null} loading={busy === "purge"}>
+                    <Trash2 className="h-3.5 w-3.5" /> Delete forever
+                  </Button>
+                </>
+              ) : (
+                <>
               <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => bulk("move")} disabled={!selected.size || busy !== null} loading={busy === "move"}>
                 <FolderInput className="h-3.5 w-3.5" /> Move to folder
               </Button>
@@ -165,9 +182,11 @@ function VideosInner() {
               <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => bulk("share-on")} disabled={!selected.size || busy !== null} loading={busy === "share-on"} title="Turn the share links of the selected videos back on. A password or expiry set on a video stays in place.">
                 <Link2 className="h-3.5 w-3.5" /> Links on
               </Button>
-              <Button variant="danger" className="px-2.5 py-1 text-xs" onClick={() => bulk("delete")} disabled={!selected.size || busy !== null} loading={busy === "delete"}>
+              <Button variant="danger" className="px-2.5 py-1 text-xs" onClick={() => bulk("delete")} disabled={!selected.size || busy !== null} loading={busy === "delete"} title={`Moves the selected videos to the trash, where they can be restored for ${TRASH_RETENTION_DAYS} days`}>
                 <Trash2 className="h-3.5 w-3.5" /> Delete
               </Button>
+                </>
+              )}
               <button type="button" onClick={stopSelecting} disabled={busy !== null} aria-label="Done selecting" className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-50">
                 <X className="h-4 w-4" />
               </button>
@@ -186,6 +205,16 @@ function VideosInner() {
               {s === "all" ? "All" : s[0].toUpperCase() + s.slice(1)}
             </button>
           ))}
+          <button
+            type="button"
+            onClick={() => setTrash((t) => !t)}
+            aria-pressed={trash}
+            data-testid="trash-toggle"
+            title={`Videos you deleted; each is removed for good ${TRASH_RETENTION_DAYS} days after it was trashed`}
+            className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium ${trash ? "bg-rose-700 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
+          >
+            <Trash2 className="h-3 w-3" /> Trash{trashed ? ` (${trashed})` : ""}
+          </button>
           <select aria-label="Sort videos" value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className="ml-auto rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700">
             <option value="newest">Newest first</option>
             <option value="oldest">Oldest first</option>
@@ -202,9 +231,9 @@ function VideosInner() {
         </div>
       ) : videos.length === 0 ? (
         <EmptyState
-          icon={<Clapperboard className="h-8 w-8" />}
-          title={hasAny ? "No videos match" : "No videos yet"}
-          body={hasAny ? "Try a different search, status, or folder." : "Your rendered videos will show up here."}
+          icon={trash ? <Trash2 className="h-8 w-8" /> : <Clapperboard className="h-8 w-8" />}
+          title={trash ? (trashed ? "No trashed videos match" : "The trash is empty") : hasAny ? "No videos match" : "No videos yet"}
+          body={trash ? `Deleted videos wait here for ${TRASH_RETENTION_DAYS} days before they are removed for good.` : hasAny ? "Try a different search, status, or folder." : "Your rendered videos will show up here."}
         />
       ) : (
         <>

@@ -41,7 +41,7 @@ export function bumpViewsByDay(existing: Record<string, number> | undefined, now
   const today = dayKey(now);
   const oldest = dayKey(now - (VIEW_HISTORY_DAYS - 1) * DAY_MS);
   const next: Record<string, number> = {};
-  for (const [day, n] of Object.entries(existing ?? {})) if (day >= oldest && day !== today && n > 0) next[day] = n;
+  for (const [day, n] of Object.entries(existing ?? {})) if (/^\d{4}-\d{2}-\d{2}$/.test(day) && day >= oldest && day !== today && n > 0) next[day] = n;
   next[today] = (existing?.[today] ?? 0) + 1;
   return next;
 }

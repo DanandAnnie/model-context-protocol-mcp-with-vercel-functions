@@ -1,4 +1,5 @@
 // Browser-side helpers for calling the app's own API.
+import { TRASH_RETENTION_DAYS } from "./types";
 export class ApiError extends Error {
   /** `body` is the parsed error response, for routes that return a record alongside the error (e.g. a failed render). */
   constructor(message: string, public status: number, public issues?: unknown, public body?: Record<string, unknown>) {
@@ -43,9 +44,20 @@ export function shareExpired(video: { shareExpiresAt?: string }, now = Date.now(
   return !!video.shareExpiresAt && Date.parse(video.shareExpiresAt) <= now;
 }
 
-/** True while the public should see "not found": the owner switched the link off, or it expired. */
-export function shareOffline(video: { shareDisabled?: boolean; shareExpiresAt?: string }, now = Date.now()): boolean {
-  return !!video.shareDisabled || shareExpired(video, now);
+/** True while the public should see "not found": the owner switched the link off, it expired, or the video is in the trash. */
+export function shareOffline(video: { shareDisabled?: boolean; shareExpiresAt?: string; deletedAt?: string }, now = Date.now()): boolean {
+  return !!video.shareDisabled || !!video.deletedAt || shareExpired(video, now);
+}
+
+/** When a trashed video is deleted for good, as an ISO instant; undefined for a video that is not in the trash. */
+export function purgeAt(video: { deletedAt?: string }): string | undefined {
+  return video.deletedAt ? new Date(Date.parse(video.deletedAt) + TRASH_RETENTION_DAYS * 86_400_000).toISOString() : undefined;
+}
+
+/** Whole days until a trashed video is deleted for good (never below zero). */
+export function daysUntilPurge(video: { deletedAt?: string }, now = Date.now()): number {
+  const at = purgeAt(video);
+  return at ? Math.max(0, Math.ceil((Date.parse(at) - now) / 86_400_000)) : 0;
 }
 
 export function formatDate(iso: string): string {

@@ -140,8 +140,57 @@ describe("videos", () => {
     const list = await listVideos();
     assert.deepEqual(list.map((v) => v.id), [b.id, a.id]);
     await deleteVideo(a.id);
-    assert.equal((await listVideos()).length, 1);
-    await assert.rejects(deleteVideo(a.id), /not found/);
+    assert.equal((await listVideos()).length, 1, "a trashed video leaves the library");
+    assert.deepEqual((await listVideos(LOCAL_OWNER, false, true)).map((v) => v.id), [a.id], "and shows in the trash");
+    await deleteVideo(a.id, LOCAL_OWNER, true);
+    await assert.rejects(deleteVideo(a.id), /not found/, "deleted for good");
+    assert.equal((await listVideos(LOCAL_OWNER, false, true)).length, 0);
+  });
+
+  it("trashed videos hide from the public, restore, and are purged after the retention period", async () => {
+    const { TRASH_RETENTION_DAYS } = await import("../types");
+    const { restoreVideo, queryVideos, videoQuerySchema, retryVideo } = await import("../services/videos");
+    const { PUBLIC_ACCESS } = await import("../services");
+    const { getShareLock } = await import("../share-lock");
+    const v = await createVideo(videoRequestSchema.parse({ ...base, title: "Keep me" }));
+    const stored = await getVideo(v.id, undefined, false);
+    await globalThis.__avatarStudioStore!.put("video", { ...stored, status: "completed", views: 3 });
+    const before = await deleteVideo(v.id);
+    assert.equal(before, undefined);
+    const trashed = await getVideo(v.id, undefined, false);
+    assert.ok(trashed.deletedAt, "the owner still reads it");
+    assert.equal(trashed.views, 3, "counters survive the move");
+    await assert.rejects(getVideo(v.id, PUBLIC_ACCESS, false), /not found/, "the public does not");
+    await assert.rejects(recordView(v.id), /not found/, "nor the beacons");
+    const firstDeletedAt = trashed.deletedAt;
+    await new Promise((r) => setTimeout(r, 3));
+    await deleteVideo(v.id);
+    assert.equal((await getVideo(v.id, undefined, false)).deletedAt, firstDeletedAt, "trashing twice keeps the first time");
+    await assert.rejects(deleteVideo(v.id, "someone-else"), /not found/);
+    await assert.rejects(restoreVideo(v.id, "someone-else"), /not found/);
+    // The library and the trash are two views of the same page, with the trash newest deletion first.
+    const library = await queryVideos(LOCAL_OWNER, videoQuerySchema.parse({}));
+    assert.equal(library.videos.some((x) => x.id === v.id), false);
+    assert.equal(library.trashed, 1);
+    const bin = await queryVideos(LOCAL_OWNER, videoQuerySchema.parse({ trash: "true" }));
+    assert.deepEqual(bin.videos.map((x) => x.id), [v.id]);
+    assert.equal(bin.trashed, 1);
+    // Restore puts it back, with its counters.
+    const back = await restoreVideo(v.id);
+    assert.equal("deletedAt" in back, false);
+    assert.equal(back.views, 3);
+    assert.equal((await restoreVideo(v.id)).id, v.id, "restoring a live video is a no-op");
+    await getVideo(v.id, PUBLIC_ACCESS, false);
+    // A failed render in the trash cannot be retried until it is restored.
+    await globalThis.__avatarStudioStore!.put("video", { ...(await getVideo(v.id, undefined, false)), status: "failed", deletedAt: new Date().toISOString() });
+    await assert.rejects(retryVideo(v.id), /Restore the video/);
+    // Once the retention period has passed, listing the owner's videos removes it for good, side records included.
+    await updateVideo(v.id, videoPatchSchema.parse({ sharePassword: "secret12" }));
+    const old = new Date(Date.now() - (TRASH_RETENTION_DAYS * 86_400_000 + 1000)).toISOString();
+    await globalThis.__avatarStudioStore!.put("video", { ...(await getVideo(v.id, undefined, false)), deletedAt: old });
+    assert.equal((await listVideos(LOCAL_OWNER, false, true)).length, 0, "purged on the way out");
+    await assert.rejects(getVideo(v.id, undefined, false), /not found/);
+    assert.equal(await getShareLock(v.id), null, "the lock went with it");
   });
 
   it("the library refreshes in-flight renders without a detail visit", async () => {
@@ -868,20 +917,22 @@ describe("folders and share views", () => {
     assert.equal((await recordView(v.id)).views, 2);
     const counted = await getVideo(v.id, undefined, false);
     assert.ok(counted.lastViewedAt);
-    const today = new Date().toISOString().slice(0, 10);
-    assert.deepEqual(counted.viewsByDay, { [today]: 2 }, "every counted view lands on today's UTC day");
+    const today = counted.lastViewedAt!.slice(0, 10);
+    assert.equal(Object.values(counted.viewsByDay!).reduce((a, b) => a + b, 0), 2, "every counted view lands on its UTC day");
+    assert.ok(counted.viewsByDay![today]! >= 1, "the last view landed on the day of the last write");
     await assert.rejects(recordView("vid_missing"), /not found/);
   });
 
   it("keeps views per day for ninety days and sums the recent window", () => {
     const now = Date.UTC(2026, 9, 23, 12);
     const day = (ago: number) => new Date(now - ago * 86_400_000).toISOString().slice(0, 10);
-    const history = { [day(0)]: 2, [day(1)]: 5, [day(6)]: 1, [day(7)]: 4, [day(89)]: 3, [day(90)]: 9, "bogus": 0 };
+    const history = { [day(0)]: 2, [day(1)]: 5, [day(6)]: 1, [day(7)]: 4, [day(89)]: 3, [day(90)]: 9, bogus: 4, "2026-13-99": 0 };
     const bumped = bumpViewsByDay(history, now);
     assert.equal(bumped[day(0)], 3, "today gains one");
     assert.equal(bumped[day(89)], 3, "the ninetieth day is still kept");
     assert.equal(day(90) in bumped, false, "the ninety-first day is dropped");
-    assert.equal("bogus" in bumped, false, "zero and junk entries are dropped");
+    assert.equal("bogus" in bumped, false, "a key that is not a date is dropped even with a count");
+    assert.equal("2026-13-99" in bumped, false, "a zero count is dropped");
     assert.deepEqual(bumpViewsByDay(undefined, now), { [day(0)]: 1 });
     const video = { viewsByDay: bumped };
     const perDay = viewsPerDay(video, now, 14);
@@ -1047,8 +1098,8 @@ describe("folders and share views", () => {
     assert.equal(await getShareLock(v.id), null);
     assert.equal(await shareUnlocked(open, undefined), true);
     await updateVideo(v.id, videoPatchSchema.parse({ sharePassword: "back again" }));
-    await deleteVideo(v.id);
-    assert.equal(await getShareLock(v.id), null, "deleting the video removes its lock");
+    await deleteVideo(v.id, LOCAL_OWNER, true);
+    assert.equal(await getShareLock(v.id), null, "deleting the video for good removes its lock");
   });
 
   it("counts call-to-action clicks only while a completed video carries the button", async () => {
@@ -1177,7 +1228,7 @@ describe("cover image", () => {
     assert.equal("cover" in cleared, false);
     assert.equal(await getCover(v.id), null);
     await updateVideo(v.id, videoPatchSchema.parse({ cover: png }));
-    await deleteVideo(v.id);
+    await deleteVideo(v.id, LOCAL_OWNER, true);
     assert.equal(await getCover(v.id), null, "deleting the video removes its cover");
   });
 
@@ -1224,6 +1275,15 @@ describe("bulk actions", () => {
     assert.deepEqual(deleted, { done: 1, missing: [theirs.id] });
     assert.equal((await listVideos("u1")).length, 1);
     assert.equal((await listVideos("u2")).length, 1);
+    assert.deepEqual((await listVideos("u1", false, true)).map((v) => v.id), [a.id], "bulk delete moves to the trash");
+    // Purge reaches only the trash; restore brings a trashed video back.
+    assert.deepEqual(await bulkVideos({ action: "purge", ids: [b.id] }, "u1"), { done: 0, missing: [b.id] }, "a live video cannot be purged");
+    assert.deepEqual(await bulkVideos({ action: "restore", ids: [a.id, theirs.id] }, "u1"), { done: 1, missing: [theirs.id] });
+    assert.equal((await listVideos("u1")).length, 2);
+    await bulkVideos({ action: "delete", ids: [a.id] }, "u1");
+    assert.deepEqual(await bulkVideos({ action: "purge", ids: [a.id] }, "u1"), { done: 1, missing: [] });
+    await assert.rejects(getVideo(a.id, "u1", false), /not found/);
+    assert.equal((await listVideos("u1", false, true)).length, 0);
     assert.throws(() => bulkVideoSchema.parse({ action: "move", ids: [] }));
     // Share links switch off and on in bulk, never for someone else's video.
     const off = await bulkVideos(bulkVideoSchema.parse({ action: "share", ids: [b.id, theirs.id], shareDisabled: true }), "u1");

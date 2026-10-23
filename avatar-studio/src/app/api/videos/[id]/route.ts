@@ -26,10 +26,12 @@ export async function PATCH(req: Request, ctx: Ctx) {
   }
 }
 
-export async function DELETE(_req: Request, ctx: Ctx) {
+/** Moves the video to the trash; `?permanent=true` deletes it for good. */
+export async function DELETE(req: Request, ctx: Ctx) {
   try {
     const { id } = await ctx.params;
-    await deleteVideo(id, await requireOwner());
+    const permanent = new URL(req.url).searchParams.get("permanent") === "true";
+    await deleteVideo(id, await requireOwner(), permanent);
     return json({ ok: true });
   } catch (err) {
     return errorResponse(err);

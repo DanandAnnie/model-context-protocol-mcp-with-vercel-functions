@@ -64,6 +64,7 @@ export async function shareVideoByEmail(
 ): Promise<ShareEmailResult> {
   const video = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
   if (video.status !== "completed") throw new ConflictError("Only a finished video can be shared");
+  if (video.deletedAt) throw new ConflictError("The video is in the trash; restore it before sending");
   if (shareOffline(video)) throw new ConflictError("The share link is off or expired; turn it on before sending");
   const to = [...new Set(input.to)];
   const sender = reserveRateLimit(`share-email:sender:${context.senderId ?? ownerId}`, to.length, SHARE_EMAILS_PER_HOUR, HOUR_MS);

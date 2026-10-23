@@ -84,10 +84,21 @@ export interface Background {
   value: string;
 }
 
+/** Where the presenter sits in the frame: `scale` 0.5–1.5 (1 is the renderer's default size), `x` and `y` offsets of -1..1 as a share of the frame (0 is the default spot). */
+export interface SceneLayout {
+  scale: number;
+  x: number;
+  y: number;
+}
+
+export const DEFAULT_LAYOUT: SceneLayout = { scale: 1, x: 0, y: 0 };
+
 export interface Scene {
   /** Spoken text for this scene. */
   script: string;
   background: Background;
+  /** Presenter size and position for this scene; the renderer's default when absent. */
+  layout?: SceneLayout;
   /** Presenter for this scene; the video's avatar when absent. */
   avatarId?: string;
   /** Voice for this scene; the video's voice when absent. */

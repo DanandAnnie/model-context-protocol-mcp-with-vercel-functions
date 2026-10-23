@@ -18,6 +18,8 @@ import { shareOffline } from "../client";
 import { bumpViewsByDay } from "../insights";
 
 export const backgroundSchema = z.object({ type: z.enum(["color", "image"]), value: z.string().min(1) });
+/** Presenter size and position in the frame; see `SceneLayout`. */
+export const sceneLayoutSchema = z.object({ scale: z.number().min(0.5).max(1.5), x: z.number().min(-1).max(1), y: z.number().min(-1).max(1) });
 
 export const videoRequestSchema = z
   .object({
@@ -32,6 +34,7 @@ export const videoRequestSchema = z
           /** Presenter and voice for this scene; the video's when omitted. */
           avatarId: z.string().min(1).optional(),
           voiceId: z.string().min(1).optional(),
+          layout: sceneLayoutSchema.optional(),
         }),
       )
       .min(1)
@@ -201,9 +204,11 @@ function purgeDue(video: Video, now: number): boolean {
 
 /** Removes a video and its side records for good. */
 async function purgeVideo(id: string): Promise<void> {
-  await getStore().remove("video", id);
+  // Side records first and the video row last: a failure part-way leaves the video listed, so the
+  // next listing retries the whole purge (every remove is idempotent) instead of orphaning a record.
   await clearShareLock(id);
   await clearCover(id);
+  await getStore().remove("video", id);
 }
 
 /**
@@ -374,6 +379,8 @@ export const videoPatchSchema = z
 
 export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSchema>, ownerId: string = LOCAL_OWNER): Promise<Video> {
   const existing = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
+  // A trashed video past its retention is gone (see getVideo); writing it would only feed the purge.
+  if (purgeDue(existing, Date.now())) throw new NotFoundError(`Video ${id} not found`);
   const next: Video = { ...existing, updatedAt: nowIso() };
   if (patch.title !== undefined) next.title = patch.title;
   if (patch.folder !== undefined) {
@@ -547,7 +554,8 @@ export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId
   let done = 0;
   for (const id of Array.from(new Set(input.ids))) {
     const existing = await getStore().get<Video>("video", id);
-    if (!existing || (existing.ownerId ?? LOCAL_OWNER) !== ownerId || (input.action === "purge" && !existing.deletedAt)) {
+    // A trashed video past its retention is as good as gone, so it is reported rather than restored, moved, or written.
+    if (!existing || (existing.ownerId ?? LOCAL_OWNER) !== ownerId || (input.action === "purge" && !existing.deletedAt) || (input.action !== "purge" && purgeDue(existing, Date.now()))) {
       missing.push(id);
       continue;
     }
@@ -574,9 +582,19 @@ export const folderRenameSchema = z.object({
  */
 export async function renameFolder(input: z.infer<typeof folderRenameSchema>, ownerId: string = LOCAL_OWNER): Promise<{ moved: number }> {
   if (input.from === input.to) return { moved: 0 };
-  const videos = (await getStore().list<Video>("video", ownerId)).filter((v) => v.folder === input.from);
-  for (const v of videos) await updateVideo(v.id, { folder: input.to }, ownerId);
-  return { moved: videos.length };
+  const now = Date.now();
+  const videos = (await getStore().list<Video>("video", ownerId)).filter((v) => v.folder === input.from && !purgeDue(v, now));
+  let moved = 0;
+  for (const v of videos) {
+    try {
+      await updateVideo(v.id, { folder: input.to }, ownerId);
+      moved += 1;
+    } catch (err) {
+      // Deleted for good between the listing and its turn: nothing to rename, carry on with the rest.
+      if (!(err instanceof NotFoundError)) throw err;
+    }
+  }
+  return { moved };
 }
 
 /**
@@ -585,6 +603,7 @@ export async function renameFolder(input: z.infer<typeof folderRenameSchema>, ow
  */
 export async function retryVideo(id: string, ownerId: string = LOCAL_OWNER): Promise<Video> {
   const failed = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
+  if (purgeDue(failed, Date.now())) throw new NotFoundError(`Video ${id} not found`);
   if (failed.status !== "failed") throw new ConflictError("Only failed renders can be retried");
   if (failed.deletedAt) throw new ConflictError("Restore the video from the trash before retrying it");
   const req: VideoRequest = {

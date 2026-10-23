@@ -55,7 +55,8 @@ export class HeyGenAvatarProvider implements AvatarProvider {
         const sceneAvatar = (scene.avatarId && cast?.avatars[scene.avatarId]) || avatar;
         const sceneVoice = (scene.voiceId && cast?.voices[scene.voiceId]) || voice;
         return {
-          character: this.character(sceneAvatar),
+          // HeyGen places the presenter with a scale (1 = default) and an x/y offset of the frame.
+          character: { ...this.character(sceneAvatar), ...(scene.layout ? { scale: scene.layout.scale, offset: { x: scene.layout.x, y: scene.layout.y } } : {}) },
           voice: { type: "text", input_text: scene.script, voice_id: this.voiceId(sceneVoice, req.voiceId), speed: req.speed },
           background:
             scene.background.type === "image"

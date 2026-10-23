@@ -7,7 +7,7 @@ import type { Video, VideoTemplate } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { LimitError, NotFoundError, ValidationError } from "../errors";
 import { owned } from "./shared";
-import { backgroundSchema } from "./videos";
+import { backgroundSchema, sceneLayoutSchema } from "./videos";
 
 export const MAX_TEMPLATES = 50;
 
@@ -16,6 +16,7 @@ const sceneSchema = z.object({
   background: backgroundSchema,
   avatarId: z.string().min(1).optional(),
   voiceId: z.string().min(1).optional(),
+  layout: sceneLayoutSchema.optional(),
 });
 
 /** Either copy a video the owner has (`fromVideoId`, title optional) or spell the template out. */
@@ -57,6 +58,7 @@ export async function createTemplate(input: TemplateInput, ownerId: string = LOC
       background: sc.background,
       ...(sc.avatarId ? { avatarId: sc.avatarId } : {}),
       ...(sc.voiceId ? { voiceId: sc.voiceId } : {}),
+      ...(sc.layout ? { layout: sc.layout } : {}),
     }));
     base = {
       title: input.title ?? video.title,

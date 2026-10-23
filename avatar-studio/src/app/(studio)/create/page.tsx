@@ -12,7 +12,7 @@ import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib
 import { languageLabel } from "@/lib/language";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
-import { MAX_SCENES, RESOLUTIONS, type AspectRatio, type Avatar, type Background, type BrandKit, type Resolution, type Scene, type Video, type VideoTemplate, type Voice } from "@/lib/types";
+import { DEFAULT_LAYOUT, MAX_SCENES, RESOLUTIONS, type AspectRatio, type Avatar, type Background, type BrandKit, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -49,12 +49,15 @@ function writeDraft(d: Draft | null) {
     // Storage can be unavailable (private mode); drafts are a convenience only.
   }
 }
-const newScene = (script = "", background: Background = DEFAULT_BG, presenter: Pick<Scene, "avatarId" | "voiceId"> = {}): Scene => ({
+const newScene = (script = "", background: Background = DEFAULT_BG, presenter: Pick<Scene, "avatarId" | "voiceId" | "layout"> = {}): Scene => ({
   script,
   background,
   ...(presenter.avatarId ? { avatarId: presenter.avatarId } : {}),
   ...(presenter.voiceId ? { voiceId: presenter.voiceId } : {}),
+  ...(presenter.layout ? { layout: presenter.layout } : {}),
 });
+/** True when a layout is the renderer's default and need not be stored. */
+const isDefaultLayout = (l: SceneLayout) => l.scale === 1 && l.x === 0 && l.y === 0;
 const TONES = ["friendly", "professional", "formal", "energetic", "calm"] as const;
 type Tab = "avatar" | "voice" | "background" | "settings";
 
@@ -82,6 +85,9 @@ function CreateInner() {
   const background = active.background;
   const setScript = (value: string) => updateScene(activeIdx, { script: value });
   const setBackground = (value: Background) => updateScene(activeIdx, { background: value });
+  const layout: SceneLayout = active.layout ?? DEFAULT_LAYOUT;
+  // The default layout is stored as absent, so an untouched scene renders exactly as before.
+  const setLayout = (value: SceneLayout) => updateScene(activeIdx, { layout: isDefaultLayout(value) ? undefined : value });
   function updateScene(idx: number, patch: Partial<Scene>) {
     setScenes((prev) => prev.map((sc, i) => (i === idx ? { ...sc, ...patch } : sc)));
   }
@@ -131,7 +137,7 @@ function CreateInner() {
         const dropVoice = !!sc.voiceId && !voices.has(sc.voiceId);
         if (!dropAvatar && !dropVoice) return sc;
         changed = true;
-        return newScene(sc.script, sc.background, { avatarId: dropAvatar ? undefined : sc.avatarId, voiceId: dropVoice ? undefined : sc.voiceId });
+        return newScene(sc.script, sc.background, { avatarId: dropAvatar ? undefined : sc.avatarId, voiceId: dropVoice ? undefined : sc.voiceId, layout: sc.layout });
       });
       return changed ? next : prev;
     });
@@ -382,6 +388,7 @@ function CreateInner() {
                   src={sceneAvatar.imageUrl}
                   alt={sceneAvatar.name}
                   className={`${aspect === "16:9" ? "h-[92%]" : "h-[80%]"} max-w-[80%] object-contain object-bottom drop-shadow-xl`}
+                  style={{ transform: `translate(${layout.x * 50}%, ${layout.y * 50}%) scale(${layout.scale})`, transformOrigin: "bottom center" }}
                   onError={(e) => {
                     const img = e.currentTarget;
                     if (!img.dataset.fallback) {
@@ -473,6 +480,33 @@ function CreateInner() {
                 </select>
               </div>
             )}
+            <details className="mb-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="scene-layout">
+              <summary className="cursor-pointer select-none font-medium text-slate-700">
+                Presenter layout{isDefaultLayout(layout) ? "" : ` · ${Math.round(layout.scale * 100)}%${layout.x || layout.y ? ", moved" : ""}`}
+              </summary>
+              <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                <label className="block">
+                  <span className="mb-1 block">Size · {Math.round(layout.scale * 100)}%</span>
+                  <input type="range" aria-label="Presenter size" min={0.5} max={1.5} step={0.05} value={layout.scale} onChange={(e) => setLayout({ ...layout, scale: Number(e.target.value) })} className="w-full accent-brand-600" />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block">Horizontal · {Math.round(layout.x * 100)}</span>
+                  <input type="range" aria-label="Presenter horizontal position" min={-1} max={1} step={0.05} value={layout.x} onChange={(e) => setLayout({ ...layout, x: Number(e.target.value) })} className="w-full accent-brand-600" />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block">Vertical · {Math.round(layout.y * 100)}</span>
+                  <input type="range" aria-label="Presenter vertical position" min={-1} max={1} step={0.05} value={layout.y} onChange={(e) => setLayout({ ...layout, y: Number(e.target.value) })} className="w-full accent-brand-600" />
+                </label>
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <span className="text-slate-500">Applies to this scene. HeyGen renders the size and position; other renderers use their default.</span>
+                {!isDefaultLayout(layout) && (
+                  <button type="button" onClick={() => setLayout(DEFAULT_LAYOUT)} className="text-brand-700 hover:underline">
+                    Reset
+                  </button>
+                )}
+              </div>
+            </details>
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-semibold text-slate-900">{scenes.length > 1 ? `Scene ${activeIdx + 1} script` : "Script"}</h3>
               <div className="flex flex-wrap items-center gap-2">

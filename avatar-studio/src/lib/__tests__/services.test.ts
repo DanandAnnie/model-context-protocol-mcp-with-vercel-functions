@@ -191,6 +191,9 @@ describe("videos", () => {
     await globalThis.__avatarStudioStore!.put("video", { ...(await getVideo(v.id, undefined, false)), deletedAt: old });
     await assert.rejects(getVideo(v.id, undefined, false), /not found/, "a due video reads as gone before any listing purges it");
     await assert.rejects(restoreVideo(v.id), /not found/, "and cannot be restored");
+    await assert.rejects(updateVideo(v.id, videoPatchSchema.parse({ title: "late" })), /not found/, "nor written");
+    const { bulkVideos: bulk } = await import("../services/videos");
+    assert.deepEqual(await bulk({ action: "restore", ids: [v.id] }), { done: 0, missing: [v.id] }, "bulk reports it instead of failing the request");
     assert.equal((await listVideos(LOCAL_OWNER, false, true)).length, 0, "purged on the way out");
     await assert.rejects(getVideo(v.id, undefined, false), /not found/);
     assert.equal(await getShareLock(v.id), null, "the lock went with it");
@@ -212,10 +215,11 @@ describe("videos", () => {
     const keep = await createVideo(videoRequestSchema.parse({ ...base, title: "Keep" }), "purger");
     const store = globalThis.__avatarStudioStore!;
     const realRemove = store.remove.bind(store);
-    let failed = 0;
+    // Whichever due video the batch removes first fails once; the test must not depend on the store's list order.
+    let failedId: string | null = null;
     store.remove = async (kind: Parameters<typeof realRemove>[0], id: string) => {
-      if (kind === "video" && id === ids[0] && failed === 0) {
-        failed += 1;
+      if (kind === "video" && ids.includes(id) && failedId === null) {
+        failedId = id;
         throw new Error("store hiccup");
       }
       return realRemove(kind, id);
@@ -226,6 +230,7 @@ describe("videos", () => {
       assert.equal(page.trashed, 0, "due videos are gone from the owner's point of view");
       const left = (await store.list("video", "purger")).filter((v) => (v as { deletedAt?: string }).deletedAt).length;
       assert.equal(left, 3, "a bounded batch went, the failed one and the overflow wait for the next listing");
+      assert.notEqual(await store.get("video", failedId!), null, "the failed one is still stored for the retry");
       await queryVideos("purger", videoQuerySchema.parse({}));
       assert.equal((await store.list("video", "purger")).filter((v) => (v as { deletedAt?: string }).deletedAt).length, 0, "the next listing finishes the job");
     } finally {
@@ -468,6 +473,13 @@ describe("scenes", () => {
     const cast = { avatars: { [ava.id]: ava, [marcus.id]: marcus }, voices: { [emma.id]: emma, [james.id]: james } };
     assert.equal((await heygen.createVideo(req, ava, emma, cast)).providerJobId, "hg_1");
     assert.deepEqual(sent!.video_inputs.map((i) => [i.character.avatar_id, i.voice.voice_id]), [[ava.id, emma.id], [marcus.id, james.id]]);
+    // A scene layout becomes the character's scale and offset; a scene without one sends neither.
+    const placed = videoRequestSchema.parse({ ...req, scenes: [{ ...req.scenes![0], layout: { scale: 1.2, x: 0.25, y: -0.1 } }, req.scenes![1]] });
+    await heygen.createVideo(placed, ava, emma, cast);
+    const chars = sent!.video_inputs.map((i) => i.character as { scale?: number; offset?: { x: number; y: number } });
+    assert.deepEqual([chars[0].scale, chars[0].offset], [1.2, { x: 0.25, y: -0.1 }]);
+    assert.equal("scale" in chars[1], false);
+    assert.throws(() => videoRequestSchema.parse({ ...req, scenes: [{ ...req.scenes![0], layout: { scale: 2, x: 0, y: 0 } }] }), "the scale is bounded");
     // A scene voice from another provider is refused like the video's voice would be.
     await assert.rejects(heygen.createVideo(req, ava, emma, { ...cast, voices: { ...cast.voices, [james.id]: { ...james, provider: "elevenlabs" } } }), /HeyGen voice/);
     await assert.rejects(new DidAvatarProvider("key").createVideo(req, ava, emma), /one presenter and one voice per video/);
@@ -966,6 +978,24 @@ describe("folders and share views", () => {
     assert.equal("folder" in (await getVideo(a.id, "f1", false)), false);
     assert.deepEqual(await renameFolder({ from: "Nope", to: "X" }, "f1"), { moved: 0 });
     assert.throws(() => folderRenameSchema.parse({ from: "", to: "X" }));
+    // A video deleted for good between the listing and its turn is skipped, not fatal.
+    await updateVideo(a.id, { folder: "Gone" }, "f1");
+    await updateVideo(c.id, { folder: "Gone" }, "f1");
+    const store = globalThis.__avatarStudioStore!;
+    const realPut = store.put.bind(store);
+    store.put = async (kind, item) => {
+      if (kind === "video" && (item as { id: string }).id === a.id) {
+        await store.remove("video", a.id);
+        throw new (await import("../errors")).NotFoundError("gone");
+      }
+      return realPut(kind, item);
+    };
+    try {
+      assert.deepEqual(await renameFolder({ from: "Gone", to: "Kept" }, "f1"), { moved: 1 });
+    } finally {
+      store.put = realPut;
+    }
+    assert.equal((await getVideo(c.id, "f1", false)).folder, "Kept");
   });
 
   it("counts share views only once the render completed", async () => {

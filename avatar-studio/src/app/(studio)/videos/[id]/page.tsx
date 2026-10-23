@@ -718,8 +718,10 @@ export default function VideoDetailPage() {
                           {i + 1}
                         </span>
                         <div className="min-w-0">
-                          {(sc.avatarName || sc.voiceName) && (
-                            <div className="mb-0.5 text-xs text-slate-500">{[sc.avatarName, sc.voiceName].filter(Boolean).join(" · ")}</div>
+                          {(sc.avatarName || sc.voiceName || sc.layout) && (
+                            <div className="mb-0.5 text-xs text-slate-500">
+                              {[sc.avatarName, sc.voiceName, sc.layout ? `presenter ${Math.round(sc.layout.scale * 100)}%${sc.layout.x || sc.layout.y ? ", moved" : ""}` : undefined].filter(Boolean).join(" · ")}
+                            </div>
                           )}
                           <p className="whitespace-pre-wrap leading-relaxed text-slate-700">{sc.script}</p>
                         </div>

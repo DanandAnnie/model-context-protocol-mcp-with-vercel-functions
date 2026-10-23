@@ -241,7 +241,14 @@ test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page 
   await page.getByLabel("Scene avatar").selectOption({ label: "Marcus Hill" });
   await page.getByLabel("Scene voice").selectOption({ label: "Olivia" });
   await expect(page.getByTestId("stage-avatar")).toHaveAttribute("alt", "Marcus Hill");
+  // The presenter can be sized and moved per scene; the stage preview follows and the scene stores it.
+  await page.getByTestId("scene-layout").locator("summary").click();
+  await page.getByLabel("Presenter size").fill("1.2");
+  await page.getByLabel("Presenter horizontal position").fill("0.5");
+  await expect(page.getByTestId("stage-avatar")).toHaveCSS("transform", /matrix\(1\.2, 0, 0, 1\.2, .+\)/);
+  await expect(page.getByTestId("scene-layout")).toContainText("120%, moved");
   await page.getByRole("button", { name: /^Scene 1,/ }).click();
+  await expect(page.getByTestId("scene-layout")).not.toContainText("120%");
   await expect(page.getByTestId("stage-avatar")).not.toHaveAttribute("alt", "Marcus Hill");
   await page.getByRole("button", { name: /^Scene 2,/ }).click();
   await page.getByRole("button", { name: "Generate video" }).click();
@@ -251,7 +258,8 @@ test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page 
   expect(video.scenes).toHaveLength(2);
   expect(video.script).toBe("Scene one says hello.\n\nScene two says goodbye.");
   expect(video.scenes[0].avatarName).toBeUndefined();
-  expect(video.scenes[1]).toMatchObject({ avatarId: "stock_2", avatarName: "Marcus Hill", voiceId: "stock_voice_3", voiceName: "Olivia" });
+  expect(video.scenes[1]).toMatchObject({ avatarId: "stock_2", avatarName: "Marcus Hill", voiceId: "stock_voice_3", voiceName: "Olivia", layout: { scale: 1.2, x: 0.5, y: 0 } });
+  expect(video.scenes[0].layout).toBeUndefined();
   await expect(page.getByText("Script · 2 scenes")).toBeVisible();
   await expect(page.getByText("Marcus Hill · Olivia")).toBeVisible();
   // Edit a copy keeps the scene's presenter.

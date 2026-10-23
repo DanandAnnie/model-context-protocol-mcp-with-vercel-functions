@@ -138,6 +138,9 @@ export interface CaptionStyle {
   size: CaptionSize;
 }
 export const DEFAULT_CAPTION_STYLE: CaptionStyle = { position: "bottom", size: "medium" };
+export function isDefaultCaptionStyle(style: CaptionStyle): boolean {
+  return style.position === DEFAULT_CAPTION_STYLE.position && style.size === DEFAULT_CAPTION_STYLE.size;
+}
 
 export type WatchQuarter = 25 | 50 | 75 | 100;
 export type WatchCounts = { q25: number; q50: number; q75: number; q100: number };

@@ -35,7 +35,8 @@ export function SharePlayer({ videoId, src, poster, captions, captionSize = "med
       }}
       onEnded={() => report(100)}
     >
-      {captions && <track kind="subtitles" srcLang="en" label="Captions" src={`/api/videos/${videoId}/captions?format=vtt`} />}
+      {/* `default` switches the track on without a trip to the CC menu; a styled video has no burned-in captions to fall back on. */}
+      {captions && <track default kind="subtitles" srcLang="en" label="Captions" src={`/api/videos/${videoId}/captions?format=vtt`} />}
     </video>
   );
 }

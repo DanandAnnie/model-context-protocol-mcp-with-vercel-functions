@@ -742,6 +742,8 @@ test("captions are served as SRT and VTT, security headers are set", async ({ pa
   // The player carries the size as a class, which the stylesheet turns into a cue font size.
   await page.goto(`/share/${v.id}`);
   await expect(page.getByTestId("share-player")).toHaveClass(/cue-large/);
+  // The track is on from the start: a styled video has no burned-in captions to fall back on.
+  await expect(page.getByTestId("share-player").locator("track")).toHaveAttribute("default", "");
   await page.goto(`/videos/${v.id}`);
   await expect(page.getByText("On · top, large")).toBeVisible();
   // The editor offers the style once captions are on, previews it on the stage, and a copy keeps it.
@@ -1199,9 +1201,16 @@ test("voice cloning saves a private voice that renders and can be deleted", asyn
     expect(made.status()).toBe(201);
     expect((await made.json()).video.voiceName).toBe("My voice");
     expect((await page.request.post("/api/voices/clone", { data: { name: "bad", samples: ["data:image/png;base64,AAAA"] } })).status()).toBe(400);
+    // Rename in place; the voice keeps its id, so the rendered video still plays with it.
+    page.once("dialog", (d) => d.accept("Studio clone"));
+    await page.getByRole("button", { name: "Rename My voice" }).click();
+    await expect(page.getByText("Studio clone", { exact: true })).toBeVisible();
+    expect(((await (await page.request.get("/api/voices")).json()).voices as Array<{ id: string; name: string }>).find((x) => x.id === voice.id)?.name).toBe("Studio clone");
+    expect((await page.request.patch("/api/voices/stock_voice_1", { data: { name: "Nope" } })).status()).toBe(404);
+    expect((await page.request.patch(`/api/voices/${voice.id}`, { data: { name: "" } })).status()).toBe(400);
     page.once("dialog", (d) => d.accept());
-    await page.getByRole("button", { name: "Delete My voice" }).click();
-    await expect(page.getByText("My voice")).toHaveCount(0);
+    await page.getByRole("button", { name: "Delete Studio clone" }).click();
+    await expect(page.getByText("Studio clone", { exact: true })).toHaveCount(0);
   } finally {
     await page.request.delete(`/api/voices/${voice.id}`);
   }

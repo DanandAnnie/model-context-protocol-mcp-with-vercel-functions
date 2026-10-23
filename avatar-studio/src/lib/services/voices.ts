@@ -54,6 +54,17 @@ export async function cloneVoice(input: z.infer<typeof cloneVoiceSchema>, ownerI
   return getStore().put("voice", voice);
 }
 
+export const updateVoiceSchema = z.object({ name: z.string().trim().min(1).max(60) });
+
+/**
+ * Renames a cloned voice. Provider voices cannot be edited (404, like any voice that is not the
+ * owner's). Videos keep the name they were rendered with; the provider's copy keeps its name too.
+ */
+export async function updateClonedVoice(id: string, patch: z.infer<typeof updateVoiceSchema>, ownerId: string = LOCAL_OWNER): Promise<Voice> {
+  const existing = owned(await getStore().get<Voice>("voice", id), ownerId, `Voice ${id}`);
+  return getStore().put("voice", { ...existing, name: patch.name });
+}
+
 export async function deleteClonedVoice(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
   const voice = owned(await getStore().get<Voice>("voice", id), ownerId, `Voice ${id}`);
   const provider = getTtsProvider();

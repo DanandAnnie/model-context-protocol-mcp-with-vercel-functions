@@ -3,7 +3,7 @@ import { z } from "zod";
 import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import { getStore } from "../store";
-import { CAPTION_POSITIONS, CAPTION_SIZES, EMPTY_WATCH, MAX_SCENES, TRASH_RETENTION_DAYS } from "../types";
+import { CAPTION_POSITIONS, CAPTION_SIZES, EMPTY_WATCH, MAX_SCENES, TRASH_RETENTION_DAYS, isDefaultCaptionStyle } from "../types";
 import type { Avatar, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
 import type { AvatarProvider, RenderCast } from "../providers/types";
 import { LOCAL_OWNER } from "../owner-id";
@@ -147,6 +147,9 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
+  // Like a scene's layout: the default look is stored as absent whichever client spelled it out, so every
+  // renderer sees one shape (and burns captions in when it can).
+  if (base.captionStyle && isDefaultCaptionStyle(base.captionStyle)) delete base.captionStyle;
 
   try {
     if (provider.prepareAvatar) {
@@ -196,7 +199,11 @@ function prepareOnce(provider: AvatarProvider, avatar: Avatar): Promise<Avatar> 
   if (running) return running;
   const run = (async () => {
     const prepared = await provider.prepareAvatar!(avatar);
-    return prepared === avatar ? avatar : getStore().put("avatar", prepared);
+    if (prepared === avatar) return avatar;
+    // The upload takes seconds; a rename that landed meanwhile must survive, so only the asset ids are written,
+    // and an avatar deleted meanwhile is not brought back (this render still uses the upload).
+    const current = await getStore().get<Avatar>("avatar", avatar.id);
+    return current ? getStore().put("avatar", { ...current, providerAssetIds: prepared.providerAssetIds }) : prepared;
   })().finally(() => preparing.delete(avatar.id));
   preparing.set(avatar.id, run);
   return run;

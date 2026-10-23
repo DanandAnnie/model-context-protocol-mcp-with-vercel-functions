@@ -734,7 +734,7 @@ function CreateInner() {
                 {captions && (
                   <div className="rounded-lg border border-slate-200 px-3 py-3" data-testid="caption-style">
                     <div className="text-sm font-medium text-slate-800">Caption style</div>
-                    <div className="mt-0.5 text-xs text-slate-500">Where subtitles sit and how big they read in the share page's subtitle track and the subtitle file. A renderer that burns captions into the video leaves them off, so this look is the only one.</div>
+                    <div className="mt-0.5 text-xs text-slate-500">Where subtitles sit and how big they read in the share page's subtitle track and the subtitle file. A renderer that burns captions into the video leaves them off, so this look is the only one and the downloaded file carries no captions.</div>
                     <div className="mt-2 grid gap-2 sm:grid-cols-2">
                       <div role="group" aria-label="Caption position" className="flex gap-1">
                         {CAPTION_POSITIONS.map((pos) => (

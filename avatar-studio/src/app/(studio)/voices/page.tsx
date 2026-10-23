@@ -1,6 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
-import { Mic2, Trash2 } from "lucide-react";
+import { Mic2, Pencil, Trash2 } from "lucide-react";
 import { VoiceCloner } from "@/components/VoiceCloner";
 import { api } from "@/lib/client";
 import { VoiceRow } from "@/components/VoicePicker";
@@ -19,6 +19,19 @@ export default function VoicesPage() {
   const { data, loading, error, refetch } = useApi<{ voices: Voice[] }>("/api/voices");
   const { data: status } = useApi<ProviderStatus>("/api/status");
   const [actionErr, setActionErr] = useState<string | null>(null);
+  async function renameVoice(v: Voice) {
+    const answer = window.prompt("Voice name", v.name);
+    if (answer === null) return;
+    const name = answer.trim();
+    if (!name || name === v.name) return;
+    setActionErr(null);
+    try {
+      await api(`/api/voices/${v.id}`, { method: "PATCH", body: JSON.stringify({ name }) });
+      await refetch();
+    } catch (e) {
+      setActionErr(e instanceof Error ? e.message : "Could not rename the voice");
+    }
+  }
   async function removeVoice(v: Voice) {
     if (!window.confirm(`Delete "${v.name}"? Videos already rendered keep their audio.`)) return;
     setActionErr(null);
@@ -109,15 +122,26 @@ export default function VoicesPage() {
                 onToggleFavorite={() => favorites.toggle("voice", v.id)}
               />
               {v.source === "custom" && (
-                <button
-                  type="button"
-                  onClick={() => removeVoice(v)}
-                  aria-label={`Delete ${v.name}`}
-                  title="Delete this cloned voice"
-                  className="absolute right-12 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-700"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+                <span className="absolute right-12 top-1/2 flex -translate-y-1/2 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => renameVoice(v)}
+                    aria-label={`Rename ${v.name}`}
+                    title="Rename this cloned voice; videos already rendered keep the old name"
+                    className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand-700"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeVoice(v)}
+                    aria-label={`Delete ${v.name}`}
+                    title="Delete this cloned voice"
+                    className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-700"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </span>
               )}
             </div>
           ))}

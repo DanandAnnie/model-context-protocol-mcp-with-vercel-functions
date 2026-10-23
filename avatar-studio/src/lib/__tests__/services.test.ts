@@ -9,6 +9,7 @@ import {
   bulkVideos,
   createAvatar,
   createAvatarSchema,
+  deleteAvatar,
   getAvatar,
   deleteBrandKit,
   getBrandKit,
@@ -100,6 +101,50 @@ describe("avatars", () => {
     await assert.rejects(updateAvatar(STOCK_AVATARS[0].id, { name: "Nope" }, "r1"), /not found/, "library presenters are the provider's");
     assert.throws(() => updateAvatarSchema.parse({}), /Nothing to update/);
     assert.throws(() => updateAvatarSchema.parse({ name: "" }));
+  });
+
+  it("renaming a photo avatar renames the shared presenters built on it, and only those", async () => {
+    const { updateAvatar } = await import("../services/avatars");
+    const mine = await createAvatar({ name: "Dan", imageUrl: "https://example.com/p.jpg" }, "r3");
+    const other = await createAvatar({ name: "Ann", imageUrl: "https://example.com/a.jpg" }, "r3");
+    const onMine = await createAgent(agentSchema.parse({ name: "Dan live", avatarId: mine.id, isPublic: true }), "r3");
+    const onOther = await createAgent(agentSchema.parse({ name: "Ann live", avatarId: other.id }), "r3");
+    await updateAvatar(mine.id, { gender: "male" }, "r3");
+    assert.equal((await getAgent(onMine.id, "r3")).avatarName, "Dan", "a gender change leaves the snapshot alone");
+    await updateAvatar(mine.id, { name: "Daniel" }, "r3");
+    assert.equal((await getAgent(onMine.id, "r3")).avatarName, "Daniel");
+    assert.equal((await getAgent(onMine.id, "r3")).avatarImageUrl, mine.imageUrl, "the portrait snapshot stays");
+    assert.equal((await publicAgent(onMine.id)).avatar.name, "Daniel", "the talk page shows the new name");
+    assert.equal((await getAgent(onOther.id, "r3")).avatarName, "Ann");
+  });
+
+  it("an upload that finishes after a rename keeps the new name, and never brings a deleted avatar back", async () => {
+    const { updateAvatar } = await import("../services/avatars");
+    const custom = await createAvatar({ name: "Before", imageUrl: "https://example.com/me.jpg" }, "r4");
+    const proto = MockAvatarProvider.prototype as unknown as { prepareAvatar?: (a: typeof custom) => Promise<typeof custom> };
+    let during: () => Promise<unknown> = async () => undefined;
+    proto.prepareAvatar = async (a) => {
+      if (a.providerAssetIds?.mock) return a;
+      await during();
+      return { ...a, providerAssetIds: { ...a.providerAssetIds, mock: "asset_9" } };
+    };
+    const req = { title: "V", script: "Hi.", avatarId: custom.id, voiceId: STOCK_VOICES[0].id, aspect: "16:9" as const, background: { type: "color" as const, value: "#fff" }, captions: false, speed: 1 };
+    try {
+      during = () => updateAvatar(custom.id, { name: "After" }, "r4");
+      const video = await createVideo(req, "r4");
+      assert.equal(video.status, "processing");
+      const stored = await getAvatar(custom.id, "r4");
+      assert.equal(stored.name, "After", "the rename that landed during the upload survives");
+      assert.equal(stored.providerAssetIds?.mock, "asset_9", "and the upload is still recorded");
+
+      const gone = await createAvatar({ name: "Gone", imageUrl: "https://example.com/g.jpg" }, "r4");
+      during = () => deleteAvatar(gone.id, "r4");
+      const v2 = await createVideo({ ...req, avatarId: gone.id }, "r4");
+      assert.equal(v2.status, "processing", "the render in flight still uses the upload");
+      await assert.rejects(getAvatar(gone.id, "r4"), /not found/, "the deleted avatar is not written back");
+    } finally {
+      delete proto.prepareAvatar;
+    }
   });
 
   it("rejects non-image inputs", () => {
@@ -405,6 +450,15 @@ describe("captions", () => {
     const { captionStyleSchema } = await import("../services/videos");
     assert.deepEqual(captionStyleSchema.parse({ position: "top", size: "large" }), { position: "top", size: "large" });
     assert.throws(() => captionStyleSchema.parse({ position: "middle", size: "large" }));
+  });
+
+  it("stores the default caption style as absent whichever client spelled it out", async () => {
+    const req = { title: "C", script: "Hi.", avatarId: "stock_1", voiceId: STOCK_VOICES[0].id, aspect: "16:9" as const, background: { type: "color" as const, value: "#fff" }, captions: true, speed: 1 };
+    const plain = await createVideo({ ...req, captionStyle: { position: "bottom", size: "medium" } });
+    assert.equal("captionStyle" in plain, false);
+    assert.equal((await getVideo(plain.id)).captionStyle, undefined);
+    const styled = await createVideo({ ...req, captionStyle: { position: "bottom", size: "large" } });
+    assert.deepEqual(styled.captionStyle, { position: "bottom", size: "large" });
   });
 
   it("returns nothing for empty input", async () => {
@@ -1931,6 +1985,15 @@ describe("voice cloning", () => {
     assert.equal(video.voiceName, "Dana");
     await assert.rejects(createVideo({ title: "V", script: "Hi.", avatarId: "stock_1", voiceId: voice.id, aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, "u2"), /not available/);
 
+    const { updateClonedVoice, updateVoiceSchema } = await import("../services/voices");
+    const renamed = await updateClonedVoice(voice.id, updateVoiceSchema.parse({ name: " Dana (studio) " }), "u1");
+    assert.equal(renamed.name, "Dana (studio)");
+    assert.equal(renamed.language, "en-US", "untouched fields stay");
+    assert.equal((await listVoices("u1"))[0].name, "Dana (studio)");
+    assert.equal((await getVideo(video.id, "u1")).voiceName, "Dana", "rendered videos keep the old name");
+    await assert.rejects(updateClonedVoice(voice.id, { name: "Nope" }, "u2"), /not found/);
+    await assert.rejects(updateClonedVoice(STOCK_VOICES[0].id, { name: "Nope" }, "u1"), /not found/, "provider voices are the provider's");
+    assert.throws(() => updateVoiceSchema.parse({ name: "  " }));
     await assert.rejects(cloneVoice(cloneVoiceSchema.parse({ name: "x", samples: ["data:image/png;base64,AAAA"] }), "u1"), /audio recordings or files/);
     assert.throws(() => cloneVoiceSchema.parse({ name: "x", samples: [] }));
     await assert.rejects(deleteClonedVoice(voice.id, "u2"), /not found/);

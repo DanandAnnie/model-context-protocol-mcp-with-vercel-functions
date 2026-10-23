@@ -1035,9 +1035,11 @@ describe("account data", () => {
     await createVideo({ title: "Theirs", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, "u2");
     await createApiKey("ci", "u1");
     await saveNotifySettings({ url: "https://203.0.113.5/hooks" }, "u1");
+    await savePrefs({ emailOnComplete: "dana@example.com" }, "u1");
     await cloneVoice(cloneVoiceSchema.parse({ name: "v", samples: [`data:audio/webm;base64,${Buffer.from("x").toString("base64")}`] }), "u1");
     const exported = await exportOwnerData("u1");
     assert.equal(exported.ownerId, "u1");
+    assert.equal((exported.prefs[0] as { emailOnComplete: string }).emailOnComplete, "dana@example.com", "email preferences are personal data");
     assert.equal(exported.video.length, 1);
     assert.equal((exported.video[0] as { title: string }).title, "Mine");
     assert.equal("hash" in exported.apikey[0], false, "key hashes are redacted");
@@ -1047,6 +1049,7 @@ describe("account data", () => {
     assert.equal(counts.video, 1);
     assert.equal(counts.apikey, 1);
     assert.equal(counts.voice, 1);
+    assert.equal(counts.prefs, 1);
     assert.deepEqual(await listVideos("u1"), []);
     assert.equal((await listVideos("u2")).length, 1, "other owners are untouched");
     assert.equal((await exportOwnerData("u1")).video.length, 0);

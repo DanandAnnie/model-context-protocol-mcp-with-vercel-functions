@@ -131,6 +131,18 @@ export interface BrandKit {
   updatedAt: string;
 }
 
+/** Personal API key. The secret is returned once at creation; only `hash` is stored. */
+export interface ApiKey {
+  id: string;
+  ownerId: string;
+  name: string;
+  /** First characters of the secret, for recognising a key in the list. */
+  prefix: string;
+  hash: string;
+  createdAt: string;
+  lastUsedAt?: string;
+}
+
 export interface ProviderStatus {
   mode: "demo" | "live";
   avatar: string;

@@ -1,4 +1,4 @@
--- Avatar Studio persistence. One JSON document per video / avatar / translation / brand kit.
+-- Avatar Studio persistence. One JSON document per video / avatar / translation / brand kit / API key.
 create table if not exists public.studio_items (
   id          text primary key,
   kind        text not null,
@@ -10,7 +10,7 @@ create table if not exists public.studio_items (
 -- Allowed kinds. Re-running this file after an upgrade refreshes the list.
 alter table public.studio_items drop constraint if exists studio_items_kind_check;
 alter table public.studio_items
-  add constraint studio_items_kind_check check (kind in ('video', 'avatar', 'translation', 'brand'));
+  add constraint studio_items_kind_check check (kind in ('video', 'avatar', 'translation', 'brand', 'apikey'));
 
 create index if not exists studio_items_kind_created_idx
   on public.studio_items (kind, created_at desc);
@@ -22,6 +22,11 @@ create index if not exists studio_items_owner_idx
 -- Provider webhooks look jobs up by their provider job id.
 create index if not exists studio_items_provider_job_idx
   on public.studio_items (kind, (data->>'providerJobId'));
+
+-- API keys are looked up by the hash of the presented secret.
+create index if not exists studio_items_apikey_hash_idx
+  on public.studio_items ((data->>'hash'))
+  where kind = 'apikey';
 
 -- The app talks to this table with the service-role key only, so RLS can stay
 -- enabled with no policies: anonymous clients get nothing.

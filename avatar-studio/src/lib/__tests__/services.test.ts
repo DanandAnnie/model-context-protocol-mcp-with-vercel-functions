@@ -25,6 +25,7 @@ import {
   videoRequestSchema,
 } from "../services";
 import { MockAvatarProvider } from "../providers/avatar/mock";
+import { API_KEY_PREFIX, MAX_API_KEYS, createApiKey, listApiKeys, ownerForApiKey, revokeApiKey } from "../api-keys";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import { SCRIPT_TEMPLATES, findTemplate } from "../templates";
 
@@ -495,5 +496,29 @@ describe("bulk actions", () => {
     assert.equal((await listVideos("u1")).length, 1);
     assert.equal((await listVideos("u2")).length, 1);
     assert.throws(() => bulkVideoSchema.parse({ action: "move", ids: [] }));
+  });
+});
+
+describe("api keys", () => {
+  it("resolves the owner from a secret, never exposes the hash, and stops after revocation", async () => {
+    const { key, secret } = await createApiKey("Zapier", "u1");
+    assert.ok(secret.startsWith(API_KEY_PREFIX));
+    assert.ok(!("hash" in key));
+    assert.equal(secret.startsWith(key.prefix), true);
+    assert.equal(await ownerForApiKey(secret), "u1");
+    assert.equal(await ownerForApiKey(`${secret}x`), null);
+    assert.equal(await ownerForApiKey("not-a-key"), null);
+    const listed = await listApiKeys("u1");
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0].id, key.id);
+    assert.deepEqual(await listApiKeys("u2"), []);
+    assert.equal(await revokeApiKey(key.id, "u2"), false, "another owner cannot revoke it");
+    assert.equal(await revokeApiKey(key.id, "u1"), true);
+    assert.equal(await ownerForApiKey(secret), null);
+  });
+
+  it("caps the number of keys per owner", async () => {
+    for (let i = 0; i < MAX_API_KEYS; i++) await createApiKey(`k${i}`, "u3");
+    await assert.rejects(createApiKey("one more", "u3"), /At most/);
   });
 });

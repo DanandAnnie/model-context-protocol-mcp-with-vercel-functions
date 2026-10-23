@@ -13,6 +13,8 @@ export async function proxy(req: NextRequest) {
   if (mode === "open") return NextResponse.next();
   const { pathname } = req.nextUrl;
   const isPublic = pathname === "/" || PUBLIC_PREFIXES.some((p) => pathname.startsWith(p)) || PUBLIC_PATTERNS.some((r) => r.test(pathname));
+  // API calls carrying a bearer key skip the session check; the route validates the key itself.
+  if (pathname.startsWith("/api/") && /^Bearer\s+\S/i.test(req.headers.get("authorization") ?? "")) return NextResponse.next();
 
   if (mode === "supabase") {
     // Always run the refresh so auth cookies stay current, even on public paths.

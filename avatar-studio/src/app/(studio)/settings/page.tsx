@@ -1,4 +1,5 @@
 "use client";
+import { ApiKeys } from "@/components/ApiKeys";
 import { Card, SectionTitle } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { formatSeconds } from "@/lib/client";
@@ -87,6 +88,7 @@ export default function SettingsPage() {
           {data ? (data.authMode === "supabase" ? "accounts" : data.authMode === "password" ? "password required" : "open") : "…"}
         </span>
       </Card>
+      <ApiKeys />
       <Card className="mt-6 p-5 text-sm text-slate-600">
         <h3 className="mb-2 font-semibold text-slate-900">How to go live</h3>
         <ol className="list-decimal space-y-1 pl-5">

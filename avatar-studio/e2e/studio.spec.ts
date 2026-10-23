@@ -498,7 +498,8 @@ test("interactive avatar takes a spoken question when the browser can transcribe
   await expect(page.locator("[data-testid=chat-log] [data-role=user]").first()).toHaveText("How much does it cost?");
   await expect(page.locator("[data-testid=chat-log] [data-role=assistant]").first()).toContainText(/pricing/i);
   await expect(page.getByLabel("Your message")).toHaveValue("");
-  expect(await page.evaluate(() => (window as unknown as { __recLang: string }).__recLang)).toBeTruthy();
+  // The recogniser listens in the presenter's voice language (the default stock voice is en-US).
+  expect(await page.evaluate(() => (window as unknown as { __recLang: string }).__recLang)).toBe("en-US");
 });
 
 test("the microphone button is hidden when the browser cannot transcribe", async ({ page }) => {

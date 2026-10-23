@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Voice } from "@/lib/types";
+import { languageCode } from "@/lib/language";
 
 /**
  * Plays a voice sample: provider audio when available, otherwise the
@@ -35,10 +36,12 @@ export function useVoicePreview() {
     const utter = new SpeechSynthesisUtterance(text);
     utter.rate = speed;
     const voices = window.speechSynthesis.getVoices();
-    const match =
-      voices.find((v) => voice.language && v.lang.toLowerCase().startsWith(voice.language.toLowerCase().slice(0, 2))) ??
-      voices[0];
-    if (match) utter.voice = match;
+    const code = languageCode(voice.language);
+    const match = (code && voices.find((v) => v.lang.toLowerCase().startsWith(code))) || voices[0];
+    if (match) {
+      utter.voice = match;
+      utter.lang = match.lang;
+    }
     utter.onend = () => setPlayingId(null);
     utter.onerror = () => setPlayingId(null);
     window.speechSynthesis.speak(utter);

@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { MessageSquare, Mic, Send, Square, Volume2, VolumeX } from "lucide-react";
 import { Button, ErrorBanner, inputClass } from "@/components/ui";
+import { languageCode, languageTag } from "@/lib/language";
 import { portraitSvg } from "@/lib/stock";
 import type { LiveStatus } from "@/hooks/useLiveAvatar";
 
@@ -95,9 +96,12 @@ export function ChatPanel({
     if (muted || typeof window === "undefined" || !("speechSynthesis" in window)) return;
     window.speechSynthesis.cancel();
     const utter = new SpeechSynthesisUtterance(text);
-    const voices = window.speechSynthesis.getVoices();
-    const match = voices.find((v) => voiceLanguage && v.lang.toLowerCase().startsWith(voiceLanguage.toLowerCase().slice(0, 2)));
-    if (match) utter.voice = match;
+    const code = languageCode(voiceLanguage);
+    const match = code ? window.speechSynthesis.getVoices().find((v) => v.lang.toLowerCase().startsWith(code)) : undefined;
+    if (match) {
+      utter.voice = match;
+      utter.lang = match.lang;
+    }
     utter.onstart = () => setSpeaking(true);
     utter.onend = () => setSpeaking(false);
     utter.onerror = () => setSpeaking(false);
@@ -117,7 +121,7 @@ export function ChatPanel({
     setErr(null);
     heard.current = "";
     const rec = new Ctor();
-    rec.lang = voiceLanguage || navigator.language || "en-US";
+    rec.lang = languageTag(voiceLanguage) ?? navigator.language ?? "en-US";
     rec.interimResults = true;
     rec.continuous = false;
     rec.onresult = (e) => {

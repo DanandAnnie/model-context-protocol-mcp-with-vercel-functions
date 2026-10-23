@@ -33,7 +33,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     // A cover anyone may fetch can sit in shared caches (CDN); one behind a password or an offline
     // link is served per viewer, so only that viewer's browser may keep it.
     const shared = !video.shareLocked && !shareOffline(video);
-    const cacheControl = !versioned ? "no-store" : shared ? "public, max-age=31536000, immutable" : "private, max-age=31536000, immutable";
+    // A shared cover may not outlive a known expiry in a CDN: its lifetime ends when the link does.
+    const year = 31536000;
+    const ttl = video.shareExpiresAt ? Math.min(year, Math.max(0, Math.floor((Date.parse(video.shareExpiresAt) - Date.now()) / 1000))) : year;
+    const cacheControl = !versioned ? "no-store" : shared ? `public, max-age=${ttl}, immutable` : `private, max-age=${year}, immutable`;
     return new Response(cover.bytes as BodyInit, {
       headers: {
         "Content-Type": cover.mimeType,

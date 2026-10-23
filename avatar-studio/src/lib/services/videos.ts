@@ -267,11 +267,9 @@ export const videoPatchSchema = z
     /** Whether the public share page offers a download link. */
     shareDownload: z.boolean().optional(),
     shareDisabled: z.boolean().optional(),
-    /** When the public link stops working (ISO 8601, in the future); null keeps it open indefinitely. */
-    shareExpiresAt: z
-      .string()
-      .trim()
-      .refine((v) => Number.isFinite(Date.parse(v)), "The expiry must be a date")
+    /** When the public link stops working (ISO 8601 with a UTC offset, in the future); null keeps it open indefinitely. */
+    shareExpiresAt: z.iso
+      .datetime({ offset: true, message: "The expiry must be an ISO 8601 date and time with a UTC offset" })
       .refine((v) => Date.parse(v) > Date.now(), "The expiry must be in the future")
       .nullable()
       .optional(),

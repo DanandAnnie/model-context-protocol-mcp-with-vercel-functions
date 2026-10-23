@@ -880,17 +880,22 @@ describe("folders and share views", () => {
     const v = await createVideo(req);
     const fresh = await getVideo(v.id, undefined, false);
     globalThis.__avatarStudioStore!.put("video", { ...fresh, status: "completed", shareCta: { label: "Go", url: "https://example.com" } });
-    assert.throws(() => videoPatchSchema.parse({ shareExpiresAt: "yesterday" }), /must be a date/);
+    assert.throws(() => videoPatchSchema.parse({ shareExpiresAt: "yesterday" }), /ISO 8601/);
+    assert.throws(() => videoPatchSchema.parse({ shareExpiresAt: "2030-01-01T09:00" }), /UTC offset/, "a wall-clock time without an offset is ambiguous");
     assert.throws(() => videoPatchSchema.parse({ shareExpiresAt: "2001-01-01T00:00:00Z" }), /in the future/);
-    const soon = new Date(Date.now() + 80).toISOString();
+    const offset = await updateVideo(v.id, videoPatchSchema.parse({ shareExpiresAt: "2030-06-01T10:00:00+02:00" }));
+    assert.equal(offset.shareExpiresAt, "2030-06-01T08:00:00.000Z", "stored as a UTC instant");
+    const soon = new Date(Date.now() + 60_000).toISOString();
     const set = await updateVideo(v.id, videoPatchSchema.parse({ shareExpiresAt: soon }));
-    assert.equal(set.shareExpiresAt, soon, "stored as an ISO instant");
+    assert.equal(set.shareExpiresAt, soon);
     assert.equal(shareExpired(set), false);
+    assert.equal(shareOffline(set, Date.parse(soon)), true, "the helper takes a clock");
     assert.equal((await getVideo(v.id, null, false)).id, v.id, "public until the time passes");
     assert.deepEqual(await recordView(v.id), { views: 1, counted: true });
-    await new Promise((r) => setTimeout(r, 120));
-    assert.equal(shareExpired(set), true);
-    assert.equal(shareOffline({ shareExpiresAt: soon }, Date.parse(soon) - 1), false, "the helper takes a clock");
+    // The moment passes (the stored instant moves behind the clock rather than the test waiting).
+    const stored = (await getVideo(v.id, undefined, false)) as Video;
+    globalThis.__avatarStudioStore!.put("video", { ...stored, shareExpiresAt: new Date(Date.now() - 1).toISOString() });
+    assert.equal(shareExpired(await getVideo(v.id, undefined, false)), true);
     await assert.rejects(getVideo(v.id, null, false), /not found/, "public after the time passes");
     assert.equal((await getVideo(v.id, undefined, false)).id, v.id, "the owner still sees it");
     await assert.rejects(recordView(v.id), /not found/, "beacons answer like the share page");

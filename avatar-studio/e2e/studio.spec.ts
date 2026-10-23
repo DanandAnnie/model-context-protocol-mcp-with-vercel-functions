@@ -413,7 +413,7 @@ test("the owner can take a share link offline and back", async ({ page }) => {
   await expiry.getByRole("button", { name: "Set expiry" }).click();
   await expect(page.getByText("The expiry must be in the future")).toBeVisible();
   const future = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
-  future.setSeconds(0, 0);
+  future.setHours(12, 0, 0, 0); // noon: never inside a daylight-saving transition
   await page.getByLabel("Share link expiry").fill(local(future));
   await expiry.getByRole("button", { name: "Set expiry" }).click();
   await expect(page.getByTestId("share-expiry-badge")).toContainText("Expires");

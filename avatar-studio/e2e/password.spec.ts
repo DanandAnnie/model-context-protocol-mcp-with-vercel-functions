@@ -95,6 +95,12 @@ test("an offline share link is hidden from the public but not from the owner", a
   // An expiry a moment away: public until then, then "not found" for everyone but the owner.
   expect((await request.patch(`/api/videos/${id}`, { data: { shareExpiresAt: new Date(Date.now() + 1500).toISOString() } })).status()).toBe(200);
   expect((await anon.get(`/share/${id}`)).status()).toBe(200);
+  // A shared cover's cache lifetime ends with the link, so a CDN cannot serve it past the expiry.
+  const expiring = await anon.get(`/api/videos/${id}/cover?v=1`);
+  expect(expiring.status()).toBe(200);
+  const maxAge = Number(/max-age=(\d+)/.exec(expiring.headers()["cache-control"] ?? "")?.[1]);
+  expect(maxAge).toBeLessThanOrEqual(2);
+  expect(expiring.headers()["cache-control"]).toContain("public");
   await expect.poll(async () => (await anon.get(`/share/${id}`)).status(), { timeout: 10_000 }).toBe(404);
   expect((await anon.get(`/api/videos/${id}/captions`)).status()).toBe(404);
   expect((await anon.get(`/api/videos/${id}/cover`)).status()).toBe(404);

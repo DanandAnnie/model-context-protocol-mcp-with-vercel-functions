@@ -94,8 +94,8 @@ export default function VideoDetailPage() {
   // Optimistic: a box flips at once and reverts if the save fails.
   type SharePatch = { shareDownload?: boolean; shareDisabled?: boolean; shareExpiresAt?: string | null };
   const [shareDraft, setShareDraft] = useState<SharePatch>({});
-  async function patchShare(patch: SharePatch) {
-    if (!video) return;
+  async function patchShare(patch: SharePatch): Promise<boolean> {
+    if (!video) return false;
     setShareErr(null);
     setShareDraft((d) => ({ ...d, ...patch }));
     try {
@@ -110,8 +110,10 @@ export default function VideoDetailPage() {
       });
       // A status poll that started before the save would land after it with the old record.
       void refetch();
+      return true;
     } catch (e) {
       setShareErr(e instanceof Error ? e.message : "Could not update sharing");
+      return false;
     } finally {
       setShareDraft((d) => {
         const rest = { ...d };
@@ -136,8 +138,7 @@ export default function VideoDetailPage() {
       setShareErr("The expiry must be in the future");
       return;
     }
-    await patchShare({ shareExpiresAt: at.toISOString() });
-    setExpiryDraft("");
+    if (await patchShare({ shareExpiresAt: at.toISOString() })) setExpiryDraft("");
   }
 
   // Cover image: downscaled in the browser to at most 1280px wide, sent as a JPEG data URL.

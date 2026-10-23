@@ -4,6 +4,7 @@ import { getScriptProvider } from "../providers";
 import { LOCAL_OWNER } from "../owner-id";
 import { ValidationError } from "../errors";
 import { fetchPageText } from "../webpage";
+import type { FetchLike } from "../safe-fetch";
 import { getAvatar } from "./avatars";
 
 export const scriptSchema = z
@@ -18,7 +19,7 @@ export const scriptSchema = z
   })
   .refine((v) => v.topic.length >= 3 || !!v.url, { path: ["topic"], message: "Give a topic or a page URL" });
 
-export async function generateScript(input: z.infer<typeof scriptSchema>, fetchImpl: typeof fetch = fetch): Promise<string> {
+export async function generateScript(input: z.infer<typeof scriptSchema>, fetchImpl?: FetchLike): Promise<string> {
   if (input.url) {
     let page: { title: string; text: string };
     try {

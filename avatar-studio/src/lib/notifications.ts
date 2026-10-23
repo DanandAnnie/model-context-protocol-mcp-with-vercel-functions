@@ -70,7 +70,7 @@ export async function dispatchNotification(settings: NotifySettings, event: Noti
       body,
       redirect: "error",
       signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
-    }, "Webhook URL", fetchOverride);
+    }, "Webhook URL", fetchOverride, { discardBody: true });
     result = { at: nowIso(), event, ok: res.ok, status: res.status, error: res.ok ? undefined : `Endpoint returned ${res.status}` };
   } catch (err) {
     result = { at: nowIso(), event, ok: false, error: err instanceof Error ? err.message : "Delivery failed" };

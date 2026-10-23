@@ -482,6 +482,39 @@ describe("second review fixes", () => {
     assert.deepEqual(calls, ["https://93.184.216.34/ok"]);
   });
 
+  it("reads large bodies through the pinned client and caps them", async () => {
+    const { createServer } = await import("node:http");
+    const { fetchPinned, ResponseTooLargeError } = await import("../safe-fetch");
+    const big = Buffer.alloc(3 * 1024 * 1024, "a");
+    const server = createServer((req, res) => {
+      if (req.url === "/empty") { res.writeHead(204); res.end(); return; }
+      if (req.url === "/hook") { res.writeHead(200, { "content-type": "text/plain" }); res.end(big); return; }
+      res.writeHead(200, { "content-type": "text/html", "x-host-seen": req.headers.host ?? "" });
+      // Several writes so the body spans many socket reads, like a real download.
+      for (let i = 0; i < 3; i++) res.write(big.subarray(i * 1024 * 1024, (i + 1) * 1024 * 1024));
+      res.end();
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as { port: number }).port;
+    // The name never resolves; only the pinned lookup can reach the server.
+    const url = new URL(`http://pinned.example.invalid:${port}/page`);
+    const pinned = [{ address: "127.0.0.1", family: 4 as const }];
+    try {
+      const res = await fetchPinned(url, pinned, { signal: AbortSignal.timeout(5_000) }, "Page URL");
+      assert.equal(res.status, 200);
+      assert.equal(res.headers.get("x-host-seen"), `pinned.example.invalid:${port}`, "Host header keeps the name, not the address");
+      assert.equal((await res.arrayBuffer()).byteLength, big.byteLength, "the whole body arrives after the client is torn down");
+      await assert.rejects(fetchPinned(url, pinned, { signal: AbortSignal.timeout(5_000) }, "Page URL", { maxBytes: 1_000_000 }), ResponseTooLargeError);
+      const hook = await fetchPinned(new URL(`http://pinned.example.invalid:${port}/hook`), pinned, { method: "POST", body: "{}", signal: AbortSignal.timeout(5_000) }, "Webhook URL", { discardBody: true });
+      assert.equal(hook.status, 200);
+      assert.equal(hook.body, null, "a discarded body is not read");
+      const empty = await fetchPinned(new URL(`http://pinned.example.invalid:${port}/empty`), pinned, {}, "URL");
+      assert.equal(empty.status, 204);
+    } finally {
+      server.close();
+    }
+  });
+
   it("decodes base64 and utf8 data URLs", async () => {
     const { decodeDataUrl } = await import("../providers/image");
     const b64 = decodeDataUrl("data:image/png;base64,aGVsbG8=");
@@ -995,6 +1028,11 @@ describe("script from a web page", () => {
     await assert.rejects(fetchPageText("https://203.0.113.5/big", fake), /too large/);
     await assert.rejects(fetchPageText("https://203.0.113.5/tiny", fake), /too little readable text/);
     await assert.rejects(fetchPageText("https://203.0.113.5/missing", fake), /returned 404/);
+    // A 3xx under redirect: "error" surfaces as "fetch failed" with the reason on `cause`.
+    const redirecting = (async () => { throw new TypeError("fetch failed", { cause: new Error("unexpected redirect") }); }) as typeof fetch;
+    await assert.rejects(fetchPageText("https://203.0.113.5/moved", redirecting), /That address redirects/);
+    // Without an injected client the writer takes the pinned path, which starts with the same host check.
+    await assert.rejects(generateScript(scriptSchema.parse({ url: "http://127.0.0.1/listing", lengthSec: 45 })), /public host/);
 
     const script = await generateScript(scriptSchema.parse({ url: "https://203.0.113.5/listing", lengthSec: 45 }), fake);
     assert.match(script, /12 Maple St & more/, "topic defaults to the page title");

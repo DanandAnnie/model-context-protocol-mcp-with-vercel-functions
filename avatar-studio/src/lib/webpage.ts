@@ -1,5 +1,5 @@
 // Turns a public web page into plain text for the script writer ("make a video from this page").
-import { safeFetch, type FetchLike } from "./safe-fetch";
+import { isRedirectError, ResponseTooLargeError, safeFetch, type FetchLike } from "./safe-fetch";
 import { UnsafeUrlError } from "./safe-url";
 
 export const MAX_PAGE_BYTES = 1_000_000;
@@ -48,9 +48,11 @@ export async function fetchPageText(url: string, fetchImpl?: FetchLike): Promise
     },
     "Page URL",
     fetchImpl,
+    { maxBytes: MAX_PAGE_BYTES },
   ).catch((err) => {
     if (err instanceof UnsafeUrlError) throw err;
-    throw new Error(err instanceof Error && /redirect/i.test(err.message) ? "That address redirects; paste the final page URL" : "The page could not be fetched");
+    if (err instanceof ResponseTooLargeError) throw new Error("The page is too large");
+    throw new Error(isRedirectError(err) ? "That address redirects; paste the final page URL" : "The page could not be fetched");
   });
   if (!res.ok) throw new Error(`The page returned ${res.status}`);
   const type = res.headers.get("content-type") ?? "";

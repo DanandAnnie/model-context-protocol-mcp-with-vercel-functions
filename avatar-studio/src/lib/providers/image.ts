@@ -1,11 +1,16 @@
 // Fetch a portrait as bytes for provider uploads. Accepts data: URLs and public http(s) URLs.
-import { safeFetch, type FetchLike } from "../safe-fetch";
+import { isRedirectError, ResponseTooLargeError, safeFetch, type FetchLike } from "../safe-fetch";
+import { UnsafeUrlError } from "../safe-url";
 
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 export async function loadImage(url: string, fetchImpl?: FetchLike): Promise<{ bytes: Uint8Array; mimeType: string }> {
   if (url.startsWith("data:")) return decodeDataUrl(url);
-  const res = await safeFetch(url, { redirect: "error", signal: AbortSignal.timeout(15_000) }, "Image URL", fetchImpl);
+  const res = await safeFetch(url, { redirect: "error", signal: AbortSignal.timeout(15_000) }, "Image URL", fetchImpl, { maxBytes: MAX_IMAGE_BYTES }).catch((err) => {
+    if (err instanceof UnsafeUrlError) throw err;
+    if (err instanceof ResponseTooLargeError) throw new Error("Avatar image is too large (10 MB max)");
+    throw new Error(isRedirectError(err) ? "Avatar URL redirects; use the final image address" : "Could not download avatar image");
+  });
   if (!res.ok) throw new Error(`Could not download avatar image (${res.status})`);
   const mimeType = res.headers.get("content-type")?.split(";")[0].trim() ?? "image/jpeg";
   if (!mimeType.startsWith("image/")) throw new Error("Avatar URL did not return an image");

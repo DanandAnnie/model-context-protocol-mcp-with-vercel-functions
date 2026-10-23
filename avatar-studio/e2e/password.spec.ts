@@ -74,9 +74,18 @@ test("an offline share link is hidden from the public but not from the owner", a
   expect((await anon.get(`/share/${id}`)).status()).toBe(200);
   expect((await anon.get(`/api/videos/${id}/captions`)).status()).toBe(200);
 
+  const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+  expect((await request.patch(`/api/videos/${id}`, { data: { cover: png } })).status()).toBe(200);
+  expect((await anon.get(`/api/videos/${id}/cover`)).status()).toBe(200);
+
   expect((await request.patch(`/api/videos/${id}`, { data: { shareDisabled: true } })).status()).toBe(200);
   expect((await anon.get(`/share/${id}`)).status()).toBe(404);
   expect((await anon.get(`/api/videos/${id}/captions`)).status()).toBe(404);
+  // The cover goes offline with the link for everyone but the owner.
+  expect((await anon.get(`/api/videos/${id}/cover`)).status()).toBe(404);
+  const ownerCover = await request.get(`/api/videos/${id}/cover?v=1`);
+  expect(ownerCover.status()).toBe(200);
+  expect(ownerCover.headers()["cache-control"]).toContain("private");
   expect((await request.get(`/api/videos/${id}/captions`)).status()).toBe(200);
   expect((await request.get(`/api/videos/${id}`)).status()).toBe(200);
 
@@ -107,7 +116,11 @@ test("a password-protected share link opens only with the password or for the ow
   // A cover follows the same rule: the unlocked visitor and the owner get it, a stranger does not.
   const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
   expect((await request.patch(`/api/videos/${id}`, { data: { cover: png } })).status()).toBe(200);
-  expect((await anon.get(`/api/videos/${id}/cover`)).status()).toBe(200);
+  const cover = await anon.get(`/api/videos/${id}/cover?v=1`);
+  expect(cover.status()).toBe(200);
+  // Served per viewer: a CDN must not hand the cached image to the next visitor.
+  expect(cover.headers()["cache-control"]).toContain("private");
+  expect(cover.headers()["cache-control"]).not.toContain("public");
   const stranger = await playwright.request.newContext({ baseURL: "http://localhost:3102" });
   expect((await stranger.get(`/api/videos/${id}/cover`)).status()).toBe(404);
   await stranger.dispose();

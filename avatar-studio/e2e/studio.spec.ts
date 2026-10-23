@@ -494,6 +494,7 @@ test("a custom cover image replaces the poster everywhere", async ({ page }) => 
   const served = await page.request.get(`/api/videos/${v.id}/cover?v=${Date.parse(record.cover!.updatedAt)}`);
   expect(served.status()).toBe(200);
   expect(served.headers()["content-type"]).toBe("image/jpeg");
+  expect(served.headers()["cache-control"]).toContain("public");
   expect(served.headers()["cache-control"]).toContain("immutable");
   // The share page's poster and link preview use it.
   const html = await (await page.request.get(`/share/${v.id}`)).text();

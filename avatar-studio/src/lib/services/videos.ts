@@ -328,7 +328,7 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
   if (patch.cover !== undefined) {
     if (patch.cover) {
       const cover = await setCover(next, patch.cover);
-      next.cover = { updatedAt: cover.updatedAt };
+      next.cover = { updatedAt: cover.updatedAt, mimeType: cover.mimeType, bytes: cover.bytes };
     } else {
       await clearCover(next.id);
       delete next.cover;

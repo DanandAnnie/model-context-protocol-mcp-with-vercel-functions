@@ -5,13 +5,15 @@ import { getStore } from "../store";
 import { LOCAL_OWNER } from "../owner-id";
 
 const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover"] as const;
+/** Cover rows hold the image bytes; the export describes each cover from its video (`cover.mimeType`, `cover.bytes`) instead of loading them. */
+const EXPORT_KINDS = OWNER_KINDS.filter((k) => k !== "cover") as Exclude<(typeof OWNER_KINDS)[number], "cover">[];
 
-/** Everything stored under an owner id, for a data export. Secrets (key hashes, webhook secret) are redacted. */
-export type OwnerExport = { ownerId: string; exportedAt: string } & Record<(typeof OWNER_KINDS)[number], Record<string, unknown>[]>;
+/** Everything stored under an owner id, for a data export. Secrets (key hashes, webhook secret) and cover image bytes are left out. */
+export type OwnerExport = { ownerId: string; exportedAt: string } & Record<(typeof EXPORT_KINDS)[number], Record<string, unknown>[]>;
 
 export async function exportOwnerData(ownerId: string = LOCAL_OWNER): Promise<OwnerExport> {
-  const out = {} as Record<(typeof OWNER_KINDS)[number], Record<string, unknown>[]>;
-  for (const kind of OWNER_KINDS) {
+  const out = {} as Record<(typeof EXPORT_KINDS)[number], Record<string, unknown>[]>;
+  for (const kind of EXPORT_KINDS) {
     const items = await getStore().list<Record<string, unknown>>(kind, ownerId);
     out[kind] = items.map((item) => {
       const copy = { ...item };
@@ -20,11 +22,6 @@ export async function exportOwnerData(ownerId: string = LOCAL_OWNER): Promise<Ow
       if (kind === "sharelock") {
         delete copy.hash;
         delete copy.salt;
-      }
-      if (kind === "cover" && typeof copy.data === "string") {
-        // The image itself can be downloaded from the video; the export keeps its size.
-        copy.bytes = Buffer.from(copy.data, "base64").byteLength;
-        delete copy.data;
       }
       return copy;
     });

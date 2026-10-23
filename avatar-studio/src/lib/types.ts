@@ -133,8 +133,8 @@ export interface Video extends VideoRequest {
   shareDisabled?: boolean;
   /** Visitors must enter a password (kept as a salted hash in its own record) before the share page plays. */
   shareLocked?: boolean;
-  /** A custom poster image is stored in its own record; `updatedAt` versions its URL. */
-  cover?: { updatedAt: string };
+  /** A custom poster image is stored in its own record; `updatedAt` versions its URL, `bytes` is its decoded size. */
+  cover?: { updatedAt: string; mimeType: string; bytes: number };
   /** A button under the share-page player: "Book a showing" → https://… */
   shareCta?: { label: string; url: string };
   /** Share page views (completed videos only; one per viewer per window). */

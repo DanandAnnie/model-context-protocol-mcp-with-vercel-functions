@@ -138,7 +138,11 @@ export default function VideoDetailPage() {
       const canvas = document.createElement("canvas");
       canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
       canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
-      canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const ctx = canvas.getContext("2d")!;
+      // JPEG has no alpha: a transparent PNG lands on white rather than black.
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       return canvas.toDataURL("image/jpeg", 0.85);
     } finally {
       URL.revokeObjectURL(url);

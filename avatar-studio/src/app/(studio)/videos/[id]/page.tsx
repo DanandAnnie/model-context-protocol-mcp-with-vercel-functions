@@ -2,10 +2,10 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import { ArrowLeft, Captions, Check, Code2, Copy, Download, Eye, FolderOpen, Languages, LayoutTemplate, Link2, Lock, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowLeft, Captions, Check, Clock, Code2, Copy, Download, Eye, FolderOpen, Languages, LayoutTemplate, Link2, Lock, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
-import { ApiError, api, formatDate, formatSeconds, isDarkHex, posterUrl } from "@/lib/client";
+import { ApiError, api, formatDate, formatSeconds, isDarkHex, posterUrl, shareExpired } from "@/lib/client";
 import type { Video } from "@/lib/types";
 
 export default function VideoDetailPage() {
@@ -92,7 +92,7 @@ export default function VideoDetailPage() {
 
   const [shareErr, setShareErr] = useState<string | null>(null);
   // Optimistic: a box flips at once and reverts if the save fails.
-  type SharePatch = { shareDownload?: boolean; shareDisabled?: boolean };
+  type SharePatch = { shareDownload?: boolean; shareDisabled?: boolean; shareExpiresAt?: string | null };
   const [shareDraft, setShareDraft] = useState<SharePatch>({});
   async function patchShare(patch: SharePatch) {
     if (!video) return;
@@ -105,7 +105,7 @@ export default function VideoDetailPage() {
       // must disappear too, or the box would flip back until the refetch lands.
       setData((d) => {
         const merged = { ...d?.video, ...next } as Video;
-        for (const key of ["shareDisabled", "shareDownload", "shareLocked", "shareCta"] as const) if (!(key in next)) delete merged[key];
+        for (const key of ["shareDisabled", "shareDownload", "shareLocked", "shareCta", "shareExpiresAt"] as const) if (!(key in next)) delete merged[key];
         return { video: merged };
       });
       // A status poll that started before the save would land after it with the old record.
@@ -121,6 +121,24 @@ export default function VideoDetailPage() {
     }
   }
   const shareLive = !(shareDraft.shareDisabled ?? !!video?.shareDisabled);
+  // Expiry: the owner types a local date and time; the API stores it as an instant.
+  const [expiryDraft, setExpiryDraft] = useState("");
+  const expiryInput = (iso?: string) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+  async function saveExpiry() {
+    const at = new Date(expiryDraft);
+    if (!expiryDraft || Number.isNaN(at.getTime())) return;
+    if (at.getTime() <= Date.now()) {
+      setShareErr("The expiry must be in the future");
+      return;
+    }
+    await patchShare({ shareExpiresAt: at.toISOString() });
+    setExpiryDraft("");
+  }
 
   // Cover image: downscaled in the browser to at most 1280px wide, sent as a JPEG data URL.
   const [coverBusy, setCoverBusy] = useState<"save" | "remove" | null>(null);
@@ -323,6 +341,40 @@ export default function VideoDetailPage() {
                       Viewers can download
                     </label>
                     {!shareLive && <span className="text-xs text-slate-500" data-testid="share-off-note">Share link off: the share page and embed answer “not found”.</span>}
+                    <form
+                      className="inline-flex flex-wrap items-center gap-2"
+                      data-testid="share-expiry"
+                      noValidate
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void saveExpiry();
+                      }}
+                    >
+                      {video.shareExpiresAt && (
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${shareExpired(video) ? "bg-rose-50 text-rose-800" : "bg-slate-100 text-slate-700"}`}
+                          data-testid="share-expiry-badge"
+                        >
+                          <Clock className="h-3 w-3" /> {shareExpired(video) ? "Expired" : "Expires"} {formatDate(video.shareExpiresAt)}
+                        </span>
+                      )}
+                      <input
+                        type="datetime-local"
+                        aria-label="Share link expiry"
+                        className={`${inputClass} w-52 py-1.5 text-xs`}
+                        value={expiryDraft}
+                        min={expiryInput(new Date().toISOString())}
+                        onChange={(e) => setExpiryDraft(e.target.value)}
+                      />
+                      <Button type="submit" variant="secondary" disabled={!expiryDraft} title="The share link stops working at this time; you keep access">
+                        {video.shareExpiresAt ? "Change expiry" : "Set expiry"}
+                      </Button>
+                      {video.shareExpiresAt && (
+                        <Button type="button" variant="ghost" onClick={() => void patchShare({ shareExpiresAt: null })}>
+                          Clear expiry
+                        </Button>
+                      )}
+                    </form>
                     <form
                       className="inline-flex flex-wrap items-center gap-2"
                       data-testid="share-password"

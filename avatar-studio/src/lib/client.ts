@@ -38,6 +38,16 @@ export function posterUrl(video: { id: string; cover?: { updatedAt: string }; th
   return video.thumbnailUrl;
 }
 
+/** True once a share link's expiry has passed. */
+export function shareExpired(video: { shareExpiresAt?: string }, now = Date.now()): boolean {
+  return !!video.shareExpiresAt && Date.parse(video.shareExpiresAt) <= now;
+}
+
+/** True while the public should see "not found": the owner switched the link off, or it expired. */
+export function shareOffline(video: { shareDisabled?: boolean; shareExpiresAt?: string }, now = Date.now()): boolean {
+  return !!video.shareDisabled || shareExpired(video, now);
+}
+
 export function formatDate(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }

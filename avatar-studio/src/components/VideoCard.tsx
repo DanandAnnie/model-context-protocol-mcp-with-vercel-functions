@@ -1,8 +1,8 @@
 "use client";
 import Link from "next/link";
-import { Film, LinkIcon, Lock } from "lucide-react";
+import { Clock, Film, LinkIcon, Lock } from "lucide-react";
 import { StatusBadge } from "./ui";
-import { formatDate, formatSeconds, posterUrl } from "@/lib/client";
+import { formatDate, formatSeconds, posterUrl, shareExpired } from "@/lib/client";
 import type { Video } from "@/lib/types";
 
 export function VideoCard({ video, selectable = false, selected = false, onToggle }: { video: Video; selectable?: boolean; selected?: boolean; onToggle?: () => void }) {
@@ -32,11 +32,16 @@ export function VideoCard({ video, selectable = false, selected = false, onToggl
         {video.durationSec != null && (
           <span className="absolute bottom-2 right-2 rounded bg-black/70 px-1.5 py-0.5 text-xs text-white">{formatSeconds(video.durationSec)}</span>
         )}
-        {(video.shareDisabled || video.shareLocked) && (
+        {(video.shareDisabled || video.shareLocked || shareExpired(video)) && (
           <span className="absolute bottom-2 left-2 flex gap-1" data-testid="share-badges">
             {video.shareDisabled && (
               <span className="inline-flex items-center gap-1 rounded bg-black/70 px-1.5 py-0.5 text-xs text-white" title="The share link is off">
                 <LinkIcon className="h-3 w-3" /> Link off
+              </span>
+            )}
+            {!video.shareDisabled && shareExpired(video) && (
+              <span className="inline-flex items-center gap-1 rounded bg-black/70 px-1.5 py-0.5 text-xs text-white" title={`The share link expired ${formatDate(video.shareExpiresAt!)}`}>
+                <Clock className="h-3 w-3" /> Expired
               </span>
             )}
             {video.shareLocked && (

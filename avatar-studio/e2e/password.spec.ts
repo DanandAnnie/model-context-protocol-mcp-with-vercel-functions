@@ -91,6 +91,17 @@ test("an offline share link is hidden from the public but not from the owner", a
 
   expect((await request.patch(`/api/videos/${id}`, { data: { shareDisabled: false } })).status()).toBe(200);
   expect((await anon.get(`/share/${id}`)).status()).toBe(200);
+
+  // An expiry a moment away: public until then, then "not found" for everyone but the owner.
+  expect((await request.patch(`/api/videos/${id}`, { data: { shareExpiresAt: new Date(Date.now() + 1500).toISOString() } })).status()).toBe(200);
+  expect((await anon.get(`/share/${id}`)).status()).toBe(200);
+  await expect.poll(async () => (await anon.get(`/share/${id}`)).status(), { timeout: 10_000 }).toBe(404);
+  expect((await anon.get(`/api/videos/${id}/captions`)).status()).toBe(404);
+  expect((await anon.get(`/api/videos/${id}/cover`)).status()).toBe(404);
+  expect((await request.get(`/api/videos/${id}/cover`)).status()).toBe(200);
+  expect((await request.get(`/api/videos/${id}`)).status()).toBe(200);
+  expect((await request.patch(`/api/videos/${id}`, { data: { shareExpiresAt: null } })).status()).toBe(200);
+  expect((await anon.get(`/share/${id}`)).status()).toBe(200);
   await anon.dispose();
 });
 

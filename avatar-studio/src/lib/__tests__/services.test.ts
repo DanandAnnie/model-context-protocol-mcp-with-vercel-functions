@@ -874,6 +874,33 @@ describe("folders and share views", () => {
     assert.deepEqual(await recordView(v.id), { views: 1, counted: true });
   });
 
+  it("expires a share link at a set time for the public only", async () => {
+    const { recordCtaClick, updateVideo, videoPatchSchema } = await import("../services/videos");
+    const { shareExpired, shareOffline } = await import("../client");
+    const v = await createVideo(req);
+    const fresh = await getVideo(v.id, undefined, false);
+    globalThis.__avatarStudioStore!.put("video", { ...fresh, status: "completed", shareCta: { label: "Go", url: "https://example.com" } });
+    assert.throws(() => videoPatchSchema.parse({ shareExpiresAt: "yesterday" }), /must be a date/);
+    assert.throws(() => videoPatchSchema.parse({ shareExpiresAt: "2001-01-01T00:00:00Z" }), /in the future/);
+    const soon = new Date(Date.now() + 80).toISOString();
+    const set = await updateVideo(v.id, videoPatchSchema.parse({ shareExpiresAt: soon }));
+    assert.equal(set.shareExpiresAt, soon, "stored as an ISO instant");
+    assert.equal(shareExpired(set), false);
+    assert.equal((await getVideo(v.id, null, false)).id, v.id, "public until the time passes");
+    assert.deepEqual(await recordView(v.id), { views: 1, counted: true });
+    await new Promise((r) => setTimeout(r, 120));
+    assert.equal(shareExpired(set), true);
+    assert.equal(shareOffline({ shareExpiresAt: soon }, Date.parse(soon) - 1), false, "the helper takes a clock");
+    await assert.rejects(getVideo(v.id, null, false), /not found/, "public after the time passes");
+    assert.equal((await getVideo(v.id, undefined, false)).id, v.id, "the owner still sees it");
+    await assert.rejects(recordView(v.id), /not found/, "beacons answer like the share page");
+    await assert.rejects(recordCtaClick(v.id), /not found/);
+    const cleared = await updateVideo(v.id, videoPatchSchema.parse({ shareExpiresAt: null }));
+    assert.equal("shareExpiresAt" in cleared, false);
+    assert.equal((await getVideo(v.id, null, false)).id, v.id, "clearing the expiry reopens the link");
+    assert.deepEqual(await recordView(v.id), { views: 2, counted: true });
+  });
+
   it("the in-memory store refuses one id under two kinds, like the single-key table", async () => {
     const store = new MemoryStore();
     await store.put("video", { id: "vid_shared" });

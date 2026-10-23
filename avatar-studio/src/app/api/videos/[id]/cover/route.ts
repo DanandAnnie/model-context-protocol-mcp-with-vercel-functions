@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { errorResponse } from "@/lib/api-utils";
+import { shareOffline } from "@/lib/client";
 import { getCover } from "@/lib/cover";
 import { NotFoundError } from "@/lib/errors";
 import { LOCAL_OWNER, optionalOwner } from "@/lib/owner";
@@ -23,7 +24,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     const owner = await optionalOwner();
     const isOwner = !!owner && (video.ownerId ?? LOCAL_OWNER) === owner;
     if (!isOwner) {
-      if (video.shareDisabled) throw new NotFoundError("Cover not found");
+      if (shareOffline(video)) throw new NotFoundError("Cover not found");
       if (!(await shareUnlocked(video, (await cookies()).get(shareCookieName(id))?.value))) throw new NotFoundError("Cover not found");
     }
     const cover = await getCover(id);
@@ -31,7 +32,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     const versioned = new URL(req.url).searchParams.has("v");
     // A cover anyone may fetch can sit in shared caches (CDN); one behind a password or an offline
     // link is served per viewer, so only that viewer's browser may keep it.
-    const shared = !video.shareLocked && !video.shareDisabled;
+    const shared = !video.shareLocked && !shareOffline(video);
     const cacheControl = !versioned ? "no-store" : shared ? "public, max-age=31536000, immutable" : "private, max-age=31536000, immutable";
     return new Response(cover.bytes as BodyInit, {
       headers: {

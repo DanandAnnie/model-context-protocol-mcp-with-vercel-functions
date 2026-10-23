@@ -14,6 +14,7 @@ import { listVoices } from "./voices";
 import { PUBLIC_ACCESS, owned, scheduleNotification, stripUndefined } from "./shared";
 import { SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, clearShareLock, setShareLock, shareUnlocked } from "../share-lock";
 import { clearCover, setCover } from "../cover";
+import { shareOffline } from "../client";
 
 export const backgroundSchema = z.object({ type: z.enum(["color", "image"]), value: z.string().min(1) });
 
@@ -211,7 +212,7 @@ export async function getVideo(id: string, ownerId: string | null = LOCAL_OWNER,
   const video = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
   // A share link the owner switched off is indistinguishable from a missing video to the public
   // (the beacons make the same distinction themselves, since they read the store directly).
-  if (ownerId === PUBLIC_ACCESS && video.shareDisabled) throw new NotFoundError(`Video ${id} not found`);
+  if (ownerId === PUBLIC_ACCESS && shareOffline(video)) throw new NotFoundError(`Video ${id} not found`);
   return refresh ? refreshStatus(video) : video;
 }
 
@@ -266,6 +267,14 @@ export const videoPatchSchema = z
     /** Whether the public share page offers a download link. */
     shareDownload: z.boolean().optional(),
     shareDisabled: z.boolean().optional(),
+    /** When the public link stops working (ISO 8601, in the future); null keeps it open indefinitely. */
+    shareExpiresAt: z
+      .string()
+      .trim()
+      .refine((v) => Number.isFinite(Date.parse(v)), "The expiry must be a date")
+      .refine((v) => Date.parse(v) > Date.now(), "The expiry must be in the future")
+      .nullable()
+      .optional(),
     /** A `data:image/...` URL (PNG, JPEG, WebP, or GIF; 2 MB decoded) or null to remove the cover. */
     cover: z
       .string()
@@ -299,6 +308,7 @@ export const videoPatchSchema = z
       p.folder !== undefined ||
       p.shareDownload !== undefined ||
       p.shareDisabled !== undefined ||
+      p.shareExpiresAt !== undefined ||
       p.sharePassword !== undefined ||
       p.shareCta !== undefined ||
       p.cover !== undefined,
@@ -320,6 +330,10 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
   if (patch.shareDisabled !== undefined) {
     if (patch.shareDisabled) next.shareDisabled = true;
     else delete next.shareDisabled;
+  }
+  if (patch.shareExpiresAt !== undefined) {
+    if (patch.shareExpiresAt) next.shareExpiresAt = new Date(patch.shareExpiresAt).toISOString();
+    else delete next.shareExpiresAt;
   }
   if (patch.shareCta !== undefined) {
     if (patch.shareCta) next.shareCta = patch.shareCta;
@@ -353,7 +367,7 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
  */
 export async function recordView(id: string, gate: () => boolean = () => true, shareCookie?: string): Promise<{ views: number; counted: boolean }> {
   const video = await getStore().get<Video>("video", id);
-  if (!video || video.shareDisabled) throw new NotFoundError(`Video ${id} not found`);
+  if (!video || shareOffline(video)) throw new NotFoundError(`Video ${id} not found`);
   if (video.status !== "completed" || !(await shareUnlocked(video, shareCookie)) || !gate()) return { views: video.views ?? 0, counted: false };
   const views = (video.views ?? 0) + 1;
   await getStore().put("video", { ...video, views, lastViewedAt: nowIso() });
@@ -366,7 +380,7 @@ export async function recordView(id: string, gate: () => boolean = () => true, s
  */
 export async function recordCtaClick(id: string, gate: () => boolean = () => true, shareCookie?: string): Promise<{ clicks: number; counted: boolean }> {
   const video = await getStore().get<Video>("video", id);
-  if (!video || video.shareDisabled) throw new NotFoundError(`Video ${id} not found`);
+  if (!video || shareOffline(video)) throw new NotFoundError(`Video ${id} not found`);
   if (video.status !== "completed" || !video.shareCta || !(await shareUnlocked(video, shareCookie)) || !gate()) {
     return { clicks: video.ctaClicks ?? 0, counted: false };
   }

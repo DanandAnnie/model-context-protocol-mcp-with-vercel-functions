@@ -131,6 +131,8 @@ export interface Video extends VideoRequest {
   shareDownload?: boolean;
   /** The share page, its captions, and the beacons answer "not found" while true. */
   shareDisabled?: boolean;
+  /** ISO time after which the share link behaves as if switched off (the owner keeps access). */
+  shareExpiresAt?: string;
   /** Visitors must enter a password (kept as a salted hash in its own record) before the share page plays. */
   shareLocked?: boolean;
   /** A custom poster image is stored in its own record; `updatedAt` versions its URL, `bytes` is its decoded size. */

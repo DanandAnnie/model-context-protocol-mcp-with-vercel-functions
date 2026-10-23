@@ -17,7 +17,15 @@ export const config = {
   supabaseServiceRoleKey: env("SUPABASE_SERVICE_ROLE_KEY"),
   appUrl: env("APP_URL") ?? env("VERCEL_URL")?.replace(/^(?!https?:\/\/)/, "https://") ?? "http://localhost:3000",
   webhookSecret: env("WEBHOOK_SECRET"),
+  /** Optional cap on renders per owner per calendar month (UTC). Unset = unlimited. */
+  renderLimitPerMonth: parsePositiveInt(env("RENDER_LIMIT_PER_MONTH")),
 };
+
+function parsePositiveInt(v: string | undefined): number | undefined {
+  if (!v) return undefined;
+  const n = Number.parseInt(v, 10);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
 
 /**
  * Public callback URL a provider should POST to when a job finishes.

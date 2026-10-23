@@ -113,4 +113,6 @@ export interface ProviderStatus {
   persistence: "memory" | "supabase";
   authEnabled: boolean;
   authMode: "open" | "password" | "supabase";
+  /** Renders allowed per owner per calendar month, or null when unlimited. */
+  renderLimitPerMonth: number | null;
 }

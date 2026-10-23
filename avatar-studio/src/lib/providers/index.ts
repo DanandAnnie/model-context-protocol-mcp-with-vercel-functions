@@ -66,5 +66,5 @@ export function providerStatus(): ProviderStatus {
   const script = getScriptProvider().name;
   const translate = getTranslateProvider().name;
   const live = [avatar, tts, script, translate].some((n) => n !== "mock");
-  return { mode: live ? "live" : "demo", avatar, tts, script, translate, persistence: persistenceKind(), authEnabled: authEnabled(), authMode: authMode() };
+  return { mode: live ? "live" : "demo", avatar, tts, script, translate, persistence: persistenceKind(), authEnabled: authEnabled(), authMode: authMode(), renderLimitPerMonth: config.renderLimitPerMonth ?? null };
 }

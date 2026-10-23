@@ -20,7 +20,8 @@ D-ID, ElevenLabs, or in a fully offline **demo mode** with no keys at all.
 | Avatars | Library presenters + photo avatars created from an uploaded portrait, a webcam capture, or an image URL |
 | Voices | Searchable voice library with previews (provider audio, provider sample, or browser speech in demo mode) |
 | Video translate | Submit a video URL + target language, track dubbing jobs |
-| Settings | Usage summary (videos, completed, processing, failed, seconds rendered), which provider backs each capability, access mode, and how to configure it |
+| Settings | Usage summary (videos, completed, processing, failed, seconds rendered, this month vs allowance), which provider backs each capability, access mode, and how to configure it |
+| Allowance | Optional `RENDER_LIMIT_PER_MONTH` caps renders per account per calendar month; exceeding it returns 429 with a clear message |
 | Accounts | Per-user accounts with Supabase Auth (email + password sign up / sign in, email confirmation); each user sees only their own videos, avatars, and translations. Falls back to a shared `STUDIO_PASSWORD` gate, then open mode. Landing, login, share pages, and provider webhooks stay public |
 | API | REST routes under `/api/*`, provider webhooks under `/api/webhooks/:provider` |
 
@@ -94,4 +95,4 @@ supabase/schema.sql     one-table JSON store
 
 ## Not included (yet)
 
-Team workspaces and sharing between accounts, billing/credits, interactive real-time avatars, and avatar training from video.
+Team workspaces and sharing between accounts, paid billing (only a monthly render allowance today), interactive real-time avatars, and avatar training from video.

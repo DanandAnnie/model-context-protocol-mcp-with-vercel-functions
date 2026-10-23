@@ -13,8 +13,9 @@ import { getStore } from "./store";
 import { MAX_SCENES, type Avatar, type Translation, type Video, type VideoRequest, type Voice } from "./types";
 
 import { LOCAL_OWNER } from "./owner";
-import { NotFoundError, ValidationError } from "./errors";
-export { NotFoundError, ValidationError, UnauthorizedError } from "./errors";
+import { LimitError, NotFoundError, ValidationError } from "./errors";
+export { NotFoundError, ValidationError, UnauthorizedError, LimitError } from "./errors";
+import { config } from "./config";
 
 /** Pass as the owner to skip the ownership check (public share pages). */
 export const PUBLIC_ACCESS = null;
@@ -139,7 +140,27 @@ export const videoRequestSchema = z
     return { ...v, script: v.script };
   });
 
+/** Renders started by this owner since the start of the current UTC month, excluding ones that failed to start. */
+export async function rendersThisMonth(ownerId: string): Promise<number> {
+  const monthStart = new Date();
+  monthStart.setUTCDate(1);
+  monthStart.setUTCHours(0, 0, 0, 0);
+  const since = monthStart.toISOString();
+  const videos = await getStore().list<Video>("video", ownerId);
+  return videos.filter((v) => v.createdAt >= since && v.status !== "failed").length;
+}
+
+async function enforceRenderLimit(ownerId: string): Promise<void> {
+  const limit = config.renderLimitPerMonth;
+  if (!limit) return;
+  const used = await rendersThisMonth(ownerId);
+  if (used >= limit) {
+    throw new LimitError(`Monthly render limit reached (${used} of ${limit}). The allowance resets on the 1st.`);
+  }
+}
+
 export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWNER): Promise<Video> {
+  await enforceRenderLimit(ownerId);
   let avatar = await getAvatar(req.avatarId, ownerId);
   const voices = await listVoices();
   const voice = voices.find((v) => v.id === req.voiceId) ?? null;

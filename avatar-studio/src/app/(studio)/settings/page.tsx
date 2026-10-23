@@ -26,16 +26,22 @@ export default function SettingsPage() {
   const { data } = useApi<ProviderStatus>("/api/status");
   const { data: videoData } = useApi<{ videos: Video[] }>("/api/videos");
   const usage = summarize(videoData?.videos ?? []);
+  const limit = data?.renderLimitPerMonth ?? null;
+  const monthStart = new Date();
+  monthStart.setUTCDate(1);
+  monthStart.setUTCHours(0, 0, 0, 0);
+  const thisMonth = (videoData?.videos ?? []).filter((v) => v.createdAt >= monthStart.toISOString() && v.status !== "failed").length;
   return (
     <>
       <SectionTitle title="Settings" subtitle="Providers are configured with environment variables on the server, never from the browser." />
-      <Card className="mb-6 grid grid-cols-2 divide-x divide-slate-100 sm:grid-cols-5">
+      <Card className="mb-6 grid grid-cols-2 divide-x divide-slate-100 sm:grid-cols-3 lg:grid-cols-6">
         {[
           ["Videos", String(usage.total)],
           ["Completed", String(usage.completed)],
           ["Processing", String(usage.processing)],
           ["Failed", String(usage.failed)],
           ["Rendered", formatSeconds(usage.seconds)],
+          ["This month", limit ? `${thisMonth} / ${limit}` : String(thisMonth)],
         ].map(([label, value]) => (
           <div key={label} className="px-5 py-4">
             <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
@@ -61,6 +67,17 @@ export default function SettingsPage() {
             </div>
           );
         })}
+      </Card>
+      <Card className="mt-6 flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+        <div>
+          <div className="text-sm font-medium text-slate-900">Render allowance</div>
+          <div className="mt-0.5 text-xs text-slate-500">
+            <code className="rounded bg-slate-100 px-1 py-0.5">RENDER_LIMIT_PER_MONTH</code> · caps renders per account per calendar month (UTC); failed starts do not count
+          </div>
+        </div>
+        <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${limit ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
+          {data ? (limit ? `${limit} per month` : "unlimited") : "…"}
+        </span>
       </Card>
       <Card className="mt-6 flex flex-wrap items-center justify-between gap-3 px-5 py-4">
         <div>

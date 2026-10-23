@@ -276,3 +276,23 @@ describe("owner isolation", () => {
     assert.equal((await listTranslations("user-b")).length, 0);
   });
 });
+
+describe("render allowance", () => {
+  it("counts this month's renders and enforces RENDER_LIMIT_PER_MONTH", async () => {
+    const { config } = await import("../config");
+    const { rendersThisMonth, LimitError } = await import("../services");
+    const req = () => videoRequestSchema.parse({ title: "r", script: "hi there", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id });
+    const original = config.renderLimitPerMonth;
+    (config as { renderLimitPerMonth?: number }).renderLimitPerMonth = 2;
+    try {
+      await createVideo(req(), "quota-user");
+      await createVideo(req(), "quota-user");
+      assert.equal(await rendersThisMonth("quota-user"), 2);
+      await assert.rejects(createVideo(req(), "quota-user"), (e: unknown) => e instanceof LimitError && /2 of 2/.test((e as Error).message));
+      // Other owners are unaffected.
+      await createVideo(req(), "other-user");
+    } finally {
+      (config as { renderLimitPerMonth?: number }).renderLimitPerMonth = original;
+    }
+  });
+});

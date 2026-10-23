@@ -7,7 +7,7 @@ import { refreshSupabaseSession } from "@/lib/supabase/proxy";
 const PUBLIC_PREFIXES = ["/login", "/auth/", "/api/auth/", "/share/", "/talk/", "/api/talk/", "/embed/", "/api/webhooks/", "/api/health", "/_next/", "/favicon"];
 // Caption files back the public share player's subtitle track; view and click beacons and the
 // share-password check come from it too.
-const PUBLIC_PATTERNS = [/^\/api\/videos\/[^/]+\/(captions|cover)$/, /^\/api\/videos\/[^/]+\/(view|cta|unlock)$/];
+const PUBLIC_PATTERNS = [/^\/api\/videos\/[^/]+\/(captions|cover)$/, /^\/api\/videos\/[^/]+\/(view|cta|watch|unlock)$/];
 
 export async function proxy(req: NextRequest) {
   const mode = authMode();

@@ -3,8 +3,8 @@ import { z } from "zod";
 import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import { getStore } from "../store";
-import { MAX_SCENES } from "../types";
-import type { Avatar, Scene, Video, VideoRequest, Voice } from "../types";
+import { EMPTY_WATCH, MAX_SCENES } from "../types";
+import type { Avatar, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
 import type { AvatarProvider, RenderCast } from "../providers/types";
 import { LOCAL_OWNER } from "../owner-id";
 import { renderLimitFor } from "../billing";
@@ -370,6 +370,28 @@ export async function recordView(id: string, gate: () => boolean = () => true, s
   const views = (video.views ?? 0) + 1;
   await getStore().put("video", { ...video, views, lastViewedAt: nowIso() });
   return { views, counted: true };
+}
+
+export const watchSchema = z.object({ quarter: z.union([z.literal(25), z.literal(50), z.literal(75), z.literal(100)]) });
+
+/**
+ * Count a viewer passing a quarter of the share-page player. Public, like `recordView`; the
+ * route's `gate` keeps each viewer to one count per quarter per window.
+ */
+export async function recordWatch(
+  id: string,
+  quarter: WatchQuarter,
+  gate: () => boolean = () => true,
+  shareCookie?: string,
+): Promise<{ watch: Video["watch"]; counted: boolean }> {
+  const video = await getStore().get<Video>("video", id);
+  if (!video || shareOffline(video)) throw new NotFoundError(`Video ${id} not found`);
+  const watch = { ...EMPTY_WATCH, ...video.watch };
+  if (video.status !== "completed" || !(await shareUnlocked(video, shareCookie)) || !gate()) return { watch, counted: false };
+  const key = `q${quarter}` as keyof typeof watch;
+  watch[key] += 1;
+  await getStore().put("video", { ...video, watch });
+  return { watch, counted: true };
 }
 
 /**

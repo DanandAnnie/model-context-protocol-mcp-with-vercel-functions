@@ -21,5 +21,8 @@ describe("beacons", () => {
     assert.equal(beaconAllowed(req({ "x-forwarded-for": "198.51.100.3" }), "cta", id, 3, 60_000), true);
     assert.equal(beaconAllowed(req({ "x-forwarded-for": "198.51.100.4" }), "cta", id, 3, 60_000), false, "per-video ceiling");
     assert.equal(beaconAllowed(req({ "x-forwarded-for": "198.51.100.5" }), "view", id, 3, 60_000), true, "views are counted apart from clicks");
+    assert.equal(beaconAllowed(req({ "x-forwarded-for": "198.51.100.5" }), "watch25", id, 3, 60_000), true, "each quarter has its own window");
+    assert.equal(beaconAllowed(req({ "x-forwarded-for": "198.51.100.5" }), "watch50", id, 3, 60_000), true);
+    assert.equal(beaconAllowed(req({ "x-forwarded-for": "198.51.100.5" }), "watch25", id, 3, 60_000), false, "the same quarter again is not");
   });
 });

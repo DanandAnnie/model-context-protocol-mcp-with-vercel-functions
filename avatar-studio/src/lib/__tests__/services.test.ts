@@ -869,6 +869,26 @@ describe("folders and share views", () => {
     await assert.rejects(recordView("vid_missing"), /not found/);
   });
 
+  it("counts how far viewers get, once per quarter, under the share rules", async () => {
+    const { recordWatch, updateVideo, videoPatchSchema, watchSchema } = await import("../services/videos");
+    const v = await createVideo(req);
+    assert.throws(() => watchSchema.parse({ quarter: 30 }), /Invalid/);
+    assert.deepEqual(await recordWatch(v.id, 25), { watch: { q25: 0, q50: 0, q75: 0, q100: 0 }, counted: false }, "nothing counts before the render completed");
+    const fresh = await getVideo(v.id, undefined, false);
+    globalThis.__avatarStudioStore!.put("video", { ...fresh, status: "completed" });
+    assert.deepEqual(await recordWatch(v.id, 25), { watch: { q25: 1, q50: 0, q75: 0, q100: 0 }, counted: true });
+    assert.deepEqual(await recordWatch(v.id, 100), { watch: { q25: 1, q50: 0, q75: 0, q100: 1 }, counted: true });
+    assert.deepEqual((await recordWatch(v.id, 25, () => false)).counted, false, "gated repeat is not counted");
+    assert.equal((await getVideo(v.id, undefined, false)).watch?.q25, 1);
+    await updateVideo(v.id, videoPatchSchema.parse({ sharePassword: "letmein1" }));
+    assert.equal((await recordWatch(v.id, 50)).counted, false, "a locked link needs the unlock cookie");
+    const { getShareLock, shareCookieValue } = await import("../share-lock");
+    assert.equal((await recordWatch(v.id, 50, undefined, shareCookieValue((await getShareLock(v.id))!))).counted, true);
+    await updateVideo(v.id, videoPatchSchema.parse({ sharePassword: null, shareDisabled: true }));
+    await assert.rejects(recordWatch(v.id, 75), /not found/, "an offline link answers like the share page");
+    await assert.rejects(recordWatch("vid_missing", 25), /not found/);
+  });
+
   it("takes the share link offline for the public only", async () => {
     const { recordCtaClick, updateVideo, videoPatchSchema } = await import("../services/videos");
     const v = await createVideo(req);

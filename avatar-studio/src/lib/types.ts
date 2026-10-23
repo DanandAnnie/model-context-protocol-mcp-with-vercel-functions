@@ -114,6 +114,10 @@ export interface VideoRequest {
   speed: number;
 }
 
+export type WatchQuarter = 25 | 50 | 75 | 100;
+export type WatchCounts = { q25: number; q50: number; q75: number; q100: number };
+export const EMPTY_WATCH: WatchCounts = { q25: 0, q50: 0, q75: 0, q100: 0 };
+
 export interface Video extends VideoRequest {
   id: string;
   status: VideoStatus;
@@ -142,6 +146,8 @@ export interface Video extends VideoRequest {
   /** Share page views (completed videos only; one per viewer per window). */
   views?: number;
   lastViewedAt?: string;
+  /** How far share-page viewers got: viewers who passed a quarter, half, three quarters, and the end (one per viewer per window). */
+  watch?: WatchCounts;
   /** Clicks on the share-page call to action (one per viewer per window). */
   ctaClicks?: number;
   lastCtaClickAt?: string;

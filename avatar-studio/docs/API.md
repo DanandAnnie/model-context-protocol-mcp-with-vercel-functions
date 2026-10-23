@@ -16,7 +16,7 @@ Authorization: Bearer as_live_…
 - Keys minted inside a workspace are revoked when that member leaves or is removed, and when the workspace is deleted.
 - Unknown or revoked keys get `401`. Only tokens that start with `as_live_` are treated as keys; any other bearer value falls back to the normal session check.
 
-Public routes need no key: `/api/videos/:id/captions`, `/api/videos/:id/cover`, `/api/videos/:id/view`, `/api/videos/:id/cta`, `/api/videos/:id/unlock`, `/api/talk/:id`, `/api/webhooks/:provider`, `/api/auth/*`, `/share/:id`.
+Public routes need no key: `/api/videos/:id/captions`, `/api/videos/:id/cover`, `/api/videos/:id/view`, `/api/videos/:id/watch`, `/api/videos/:id/cta`, `/api/videos/:id/unlock`, `/api/talk/:id`, `/api/webhooks/:provider`, `/api/auth/*`, `/share/:id`.
 
 ## Conventions
 
@@ -102,6 +102,7 @@ Submits a **failed** render again as a new video with the same scenes, presenter
 ### `GET /api/videos/:id/cover` — the custom poster image (public under the share page's rules: `404` while the link is offline, for a password-protected link without the unlock cookie, and when no cover is set; `?v=` responses are immutable, and `public` only for a link that is neither offline nor password-protected, with a lifetime capped at the link's expiry)
 ### `GET /api/videos/:id/captions` — SRT; add `?format=vtt` for WebVTT (public; while the share link is offline only the owner's own request gets them, and a password-protected link needs the unlock cookie or the owner)
 ### `POST /api/videos/:id/view` — share-page view beacon (public; one per viewer per 10 minutes, 600 per video; counts only once the render completed)
+### `POST /api/videos/:id/watch` — `{ "quarter": 25 | 50 | 75 | 100 }` share-player progress beacon (public; one per viewer per quarter per 10 minutes, 600 per quarter per video; counts only once the render completed; the video carries `watch: { q25, q50, q75, q100 }`)
 ### `POST /api/videos/:id/cta` — call-to-action click beacon (public; one per viewer per 10 minutes, 300 per video; counts only while a completed video carries a button)
 ### `POST /api/videos/:id/unlock` — `{ "password" }` for a password-protected share link (public; 5 attempts per client per video, 30 per client across all videos, and 100 per video per 15 minutes, `429` with `Retry-After` past that; `401` on a wrong password). A correct password sets an `httpOnly` cookie for that video, valid for 30 days or until the password changes (`SameSite=None; Secure` in production so a share page embedded on another site can unlock too; browsers that block third-party cookies cannot unlock inside a frame).
 

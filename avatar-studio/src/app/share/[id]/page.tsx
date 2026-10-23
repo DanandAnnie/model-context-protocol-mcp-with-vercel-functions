@@ -17,6 +17,7 @@ import { dimensionsFor } from "@/lib/types";
 import { ViewBeacon } from "@/components/ViewBeacon";
 import { ShareCta } from "@/components/ShareCta";
 import { ShareUnlock } from "@/components/ShareUnlock";
+import { SharePlayer } from "@/components/SharePlayer";
 import { shareCookieName, shareUnlocked } from "@/lib/share-lock";
 
 export const dynamic = "force-dynamic";
@@ -171,22 +172,7 @@ export default async function SharePage({
               className={`mx-auto w-full overflow-hidden rounded-xl bg-black ${frame}`}
             >
               {video.status === "completed" && video.videoUrl ? (
-                <video
-                  src={video.videoUrl}
-                  poster={posterUrl(video)}
-                  controls
-                  autoPlay={false}
-                  className="h-full w-full"
-                >
-                  {video.captions && (
-                    <track
-                      kind="subtitles"
-                      srcLang="en"
-                      label="Captions"
-                      src={`/api/videos/${video.id}/captions?format=vtt`}
-                    />
-                  )}
-                </video>
+                <SharePlayer videoId={video.id} src={video.videoUrl} poster={posterUrl(video)} captions={!!video.captions} />
               ) : (
                 <div className="flex h-full w-full items-center justify-center p-10 text-center text-sm text-slate-400">
                   {video.status === "failed"

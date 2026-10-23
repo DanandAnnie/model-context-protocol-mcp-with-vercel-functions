@@ -507,6 +507,21 @@ export default function VideoDetailPage() {
                       {video.views ?? 0}
                     </span>
                   </Row>
+                  {video.watch && (
+                    <Row label="Watch-through">
+                      <span
+                        data-testid="watch-through"
+                        title={`Viewers who reached a quarter, half, three quarters, and the end${video.views ? `; ${Math.round(((video.watch.q100 ?? 0) / video.views) * 100)}% of views played to the end` : ""}`}
+                      >
+                        {([25, 50, 75, 100] as const).map((q, i) => (
+                          <span key={q}>
+                            {i > 0 && <span className="text-slate-300"> · </span>}
+                            <span className="text-slate-500">{q}%</span> {video.watch?.[`q${q}`] ?? 0}
+                          </span>
+                        ))}
+                      </span>
+                    </Row>
+                  )}
                   {(video.shareCta || (video.ctaClicks ?? 0) > 0) && (
                     <Row label="Button clicks">
                       <span data-testid="cta-clicks" title={video.lastCtaClickAt ? `Last clicked ${formatDate(video.lastCtaClickAt)}` : "No clicks yet"}>{video.ctaClicks ?? 0}</span>

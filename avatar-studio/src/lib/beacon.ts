@@ -15,7 +15,7 @@ export function crossSiteBeacon(req: Request): boolean {
  * One count per viewer per video per window, with a per-video ceiling so a loop that forges
  * the client address cannot inflate a count without bound. Checked only for a countable event.
  */
-export function beaconAllowed(req: Request, kind: "view" | "cta", id: string, perVideo: number, windowMs: number): boolean {
+export function beaconAllowed(req: Request, kind: "view" | "cta" | `watch${number}`, id: string, perVideo: number, windowMs: number): boolean {
   if (crossSiteBeacon(req)) return false;
   // The viewer's own window first: a repeat (a refresh) must not use up the video's ceiling.
   if (!rateLimit(`${kind}:${clientIp(req)}:${id}`, 1, windowMs).allowed) return false;

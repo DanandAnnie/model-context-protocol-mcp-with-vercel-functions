@@ -354,8 +354,20 @@ test("share page offers a download only when the owner allows it", async ({ page
     await popup.close();
   }
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.ctaClicks).toBe(1);
+  // The player reports how far viewers get; each quarter counts once per viewer.
+  await expect(page.getByTestId("share-player")).toBeAttached();
+  const watch = async (quarter: number, headers?: Record<string, string>) =>
+    (await (await page.request.post(`/api/videos/${v.id}/watch`, { data: { quarter }, headers })).json()) as { counted: boolean; watch: { q25: number; q100: number } };
+  expect((await watch(25)).counted).toBe(true);
+  expect((await watch(25)).counted).toBe(false);
+  expect((await watch(100)).counted).toBe(true);
+  expect((await watch(50, { "sec-fetch-site": "cross-site" })).counted).toBe(false);
+  expect((await page.request.post(`/api/videos/${v.id}/watch`, { data: { quarter: 30 } })).status()).toBe(400);
   await page.goto(`/videos/${v.id}`);
   await expect(page.getByTestId("cta-clicks")).toHaveText("1");
+  await expect(page.getByTestId("watch-through")).toContainText("25% 1");
+  await expect(page.getByTestId("watch-through")).toContainText("50% 0");
+  await expect(page.getByTestId("watch-through")).toContainText("100% 1");
   // Home insights total the clicks across the library next to share views.
   await page.goto("/home");
   await expect(page.getByTestId("cta-click-summary")).toContainText(/button clicks?/);

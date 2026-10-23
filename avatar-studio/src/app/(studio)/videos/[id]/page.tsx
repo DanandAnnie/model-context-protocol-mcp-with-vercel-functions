@@ -223,10 +223,9 @@ export default function VideoDetailPage() {
       const note = res.delivers ? "" : " (demo: no email provider is configured, so nothing was delivered)";
       const failed = res.failed.length ? ` ${res.failed.length} could not be sent: ${res.failed.map((f) => f.to).join(", ")}.` : "";
       setMailStatus({ ok: res.failed.length === 0, text: `Sent to ${n} ${n === 1 ? "recipient" : "recipients"}${note}.${failed}` });
-      if (res.failed.length === 0) {
-        setMailTo("");
-        setMailMsg("");
-      }
+      // Only the addresses that failed stay in the box, so a retry does not email the others twice.
+      setMailTo(res.failed.map((f) => f.to).join(", "));
+      if (res.failed.length === 0) setMailMsg("");
     } catch (e) {
       setMailStatus({ ok: false, text: e instanceof Error ? e.message : "Could not send" });
     } finally {
@@ -621,11 +620,10 @@ export default function VideoDetailPage() {
                         Send link
                       </Button>
                       {(!shareLive || shareExpired(video)) && <span className="text-xs text-slate-500">Turn the share link on first.</span>}
-                      {mailStatus && (
-                        <span className={`text-xs ${mailStatus.ok ? "text-emerald-700" : "text-rose-600"}`} data-testid="share-email-status" role="status">
-                          {mailStatus.text}
-                        </span>
-                      )}
+                      {/* Always mounted so screen readers announce the first message too. */}
+                      <span className={`text-xs ${mailStatus?.ok ? "text-emerald-700" : "text-rose-600"}`} data-testid="share-email-status" role="status">
+                        {mailStatus?.text}
+                      </span>
                     </div>
                   </form>
                 </Card>

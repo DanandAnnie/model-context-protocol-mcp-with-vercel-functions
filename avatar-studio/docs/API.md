@@ -93,7 +93,7 @@ A template is a starting point for the editor: scenes (with any per-scene presen
 ### `POST /api/videos/bulk` — `{ "action": "move", "ids": [...], "folder": "Q4" }` or `{ "action": "delete", "ids": [...] }` → `{ "done", "missing" }`
 ### `POST /api/videos/:id/share` — `{ "to": ["jane@example.com", ...], "message"?: string }`
 
-Emails the share link of a **completed** video to up to 10 recipients (de-duplicated; `message` is an optional plain-text note of up to 500 characters shown above the link; a password-protected link tells the recipient a password is needed without including it). `409` while the share link is off or expired, `429` beyond 60 recipients per owner per hour. Returns `{ "sent": [...], "failed": [{ "to", "error" }], "delivers" }`; `delivers` is `false` with the demo email provider, which only records the message. The status is `502` when no recipient could be sent to.
+Emails the share link of a **completed** video to up to 10 recipients (de-duplicated; `message` is an optional plain-text note of up to 500 characters shown above the link; a password-protected link tells the recipient a password is needed without including it). `404` for a video that is not yours, `409` while the render is not finished or the share link is off or expired, `429` beyond 60 recipients per sender per hour (600 per instance); a refused batch takes nothing from the allowance. The link uses `APP_URL` when it is set, otherwise the request's origin. Returns `{ "sent": [...], "failed": [{ "to", "error" }], "delivers" }`; `delivers` is `false` with the demo email provider, which only records the message. The status is `502` when no recipient could be sent to.
 
 ### `POST /api/videos/:id/retry`
 

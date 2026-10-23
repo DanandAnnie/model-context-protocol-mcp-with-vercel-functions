@@ -665,6 +665,19 @@ describe("hardening", () => {
     assert.equal(rateLimit("k", 1, 60_000, t0).remaining, 0);
   });
 
+  it("reserves a batch of slots whole or not at all", async () => {
+    const { reserveRateLimit, resetRateLimit } = await import("../rate-limit");
+    const t0 = 2_000_000;
+    assert.equal(reserveRateLimit("batch", 7, 10, 60_000, t0).allowed, true);
+    const refused = reserveRateLimit("batch", 4, 10, 60_000, t0 + 1);
+    assert.equal(refused.allowed, false);
+    assert.equal(refused.remaining, 3, "a refused batch leaves the window untouched");
+    assert.equal(reserveRateLimit("batch", 3, 10, 60_000, t0 + 2).allowed, true, "the three that fit still go");
+    assert.equal(reserveRateLimit("batch", 1, 10, 60_000, t0 + 3).allowed, false);
+    assert.equal(reserveRateLimit("batch", 10, 10, 60_000, t0 + 60_001).allowed, true, "window reset");
+    resetRateLimit("batch");
+  });
+
   it("builds WebVTT with dot separators and a header", async () => {
     const { buildVtt } = await import("../captions");
     const vtt = buildVtt("Hello there. Welcome!", 4);
@@ -1007,15 +1020,23 @@ describe("send by email", () => {
       assert.match(msg.html, /Open &lt;house&gt;/, "html escapes the title");
       assert.match(msg.html, /Have a look &lt;3/, "html escapes the note");
       assert.match(msg.html, /href="https:\/\/studio\.example\.com\/share\/vid_/);
+      assert.equal(msg.replyTo, "alice@example.com", "replies go to the sender, not the app");
+      assert.match(msg.text, /You received this because alice@example.com entered your address/);
       await assert.rejects(shareVideoByEmail("vid_missing", input, LOCAL_OWNER, ctx), /not found/);
       await assert.rejects(shareVideoByEmail(v.id, input, "someone-else", ctx), /not found/, "only the owner can send");
-      // The hourly allowance counts recipients.
+      // The hourly allowance counts recipients and is charged to the sender, whatever workspace is active.
       const many = { to: Array.from({ length: 10 }, (_, i) => `r${i}@example.com`) };
       for (let i = 0; i < Math.floor((SHARE_EMAILS_PER_HOUR - 2) / 10); i += 1) await shareVideoByEmail(v.id, many, LOCAL_OWNER, ctx);
-      await assert.rejects(shareVideoByEmail(v.id, many, LOCAL_OWNER, ctx), /per hour/);
+      await assert.rejects(shareVideoByEmail(v.id, many, LOCAL_OWNER, ctx), /per hour \(8 left\)/);
+      const eight = { to: many.to.slice(0, 8) };
+      assert.equal((await shareVideoByEmail(v.id, eight, LOCAL_OWNER, ctx)).sent.length, 8, "a refused batch took nothing: the eight that fit still go");
+      await assert.rejects(shareVideoByEmail(v.id, { to: ["one@example.com"] }, LOCAL_OWNER, ctx), /\(0 left\)/);
+      const asMember = { ...ctx, senderId: "user_alice" };
+      assert.equal((await shareVideoByEmail(v.id, { to: ["one@example.com"] }, LOCAL_OWNER, asMember)).sent.length, 1, "a signed-in sender has their own allowance");
     } finally {
       setEmailProvider(undefined);
-      (await import("../rate-limit")).resetRateLimit(`share-email:${LOCAL_OWNER}`);
+      const { resetRateLimit } = await import("../rate-limit");
+      for (const key of [`share-email:sender:${LOCAL_OWNER}`, "share-email:sender:user_alice", "share-email:global"]) resetRateLimit(key);
     }
   });
 
@@ -1037,8 +1058,11 @@ describe("send by email", () => {
       assert.equal(flaky.sent.length, 1);
       assert.doesNotMatch(flaky.sent[0].text, /password/, "no password hint for an open link");
       assert.match(flaky.sent[0].subject, /^Someone shared/);
+      assert.equal(flaky.sent[0].replyTo, undefined);
     } finally {
       setEmailProvider(undefined);
+      const { resetRateLimit } = await import("../rate-limit");
+      for (const key of [`share-email:sender:${LOCAL_OWNER}`, "share-email:global"]) resetRateLimit(key);
     }
   });
 });

@@ -6,6 +6,8 @@ export interface EmailMessage {
   subject: string;
   text: string;
   html: string;
+  /** Where a reply should go when the message is sent on someone's behalf. */
+  replyTo?: string;
 }
 
 export interface EmailProvider {
@@ -35,7 +37,7 @@ export class ResendEmailProvider implements EmailProvider {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: this.from, to: [message.to], subject: message.subject, text: message.text, html: message.html }),
+      body: JSON.stringify({ from: this.from, to: [message.to], subject: message.subject, text: message.text, html: message.html, ...(message.replyTo ? { reply_to: message.replyTo } : {}) }),
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) throw new Error(`Resend returned ${res.status}: ${(await res.text()).slice(0, 200)}`);
@@ -60,7 +62,9 @@ export function setEmailProvider(p: EmailProvider | undefined) {
   globalThis.__avatarStudioEmail = p;
 }
 
-const escape = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string);
+/** HTML-escapes text for the html part of a message. */
+export const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string);
+const escape = escapeHtml;
 
 export function inviteEmail(input: { to: string; workspaceName: string; inviterEmail?: string; role: string; url: string; expiresAt: string }): EmailMessage {
   const who = input.inviterEmail ? `${input.inviterEmail} invited you` : "You have been invited";

@@ -50,6 +50,22 @@ export function rateLimitPair(clientKey: string, clientLimit: number, globalKey:
   return a.remaining <= b.remaining ? a : b;
 }
 
+/**
+ * Take `n` slots from a window at once, or none: a batch that does not fit is refused without
+ * eating into what is left, so a refused send cannot lock out a smaller one that would fit.
+ */
+export function reserveRateLimit(key: string, n: number, limit: number, windowMs: number, now = Date.now()): RateLimitResult {
+  prune(now);
+  let b = buckets.get(key);
+  if (!b || b.resetAt <= now) {
+    b = { count: 0, resetAt: now + windowMs };
+    buckets.set(key, b);
+  }
+  const allowed = b.count + n <= limit;
+  if (allowed) b.count += n;
+  return { allowed, remaining: Math.max(0, limit - b.count), retryAfterSec: Math.max(1, Math.ceil((b.resetAt - now) / 1000)) };
+}
+
 /** Forget a key, e.g. after a successful sign-in. */
 export function resetRateLimit(key: string): void {
   buckets.delete(key);

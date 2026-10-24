@@ -1,0 +1,45 @@
+name: avatar-studio
+
+on:
+  push:
+    paths: ["avatar-studio/**", ".github/workflows/avatar-studio.yml"]
+  pull_request:
+    paths: ["avatar-studio/**", ".github/workflows/avatar-studio.yml"]
+
+concurrency:
+  group: avatar-studio-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Official Playwright image: Node 22 plus Chromium and its system libraries are
+    # preinstalled, so no apt-get or browser download runs in CI. Keep the tag in
+    # step with the @playwright/test version in avatar-studio/package.json.
+    container:
+      image: mcr.microsoft.com/playwright:v1.56.1-noble
+    defaults:
+      run:
+        working-directory: avatar-studio
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache npm
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('avatar-studio/package-lock.json') }}
+      - run: node --version && npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm run e2e
+        timeout-minutes: 8
+        env:
+          HOME: /root
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: avatar-studio/playwright-report
+          retention-days: 7

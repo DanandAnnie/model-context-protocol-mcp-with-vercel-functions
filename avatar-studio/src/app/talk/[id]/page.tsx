@@ -1,0 +1,162 @@
+"use client";
+import Link from "next/link";
+import { useParams, useSearchParams } from "next/navigation";
+import { Suspense, useRef, useState } from "react";
+import { Sparkles } from "lucide-react";
+import { ChatPanel, type ChatTurn } from "@/components/ChatPanel";
+import { useApi } from "@/hooks/useApi";
+import { useLiveAvatar } from "@/hooks/useLiveAvatar";
+import { api } from "@/lib/client";
+import { Button, inputClass } from "@/components/ui";
+
+interface PublicAgent {
+  id: string;
+  name: string;
+  language: string;
+  avatar: { id: string; name: string; imageUrl: string };
+  voiceLanguage?: string;
+  greeting?: string;
+  starters?: string[];
+  collectEmail: boolean;
+  liveVideo: boolean;
+  brand: { name: string; logoUrl?: string; primaryColor: string; accentColor?: string } | null;
+}
+
+/** Public page where visitors talk to a shared presenter. No sign-in; the owner's instructions stay server-side. */
+export default function TalkPage() {
+  return (
+    <Suspense>
+      <TalkInner />
+    </Suspense>
+  );
+}
+
+function TalkInner() {
+  const { id } = useParams<{ id: string }>();
+  const embed = useSearchParams().get("embed") === "1";
+  const { data, loading, error } = useApi<{ agent: PublicAgent }>(`/api/talk/${id}`);
+  const agent = data?.agent;
+  const accent = agent?.brand?.accentColor ?? agent?.brand?.primaryColor;
+
+  // One transcript per visit: the first turn returns an id that later turns send back.
+  const conversationId = useRef<string | undefined>(undefined);
+  const [turns, setTurns] = useState(0);
+  const [lead, setLead] = useState<{ email: string; name: string }>({ email: "", name: "" });
+  const [leadState, setLeadState] = useState<"idle" | "sending" | "done" | "dismissed">("idle");
+  const [leadErr, setLeadErr] = useState<string | null>(null);
+  async function ask(messages: ChatTurn[]) {
+    const res = await api<{ reply: string; conversationId: string }>(`/api/talk/${id}`, { method: "POST", body: JSON.stringify({ messages, conversationId: conversationId.current }) });
+    conversationId.current = res.conversationId;
+    setTurns((n) => n + 1);
+    return res.reply;
+  }
+  async function sendLead() {
+    if (!conversationId.current) return;
+    setLeadState("sending");
+    setLeadErr(null);
+    try {
+      await api(`/api/talk/${id}/lead`, { method: "POST", body: JSON.stringify({ conversationId: conversationId.current, email: lead.email, name: lead.name || undefined }) });
+      setLeadState("done");
+    } catch (e) {
+      setLeadErr(e instanceof Error ? e.message : "Could not send");
+      setLeadState("idle");
+    }
+  }
+  const showLead = !!agent?.collectEmail && turns >= 1 && leadState !== "dismissed";
+  const live = useLiveAvatar({
+    enabled: !!agent?.liveVideo,
+    openPath: `/api/talk/${id}/live`,
+    openBody: {},
+    sessionPath: (sid) => `/api/talk/${id}/live/${sid}`,
+    key: id,
+  });
+
+  return (
+    <main className="min-h-screen bg-slate-950 text-slate-100">
+      {accent && <div className="h-1.5" style={{ background: accent }} aria-hidden />}
+      <header className={`mx-auto flex max-w-5xl items-center justify-between px-6 ${embed ? "py-3" : "py-5"}`}>
+        {agent?.brand && (agent.brand.name || agent.brand.logoUrl) ? (
+          <div className="flex items-center gap-3 text-sm font-medium text-slate-200" data-testid="talk-brand">
+            {agent.brand.logoUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={agent.brand.logoUrl} alt={agent.brand.name ? `${agent.brand.name} logo` : "Logo"} className="h-8 max-w-[140px] object-contain" />
+            )}
+            {agent.brand.name && <span>{agent.brand.name}</span>}
+          </div>
+        ) : (
+          <Link href="/" className="flex items-center gap-2 text-sm font-medium text-slate-300 hover:text-white">
+            <span className="flex h-7 w-7 items-center justify-center rounded-md bg-brand-600 text-white">
+              <Sparkles className="h-3.5 w-3.5" />
+            </span>
+            Avatar Studio
+          </Link>
+        )}
+      </header>
+      <section className={`mx-auto max-w-5xl ${embed ? "px-4 pb-6" : "px-6 pb-16"}`}>
+        {loading ? (
+          <p className="text-sm text-slate-400">Loading…</p>
+        ) : !agent ? (
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-8 text-center">
+            <h1 className="text-lg font-semibold">This presenter is not available</h1>
+            <p className="mt-2 text-sm text-slate-400">{error ?? "The link may have been turned off or deleted."}</p>
+          </div>
+        ) : (
+          <>
+            <h1 className={`mb-1 font-semibold ${embed ? "text-base" : "text-xl"}`} data-testid="talk-name">
+              Talk with {agent.name}
+            </h1>
+            <p className={`text-sm text-slate-400 ${embed ? "mb-3" : "mb-5"}`}>Ask a question and {agent.avatar.name} will answer in {agent.language}. Replies are generated by AI; conversations may be kept by the presenter&apos;s owner.</p>
+            <ChatPanel
+              name={agent.avatar.name}
+              imageUrl={agent.avatar.imageUrl}
+              voiceLanguage={agent.voiceLanguage}
+              ask={ask}
+              live={live}
+              dark
+              compact={embed}
+              emptyHint={`Say hello to ${agent.avatar.name}.`}
+              opening={agent.greeting}
+              starters={agent.starters}
+              onReset={() => {
+                conversationId.current = undefined;
+                setTurns(0);
+                setLeadState("idle");
+              }}
+            />
+            {showLead && (
+              <div className="mt-4 rounded-xl border border-slate-800 bg-slate-900 p-4" data-testid="lead-form">
+                {leadState === "done" ? (
+                  <p className="text-sm text-slate-200">Thanks. {agent.name} will follow up at {lead.email}.</p>
+                ) : (
+                  <form
+                    className="flex flex-wrap items-end gap-2"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      sendLead();
+                    }}
+                  >
+                    <div className="w-full text-sm text-slate-200">Want a follow-up? Leave your email and {agent.name} will get back to you.</div>
+                    <input aria-label="Your name" value={lead.name} onChange={(e) => setLead({ ...lead, name: e.target.value })} placeholder="Name (optional)" maxLength={80} className={`${inputClass} w-40`} />
+                    <input aria-label="Your email" type="email" required value={lead.email} onChange={(e) => setLead({ ...lead, email: e.target.value })} placeholder="you@example.com" maxLength={200} className={`${inputClass} min-w-[200px] flex-1`} />
+                    <Button type="submit" loading={leadState === "sending"} disabled={!lead.email.trim()}>
+                      Send
+                    </Button>
+                    <button type="button" onClick={() => setLeadState("dismissed")} className="text-xs text-slate-400 hover:text-slate-200">
+                      No thanks
+                    </button>
+                    {leadErr && <div className="w-full text-xs text-rose-300">{leadErr}</div>}
+                  </form>
+                )}
+              </div>
+            )}
+            {!embed && agent.brand && (agent.brand.name || agent.brand.logoUrl) && (
+              <p className="mt-10 text-xs text-slate-500">
+                Made with <Link href="/" className="underline hover:text-slate-300">Avatar Studio</Link>
+              </p>
+            )}
+          </>
+        )}
+      </section>
+    </main>
+  );
+}

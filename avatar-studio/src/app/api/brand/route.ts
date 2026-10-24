@@ -1,0 +1,38 @@
+import { errorResponse, json, readJson } from "@/lib/api-utils";
+import { recordRequestActivity } from "@/lib/activity-request";
+import { requireEditor, requireOwner } from "@/lib/owner";
+import { brandKitSchema, deleteBrandKit, getBrandKit, saveBrandKit } from "@/lib/services";
+
+export const dynamic = "force-dynamic";
+
+/** The signed-in owner's brand kit (null until one is saved). */
+export async function GET() {
+  try {
+    return json({ brand: await getBrandKit(await requireOwner()) });
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+export async function PUT(req: Request) {
+  try {
+    const owner = await requireEditor();
+    const input = brandKitSchema.parse(await readJson(req));
+    const brand = await saveBrandKit(input, owner);
+    await recordRequestActivity(owner, "brand.saved", { subject: input.name || undefined });
+    return json({ brand });
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+export async function DELETE() {
+  try {
+    const owner = await requireEditor();
+    await deleteBrandKit(owner);
+    await recordRequestActivity(owner, "brand.removed");
+    return new Response(null, { status: 204 });
+  } catch (err) {
+    return errorResponse(err);
+  }
+}

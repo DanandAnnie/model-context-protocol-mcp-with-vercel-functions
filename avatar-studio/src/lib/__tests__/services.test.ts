@@ -744,6 +744,10 @@ describe("translated subtitles", () => {
     // Deleting reports whether anything changed, so the route can skip a feed line for a trash that was already done.
     assert.deepEqual(await deleteVideo(v.id, "u-sub"), { title: "Renamed meanwhile", changed: false });
     assert.deepEqual(await deleteVideo(v.id, "u-sub", true), { title: "Renamed meanwhile", changed: true });
+    // Two trashes of one live video that overlap: both read it live, but only the one that writes under the lock did the change.
+    const w = await createVideo(videoRequestSchema.parse({ title: "Twice", script: "Hi.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }), "u-sub");
+    const both = await Promise.all([deleteVideo(w.id, "u-sub"), deleteVideo(w.id, "u-sub")]);
+    assert.deepEqual(both.map((r) => r.changed).sort(), [false, true]);
   });
 
   it("decides the language and the cap on the record as stored, so overlapping adds cannot double a track or pass the cap", async () => {

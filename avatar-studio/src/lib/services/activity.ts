@@ -13,15 +13,16 @@ const MAX_SUBJECT = 80;
 
 export const activityQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(MAX_ACTIVITY).default(50) });
 
-/**
- * Event times are strictly increasing within an instance, so events recorded in one millisecond
- * (a bulk action and the request behind it, a burst of tests) still list in the order they happened.
- */
 declare global {
   // eslint-disable-next-line no-var
   var __avatarStudioActivityStamp: number | undefined;
 }
-// Held on globalThis, like the store: module scope is not shared across route bundles.
+
+/**
+ * Event times are strictly increasing within an instance, so events recorded in one millisecond
+ * (a bulk action and the request behind it, a burst of tests) still list in the order they happened.
+ * The last stamp is held on globalThis, like the store: module scope is not shared across route bundles.
+ */
 function stamp(): string {
   const ms = Math.max(Date.now(), (globalThis.__avatarStudioActivityStamp ?? 0) + 1);
   globalThis.__avatarStudioActivityStamp = ms;

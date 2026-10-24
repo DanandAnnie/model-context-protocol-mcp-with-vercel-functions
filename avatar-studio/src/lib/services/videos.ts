@@ -760,8 +760,14 @@ export async function deleteVideo(id: string, ownerId: string = LOCAL_OWNER, per
     return { title: video.title, changed: true };
   }
   if (video.deletedAt) return { title: video.title, changed: false };
-  const next = await updateKeepingCounters(id, ownerId, (stored) => (stored.deletedAt ? stored : { ...stored, deletedAt: nowIso(), updatedAt: nowIso() }));
-  return { title: next.title, changed: next !== video && next.deletedAt !== video.deletedAt };
+  // Decided under the lock: a request that trashed the video between our read and our turn did the change, not us.
+  let changed = false;
+  const next = await updateKeepingCounters(id, ownerId, (stored) => {
+    if (stored.deletedAt) return stored;
+    changed = true;
+    return { ...stored, deletedAt: nowIso(), updatedAt: nowIso() };
+  });
+  return { title: next.title, changed };
 }
 
 /** Brings a trashed video back to the library; a video that is not in the trash is returned as is. */

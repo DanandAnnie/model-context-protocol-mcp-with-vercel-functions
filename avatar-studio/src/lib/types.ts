@@ -399,6 +399,42 @@ export interface VideoComment {
   createdAt: string;
 }
 
+/** What happened in an account or workspace, for its activity feed. */
+export type ActivityKind =
+  | "video.created"
+  | "video.trashed"
+  | "video.restored"
+  | "video.purged"
+  | "batch.created"
+  | "member.joined"
+  | "member.left"
+  | "member.removed"
+  | "member.role"
+  | "apikey.created"
+  | "apikey.revoked"
+  | "brand.saved"
+  | "brand.removed"
+  | "agent.created"
+  | "agent.deleted";
+
+export interface ActivityEvent {
+  id: string;
+  /** The account or workspace the event belongs to. */
+  ownerId: string;
+  kind: ActivityKind;
+  /** The person who did it; the owner id itself when a script with an API key did. */
+  actorId: string;
+  actorEmail?: string;
+  /** What it was done to: a video title, a member's email, a key or presenter name. */
+  subject?: string;
+  subjectId?: string;
+  /** For bulk actions, how many items. */
+  count?: number;
+  /** For a role change, the new role. */
+  role?: string;
+  createdAt: string;
+}
+
 export type PlanId = "free" | "pro";
 
 /** Billing plan of an owner (person or workspace). Absent means free. */

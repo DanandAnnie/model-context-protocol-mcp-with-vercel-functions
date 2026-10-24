@@ -211,6 +211,7 @@ Returns `{ "reply": "…" }`.
 - `PATCH /api/workspaces/:id/members/:userId` → `{ "role" }`; `DELETE` removes (owners) or leaves (self)
 - `POST /api/workspaces/switch` → `{ "id": "ws_…" }` or your personal id; sets the `studio_workspace` cookie (browser sessions only; keys are bound at minting)
 - `GET | POST /api/invites/:token` describes and accepts an invite
+- `GET /api/activity?limit=50` → `{ "events": [{ "id", "ownerId", "kind", "actorId", "actorEmail"?, "subject"?, "subjectId"?, "count"?, "role"?, "createdAt" }] }`, the active account's or workspace's activity, newest first (`limit` up to 200; the last 200 events are kept). Kinds: `video.created`, `video.trashed`, `video.restored`, `video.purged` (single videos carry the title as `subject`; bulk actions carry `count`), `batch.created` (`subject` is the batch title, `count` the rows started), `member.joined`, `member.left`, `member.removed`, `member.role` (`subject` is the member's email or id, `role` the new role), `apikey.created`, `apikey.revoked`, `brand.saved`, `brand.removed`, `agent.created`, `agent.deleted`. `actorId` is the signed-in person (their email in `actorEmail` when the account mode knows one), or the owner id itself when a script with an API key did it. Recording is best effort: a store failure is logged and the request that did the work still succeeds. The feed is part of the account export and is removed with the account's data
 
 ## Keys and notifications
 
@@ -231,7 +232,7 @@ Returns `{ "reply": "…" }`.
 
 ## Account data
 
-- `GET /api/account/export` downloads everything stored for the active account or workspace as JSON (key hashes, the webhook secret, and cover image bytes are left out; each video lists its cover's type and size). Session only; `403` with a key.
+- `GET /api/account/export` downloads everything stored for the active account or workspace as JSON (key hashes, the webhook secret, and cover image bytes are left out; each video lists its cover's type and size; the activity feed is included). Session only; `403` with a key.
 - `DELETE /api/account` with `{ "confirm": "DELETE" }` removes every record of the active account or workspace (cloned voices are deleted at the provider too) and returns counts per kind. Session only; in a workspace, owners only (`403` for editors). Workspace membership is unaffected.
 
 ## Outbound webhooks

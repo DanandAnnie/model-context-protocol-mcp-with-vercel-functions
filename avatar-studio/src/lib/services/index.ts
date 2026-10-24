@@ -12,4 +12,5 @@ export * from "./account";
 export * from "./videos";
 export * from "./batches";
 export * from "./translations";
+export * from "./activity";
 export * from "./templates";

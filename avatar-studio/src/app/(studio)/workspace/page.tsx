@@ -1,10 +1,12 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Check, Copy, Link2, Trash2, UserMinus } from "lucide-react";
+import { Activity, Check, Copy, Link2, Trash2, UserMinus } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
+import { describeActivity } from "@/lib/activity-text";
+import type { ActivityEvent } from "@/lib/types";
 
 interface View {
   id: string;
@@ -24,6 +26,7 @@ export default function WorkspacePage() {
   const router = useRouter();
   const { data, loading, error, refetch } = useApi<Summary>("/api/workspaces");
   const ws = data?.workspaces.find((w) => w.id === data.activeId) ?? null;
+  const activity = useApi<{ events: ActivityEvent[] }>(ws ? "/api/activity?limit=30" : null);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"owner" | "editor">("editor");
   const [link, setLink] = useState<string | null>(null);
@@ -38,7 +41,7 @@ export default function WorkspacePage() {
     setErr(null);
     try {
       await fn();
-      await refetch();
+      await Promise.all([refetch(), activity.refetch()]);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Something went wrong");
     } finally {
@@ -238,6 +241,26 @@ export default function WorkspacePage() {
           </div>
         )}
       </div>
+      <Card className="mt-6 p-5" data-testid="activity-feed">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+          <Activity className="h-4 w-4 text-slate-500" aria-hidden /> Activity
+        </h3>
+        <p className="mt-1 text-xs text-slate-500">What the team did here: videos created, trashed, and restored, members, keys, the brand kit, and shared presenters. The last 200 events are kept.</p>
+        <ErrorBanner message={activity.error} />
+        {activity.data && activity.data.events.length === 0 && <p className="mt-3 text-sm text-slate-500">Nothing yet. Activity shows up here as the team works.</p>}
+        {activity.data && activity.data.events.length > 0 && (
+          <ol className="mt-3 divide-y divide-slate-100 text-sm">
+            {activity.data.events.map((e) => (
+              <li key={e.id} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2">
+                <span className="min-w-0 break-words text-slate-800">{describeActivity(e, data?.personalId)}</span>
+                <time dateTime={e.createdAt} className="shrink-0 text-xs text-slate-500">
+                  {formatDate(e.createdAt)}
+                </time>
+              </li>
+            ))}
+          </ol>
+        )}
+      </Card>
     </>
   );
 }

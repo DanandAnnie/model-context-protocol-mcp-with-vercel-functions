@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { errorResponse, json, readJson } from "@/lib/api-utils";
-import { requireOwner } from "@/lib/owner";
-import { batchRequestSchema, createBatch, previewBatch } from "@/lib/services";
+import { requireOwner, userOrOwner } from "@/lib/owner";
+import { batchRequestSchema, createBatch, previewBatch, recordActivity } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -24,6 +24,7 @@ export async function POST(req: Request) {
     const owner = await requireOwner();
     const input = batchRequestSchema.parse(await readJson(req));
     const result = await createBatch(input, owner);
+    if (result.videos.length > 0) await recordActivity(owner, await userOrOwner(owner), "batch.created", { subject: input.title, count: result.videos.length });
     if (result.videos.length > 0 && result.failed.length === result.videos.length) {
       return json({ ...result, error: `No video could be started: ${result.failed[0].reason}` }, { status: 502 });
     }

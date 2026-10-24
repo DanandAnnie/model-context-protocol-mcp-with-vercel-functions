@@ -1,6 +1,6 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
-import { requireOwner } from "@/lib/owner";
-import { deleteVideo, getVideo, updateVideo, videoPatchSchema } from "@/lib/services";
+import { requireOwner, userOrOwner } from "@/lib/owner";
+import { deleteVideo, getVideo, recordActivity, updateVideo, videoPatchSchema } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +31,11 @@ export async function DELETE(req: Request, ctx: Ctx) {
   try {
     const { id } = await ctx.params;
     const permanent = new URL(req.url).searchParams.get("permanent") === "true";
-    await deleteVideo(id, await requireOwner(), permanent);
+    const owner = await requireOwner();
+    const before = await getVideo(id, owner, false);
+    await deleteVideo(id, owner, permanent);
+    // A video already in the trash is left as it is; only a change is worth a line in the feed.
+    if (permanent || !before.deletedAt) await recordActivity(owner, await userOrOwner(owner), permanent ? "video.purged" : "video.trashed", { subject: before.title, subjectId: id });
     return json({ ok: true });
   } catch (err) {
     return errorResponse(err);

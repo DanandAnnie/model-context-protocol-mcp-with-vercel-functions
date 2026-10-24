@@ -1079,8 +1079,10 @@ test("workspaces: create, switch, isolate content, invite, join, leave, delete",
     await expect(page.getByText(`Team video ${tag}`)).toBeVisible();
     await expect(page.getByText(`Personal ${tag}`)).toHaveCount(0);
 
-    // Invite link from the members page.
+    // The activity feed on the members page names the video just created.
     await page.goto("/workspace");
+    const feed = page.getByTestId("activity-feed");
+    await expect(feed.getByText(`You created "Team video ${tag}"`)).toBeVisible();
     await page.getByRole("button", { name: "Create invite link" }).click();
     const link = (await page.getByTestId("invite-link").locator("code").innerText()).trim();
     expect(link).toContain("/invite/");
@@ -1095,6 +1097,14 @@ test("workspaces: create, switch, isolate content, invite, join, leave, delete",
     const theirs = (await (await other.get("/api/videos")).json()).videos as Array<{ id: string }>;
     expect(theirs.some((v) => v.id === team.id)).toBe(true);
     await other.dispose();
+    // The join and a trash from the API land in the feed, newest first; the feed is scoped to the workspace.
+    expect((await page.request.delete(`/api/videos/${team.id}`)).status()).toBe(200);
+    const events = (await (await page.request.get("/api/activity?limit=5")).json()).events as Array<{ kind: string; subject?: string }>;
+    expect(events.map((e) => e.kind)).toEqual(["video.trashed", "member.joined", "video.created"]);
+    expect(events[0].subject).toBe(`Team video ${tag}`);
+    await page.reload();
+    await expect(feed.getByText(`You moved "Team video ${tag}" to the trash`)).toBeVisible();
+    await expect(feed.getByText("You joined the workspace")).toBeVisible();
 
     // Back to personal: the team video is gone, the personal one is back.
     await page.getByLabel("Workspace").selectOption({ label: "Personal" });

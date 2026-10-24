@@ -1,6 +1,6 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
-import { requireOwner } from "@/lib/owner";
-import { agentSchema, createAgent, listAgents } from "@/lib/services";
+import { requireOwner, userOrOwner } from "@/lib/owner";
+import { agentSchema, createAgent, listAgents, recordActivity } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 /** Creating or editing may read a knowledge page (10 s fetch budget). */
@@ -18,7 +18,9 @@ export async function POST(req: Request) {
   try {
     const owner = await requireOwner();
     const input = agentSchema.parse(await readJson(req));
-    return json({ agent: await createAgent(input, owner) }, { status: 201 });
+    const agent = await createAgent(input, owner);
+    await recordActivity(owner, await userOrOwner(owner), "agent.created", { subject: agent.name, subjectId: agent.id });
+    return json({ agent }, { status: 201 });
   } catch (err) {
     return errorResponse(err);
   }

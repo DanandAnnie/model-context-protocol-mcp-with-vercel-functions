@@ -808,6 +808,50 @@ describe("translated subtitles", () => {
   });
 });
 
+describe("activity feed", () => {
+  it("records who did what, newest first, keeps the last 200, and never fails the request", async () => {
+    const { recordActivity, listActivity, activityQuerySchema, MAX_ACTIVITY } = await import("../services/activity");
+    const { describeActivity, activityActor } = await import("../activity-text");
+    const { exportOwnerData } = await import("../services/account");
+    const dan = { id: "u-dan", email: "dan@example.com" };
+    const first = await recordActivity("ws_feed", dan, "video.created", { subject: "  Welcome home  ", subjectId: "vid_1" });
+    assert.equal(first?.subject, "Welcome home");
+    assert.equal(first?.actorEmail, "dan@example.com");
+    await recordActivity("ws_feed", { id: "u-ann" }, "member.role", { subject: "dan@example.com", subjectId: "u-dan", role: "owner" });
+    await recordActivity("ws_feed", { id: "ws_feed" }, "video.trashed", { count: 3 });
+    await recordActivity("ws_other", dan, "brand.removed");
+    const events = await listActivity("ws_feed");
+    assert.deepEqual(events.map((e) => e.kind), ["video.trashed", "member.role", "video.created"], "newest first, this owner only");
+    assert.deepEqual(await listActivity("ws_feed", 1).then((l) => l.map((e) => e.kind)), ["video.trashed"]);
+    // Sentences, from the viewer's point of view.
+    assert.equal(describeActivity(events[2], "u-dan"), 'You created "Welcome home"');
+    assert.equal(describeActivity(events[2], "u-ann"), 'dan@example.com created "Welcome home"');
+    assert.equal(describeActivity(events[1]), 'A member made "dan@example.com" an owner');
+    assert.equal(describeActivity(events[0]), "A script with an API key moved 3 videos to the trash");
+    assert.equal(activityActor({ actorId: "u-x", ownerId: "ws_feed" }), "A member");
+    assert.equal(describeActivity({ ...events[0], count: 1, kind: "video.purged" }), "A script with an API key deleted 1 video for good");
+    assert.equal(describeActivity({ ...events[2], kind: "batch.created", count: 12 }, "u-dan"), 'You started a batch of 12 videos from "Welcome home"');
+    assert.equal(describeActivity({ ...events[2], kind: "member.left", subject: undefined }, "u-dan"), "You left the workspace");
+    // A long label is cut; the cap keeps the newest; the query takes a bounded limit.
+    const long = await recordActivity("ws_feed", dan, "agent.created", { subject: "x".repeat(300) });
+    assert.equal(long?.subject?.length, 80);
+    for (let i = 0; i < MAX_ACTIVITY + 5; i++) await recordActivity("ws_cap", dan, "video.created", { subject: `v${i}` });
+    const capped = await listActivity("ws_cap", MAX_ACTIVITY);
+    assert.equal(capped.length, MAX_ACTIVITY);
+    assert.equal(capped[0].subject, `v${MAX_ACTIVITY + 4}`, "the newest is kept");
+    assert.equal(activityQuerySchema.parse({}).limit, 50);
+    assert.throws(() => activityQuerySchema.parse({ limit: "500" }));
+    // The feed is part of the export and never breaks the work it describes.
+    assert.equal((await exportOwnerData("ws_feed")).activity.length, 4);
+    const { getStore } = await import("../store");
+    const store = getStore();
+    const broken = { ...store, put: async () => { throw new Error("store down"); }, list: store.list.bind(store), remove: store.remove.bind(store), get: store.get.bind(store), findBy: store.findBy.bind(store) };
+    globalThis.__avatarStudioStore = broken as typeof store;
+    assert.equal(await recordActivity("ws_feed", dan, "video.created", { subject: "lost" }), null, "a failed write is swallowed");
+    globalThis.__avatarStudioStore = store;
+  });
+});
+
 describe("video comments", () => {
   it("lets the owner's team leave notes the share page never shows, and deletes them with the video", async () => {
     const { addComment, listComments, deleteComment, commentSchema, MAX_COMMENTS_PER_VIDEO } = await import("../services/comments");

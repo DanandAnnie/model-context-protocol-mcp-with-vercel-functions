@@ -4,7 +4,7 @@ import { getTtsProvider } from "../providers";
 import { getStore } from "../store";
 import { LOCAL_OWNER } from "../owner-id";
 
-const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment"] as const;
+const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity"] as const;
 /** Cover rows hold the image bytes; the export describes each cover from its video (`cover.mimeType`, `cover.bytes`) instead of loading them. */
 const EXPORT_KINDS = OWNER_KINDS.filter((k) => k !== "cover") as Exclude<(typeof OWNER_KINDS)[number], "cover">[];
 

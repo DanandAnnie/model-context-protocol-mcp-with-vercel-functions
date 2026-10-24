@@ -3,6 +3,7 @@ import { createApiKey, listApiKeys } from "@/lib/api-keys";
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { ValidationError } from "@/lib/errors";
 import { currentUser, presentedApiKey, requireOwner } from "@/lib/owner";
+import { recordActivity } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,9 @@ export async function POST(req: Request) {
     const [owner, user] = await Promise.all([requireOwner(), currentUser()]);
     const { name } = createSchema.parse(await readJson(req));
     try {
-      return json(await createApiKey(name, owner, user.id), { status: 201 });
+      const created = await createApiKey(name, owner, user.id);
+      await recordActivity(owner, user, "apikey.created", { subject: name, subjectId: created.key.id });
+      return json(created, { status: 201 });
     } catch (e) {
       throw new ValidationError(e instanceof Error ? e.message : "Could not create the key");
     }

@@ -539,6 +539,8 @@ describe("captions", () => {
     const tail = buildCues(`${"ab ".repeat(25)}${"あ".repeat(45)}`, 10).map((c) => c.text);
     assert.ok(tail.every((t) => Array.from(t).filter((c) => /\p{Script=Hiragana}/u.test(c)).length <= 40), tail.join(" | "));
     assert.equal(buildCues(`${"あ".repeat(44)} ${"b".repeat(46)}`, 10).length, 2, "44 dense characters plus 46 Latin ones do not fit one cue");
+    // A full stop that would be left over on its own stays with its cue.
+    assert.deepEqual(buildCues(`${"あ".repeat(40)}。`, 10).map((c) => c.text), [`${"あ".repeat(40)}。`]);
     // A closing bracket or quote stays with the sentence it closes.
     assert.deepEqual(buildCues("「はい。」次は行きましょう。", 4).map((c) => c.text), ["「はい。」", "次は行きましょう。"]);
     assert.deepEqual(buildCues('She said "Go." Then she left.', 4).map((c) => c.text), ['She said "Go."', "Then she left."]);

@@ -582,6 +582,8 @@ function updateKeepingCounters(id: string, ownerId: string, build: (stored: Vide
     const stored = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
     if (purgeDue(stored, Date.now())) throw new NotFoundError(`Video ${id} not found`);
     const next = build(stored);
+    // A builder that hands the stored record back has nothing to write (a live video "restored", a trashed one trashed again).
+    if (next === stored) return stored;
     const counters: Partial<Video> = {};
     for (const field of COUNTER_FIELDS) if (stored[field] !== undefined) Object.assign(counters, { [field]: stored[field] });
     return getStore().put("video", { ...next, ...counters });

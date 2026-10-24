@@ -9,12 +9,14 @@ export interface Cue {
 }
 
 const MAX_CUE_CHARS = 90;
-/** A cue in a script written without word spaces (Chinese, Japanese, Korean, Thai) is kept this short: its characters each carry more. */
+/** A cue in a script written without word spaces (Chinese, Japanese, Thai), or read at that density (Korean), is kept this short: its characters each carry more. */
 const MAX_UNSPACED_CUE_CHARS = 40;
 /** Marks that close a quotation or bracket and belong to the sentence before them. */
 const CLOSERS = `["'”’)\\]」』）】〕》〉]`;
 /** Sentence ends: Western punctuation (and any closing quote) followed by space, or an East Asian full stop, question, or exclamation mark with its closers. */
 const SENTENCE_END = new RegExp(`(?<=[.!?]${CLOSERS}*)\\s+|(?<=[。！？]${CLOSERS}*)(?!${CLOSERS})`, "u");
+/** Text that is nothing but sentence or clause marks and closers. */
+const ONLY_MARKS = new RegExp(`^(?:[.!?,，、。！？]|${CLOSERS})+$`, "u");
 /** Clause ends, for breaking a long sentence. */
 const CLAUSE_END = /(?<=,)\s+|(?<=[，、])/u;
 /** Characters of scripts written without word spaces (or, for Korean, read at that density); see `width` and `weight`. */
@@ -66,7 +68,11 @@ function cut(text: string): string[] {
     start = at;
     while (chars[start] === " ") start++;
   }
-  return out.filter(Boolean);
+  const pieces = out.filter(Boolean);
+  // A full stop or closing quote left over on its own belongs to the cue it ends; one mark over the room is better than a cue of punctuation.
+  const last = pieces[pieces.length - 1];
+  if (pieces.length > 1 && ONLY_MARKS.test(last)) pieces.splice(pieces.length - 2, 2, pieces[pieces.length - 2] + last);
+  return pieces;
 }
 
 /**

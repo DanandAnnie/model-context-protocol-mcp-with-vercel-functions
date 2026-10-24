@@ -97,6 +97,8 @@ in-memory store resets on every cold start.
 
 Every route is documented in [docs/API.md](docs/API.md): authentication with personal keys, request shapes, the batch and script endpoints, workspaces, and how to verify outbound webhook signatures.
 
+What landed when, and what each independent review found and fixed, is in [docs/CHANGELOG.md](docs/CHANGELOG.md).
+
 ## Project layout
 
 ```

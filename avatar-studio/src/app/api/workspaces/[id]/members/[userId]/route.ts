@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { currentUser } from "@/lib/owner";
+import { roleSchema } from "@/lib/roles";
 import { recordActivity } from "@/lib/services";
 import { getWorkspace, removeMember, setMemberRole, workspaceView } from "@/lib/workspaces";
 
@@ -18,7 +19,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
   try {
     const user = await currentUser();
     const { id, userId } = await ctx.params;
-    const { role } = z.object({ role: z.enum(["owner", "editor"]) }).parse(await readJson(req));
+    const { role } = z.object({ role: roleSchema }).parse(await readJson(req));
     const before = await memberBefore(id, userId);
     const ws = await setMemberRole(id, userId, role, user);
     if (before.role !== role) await recordActivity(id, user, "member.role", { subject: before.label, subjectId: userId, role });

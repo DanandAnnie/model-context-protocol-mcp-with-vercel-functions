@@ -1,7 +1,7 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { ValidationError } from "@/lib/errors";
 import { deleteNotifySettings, getNotifySettings, notifySchema, saveNotifySettings } from "@/lib/notifications";
-import { requireOwner } from "@/lib/owner";
+import { requireEditor, requireOwner } from "@/lib/owner";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +15,7 @@ export async function GET() {
 
 export async function PUT(req: Request) {
   try {
-    const owner = await requireOwner();
+    const owner = await requireEditor();
     const input = notifySchema.parse(await readJson(req));
     try {
       return json({ webhook: await saveNotifySettings(input, owner) });
@@ -29,7 +29,7 @@ export async function PUT(req: Request) {
 
 export async function DELETE() {
   try {
-    await deleteNotifySettings(await requireOwner());
+    await deleteNotifySettings(await requireEditor());
     return new Response(null, { status: 204 });
   } catch (err) {
     return errorResponse(err);

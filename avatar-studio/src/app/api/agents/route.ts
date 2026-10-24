@@ -1,6 +1,6 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { recordRequestActivity } from "@/lib/activity-request";
-import { requireOwner } from "@/lib/owner";
+import { requireEditor, requireOwner } from "@/lib/owner";
 import { agentSchema, createAgent, listAgents } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +17,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const owner = await requireOwner();
+    const owner = await requireEditor();
     const input = agentSchema.parse(await readJson(req));
     const agent = await createAgent(input, owner);
     await recordRequestActivity(owner, "agent.created", { subject: agent.name, subjectId: agent.id });

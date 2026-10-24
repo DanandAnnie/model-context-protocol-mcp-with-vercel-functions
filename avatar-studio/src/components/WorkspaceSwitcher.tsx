@@ -68,6 +68,7 @@ export function WorkspaceSwitcher() {
             ))}
           </select>
         </div>
+        {active?.role === "viewer" && <span className="mt-1 block text-xs text-slate-500">View only: you can watch and comment here</span>}
       </label>
       <div className="mt-1.5 flex items-center justify-between text-xs">
         <button type="button" onClick={create} disabled={busy} className="inline-flex items-center gap-1 text-slate-500 hover:text-slate-900">

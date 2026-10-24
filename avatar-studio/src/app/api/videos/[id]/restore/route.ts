@@ -1,6 +1,6 @@
 import { errorResponse, json } from "@/lib/api-utils";
 import { recordRequestActivity } from "@/lib/activity-request";
-import { requireOwner } from "@/lib/owner";
+import { requireEditor } from "@/lib/owner";
 import { getVideo, restoreVideo } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await ctx.params;
-    const owner = await requireOwner();
+    const owner = await requireEditor();
     const trashed = !!(await getVideo(id, owner, false)).deletedAt;
     const video = await restoreVideo(id, owner);
     if (trashed) await recordRequestActivity(owner, "video.restored", { subject: video.title, subjectId: id });

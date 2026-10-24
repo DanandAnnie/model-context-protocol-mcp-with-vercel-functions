@@ -1,4 +1,5 @@
 // Sentences for the activity feed. Shared by the Workspace page and its tests; no server imports.
+import { roleArticle } from "./roles";
 import type { ActivityEvent } from "./types";
 
 /** Who did it, from the viewer's point of view. */
@@ -33,7 +34,7 @@ export function describeActivity(e: ActivityEvent, viewerId?: string): string {
     case "member.removed":
       return `${who} removed ${what || "a member"}`;
     case "member.role":
-      return `${who} made ${what || "a member"} ${e.role === "owner" ? "an owner" : "an editor"}`;
+      return `${who} made ${what || "a member"} ${roleArticle(e.role)}`;
     case "apikey.created":
       return `${who} created the API key ${what}`.trimEnd();
     case "apikey.revoked":

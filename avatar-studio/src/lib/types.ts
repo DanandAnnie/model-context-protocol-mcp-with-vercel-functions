@@ -299,7 +299,7 @@ export interface Prefs {
   updatedAt: string;
 }
 
-export type WorkspaceRole = "owner" | "editor";
+export type WorkspaceRole = "owner" | "editor" | "viewer";
 
 export interface WorkspaceMember {
   userId: string;

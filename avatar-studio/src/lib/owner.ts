@@ -4,7 +4,7 @@ import { ownerForApiKey } from "./api-keys";
 import { SESSION_COOKIE, authMode, isValidSession } from "./auth";
 import { ForbiddenError, UnauthorizedError } from "./errors";
 import { createSupabaseServer } from "./supabase/server";
-import { WORKSPACE_COOKIE, canManageAccount, isWorkspaceId, workspaceForMember, type User } from "./workspaces";
+import { WORKSPACE_COOKIE, canEdit, canManageAccount, isWorkspaceId, workspaceForMember, type User } from "./workspaces";
 
 import { LOCAL_OWNER } from "./owner-id";
 export { LOCAL_OWNER };
@@ -70,6 +70,21 @@ export async function requireOwner(): Promise<string> {
   }
   const user = await currentUser();
   return (await activeWorkspaceId(user)) ?? user.id;
+}
+
+/**
+ * Owner of the current request for an action that creates, changes, or deletes content. Like
+ * `requireOwner`, except that a workspace viewer gets 403: viewers watch and comment. A key is
+ * trusted as is; viewers cannot mint one and a member made a viewer loses theirs.
+ */
+export async function requireEditor(): Promise<string> {
+  if (await presentedApiKey()) return requireOwner();
+  const user = await currentUser();
+  const id = (await cookies()).get(WORKSPACE_COOKIE)?.value;
+  const ws = id && isWorkspaceId(id) ? await workspaceForMember(id, user.id) : null;
+  if (!ws) return user.id;
+  if (!canEdit(ws, user.id)) throw new ForbiddenError("Viewers can watch and comment in this workspace, not change it");
+  return ws.id;
 }
 
 /** The request's owner when it carries a valid key or session, else null; never throws for a missing one. */

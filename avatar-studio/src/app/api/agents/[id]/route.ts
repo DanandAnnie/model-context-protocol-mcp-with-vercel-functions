@@ -1,6 +1,6 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { recordRequestActivity } from "@/lib/activity-request";
-import { requireOwner } from "@/lib/owner";
+import { requireEditor, requireOwner } from "@/lib/owner";
 import { agentPatchSchema, deleteAgent, getAgent, updateAgent } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +18,7 @@ export async function GET(_req: Request, ctx: Ctx) {
 
 export async function PATCH(req: Request, ctx: Ctx) {
   try {
-    const owner = await requireOwner();
+    const owner = await requireEditor();
     const patch = agentPatchSchema.parse(await readJson(req));
     return json({ agent: await updateAgent((await ctx.params).id, patch, owner) });
   } catch (err) {
@@ -29,7 +29,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
 export async function DELETE(_req: Request, ctx: Ctx) {
   try {
     const { id } = await ctx.params;
-    const owner = await requireOwner();
+    const owner = await requireEditor();
     const agent = await getAgent(id, owner);
     await deleteAgent(id, owner);
     await recordRequestActivity(owner, "agent.deleted", { subject: agent.name, subjectId: id });

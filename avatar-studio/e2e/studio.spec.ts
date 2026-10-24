@@ -1083,6 +1083,8 @@ test("workspaces: create, switch, isolate content, invite, join, leave, delete",
     await page.goto("/workspace");
     const feed = page.getByTestId("activity-feed");
     await expect(feed.getByText(`You created "Team video ${tag}"`)).toBeVisible();
+    await expect(page.getByRole("option", { name: /Viewer: watch and comment only/ })).toBeAttached();
+    expect((await page.request.post(`/api/workspaces/${ws.id}/invites`, { data: { role: "viewer" } })).status()).toBe(201);
     await page.getByRole("button", { name: "Create invite link" }).click();
     const link = (await page.getByTestId("invite-link").locator("code").innerText()).trim();
     expect(link).toContain("/invite/");

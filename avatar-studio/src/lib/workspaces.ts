@@ -7,6 +7,7 @@ import { NotFoundError, ValidationError } from "./errors";
 import { newId, nowIso } from "./ids";
 import { getStore } from "./store";
 import type { Membership, Workspace, WorkspaceInvite, WorkspaceRole } from "./types";
+import { roleCanEdit, roleSchema } from "./roles";
 
 export const WORKSPACE_COOKIE = "studio_workspace";
 export const MAX_WORKSPACES_PER_USER = 20;
@@ -14,7 +15,7 @@ export const MAX_MEMBERS = 50;
 const INVITE_TTL_MS = 7 * 86_400_000;
 
 export const workspaceNameSchema = z.object({ name: z.string().trim().min(1).max(60) });
-export const inviteSchema = z.object({ email: z.string().trim().email().max(200).optional(), role: z.enum(["owner", "editor"]).default("editor") });
+export const inviteSchema = z.object({ email: z.string().trim().email().max(200).optional(), role: roleSchema.default("editor") });
 
 export interface User {
   id: string;
@@ -25,6 +26,11 @@ export const isWorkspaceId = (id: string) => id.startsWith("ws_");
 
 export function memberOf(ws: Workspace, userId: string) {
   return ws.members.find((m) => m.userId === userId) ?? null;
+}
+
+/** Creating, changing, and deleting content inside a workspace is for its owners and editors; viewers watch and comment. */
+export function canEdit(ws: Workspace | null, userId: string): boolean {
+  return !ws || roleCanEdit(memberOf(ws, userId)?.role);
 }
 
 /** Account-level actions (wiping all data, billing) inside a workspace are for its owners only. */
@@ -173,6 +179,8 @@ export async function setMemberRole(id: string, userId: string, role: WorkspaceR
   }
   const next = await getStore().put("workspace", { ...ws, members: ws.members.map((m) => (m.userId === userId ? { ...m, role } : m)), updatedAt: nowIso() });
   await putMembership(next, userId, role, target.joinedAt);
+  // A key acts with the full power of the workspace; a member made a viewer keeps none.
+  if (!roleCanEdit(role)) await revokeApiKeysFor(id, userId);
   return next;
 }
 

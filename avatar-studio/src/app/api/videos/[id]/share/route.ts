@@ -1,6 +1,6 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { config } from "@/lib/config";
-import { currentUser, requireOwner } from "@/lib/owner";
+import { currentUser, requireEditor } from "@/lib/owner";
 import { getBrandKit } from "@/lib/services";
 import { shareEmailSchema, shareVideoByEmail } from "@/lib/share-email";
 
@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await ctx.params;
-    const owner = await requireOwner();
+    const owner = await requireEditor();
     const input = shareEmailSchema.parse(await readJson(req));
     // The link's host comes from configuration when it is set, so a forged Host header on a
     // self-hosted instance cannot point recipients elsewhere.

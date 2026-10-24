@@ -1,5 +1,6 @@
 "use client";
 import { useParams } from "next/navigation";
+import { roleArticle } from "@/lib/roles";
 import { useState } from "react";
 import { Building2 } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, SectionTitle } from "@/components/ui";
@@ -40,7 +41,7 @@ export default function InvitePage() {
             <div>
               <div className="text-base font-semibold text-slate-900">{data.workspace.name}</div>
               <div className="text-xs text-slate-500">
-                {data.workspace.members} {data.workspace.members === 1 ? "member" : "members"} · you would join as {data.role === "owner" ? "an owner" : "an editor"}
+                {data.workspace.members} {data.workspace.members === 1 ? "member" : "members"} · you would join as {roleArticle(data.role)}
               </div>
             </div>
           </div>

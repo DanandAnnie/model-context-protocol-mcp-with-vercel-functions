@@ -6,14 +6,15 @@ import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, inputClass 
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
 import { describeActivity } from "@/lib/activity-text";
-import type { ActivityEvent } from "@/lib/types";
+import { roleArticle } from "@/lib/roles";
+import type { ActivityEvent, WorkspaceRole } from "@/lib/types";
 
 interface View {
   id: string;
   name: string;
-  role: "owner" | "editor" | null;
-  members: Array<{ userId: string; email?: string; role: "owner" | "editor"; joinedAt: string; you: boolean }>;
-  invites: Array<{ token: string; email?: string; role: "owner" | "editor"; expiresAt: string }>;
+  role: WorkspaceRole | null;
+  members: Array<{ userId: string; email?: string; role: WorkspaceRole; joinedAt: string; you: boolean }>;
+  invites: Array<{ token: string; email?: string; role: WorkspaceRole; expiresAt: string }>;
 }
 interface Summary {
   personalId: string;
@@ -28,7 +29,7 @@ export default function WorkspacePage() {
   const ws = data?.workspaces.find((w) => w.id === data.activeId) ?? null;
   const activity = useApi<{ events: ActivityEvent[] }>(ws ? "/api/activity?limit=30" : null);
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<"owner" | "editor">("editor");
+  const [role, setRole] = useState<WorkspaceRole>("editor");
   const [link, setLink] = useState<string | null>(null);
   const [mailNote, setMailNote] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -113,7 +114,7 @@ export default function WorkspacePage() {
             />
           )
         }
-        subtitle={`${ws.members.length} ${ws.members.length === 1 ? "member" : "members"} · you are ${ws.role === "owner" ? "an owner" : "an editor"} · everything created here is shared with the team`}
+        subtitle={`${ws.members.length} ${ws.members.length === 1 ? "member" : "members"} · you are ${roleArticle(ws.role)} · ${ws.role === "viewer" ? "you can watch and comment; owners and editors create and change things" : "everything created here is shared with the team"}`}
         action={
           <div className="flex flex-wrap gap-2">
             <Button
@@ -173,6 +174,7 @@ export default function WorkspacePage() {
                   >
                     <option value="owner">Owner</option>
                     <option value="editor">Editor</option>
+                    <option value="viewer">Viewer</option>
                   </select>
                 ) : (
                   <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">{m.role}</span>
@@ -202,8 +204,9 @@ export default function WorkspacePage() {
                   <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="teammate@example.com" className={inputClass} />
                 </Field>
                 <Field label="Role">
-                  <select value={role} onChange={(e) => setRole(e.target.value as "owner" | "editor")} className={inputClass}>
+                  <select value={role} onChange={(e) => setRole(e.target.value as WorkspaceRole)} className={inputClass}>
                     <option value="editor">Editor: create and manage videos</option>
+                    <option value="viewer">Viewer: watch and comment only</option>
                     <option value="owner">Owner: also manage members</option>
                   </select>
                 </Field>

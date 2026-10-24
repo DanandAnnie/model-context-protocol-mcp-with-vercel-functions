@@ -1,5 +1,5 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
-import { requireOwner } from "@/lib/owner";
+import { requireEditor, requireOwner } from "@/lib/owner";
 import { deleteAvatar, getAvatar, updateAvatar, updateAvatarSchema } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,7 @@ export async function GET(_req: Request, ctx: Ctx) {
 export async function PATCH(req: Request, ctx: Ctx) {
   try {
     const { id } = await ctx.params;
-    const owner = await requireOwner();
+    const owner = await requireEditor();
     const patch = updateAvatarSchema.parse(await readJson(req));
     return json({ avatar: await updateAvatar(id, patch, owner) });
   } catch (err) {
@@ -30,7 +30,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
 export async function DELETE(_req: Request, ctx: Ctx) {
   try {
     const { id } = await ctx.params;
-    await deleteAvatar(id, await requireOwner());
+    await deleteAvatar(id, await requireEditor());
     return json({ ok: true });
   } catch (err) {
     return errorResponse(err);

@@ -1,6 +1,6 @@
 import { errorResponse, json } from "@/lib/api-utils";
 import { toCsv } from "@/lib/csv";
-import { requireOwner } from "@/lib/owner";
+import { requireEditor, requireOwner } from "@/lib/owner";
 import { clearConversations, listConversations } from "@/lib/services";
 
 /** Conversations in one CSV download; up to this many, newest first. */
@@ -43,7 +43,7 @@ export async function GET(req: Request, ctx: Ctx) {
 
 export async function DELETE(_req: Request, ctx: Ctx) {
   try {
-    return json({ deleted: await clearConversations((await ctx.params).id, await requireOwner()) });
+    return json({ deleted: await clearConversations((await ctx.params).id, await requireEditor()) });
   } catch (err) {
     return errorResponse(err);
   }

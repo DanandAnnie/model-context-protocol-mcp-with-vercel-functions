@@ -1,6 +1,6 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { recordRequestActivity } from "@/lib/activity-request";
-import { requireOwner } from "@/lib/owner";
+import { requireEditor, requireOwner } from "@/lib/owner";
 import { deleteVideo, getVideo, updateVideo, videoPatchSchema } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,7 @@ export async function GET(_req: Request, ctx: Ctx) {
 export async function PATCH(req: Request, ctx: Ctx) {
   try {
     const { id } = await ctx.params;
-    const owner = await requireOwner();
+    const owner = await requireEditor();
     const patch = videoPatchSchema.parse(await readJson(req));
     return json({ video: await updateVideo(id, patch, owner) });
   } catch (err) {
@@ -32,7 +32,7 @@ export async function DELETE(req: Request, ctx: Ctx) {
   try {
     const { id } = await ctx.params;
     const permanent = new URL(req.url).searchParams.get("permanent") === "true";
-    const owner = await requireOwner();
+    const owner = await requireEditor();
     const { title, changed } = await deleteVideo(id, owner, permanent);
     // A video already in the trash is left as it is; only a change is worth a line in the feed.
     if (changed) await recordRequestActivity(owner, permanent ? "video.purged" : "video.trashed", { subject: title, subjectId: id });

@@ -1,5 +1,6 @@
 // Transactional email for workspace invites. Resend when configured; otherwise a mock that records sends.
 import { config } from "../config";
+import { roleArticle } from "../roles";
 
 export interface EmailMessage {
   to: string;
@@ -70,7 +71,7 @@ export function inviteEmail(input: { to: string; workspaceName: string; inviterE
   const who = input.inviterEmail ? `${input.inviterEmail} invited you` : "You have been invited";
   const expires = new Date(input.expiresAt).toUTCString();
   const subject = `Join "${input.workspaceName}" on Avatar Studio`;
-  const text = `${who} to join the "${input.workspaceName}" workspace on Avatar Studio as ${input.role === "owner" ? "an owner" : "an editor"}.\n\nOpen this link to join:\n${input.url}\n\nThe link expires ${expires}. If you were not expecting this, ignore this email.`;
-  const html = `<p>${escape(who)} to join the <strong>${escape(input.workspaceName)}</strong> workspace on Avatar Studio as ${input.role === "owner" ? "an owner" : "an editor"}.</p><p><a href="${escape(input.url)}">Join the workspace</a></p><p style="color:#64748b;font-size:12px">The link expires ${escape(expires)}. If you were not expecting this, ignore this email.</p>`;
+  const text = `${who} to join the "${input.workspaceName}" workspace on Avatar Studio as ${roleArticle(input.role)}.\n\nOpen this link to join:\n${input.url}\n\nThe link expires ${expires}. If you were not expecting this, ignore this email.`;
+  const html = `<p>${escape(who)} to join the <strong>${escape(input.workspaceName)}</strong> workspace on Avatar Studio as ${roleArticle(input.role)}.</p><p><a href="${escape(input.url)}">Join the workspace</a></p><p style="color:#64748b;font-size:12px">The link expires ${escape(expires)}. If you were not expecting this, ignore this email.</p>`;
   return { to: input.to, subject, text, html };
 }

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { createApiKey, listApiKeys } from "@/lib/api-keys";
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { ValidationError } from "@/lib/errors";
-import { currentUser, presentedApiKey, requireOwner } from "@/lib/owner";
+import { currentUser, presentedApiKey, requireEditor, requireOwner } from "@/lib/owner";
 import { recordActivity } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +21,7 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     if (await presentedApiKey()) return json({ error: "Sign in to create API keys" }, { status: 403 });
-    const [owner, user] = await Promise.all([requireOwner(), currentUser()]);
+    const [owner, user] = await Promise.all([requireEditor(), currentUser()]);
     const { name } = createSchema.parse(await readJson(req));
     try {
       const created = await createApiKey(name, owner, user.id);

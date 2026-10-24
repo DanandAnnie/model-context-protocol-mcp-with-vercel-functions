@@ -52,7 +52,8 @@ import { API_KEY_PREFIX, MAX_API_KEYS, createApiKey, listApiKeys, ownerForApiKey
 import { createHmac } from "node:crypto";
 import { parseCsv, toCsv } from "../csv";
 import { ANALYTICS_COLUMNS, analyticsRows, bumpViewsByDay, computeInsights, finishRateOf, viewsInLast, viewsPerDay } from "../insights";
-import { acceptInvite, canManageAccount, createInvite, createWorkspace, deleteWorkspace, findInvite, listWorkspaces, removeMember, revokeInvite, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
+import { acceptInvite, canEdit, canManageAccount, createInvite, createWorkspace, deleteWorkspace, findInvite, inviteSchema, listWorkspaces, removeMember, revokeInvite, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
+import { roleArticle, roleCanEdit, roleSchema } from "../roles";
 import type { Video } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { MockEmailProvider, inviteEmail, setEmailProvider } from "../providers/email";
@@ -834,6 +835,7 @@ describe("activity feed", () => {
     assert.equal(describeActivity(events[2], "u-dan"), 'You created "Welcome home"');
     assert.equal(describeActivity(events[2], "u-ann"), 'dan@example.com created "Welcome home"');
     assert.equal(describeActivity(events[1]), 'A member made "dan@example.com" an owner');
+    assert.equal(describeActivity({ ...events[1], role: "viewer" }), 'A member made "dan@example.com" a viewer');
     assert.equal(describeActivity(events[0]), "A script with an API key moved 3 videos to the trash");
     assert.equal(activityActor({ actorId: "u-x", ownerId: "ws_feed" }), "A member");
     assert.equal(describeActivity({ ...events[0], count: 1, kind: "video.purged" }), "A script with an API key deleted 1 video for good");
@@ -1957,6 +1959,35 @@ describe("insights", () => {
 describe("workspaces", () => {
   const alice = { id: "alice", email: "alice@example.com" };
   const bob = { id: "bob", email: "bob@example.com" };
+
+  it("viewers watch and comment: no content changes, no keys, and demotion takes a member's keys away", async () => {
+    const carol = { id: "carol", email: "carol@example.com" };
+    const ws = await createWorkspace("Acme", alice);
+    const invite = await createInvite(ws.id, inviteSchema.parse({ role: "viewer" }), alice);
+    const joined = await acceptInvite(invite.token, carol);
+    assert.equal(joined.members.find((m) => m.userId === "carol")?.role, "viewer");
+    assert.equal(canEdit(joined, "carol"), false);
+    assert.equal(canEdit(joined, "alice"), true);
+    assert.equal(canEdit(null, "carol"), true, "a personal space is always the person's own");
+    assert.equal(canManageAccount(joined, "carol"), false);
+    assert.deepEqual([roleCanEdit("owner"), roleCanEdit("editor"), roleCanEdit("viewer"), roleCanEdit(null)], [true, true, false, false]);
+    assert.deepEqual([roleArticle("owner"), roleArticle("editor"), roleArticle("viewer")], ["an owner", "an editor", "a viewer"]);
+    assert.throws(() => roleSchema.parse("admin"));
+    assert.equal(inviteSchema.parse({}).role, "editor", "invites default to editor");
+    // An editor who minted a key under the workspace loses it when made a viewer; the owner's keys stay.
+    const bobInvite = await createInvite(ws.id, { role: "editor" }, alice);
+    await acceptInvite(bobInvite.token, bob);
+    await createApiKey("bob's script", ws.id, bob.id);
+    await createApiKey("alice's script", ws.id, alice.id);
+    assert.equal((await listApiKeys(ws.id)).length, 2);
+    const demoted = await setMemberRole(ws.id, bob.id, "viewer", alice);
+    assert.equal(demoted.members.find((m) => m.userId === "bob")?.role, "viewer");
+    assert.deepEqual((await listApiKeys(ws.id)).map((k) => k.name), ["alice's script"]);
+    // Back to editor: nothing is revoked, and the last owner still cannot be demoted to a viewer.
+    await setMemberRole(ws.id, bob.id, "editor", alice);
+    assert.equal((await listApiKeys(ws.id)).length, 1);
+    await assert.rejects(setMemberRole(ws.id, alice.id, "viewer", alice), /at least one owner/);
+  });
 
   it("creates, invites, joins, scopes content, and protects the last owner", async () => {
     const ws = await createWorkspace("Acme", alice);

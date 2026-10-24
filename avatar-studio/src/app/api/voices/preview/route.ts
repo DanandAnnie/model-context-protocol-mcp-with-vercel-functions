@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { errorResponse, readJson } from "@/lib/api-utils";
-import { requireOwner } from "@/lib/owner";
+import { requireEditor } from "@/lib/owner";
 import { previewVoice } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +18,7 @@ const schema = z.object({
  */
 export async function POST(req: Request) {
   try {
-    await requireOwner();
+    await requireEditor();
     const { voiceId, text, speed } = schema.parse(await readJson(req));
     const result = await previewVoice(voiceId, text, speed);
     if (!result) return new Response(null, { status: 204, headers: { "x-tts-fallback": "browser" } });

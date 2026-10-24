@@ -1,6 +1,6 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { recordRequestActivity } from "@/lib/activity-request";
-import { requireOwner } from "@/lib/owner";
+import { requireEditor } from "@/lib/owner";
 import { bulkVideoSchema, bulkVideos } from "@/lib/services";
 import type { ActivityKind } from "@/lib/types";
 
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 /** Bulk trash, restore, purge, move-to-folder, or share-link switch for the library's multi-select. */
 export async function POST(req: Request) {
   try {
-    const owner = await requireOwner();
+    const owner = await requireEditor();
     const input = bulkVideoSchema.parse(await readJson(req));
     const result = await bulkVideos(input, owner);
     const kind = BULK_ACTIVITY[input.action];

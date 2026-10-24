@@ -545,16 +545,18 @@ function withCounterLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
 const COUNTER_FIELDS = ["views", "lastViewedAt", "viewsByDay", "watch", "ctaClicks", "lastCtaClickAt"] as const;
 /**
  * Fields other writers own, which an edit built from an earlier read must take from the stored
- * record rather than from its own copy: the counters, and the subtitle tracks, which a translation
- * adds under the lock and which an owner edit never changes.
+ * record rather than from its own copy: the counters, the subtitle tracks, which a translation adds
+ * under the lock, and the trash mark, which a trash or restore sets under the lock; an owner edit
+ * changes none of them.
  */
-const CONCURRENT_FIELDS = [...COUNTER_FIELDS, "subtitles"] as const;
+const CONCURRENT_FIELDS = [...COUNTER_FIELDS, "subtitles", "deletedAt"] as const;
 
 /**
- * Writes a video built from `base` while keeping whatever counters and subtitle tracks the stored
- * record holds by then: an edit that read the record before a scrypt or a network round trip must
- * not undo the views, watch marks, and clicks counted meanwhile, nor drop (or bring back) a track
- * a translation added or removed meanwhile. Runs under the video's counter lock.
+ * Writes a video built from `base` while keeping whatever counters, subtitle tracks, and trash mark
+ * the stored record holds by then: an edit that read the record before a scrypt or a network round
+ * trip must not undo the views, watch marks, and clicks counted meanwhile, drop (or bring back) a
+ * track a translation added or removed meanwhile, or undo a trash or restore. Runs under the
+ * video's counter lock.
  */
 function putKeepingCounters(base: Video): Promise<Video> {
   return withCounterLock(base.id, async () => {
@@ -755,18 +757,18 @@ export async function deleteVideo(id: string, ownerId: string = LOCAL_OWNER, per
     return purgeVideo(id, ownerId);
   }
   if (video.deletedAt) return;
-  await putKeepingCounters({ ...video, deletedAt: nowIso(), updatedAt: nowIso() });
+  await updateKeepingCounters(id, ownerId, (stored) => (stored.deletedAt ? stored : { ...stored, deletedAt: nowIso(), updatedAt: nowIso() }));
 }
 
 /** Brings a trashed video back to the library; a video that is not in the trash is returned as is. */
-export async function restoreVideo(id: string, ownerId: string = LOCAL_OWNER): Promise<Video> {
-  const video = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
-  // Past its retention it is as good as gone, whether or not a listing has purged it yet.
-  if (purgeDue(video, Date.now())) throw new NotFoundError(`Video ${id} not found`);
-  if (!video.deletedAt) return video;
-  const { deletedAt: _gone, ...rest } = video;
-  void _gone;
-  return putKeepingCounters({ ...rest, updatedAt: nowIso() });
+export function restoreVideo(id: string, ownerId: string = LOCAL_OWNER): Promise<Video> {
+  // Past its retention it is as good as gone (the helper says not found), whether or not a listing has purged it yet.
+  return updateKeepingCounters(id, ownerId, (stored) => {
+    if (!stored.deletedAt) return stored;
+    const { deletedAt: _gone, ...rest } = stored;
+    void _gone;
+    return { ...rest, updatedAt: nowIso() };
+  });
 }
 
 export async function applyAvatarWebhook(providerName: string, body: unknown): Promise<Video | null> {

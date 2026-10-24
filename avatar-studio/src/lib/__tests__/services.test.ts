@@ -535,6 +535,10 @@ describe("captions", () => {
     // Clauses of a long Japanese sentence are not joined back past the 40-character cue.
     const clauses = buildCues(`${"あ".repeat(35)}，${"い".repeat(35)}。`, 10).map((c) => c.text);
     assert.deepEqual(clauses, [`${"あ".repeat(35)}，`, `${"い".repeat(35)}。`]);
+    // Mixed text is judged by what it carries: a Latin run with a long unspaced tail is cut so the tail fits too.
+    const tail = buildCues(`${"ab ".repeat(25)}${"あ".repeat(45)}`, 10).map((c) => c.text);
+    assert.ok(tail.every((t) => Array.from(t).filter((c) => /\p{Script=Hiragana}/u.test(c)).length <= 40), tail.join(" | "));
+    assert.equal(buildCues(`${"あ".repeat(44)} ${"b".repeat(46)}`, 10).length, 2, "44 dense characters plus 46 Latin ones do not fit one cue");
     // A closing bracket or quote stays with the sentence it closes.
     assert.deepEqual(buildCues("「はい。」次は行きましょう。", 4).map((c) => c.text), ["「はい。」", "次は行きましょう。"]);
     assert.deepEqual(buildCues('She said "Go." Then she left.', 4).map((c) => c.text), ['She said "Go."', "Then she left."]);
@@ -765,11 +769,12 @@ describe("translated subtitles", () => {
     assert.equal(Object.keys((await getVideo(v.id, "u-race", false)).subtitles ?? {}).length, MAX_SUBTITLE_LANGUAGES);
   });
 
-  it("keeps a track added while an owner edit, a trash, or a restore was in flight", async () => {
+  it("an owner edit in flight keeps a track added, a track removed, and a trash that landed meanwhile", async () => {
     const { addSubtitles, removeSubtitles, restoreVideo } = await import("../services/videos");
     const v = await createVideo(videoRequestSchema.parse({ title: "Edit race", script: "Hello.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }), "u-edit");
     const quick = async (script: string, language: string) => `[${language}] ${script}`;
-    // The password edit reads the record, then hashes (scrypt) before it writes; the translation lands in between.
+    // The password edit reads the record, then hashes (scrypt, whose callback is a macrotask) before it
+    // writes; the translation, all microtasks on the in-memory store, lands in between.
     const edit = updateVideo(v.id, videoPatchSchema.parse({ sharePassword: "secret12" }), "u-edit");
     await addSubtitles(v.id, "Spanish", "u-edit", quick);
     const edited = await edit;
@@ -782,6 +787,12 @@ describe("translated subtitles", () => {
     const edit2 = updateVideo(v.id, videoPatchSchema.parse({ sharePassword: "secret34" }), "u-edit");
     await removeSubtitles(v.id, "Spanish", "u-edit");
     assert.equal("subtitles" in (await edit2), false);
+    // Nor does the edit pull a video back out of the trash it was moved to meanwhile.
+    const edit3 = updateVideo(v.id, videoPatchSchema.parse({ title: "Renamed", sharePassword: "secret56" }), "u-edit");
+    await deleteVideo(v.id, "u-edit");
+    const trashed = await edit3;
+    assert.equal(trashed.title, "Renamed");
+    assert.ok(trashed.deletedAt, "the trash mark set meanwhile stays");
   });
 
   it("removes a track stored under any key name, not only one the add route would accept today", async () => {

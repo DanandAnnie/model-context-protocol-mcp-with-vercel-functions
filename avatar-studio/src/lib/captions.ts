@@ -9,7 +9,7 @@ export interface Cue {
 }
 
 const MAX_CUE_CHARS = 90;
-/** A cue in a script written without word spaces (Chinese, Japanese, Thai) is kept this short: its characters each carry more. */
+/** A cue in a script written without word spaces (Chinese, Japanese, Korean, Thai) is kept this short: its characters each carry more. */
 const MAX_UNSPACED_CUE_CHARS = 40;
 /** Marks that close a quotation or bracket and belong to the sentence before them. */
 const CLOSERS = `["'”’)\\]」』）】〕》〉]`;
@@ -17,22 +17,25 @@ const CLOSERS = `["'”’)\\]」』）】〕》〉]`;
 const SENTENCE_END = new RegExp(`(?<=[.!?]${CLOSERS}*)\\s+|(?<=[。！？]${CLOSERS}*)(?!${CLOSERS})`, "u");
 /** Clause ends, for breaking a long sentence. */
 const CLAUSE_END = /(?<=,)\s+|(?<=[，、])/u;
-/** Characters of scripts written without word spaces; see `limitFor` and `weight`. */
+/** Characters of scripts written without word spaces (or, for Korean, read at that density); see `width` and `weight`. */
 const UNSPACED = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u;
 
-/** True when most of the text is in a script written without word spaces, whether or not it happens to contain a space. */
-function unspaced(text: string): boolean {
-  const letters = Array.from(text).filter((c) => /[\p{L}\p{N}]/u.test(c));
-  return letters.length > 0 && letters.filter((c) => UNSPACED.test(c)).length * 2 > letters.length;
-}
+/** How much of a cue one character of an unspaced script takes up, measured in Latin characters. */
+const UNSPACED_CHAR_WIDTH = MAX_CUE_CHARS / MAX_UNSPACED_CUE_CHARS;
 
-/** How long a cue of this text may be, in characters. */
-function limitFor(text: string): number {
-  return unspaced(text) ? MAX_UNSPACED_CUE_CHARS : MAX_CUE_CHARS;
+/**
+ * The room a text takes up in a cue: a Latin character counts one, a character of a script written
+ * without word spaces counts more, so a mixed sentence is judged by what it carries rather than by
+ * which script is in the majority.
+ */
+function width(text: string): number {
+  let w = 0;
+  for (const c of text) w += UNSPACED.test(c) ? UNSPACED_CHAR_WIDTH : 1;
+  return w;
 }
 
 function fits(text: string): boolean {
-  return Array.from(text).length <= limitFor(text);
+  return width(text) <= MAX_CUE_CHARS;
 }
 
 /** Joins two cue pieces: no space after East Asian punctuation or between two characters of an unspaced script. */
@@ -42,19 +45,27 @@ function join(a: string, b: string): string {
   return tight ? a + b : `${a} ${b}`;
 }
 
-/** Cuts text that does not fit a cue into pieces that do: at the last space within the limit when there is one, else by character. */
+/** Cuts text that does not fit a cue into pieces that do: at the last space within the room when there is one, else by character. */
 function cut(text: string): string[] {
-  const limit = limitFor(text);
+  const chars = Array.from(text);
   const out: string[] = [];
-  let rest = Array.from(text);
-  while (rest.length > limit) {
-    const space = rest.lastIndexOf(" ", limit);
-    const at = space > 0 ? space : limit;
-    out.push(rest.slice(0, at).join("").trim());
-    rest = rest.slice(at);
-    while (rest[0] === " ") rest.shift();
+  let start = 0;
+  while (start < chars.length) {
+    let end = start;
+    for (let w = 0; end < chars.length; end++) {
+      w += UNSPACED.test(chars[end]) ? UNSPACED_CHAR_WIDTH : 1;
+      if (w > MAX_CUE_CHARS) break;
+    }
+    if (end === chars.length) {
+      out.push(chars.slice(start).join("").trim());
+      break;
+    }
+    const space = chars.lastIndexOf(" ", end);
+    const at = space > start ? space : end;
+    out.push(chars.slice(start, at).join("").trim());
+    start = at;
+    while (chars[start] === " ") start++;
   }
-  if (rest.length) out.push(rest.join("").trim());
   return out.filter(Boolean);
 }
 

@@ -184,6 +184,8 @@ export const subtitleSchema = z.object({
     .max(40)
     .regex(/^\p{L}[\p{L}\p{M}\s().'-]*$/u, "Name the language in letters, like Spanish or Portuguese (Brazil)"),
 });
+/** The remove route takes whatever key a track is stored under, so a track kept under an older naming rule can still go. */
+export const removeSubtitleSchema = z.object({ language: z.string().trim().min(1).max(80) });
 /** Translates a script into a language; the default asks the script provider. Injectable for tests. */
 export type Translator = (script: string, language: string) => Promise<string>;
 const translateWithProvider: Translator = (script, language) => reviseScript({ script, action: "translate", language });
@@ -541,11 +543,18 @@ function withCounterLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
 
 /** The counters that beacons own; an owner edit or provider update must never roll them back. */
 const COUNTER_FIELDS = ["views", "lastViewedAt", "viewsByDay", "watch", "ctaClicks", "lastCtaClickAt"] as const;
+/**
+ * Fields other writers own, which an edit built from an earlier read must take from the stored
+ * record rather than from its own copy: the counters, and the subtitle tracks, which a translation
+ * adds under the lock and which an owner edit never changes.
+ */
+const CONCURRENT_FIELDS = [...COUNTER_FIELDS, "subtitles"] as const;
 
 /**
- * Writes a video built from `base` while keeping whatever counters the stored record holds by
- * then: an edit that read the record before a scrypt or a network round trip must not undo the
- * views, watch marks, and clicks counted meanwhile. Runs under the video's counter lock.
+ * Writes a video built from `base` while keeping whatever counters and subtitle tracks the stored
+ * record holds by then: an edit that read the record before a scrypt or a network round trip must
+ * not undo the views, watch marks, and clicks counted meanwhile, nor drop (or bring back) a track
+ * a translation added or removed meanwhile. Runs under the video's counter lock.
  */
 function putKeepingCounters(base: Video): Promise<Video> {
   return withCounterLock(base.id, async () => {
@@ -553,10 +562,10 @@ function putKeepingCounters(base: Video): Promise<Video> {
     // Deleted (or purged) between the caller's read and this write: never bring it back without its side records.
     if (!stored) throw new NotFoundError(`Video ${base.id} not found`);
     const next: Video = { ...base };
-    for (const field of COUNTER_FIELDS) delete next[field];
-    const counters: Partial<Video> = {};
-    for (const field of COUNTER_FIELDS) if (stored[field] !== undefined) Object.assign(counters, { [field]: stored[field] });
-    return getStore().put("video", { ...next, ...counters });
+    for (const field of CONCURRENT_FIELDS) delete next[field];
+    const theirs: Partial<Video> = {};
+    for (const field of CONCURRENT_FIELDS) if (stored[field] !== undefined) Object.assign(theirs, { [field]: stored[field] });
+    return getStore().put("video", { ...next, ...theirs });
   });
 }
 

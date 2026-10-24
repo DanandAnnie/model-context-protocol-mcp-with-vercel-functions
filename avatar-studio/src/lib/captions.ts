@@ -9,26 +9,53 @@ export interface Cue {
 }
 
 const MAX_CUE_CHARS = 90;
-/** A run with no spaces to break at (Chinese, Japanese, Thai) is cut into pieces this long. */
+/** A cue in a script written without word spaces (Chinese, Japanese, Thai) is kept this short: its characters each carry more. */
 const MAX_UNSPACED_CUE_CHARS = 40;
-/** Sentence ends: Western punctuation followed by space, or an East Asian full stop, question, or exclamation mark. */
-const SENTENCE_END = /(?<=[.!?])\s+|(?<=[。！？])/u;
+/** Marks that close a quotation or bracket and belong to the sentence before them. */
+const CLOSERS = `["'”’)\\]」』）】〕》〉]`;
+/** Sentence ends: Western punctuation (and any closing quote) followed by space, or an East Asian full stop, question, or exclamation mark with its closers. */
+const SENTENCE_END = new RegExp(`(?<=[.!?]${CLOSERS}*)\\s+|(?<=[。！？]${CLOSERS}*)(?!${CLOSERS})`, "u");
 /** Clause ends, for breaking a long sentence. */
 const CLAUSE_END = /(?<=,)\s+|(?<=[，、])/u;
-const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}]/u;
+/** Characters of scripts written without word spaces; see `limitFor` and `weight`. */
+const UNSPACED = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u;
 
-/** Joins two cue pieces: no space after East Asian punctuation, which carries its own spacing. */
-function join(a: string, b: string): string {
-  if (!a) return b;
-  return /[，、。！？]$/u.test(a) ? a + b : `${a} ${b}`;
+/** True when most of the text is in a script written without word spaces, whether or not it happens to contain a space. */
+function unspaced(text: string): boolean {
+  const letters = Array.from(text).filter((c) => /[\p{L}\p{N}]/u.test(c));
+  return letters.length > 0 && letters.filter((c) => UNSPACED.test(c)).length * 2 > letters.length;
 }
 
-/** Cuts a run that has no spaces into readable pieces by character. */
-function cutUnspaced(text: string): string[] {
-  const chars = Array.from(text);
+/** How long a cue of this text may be, in characters. */
+function limitFor(text: string): number {
+  return unspaced(text) ? MAX_UNSPACED_CUE_CHARS : MAX_CUE_CHARS;
+}
+
+function fits(text: string): boolean {
+  return Array.from(text).length <= limitFor(text);
+}
+
+/** Joins two cue pieces: no space after East Asian punctuation or between two characters of an unspaced script. */
+function join(a: string, b: string): string {
+  if (!a) return b;
+  const tight = new RegExp(`[，、。！？]${CLOSERS}*$`, "u").test(a) || (UNSPACED.test(a.slice(-1)) && UNSPACED.test(b.charAt(0)));
+  return tight ? a + b : `${a} ${b}`;
+}
+
+/** Cuts text that does not fit a cue into pieces that do: at the last space within the limit when there is one, else by character. */
+function cut(text: string): string[] {
+  const limit = limitFor(text);
   const out: string[] = [];
-  for (let i = 0; i < chars.length; i += MAX_UNSPACED_CUE_CHARS) out.push(chars.slice(i, i + MAX_UNSPACED_CUE_CHARS).join(""));
-  return out;
+  let rest = Array.from(text);
+  while (rest.length > limit) {
+    const space = rest.lastIndexOf(" ", limit);
+    const at = space > 0 ? space : limit;
+    out.push(rest.slice(0, at).join("").trim());
+    rest = rest.slice(at);
+    while (rest[0] === " ") rest.shift();
+  }
+  if (rest.length) out.push(rest.join("").trim());
+  return out.filter(Boolean);
 }
 
 /**
@@ -36,7 +63,7 @@ function cutUnspaced(text: string): string[] {
  * spaces weighs about half a word per character, which is close to how long it takes to say.
  */
 function weight(text: string): number {
-  return text.split(/\s+/).reduce((n, token) => n + (CJK.test(token) ? Math.max(1, Array.from(token).length / 2) : 1), 0);
+  return text.split(/\s+/).reduce((n, token) => n + (UNSPACED.test(token) ? Math.max(1, Array.from(token).length / 2) : 1), 0);
 }
 
 /** HeyGen writes captions into the file itself unless a caption style asks for the share page's track alone. */
@@ -51,27 +78,30 @@ export function captionsBurnedIn(video: { captions?: boolean; captionStyle?: unk
 
 function splitSentences(script: string): string[] {
   const sentences = script.replace(/\s+/g, " ").trim().split(SENTENCE_END).map((s) => s.trim()).filter(Boolean);
-  // Break very long sentences at commas so cues stay readable, and cut runs with no spaces by character.
+  // A sentence too long for one cue is broken at its clause marks, the clauses joined back up to
+  // the cue limit, and a clause that is still too long (or a script with no marks at all, like
+  // Thai) cut at its spaces or, failing those, by character.
   const out: string[] = [];
   for (const s of sentences) {
-    if (s.length <= MAX_CUE_CHARS && (s.includes(" ") || Array.from(s).length <= MAX_UNSPACED_CUE_CHARS)) {
+    if (fits(s)) {
       out.push(s);
       continue;
     }
     let current = "";
     for (const clause of s.split(CLAUSE_END).map((c) => c.trim()).filter(Boolean)) {
-      if (!clause.includes(" ") && Array.from(clause).length > MAX_UNSPACED_CUE_CHARS) {
-        // A run cut by character stays in its pieces: joining them back would undo the cut.
-        if (current) out.push(current);
-        out.push(...cutUnspaced(clause));
-        current = "";
+      const joined = join(current, clause);
+      if (fits(joined)) {
+        current = joined;
         continue;
       }
-      if (join(current, clause).length > MAX_CUE_CHARS && current) {
-        out.push(current);
+      if (current) out.push(current);
+      if (fits(clause)) {
         current = clause;
       } else {
-        current = join(current, clause);
+        // The last piece of a cut clause may still take the next clause.
+        const pieces = cut(clause);
+        current = pieces.pop() ?? "";
+        out.push(...pieces);
       }
     }
     if (current) out.push(current);

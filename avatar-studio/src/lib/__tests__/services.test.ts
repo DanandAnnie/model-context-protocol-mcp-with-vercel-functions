@@ -523,6 +523,21 @@ describe("captions", () => {
     assert.ok(ja[1].endMs - ja[1].startMs > ja[2].endMs - ja[2].startMs, "a longer sentence gets more time");
     const run = buildCues("あ".repeat(100), 10);
     assert.deepEqual(run.map((c) => Array.from(c.text).length), [40, 40, 20]);
+    // Thai marks neither sentences nor clauses with punctuation; its phrases are spaced. Cues break at those spaces and stay short.
+    const thai = "วันนี้เราจะพาคุณชมบ้านหลังใหม่ ที่มีห้องนั่งเล่นกว้างขวาง และห้องครัวที่สว่างสดใส เชิญชมได้เลยครับ";
+    const th = buildCues(thai, 10).map((c) => c.text);
+    assert.ok(th.length > 1, "a Thai script longer than a cue is split");
+    assert.ok(th.every((t) => Array.from(t).length <= 40), th.join(" | "));
+    assert.equal(th.join(" "), thai, "cut only at spaces, so no word is broken");
+    // One space (around a Latin name) does not turn a Japanese sentence into a 90-character cue.
+    const mixed = buildCues("今日は Avatar Studio の新しい家をご紹介します、広いリビングと明るいキッチンと静かな書斎があります", 10).map((c) => c.text);
+    assert.ok(mixed.length > 1 && mixed.every((t) => Array.from(t).length <= 40), mixed.join(" | "));
+    // Clauses of a long Japanese sentence are not joined back past the 40-character cue.
+    const clauses = buildCues(`${"あ".repeat(35)}，${"い".repeat(35)}。`, 10).map((c) => c.text);
+    assert.deepEqual(clauses, [`${"あ".repeat(35)}，`, `${"い".repeat(35)}。`]);
+    // A closing bracket or quote stays with the sentence it closes.
+    assert.deepEqual(buildCues("「はい。」次は行きましょう。", 4).map((c) => c.text), ["「はい。」", "次は行きましょう。"]);
+    assert.deepEqual(buildCues('She said "Go." Then she left.', 4).map((c) => c.text), ['She said "Go."', "Then she left."]);
   });
 });
 
@@ -738,8 +753,8 @@ describe("translated subtitles", () => {
     };
     const both = gate();
     const results = await Promise.all([addSubtitles(v.id, "Spanish", "u-race", both), addSubtitles(v.id, "spanish", "u-race", both)]);
-    const last = results.find((r) => Object.keys(r.subtitles ?? {}).length === 1 && r.updatedAt === results.map((x) => x.updatedAt).sort().at(-1))!;
-    assert.deepEqual(Object.keys(last.subtitles ?? {}).length, 1, "one track for one language");
+    // The first writer stores "Spanish"; the second sees it under the lock and replaces it rather than adding "spanish" beside it.
+    assert.deepEqual(results.map((r) => Object.keys(r.subtitles ?? {}).length), [1, 1], "one track for one language, whichever lands last");
     assert.equal(Object.keys((await getVideo(v.id, "u-race", false)).subtitles ?? {}).length, 1);
     for (const l of ["French", "German", "Italian"]) await addSubtitles(v.id, l, "u-race");
     const two = gate();
@@ -748,6 +763,35 @@ describe("translated subtitles", () => {
     const rejected = settled.find((r) => r.status === "rejected") as PromiseRejectedResult;
     assert.match(String(rejected.reason), /At most/);
     assert.equal(Object.keys((await getVideo(v.id, "u-race", false)).subtitles ?? {}).length, MAX_SUBTITLE_LANGUAGES);
+  });
+
+  it("keeps a track added while an owner edit, a trash, or a restore was in flight", async () => {
+    const { addSubtitles, removeSubtitles, restoreVideo } = await import("../services/videos");
+    const v = await createVideo(videoRequestSchema.parse({ title: "Edit race", script: "Hello.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }), "u-edit");
+    const quick = async (script: string, language: string) => `[${language}] ${script}`;
+    // The password edit reads the record, then hashes (scrypt) before it writes; the translation lands in between.
+    const edit = updateVideo(v.id, videoPatchSchema.parse({ sharePassword: "secret12" }), "u-edit");
+    await addSubtitles(v.id, "Spanish", "u-edit", quick);
+    const edited = await edit;
+    assert.equal(edited.shareLocked, true);
+    assert.equal(edited.subtitles?.Spanish, "[Spanish] Hello.", "the edit does not write its pre-translation copy over the new track");
+    await deleteVideo(v.id, "u-edit");
+    const restored = await restoreVideo(v.id, "u-edit");
+    assert.equal(restored.subtitles?.Spanish, "[Spanish] Hello.");
+    // A track removed meanwhile does not come back with the edit either.
+    const edit2 = updateVideo(v.id, videoPatchSchema.parse({ sharePassword: "secret34" }), "u-edit");
+    await removeSubtitles(v.id, "Spanish", "u-edit");
+    assert.equal("subtitles" in (await edit2), false);
+  });
+
+  it("removes a track stored under any key name, not only one the add route would accept today", async () => {
+    const { removeSubtitles, removeSubtitleSchema } = await import("../services/videos");
+    const { getStore } = await import("../store");
+    const v = await createVideo(videoRequestSchema.parse({ title: "Legacy", script: "Hello.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }), "u-legacy");
+    await getStore().put("video", { ...(await getStore().get<Video>("video", v.id))!, subtitles: { pt_BR: "Olá." } });
+    assert.equal(removeSubtitleSchema.parse({ language: " pt_BR " }).language, "pt_BR", "the remove route takes the stored key as it is");
+    assert.throws(() => removeSubtitleSchema.parse({ language: "" }));
+    assert.equal("subtitles" in (await removeSubtitles(v.id, "pt_br", "u-legacy")), false);
   });
 });
 

@@ -752,14 +752,16 @@ export async function retryVideo(id: string, ownerId: string = LOCAL_OWNER): Pro
  * `TRASH_RETENTION_DAYS`; with `permanent` it is deleted for good straight away, side records included.
  * Trashing an already trashed video keeps its original deletion time.
  */
-export async function deleteVideo(id: string, ownerId: string = LOCAL_OWNER, permanent = false): Promise<void> {
+export async function deleteVideo(id: string, ownerId: string = LOCAL_OWNER, permanent = false): Promise<{ title: string; changed: boolean }> {
   const video = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
   if (permanent) {
     if (!video.deletedAt) throw new ConflictError("Move the video to the trash first; deleting for good is offered from there");
-    return purgeVideo(id, ownerId);
+    await purgeVideo(id, ownerId);
+    return { title: video.title, changed: true };
   }
-  if (video.deletedAt) return;
-  await updateKeepingCounters(id, ownerId, (stored) => (stored.deletedAt ? stored : { ...stored, deletedAt: nowIso(), updatedAt: nowIso() }));
+  if (video.deletedAt) return { title: video.title, changed: false };
+  const next = await updateKeepingCounters(id, ownerId, (stored) => (stored.deletedAt ? stored : { ...stored, deletedAt: nowIso(), updatedAt: nowIso() }));
+  return { title: next.title, changed: next !== video && next.deletedAt !== video.deletedAt };
 }
 
 /** Brings a trashed video back to the library; a video that is not in the trash is returned as is. */

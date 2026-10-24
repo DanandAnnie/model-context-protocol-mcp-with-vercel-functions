@@ -243,7 +243,7 @@ describe("videos", () => {
     const stored = await getVideo(v.id, undefined, false);
     await globalThis.__avatarStudioStore!.put("video", { ...stored, status: "completed", views: 3 });
     const before = await deleteVideo(v.id);
-    assert.equal(before, undefined);
+    assert.deepEqual(before, { title: "Keep me", changed: true });
     const trashed = await getVideo(v.id, undefined, false);
     assert.ok(trashed.deletedAt, "the owner still reads it");
     assert.equal(trashed.views, 3, "counters survive the move");
@@ -741,6 +741,9 @@ describe("translated subtitles", () => {
     assert.equal("subtitles" in listed, false);
     await deleteVideo(v.id, "u-sub");
     await assert.rejects(addSubtitles(v.id, "French", "u-sub"), /Restore the video/);
+    // Deleting reports whether anything changed, so the route can skip a feed line for a trash that was already done.
+    assert.deepEqual(await deleteVideo(v.id, "u-sub"), { title: "Renamed meanwhile", changed: false });
+    assert.deepEqual(await deleteVideo(v.id, "u-sub", true), { title: "Renamed meanwhile", changed: true });
   });
 
   it("decides the language and the cap on the record as stored, so overlapping adds cannot double a track or pass the cap", async () => {
@@ -847,8 +850,11 @@ describe("activity feed", () => {
     const store = getStore();
     const broken = { ...store, put: async () => { throw new Error("store down"); }, list: store.list.bind(store), remove: store.remove.bind(store), get: store.get.bind(store), findBy: store.findBy.bind(store) };
     globalThis.__avatarStudioStore = broken as typeof store;
-    assert.equal(await recordActivity("ws_feed", dan, "video.created", { subject: "lost" }), null, "a failed write is swallowed");
-    globalThis.__avatarStudioStore = store;
+    try {
+      assert.equal(await recordActivity("ws_feed", dan, "video.created", { subject: "lost" }), null, "a failed write is swallowed");
+    } finally {
+      globalThis.__avatarStudioStore = store;
+    }
   });
 });
 

@@ -17,10 +17,15 @@ export const activityQuerySchema = z.object({ limit: z.coerce.number().int().min
  * Event times are strictly increasing within an instance, so events recorded in one millisecond
  * (a bulk action and the request behind it, a burst of tests) still list in the order they happened.
  */
-let lastStampMs = 0;
+declare global {
+  // eslint-disable-next-line no-var
+  var __avatarStudioActivityStamp: number | undefined;
+}
+// Held on globalThis, like the store: module scope is not shared across route bundles.
 function stamp(): string {
-  lastStampMs = Math.max(Date.now(), lastStampMs + 1);
-  return new Date(lastStampMs).toISOString();
+  const ms = Math.max(Date.now(), (globalThis.__avatarStudioActivityStamp ?? 0) + 1);
+  globalThis.__avatarStudioActivityStamp = ms;
+  return new Date(ms).toISOString();
 }
 
 export interface ActivityDetails {

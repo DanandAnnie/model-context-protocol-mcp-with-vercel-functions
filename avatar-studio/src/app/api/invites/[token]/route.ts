@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { errorResponse, json } from "@/lib/api-utils";
 import { currentUser } from "@/lib/owner";
 import { recordActivity } from "@/lib/services";
-import { WORKSPACE_COOKIE, acceptInvite, findInvite, workspaceView } from "@/lib/workspaces";
+import { WORKSPACE_COOKIE, acceptInvite, findInvite, memberOf, workspaceView } from "@/lib/workspaces";
 
 export const dynamic = "force-dynamic";
 type Ctx = { params: Promise<{ token: string }> };
@@ -23,8 +23,12 @@ export async function GET(_req: Request, ctx: Ctx) {
 export async function POST(_req: Request, ctx: Ctx) {
   try {
     const user = await currentUser();
-    const ws = await acceptInvite((await ctx.params).token, user);
-    await recordActivity(ws.id, user, "member.joined");
+    const { token } = await ctx.params;
+    // Opening the link again as a member consumes the invite but is not a join worth a line in the feed.
+    const found = await findInvite(token);
+    const already = found ? !!memberOf(found.workspace, user.id) : false;
+    const ws = await acceptInvite(token, user);
+    if (!already) await recordActivity(ws.id, user, "member.joined");
     const res = NextResponse.json({ workspace: await workspaceView(ws, user) });
     res.cookies.set(WORKSPACE_COOKIE, ws.id, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 365 });
     return res;

@@ -1,6 +1,7 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
-import { requireOwner, userOrOwner } from "@/lib/owner";
-import { agentPatchSchema, deleteAgent, getAgent, recordActivity, updateAgent } from "@/lib/services";
+import { recordRequestActivity } from "@/lib/activity-request";
+import { requireOwner } from "@/lib/owner";
+import { agentPatchSchema, deleteAgent, getAgent, updateAgent } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 /** Creating or editing may read a knowledge page (10 s fetch budget). */
@@ -31,7 +32,7 @@ export async function DELETE(_req: Request, ctx: Ctx) {
     const owner = await requireOwner();
     const agent = await getAgent(id, owner);
     await deleteAgent(id, owner);
-    await recordActivity(owner, await userOrOwner(owner), "agent.deleted", { subject: agent.name, subjectId: id });
+    await recordRequestActivity(owner, "agent.deleted", { subject: agent.name, subjectId: id });
     return new Response(null, { status: 204 });
   } catch (err) {
     return errorResponse(err);

@@ -1,6 +1,7 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
-import { requireOwner, userOrOwner } from "@/lib/owner";
-import { createVideo, queryVideos, recordActivity, videoQuerySchema, videoRequestSchema } from "@/lib/services";
+import { recordRequestActivity } from "@/lib/activity-request";
+import { requireOwner } from "@/lib/owner";
+import { createVideo, queryVideos, videoQuerySchema, videoRequestSchema } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -20,8 +21,8 @@ export async function POST(req: Request) {
     const owner = await requireOwner();
     const input = videoRequestSchema.parse(await readJson(req));
     const video = await createVideo(input, owner);
-    await recordActivity(owner, await userOrOwner(owner), "video.created", { subject: video.title, subjectId: video.id });
     if (video.status === "failed") return json({ video, error: video.error ?? "The render could not be started" }, { status: 502 });
+    await recordRequestActivity(owner, "video.created", { subject: video.title, subjectId: video.id });
     return json({ video }, { status: 201 });
   } catch (err) {
     return errorResponse(err);

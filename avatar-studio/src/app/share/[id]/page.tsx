@@ -13,7 +13,7 @@ import { LOCAL_OWNER } from "@/lib/owner";
 import { config } from "@/lib/config";
 import { formatSeconds, isDarkHex, posterUrl } from "@/lib/client";
 import { languageCode } from "@/lib/language";
-import { cssUrl, excerpt } from "@/lib/text";
+import { excerpt } from "@/lib/text";
 import { stripPauses } from "@/lib/pauses";
 import { dimensionsFor, type WatermarkCorner } from "@/lib/types";
 import { ViewBeacon } from "@/components/ViewBeacon";
@@ -133,13 +133,17 @@ export default async function SharePage({
         ? "aspect-square max-w-[640px]"
         : "aspect-video";
 
-  // The logo is drawn from one CSS variable by the header and the player watermark, so an uploaded
-  // logo (a data URL of up to a few megabytes) is sent once in the page, not once per place it shows.
-  const logoStyle = brand?.logoUrl ? ({ "--brand-logo": cssUrl(brand.logoUrl) } as React.CSSProperties) : undefined;
-  const watermark = brand?.logoUrl && brand.watermark && video.status === "completed" && video.videoUrl ? brand.watermark : undefined;
+  // An uploaded logo (a data URL of up to a few megabytes) is served by its own cacheable route, so the
+  // header and the player watermark share one short URL instead of carrying the image in the page.
+  const logoSrc = brand?.logoUrl
+    ? brand.logoUrl.startsWith("data:")
+      ? `/api/videos/${encodeURIComponent(video.id)}/logo?v=${encodeURIComponent(brand.updatedAt)}`
+      : brand.logoUrl
+    : undefined;
+  const watermark = logoSrc && brand?.watermark && video.status === "completed" && video.videoUrl ? brand.watermark : undefined;
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100" style={logoStyle}>
+    <main className="min-h-screen bg-slate-950 text-slate-100">
       {watching && video.status === "completed" && (
         <ViewBeacon videoId={video.id} />
       )}
@@ -152,13 +156,12 @@ export default async function SharePage({
             className="flex items-center gap-3 text-sm font-medium text-slate-200"
             data-testid="share-brand"
           >
-            {brand.logoUrl && (
-              <span
-                role="img"
-                aria-label={brand.name ? `${brand.name} logo` : "Logo"}
-                className="block h-8 w-[140px] bg-contain bg-left bg-no-repeat"
-                style={{ backgroundImage: "var(--brand-logo)" }}
-                data-testid="share-logo"
+            {logoSrc && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={logoSrc}
+                alt={brand.name ? `${brand.name} logo` : "Logo"}
+                className="h-8 max-w-[140px] object-contain"
               />
             )}
             {brand.name && <span>{brand.name}</span>}
@@ -192,7 +195,7 @@ export default async function SharePage({
             <div
               className={`relative mx-auto w-full overflow-hidden rounded-xl bg-black ${frame}`}
             >
-              {watermark && <Watermark corner={watermark} />}
+              {watermark && logoSrc && <Watermark corner={watermark} src={logoSrc} captioned={!!video.captions} />}
               {video.status === "completed" && video.videoUrl ? (
                 <SharePlayer videoId={video.id} src={video.videoUrl} poster={posterUrl(video)} captions={!!video.captions} captionSize={video.captionStyle?.size} captionLook={video.captionStyle?.look} trackDefault={!captionsBurnedIn(video)} autoplay={autoplay} loop={loop} tracks={Object.keys(video.subtitles ?? {}).map((language) => ({ language, code: languageCode(language) }))} />
               ) : (
@@ -255,21 +258,30 @@ export default async function SharePage({
   );
 }
 
-/** Where the logo sits; the bottom corners clear the native player controls. */
-const WATERMARK_PLACE: Record<WatermarkCorner, string> = {
-  "top-left": "left-3 top-3 bg-left-top",
-  "top-right": "right-3 top-3 bg-right-top",
-  "bottom-left": "left-3 bottom-14 bg-left-bottom",
-  "bottom-right": "right-3 bottom-14 bg-right-bottom",
-};
+/**
+ * Where the logo sits, in shares of the frame so it keeps its place on a small embed. A bottom corner
+ * clears the native controls (at least 2.75rem), and on a captioned video it rises above the caption
+ * band, which runs about a fifth of the way up.
+ */
+function watermarkPlace(corner: WatermarkCorner, captioned: boolean): string {
+  const side = corner.endsWith("left") ? "left-[3%] object-left" : "right-[3%] object-right";
+  if (corner.startsWith("top")) return `${side} top-[4%] object-top`;
+  return `${side} object-bottom ${captioned ? "bottom-[max(2.75rem,24%)]" : "bottom-[max(2.75rem,12%)]"}`;
+}
 
-/** The brand logo over the player, as a watermark: decorative (the header names the brand), and clicks pass through to the player. */
-function Watermark({ corner }: { corner: WatermarkCorner }) {
+/**
+ * The brand logo over the player, as a watermark: decorative (the header names the brand), and clicks
+ * pass through to the player. It belongs to the page, not the video file, so it is not shown when the
+ * player goes fullscreen or picture-in-picture.
+ */
+function Watermark({ corner, src, captioned }: { corner: WatermarkCorner; src: string; captioned: boolean }) {
   return (
-    <span
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt=""
       aria-hidden
-      className={`pointer-events-none absolute z-10 h-[12%] max-h-14 w-1/4 bg-contain bg-no-repeat opacity-80 drop-shadow ${WATERMARK_PLACE[corner]}`}
-      style={{ backgroundImage: "var(--brand-logo)" }}
+      className={`pointer-events-none absolute z-10 h-[9%] max-h-12 w-[18%] object-contain opacity-80 drop-shadow ${watermarkPlace(corner, captioned)}`}
       data-testid="share-watermark"
       data-corner={corner}
     />

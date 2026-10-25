@@ -1032,6 +1032,12 @@ test("brand kit pre-fills the editor and brands the share page", async ({ page }
     await expect(page.getByLabel("Pronunciation", { exact: true })).toHaveValue("Nair = Nye-er\nSaaS = sass");
     await expect(page.getByLabel("Never translate")).toHaveValue("Acme Cloud\nNimbus");
     await expect(page.getByLabel("Logo on the player")).toHaveValue("bottom-right");
+    // Clearing the logo turns the corner off with it (not saved here: the reload below discards it).
+    await page.getByRole("button", { name: "Clear", exact: true }).click();
+    await expect(page.getByLabel("Logo on the player")).toBeDisabled();
+    await expect(page.getByLabel("Logo on the player")).toHaveValue("");
+    await page.reload();
+    await expect(page.getByLabel("Logo on the player")).toHaveValue("bottom-right");
     // Plumbing only: the translate route reads the kit and answers (the demo writer copies its input, so the
     // glossary's effect is shown by the unit tests, which use a translator that rewrites every word).
     const translated = await page.request.post("/api/script", { data: { script: "Acme Cloud and Nimbus [pause 1s] ship today.", action: "translate", language: "Spanish" } });
@@ -1049,16 +1055,27 @@ test("brand kit pre-fills the editor and brands the share page", async ({ page }
     await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
     await page.goto(`/share/${v.id}`);
     await expect(page.getByTestId("share-brand")).toContainText("Acme Realty");
-    // The header logo and the watermark draw on one copy of the uploaded file; the watermark is decorative and lets clicks through.
-    await expect(page.getByRole("img", { name: "Acme Realty logo" })).toHaveCSS("background-image", /data:image\/png/);
+    // The header logo and the watermark link one cacheable URL for the uploaded file, which the page no longer carries inline.
+    const logoSrc = await page.getByRole("img", { name: "Acme Realty logo" }).getAttribute("src");
+    expect(logoSrc).toMatch(new RegExp(`^/api/videos/${v.id}/logo\\?v=`));
     const mark = page.getByTestId("share-watermark");
+    await expect(mark).toHaveAttribute("src", logoSrc!);
     await expect(mark).toHaveAttribute("data-corner", "bottom-right");
     await expect(mark).toHaveAttribute("aria-hidden", "true");
-    await expect(mark).toHaveCSS("pointer-events", "none");
-    await expect(mark).toHaveCSS("background-image", /data:image\/png/);
-    const html = await (await page.request.get(`/share/${v.id}`)).text();
-    // Once in the markup and once in the hydration payload; an <img> per place would double that.
-    expect(html.split(TINY_PNG).length - 1).toBe(2);
+    await expect(mark).toHaveAttribute("alt", "");
+    expect((await (await page.request.get(`/share/${v.id}`)).text()).includes(TINY_PNG)).toBe(false);
+    const logo = await page.request.get(logoSrc!);
+    expect(logo.status()).toBe(200);
+    expect(logo.headers()["content-type"]).toBe("image/png");
+    expect(logo.headers()["content-security-policy"]).toContain("sandbox");
+    expect(Buffer.from(await logo.body()).toString("base64")).toBe(TINY_PNG);
+    // A click on the mark reaches the player beneath it.
+    const box = (await mark.boundingBox())!;
+    expect(box.width).toBeGreaterThan(0);
+    expect(await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.tagName, [box.x + box.width / 2, box.y + box.height / 2])).toBe("VIDEO");
+    // The logo follows the share page's rules: an offline link takes it down too.
+    await page.request.patch(`/api/videos/${v.id}`, { data: { shareDisabled: true } });
+    expect((await page.request.get(logoSrc!)).status()).toBe(404);
     await expect(page.getByRole("link", { name: "Avatar Studio" })).toBeVisible();
   } finally {
     // The suite shares one in-memory store; later tests expect the plain defaults.

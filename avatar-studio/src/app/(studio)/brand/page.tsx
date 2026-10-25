@@ -122,7 +122,7 @@ export default function BrandPage() {
           defaultAspect: aspect || undefined,
           defaultResolution: resolution || undefined,
           captionsByDefault: captions,
-          watermark: watermark || undefined,
+          watermark: (logoUrl && watermark) || undefined,
         }),
       });
       setSavedAt(brand.updatedAt);
@@ -205,7 +205,15 @@ export default function BrandPage() {
                 className={`${inputClass} min-w-[200px] flex-1`}
               />
               {logoUrl && (
-                <button type="button" onClick={() => setLogoUrl("")} className="text-xs text-slate-500 hover:text-slate-900">
+                <button
+                  type="button"
+                  onClick={() => {
+                    // With no logo there is nothing to lay over the player; a corner kept here would quietly come back with the next logo.
+                    setLogoUrl("");
+                    setWatermark("");
+                  }}
+                  className="text-xs text-slate-500 hover:text-slate-900"
+                >
                   Clear
                 </button>
               )}
@@ -283,8 +291,8 @@ export default function BrandPage() {
               <input type="checkbox" checked={captions} onChange={(e) => setCaptions(e.target.checked)} className="h-5 w-5 accent-brand-600" />
               <span className="text-sm text-slate-700">Captions on by default</span>
             </label>
-            <Field label="Logo on the player" hint={logoUrl ? "Laid over the share page and embed player of every video; the video file itself is not changed." : "Add a logo above to show it on the player."}>
-              <select value={watermark} onChange={(e) => setWatermark(e.target.value as WatermarkCorner | "")} className={inputClass}>
+            <Field label="Logo on the player" hint={logoUrl ? "Laid over the share page and embed player of every video (not in fullscreen); the video file itself is not changed." : "Add a logo above to show it on the player."}>
+              <select value={logoUrl ? watermark : ""} disabled={!logoUrl} onChange={(e) => setWatermark(e.target.value as WatermarkCorner | "")} className={inputClass}>
                 <option value="">Off</option>
                 <option value="top-left">Top left</option>
                 <option value="top-right">Top right</option>

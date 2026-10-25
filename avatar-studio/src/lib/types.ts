@@ -187,6 +187,13 @@ export const EMPTY_WATCH: WatchCounts = { q25: 0, q50: 0, q75: 0, q100: 0 };
 /** How long a trashed video can be restored before it is deleted for good. */
 export const TRASH_RETENTION_DAYS = 30;
 
+/** One caption line and when it shows, in milliseconds from the start of the video. */
+export interface CaptionCue {
+  startMs: number;
+  endMs: number;
+  text: string;
+}
+
 export interface Video extends VideoRequest {
   id: string;
   status: VideoStatus;
@@ -195,6 +202,8 @@ export interface Video extends VideoRequest {
   description?: string;
   /** Translated scripts keyed by language name, offered as extra subtitle tracks on the share page. */
   subtitles?: Record<string, string>;
+  /** Captions in the script's language as an editor corrected them; absent while they follow the script. */
+  captionCues?: CaptionCue[];
   /** Set when the video was produced by a personalized batch; `rowLabel` identifies the row. */
   batchId?: string;
   rowLabel?: string;

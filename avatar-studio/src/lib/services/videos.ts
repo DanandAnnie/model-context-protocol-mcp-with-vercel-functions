@@ -4,7 +4,8 @@ import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import { getStore } from "../store";
 import { EMPTY_WATCH, MAX_SCENES, TRASH_RETENTION_DAYS, isDefaultCaptionStyle } from "../types";
-import type { AudioClip, Avatar, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
+import type { AudioClip, Avatar, CaptionCue, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
+import { buildCues } from "../captions";
 import type { AvatarProvider, RenderCast } from "../providers/types";
 import { LOCAL_OWNER } from "../owner-id";
 import { renderLimitFor } from "../billing";
@@ -321,6 +322,69 @@ export function removeSubtitles(id: string, language: string, ownerId: string = 
 export function subtitlesFor(video: Pick<Video, "subtitles">, language: string): { language: string; text: string } | undefined {
   const key = Object.keys(video.subtitles ?? {}).find((k) => k.toLowerCase() === language.toLowerCase());
   return key ? { language: key, text: video.subtitles![key] } : undefined;
+}
+
+/** The most caption lines one video may carry, the longest a line may be, and the latest it may end (four hours). */
+export const MAX_CAPTION_CUES = 500;
+export const MAX_CAPTION_CUE_CHARS = 300;
+const MAX_CAPTION_MS = 4 * 60 * 60 * 1000;
+
+/** Captions an editor corrected: lines in order, each showing for a while, none overlapping the next. */
+export const captionCuesSchema = z
+  .object({
+    cues: z
+      .array(
+        z.object({
+          startMs: z.number().int().min(0).max(MAX_CAPTION_MS),
+          endMs: z.number().int().min(1).max(MAX_CAPTION_MS),
+          text: z.string().trim().min(1, "A caption line needs some text").max(MAX_CAPTION_CUE_CHARS),
+        }),
+      )
+      .min(1, "Keep at least one caption line, or reset the captions to follow the script")
+      .max(MAX_CAPTION_CUES),
+  })
+  .superRefine(({ cues }, ctx) => {
+    cues.forEach((c, i) => {
+      if (c.endMs <= c.startMs) ctx.addIssue({ code: "custom", path: ["cues", i, "endMs"], message: `Line ${i + 1} must end after it starts` });
+      else if (i > 0 && c.startMs < cues[i - 1].endMs) ctx.addIssue({ code: "custom", path: ["cues", i, "startMs"], message: `Line ${i + 1} starts before line ${i} ends` });
+    });
+  });
+
+/** The running time captions are timed to: the rendered length, or a reading-speed estimate while the provider has not reported one. */
+export function captionDurationSec(video: Pick<Video, "script" | "durationSec" | "speed">): number {
+  if (video.durationSec) return video.durationSec;
+  const words = video.script.trim().split(/\s+/).filter(Boolean).length;
+  return Math.max(1, Math.round(words / 2.5 / (video.speed || 1)));
+}
+
+/** The captions in the script's language: the editor's corrections when there are some, else lines timed from the script. */
+export function captionCuesFor(video: Pick<Video, "script" | "durationSec" | "speed" | "captionCues">): { cues: CaptionCue[]; edited: boolean } {
+  if (video.captionCues?.length) return { cues: video.captionCues, edited: true };
+  return { cues: buildCues(video.script, captionDurationSec(video)).map(({ startMs, endMs, text }) => ({ startMs, endMs, text })), edited: false };
+}
+
+/**
+ * Keeps an editor's corrected captions, which then serve the share page and the caption downloads.
+ * Captions are part of what viewers see, so an approval is cleared; a trashed video is refused.
+ */
+export function saveCaptionCues(id: string, input: z.infer<typeof captionCuesSchema>, ownerId: string = LOCAL_OWNER): Promise<Video> {
+  return updateKeepingCounters(id, ownerId, (video) => {
+    if (video.deletedAt) throw new ConflictError("Restore the video from the trash before editing its captions");
+    const next: Video = { ...video, captionCues: input.cues.map(({ startMs, endMs, text }) => ({ startMs, endMs, text })), updatedAt: nowIso() };
+    if (next.review?.status === "approved") delete next.review;
+    return next;
+  });
+}
+
+/** Drops the corrections so captions follow the script again. */
+export function resetCaptionCues(id: string, ownerId: string = LOCAL_OWNER): Promise<Video> {
+  return updateKeepingCounters(id, ownerId, (video) => {
+    if (!video.captionCues) return video;
+    const next: Video = { ...video, updatedAt: nowIso() };
+    delete next.captionCues;
+    if (next.review?.status === "approved") delete next.review;
+    return next;
+  });
 }
 
 /** How many in-flight renders one library request may check with the provider. */
@@ -652,10 +716,10 @@ const COUNTER_FIELDS = ["views", "lastViewedAt", "viewsByDay", "watch", "ctaClic
 /**
  * Fields other writers own, which an edit built from an earlier read must take from the stored
  * record rather than from its own copy: the counters, the subtitle tracks, which a translation adds
- * under the lock, the trash mark, which a trash or restore sets under the lock, and the review, which
+ * under the lock, the corrected captions, which their own route saves under the lock, the trash mark, which a trash or restore sets under the lock, and the review, which
  * a request or decision sets under the lock; an owner edit changes none of them.
  */
-const CONCURRENT_FIELDS = [...COUNTER_FIELDS, "subtitles", "deletedAt", "review"] as const;
+const CONCURRENT_FIELDS = [...COUNTER_FIELDS, "subtitles", "captionCues", "deletedAt", "review"] as const;
 
 /**
  * Writes a video built from `base` while keeping whatever counters, subtitle tracks, and trash mark

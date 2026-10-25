@@ -79,6 +79,11 @@ test("an offline share link is hidden from the public but not from the owner", a
   const anon = await playwright.request.newContext({ baseURL: "http://localhost:3102" });
   expect((await anon.get(`/share/${id}`)).status()).toBe(200);
   expect((await anon.get(`/api/videos/${id}/captions`)).status()).toBe(200);
+  // The captions path is public for the share player, but only a signed-in editor changes them.
+  const cues = { cues: [{ startMs: 0, endMs: 1000, text: "Defaced" }] };
+  expect((await anon.put(`/api/videos/${id}/captions`, { data: cues })).status()).toBe(401);
+  expect((await anon.delete(`/api/videos/${id}/captions`)).status()).toBe(401);
+  expect(await (await anon.get(`/api/videos/${id}/captions`)).text()).not.toContain("Defaced");
 
   const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
   expect((await request.patch(`/api/videos/${id}`, { data: { cover: png } })).status()).toBe(200);

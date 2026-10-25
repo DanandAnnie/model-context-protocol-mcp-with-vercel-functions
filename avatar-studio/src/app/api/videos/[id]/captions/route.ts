@@ -1,19 +1,24 @@
 import { cookies } from "next/headers";
-import { errorResponse, json } from "@/lib/api-utils";
-import { buildSrt, buildVtt } from "@/lib/captions";
-import { LOCAL_OWNER, optionalOwner } from "@/lib/owner";
+import { errorResponse, json, readJson } from "@/lib/api-utils";
+import { buildCues, cuesToSrt, cuesToVtt } from "@/lib/captions";
+import { LOCAL_OWNER, optionalOwner, requireEditor } from "@/lib/owner";
 import { shareCookieName, shareUnlocked } from "@/lib/share-lock";
-import { NotFoundError, PUBLIC_ACCESS, getVideo, subtitlesFor } from "@/lib/services";
+import { NotFoundError, PUBLIC_ACCESS, captionCuesFor, captionCuesSchema, captionDurationSec, getVideo, resetCaptionCues, saveCaptionCues, subtitlesFor } from "@/lib/services";
 import type { Video } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-/** Subtitles derived from the script, timed to the rendered duration. `?format=vtt` for WebVTT, SRT otherwise; `?lang=` serves a translated track the video carries. */
+/**
+ * Subtitles: the corrected captions when an editor saved some, else lines derived from the script, timed to the
+ * rendered duration. `?format=vtt` for WebVTT, `?format=json` for `{ cues, edited }`, SRT otherwise; `?lang=`
+ * serves a translated track the video carries.
+ */
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await ctx.params;
     const params = new URL(req.url).searchParams;
-    const vtt = params.get("format") === "vtt";
+    const format = params.get("format");
+    const vtt = format === "vtt";
     const lang = params.get("lang");
     // Captions are derived from the script, which the public share page already shows. When the
     // owner has switched the share link off, only the owner's own download still works.
@@ -38,11 +43,9 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     // A translated track, when asked for; the timing still follows the original script's length.
     const track = lang ? subtitlesFor(video, lang) : undefined;
     if (lang && !track) throw new NotFoundError(`No ${lang} subtitles on this video`);
-    // Fall back to a reading-speed estimate when the provider did not report a duration.
-    const words = video.script.trim().split(/\s+/).filter(Boolean).length;
-    const duration = video.durationSec ?? Math.max(1, Math.round(words / 2.5 / video.speed));
-    const text = track?.text ?? video.script;
-    const body = vtt ? buildVtt(text, duration, video.captionStyle?.position) : buildSrt(text, duration);
+    const { cues, edited } = track ? { cues: buildCues(track.text, captionDurationSec(video)), edited: false } : captionCuesFor(video);
+    if (format === "json") return json({ cues: cues.map(({ startMs, endMs, text }) => ({ startMs, endMs, text })), edited }, { headers: { "Cache-Control": "no-store" } });
+    const body = vtt ? cuesToVtt(cues, video.captionStyle?.position) : cuesToSrt(cues);
     const suffix = track ? `.${track.language.replace(/[^\w-]+/g, "_").toLowerCase()}` : "";
     const filename = `${video.title.replace(/[^\w.-]+/g, "_").slice(0, 60) || "captions"}${suffix}.${vtt ? "vtt" : "srt"}`;
     return new Response(body, {
@@ -52,6 +55,27 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
         "Cache-Control": "no-store",
       },
     });
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+/** Saves corrected captions in the script's language: `{ cues: [{ startMs, endMs, text }] }`, in order and not overlapping. */
+export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  try {
+    const owner = await requireEditor();
+    const input = captionCuesSchema.parse(await readJson(req));
+    return json({ video: await saveCaptionCues((await ctx.params).id, input, owner) });
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+/** Drops the corrections so the captions follow the script again. */
+export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+  try {
+    const owner = await requireEditor();
+    return json({ video: await resetCaptionCues((await ctx.params).id, owner) });
   } catch (err) {
     return errorResponse(err);
   }

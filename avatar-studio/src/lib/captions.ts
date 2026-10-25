@@ -157,16 +157,27 @@ export function formatVttTime(ms: number): string {
 /** A cue setting that puts subtitles near the top of the frame; the default (bottom) needs none. */
 const VTT_TOP = " line:5%";
 
-export function buildVtt(script: string, durationSec: number, position: "bottom" | "top" = "bottom"): string {
+/** A cue's text on its own lines: a blank line would end the cue early in both formats. */
+function cueText(text: string): string {
+  return text.replace(/\r\n?/g, "\n").split("\n").map((l) => l.trim()).filter(Boolean).join("\n");
+}
+
+/** WebVTT for a list of cues (generated or edited). */
+export function cuesToVtt(cues: Array<Omit<Cue, "index">>, position: "bottom" | "top" = "bottom"): string {
   const setting = position === "top" ? VTT_TOP : "";
-  const cues = buildCues(script, durationSec)
-    .map((c) => `${c.index}\n${formatVttTime(c.startMs)} --> ${formatVttTime(c.endMs)}${setting}\n${c.text}\n`)
-    .join("\n");
-  return `WEBVTT\n\n${cues}`;
+  const body = cues.map((c, i) => `${i + 1}\n${formatVttTime(c.startMs)} --> ${formatVttTime(c.endMs)}${setting}\n${cueText(c.text)}\n`).join("\n");
+  return `WEBVTT\n\n${body}`;
+}
+
+/** SRT for a list of cues (generated or edited). */
+export function cuesToSrt(cues: Array<Omit<Cue, "index">>): string {
+  return cues.map((c, i) => `${i + 1}\n${formatSrtTime(c.startMs)} --> ${formatSrtTime(c.endMs)}\n${cueText(c.text)}\n`).join("\n");
+}
+
+export function buildVtt(script: string, durationSec: number, position: "bottom" | "top" = "bottom"): string {
+  return cuesToVtt(buildCues(script, durationSec), position);
 }
 
 export function buildSrt(script: string, durationSec: number): string {
-  return buildCues(script, durationSec)
-    .map((c) => `${c.index}\n${formatSrtTime(c.startMs)} --> ${formatSrtTime(c.endMs)}\n${c.text}\n`)
-    .join("\n");
+  return cuesToSrt(buildCues(script, durationSec));
 }

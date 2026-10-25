@@ -8,6 +8,9 @@ import { ViewSparkline } from "@/components/ViewSparkline";
 import { VideoComments } from "@/components/VideoComments";
 import { ReviewPanel } from "@/components/ReviewPanel";
 import { SubtitleLanguages } from "@/components/SubtitleLanguages";
+import { CaptionEditor } from "@/components/CaptionEditor";
+import { useCanEdit } from "@/hooks/useCanEdit";
+import { captionsBurnedIn } from "@/lib/captions";
 import { useApi } from "@/hooks/useApi";
 import { ApiError, api, formatDate, formatSeconds, isDarkHex, posterUrl, purgeAt, shareExpired } from "@/lib/client";
 import { TRASH_RETENTION_DAYS, type Video } from "@/lib/types";
@@ -68,6 +71,7 @@ export default function VideoDetailPage() {
     pollWhile: (d) => d.video.status === "processing" || d.video.status === "queued",
   });
   const video = data?.video;
+  const canEdit = useCanEdit();
 
   const savingTitle = useRef(false);
 
@@ -82,7 +86,7 @@ export default function VideoDetailPage() {
    * description, a link turned back on) must disappear too, or the control flips back until the
    * refetch lands.
    */
-  const OPTIONAL_KEYS = ["description", "folder", "cover", "subtitles", "shareDisabled", "shareDownload", "shareLocked", "shareCta", "shareExpiresAt"] as const;
+  const OPTIONAL_KEYS = ["description", "folder", "cover", "subtitles", "captionCues", "review", "shareDisabled", "shareDownload", "shareLocked", "shareCta", "shareExpiresAt"] as const;
   function applyServer(next: Video) {
     setData((d) => {
       const merged = { ...d?.video, ...next } as Video;
@@ -760,6 +764,7 @@ export default function VideoDetailPage() {
                   </form>
                 </Card>
               )}
+              {!video.deletedAt && video.status === "completed" && canEdit && <CaptionEditor video={video} burnedIn={captionsBurnedIn(video)} onUpdated={applyServer} />}
               {!video.deletedAt && <SubtitleLanguages video={video} onUpdated={applyServer} />}
               <Card className="p-4" data-testid="share-description-card">
                 <h3 className="text-sm font-semibold text-slate-900">Description</h3>

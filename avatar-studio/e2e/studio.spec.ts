@@ -1592,3 +1592,46 @@ test("a mention link opens the video in its workspace, and teammates can be pick
     expect((await page.request.delete(`/api/workspaces/${ws.id}`)).status()).toBe(204);
   }
 });
+
+test("captions can be corrected on the video page and serve the downloads until reset", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Captioned ${Date.now().toString(36)}`);
+  await page.goto(`/videos/${v.id}`);
+  await expect(page.getByText("Completed")).toBeVisible({ timeout: 30_000 });
+  const editor = page.getByTestId("caption-editor");
+  await editor.getByRole("button", { name: "Edit captions" }).click();
+  const first = editor.getByLabel("Line 1 text");
+  await expect(first).not.toHaveValue("");
+  await first.fill("Hello, and welcome!");
+  const end1 = editor.getByLabel("Line 1 end (seconds)");
+  const shown = await end1.inputValue();
+  await end1.fill("abc");
+  await editor.getByRole("button", { name: "Save captions" }).click();
+  await expect(editor.getByTestId("caption-status")).toContainText("Line 1 needs a start and an end");
+  await end1.fill(shown);
+  // A line added where lines follow on without a gap takes the second half of the line before it.
+  await editor.getByRole("button", { name: "Add a line after line 1" }).click();
+  const mid = (Math.round((Number(await editor.getByLabel("Line 1 start (seconds)").inputValue()) + Number(shown)) * 5) / 10).toFixed(1);
+  await expect(end1).toHaveValue(mid);
+  await expect(editor.getByLabel("Line 2 start (seconds)")).toHaveValue(mid);
+  await expect(editor.getByLabel("Line 2 end (seconds)")).toHaveValue(shown);
+  await editor.getByLabel("Line 2 text").fill("A line of my own.");
+  await editor.getByRole("button", { name: "Save captions" }).click();
+  await expect(editor.getByTestId("caption-status")).toHaveText("Captions saved");
+  await expect(editor.getByTestId("captions-edited")).toBeVisible();
+
+  const srt = await (await page.request.get(`/api/videos/${v.id}/captions`)).text();
+  expect(srt).toMatch(/^1\n00:00:00,000 --> [\d:,]+\nHello, and welcome!\n\n2\n/);
+  expect(srt).toContain("A line of my own.");
+  expect(await (await page.request.get(`/api/videos/${v.id}/captions?format=vtt`)).text()).toContain("Hello, and welcome!");
+  const json = await (await page.request.get(`/api/videos/${v.id}/captions?format=json`)).json();
+  expect(json.edited).toBe(true);
+  // Overlapping lines are refused with the line that is wrong.
+  const overlap = await page.request.put(`/api/videos/${v.id}/captions`, { data: { cues: [{ startMs: 0, endMs: 2000, text: "a" }, { startMs: 1000, endMs: 3000, text: "b" }] } });
+  expect(overlap.status()).toBe(400);
+  expect(JSON.stringify(await overlap.json())).toContain("Line 2 starts before line 1 ends");
+
+  await editor.getByRole("button", { name: "Follow the script" }).click();
+  await expect(editor.getByTestId("captions-edited")).toHaveCount(0);
+  expect((await (await page.request.get(`/api/videos/${v.id}/captions?format=json`)).json()).edited).toBe(false);
+  expect(await (await page.request.get(`/api/videos/${v.id}/captions`)).text()).not.toContain("Hello, and welcome!");
+});

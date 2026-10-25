@@ -1,5 +1,6 @@
 // Script writing, revision, and interactive chat. Used by API routes only.
 import { protectPauses } from "../pauses";
+import { protectTerms } from "../glossary";
 import { z } from "zod";
 import { getScriptProvider } from "../providers";
 import { LOCAL_OWNER } from "../owner-id";
@@ -7,6 +8,7 @@ import { ValidationError } from "../errors";
 import { fetchPageText } from "../webpage";
 import type { FetchLike } from "../safe-fetch";
 import { getAvatar } from "./avatars";
+import { getBrandKit } from "./brand";
 
 export const scriptSchema = z
   .object({
@@ -41,10 +43,16 @@ export const reviseSchema = z.object({
   language: z.string().trim().min(2).max(40).optional(),
 });
 
-export async function reviseScript(input: z.infer<typeof reviseSchema>): Promise<string> {
-  // Pause markers ride through the model as tokens it leaves alone, then come back as written.
-  const { text, restore } = protectPauses(input.script);
-  return restore(await getScriptProvider().revise({ ...input, script: text }));
+/**
+ * Pause markers ride through the model as tokens it leaves alone, then come back as written. A
+ * translation does the same with the owner's brand glossary, so its terms come back untranslated.
+ */
+export async function reviseScript(input: z.infer<typeof reviseSchema>, ownerId: string = LOCAL_OWNER): Promise<string> {
+  const pauses = protectPauses(input.script);
+  const terms = input.action === "translate" ? protectTerms(pauses.text, (await getBrandKit(ownerId))?.glossary ?? []) : null;
+  const sent = terms ? terms.text : pauses.text;
+  const out = await getScriptProvider().revise({ ...input, script: sent });
+  return pauses.restore(terms ? terms.restore(out) : out);
 }
 
 export const chatSchema = z.object({

@@ -38,8 +38,11 @@ export class AnthropicScriptProvider implements ScriptProvider {
       translate: `Translate this script into ${input.language ?? "English"}. Keep it natural for a spoken presenter; do not add commentary.`,
       polish: "Tighten the wording for spoken delivery: shorter sentences, contractions, no filler. Keep meaning and length.",
     };
-    // Pauses reach the model as [[P1]]-style tokens; asking for them back keeps a pause where it belongs.
-    const keep = /\[\[P\d+\]\]/.test(input.script) ? " Tokens like [[P1]] mark pauses: keep each one, unchanged, at the matching point in the text." : "";
+    // Pauses reach the model as [[P1]]-style tokens and glossary terms as [[T1]]; asking for them back keeps each where it belongs.
+    const keep = [
+      /\[\[P\d+\]\]/.test(input.script) ? " Tokens like [[P1]] mark pauses: keep each one, unchanged, at the matching point in the text." : "",
+      /\[\[T\d+\]\]/.test(input.script) ? " Tokens like [[T1]] stand for brand terms that must not be translated: keep each one, unchanged, where the term belongs in the sentence." : "",
+    ].join("");
     return this.complete(`${instruction[input.action]}${keep}\n\nScript:\n${input.script}`);
   }
 

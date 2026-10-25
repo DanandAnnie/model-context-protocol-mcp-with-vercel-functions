@@ -271,7 +271,8 @@ export const subtitleSchema = z.object({
 export const removeSubtitleSchema = z.object({ language: z.string().trim().min(1).max(80) });
 /** Translates a script into a language; the default asks the script provider. Injectable for tests. */
 export type Translator = (script: string, language: string) => Promise<string>;
-const translateWithProvider: Translator = (script, language) => reviseScript({ script, action: "translate", language });
+/** The default translator: the script provider, keeping the owner's brand glossary as written. */
+const translateFor = (ownerId: string): Translator => (script, language) => reviseScript({ script, action: "translate", language }, ownerId);
 
 /** The stored key for a language, matched without regard to case so "spanish" and "Spanish" are one track. */
 function subtitleKey(video: Video, language: string): string | undefined {
@@ -283,7 +284,7 @@ function subtitleKey(video: Video, language: string): string | undefined {
  * (the share page offers it, `GET /api/videos/:id/captions?lang=` serves it). Asking again for a
  * language the video already has translates it afresh.
  */
-export async function addSubtitles(id: string, language: string, ownerId: string = LOCAL_OWNER, translate: Translator = translateWithProvider): Promise<Video> {
+export async function addSubtitles(id: string, language: string, ownerId: string = LOCAL_OWNER, translate: Translator = translateFor(ownerId)): Promise<Video> {
   // Refuse early, before a provider call, what the write below would refuse anyway.
   const video = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
   if (purgeDue(video, Date.now())) throw new NotFoundError(`Video ${id} not found`);

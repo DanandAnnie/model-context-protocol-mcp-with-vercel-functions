@@ -47,7 +47,14 @@ export function getAvatarProviderByName(name: string): AvatarProvider {
   throw new Error(`Provider "${name}" is not configured (missing API key)`);
 }
 
+let scriptOverride: ScriptProvider | undefined;
+/** Swaps in a script provider (tests); `undefined` goes back to the configured one. */
+export function setScriptProvider(p: ScriptProvider | undefined) {
+  scriptOverride = p;
+}
+
 export function getScriptProvider(): ScriptProvider {
+  if (scriptOverride) return scriptOverride;
   if (config.scriptProvider === "anthropic" && config.anthropicApiKey) return new AnthropicScriptProvider(config.anthropicApiKey);
   return new MockScriptProvider();
 }

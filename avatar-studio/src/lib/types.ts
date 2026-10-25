@@ -315,6 +315,8 @@ export interface BrandKit {
   defaultBackground?: Background;
   /** How the renderer says particular words; the stored script and captions keep the spelling. */
   pronunciations?: Pronunciation[];
+  /** Terms the AI translation (script Translate, subtitle languages) leaves exactly as written. */
+  glossary?: string[];
   defaultAvatarId?: string;
   defaultVoiceId?: string;
   defaultAspect?: AspectRatio;

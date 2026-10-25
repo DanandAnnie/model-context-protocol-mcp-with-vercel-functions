@@ -165,7 +165,7 @@ Or write from a public web page (`url`; the topic defaults to the page title; pr
 { "action": "translate", "script": "…", "language": "Spanish" }
 ```
 
-Actions: `shorten`, `expand`, `tone`, `translate`, `polish`. Returns `{ "script": "…" }`.
+Actions: `shorten`, `expand`, `tone`, `translate`, `polish`. Returns `{ "script": "…" }`. A `translate` keeps the terms in the brand kit's `glossary` exactly as written.
 
 ## Interactive avatar
 
@@ -208,7 +208,7 @@ Returns `{ "reply": "…" }`.
 ## Brand kit
 
 - `GET /api/brand` → `{ "brand": BrandKit | null }`
-- `PUT /api/brand` → `{ "name", "logoUrl", "primaryColor": "#0f766e", "accentColor"?, "defaultBackground"? (an image or video `background` as on a video, behind every new scene instead of the primary colour), "pronunciations"? (up to 50 `{ "word", "sayAs" }` rules, a word of up to 40 characters and a spelling of up to 80; every render replaces each word, whole and case-insensitively, in the script handed to the renderer while the stored script and its captions keep the spelling), "defaultAvatarId"?, "defaultVoiceId"?, "defaultAspect"?, "defaultResolution"? (`720p` | `1080p`), "captionsByDefault"? }`
+- `PUT /api/brand` → `{ "name", "logoUrl", "primaryColor": "#0f766e", "accentColor"?, "defaultBackground"? (an image or video `background` as on a video, behind every new scene instead of the primary colour), "pronunciations"? (up to 50 `{ "word", "sayAs" }` rules, a word of up to 40 characters and a spelling of up to 80; every render replaces each word, whole and case-insensitively, in the script handed to the renderer while the stored script and its captions keep the spelling), "glossary"? (up to 50 terms of up to 60 characters, repeats ignoring case dropped, that `translate` revisions and subtitle languages keep exactly as written: each whole, case-insensitive occurrence reaches the model as a token and comes back in the source's spelling; dubbing jobs go to the translation provider unchanged), "defaultAvatarId"?, "defaultVoiceId"?, "defaultAspect"?, "defaultResolution"? (`720p` | `1080p`), "captionsByDefault"? }`
 - `DELETE /api/brand`
 
 ## Workspaces

@@ -7,6 +7,7 @@ import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api, isDarkHex } from "@/lib/client";
 import { MAX_PRONUNCIATIONS, formatPronunciations, parsePronunciations } from "@/lib/pronounce";
+import { MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH, parseGlossary } from "@/lib/glossary";
 import type { AspectRatio, Avatar, BrandKit, Resolution, Voice } from "@/lib/types";
 
 const DEFAULT_PRIMARY = "#4f46e5";
@@ -26,6 +27,7 @@ export default function BrandPage() {
   const [bgType, setBgType] = useState<"" | "image" | "video">("");
   const [bgUrl, setBgUrl] = useState("");
   const [pronunciations, setPronunciations] = useState("");
+  const [glossary, setGlossary] = useState("");
   const [avatarId, setAvatarId] = useState("");
   const [voiceId, setVoiceId] = useState("");
   const [aspect, setAspect] = useState<AspectRatio | "">("");
@@ -50,6 +52,7 @@ export default function BrandPage() {
     setBgType(b.defaultBackground && b.defaultBackground.type !== "color" ? b.defaultBackground.type : "");
     setBgUrl(b.defaultBackground && b.defaultBackground.type !== "color" ? b.defaultBackground.value : "");
     setPronunciations(formatPronunciations(b.pronunciations ?? []));
+    setGlossary((b.glossary ?? []).join("\n"));
     setAvatarId(b.defaultAvatarId ?? "");
     setVoiceId(b.defaultVoiceId ?? "");
     setAspect(b.defaultAspect ?? "");
@@ -83,6 +86,16 @@ export default function BrandPage() {
       setErr(`Pronunciation "${badRule.word.slice(0, 20)}": the word is at most 40 characters and the spelling at most 80.`);
       return;
     }
+    const terms = parseGlossary(glossary);
+    if (terms.length > MAX_GLOSSARY_TERMS) {
+      setErr(`Up to ${MAX_GLOSSARY_TERMS} terms to keep untranslated (you have ${terms.length}).`);
+      return;
+    }
+    const longTerm = terms.find((t) => t.length > MAX_GLOSSARY_TERM_LENGTH);
+    if (longTerm) {
+      setErr(`"${longTerm.slice(0, 20)}…": a term to keep untranslated is at most ${MAX_GLOSSARY_TERM_LENGTH} characters.`);
+      return;
+    }
     setSaving(true);
     setErr(null);
     try {
@@ -95,6 +108,7 @@ export default function BrandPage() {
           accentColor: accent || undefined,
           defaultBackground: bgType && bgUrl.trim() ? { type: bgType, value: bgUrl.trim() } : undefined,
           pronunciations: rules,
+          glossary: terms,
           defaultAvatarId: avatarId || undefined,
           defaultVoiceId: voiceId || undefined,
           defaultAspect: aspect || undefined,
@@ -127,6 +141,7 @@ export default function BrandPage() {
       setBgType("");
       setBgUrl("");
       setPronunciations("");
+      setGlossary("");
       setCaptions(false);
       setSavedAt(null);
     } catch (e) {
@@ -261,6 +276,9 @@ export default function BrandPage() {
           </div>
           <Field label="Pronunciation" hint="One per line, word = how to say it (for example Nair = Nye-er). Renders say it that way; scripts and captions keep the spelling. Up to 50.">
             <textarea aria-label="Pronunciation" value={pronunciations} onChange={(e) => setPronunciations(e.target.value)} rows={3} placeholder={"Nair = Nye-er\nSaaS = sass"} className={`${inputClass} font-mono text-xs`} />
+          </Field>
+          <Field label="Never translate" hint="One term per line: product names, slogans, handles. Translating a script or adding a subtitle language keeps each one exactly as written (matched whole, ignoring case). Dubbing jobs go to the provider as they are. Up to 50.">
+            <textarea aria-label="Never translate" value={glossary} onChange={(e) => setGlossary(e.target.value)} rows={3} placeholder={"Acme Cloud\nNimbus"} className={`${inputClass} font-mono text-xs`} />
           </Field>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
             <span className="text-xs text-slate-500">{savedAt ? `Saved ${new Date(savedAt).toLocaleString()}` : "Not saved yet"}</span>

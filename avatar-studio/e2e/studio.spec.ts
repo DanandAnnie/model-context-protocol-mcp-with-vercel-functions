@@ -1011,13 +1011,21 @@ test("brand kit pre-fills the editor and brands the share page", async ({ page }
     await expect(page.getByRole("button", { name: "Save brand kit" })).toBeDisabled();
     await page.getByLabel("Default background URL").fill("https://example.com/brand-bg.jpg");
     await page.getByLabel("Pronunciation", { exact: true }).fill("Nair = Nye-er\nSaaS = sass");
+    // Terms to keep untranslated: one per line, repeats (ignoring case) dropped.
+    await page.getByLabel("Never translate").fill("Acme Cloud\n\nacme cloud\nNimbus");
     await page.getByRole("button", { name: "Save brand kit" }).click();
     await expect(page.getByText(/^Saved /)).toBeVisible();
     const kit = (await (await page.request.get("/api/brand")).json()).brand;
     expect(kit.defaultBackground).toEqual({ type: "image", value: "https://example.com/brand-bg.jpg" });
     expect(kit.pronunciations).toEqual([{ word: "Nair", sayAs: "Nye-er" }, { word: "SaaS", sayAs: "sass" }]);
+    expect(kit.glossary).toEqual(["Acme Cloud", "Nimbus"]);
     await page.reload();
     await expect(page.getByLabel("Pronunciation", { exact: true })).toHaveValue("Nair = Nye-er\nSaaS = sass");
+    await expect(page.getByLabel("Never translate")).toHaveValue("Acme Cloud\nNimbus");
+    // A translation through the API keeps the terms as written (the demo writer only labels its output).
+    const translated = await page.request.post("/api/script", { data: { script: "Acme Cloud and Nimbus [pause 1s] ship today.", action: "translate", language: "Spanish" } });
+    expect(translated.status()).toBe(200);
+    expect((await translated.json()).script).toBe("[Spanish] Acme Cloud and Nimbus [pause 1s] ship today.");
 
     await page.goto("/create");
     await expect(page.getByText(/· Olivia · 16:9 · 1 scene · captions on$/)).toBeVisible({ timeout: 10_000 });

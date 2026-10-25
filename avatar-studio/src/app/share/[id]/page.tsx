@@ -64,8 +64,10 @@ export async function generateMetadata({
       twitter: { card: "summary", title: video.title, description },
     };
   }
-  const description = excerpt(video.description ?? "") || excerpt(stripPauses(video.script)) || `A video from ${siteName}`;
-  const ready = video.status === "completed" && !!video.videoUrl;
+  // A gated link previews without the video or the script, which would let the preview stand in for the form.
+  const gate = !!video.shareGate;
+  const description = excerpt(video.description ?? "") || (gate ? "" : excerpt(stripPauses(video.script))) || `A video from ${siteName}`;
+  const ready = video.status === "completed" && !!video.videoUrl && !gate;
   const poster = posterUrl(video, base);
   const images = poster
     ? [{ url: poster, alt: video.title }]
@@ -176,10 +178,11 @@ export default async function SharePage({
         <h1 className="mb-4 text-xl font-semibold">{video.title}</h1>
         {!unlocked ? (
           <ShareUnlock videoId={video.id} />
-        ) : gated ? (
-          <ShareLeadGate videoId={video.id} brandName={brand?.name} />
         ) : (
-          <>
+          // The gate shows the player itself once the email is in, so an embed whose browser drops
+          // third-party cookies still plays; the cookie only spares a returning viewer the form.
+          <ShareLeadGate videoId={video.id} brandName={brand?.name} open={!gated}>
+          {gated && video.status === "completed" && <ViewBeacon videoId={video.id} />}
             <div
               className={`mx-auto w-full overflow-hidden rounded-xl bg-black ${frame}`}
             >
@@ -230,7 +233,7 @@ export default async function SharePage({
             <p className="mt-6 whitespace-pre-wrap text-sm leading-relaxed text-slate-300">
               {stripPauses(video.script)}
             </p>
-          </>
+          </ShareLeadGate>
         )}
         {brand && (brand.name || brand.logoUrl) && (
           <p className="mt-10 text-xs text-slate-500">

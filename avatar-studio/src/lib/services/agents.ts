@@ -97,6 +97,7 @@ export async function captureLead(agentId: string, input: z.infer<typeof leadSch
   const settings = await getNotifySettings(agent.ownerId).catch(() => null);
   if (settings) {
     await afterResponse(() => dispatchNotification(settings, "lead.captured", {
+      source: "presenter",
       agentId: agent.id,
       agentName: agent.name,
       conversationId: conversation.id,

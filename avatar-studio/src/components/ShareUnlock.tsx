@@ -21,6 +21,8 @@ export function ShareUnlock({ videoId }: { videoId: string }) {
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not unlock the video");
+    } finally {
+      // A browser that drops the cookie shows the form again; it must not be left on "Checking…".
       setBusy(false);
     }
   }

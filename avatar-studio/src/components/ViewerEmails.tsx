@@ -7,7 +7,8 @@ import type { VideoLead } from "@/lib/types";
 
 /** The emails the share page's gate collected for one video, newest first, with a CSV download. */
 export function ViewerEmails({ videoId, gateOn }: { videoId: string; gateOn: boolean }) {
-  const { data } = useApi<{ leads: VideoLead[] }>(`/api/videos/${videoId}/leads`, { pollMs: 15_000 });
+  // New emails only arrive while the gate is on, so the list is only kept fresh then.
+  const { data } = useApi<{ leads: VideoLead[] }>(`/api/videos/${videoId}/leads`, gateOn ? { pollMs: 15_000 } : {});
   const leads = data?.leads ?? [];
   if (!gateOn && leads.length === 0) return null;
   return (

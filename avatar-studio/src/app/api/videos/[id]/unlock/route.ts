@@ -44,6 +44,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       httpOnly: true,
       sameSite: production ? "none" : "lax",
       secure: production,
+      // Partitioned (CHIPS), so a browser that blocks third-party cookies still keeps it for the embedding site.
+      partitioned: production,
       path: "/",
       maxAge: SHARE_COOKIE_MAX_AGE,
     });

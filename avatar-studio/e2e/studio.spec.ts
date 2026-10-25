@@ -1691,6 +1691,10 @@ test("a share page can ask for an email before playing, and the owner sees who w
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.shareGate).toBe(true);
   await expect(page.getByTestId("viewer-emails")).toContainText("Viewer emails · 0");
 
+  // The link preview carries neither the video nor the script, which would stand in for the form.
+  const html = await (await page.request.get(`/share/${v.id}`)).text();
+  expect(html).not.toContain('property="og:video"');
+  expect(html).not.toMatch(/<meta[^>]+og:description[^>]+Hello there/);
   // A visitor with no cookies meets the form, not the player.
   const visitor = await browser.newContext();
   const share = await visitor.newPage();

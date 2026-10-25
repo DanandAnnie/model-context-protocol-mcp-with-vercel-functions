@@ -7,7 +7,7 @@ import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api, isDarkHex } from "@/lib/client";
 import { MAX_PRONUNCIATIONS, formatPronunciations, parsePronunciations } from "@/lib/pronounce";
-import { MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH, parseGlossary } from "@/lib/glossary";
+import { MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH, MIN_GLOSSARY_TERM_LENGTH, parseGlossary } from "@/lib/glossary";
 import type { AspectRatio, Avatar, BrandKit, Resolution, Voice } from "@/lib/types";
 
 const DEFAULT_PRIMARY = "#4f46e5";
@@ -94,6 +94,12 @@ export default function BrandPage() {
     const longTerm = terms.find((t) => t.length > MAX_GLOSSARY_TERM_LENGTH);
     if (longTerm) {
       setErr(`"${longTerm.slice(0, 20)}…": a term to keep untranslated is at most ${MAX_GLOSSARY_TERM_LENGTH} characters.`);
+      return;
+    }
+    // A one-letter term would hold back every "a" or "I" in a script.
+    const shortTerm = terms.find((t) => t.length < MIN_GLOSSARY_TERM_LENGTH);
+    if (shortTerm) {
+      setErr(`"${shortTerm}": a term to keep untranslated is at least ${MIN_GLOSSARY_TERM_LENGTH} characters.`);
       return;
     }
     setSaving(true);

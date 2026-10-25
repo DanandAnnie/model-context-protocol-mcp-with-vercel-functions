@@ -9,7 +9,7 @@ import { getAvatar } from "./avatars";
 import { listVoices } from "./voices";
 import { backgroundSchema } from "./schemas";
 import { MAX_PRONUNCIATIONS } from "../pronounce";
-import { MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH } from "../glossary";
+import { MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH, MIN_GLOSSARY_TERM_LENGTH } from "../glossary";
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
@@ -26,9 +26,9 @@ export const brandKitSchema = z.object({
   defaultBackground: backgroundSchema.optional(),
   /** Up to 50 rules; a word is matched whole and case-insensitively in every script handed to the renderer. */
   pronunciations: z.array(z.object({ word: z.string().trim().min(1).max(40), sayAs: z.string().trim().min(1).max(80) })).max(MAX_PRONUNCIATIONS).optional(),
-  /** Up to 50 terms, each matched whole and case-insensitively, that translations keep as written; repeats ignoring case are dropped. */
+  /** Up to 50 terms of 2 to 60 characters, each matched whole and case-insensitively, that translations keep as written; repeats ignoring case are dropped. */
   glossary: z
-    .array(z.string().trim().min(1).max(MAX_GLOSSARY_TERM_LENGTH))
+    .array(z.string().trim().min(MIN_GLOSSARY_TERM_LENGTH, `A term to keep untranslated is at least ${MIN_GLOSSARY_TERM_LENGTH} characters`).max(MAX_GLOSSARY_TERM_LENGTH))
     .max(MAX_GLOSSARY_TERMS)
     .transform((terms) => terms.filter((t, i) => terms.findIndex((u) => u.toLowerCase() === t.toLowerCase()) === i))
     .optional(),

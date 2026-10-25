@@ -30,7 +30,7 @@ export class AnthropicScriptProvider implements ScriptProvider {
     this.client = new Anthropic({ apiKey });
   }
 
-  async revise(input: { script: string; action: ScriptAction; tone?: string; language?: string }) {
+  async revise(input: { script: string; action: ScriptAction; tone?: string; language?: string; terms?: string[] }) {
     const instruction: Record<ScriptAction, string> = {
       shorten: "Cut this script to roughly half its length. Keep the hook and the call to action.",
       expand: "Expand this script to roughly 1.5x its length with one concrete example or detail. Keep the same voice.",
@@ -41,7 +41,9 @@ export class AnthropicScriptProvider implements ScriptProvider {
     // Pauses reach the model as [[P1]]-style tokens and glossary terms as [[T1]]; asking for them back keeps each where it belongs.
     const keep = [
       /\[\[P\d+\]\]/.test(input.script) ? " Tokens like [[P1]] mark pauses: keep each one, unchanged, at the matching point in the text." : "",
-      /\[\[T\d+\]\]/.test(input.script) ? " Tokens like [[T1]] stand for brand terms that must not be translated: keep each one, unchanged, where the term belongs in the sentence." : "",
+      /\[\[T\d+\]\]/.test(input.script)
+        ? ` Tokens like [[T1]] stand for brand terms that must not be translated: keep each one, unchanged, where the term belongs in the sentence, and make the words around it agree with it.${input.terms?.length ? ` They stand for: ${input.terms.map((t, i) => `[[T${i + 1}]] = ${JSON.stringify(t)}`).join(", ")}.` : ""}`
+        : "",
     ].join("");
     return this.complete(`${instruction[input.action]}${keep}\n\nScript:\n${input.script}`);
   }

@@ -59,8 +59,12 @@ export type ScriptAction = "shorten" | "expand" | "tone" | "translate" | "polish
 export interface ScriptProvider {
   readonly name: string;
   generate(input: { topic: string; tone: string; lengthSec: number; language: string; audience?: string; source?: string }): Promise<string>;
-  /** Transform an existing script: shorten, expand, change tone, translate, or polish. */
-  revise(input: { script: string; action: ScriptAction; tone?: string; language?: string }): Promise<string>;
+  /**
+   * Transform an existing script: shorten, expand, change tone, translate, or polish. `terms[i]` is what
+   * the token `[[T{i+1}]]` in the script stands for (a brand term kept untranslated), so the words around
+   * it can agree with it; the caller puts the term back itself.
+   */
+  revise(input: { script: string; action: ScriptAction; tone?: string; language?: string; terms?: string[] }): Promise<string>;
   /** One conversational turn for the interactive avatar: the presenter answers in character, briefly, for speech. */
   chat(input: { persona: ChatPersona; messages: ChatMessage[] }): Promise<string>;
 }

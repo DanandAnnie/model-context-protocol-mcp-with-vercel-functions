@@ -51,7 +51,7 @@ export async function reviseScript(input: z.infer<typeof reviseSchema>, ownerId:
   const pauses = protectPauses(input.script);
   const terms = input.action === "translate" ? protectTerms(pauses.text, (await getBrandKit(ownerId))?.glossary ?? []) : null;
   const sent = terms ? terms.text : pauses.text;
-  const out = await getScriptProvider().revise({ ...input, script: sent });
+  const out = await getScriptProvider().revise({ ...input, script: sent, ...(terms?.terms.length ? { terms: terms.terms } : {}) });
   return pauses.restore(terms ? terms.restore(out) : out);
 }
 

@@ -1022,7 +1022,8 @@ test("brand kit pre-fills the editor and brands the share page", async ({ page }
     await page.reload();
     await expect(page.getByLabel("Pronunciation", { exact: true })).toHaveValue("Nair = Nye-er\nSaaS = sass");
     await expect(page.getByLabel("Never translate")).toHaveValue("Acme Cloud\nNimbus");
-    // A translation through the API keeps the terms as written (the demo writer only labels its output).
+    // Plumbing only: the translate route reads the kit and answers (the demo writer copies its input, so the
+    // glossary's effect is shown by the unit tests, which use a translator that rewrites every word).
     const translated = await page.request.post("/api/script", { data: { script: "Acme Cloud and Nimbus [pause 1s] ship today.", action: "translate", language: "Spanish" } });
     expect(translated.status()).toBe(200);
     expect((await translated.json()).script).toBe("[Spanish] Acme Cloud and Nimbus [pause 1s] ship today.");

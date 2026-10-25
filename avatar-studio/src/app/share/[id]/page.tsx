@@ -14,6 +14,7 @@ import { config } from "@/lib/config";
 import { formatSeconds, isDarkHex, posterUrl } from "@/lib/client";
 import { languageCode } from "@/lib/language";
 import { excerpt } from "@/lib/text";
+import { stripPauses } from "@/lib/pauses";
 import { dimensionsFor } from "@/lib/types";
 import { ViewBeacon } from "@/components/ViewBeacon";
 import { ShareCta } from "@/components/ShareCta";
@@ -62,7 +63,7 @@ export async function generateMetadata({
       twitter: { card: "summary", title: video.title, description },
     };
   }
-  const description = excerpt(video.description ?? "") || excerpt(video.script) || `A video from ${siteName}`;
+  const description = excerpt(video.description ?? "") || excerpt(stripPauses(video.script)) || `A video from ${siteName}`;
   const ready = video.status === "completed" && !!video.videoUrl;
   const poster = posterUrl(video, base);
   const images = poster
@@ -223,7 +224,7 @@ export default async function SharePage({
               </p>
             )}
             <p className="mt-6 whitespace-pre-wrap text-sm leading-relaxed text-slate-300">
-              {video.script}
+              {stripPauses(video.script)}
             </p>
           </>
         )}

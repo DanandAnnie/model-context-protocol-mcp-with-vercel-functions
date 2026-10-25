@@ -1,3 +1,4 @@
+import { pauseSeconds, stripPauses } from "../../pauses";
 import { SAMPLE_PREVIEW_VIDEO, STOCK_AVATARS } from "../../stock";
 import { demoAssetUrl } from "../../config";
 import type { AudioClip, Avatar, VideoRequest } from "../../types";
@@ -22,10 +23,10 @@ export class MockAvatarProvider implements AvatarProvider {
   }
 
   async createVideo(req: VideoRequest): Promise<{ providerJobId: string }> {
-    const words = (text: string) => text.trim().split(/\s+/).filter(Boolean).length;
-    // An audio scene lasts as long as its clip; a typed one as long as its words take at the chosen speed.
+    const words = (text: string) => stripPauses(text).trim().split(/\s+/).filter(Boolean).length;
+    // An audio scene lasts as long as its clip; a typed one as long as its words take at the chosen speed, plus its pauses.
     const scenes = req.scenes?.length ? req.scenes : [{ script: req.script }];
-    const seconds = scenes.reduce((sum, sc) => sum + ("audioSeconds" in sc && sc.audioSeconds ? sc.audioSeconds : words(sc.script) / 2.5 / req.speed), 0);
+    const seconds = scenes.reduce((sum, sc) => sum + ("audioSeconds" in sc && sc.audioSeconds ? sc.audioSeconds : words(sc.script) / 2.5 / req.speed + pauseSeconds(sc.script)), 0);
     const durationSec = Math.max(3, Math.round(seconds));
     // Encode submission time + duration in the job id so status needs no state.
     return { providerJobId: `mock_${Date.now()}_${durationSec}` };

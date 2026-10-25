@@ -1,3 +1,4 @@
+import { pauseSeconds, stripPauses } from "./pauses";
 // Browser-side helpers for calling the app's own API.
 import { TRASH_RETENTION_DAYS } from "./types";
 export class ApiError extends Error {
@@ -64,13 +65,14 @@ export function formatDate(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
+/** Words a script speaks: pause markers are not words. */
 export function wordCount(text: string): number {
-  return text.trim().split(/\s+/).filter(Boolean).length;
+  return stripPauses(text).trim().split(/\s+/).filter(Boolean).length;
 }
 
-/** Rough spoken duration estimate: ~2.5 words per second at 1.0x. */
+/** Rough spoken duration estimate: ~2.5 words per second at 1.0x, plus the script's pauses. */
 export function estimateSeconds(text: string, speed = 1): number {
-  return Math.round(wordCount(text) / 2.5 / speed);
+  return Math.round(wordCount(text) / 2.5 / speed + pauseSeconds(text));
 }
 
 /** True when a hex color is dark enough to need light text on top of it. */

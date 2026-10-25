@@ -6,6 +6,7 @@ import { getStore } from "../store";
 import { EMPTY_WATCH, MAX_SCENES, TRASH_RETENTION_DAYS, isDefaultCaptionStyle } from "../types";
 import type { AudioClip, Avatar, CaptionCue, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
 import { buildCues } from "../captions";
+import { pauseSeconds, stripPauses } from "../pauses";
 import type { AvatarProvider, RenderCast } from "../providers/types";
 import { LOCAL_OWNER } from "../owner-id";
 import { renderLimitFor } from "../billing";
@@ -289,7 +290,8 @@ export async function addSubtitles(id: string, language: string, ownerId: string
   if (!subtitleKey(video, language) && Object.keys(video.subtitles ?? {}).length >= MAX_SUBTITLE_LANGUAGES) {
     throw new ValidationError(`At most ${MAX_SUBTITLE_LANGUAGES} subtitle languages per video`);
   }
-  const text = await translate(video.script, language);
+  // Subtitles are captions: the translator gets the words without the pause markers.
+  const text = await translate(stripPauses(video.script), language);
   // The translation took a while: build on the record as stored under the lock, so edits made
   // meanwhile are kept and a track added or removed by a concurrent request is seen. The language
   // and the cap are decided again there, so two overlapping adds cannot store one language twice
@@ -354,8 +356,8 @@ export const captionCuesSchema = z
 /** The running time captions are timed to: the rendered length, or a reading-speed estimate while the provider has not reported one. */
 export function captionDurationSec(video: Pick<Video, "script" | "durationSec" | "speed">): number {
   if (video.durationSec) return video.durationSec;
-  const words = video.script.trim().split(/\s+/).filter(Boolean).length;
-  return Math.max(1, Math.round(words / 2.5 / (video.speed || 1)));
+  const words = stripPauses(video.script).trim().split(/\s+/).filter(Boolean).length;
+  return Math.max(1, Math.round(words / 2.5 / (video.speed || 1) + pauseSeconds(video.script)));
 }
 
 /** The captions in the script's language: the editor's corrections when there are some, else lines timed from the script. */
@@ -1029,7 +1031,7 @@ export function filterVideos(videos: Video[], query: VideoQuery): Video[] {
       if (query.review !== "all" && (v.review?.status ?? "none") !== query.review) return false;
       if (query.folder !== undefined && (v.folder ?? "") !== query.folder) return false;
       if (query.status === "processing" ? v.status !== "processing" && v.status !== "queued" : query.status !== "all" && v.status !== query.status) return false;
-      return !needle || `${v.title} ${v.description ?? ""} ${v.script} ${v.avatarName ?? ""} ${v.voiceName ?? ""}`.toLowerCase().includes(needle);
+      return !needle || `${v.title} ${v.description ?? ""} ${stripPauses(v.script)} ${v.avatarName ?? ""} ${v.voiceName ?? ""}`.toLowerCase().includes(needle);
     })
     .sort(SORTERS[query.sort]);
 }

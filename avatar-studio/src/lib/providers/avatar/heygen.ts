@@ -1,4 +1,5 @@
 import { dimensionsFor, type AudioClip, type Avatar, type Scene, type VideoRequest, type Voice } from "../../types";
+import { withBreakTags } from "../../pauses";
 import { heygenBurnsCaptions } from "../../captions";
 import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
@@ -70,7 +71,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
           // An audio scene lip-syncs to its clip; speed and pitch apply to synthesised speech only.
           voice: scene.audioId
             ? { type: "audio", audio_asset_id: this.audioAssetId(scene.audioId, cast) }
-            : { type: "text", input_text: scene.script, voice_id: this.voiceId(sceneVoice, req.voiceId), speed: req.speed, ...(req.pitch ? { pitch: req.pitch } : {}) },
+            : { type: "text", input_text: withBreakTags(scene.script), voice_id: this.voiceId(sceneVoice, req.voiceId), speed: req.speed, ...(req.pitch ? { pitch: req.pitch } : {}) },
           // A video background loops for the length of the scene and fills the frame.
           background:
             scene.background.type === "video"

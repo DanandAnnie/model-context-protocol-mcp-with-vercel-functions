@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { stripPauses } from "@/lib/pauses";
 import type { Voice } from "@/lib/types";
 import { languageCode } from "@/lib/language";
 
@@ -68,7 +69,7 @@ export function useVoicePreview() {
             audioRef.current = audio;
             await audio.play();
           } else {
-            speakInBrowser(voice, text, speed);
+            speakInBrowser(voice, stripPauses(text), speed);
           }
         } else if (res.ok) {
           const blob = await res.blob();

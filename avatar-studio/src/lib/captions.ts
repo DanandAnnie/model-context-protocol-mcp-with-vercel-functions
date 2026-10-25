@@ -1,3 +1,4 @@
+import { splitAtPauses } from "./pauses";
 // Build an SRT subtitle file from a script and the rendered duration.
 // Sentences are timed proportionally to their word count.
 
@@ -126,19 +127,38 @@ function splitSentences(script: string): string[] {
   return out;
 }
 
+/**
+ * Cues for a script timed to a running time: sentences share the spoken time by their weight, and a
+ * pause marker between them leaves a gap as long as the pause (pauses never take more than half the
+ * running time, so a short render still shows every line). Markers never appear in the cue text.
+ */
 export function buildCues(script: string, durationSec: number): Cue[] {
-  const sentences = splitSentences(script);
-  const totalWords = sentences.reduce((n, s) => n + weight(s), 0);
-  if (!sentences.length || totalWords === 0 || durationSec <= 0) return [];
+  const parts = splitAtPauses(script).map((p) => ({ sentences: splitSentences(p.text), pauseSec: p.pauseSec }));
+  const totalWords = parts.reduce((n, p) => n + p.sentences.reduce((m, s) => m + weight(s), 0), 0);
+  if (totalWords === 0 || durationSec <= 0) return [];
   const totalMs = Math.round(durationSec * 1000);
-  let cursor = 0;
-  return sentences.map((text, i) => {
-    const words = weight(text);
-    const span = i === sentences.length - 1 ? totalMs - cursor : Math.round((words / totalWords) * totalMs);
-    const cue = { index: i + 1, startMs: cursor, endMs: cursor + span, text };
-    cursor += span;
-    return cue;
+  // A pause before the first line or after the last shows no cue; only pauses between lines are gaps.
+  const firstPart = parts.findIndex((p) => p.sentences.length);
+  const lastPart = parts.length - 1 - [...parts].reverse().findIndex((p) => p.sentences.length);
+  const gapMs = parts.map((p, i) => (i >= firstPart && i < lastPart ? p.pauseSec * 1000 : 0));
+  const leadMs = parts.slice(0, firstPart).reduce((n, p) => n + p.pauseSec * 1000, 0);
+  const pausesMs = gapMs.reduce((n, g) => n + g, 0) + leadMs;
+  const scale = pausesMs > totalMs / 2 ? totalMs / 2 / pausesMs : 1;
+  const speechMs = totalMs - Math.round(pausesMs * scale);
+  const cues: Cue[] = [];
+  let cursor = Math.round(leadMs * scale);
+  parts.forEach((part, pi) => {
+    part.sentences.forEach((text, si) => {
+      const words = weight(text);
+      const isLast = pi === lastPart && si === part.sentences.length - 1;
+      // Each cue ends where its share of the spoken time runs out, so rounding never drifts.
+      const end = isLast ? totalMs : Math.round(cursor + (words / totalWords) * speechMs);
+      cues.push({ index: cues.length + 1, startMs: cursor, endMs: Math.max(end, cursor + 1), text });
+      cursor = cues[cues.length - 1].endMs;
+    });
+    cursor += Math.round(gapMs[pi] * scale);
   });
+  return cues;
 }
 
 export function formatSrtTime(ms: number): string {

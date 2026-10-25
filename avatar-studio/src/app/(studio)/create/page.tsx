@@ -1,7 +1,7 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Captions, ChevronLeft, ChevronRight, Clapperboard, Copy, Image as ImageIcon, Layers, Mic2, Palette, Play, Plus, Sparkles, Square, Trash2, Users, Wand2, X } from "lucide-react";
+import { Captions, ChevronLeft, ChevronRight, Clapperboard, Copy, Image as ImageIcon, Layers, Mic2, Palette, Pause, Play, Plus, Sparkles, Square, Trash2, Users, Wand2, X } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { VoiceRow } from "@/components/VoicePicker";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -92,6 +92,25 @@ function CreateInner() {
   const script = scenes.map((s) => s.script).join("\n\n");
   const background = active.background;
   const setScript = (value: string) => updateScene(activeIdx, { script: value });
+  const scriptRef = useRef<HTMLTextAreaElement>(null);
+  /** Puts a one-second pause marker at the cursor (or over the selection), spaced off from the words around it. */
+  function insertPause() {
+    const el = scriptRef.current;
+    const text = active.script;
+    const start = el ? el.selectionStart : text.length;
+    const end = el ? el.selectionEnd : start;
+    const before = text.slice(0, start);
+    const after = text.slice(end);
+    // A space after the marker unless one follows already, so typing carries on as a new word.
+    const marker = `${before && !/\s$/.test(before) ? " " : ""}[pause 1s]${/^\s/.test(after) ? "" : " "}`;
+    if ((before + marker + after).length > 5000) return;
+    setScript(before + marker + after);
+    const at = before.length + marker.length;
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(at, at);
+    });
+  }
   const setBackground = (value: Background) => updateScene(activeIdx, { background: value });
   const layout: SceneLayout = active.layout ?? DEFAULT_LAYOUT;
   // The default layout is stored as absent, so an untouched scene renders exactly as before.
@@ -620,6 +639,11 @@ function CreateInner() {
                     </div>
                   )}
                 </div>
+                {!active.audioId && (
+                  <Button variant="secondary" className="px-3 py-1.5" onClick={insertPause} disabled={canEdit === false} title="Insert a pause at the cursor; change the number to make it longer (up to 10 seconds)">
+                    <Pause className="h-4 w-4" /> Pause
+                  </Button>
+                )}
                 {sceneVoice && !active.audioId && (
                   <Button
                     variant="secondary"
@@ -636,6 +660,8 @@ function CreateInner() {
             </div>
             {writerOpen && <ScriptWriter onClose={() => setWriterOpen(false)} onScript={(s) => { setScript(s); setWriterOpen(false); }} />}
             <textarea
+              ref={scriptRef}
+              aria-label={scenes.length > 1 ? `Scene ${activeIdx + 1} script` : "Script"}
               key={activeIdx}
               className={`${inputClass} min-h-[220px] resize-y leading-relaxed`}
               value={active.script}

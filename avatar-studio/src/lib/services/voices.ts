@@ -1,3 +1,4 @@
+import { withBreakTags } from "../pauses";
 // Voices: provider voices and cloned voices. Used by API routes only.
 import { z } from "zod";
 import { nowIso } from "../ids";
@@ -76,5 +77,6 @@ export async function deleteClonedVoice(id: string, ownerId: string = LOCAL_OWNE
 }
 
 export async function previewVoice(voiceId: string, text: string, speed: number) {
-  return getTtsProvider().synthesize(voiceId, text, speed);
+  // ElevenLabs reads break tags in the text; the other engines have none to read.
+  return getTtsProvider().synthesize(voiceId, withBreakTags(text), speed);
 }

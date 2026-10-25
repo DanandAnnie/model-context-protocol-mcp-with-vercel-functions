@@ -1636,3 +1636,28 @@ test("captions can be corrected on the video page and serve the downloads until 
   expect((await (await page.request.get(`/api/videos/${v.id}/captions?format=json`)).json()).edited).toBe(false);
   expect(await (await page.request.get(`/api/videos/${v.id}/captions`)).text()).not.toContain("Hello, and welcome!");
 });
+
+test("a pause inserted in the script holds the presenter and leaves a gap in the captions", async ({ page }) => {
+  const title = `Paused ${Date.now().toString(36)}`;
+  await page.goto("/create");
+  await page.locator("input[placeholder='Video title']").fill(title);
+  const box = page.locator("textarea");
+  await box.fill("Welcome home.");
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect(box).toHaveValue("Welcome home. [pause 1s] ");
+  // The cursor is back after the marker, so typing carries on from there.
+  await page.keyboard.type("Here is the kitchen.");
+  await expect(box).toHaveValue("Welcome home. [pause 1s] Here is the kitchen.");
+  // Markers are not words, but their time counts: six words at 2.5 a second plus one second.
+  await expect(page.getByTestId("script-length")).toHaveText("6 words · ~3s");
+  await page.getByRole("button", { name: "Generate video" }).click();
+  await page.waitForURL(/\/videos\/vid_/);
+  const id = page.url().split("/videos/")[1].split(/[?#]/)[0];
+  const { cues } = await (await page.request.get(`/api/videos/${id}/captions?format=json`)).json();
+  expect(cues.map((c: { text: string }) => c.text)).toEqual(["Welcome home.", "Here is the kitchen."]);
+  expect(cues[1].startMs - cues[0].endMs).toBe(1000);
+  // The share page's transcript and link preview read as speech.
+  const share = await (await page.request.get(`/share/${id}`)).text();
+  expect(share).toContain("Welcome home. Here is the kitchen.");
+  expect(share).not.toContain("[pause");
+});

@@ -1,4 +1,5 @@
 import type { AudioClip, Avatar, VideoRequest, Voice } from "../../types";
+import { hasPauses, toSsml, withBreakTags } from "../../pauses";
 import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
 import type { AvatarJobStatus, AvatarProvider, RenderCast } from "../types";
@@ -53,6 +54,17 @@ export class DidAvatarProvider implements AvatarProvider {
     return { ...avatar, providerAssetIds: { ...avatar.providerAssetIds, [this.name]: json.url } };
   }
 
+  /**
+   * A text script for a talk. Pauses go to Microsoft voices as SSML breaks (the rest of the text escaped)
+   * and to ElevenLabs voices as break tags in the text, which both engines honour.
+   */
+  private textScript(script: string, voice: Voice | null) {
+    const provider = this.resolveVoice(voice);
+    if (!hasPauses(script)) return { type: "text", input: script, provider };
+    if (provider.type === "microsoft") return { type: "text", input: toSsml(script), ssml: true, provider };
+    return { type: "text", input: withBreakTags(script), provider };
+  }
+
   /** Demo voices are not D-ID voices; map them to Microsoft neural voices by gender. */
   private resolveVoice(voice: Voice | null): { type: string; voice_id: string } {
     if (voice?.provider === "elevenlabs") return { type: "elevenlabs", voice_id: voice.id };
@@ -84,7 +96,7 @@ export class DidAvatarProvider implements AvatarProvider {
     if (!sourceUrl) throw new Error("Custom avatar has not been uploaded to D-ID yet.");
     const body = {
       source_url: sourceUrl,
-      script: audioUrl ? { type: "audio", audio_url: audioUrl } : { type: "text", input: req.script, provider: this.resolveVoice(voice) },
+      script: audioUrl ? { type: "audio", audio_url: audioUrl } : this.textScript(req.script, voice),
       config: { stitch: true, result_format: "mp4" },
       ...(webhookUrl("did") ? { webhook: webhookUrl("did") } : {}),
       name: req.title,

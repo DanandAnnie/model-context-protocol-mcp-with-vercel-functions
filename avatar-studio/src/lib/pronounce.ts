@@ -1,5 +1,6 @@
 // Pronunciation rules: how the renderer should say a word, while the stored script and its captions
 // keep the real spelling. Applied to the text handed to the provider only.
+import { PAUSE_MARKER } from "./pauses";
 import type { Pronunciation, VideoRequest } from "./types";
 
 export const MAX_PRONUNCIATIONS = 50;
@@ -21,8 +22,9 @@ export function applyPronunciations(text: string, rules: Pronunciation[]): strin
   }
   if (bySpelling.size === 0) return text;
   const words = [...bySpelling.keys()].sort((a, b) => b.length - a.length).map(escapeRegExp).join("|");
-  const re = new RegExp(`(?<![\\p{L}\\p{N}])(?:${words})(?![\\p{L}\\p{N}])`, "giu");
-  return text.replace(re, (m) => bySpelling.get(m.toLowerCase()) ?? m);
+  // A pause marker is matched first and handed back as written, so a rule for "pause" never rewrites one.
+  const re = new RegExp(`(${PAUSE_MARKER})|(?<![\\p{L}\\p{N}])(?:${words})(?![\\p{L}\\p{N}])`, "giu");
+  return text.replace(re, (m, marker?: string) => (marker ? m : (bySpelling.get(m.toLowerCase()) ?? m)));
 }
 
 /** The request as the renderer should speak it: the script and every scene's script with the rules applied. */

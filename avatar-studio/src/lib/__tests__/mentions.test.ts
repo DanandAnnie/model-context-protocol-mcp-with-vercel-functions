@@ -8,6 +8,8 @@ import { MockEmailProvider, setEmailProvider } from "../providers/email";
 import { acceptInvite, createInvite, createWorkspace, inviteSchema } from "../workspaces";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import { resetRateLimit } from "../rate-limit";
+import { getStore } from "../store";
+import type { Video } from "../types";
 
 let mail: MockEmailProvider;
 beforeEach(() => {
@@ -61,6 +63,27 @@ describe("comment mentions", () => {
     assert.ok(msg.text.includes(`/videos/${video.id}?ws=${ws.id}`), "the link switches the reader into the workspace");
     assert.match(msg.html, /Launch &lt;teaser&gt;/, "html escapes the title");
     assert.equal(msg.replyTo, alice.email, "a reply goes to the author");
+  });
+
+  it("pins a comment to a moment: kept to tenths, checked against the length, and named in the email with a link that opens there", async () => {
+    const { ws, video } = await team();
+    await getStore().put<Video>("video", { ...(await getStore().get<Video>("video", video.id))!, status: "completed", durationSec: 90 });
+    const pinned = await addComment(video.id, commentSchema.parse({ text: "@bob@example.com the cut here", atSec: 65.437 }), ws.id, alice);
+    assert.equal(pinned.atSec, 65.4);
+    assert.equal(await notifyMentions(pinned), 1);
+    assert.match(mail.sent[0].text, /in a comment on "Launch <teaser>" at 1:05:/);
+    assert.ok(mail.sent[0].text.includes(`/videos/${video.id}?ws=${ws.id}&t=65`), "the link opens the player at the note");
+    assert.match(mail.sent[0].html, /<strong>Launch &lt;teaser&gt;<\/strong> at 1:05:/);
+    // The end itself is fine (players report a little past it); a point past it is not.
+    assert.equal((await addComment(video.id, commentSchema.parse({ text: "last frame", atSec: 90.3 }), ws.id, alice)).atSec, 90.3);
+    await assert.rejects(addComment(video.id, commentSchema.parse({ text: "too far", atSec: 95 }), ws.id, alice), /past the end of the video \(1:30\)/);
+    // A note on the whole video carries no time, and its email no "at" or `t`.
+    const whole = await addComment(video.id, commentSchema.parse({ text: "@bob@example.com overall", atSec: null }), ws.id, alice);
+    assert.equal("atSec" in whole, false);
+    await notifyMentions(whole);
+    assert.doesNotMatch(mail.sent[1].text, / at \d|&t=/);
+    assert.throws(() => commentSchema.parse({ text: "x", atSec: -1 }));
+    assert.throws(() => commentSchema.parse({ text: "x", atSec: "12" }));
   });
 
   it("keeps notifying the others when one send fails", async () => {

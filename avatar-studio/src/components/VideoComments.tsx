@@ -4,6 +4,7 @@ import { MessageSquare, Trash2 } from "lucide-react";
 import { Button, Card, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
+import { formatTimestamp } from "@/lib/text";
 import type { VideoComment, WorkspaceRole } from "@/lib/types";
 
 interface WorkspaceSummary {
@@ -12,10 +13,15 @@ interface WorkspaceSummary {
   workspaces: Array<{ id: string; members: Array<{ userId: string; email?: string; role: WorkspaceRole; you?: boolean }> }>;
 }
 
-/** Review notes on a video for the owner and workspace members; each author can remove their own. */
-export function VideoComments({ videoId }: { videoId: string }) {
+/**
+ * Review notes on a video for the owner and workspace members; each author can remove their own. With a
+ * player (`playerTime` is its time in whole seconds, null when there is none), a note can be pinned to the
+ * moment the player is at, and a pinned note's time seeks the player there.
+ */
+export function VideoComments({ videoId, playerTime = null, onSeek }: { videoId: string; playerTime?: number | null; onSeek?: (sec: number) => void }) {
   const { data, refetch } = useApi<{ comments: VideoComment[] }>(`/api/videos/${videoId}/comments`);
   const [draft, setDraft] = useState("");
+  const [pin, setPin] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const comments = data?.comments ?? [];
@@ -35,8 +41,10 @@ export function VideoComments({ videoId }: { videoId: string }) {
     setBusy(true);
     setErr(null);
     try {
-      await api(`/api/videos/${videoId}/comments`, { method: "POST", body: JSON.stringify({ text }) });
+      const atSec = pin && playerTime !== null ? playerTime : undefined;
+      await api(`/api/videos/${videoId}/comments`, { method: "POST", body: JSON.stringify({ text, ...(atSec !== undefined ? { atSec } : {}) }) });
       setDraft("");
+      setPin(false);
       await refetch();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not post the comment");
@@ -69,7 +77,25 @@ export function VideoComments({ videoId }: { videoId: string }) {
                 <div className="text-xs text-slate-500">
                   {c.authorEmail ?? "You"} · {formatDate(c.createdAt)}
                 </div>
-                <p className="whitespace-pre-wrap text-slate-800">{c.text}</p>
+                <p className="whitespace-pre-wrap text-slate-800">
+                  {c.atSec !== undefined &&
+                    (onSeek && playerTime !== null ? (
+                      <button
+                        type="button"
+                        onClick={() => onSeek(c.atSec!)}
+                        aria-label={`Play from ${formatTimestamp(c.atSec)}`}
+                        className="mr-1.5 rounded bg-brand-50 px-1.5 py-0.5 align-baseline font-mono text-xs font-medium text-brand-700 hover:bg-brand-100"
+                        data-testid="comment-time"
+                      >
+                        {formatTimestamp(c.atSec)}
+                      </button>
+                    ) : (
+                      <span className="mr-1.5 rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-600" data-testid="comment-time">
+                        {formatTimestamp(c.atSec)}
+                      </span>
+                    ))}
+                  {c.text}
+                </p>
                 {c.mentions?.length ? (
                   <div className="mt-0.5 text-xs text-slate-500" data-testid="comment-mentions">
                     Mentioned {c.mentions.map((m) => m.email).join(", ")}
@@ -100,6 +126,12 @@ export function VideoComments({ videoId }: { videoId: string }) {
               </button>
             ))}
           </div>
+        )}
+        {playerTime !== null && (
+          <label className="flex items-center gap-2 text-xs text-slate-600">
+            <input type="checkbox" checked={pin} onChange={(e) => setPin(e.target.checked)} className="h-3.5 w-3.5 rounded border-slate-300" />
+            Pin to {formatTimestamp(playerTime)} in the video
+          </label>
         )}
         <div className="flex items-center gap-2">
           <Button type="submit" className="px-3 py-1.5 text-xs" loading={busy} disabled={!draft.trim()}>

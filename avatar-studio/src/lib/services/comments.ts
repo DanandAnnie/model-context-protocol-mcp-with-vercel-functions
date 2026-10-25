@@ -10,10 +10,18 @@ import { getEmailProvider, mentionEmail } from "../providers/email";
 import { reserveRateLimit } from "../rate-limit";
 import { ForbiddenError, NotFoundError, ValidationError } from "../errors";
 import { owned } from "./shared";
+import { formatTimestamp } from "../text";
 
 export const MAX_COMMENTS_PER_VIDEO = 200;
 
-export const commentSchema = z.object({ text: z.string().trim().min(1).max(1000) });
+/** Longest point a comment can be pinned to, in seconds (a render is never close to this). */
+const MAX_COMMENT_AT_SEC = 4 * 3600;
+
+export const commentSchema = z.object({
+  text: z.string().trim().min(1).max(1000),
+  /** Seconds from the start; `null` reads as a note on the whole video, as an API client may send for an empty field. */
+  atSec: z.preprocess((v) => (v === null ? undefined : v), z.number().finite().min(0).max(MAX_COMMENT_AT_SEC).optional()),
+});
 
 /** How many people one comment can notify. */
 export const MAX_MENTIONS = 10;
@@ -58,9 +66,13 @@ export async function listComments(videoId: string, ownerId: string = LOCAL_OWNE
 }
 
 export async function addComment(videoId: string, input: z.infer<typeof commentSchema>, ownerId: string = LOCAL_OWNER, author: User = { id: ownerId }): Promise<VideoComment> {
-  await ownedVideo(videoId, ownerId);
+  const video = await ownedVideo(videoId, ownerId);
   const existing = await listComments(videoId, ownerId);
   if (existing.length >= MAX_COMMENTS_PER_VIDEO) throw new ValidationError(`At most ${MAX_COMMENTS_PER_VIDEO} comments per video`);
+  // A player reports a little past the stated length at the very end, so half a second of slack.
+  if (input.atSec !== undefined && video.durationSec && input.atSec > video.durationSec + 0.5) {
+    throw new ValidationError(`That point is past the end of the video (${formatTimestamp(video.durationSec)})`);
+  }
   const comment: VideoComment = {
     id: newId("cmt"),
     ownerId,
@@ -68,6 +80,7 @@ export async function addComment(videoId: string, input: z.infer<typeof commentS
     authorId: author.id,
     ...(author.email ? { authorEmail: author.email } : {}),
     text: input.text,
+    ...(input.atSec !== undefined ? { atSec: Math.round(input.atSec * 10) / 10 } : {}),
     createdAt: nowIso(),
   };
   if (isWorkspaceId(ownerId)) {
@@ -93,11 +106,13 @@ export async function notifyMentions(comment: VideoComment): Promise<number> {
     console.warn(`mention emails for comment ${comment.id} skipped: hourly limit reached`);
     return 0;
   }
-  const url = `${config.appUrl.replace(/\/$/, "")}/videos/${encodeURIComponent(video.id)}?ws=${encodeURIComponent(comment.ownerId)}`;
+  // A pinned note's link opens the player at its moment (`t`, whole seconds).
+  const at = comment.atSec !== undefined ? `&t=${Math.floor(comment.atSec)}` : "";
+  const url = `${config.appUrl.replace(/\/$/, "")}/videos/${encodeURIComponent(video.id)}?ws=${encodeURIComponent(comment.ownerId)}${at}`;
   let sent = 0;
   for (const m of comment.mentions) {
     try {
-      await getEmailProvider().send(mentionEmail({ to: m.email, authorEmail: comment.authorEmail, videoTitle: video.title, text: comment.text, url }));
+      await getEmailProvider().send(mentionEmail({ to: m.email, authorEmail: comment.authorEmail, videoTitle: video.title, text: comment.text, url, ...(comment.atSec !== undefined ? { at: formatTimestamp(comment.atSec) } : {}) }));
       sent++;
     } catch (err) {
       console.error(`mention email to ${m.email} failed:`, err);

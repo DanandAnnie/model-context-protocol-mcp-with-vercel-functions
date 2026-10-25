@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { excerpt } from "../text";
+import { excerpt, formatTimestamp } from "../text";
 
 describe("excerpt", () => {
   it("collapses whitespace and leaves short text alone", () => {
@@ -22,5 +22,16 @@ describe("excerpt", () => {
     assert.equal(out, `${"😀".repeat(9)}…`);
     assert.equal(out.includes("\uFFFD"), false);
     assert.equal(excerpt("Hello there. Then some more words follow", 14), "Hello there…");
+  });
+});
+
+describe("formatTimestamp", () => {
+  it("reads like a player's clock, dropping fractions", () => {
+    assert.equal(formatTimestamp(0), "0:00");
+    assert.equal(formatTimestamp(5.9), "0:05");
+    assert.equal(formatTimestamp(65.4), "1:05");
+    assert.equal(formatTimestamp(600), "10:00");
+    assert.equal(formatTimestamp(3725), "1:02:05");
+    assert.equal(formatTimestamp(-3), "0:00");
   });
 });

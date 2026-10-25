@@ -462,6 +462,8 @@ export interface VideoComment {
   authorId: string;
   authorEmail?: string;
   text: string;
+  /** The moment in the video the note is about, in seconds from the start (tenths kept); absent for a note on the whole video. */
+  atSec?: number;
   /** Workspace members named as `@email` in the text; each is emailed a link to the video once. */
   mentions?: Array<{ userId: string; email: string }>;
   createdAt: string;

@@ -7,3 +7,12 @@ export function excerpt(text: string, max = 160): string {
   const atWord = cut.lastIndexOf(" ");
   return `${(atWord > max / 2 ? cut.slice(0, atWord) : cut).replace(/[\s,;:.]+$/, "")}…`;
 }
+
+/** A point in a video as a player shows it: `m:ss`, or `h:mm:ss` from an hour on; fractions are dropped. */
+export function formatTimestamp(sec: number): string {
+  const total = Math.max(0, Math.floor(sec));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = String(total % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
+}

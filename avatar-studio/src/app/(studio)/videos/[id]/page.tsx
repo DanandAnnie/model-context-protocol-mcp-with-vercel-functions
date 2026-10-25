@@ -77,6 +77,22 @@ export default function VideoDetailPage() {
 
   const savingTitle = useRef(false);
 
+  // The player, for comments pinned to a moment: its time in whole seconds (null until it can play),
+  // and a seek. A mention email links here with ?t=<seconds> to open at the note's moment.
+  const player = useRef<HTMLVideoElement>(null);
+  const [playerTime, setPlayerTime] = useState<number | null>(null);
+  const startAt = useRef<number | null>(null);
+  useEffect(() => {
+    const t = Number(new URL(window.location.href).searchParams.get("t"));
+    if (Number.isFinite(t) && t > 0) startAt.current = t;
+  }, []);
+  const seek = (sec: number) => {
+    const el = player.current;
+    if (!el) return;
+    el.currentTime = sec;
+    el.focus();
+  };
+
   // Folder: free text with the owner's existing folders as suggestions.
   const { data: libraryData } = useApi<{ videos: Video[] }>("/api/videos");
   const folders = Array.from(new Set((libraryData?.videos ?? []).map((v) => v.folder).filter((f): f is string => !!f))).sort();
@@ -593,7 +609,24 @@ export default function VideoDetailPage() {
               <div className="flex items-center justify-center bg-slate-950 p-0">
                <div className={`relative flex items-center justify-center ${video.aspect === "9:16" ? "aspect-[9/16] h-[70vh]" : video.aspect === "1:1" ? "aspect-square w-full max-w-[560px]" : "aspect-video w-full"}`}>
                 {video.status === "completed" && video.videoUrl ? (
-                  <video src={video.videoUrl} poster={posterUrl(video)} controls className="h-full w-full" />
+                  <video
+                    ref={player}
+                    src={video.videoUrl}
+                    poster={posterUrl(video)}
+                    controls
+                    className="h-full w-full"
+                    data-testid="video-player"
+                    onLoadedMetadata={(e) => {
+                      const el = e.currentTarget;
+                      if (startAt.current !== null) {
+                        el.currentTime = Math.min(startAt.current, Number.isFinite(el.duration) ? el.duration : startAt.current);
+                        startAt.current = null;
+                      }
+                      setPlayerTime(Math.floor(el.currentTime));
+                    }}
+                    onTimeUpdate={(e) => setPlayerTime(Math.floor(e.currentTarget.currentTime))}
+                    onSeeked={(e) => setPlayerTime(Math.floor(e.currentTarget.currentTime))}
+                  />
                 ) : video.status === "failed" ? (
                   <div className="p-8 text-center text-sm text-rose-200">
                     <p className="font-medium">Render failed</p>
@@ -888,7 +921,7 @@ export default function VideoDetailPage() {
                 )}
               </Card>
               <ReviewPanel video={video} onChange={(next) => setData({ video: next })} />
-              <VideoComments videoId={video.id} />
+              <VideoComments videoId={video.id} playerTime={video.status === "completed" && video.videoUrl ? playerTime : null} onSeek={seek} />
             </div>
           </div>
         </>

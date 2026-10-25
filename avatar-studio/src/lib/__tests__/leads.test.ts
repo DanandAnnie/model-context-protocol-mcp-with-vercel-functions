@@ -294,5 +294,12 @@ describe("share-page email gate", () => {
     assert.deepEqual([(await getPlan("u1")).provider, (await getPlan("u1")).customerId], ["stripe", "cus_1"]);
     await demo.checkout("u2", "/settings");
     assert.equal((await getPlan("u2")).plan, "pro", "a demo account still upgrades instantly");
+    // A Stripe plan with no customer yet (its subscription event came before the checkout one) is left alone too.
+    await setPlan("u3", { plan: "pro", provider: "stripe", status: "active", subscriptionId: "sub_3" });
+    await assert.rejects(demo.portal("u3", "/settings"), /billed through Stripe/);
+    assert.equal((await getPlan("u3")).subscriptionId, "sub_3");
+    // And a subscription event that names the customer records it.
+    await applyStripeEvent({ type: "customer.subscription.updated", data: { object: { id: "sub_3", status: "active", customer: "cus_3", metadata: { ownerId: "u3" } } } });
+    assert.equal((await getPlan("u3")).customerId, "cus_3");
   });
 });

@@ -91,7 +91,7 @@ export interface BillingProvider {
  */
 async function refuseStripePlan(ownerId: string): Promise<void> {
   const plan = await getPlan(ownerId);
-  if (plan.provider === "stripe" && plan.customerId) throw new ValidationError("This plan is billed through Stripe, which is not configured here");
+  if (plan.provider === "stripe") throw new ValidationError("This plan is billed through Stripe, which is not configured here");
 }
 
 /** Demo billing: upgrades and downgrades take effect immediately, no payment. */
@@ -232,7 +232,9 @@ export async function applyStripeEvent(event: StripeEvent): Promise<string | nul
       const status = String(obj.status ?? "");
       const endsAt = stripeEndsAt(obj);
       const active = event.type !== "customer.subscription.deleted" && ["active", "trialing", "past_due"].includes(status);
-      await setPlan(ownerId, active ? { plan: "pro", provider: "stripe", status, endsAt, subscriptionId: typeof obj.id === "string" ? obj.id : undefined } : { plan: "free", provider: "stripe" });
+      // The customer comes along when the event carries it (a missed or late checkout event would otherwise leave none).
+      const customer = typeof obj.customer === "string" ? { customerId: obj.customer } : {};
+      await setPlan(ownerId, active ? { plan: "pro", provider: "stripe", status, endsAt, subscriptionId: typeof obj.id === "string" ? obj.id : undefined, ...customer } : { plan: "free", provider: "stripe", ...customer });
       return ownerId;
     }
     default:

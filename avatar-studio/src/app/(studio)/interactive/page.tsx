@@ -23,7 +23,9 @@ export default function InteractivePage() {
   const { data: avatarData, loading: avatarsLoading } = useApi<{ avatars: Avatar[] }>("/api/avatars");
   const { data: voiceData } = useApi<{ voices: Voice[] }>("/api/voices");
   const { data: status } = useApi<ProviderStatus>("/api/status");
-  const { data: agentData, refetch: refetchAgents } = useApi<{ agents: Agent[] }>("/api/agents");
+  const { data: agentData, refetch: refetchAgents } = useApi<{ agents: Agent[]; shareOrigin?: string }>("/api/agents");
+  // Public links use the server's public origin (APP_URL when set), not whichever host this tab is on.
+  const linkOrigin = () => agentData?.shareOrigin || window.location.origin;
   const [avatar, setAvatar] = useState<Avatar | null>(null);
   const [voice, setVoice] = useState<Voice | null>(null);
   const [instructions, setInstructions] = useState(DEFAULT_INSTRUCTIONS);
@@ -99,7 +101,7 @@ export default function InteractivePage() {
         method: "POST",
         body: JSON.stringify({ name: agentName.trim() || avatar.name, avatarId: avatar.id, voiceId: voice?.id, instructions, language, isPublic: true, collectEmail, ...(greeting.trim() ? { greeting: greeting.trim() } : {}), ...(starterList.length ? { starters: starterList } : {}), ...(knowledgeUrl.trim() ? { knowledgeUrl: knowledgeUrl.trim() } : {}) }),
       });
-      setSavedLink(`${window.location.origin}/talk/${agent.id}`);
+      setSavedLink(`${linkOrigin()}/talk/${agent.id}`);
       setAgentName("");
       setKnowledgeUrl("");
       setGreeting("");
@@ -236,7 +238,7 @@ export default function InteractivePage() {
           <ul className="mt-3 divide-y divide-slate-100" data-testid="agent-list">
             {agentData?.agents.length === 0 && <li className="py-3 text-xs text-slate-500">Nothing shared yet.</li>}
             {agentData?.agents.map((a) => {
-              const url = typeof window === "undefined" ? `/talk/${a.id}` : `${window.location.origin}/talk/${a.id}`;
+              const url = typeof window === "undefined" ? `/talk/${a.id}` : `${linkOrigin()}/talk/${a.id}`;
               return (
                 <li key={a.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
                   <div className="min-w-0">
@@ -253,7 +255,7 @@ export default function InteractivePage() {
                     <Button
                       variant="secondary"
                       className="px-2.5 py-1 text-xs"
-                      onClick={() => copy(`<script src="${window.location.origin}/embed/agent.js?id=${a.id}" async></script>`, `embed-${a.id}`)}
+                      onClick={() => copy(`<script src="${linkOrigin()}/embed/agent.js?id=${a.id}" async></script>`, `embed-${a.id}`)}
                       aria-label={`Copy embed code for ${a.name}`}
                       title="Paste before </body> on your site to add a floating chat launcher"
                     >

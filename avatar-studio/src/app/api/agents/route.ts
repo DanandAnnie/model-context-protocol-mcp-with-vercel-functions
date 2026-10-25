@@ -1,4 +1,5 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
+import { publicOrigin } from "@/lib/config";
 import { recordRequestActivity } from "@/lib/activity-request";
 import { requireEditor, requireOwner } from "@/lib/owner";
 import { agentSchema, createAgent, listAgents } from "@/lib/services";
@@ -7,9 +8,10 @@ export const dynamic = "force-dynamic";
 /** Creating or editing may read a knowledge page (10 s fetch budget). */
 export const maxDuration = 60;
 
-export async function GET() {
+/** The owner's shared presenters, plus the origin their public links are built on (see `publicOrigin`). */
+export async function GET(req: Request) {
   try {
-    return json({ agents: await listAgents(await requireOwner()) });
+    return json({ agents: await listAgents(await requireOwner()), shareOrigin: publicOrigin(req) });
   } catch (err) {
     return errorResponse(err);
   }

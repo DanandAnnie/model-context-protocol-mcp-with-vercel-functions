@@ -3,7 +3,9 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
-import { logoResponse, publicLogoSrc } from "../brand-logo";
+import { logoResponse, publicLogoSrc, servableLogo } from "../brand-logo";
+import { logoFileType } from "../logo-types";
+import { watermarkPlace } from "../watermark";
 import { agentSchema, brandKitSchema, createAgent, publicAgent, saveBrandKit } from "../services";
 import { STOCK_AVATARS } from "../stock";
 
@@ -45,6 +47,33 @@ describe("brand logo", () => {
     for (const url of [undefined, "https://cdn.example.com/logo.png", "data:image/tiff;base64,AAAA", "data:image/png;base64"]) {
       assert.throws(() => logoResponse(kit(url), req()), /Logo not found/, String(url));
     }
+  });
+
+  it("judges a logo exactly as the route serves it: type in any case, and a data URL that decodes", () => {
+    assert.equal(servableLogo(`data:image/PNG;base64,${PNG}`), true);
+    assert.equal(logoResponse({ logoUrl: `data:image/PNG;base64,${PNG}`, updatedAt: "x" }, req()).headers.get("content-type"), "image/png");
+    assert.equal(servableLogo("data:image/png;base64"), false, "no comma, nothing to decode");
+    assert.equal(servableLogo("data:image/tiff;base64,AAAA"), false);
+    assert.equal(brandKitSchema.safeParse({ primaryColor: "#4f46e5", logoUrl: "data:image/png;base64" }).success, false);
+    // A picked file's type, or one read from its name when the browser reports none.
+    assert.equal(logoFileType({ type: "image/png", name: "a.png" }), "image/png");
+    assert.equal(logoFileType({ type: "", name: "brand.ICO" }), "image/x-icon");
+    assert.equal(logoFileType({ type: "", name: "brand.avif" }), "image/avif");
+    assert.equal(logoFileType({ type: "image/tiff", name: "a.tif" }), undefined);
+    assert.equal(logoFileType({ type: "", name: "noext" }), undefined);
+  });
+
+  it("puts the watermark in each corner with one position class, clear of controls and captions at the bottom", () => {
+    const position = (classes: string) => classes.split(" ").filter((c) => c.startsWith("object-"));
+    assert.deepEqual(position(watermarkPlace("top-left", false)), ["object-[left_top]"]);
+    assert.deepEqual(position(watermarkPlace("top-right", true)), ["object-[right_top]"]);
+    assert.deepEqual(position(watermarkPlace("bottom-left", false)), ["object-[left_bottom]"]);
+    assert.deepEqual(position(watermarkPlace("bottom-right", false)), ["object-[right_bottom]"]);
+    assert.match(watermarkPlace("top-left", true), /\bleft-\[3%\] top-\[4%\]/);
+    assert.match(watermarkPlace("top-right", false), /\bright-\[3%\] top-\[4%\]/);
+    assert.match(watermarkPlace("bottom-left", false), /bottom-\[max\(2\.75rem,12%\)\]/);
+    assert.match(watermarkPlace("bottom-right", true), /bottom-\[max\(2\.75rem,24%\)\]/, "a captioned video lifts it above the caption band");
+    assert.doesNotMatch(watermarkPlace("top-left", true), /bottom-/);
   });
 
   it("only takes an uploaded logo in a type the pages can show", () => {

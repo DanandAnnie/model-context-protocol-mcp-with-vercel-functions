@@ -8,7 +8,7 @@ import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api, isDarkHex } from "@/lib/client";
 import { MAX_PRONUNCIATIONS, formatPronunciations, parsePronunciations } from "@/lib/pronounce";
 import { MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH, MIN_GLOSSARY_TERM_LENGTH, parseGlossary } from "@/lib/glossary";
-import { LOGO_TYPES } from "@/lib/logo-types";
+import { LOGO_TYPES, logoDataType, logoFileType } from "@/lib/logo-types";
 import type { AspectRatio, Avatar, BrandKit, Resolution, Voice, WatermarkCorner } from "@/lib/types";
 
 const DEFAULT_PRIMARY = "#4f46e5";
@@ -29,6 +29,7 @@ export default function BrandPage() {
   const [bgUrl, setBgUrl] = useState("");
   const [pronunciations, setPronunciations] = useState("");
   const [glossary, setGlossary] = useState("");
+  const [logoNotice, setLogoNotice] = useState<string | null>(null);
   const [avatarId, setAvatarId] = useState("");
   const [voiceId, setVoiceId] = useState("");
   const [aspect, setAspect] = useState<AspectRatio | "">("");
@@ -48,7 +49,13 @@ export default function BrandPage() {
     const b = brandData.brand;
     if (!b) return;
     setName(b.name);
-    setLogoUrl(b.logoUrl ?? "");
+    // A logo saved before only displayable types were accepted is left out (and said so), so the rest of the kit can still be saved.
+    const storedType = b.logoUrl ? logoDataType(b.logoUrl) : undefined;
+    if (storedType && !LOGO_TYPES.has(storedType)) {
+      setLogoNotice("The saved logo is in a format the share page cannot show, so saving will remove it. Upload a PNG, JPEG, WebP, GIF, SVG, AVIF, BMP, or ICO logo to replace it.");
+    } else {
+      setLogoUrl(b.logoUrl ?? "");
+    }
     setPrimary(b.primaryColor);
     setAccent(b.accentColor ?? "");
     setBgType(b.defaultBackground && b.defaultBackground.type !== "color" ? b.defaultBackground.type : "");
@@ -70,12 +77,17 @@ export default function BrandPage() {
       setErr("Please choose a logo under 2 MB.");
       return;
     }
-    if (!LOGO_TYPES.has(file.type)) {
+    const type = logoFileType(file);
+    if (!type) {
       setErr("Please choose a PNG, JPEG, WebP, GIF, SVG, AVIF, BMP, or ICO logo.");
       return;
     }
     const reader = new FileReader();
-    reader.onload = () => setLogoUrl(String(reader.result));
+    reader.onload = () => {
+      // A browser that reports no type reads the file as application/octet-stream; label it with the type read from its name.
+      setLogoUrl(String(reader.result).replace(/^data:[^;,]*/, `data:${type}`));
+      setLogoNotice(null);
+    };
     reader.readAsDataURL(file);
   }
 
@@ -190,6 +202,11 @@ export default function BrandPage() {
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Acme Realty" maxLength={80} className={inputClass} disabled={loading} />
           </Field>
           <Field label="Logo" hint="PNG or SVG with a transparent background looks best. Upload a file or paste an image URL.">
+            {logoNotice && (
+              <span role="status" className="mb-2 block rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="logo-notice">
+                {logoNotice}
+              </span>
+            )}
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
                 {logoUrl ? (

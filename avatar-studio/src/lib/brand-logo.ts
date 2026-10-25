@@ -14,6 +14,15 @@ export function publicLogoSrc(brand: Pick<BrandKit, "logoUrl" | "updatedAt"> | n
   return brand.logoUrl.startsWith("data:") ? `${route}?v=${encodeURIComponent(brand.updatedAt)}` : brand.logoUrl;
 }
 
+/** Whether an uploaded logo decodes to a type the logo route serves: the same check the route makes, so a kit can never save a logo its pages would show broken. */
+export function servableLogo(dataUrl: string): boolean {
+  try {
+    return LOGO_TYPES.has(decodeDataUrl(dataUrl).mimeType.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The uploaded logo as an image response; 404 when the kit has none or links an external one. A request
  * whose `v` matches the kit's last save may be cached for an hour (never past `expiresAt`, when the page
@@ -29,13 +38,14 @@ export function logoResponse(brand: Pick<BrandKit, "logoUrl" | "updatedAt"> | nu
   } catch {
     throw new NotFoundError("Logo not found");
   }
-  if (!LOGO_TYPES.has(logo.mimeType)) throw new NotFoundError("Logo not found");
+  const mimeType = logo.mimeType.toLowerCase();
+  if (!LOGO_TYPES.has(mimeType)) throw new NotFoundError("Logo not found");
   const current = new URL(req.url).searchParams.get("v") === brand?.updatedAt;
   const untilExpiry = expiresAt ? Math.floor((Date.parse(expiresAt) - Date.now()) / 1000) : Infinity;
   const ttl = Math.max(0, Math.min(3600, untilExpiry));
   return new Response(logo.bytes as BodyInit, {
     headers: {
-      "Content-Type": logo.mimeType,
+      "Content-Type": mimeType,
       "Content-Length": String(logo.bytes.byteLength),
       "Cache-Control": current && ttl > 0 ? `public, max-age=${ttl}` : "no-store",
       "X-Content-Type-Options": "nosniff",

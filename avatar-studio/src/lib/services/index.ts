@@ -6,6 +6,7 @@ export * from "./avatars";
 export * from "./voices";
 export * from "./brand";
 export * from "./comments";
+export * from "./leads";
 export * from "./scripts";
 export * from "./agents";
 export * from "./account";

@@ -4,7 +4,7 @@ import { getTtsProvider } from "../providers";
 import { getStore } from "../store";
 import { LOCAL_OWNER } from "../owner-id";
 
-const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip"] as const;
+const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip", "videolead"] as const;
 /**
  * Cover rows hold image bytes; the export describes each cover from its video (`cover.mimeType`, `cover.bytes`) instead
  * of loading them. Clip audio is never listed (each `clip` row names its own `clipaudio_<id>` row), so the export and

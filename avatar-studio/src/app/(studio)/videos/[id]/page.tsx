@@ -9,6 +9,7 @@ import { VideoComments } from "@/components/VideoComments";
 import { ReviewPanel } from "@/components/ReviewPanel";
 import { SubtitleLanguages } from "@/components/SubtitleLanguages";
 import { CaptionEditor } from "@/components/CaptionEditor";
+import { ViewerEmails } from "@/components/ViewerEmails";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { captionsBurnedIn } from "@/lib/captions";
 import { useApi } from "@/hooks/useApi";
@@ -86,7 +87,7 @@ export default function VideoDetailPage() {
    * description, a link turned back on) must disappear too, or the control flips back until the
    * refetch lands.
    */
-  const OPTIONAL_KEYS = ["description", "folder", "cover", "subtitles", "captionCues", "review", "shareDisabled", "shareDownload", "shareLocked", "shareCta", "shareExpiresAt"] as const;
+  const OPTIONAL_KEYS = ["description", "folder", "cover", "subtitles", "captionCues", "review", "shareGate", "shareDisabled", "shareDownload", "shareLocked", "shareCta", "shareExpiresAt"] as const;
   function applyServer(next: Video) {
     setData((d) => {
       const merged = { ...d?.video, ...next } as Video;
@@ -145,7 +146,7 @@ export default function VideoDetailPage() {
 
   const [shareErr, setShareErr] = useState<string | null>(null);
   // Optimistic: a box flips at once and reverts if the save fails.
-  type SharePatch = { shareDownload?: boolean; shareDisabled?: boolean; shareExpiresAt?: string | null };
+  type SharePatch = { shareDownload?: boolean; shareGate?: boolean; shareDisabled?: boolean; shareExpiresAt?: string | null };
   const [shareDraft, setShareDraft] = useState<SharePatch>({});
   async function patchShare(patch: SharePatch): Promise<boolean> {
     if (!video) return false;
@@ -476,6 +477,10 @@ export default function VideoDetailPage() {
                       <input type="checkbox" checked={shareDraft.shareDownload ?? !!video.shareDownload} onChange={(e) => patchShare({ shareDownload: e.target.checked })} className="accent-brand-600" />
                       Viewers can download
                     </label>
+                    <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700" title="Viewers enter an email before the video plays; the emails are listed below">
+                      <input type="checkbox" checked={shareDraft.shareGate ?? !!video.shareGate} onChange={(e) => patchShare({ shareGate: e.target.checked })} className="accent-brand-600" />
+                      Ask for an email before playing
+                    </label>
                     {!shareLive && <span className="text-xs text-slate-500" data-testid="share-off-note">Share link off: the share page and embed answer “not found”.</span>}
                     <form
                       className="inline-flex flex-wrap items-center gap-2"
@@ -764,6 +769,7 @@ export default function VideoDetailPage() {
                   </form>
                 </Card>
               )}
+              {!video.deletedAt && <ViewerEmails videoId={video.id} gateOn={!!video.shareGate} />}
               {!video.deletedAt && video.status === "completed" && canEdit && <CaptionEditor video={video} burnedIn={captionsBurnedIn(video)} onUpdated={applyServer} />}
               {!video.deletedAt && <SubtitleLanguages video={video} onUpdated={applyServer} />}
               <Card className="p-4" data-testid="share-description-card">

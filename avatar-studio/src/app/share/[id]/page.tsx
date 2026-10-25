@@ -21,7 +21,8 @@ import { ShareCta } from "@/components/ShareCta";
 import { ShareUnlock } from "@/components/ShareUnlock";
 import { SharePlayer } from "@/components/SharePlayer";
 import { captionsBurnedIn } from "@/lib/captions";
-import { shareCookieName, shareUnlocked } from "@/lib/share-lock";
+import { shareCookieName, shareGateCookieName, shareUnlocked } from "@/lib/share-lock";
+import { ShareLeadGate } from "@/components/ShareLeadGate";
 
 export const dynamic = "force-dynamic";
 
@@ -117,10 +118,11 @@ export default async function SharePage({
   const brand = await getBrandKit(video.ownerId ?? LOCAL_OWNER);
   const accent = brand?.accentColor ?? brand?.primaryColor;
   const ctaBackground = accent ?? "#4f46e5";
-  const unlocked = await shareUnlocked(
-    video,
-    (await cookies()).get(shareCookieName(video.id))?.value,
-  );
+  const jar = await cookies();
+  const unlocked = await shareUnlocked(video, jar.get(shareCookieName(video.id))?.value);
+  // The email gate comes after the password: a viewer who has not given an email yet sees the form, not the player.
+  const gated = unlocked && !!video.shareGate && !jar.get(shareGateCookieName(video.id));
+  const watching = unlocked && !gated;
 
   const frame =
     video.aspect === "9:16"
@@ -131,7 +133,7 @@ export default async function SharePage({
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
-      {unlocked && video.status === "completed" && (
+      {watching && video.status === "completed" && (
         <ViewBeacon videoId={video.id} />
       )}
       {accent && (
@@ -174,6 +176,8 @@ export default async function SharePage({
         <h1 className="mb-4 text-xl font-semibold">{video.title}</h1>
         {!unlocked ? (
           <ShareUnlock videoId={video.id} />
+        ) : gated ? (
+          <ShareLeadGate videoId={video.id} brandName={brand?.name} />
         ) : (
           <>
             <div

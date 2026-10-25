@@ -6,8 +6,8 @@ import { refreshSupabaseSession } from "@/lib/supabase/proxy";
 // callbacks, public share pages, provider webhooks, and static assets.
 const PUBLIC_PREFIXES = ["/login", "/auth/", "/api/auth/", "/share/", "/talk/", "/api/talk/", "/embed/", "/api/webhooks/", "/api/health", "/_next/", "/favicon"];
 // Caption files back the public share player's subtitle track; the view, watch, and click
-// beacons and the share-password check come from it too.
-const PUBLIC_PATTERNS = [/^\/api\/videos\/[^/]+\/(captions|cover)$/, /^\/api\/videos\/[^/]+\/(view|cta|watch|unlock)$/];
+// beacons, the share-password check, and the email gate come from it too.
+const PUBLIC_PATTERNS = [/^\/api\/videos\/[^/]+\/(captions|cover)$/, /^\/api\/videos\/[^/]+\/(view|cta|watch|unlock|lead)$/];
 // Only bundled non-private sample assets; public share pages need these without a session.
 const DEMO_ASSETS = new Set(["/demo/render.mp4", "/demo/render.webm", "/demo/poster.svg"]);
 

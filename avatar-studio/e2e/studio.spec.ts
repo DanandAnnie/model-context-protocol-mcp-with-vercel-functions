@@ -1680,3 +1680,42 @@ test("a dub can be voice only and name its speakers", async ({ page }) => {
   expect([made?.audioOnly, made?.speakers]).toEqual([true, 2]);
   expect((await page.request.post("/api/translate", { data: { title: "Too many", sourceVideoUrl: "https://cdn.example.com/v.mp4", targetLanguage: "French", speakers: 11 } })).status()).toBe(400);
 });
+
+test("a share page can ask for an email before playing, and the owner sees who watched", async ({ page, browser }) => {
+  const v = await createVideoViaApi(page, `Gated ${Date.now().toString(36)}`);
+  await page.goto(`/videos/${v.id}`);
+  await expect(page.getByText("Completed")).toBeVisible({ timeout: 30_000 });
+  // Nothing to collect yet, so no card until the gate is on.
+  await expect(page.getByTestId("viewer-emails")).toHaveCount(0);
+  await page.getByLabel("Ask for an email before playing").check();
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.shareGate).toBe(true);
+  await expect(page.getByTestId("viewer-emails")).toContainText("Viewer emails · 0");
+
+  // A visitor with no cookies meets the form, not the player.
+  const visitor = await browser.newContext();
+  const share = await visitor.newPage();
+  await share.goto(`/share/${v.id}`);
+  await expect(share.getByTestId("share-gate")).toBeVisible();
+  await expect(share.locator("video")).toHaveCount(0);
+  await share.getByLabel("Your email").fill("Viewer@Example.com");
+  await share.getByLabel("Your name (optional)").fill("Vee");
+  await share.getByRole("button", { name: "Watch video" }).click();
+  await expect(share.locator("video")).toBeVisible();
+  // The pass is remembered for this video.
+  await share.reload();
+  await expect(share.locator("video")).toBeVisible();
+  await expect(share.getByTestId("share-gate")).toHaveCount(0);
+  await visitor.close();
+
+  await page.reload();
+  const card = page.getByTestId("viewer-emails");
+  await expect(card).toContainText("Viewer emails · 1");
+  await expect(page.getByTestId("viewer-email-list")).toContainText("viewer@example.com · Vee");
+  const csv = await (await page.request.get(`/api/videos/${v.id}/leads?format=csv`)).text();
+  expect(csv).toContain('"viewer@example.com","Vee"');
+  // A link that does not ask takes no emails.
+  await page.getByLabel("Ask for an email before playing").uncheck();
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.shareGate).toBeUndefined();
+  expect((await page.request.post(`/api/videos/${v.id}/lead`, { data: { email: "late@example.com" } })).status()).toBe(404);
+  expect((await page.request.post(`/api/videos/vid_nope/lead`, { data: { email: "x@example.com" } })).status()).toBe(404);
+});

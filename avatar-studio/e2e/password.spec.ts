@@ -84,6 +84,9 @@ test("an offline share link is hidden from the public but not from the owner", a
   expect((await anon.put(`/api/videos/${id}/captions`, { data: cues })).status()).toBe(401);
   expect((await anon.delete(`/api/videos/${id}/captions`)).status()).toBe(401);
   expect(await (await anon.get(`/api/videos/${id}/captions`)).text()).not.toContain("Defaced");
+  // The email gate is public, but a link that does not ask takes no emails, and a viewer cannot read the list.
+  expect((await anon.post(`/api/videos/${id}/lead`, { data: { email: "a@example.com" } })).status()).toBe(404);
+  expect((await anon.get(`/api/videos/${id}/leads`)).status()).toBe(401);
 
   const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
   expect((await request.patch(`/api/videos/${id}`, { data: { cover: png } })).status()).toBe(200);

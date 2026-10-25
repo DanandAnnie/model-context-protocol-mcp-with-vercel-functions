@@ -18,6 +18,8 @@ export const shareLockId = (videoId: string) => `sharelock_${videoId}`;
 
 export const SHARE_PASSWORD_MIN = 4;
 export const SHARE_PASSWORD_MAX = 64;
+/** The cookie that marks a viewer who passed a video's email gate. It is a courtesy, not a lock: the gate collects emails, it does not protect the video. */
+export const shareGateCookieName = (videoId: string) => `as_gate_${videoId.replace(/[^A-Za-z0-9_-]/g, "")}`;
 /** How long an unlocked visitor stays unlocked. */
 export const SHARE_COOKIE_MAX_AGE = 60 * 60 * 24 * 30;
 

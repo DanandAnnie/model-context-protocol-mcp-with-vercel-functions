@@ -25,6 +25,7 @@ import { backgroundSchema, captionStyleSchema, pitchSchema, sceneLayoutSchema } 
 import { getBrandKit } from "./brand";
 import { spokenCopy } from "../pronounce";
 import { clearComments } from "./comments";
+import { clearVideoLeads } from "./leads";
 import { reviseScript } from "./scripts";
 export { backgroundSchema, captionStyleSchema, pitchSchema, sceneLayoutSchema };
 
@@ -461,6 +462,7 @@ async function purgeVideo(id: string, ownerId: string): Promise<void> {
   await clearShareLock(id);
   await clearCover(id);
   await clearComments(id, ownerId);
+  await clearVideoLeads(id, ownerId);
   await getStore().remove("video", id);
 }
 
@@ -588,6 +590,8 @@ export const videoPatchSchema = z
     folder: z.string().trim().max(MAX_FOLDER_NAME).optional(),
     /** Whether the public share page offers a download link. */
     shareDownload: z.boolean().optional(),
+    /** Whether the share page asks for the viewer's email before the player shows. */
+    shareGate: z.boolean().optional(),
     shareDisabled: z.boolean().optional(),
     /** When the public link stops working (ISO 8601 with a UTC offset, in the future); null keeps it open indefinitely. */
     shareExpiresAt: z.iso
@@ -628,6 +632,7 @@ export const videoPatchSchema = z
       p.description !== undefined ||
       p.folder !== undefined ||
       p.shareDownload !== undefined ||
+      p.shareGate !== undefined ||
       p.shareDisabled !== undefined ||
       p.shareExpiresAt !== undefined ||
       p.sharePassword !== undefined ||
@@ -653,6 +658,10 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
   if (patch.shareDownload !== undefined) {
     if (patch.shareDownload) next.shareDownload = true;
     else delete next.shareDownload;
+  }
+  if (patch.shareGate !== undefined) {
+    if (patch.shareGate) next.shareGate = true;
+    else delete next.shareGate;
   }
   if (patch.shareDisabled !== undefined) {
     if (patch.shareDisabled) next.shareDisabled = true;

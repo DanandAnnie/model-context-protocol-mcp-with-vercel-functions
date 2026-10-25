@@ -187,6 +187,18 @@ export const EMPTY_WATCH: WatchCounts = { q25: 0, q50: 0, q75: 0, q100: 0 };
 /** How long a trashed video can be restored before it is deleted for good. */
 export const TRASH_RETENTION_DAYS = 30;
 
+/** A viewer who gave an email at a video's share-page gate; one row per address per video. */
+export interface VideoLead {
+  id: string;
+  ownerId: string;
+  videoId: string;
+  email: string;
+  name?: string;
+  createdAt: string;
+  lastSeenAt: string;
+  visits: number;
+}
+
 /** One caption line and when it shows, in milliseconds from the start of the video. */
 export interface CaptionCue {
   startMs: number;
@@ -217,6 +229,8 @@ export interface Video extends VideoRequest {
   deletedAt?: string;
   /** Share page offers a download link when true (off by default). */
   shareDownload?: boolean;
+  /** The share page asks for the viewer's email before the player shows; the answers are `VideoLead` rows. */
+  shareGate?: boolean;
   /** The share page, its captions, and the beacons answer "not found" while true. */
   shareDisabled?: boolean;
   /** ISO time after which the share link behaves as if switched off (the owner keeps access). */

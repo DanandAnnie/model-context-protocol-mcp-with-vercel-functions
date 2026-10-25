@@ -35,4 +35,27 @@ describe("multi-language translation", () => {
     assert.equal(one.title, "Walkthrough");
     assert.equal((await listTranslations("someone-else")).length, 0);
   });
+
+  it("passes voice-only and the speaker count to every dub, and HeyGen gets them as its own fields", async () => {
+    assert.equal(translationBatchSchema.safeParse({ ...base, targetLanguage: "Spanish", speakers: 0 }).success, false);
+    assert.equal(translationBatchSchema.safeParse({ ...base, targetLanguage: "Spanish", speakers: 11 }).success, false);
+    assert.equal(translationBatchSchema.safeParse({ ...base, targetLanguage: "Spanish", speakers: 1.5 }).success, false);
+    const made = await createTranslations(translationBatchSchema.parse({ ...base, targetLanguages: ["French", "German"], audioOnly: true, speakers: 2 }), "u-opt");
+    assert.deepEqual(made.map((t) => [t.audioOnly, t.speakers]), [[true, 2], [true, 2]]);
+    const [plain] = await createTranslations(translationBatchSchema.parse({ ...base, targetLanguage: "Spanish", audioOnly: false }), "u-opt");
+    assert.equal("audioOnly" in plain, false, "a lip-synced dub stores no flag");
+    assert.equal("speakers" in plain, false);
+
+    const { HeyGenTranslateProvider } = await import("../providers/translate/heygen");
+    const heygen = new HeyGenTranslateProvider("key");
+    const bodies: Array<Record<string, unknown>> = [];
+    (heygen as unknown as { client: { createTranslation: (b: Record<string, unknown>) => Promise<unknown> } }).client.createTranslation = async (b) => {
+      bodies.push(b);
+      return { video_translate_id: "vt_1" };
+    };
+    await heygen.createTranslation({ sourceVideoUrl: base.sourceVideoUrl, targetLanguage: "French", title: "T", audioOnly: true, speakers: 2 });
+    await heygen.createTranslation({ sourceVideoUrl: base.sourceVideoUrl, targetLanguage: "French", title: "T" });
+    assert.deepEqual([bodies[0].translate_audio_only, bodies[0].speaker_num], [true, 2]);
+    assert.equal("translate_audio_only" in bodies[1] || "speaker_num" in bodies[1], false, "left to HeyGen's defaults");
+  });
 });

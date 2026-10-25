@@ -92,7 +92,7 @@ export function splitKnowledge(instructions: string): { own: string; reference: 
 
 export interface TranslateProvider {
   readonly name: string;
-  createTranslation(input: { sourceVideoUrl: string; targetLanguage: string; title: string }): Promise<{ providerJobId: string }>;
+  createTranslation(input: { sourceVideoUrl: string; targetLanguage: string; title: string; audioOnly?: boolean; speakers?: number }): Promise<{ providerJobId: string }>;
   getStatus(providerJobId: string): Promise<Pick<Translation, "status" | "videoUrl" | "error">>;
   supportedLanguages(): string[];
   parseWebhook?(body: unknown): { providerJobId: string; update: Pick<Translation, "status" | "videoUrl" | "error"> } | null;

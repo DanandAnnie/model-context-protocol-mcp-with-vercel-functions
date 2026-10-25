@@ -1661,3 +1661,19 @@ test("a pause inserted in the script holds the presenter and leaves a gap in the
   expect(share).toContain("Welcome home. Here is the kitchen.");
   expect(share).not.toContain("[pause");
 });
+
+test("a dub can be voice only and name its speakers", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  await page.goto("/translate");
+  await page.getByPlaceholder("https://…/video.mp4").fill("https://cdn.example.com/interview.mp4");
+  await page.getByLabel("Lip-sync the dub").uncheck();
+  await page.getByLabel("Speakers").selectOption("2");
+  await page.getByLabel("Title (optional)").fill(`Interview ${tag}`);
+  await page.getByRole("button", { name: "Translate video" }).click();
+  const card = page.locator("div", { has: page.getByText(`Interview ${tag}`, { exact: true }) }).getByTestId("translation-meta").first();
+  await expect(card).toContainText("→ Spanish · voice only · 2 speakers");
+  const list = (await (await page.request.get("/api/translate")).json()).translations as Array<{ title: string; audioOnly?: boolean; speakers?: number }>;
+  const made = list.find((t) => t.title === `Interview ${tag}`);
+  expect([made?.audioOnly, made?.speakers]).toEqual([true, 2]);
+  expect((await page.request.post("/api/translate", { data: { title: "Too many", sourceVideoUrl: "https://cdn.example.com/v.mp4", targetLanguage: "French", speakers: 11 } })).status()).toBe(400);
+});

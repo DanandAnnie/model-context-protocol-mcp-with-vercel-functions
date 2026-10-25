@@ -253,7 +253,14 @@ export interface TranslationRequest {
   title: string;
   sourceVideoUrl: string;
   targetLanguage: string;
+  /** Dub the voice only and leave the mouth as filmed (faster, and fine for a presenter who is often off screen); lip-synced when absent. */
+  audioOnly?: boolean;
+  /** How many people speak in the source video, so each gets a voice of their own; the provider guesses when absent. */
+  speakers?: number;
 }
+
+/** The most speakers a dub can tell apart. */
+export const MAX_TRANSLATION_SPEAKERS = 10;
 
 export interface Translation extends TranslationRequest {
   id: string;

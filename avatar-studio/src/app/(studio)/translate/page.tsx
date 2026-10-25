@@ -7,7 +7,7 @@ import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api, formatDate } from "@/lib/client";
-import type { Translation } from "@/lib/types";
+import { MAX_TRANSLATION_SPEAKERS, type Translation } from "@/lib/types";
 
 /** Matches the server's limit per request. */
 const MAX_LANGUAGES = 5;
@@ -32,6 +32,8 @@ function TranslateInner() {
   // Up to five languages per request, one dubbing job each.
   const [languages, setLanguages] = useState<string[]>(["Spanish"]);
   const toggle = (l: string) => setLanguages((prev) => (prev.includes(l) ? prev.filter((x) => x !== l) : prev.length >= MAX_LANGUAGES ? prev : [...prev, l]));
+  const [lipSync, setLipSync] = useState(true);
+  const [speakers, setSpeakers] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -40,7 +42,7 @@ function TranslateInner() {
     setErr(null);
     try {
       const fallback = languages.length === 1 ? `Translation to ${languages[0]}` : "Translation";
-      await api("/api/translate", { method: "POST", body: JSON.stringify({ title: title || fallback, sourceVideoUrl, targetLanguages: languages }) });
+      await api("/api/translate", { method: "POST", body: JSON.stringify({ title: title || fallback, sourceVideoUrl, targetLanguages: languages, ...(lipSync ? {} : { audioOnly: true }), ...(speakers ? { speakers } : {}) }) });
       setSource("");
       setTitle("");
       refetch();
@@ -56,7 +58,7 @@ function TranslateInner() {
 
   return (
     <>
-      <SectionTitle title="Video translate" subtitle="Dub an existing video into another language. Lip-sync depends on your provider." />
+      <SectionTitle title="Video translate" subtitle="Dub an existing video into other languages, lip-synced or voice only." />
       {canEdit === false && <ViewOnlyNotice what="start translations" />}
       <ErrorBanner message={error ?? err} />
       <div className="grid gap-6 lg:grid-cols-[1fr_1.4fr]">
@@ -81,6 +83,25 @@ function TranslateInner() {
                 })}
               </div>
             </fieldset>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="flex items-start gap-2 text-sm text-slate-700">
+                <input type="checkbox" className="mt-0.5" checked={lipSync} onChange={(e) => setLipSync(e.target.checked)} />
+                <span>
+                  Lip-sync the dub
+                  <span className="block text-xs text-slate-500">Off dubs the voice only: faster, and fine when the speaker is often off screen.</span>
+                </span>
+              </label>
+              <Field label="Speakers" hint="People talking in the video, so each keeps a voice of their own.">
+                <select className={inputClass} value={speakers} onChange={(e) => setSpeakers(Number(e.target.value))}>
+                  <option value={0}>Detect automatically</option>
+                  {Array.from({ length: MAX_TRANSLATION_SPEAKERS }, (_, i) => i + 1).map((n) => (
+                    <option key={n} value={n}>
+                      {n} {n === 1 ? "speaker" : "speakers"}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
             <Field label="Title (optional)">
               <input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} placeholder={languages.length > 1 ? "Product walkthrough (each dub adds its language)" : "Product walkthrough – Spanish"} />
             </Field>
@@ -101,7 +122,11 @@ function TranslateInner() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium text-slate-900">{t.title}</div>
-                      <div className="mt-0.5 text-xs text-slate-500">→ {t.targetLanguage} · {formatDate(t.createdAt)}</div>
+                      <div className="mt-0.5 text-xs text-slate-500" data-testid="translation-meta">
+                        → {t.targetLanguage}
+                        {t.audioOnly ? " · voice only" : ""}
+                        {t.speakers ? ` · ${t.speakers} ${t.speakers === 1 ? "speaker" : "speakers"}` : ""} · {formatDate(t.createdAt)}
+                      </div>
                       {t.error && <div className="mt-1 text-xs text-rose-600">{t.error}</div>}
                     </div>
                     <StatusBadge status={t.status} />

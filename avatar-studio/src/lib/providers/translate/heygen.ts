@@ -9,11 +9,14 @@ export class HeyGenTranslateProvider implements TranslateProvider {
   constructor(apiKey: string) {
     this.client = new HeyGenClient(apiKey);
   }
-  async createTranslation(input: { sourceVideoUrl: string; targetLanguage: string; title: string }) {
+  async createTranslation(input: { sourceVideoUrl: string; targetLanguage: string; title: string; audioOnly?: boolean; speakers?: number }) {
     const data = await this.client.createTranslation({
       video_url: input.sourceVideoUrl,
       output_language: input.targetLanguage,
       title: input.title,
+      // HeyGen lip-syncs unless told to translate the audio alone; the speaker count is its own guess when left out.
+      ...(input.audioOnly ? { translate_audio_only: true } : {}),
+      ...(input.speakers ? { speaker_num: input.speakers } : {}),
       ...(webhookUrl("heygen-translate") ? { callback_url: webhookUrl("heygen-translate") } : {}),
     });
     return { providerJobId: data.video_translate_id };

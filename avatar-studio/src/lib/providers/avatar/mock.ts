@@ -1,10 +1,11 @@
 import { SAMPLE_PREVIEW_VIDEO, STOCK_AVATARS } from "../../stock";
+import { demoAssetUrl } from "../../config";
 import type { Avatar, VideoRequest } from "../../types";
 import type { AvatarJobStatus, AvatarProvider } from "../types";
 
-/** Public-domain sample clip used to stand in for a rendered avatar video in demo mode (the same one presenters preview). */
+/** Labeled, self-hosted stand-in; no avatar synthesis or paid operation occurs. */
 const SAMPLE_VIDEO = SAMPLE_PREVIEW_VIDEO;
-const SAMPLE_THUMB = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/ForBiggerEscapes.jpg";
+const SAMPLE_THUMB = "/demo/poster.svg";
 
 /** Simulates an async render that completes ~12s after submission. */
 export class MockAvatarProvider implements AvatarProvider {
@@ -29,8 +30,8 @@ export class MockAvatarProvider implements AvatarProvider {
     if (elapsed < MockAvatarProvider.RENDER_MS) return { status: "processing" };
     return {
       status: "completed",
-      videoUrl: SAMPLE_VIDEO,
-      thumbnailUrl: SAMPLE_THUMB,
+      videoUrl: demoAssetUrl(SAMPLE_VIDEO),
+      thumbnailUrl: demoAssetUrl(SAMPLE_THUMB),
       durationSec: Number(duration),
     };
   }

@@ -60,3 +60,10 @@ export function webhookUrl(provider: string): string | undefined {
   const base = config.appUrl.replace(/\/$/, "");
   return `${base}/api/webhooks/${provider}?secret=${encodeURIComponent(config.webhookSecret)}`;
 }
+
+/** Keep demo media on the deployment being tested, including protected previews. */
+export function demoAssetUrl(path: string): string {
+  const deployment = env("VERCEL_URL");
+  const origin = deployment ? `https://${deployment}` : config.appUrl;
+  return new URL(path, origin).href;
+}

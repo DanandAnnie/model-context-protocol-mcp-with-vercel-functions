@@ -53,6 +53,10 @@ test("write with AI, pick a voice, generate, reach Completed", async ({ page }) 
   await page.getByRole("button", { name: "Generate video" }).click();
   await page.waitForURL(/\/videos\/vid_/);
   await expect(page.getByText("Completed")).toBeVisible({ timeout: 30_000 });
+  // A completed demo must play, rather than only displaying a status badge.
+  const player = page.locator("video");
+  await player.evaluate(async (video: HTMLVideoElement) => { video.muted = true; await video.play(); });
+  await expect.poll(() => player.evaluate((video: HTMLVideoElement) => video.currentTime)).toBeGreaterThan(0);
   await expect(page.getByRole("link", { name: /Captions \(\.srt\)/ })).toBeVisible();
 });
 
@@ -184,7 +188,7 @@ test("the avatar library filters by gender and name", async ({ page }) => {
   // Library presenters with a preview clip play it, muted, while hovered; others show nothing.
   await expect(page.getByTestId("avatar-preview-badge")).toHaveCount(2);
   await page.getByRole("img", { name: "Ava Chen" }).hover();
-  await expect(page.getByTestId("avatar-preview")).toHaveAttribute("src", /ForBiggerEscapes\.mp4$/);
+  await expect(page.getByTestId("avatar-preview")).toHaveAttribute("src", /\/demo\/render\.mp4$/);
   await expect(page.getByTestId("avatar-preview")).toHaveJSProperty("muted", true);
   // The clip sits under the favourite star, so the star still takes the click while the clip plays.
   await page.getByRole("button", { name: "Add Ava Chen to favourites" }).click();

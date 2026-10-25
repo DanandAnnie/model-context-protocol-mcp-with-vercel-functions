@@ -16,13 +16,13 @@ export default defineConfig({
     { name: "password", testMatch: /password\.spec\.ts/, use: { baseURL: "http://localhost:3102" } },
   ],
   webServer: [
-    { command: "npx next start -p 3100", url: "http://localhost:3100/api/status", reuseExistingServer: !process.env.CI, timeout: 120_000 },
+    { command: "npx next start -p 3100", url: "http://localhost:3100/api/status", reuseExistingServer: !process.env.CI, timeout: 120_000, env: { APP_URL: "http://localhost:3100" } },
     {
       command: "npx next start -p 3102",
       url: "http://localhost:3102/",
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
-      env: { STUDIO_PASSWORD: "hunter2" },
+      env: { STUDIO_PASSWORD: "hunter2", APP_URL: "http://localhost:3102" },
     },
   ],
 });

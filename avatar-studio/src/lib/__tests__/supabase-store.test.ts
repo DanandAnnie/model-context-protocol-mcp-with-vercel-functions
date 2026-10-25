@@ -32,6 +32,10 @@ beforeEach(() => {
 });
 
 describe("SupabaseStore", () => {
+  it("says it is shared by every instance, which billing relies on before cancelling a deleted workspace's subscription", () => {
+    assert.equal(store.durable, true);
+  });
+
   it("lists a kind newest first, filtered by the document's ownerId when given", async () => {
     respond = () => [{ data: { id: "v1", ownerId: "u1" } }, { data: { id: "v2", ownerId: "u1" } }];
     const items = await store.list<{ id: string }>("video", "u1");

@@ -334,6 +334,13 @@ describe("share-page email gate", () => {
       assert.equal(calls[0].body, undefined, "a DELETE carries no body");
       assert.deepEqual(calls[0].headers, { Authorization: "Bearer sk_test" });
       assert.equal(await getStore().get("plan", "plan_ws_gone"), null);
+      // Two checkouts for the gone workspace: the one that cancels does not take away the ids the other still owes.
+      answer = down;
+      await assert.rejects(applyStripeEvent({ ...checkout, data: { object: { ...checkout.data.object, subscription: "sub_A" } } }), /Stripe is down/);
+      answer = ok;
+      assert.equal(await applyStripeEvent({ ...checkout, data: { object: { ...checkout.data.object, subscription: "sub_B" } } }), null);
+      assert.equal((await getPlan("ws_gone")).subscriptionId, "sub_A", "sub_A's cancellation is still owed");
+      await getStore().remove("plan", "plan_ws_gone");
       // A subscription Stripe no longer has counts as cancelled; a live one behind a test key does not.
       answer = { status: 404, body: { error: { code: "resource_missing", message: "No such subscription: 'sub_9'" } } };
       assert.equal(await applyStripeEvent(checkout), null);

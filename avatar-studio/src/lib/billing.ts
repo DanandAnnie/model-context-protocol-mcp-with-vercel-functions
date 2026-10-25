@@ -238,7 +238,9 @@ export async function applyStripeEvent(event: StripeEvent): Promise<string | nul
       if (cancel && subscription) {
         try {
           await cancel(subscription);
-          await getStore().remove("plan", planId(ownerId));
+          // Only the row for this subscription goes: another checkout's ids may still be owed a cancellation.
+          const recorded = await getStore().get<Plan>("plan", planId(ownerId));
+          if (recorded && (!recorded.subscriptionId || recorded.subscriptionId === subscription)) await getStore().remove("plan", planId(ownerId));
           return null;
         } catch (err) {
           await setPlan(ownerId, { plan: "pro", provider: "stripe", customerId: typeof obj.customer === "string" ? obj.customer : undefined, subscriptionId: subscription, status: "active" });

@@ -493,19 +493,25 @@ test("share page offers a download only when the owner allows it", async ({ page
   // A note pinned to the player's moment shows its time, which seeks the player back there.
   const player = page.getByTestId("video-player");
   const comments = page.getByTestId("comments");
+  // The demo sample runs past the script's estimated length (about 5 s here), and the pin must still be accepted.
   await expect(comments.getByText("Pin to 0:00 in the video")).toBeVisible();
-  await player.evaluate((el: HTMLVideoElement) => (el.currentTime = 2));
-  await expect(comments.getByText("Pin to 0:02 in the video")).toBeVisible();
-  await comments.getByLabel("Pin to 0:02 in the video").check();
+  await player.evaluate((el: HTMLVideoElement) => (el.currentTime = 8));
+  await expect(comments.getByText("Pin to 0:08 in the video")).toBeVisible();
+  await comments.getByLabel("Pin to 0:08 in the video").check();
+  // Playing on while typing keeps the moment the box was ticked at.
+  await player.evaluate((el: HTMLVideoElement) => (el.currentTime = 10));
+  await expect(comments.getByLabel("Pin to 0:08 in the video")).toBeChecked();
   await page.getByLabel("New comment").fill("Cut the pause here.");
   await page.getByRole("button", { name: "Post comment" }).click();
-  await expect(page.getByTestId("comment-list")).toContainText("0:02Cut the pause here.");
+  await expect(page.getByTestId("comment-list")).toContainText("0:08Cut the pause here.");
   await expect(comments.getByRole("checkbox")).not.toBeChecked();
+  await expect(comments.getByText("Pin to 0:10 in the video")).toBeVisible();
   const listed = (await (await page.request.get(`/api/videos/${v.id}/comments`)).json()).comments;
-  expect(listed.map((c: { atSec?: number }) => c.atSec)).toEqual([2]);
+  expect(listed.map((c: { atSec?: number }) => c.atSec)).toEqual([8]);
   await player.evaluate((el: HTMLVideoElement) => (el.currentTime = 0));
-  await comments.getByRole("button", { name: "Play from 0:02" }).click();
-  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.currentTime)).toBe(2);
+  await comments.getByRole("button", { name: "Go to 0:08 in the video" }).click();
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.currentTime)).toBe(8);
+  await expect(player).toBeFocused();
   // A mention email's ?t= opens the player at the note.
   await page.goto(`/videos/${v.id}?t=3`);
   await expect.poll(() => page.getByTestId("video-player").evaluate((el: HTMLVideoElement) => el.currentTime)).toBe(3);

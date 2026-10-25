@@ -67,7 +67,12 @@ describe("comment mentions", () => {
 
   it("pins a comment to a moment: kept to tenths, checked against the length, and named in the email with a link that opens there", async () => {
     const { ws, video } = await team();
-    await getStore().put<Video>("video", { ...(await getStore().get<Video>("video", video.id))!, status: "completed", durationSec: 90 });
+    await assert.rejects(addComment(video.id, commentSchema.parse({ text: "too soon", atSec: 1 }), ws.id, alice), /once the video has finished rendering/);
+    // Demo renders all play one sample whose length the script estimate does not match, so theirs is not checked.
+    const demo = await getStore().put<Video>("video", { ...(await getStore().get<Video>("video", video.id))!, status: "completed", durationSec: 5 });
+    assert.equal(demo.provider, "mock");
+    assert.equal((await addComment(video.id, commentSchema.parse({ text: "inside the sample", atSec: 8 }), ws.id, alice)).atSec, 8);
+    await getStore().put<Video>("video", { ...demo, provider: "heygen", durationSec: 90 });
     const pinned = await addComment(video.id, commentSchema.parse({ text: "@bob@example.com the cut here", atSec: 65.437 }), ws.id, alice);
     assert.equal(pinned.atSec, 65.4);
     assert.equal(await notifyMentions(pinned), 1);
@@ -82,6 +87,7 @@ describe("comment mentions", () => {
     assert.equal("atSec" in whole, false);
     await notifyMentions(whole);
     assert.doesNotMatch(mail.sent[1].text, / at \d|&t=/);
+    assert.equal(mail.sent.length, 2);
     assert.throws(() => commentSchema.parse({ text: "x", atSec: -1 }));
     assert.throws(() => commentSchema.parse({ text: "x", atSec: "12" }));
   });

@@ -77,21 +77,14 @@ export default function VideoDetailPage() {
 
   const savingTitle = useRef(false);
 
-  // The player, for comments pinned to a moment: its time in whole seconds (null until it can play),
-  // and a seek. A mention email links here with ?t=<seconds> to open at the note's moment.
+  // The player, which comments pinned to a moment read and seek. A mention email links here with
+  // ?t=<seconds> to open at the note's moment.
   const player = useRef<HTMLVideoElement>(null);
-  const [playerTime, setPlayerTime] = useState<number | null>(null);
   const startAt = useRef<number | null>(null);
   useEffect(() => {
     const t = Number(new URL(window.location.href).searchParams.get("t"));
     if (Number.isFinite(t) && t > 0) startAt.current = t;
   }, []);
-  const seek = (sec: number) => {
-    const el = player.current;
-    if (!el) return;
-    el.currentTime = sec;
-    el.focus();
-  };
 
   // Folder: free text with the owner's existing folders as suggestions.
   const { data: libraryData } = useApi<{ videos: Video[] }>("/api/videos");
@@ -618,14 +611,10 @@ export default function VideoDetailPage() {
                     data-testid="video-player"
                     onLoadedMetadata={(e) => {
                       const el = e.currentTarget;
-                      if (startAt.current !== null) {
-                        el.currentTime = Math.min(startAt.current, Number.isFinite(el.duration) ? el.duration : startAt.current);
-                        startAt.current = null;
-                      }
-                      setPlayerTime(Math.floor(el.currentTime));
+                      if (startAt.current === null) return;
+                      el.currentTime = Math.min(startAt.current, Number.isFinite(el.duration) ? el.duration : startAt.current);
+                      startAt.current = null;
                     }}
-                    onTimeUpdate={(e) => setPlayerTime(Math.floor(e.currentTarget.currentTime))}
-                    onSeeked={(e) => setPlayerTime(Math.floor(e.currentTarget.currentTime))}
                   />
                 ) : video.status === "failed" ? (
                   <div className="p-8 text-center text-sm text-rose-200">
@@ -921,7 +910,7 @@ export default function VideoDetailPage() {
                 )}
               </Card>
               <ReviewPanel video={video} onChange={(next) => setData({ video: next })} />
-              <VideoComments videoId={video.id} playerTime={video.status === "completed" && video.videoUrl ? playerTime : null} onSeek={seek} />
+              <VideoComments videoId={video.id} player={video.status === "completed" && video.videoUrl ? player : undefined} />
             </div>
           </div>
         </>

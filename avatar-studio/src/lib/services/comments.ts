@@ -69,9 +69,13 @@ export async function addComment(videoId: string, input: z.infer<typeof commentS
   const video = await ownedVideo(videoId, ownerId);
   const existing = await listComments(videoId, ownerId);
   if (existing.length >= MAX_COMMENTS_PER_VIDEO) throw new ValidationError(`At most ${MAX_COMMENTS_PER_VIDEO} comments per video`);
-  // A player reports a little past the stated length at the very end, so half a second of slack.
-  if (input.atSec !== undefined && video.durationSec && input.atSec > video.durationSec + 0.5) {
-    throw new ValidationError(`That point is past the end of the video (${formatTimestamp(video.durationSec)})`);
+  if (input.atSec !== undefined) {
+    if (video.status !== "completed") throw new ValidationError("A note can be pinned to a moment once the video has finished rendering");
+    // A player reports a little past the stated length at the very end, so half a second of slack. Demo
+    // renders all play one sample clip while their length is estimated from the script, so the two differ.
+    if (video.provider !== "mock" && video.durationSec && input.atSec > video.durationSec + 0.5) {
+      throw new ValidationError(`That point is past the end of the video (${formatTimestamp(video.durationSec)})`);
+    }
   }
   const comment: VideoComment = {
     id: newId("cmt"),

@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import { MessageSquare, Trash2 } from "lucide-react";
 import { Button, Card, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
@@ -14,14 +14,39 @@ interface WorkspaceSummary {
 }
 
 /**
- * Review notes on a video for the owner and workspace members; each author can remove their own. With a
- * player (`playerTime` is its time in whole seconds, null when there is none), a note can be pinned to the
- * moment the player is at, and a pinned note's time seeks the player there.
+ * Review notes on a video for the owner and workspace members; each author can remove their own. With the
+ * page's player, a note can be pinned to the moment the player is at when the box is ticked, and a pinned
+ * note's time moves the player there.
  */
-export function VideoComments({ videoId, playerTime = null, onSeek }: { videoId: string; playerTime?: number | null; onSeek?: (sec: number) => void }) {
+export function VideoComments({ videoId, player }: { videoId: string; player?: RefObject<HTMLVideoElement | null> }) {
   const { data, refetch } = useApi<{ comments: VideoComment[] }>(`/api/videos/${videoId}/comments`);
   const [draft, setDraft] = useState("");
-  const [pin, setPin] = useState(false);
+  // The player's time in whole seconds (null without a player), followed here rather than on the page so
+  // playback re-renders only this card; and the moment taken when the box was ticked, which playing on keeps.
+  const [playerTime, setPlayerTime] = useState<number | null>(null);
+  const [pinAt, setPinAt] = useState<number | null>(null);
+  const hasPlayer = !!player;
+  useEffect(() => {
+    const el = player?.current;
+    if (!el) {
+      setPlayerTime(null);
+      setPinAt(null);
+      return;
+    }
+    const read = () => setPlayerTime(Math.floor(el.currentTime));
+    read();
+    const events = ["timeupdate", "seeked", "loadedmetadata"] as const;
+    for (const e of events) el.addEventListener(e, read);
+    return () => {
+      for (const e of events) el.removeEventListener(e, read);
+    };
+  }, [player, hasPlayer]);
+  const seek = (sec: number) => {
+    const el = player?.current;
+    if (!el) return;
+    el.currentTime = sec;
+    el.focus();
+  };
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const comments = data?.comments ?? [];
@@ -41,10 +66,9 @@ export function VideoComments({ videoId, playerTime = null, onSeek }: { videoId:
     setBusy(true);
     setErr(null);
     try {
-      const atSec = pin && playerTime !== null ? playerTime : undefined;
-      await api(`/api/videos/${videoId}/comments`, { method: "POST", body: JSON.stringify({ text, ...(atSec !== undefined ? { atSec } : {}) }) });
+      await api(`/api/videos/${videoId}/comments`, { method: "POST", body: JSON.stringify({ text, ...(pinAt !== null ? { atSec: pinAt } : {}) }) });
       setDraft("");
-      setPin(false);
+      setPinAt(null);
       await refetch();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not post the comment");
@@ -79,11 +103,11 @@ export function VideoComments({ videoId, playerTime = null, onSeek }: { videoId:
                 </div>
                 <p className="whitespace-pre-wrap text-slate-800">
                   {c.atSec !== undefined &&
-                    (onSeek && playerTime !== null ? (
+                    (playerTime !== null ? (
                       <button
                         type="button"
-                        onClick={() => onSeek(c.atSec!)}
-                        aria-label={`Play from ${formatTimestamp(c.atSec)}`}
+                        onClick={() => seek(c.atSec!)}
+                        aria-label={`Go to ${formatTimestamp(c.atSec)} in the video`}
                         className="mr-1.5 rounded bg-brand-50 px-1.5 py-0.5 align-baseline font-mono text-xs font-medium text-brand-700 hover:bg-brand-100"
                         data-testid="comment-time"
                       >
@@ -129,8 +153,8 @@ export function VideoComments({ videoId, playerTime = null, onSeek }: { videoId:
         )}
         {playerTime !== null && (
           <label className="flex items-center gap-2 text-xs text-slate-600">
-            <input type="checkbox" checked={pin} onChange={(e) => setPin(e.target.checked)} className="h-3.5 w-3.5 rounded border-slate-300" />
-            Pin to {formatTimestamp(playerTime)} in the video
+            <input type="checkbox" checked={pinAt !== null} onChange={(e) => setPinAt(e.target.checked ? playerTime : null)} className="h-3.5 w-3.5 rounded border-slate-300" />
+            Pin to {formatTimestamp(pinAt ?? playerTime)} in the video
           </label>
         )}
         <div className="flex items-center gap-2">

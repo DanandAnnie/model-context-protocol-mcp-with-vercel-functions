@@ -138,7 +138,7 @@ export default function WorkspacePage() {
                 disabled={busy}
                 onClick={() => {
                   const typed = window.prompt(
-                    `Delete "${ws.name}" for good? Its videos, translations, avatars, voices, audio clips, templates, presenters and their conversations, viewer emails, brand kit, and settings are deleted for everyone, and its API keys stop working. Cancel a Pro plan first. This cannot be undone.\n\nType the workspace name to confirm.`,
+                    `Delete "${ws.name}" for good? Its videos, translations, avatars, voices, audio clips, templates, presenters and their conversations, viewer emails, brand kit, and settings are deleted for everyone, and its API keys stop working. Cancel its Stripe subscription first. This cannot be undone.\n\nType the workspace name to confirm.`,
                   );
                   if (typed === null) return;
                   if (typed.trim() !== ws.name) return setErr("The name did not match, so nothing was deleted.");

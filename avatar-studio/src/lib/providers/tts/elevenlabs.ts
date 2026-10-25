@@ -64,7 +64,17 @@ export class ElevenLabsTtsProvider implements TtsProvider {
     if (res.ok || res.status === 404) return;
     const body = await res.text();
     // Some ElevenLabs endpoints answer a voice they no longer have with 400 and a "voice_not_found" status.
-    if ((res.status === 400 || res.status === 422) && /voice_(not_found|does_not_exist)/.test(body)) return;
+    if (res.status === 400 && voiceMissing(body)) return;
     throw Object.assign(new Error(`ElevenLabs voice delete failed: ${res.status} ${body}`), { status: res.status });
+  }
+}
+
+/** Whether an ElevenLabs error body's `detail.status` says the voice does not exist (not merely mentions it). */
+function voiceMissing(body: string): boolean {
+  try {
+    const status = (JSON.parse(body) as { detail?: { status?: unknown } }).detail?.status;
+    return status === "voice_not_found" || status === "voice_does_not_exist";
+  } catch {
+    return false;
   }
 }

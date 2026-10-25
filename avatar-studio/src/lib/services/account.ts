@@ -54,6 +54,7 @@ export async function deleteOwnerData(ownerId: string = LOCAL_OWNER, opts: { bil
   if (!opts.billingChecked) await assertNoRenewingPlan(ownerId);
   const counts: Record<string, number> = {};
   const tts = getTtsProvider();
+  let clonesRemoved = 0;
   for (const kind of DELETE_ORDER) {
     const removed = new Set<string>();
     for (;;) {
@@ -67,9 +68,10 @@ export async function deleteOwnerData(ownerId: string = LOCAL_OWNER, opts: { bil
             console.error(err);
             const status = (err as { status?: number }).status;
             throw new ConflictError(
-              `The voice provider would not delete the cloned voice "${(item as { name?: string }).name ?? item.id}"${status ? ` (${status})` : ""}. API keys${counts.voice === undefined && removed.size ? ` and ${removed.size} other cloned voice(s)` : ""} were already removed; videos and the rest were kept. Try again once the provider answers (check its API key if this repeats).`,
+              `The voice provider would not delete the cloned voice "${(item as { name?: string }).name ?? item.id}"${status ? ` (${status})` : ""}. Any API keys${clonesRemoved ? ` and ${clonesRemoved} other cloned voice(s) at the provider` : ""} were already removed; videos and the rest were kept. Try again once the provider answers (check its API key if this repeats).`,
             );
           });
+          clonesRemoved += 1;
         }
         // The clip's audio sits in its own row, removed by id so it is never loaded.
         if (kind === "clip") await getStore().remove("clipaudio", `clipaudio_${item.id}`);

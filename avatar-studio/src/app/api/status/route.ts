@@ -1,5 +1,5 @@
 import { json } from "@/lib/api-utils";
-import { getPlan, renderLimitFor } from "@/lib/billing";
+import { getBillingProvider, getPlan, renderLimitFor } from "@/lib/billing";
 import { config } from "@/lib/config";
 import { UnauthorizedError } from "@/lib/errors";
 import { requireOwner } from "@/lib/owner";
@@ -23,8 +23,9 @@ export async function GET() {
         proPriceLabel: config.proPriceLabel,
         subscriptionStatus: plan.status,
         endsAt: plan.endsAt,
-        // A Stripe customer can open the billing portal even on Free (an unpaid subscription still bills there).
-        billingAccount: plan.provider === "stripe" && Boolean(plan.customerId),
+        // A Stripe customer can open the billing portal even on Free (an unpaid subscription still bills there),
+        // while Stripe is the billing in use: the demo portal would only rewrite the plan.
+        billingAccount: getBillingProvider().name === "stripe" && plan.provider === "stripe" && Boolean(plan.customerId),
       },
     });
   } catch (err) {

@@ -9,9 +9,11 @@ import { owned, stripUndefined } from "./shared";
 
 const languageSchema = z.string().trim().min(2).max(40);
 /** How a dub is made: voice only or lip-synced, and how many people speak. */
+/** `null` reads as "not set" (lip-synced, speakers detected), as an API client may send for an empty field. */
+const unsetIfNull = (v: unknown) => (v === null ? undefined : v);
 const dubOptions = {
-  audioOnly: z.boolean().optional(),
-  speakers: z.number().int().min(1).max(MAX_TRANSLATION_SPEAKERS).optional(),
+  audioOnly: z.preprocess(unsetIfNull, z.boolean().optional()),
+  speakers: z.preprocess(unsetIfNull, z.number().int().min(1).max(MAX_TRANSLATION_SPEAKERS).optional()),
 };
 
 export const translationRequestSchema = z.object({

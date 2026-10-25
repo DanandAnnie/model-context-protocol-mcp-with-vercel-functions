@@ -1672,6 +1672,9 @@ test("a dub can be voice only and name its speakers", async ({ page }) => {
   await page.getByRole("button", { name: "Translate video" }).click();
   const card = page.locator("div", { has: page.getByText(`Interview ${tag}`, { exact: true }) }).getByTestId("translation-meta").first();
   await expect(card).toContainText("→ Spanish · voice only · 2 speakers");
+  // The next video may have a different cast, so the count goes back to detecting it; lip-sync stays as chosen.
+  await expect(page.getByLabel("Speakers")).toHaveValue("0");
+  await expect(page.getByLabel("Lip-sync the dub")).not.toBeChecked();
   const list = (await (await page.request.get("/api/translate")).json()).translations as Array<{ title: string; audioOnly?: boolean; speakers?: number }>;
   const made = list.find((t) => t.title === `Interview ${tag}`);
   expect([made?.audioOnly, made?.speakers]).toEqual([true, 2]);

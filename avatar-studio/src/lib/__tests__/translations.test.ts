@@ -40,6 +40,9 @@ describe("multi-language translation", () => {
     assert.equal(translationBatchSchema.safeParse({ ...base, targetLanguage: "Spanish", speakers: 0 }).success, false);
     assert.equal(translationBatchSchema.safeParse({ ...base, targetLanguage: "Spanish", speakers: 11 }).success, false);
     assert.equal(translationBatchSchema.safeParse({ ...base, targetLanguage: "Spanish", speakers: 1.5 }).success, false);
+    assert.equal(translationBatchSchema.safeParse({ ...base, targetLanguage: "Spanish", speakers: "2" }).success, false, "a number, not a string");
+    const unset = translationBatchSchema.parse({ ...base, targetLanguage: "Spanish", speakers: null, audioOnly: null });
+    assert.equal("speakers" in unset || "audioOnly" in unset, false, "null means not set");
     const made = await createTranslations(translationBatchSchema.parse({ ...base, targetLanguages: ["French", "German"], audioOnly: true, speakers: 2 }), "u-opt");
     assert.deepEqual(made.map((t) => [t.audioOnly, t.speakers]), [[true, 2], [true, 2]]);
     const [plain] = await createTranslations(translationBatchSchema.parse({ ...base, targetLanguage: "Spanish", audioOnly: false }), "u-opt");

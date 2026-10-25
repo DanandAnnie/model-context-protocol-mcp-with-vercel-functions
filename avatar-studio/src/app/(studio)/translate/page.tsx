@@ -45,6 +45,8 @@ function TranslateInner() {
       await api("/api/translate", { method: "POST", body: JSON.stringify({ title: title || fallback, sourceVideoUrl, targetLanguages: languages, ...(lipSync ? {} : { audioOnly: true }), ...(speakers ? { speakers } : {}) }) });
       setSource("");
       setTitle("");
+      // The next video may have a different cast; the lip-sync choice is a preference and stays.
+      setSpeakers(0);
       refetch();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Translation failed");
@@ -85,14 +87,14 @@ function TranslateInner() {
             </fieldset>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="flex items-start gap-2 text-sm text-slate-700">
-                <input type="checkbox" className="mt-0.5" checked={lipSync} onChange={(e) => setLipSync(e.target.checked)} />
+                <input type="checkbox" className="mt-0.5" checked={lipSync} disabled={canEdit === false} onChange={(e) => setLipSync(e.target.checked)} />
                 <span>
                   Lip-sync the dub
                   <span className="block text-xs text-slate-500">Off dubs the voice only: faster, and fine when the speaker is often off screen.</span>
                 </span>
               </label>
               <Field label="Speakers" hint="People talking in the video, so each keeps a voice of their own.">
-                <select className={inputClass} value={speakers} onChange={(e) => setSpeakers(Number(e.target.value))}>
+                <select className={inputClass} value={speakers} disabled={canEdit === false} onChange={(e) => setSpeakers(Number(e.target.value))}>
                   <option value={0}>Detect automatically</option>
                   {Array.from({ length: MAX_TRANSLATION_SPEAKERS }, (_, i) => i + 1).map((n) => (
                     <option key={n} value={n}>

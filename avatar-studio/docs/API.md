@@ -200,7 +200,7 @@ Returns `{ "reply": "…" }`.
 
 ## Translation
 
-- `POST /api/translate` → `{ "title", "sourceVideoUrl", "targetLanguage" }` → `201 { "translation" }`, or `{ "title", "sourceVideoUrl", "targetLanguages": [...] }` (1 to 5 languages, repeats ignored without regard to case) → `201 { "translations" }`, one dubbing job per language, each titled `"<title> (<language>)"`. Either form takes `"audioOnly": true` to dub the voice alone and leave the mouth as filmed (HeyGen `translate_audio_only`; lip-synced otherwise) and `"speakers"` (1–10) to say how many people talk so each keeps a voice of their own (HeyGen `speaker_num`; detected when absent); both are stored on each job. A job the provider refuses is returned as failed while the rest start (the response then carries an `error` saying how many failed); `502` when none started
+- `POST /api/translate` → `{ "title", "sourceVideoUrl", "targetLanguage" }` → `201 { "translation" }`, or `{ "title", "sourceVideoUrl", "targetLanguages": [...] }` (1 to 5 languages, repeats ignored without regard to case) → `201 { "translations" }`, one dubbing job per language, each titled `"<title> (<language>)"`. Either form takes `"audioOnly": true` to dub the voice alone and leave the mouth as filmed (HeyGen `translate_audio_only`; lip-synced otherwise) and `"speakers"` (1–10, this app's limit; `null` means not set) to say how many people talk so each keeps a voice of their own (HeyGen `speaker_num`; detected when absent); both are stored on each job. A job the provider refuses is returned as failed while the rest start (the response then carries an `error` saying how many failed); `502` when none started
 - `GET /api/translate`, `GET /api/translate/:id`
 
 ## Brand kit

@@ -4,6 +4,7 @@ import { config } from "./config";
 import { nowIso } from "./ids";
 import { LOCAL_OWNER } from "./owner-id";
 import { getStore } from "./store";
+import { ValidationError } from "./errors";
 import type { Plan, PlanId } from "./types";
 
 export const planId = (ownerId: string) => `plan_${ownerId}`;
@@ -24,6 +25,31 @@ export async function setPlan(ownerId: string, patch: Partial<Omit<Plan, "id" | 
   return getStore().put("plan", next);
 }
 
+/** Subscription states Stripe still charges, and that can be cancelled from the billing portal. */
+const RENEWING = ["active", "trialing", "past_due", "unpaid"];
+
+/**
+ * Refuses (400) while a Stripe subscription still renews for this owner: deleting the plan row would leave
+ * them billed with no way to reach the billing portal. The stored plan answers first; when it says the plan
+ * renews, Stripe is asked too, so a cancellation whose webhook never arrived does not block for good.
+ */
+export async function assertNoRenewingPlan(ownerId: string): Promise<void> {
+  const plan = await getPlan(ownerId);
+  if (plan.plan !== "pro" || plan.provider !== "stripe" || plan.endsAt) return;
+  const provider = getBillingProvider();
+  const renews = provider.subscriptionRenews ? await provider.subscriptionRenews(plan).catch(() => true) : true;
+  if (renews) throw new ValidationError("Cancel the Pro plan first (Settings, Manage subscription); it keeps billing otherwise");
+}
+
+/** When a cancelled subscription stops: `cancel_at`, else the period end (on the items since Stripe's 2025-03-31 API). */
+function stripeEndsAt(obj: Record<string, unknown>): string | undefined {
+  if (typeof obj.cancel_at === "number") return new Date(obj.cancel_at * 1000).toISOString();
+  if (!obj.cancel_at_period_end) return undefined;
+  const item = ((obj.items as { data?: Array<Record<string, unknown>> } | undefined)?.data ?? [])[0];
+  const end = typeof obj.current_period_end === "number" ? obj.current_period_end : item?.current_period_end;
+  return typeof end === "number" ? new Date(end * 1000).toISOString() : undefined;
+}
+
 /** Monthly render allowance for an owner, or null when unlimited. */
 export async function renderLimitFor(ownerId: string): Promise<number | null> {
   const plan = await getPlan(ownerId);
@@ -39,6 +65,8 @@ export interface BillingProvider {
   checkout(ownerId: string, returnUrl: string): Promise<{ url: string }>;
   /** Opens subscription management (cancel, update card); returns the URL. */
   portal(ownerId: string, returnUrl: string): Promise<{ url: string }>;
+  /** Asks the billing provider whether the plan's subscription will charge again (for when a webhook was missed). */
+  subscriptionRenews?(plan: Plan): Promise<boolean>;
 }
 
 /** Demo billing: upgrades and downgrades take effect immediately, no payment. */
@@ -59,16 +87,28 @@ export class StripeBillingProvider implements BillingProvider {
   name = "stripe";
   constructor(private secretKey: string, private pricePro: string) {}
 
-  private async call<T>(path: string, params: Record<string, string>): Promise<T> {
+  private async call<T>(path: string, params?: Record<string, string>): Promise<T> {
     const res = await fetch(`https://api.stripe.com/v1/${path}`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${this.secretKey}`, "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams(params).toString(),
+      method: params ? "POST" : "GET",
+      headers: { Authorization: `Bearer ${this.secretKey}`, ...(params ? { "Content-Type": "application/x-www-form-urlencoded" } : {}) },
+      body: params ? new URLSearchParams(params).toString() : undefined,
       signal: AbortSignal.timeout(15_000),
     });
-    const body = (await res.json()) as T & { error?: { message?: string } };
-    if (!res.ok) throw new Error(body.error?.message ?? `Stripe returned ${res.status}`);
+    const body = (await res.json()) as T & { error?: { message?: string; code?: string } };
+    if (!res.ok) throw Object.assign(new Error(body.error?.message ?? `Stripe returned ${res.status}`), { code: body.error?.code });
     return body;
+  }
+
+  async subscriptionRenews(plan: Plan): Promise<boolean> {
+    if (!plan.subscriptionId) return false;
+    try {
+      const sub = await this.call<Record<string, unknown>>(`subscriptions/${encodeURIComponent(plan.subscriptionId)}`);
+      return RENEWING.includes(String(sub.status)) && !sub.cancel_at_period_end && typeof sub.cancel_at !== "number";
+    } catch (err) {
+      // A subscription Stripe no longer has cannot charge; any other failure is treated as "still renews".
+      if ((err as { code?: string }).code === "resource_missing") return false;
+      throw err;
+    }
   }
 
   async checkout(ownerId: string, returnUrl: string) {
@@ -138,6 +178,8 @@ export async function applyStripeEvent(event: StripeEvent): Promise<string | nul
   const obj = event.data.object;
   const meta = (obj.metadata as Record<string, string> | undefined) ?? {};
   const ownerId = (obj.client_reference_id as string | undefined) ?? meta.ownerId;
+  // A deleted workspace gets no plan row back from a late event (its subscription's final "deleted", say).
+  if (ownerId?.startsWith("ws_") && !(await getStore().get("workspace", ownerId))) return null;
   switch (event.type) {
     case "checkout.session.completed": {
       if (!ownerId) return null;
@@ -154,7 +196,7 @@ export async function applyStripeEvent(event: StripeEvent): Promise<string | nul
     case "customer.subscription.deleted": {
       if (!ownerId) return null;
       const status = String(obj.status ?? "");
-      const endsAt = obj.cancel_at_period_end && typeof obj.current_period_end === "number" ? new Date(obj.current_period_end * 1000).toISOString() : undefined;
+      const endsAt = stripeEndsAt(obj);
       const active = event.type !== "customer.subscription.deleted" && ["active", "trialing", "past_due"].includes(status);
       await setPlan(ownerId, active ? { plan: "pro", provider: "stripe", status, endsAt, subscriptionId: typeof obj.id === "string" ? obj.id : undefined } : { plan: "free", provider: "stripe" });
       return ownerId;

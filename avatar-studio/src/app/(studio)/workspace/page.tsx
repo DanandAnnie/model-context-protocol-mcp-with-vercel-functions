@@ -136,16 +136,18 @@ export default function WorkspacePage() {
               <Button
                 variant="danger"
                 disabled={busy}
-                onClick={() =>
-                  window.prompt(
+                onClick={() => {
+                  const typed = window.prompt(
                     `Delete "${ws.name}" for good? Its videos, translations, avatars, voices, audio clips, templates, presenters and their conversations, viewer emails, brand kit, and settings are deleted for everyone, and its API keys stop working. Cancel a Pro plan first. This cannot be undone.\n\nType the workspace name to confirm.`,
-                  )?.trim() === ws.name &&
-                  run(async () => {
+                  );
+                  if (typed === null) return;
+                  if (typed.trim() !== ws.name) return setErr("The name did not match, so nothing was deleted.");
+                  void run(async () => {
                     await api(`/api/workspaces/${ws.id}`, { method: "DELETE" });
                     await api("/api/workspaces/switch", { method: "POST", body: JSON.stringify({ id: data!.personalId }) });
                     window.location.href = "/home";
-                  })
-                }
+                  });
+                }}
               >
                 <Trash2 className="h-4 w-4" /> Delete workspace
               </Button>

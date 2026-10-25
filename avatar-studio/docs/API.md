@@ -242,7 +242,7 @@ Returns `{ "reply": "…" }`.
 ## Account data
 
 - `GET /api/account/export` downloads everything stored for the active account or workspace as JSON (key hashes, the webhook secret, and cover image bytes are left out; each video lists its cover's type and size; the activity feed is included). Session only; `403` with a key.
-- `DELETE /api/account` with `{ "confirm": "DELETE" }` removes every record of the active account or workspace (cloned voices are deleted at the provider too) and returns counts per kind; `400` while a Stripe Pro plan still renews (cancel it first, or the subscription keeps billing with no plan left to manage it). Session only; in a workspace, owners only (`403` for editors). Workspace membership is unaffected.
+- `DELETE /api/account` with `{ "confirm": "DELETE" }` removes every record of the active account or workspace (cloned voices are deleted at the provider too) and returns counts per kind (`voiceLeftAtProvider` counts cloned voices the provider refused to delete for good, for instance after its key was revoked; remove those in the provider's dashboard); `400` while a Stripe Pro plan still renews (cancel it first, or the subscription keeps billing with no plan left to manage it; Stripe is asked directly when the stored plan says it renews, so a missed cancellation webhook does not block). Keys go first and cloned voices next, so a provider failure stops the run before other data is lost. Session only; in a workspace, owners only (`403` for editors). Workspace membership is unaffected.
 
 ## Outbound webhooks
 

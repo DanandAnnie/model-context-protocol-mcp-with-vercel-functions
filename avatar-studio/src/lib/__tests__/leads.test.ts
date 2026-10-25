@@ -20,6 +20,9 @@ import {
   videoRequestSchema,
 } from "../services";
 import { saveNotifySettings, setNotificationFetch } from "../notifications";
+import { createApiKey, ownerForApiKey } from "../api-keys";
+import { MockBillingProvider, applyStripeEvent, getPlan, setBillingProvider, setPlan } from "../billing";
+import { MockTtsProvider } from "../providers/tts/mock";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import type { Video, VideoLead } from "../types";
 
@@ -112,7 +115,6 @@ describe("share-page email gate", () => {
   it("is refused while a Stripe plan still renews, and clears rows past a store's listing cap", async () => {
     const { createWorkspace, deleteWorkspace } = await import("../workspaces");
     const { deleteOwnerData } = await import("../services");
-    const { setPlan } = await import("../billing");
     // A store that, like Supabase's API, returns only so many rows per listing.
     class CappedStore extends MemoryStore {
       async list<T>(kind: Parameters<MemoryStore["list"]>[0], ownerId?: string): Promise<T[]> {
@@ -124,14 +126,76 @@ describe("share-page email gate", () => {
     const ws = await createWorkspace("Acme", alice);
     const v = await gatedVideo(ws.id);
     for (const n of [1, 2, 3, 4, 5]) await captureVideoLead(v, lead(`viewer${n}@example.com`));
+    const { secret } = await createApiKey("CI", ws.id, alice.id);
     await setPlan(ws.id, { plan: "pro", provider: "stripe", status: "active", customerId: "cus_1", subscriptionId: "sub_1" });
     await assert.rejects(deleteWorkspace(ws.id, alice, deleteOwnerData), /Cancel the Pro plan/);
     assert.ok(await getStore().get("workspace", ws.id), "a refused delete keeps the workspace");
     assert.ok(await getStore().get("video", v.id));
+    assert.equal(await ownerForApiKey(secret), ws.id, "and its keys keep working");
     // Once cancelled (it runs to the end of the period), the delete goes ahead and takes every lead.
     await setPlan(ws.id, { plan: "pro", provider: "stripe", status: "active", endsAt: "2030-01-01T00:00:00.000Z" });
     await deleteWorkspace(ws.id, alice, deleteOwnerData);
     assert.equal(await getStore().get("workspace", ws.id), null);
     assert.deepEqual(await getStore().list<VideoLead>("videolead", ws.id), [], "five leads gone, two per listing");
+  });
+
+  it("asks Stripe before refusing, so a cancellation whose webhook was missed does not block", async () => {
+    const { deleteOwnerData } = await import("../services");
+    await setPlan("u1", { plan: "pro", provider: "stripe", status: "active", subscriptionId: "sub_gone" });
+    const asked: string[] = [];
+    const stripe = Object.assign(new MockBillingProvider(), {
+      name: "stripe",
+      subscriptionRenews: async (plan: { subscriptionId?: string }) => {
+        asked.push(plan.subscriptionId ?? "");
+        return asked.length > 1 ? false : true;
+      },
+    });
+    setBillingProvider(stripe);
+    try {
+      await assert.rejects(deleteOwnerData("u1"), /Cancel the Pro plan/, "Stripe says it still renews");
+      await deleteOwnerData("u1");
+      assert.deepEqual(asked, ["sub_gone", "sub_gone"]);
+      stripe.subscriptionRenews = async () => {
+        throw new Error("Stripe is down");
+      };
+      await setPlan("u1", { plan: "pro", provider: "stripe", status: "active", subscriptionId: "sub_2" });
+      await assert.rejects(deleteOwnerData("u1"), /Cancel the Pro plan/, "an unanswered lookup is treated as still renewing");
+    } finally {
+      setBillingProvider(undefined);
+    }
+  });
+
+  it("reads when a cancelled subscription ends from current Stripe events, and leaves deleted workspaces alone", async () => {
+    const sub = (extra: Record<string, unknown>, ownerId = "u9") => ({ type: "customer.subscription.updated", data: { object: { id: "sub_1", status: "active", metadata: { ownerId }, ...extra } } });
+    await applyStripeEvent(sub({ cancel_at_period_end: true, items: { data: [{ current_period_end: 1800000000 }] } }));
+    assert.equal((await getPlan("u9")).endsAt, new Date(1800000000 * 1000).toISOString(), "the period end moved onto the items in 2025");
+    await applyStripeEvent(sub({ cancel_at: 1700000000 }));
+    assert.equal((await getPlan("u9")).endsAt, new Date(1700000000 * 1000).toISOString());
+    await applyStripeEvent(sub({}));
+    assert.equal((await getPlan("u9")).endsAt, undefined, "renewing again clears the date");
+    assert.equal(await applyStripeEvent({ type: "customer.subscription.deleted", data: { object: { id: "sub_1", status: "canceled", metadata: { ownerId: "ws_gone" } } } }), null);
+    assert.equal(await getStore().get("plan", "plan_ws_gone"), null, "no plan row comes back for a deleted workspace");
+  });
+
+  it("stops before deleting anything when a cloned voice cannot be removed yet, and moves on when it never can", async () => {
+    const { deleteOwnerData } = await import("../services");
+    const v = await gatedVideo();
+    await getStore().put("voice", { id: "clone_1", name: "Me", provider: "mock", source: "custom", ownerId: "u1" });
+    const original = MockTtsProvider.prototype.deleteVoice;
+    let status = 503;
+    MockTtsProvider.prototype.deleteVoice = async () => {
+      throw Object.assign(new Error(`voice delete failed: ${status}`), { status });
+    };
+    try {
+      await assert.rejects(deleteOwnerData("u1"), /503/);
+      assert.ok(await getStore().get("video", v.id), "a passing failure stops the run before the videos go");
+      assert.ok(await getStore().get("voice", "clone_1"), "and keeps the row so a retry finds the clone");
+      status = 401;
+      const counts = await deleteOwnerData("u1");
+      assert.equal(counts.voiceLeftAtProvider, 1, "a refusal that will not change is reported, not retried for ever");
+      assert.equal(await getStore().get("video", v.id), null);
+    } finally {
+      MockTtsProvider.prototype.deleteVoice = original;
+    }
   });
 });

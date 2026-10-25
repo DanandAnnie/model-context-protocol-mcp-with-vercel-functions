@@ -3,8 +3,7 @@ import { nowIso } from "../ids";
 import { getTtsProvider } from "../providers";
 import { getStore } from "../store";
 import { LOCAL_OWNER } from "../owner-id";
-import { getPlan } from "../billing";
-import { ValidationError } from "../errors";
+import { assertNoRenewingPlan } from "../billing";
 
 const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip", "videolead"] as const;
 /**
@@ -37,20 +36,26 @@ export async function exportOwnerData(ownerId: string = LOCAL_OWNER): Promise<Ow
 }
 
 /**
- * Deletes everything stored under an owner id (cloned voices are removed at the provider too). Returns counts per kind.
- * A Stripe subscription that is still renewing is refused first: deleting its plan row would leave the owner billed
- * with no way to reach the billing portal. Each kind is listed until it comes back empty, because a store may cap
- * one listing (Supabase returns at most 1,000 rows), and a failed provider voice delete stops the run with the row
- * kept so a retry can find the clone again.
+ * Kinds in deletion order: keys first so no script keeps writing while the rest goes, then voices, whose
+ * provider call is the step most likely to fail, so a failure stops the run before anything else is lost.
+ */
+const DELETE_ORDER = ["apikey", "voice", ...OWNER_KINDS.filter((k) => k !== "apikey" && k !== "voice")] as const;
+
+/** Provider answers that will not change on a retry (a revoked key, a clone under another account). */
+const PERMANENT_PROVIDER_STATUS = [400, 401, 403, 422];
+
+/**
+ * Deletes everything stored under an owner id (cloned voices are removed at the provider too). Returns counts per kind,
+ * plus `voiceLeftAtProvider` when the provider refused a clone for good (it can only be removed in the provider's own
+ * dashboard then). A Stripe subscription that still renews is refused first (400). Each kind is listed until it comes
+ * back empty, because a store may cap one listing (Supabase returns at most 1,000 rows); a passing provider failure
+ * stops the run with the voice row kept, so a retry can find the clone again.
  */
 export async function deleteOwnerData(ownerId: string = LOCAL_OWNER): Promise<Record<string, number>> {
-  const plan = await getPlan(ownerId);
-  if (plan.plan === "pro" && plan.provider === "stripe" && !plan.endsAt) {
-    throw new ValidationError("Cancel the Pro plan first (Settings, Manage subscription); it keeps billing otherwise");
-  }
+  await assertNoRenewingPlan(ownerId);
   const counts: Record<string, number> = {};
   const tts = getTtsProvider();
-  for (const kind of OWNER_KINDS) {
+  for (const kind of DELETE_ORDER) {
     const removed = new Set<string>();
     for (;;) {
       const items = await getStore().list<{ id: string; provider?: string }>(kind, ownerId);
@@ -58,7 +63,14 @@ export async function deleteOwnerData(ownerId: string = LOCAL_OWNER): Promise<Re
       // A row that is still listed after being removed would loop forever; stop and report it instead.
       if (items.every((item) => removed.has(item.id))) throw new Error(`Could not delete ${kind} records; try again`);
       for (const item of items) {
-        if (kind === "voice" && item.provider === tts.name) await tts.deleteVoice?.(item.id);
+        if (kind === "voice" && item.provider === tts.name && !removed.has(item.id)) {
+          try {
+            await tts.deleteVoice?.(item.id);
+          } catch (err) {
+            if (!PERMANENT_PROVIDER_STATUS.includes((err as { status?: number }).status ?? 0)) throw err;
+            counts.voiceLeftAtProvider = (counts.voiceLeftAtProvider ?? 0) + 1;
+          }
+        }
         // The clip's audio sits in its own row, removed by id so it is never loaded.
         if (kind === "clip") await getStore().remove("clipaudio", `clipaudio_${item.id}`);
         await getStore().remove(kind, item.id);

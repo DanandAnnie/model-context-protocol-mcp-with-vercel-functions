@@ -61,6 +61,6 @@ export class ElevenLabsTtsProvider implements TtsProvider {
 
   async deleteVoice(voiceId: string) {
     const res = await fetch(`${BASE}/voices/${encodeURIComponent(voiceId)}`, { method: "DELETE", headers: this.headers() });
-    if (!res.ok && res.status !== 404) throw new Error(`ElevenLabs voice delete failed: ${res.status} ${await res.text()}`);
+    if (!res.ok && res.status !== 404) throw Object.assign(new Error(`ElevenLabs voice delete failed: ${res.status} ${await res.text()}`), { status: res.status });
   }
 }

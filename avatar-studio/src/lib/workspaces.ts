@@ -4,6 +4,7 @@ import { z } from "zod";
 import { revokeApiKeysFor } from "./api-keys";
 import { deleteNotifySettings } from "./notifications";
 import { NotFoundError, ValidationError } from "./errors";
+import { assertNoRenewingPlan } from "./billing";
 import { newId, nowIso } from "./ids";
 import { getStore } from "./store";
 import type { Membership, Workspace, WorkspaceInvite, WorkspaceRole } from "./types";
@@ -112,6 +113,8 @@ export async function deleteWorkspace(id: string, user: User, purge?: (ownerId: 
   const ws = await requireRole(id, user, ["owner"]);
   // The purge deletes by owner id; never let it run on anything but this workspace's own id.
   if (!isWorkspaceId(id) || ws.id !== id) throw new NotFoundError("Workspace not found");
+  // Checked before anything is touched, so a refusal leaves the keys working.
+  if (purge) await assertNoRenewingPlan(id);
   await revokeApiKeysFor(id);
   if (purge) await purge(id);
   await deleteNotifySettings(id);

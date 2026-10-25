@@ -5,14 +5,22 @@ function env(name: string): string | undefined {
   return v && v.trim() !== "" ? v.trim() : undefined;
 }
 
+// A preview may have credentials provisioned before live operations are approved.
+// Hide every paid-provider credential while locked, including implicit HeyGen translation.
+const demoLocked = (env("STUDIO_DEMO_MODE") ?? "false").toLowerCase() === "true";
+function providerSecret(name: string): string | undefined {
+  return demoLocked ? undefined : env(name);
+}
+
 export const config = {
+  demoLocked,
   avatarProvider: (env("AVATAR_PROVIDER") ?? "mock").toLowerCase(),
   ttsProvider: (env("TTS_PROVIDER") ?? "mock").toLowerCase(),
   scriptProvider: (env("SCRIPT_PROVIDER") ?? "mock").toLowerCase(),
-  heygenApiKey: env("HEYGEN_API_KEY"),
-  didApiKey: env("DID_API_KEY"),
-  elevenLabsApiKey: env("ELEVENLABS_API_KEY"),
-  anthropicApiKey: env("ANTHROPIC_API_KEY"),
+  heygenApiKey: providerSecret("HEYGEN_API_KEY"),
+  didApiKey: providerSecret("DID_API_KEY"),
+  elevenLabsApiKey: providerSecret("ELEVENLABS_API_KEY"),
+  anthropicApiKey: providerSecret("ANTHROPIC_API_KEY"),
   supabaseUrl: env("SUPABASE_URL"),
   supabaseServiceRoleKey: env("SUPABASE_SERVICE_ROLE_KEY"),
   appUrl: env("APP_URL") ?? env("VERCEL_URL")?.replace(/^(?!https?:\/\/)/, "https://") ?? "http://localhost:3000",
@@ -21,7 +29,7 @@ export const config = {
   streamingEnabled: (env("STREAMING_AVATAR") ?? "true").toLowerCase() !== "false",
   /** "resend" sends workspace invites by email; anything else only produces links. */
   emailProvider: (env("EMAIL_PROVIDER") ?? "mock").toLowerCase(),
-  resendApiKey: env("RESEND_API_KEY"),
+  resendApiKey: providerSecret("RESEND_API_KEY"),
   emailFrom: env("EMAIL_FROM") ?? "Avatar Studio <onboarding@resend.dev>",
   /** Free-plan cap on renders per owner per calendar month (UTC). Unset = unlimited. */
   renderLimitPerMonth: parsePositiveInt(env("RENDER_LIMIT_PER_MONTH")),
@@ -30,8 +38,8 @@ export const config = {
   proPriceLabel: env("PLAN_PRO_PRICE_LABEL") ?? "$29 / month",
   /** "stripe" with the keys below, otherwise a mock that upgrades instantly (demo). */
   billingProvider: (env("BILLING_PROVIDER") ?? "mock").toLowerCase(),
-  stripeSecretKey: env("STRIPE_SECRET_KEY"),
-  stripeWebhookSecret: env("STRIPE_WEBHOOK_SECRET"),
+  stripeSecretKey: providerSecret("STRIPE_SECRET_KEY"),
+  stripeWebhookSecret: providerSecret("STRIPE_WEBHOOK_SECRET"),
   stripePricePro: env("STRIPE_PRICE_PRO"),
 };
 

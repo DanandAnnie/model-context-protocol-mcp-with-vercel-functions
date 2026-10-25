@@ -31,3 +31,6 @@ create index if not exists studio_items_apikey_hash_idx
 -- The app talks to this table with the service-role key only, so RLS can stay
 -- enabled with no policies: anonymous clients get nothing.
 alter table public.studio_items enable row level security;
+-- Explicit privileges also work when automatic grants for new tables are disabled.
+revoke all on public.studio_items from anon, authenticated;
+grant select, insert, update, delete on public.studio_items to service_role;

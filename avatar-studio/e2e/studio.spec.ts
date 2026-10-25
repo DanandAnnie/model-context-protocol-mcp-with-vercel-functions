@@ -892,7 +892,7 @@ test("personalized batch creates one video per CSV row", async ({ page }) => {
 });
 
 test("captions are served as SRT and VTT, security headers are set", async ({ page, request }) => {
-  const v = await createVideoViaApi(page, "Caption formats", { captions: true, captionStyle: { position: "top", size: "large" } });
+  const v = await createVideoViaApi(page, "Caption formats", { captions: true, captionStyle: { position: "top", size: "large", look: "yellow" } });
   const vtt = await request.get(`/api/videos/${v.id}/captions?format=vtt`);
   expect(vtt.headers()["content-type"]).toContain("text/vtt");
   expect(await vtt.text()).toMatch(/^WEBVTT/);
@@ -913,10 +913,11 @@ test("captions are served as SRT and VTT, security headers are set", async ({ pa
   // The player carries the size as a class, which the stylesheet turns into a cue font size.
   await page.goto(`/share/${v.id}`);
   await expect(page.getByTestId("share-player")).toHaveClass(/cue-large/);
+  await expect(page.getByTestId("share-player")).toHaveClass(/cue-look-yellow/);
   // The track is on from the start: the demo renderer (like D-ID, or HeyGen with a style) burns no captions into the file.
   await expect(page.getByTestId("share-player").locator("track")).toHaveAttribute("default", "");
   await page.goto(`/videos/${v.id}`);
-  await expect(page.getByText("On · top, large")).toBeVisible();
+  await expect(page.getByText("On · top, large, yellow")).toBeVisible();
   // The editor offers the style once captions are on, previews it on the stage, and a copy keeps it.
   await page.goto(`/create?from=${v.id}`);
   await page.getByRole("button", { name: "Settings" }).click();
@@ -924,6 +925,10 @@ test("captions are served as SRT and VTT, security headers are set", async ({ pa
   await expect(page.getByTestId("stage-caption")).toHaveClass(/top-4/);
   await page.getByRole("group", { name: "Caption size" }).getByRole("button", { name: "small" }).click();
   await expect(page.getByTestId("stage-caption")).toHaveClass(/text-xs/);
+  await expect(page.getByRole("group", { name: "Caption look" }).getByRole("button", { name: "yellow" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("stage-caption")).toHaveAttribute("data-look", "yellow");
+  await page.getByRole("group", { name: "Caption look" }).getByRole("button", { name: "bold" }).click();
+  await expect(page.getByTestId("stage-caption")).toHaveClass(/font-bold/);
 });
 
 test("brand kit pre-fills the editor and brands the share page", async ({ page }) => {

@@ -478,6 +478,21 @@ describe("captions", () => {
     assert.throws(() => captionStyleSchema.parse({ position: "middle", size: "large" }));
   });
 
+  it("takes a caption look, storing the classic one as absent", async () => {
+    const { captionStyleSchema, videoRequestSchema } = await import("../services/videos");
+    const { isDefaultCaptionStyle } = await import("../types");
+    assert.deepEqual(captionStyleSchema.parse({ position: "top", size: "large", look: "yellow" }), { position: "top", size: "large", look: "yellow" });
+    assert.deepEqual(captionStyleSchema.parse({ position: "top", size: "large", look: "classic" }), { position: "top", size: "large" });
+    assert.throws(() => captionStyleSchema.parse({ position: "top", size: "large", look: "neon" }));
+    assert.equal(isDefaultCaptionStyle({ position: "bottom", size: "medium", look: "classic" }), true);
+    assert.equal(isDefaultCaptionStyle({ position: "bottom", size: "medium", look: "bold" }), false, "a look alone is a style worth keeping");
+    // A look on otherwise default placement survives into the stored video, so HeyGen leaves its captions to the track.
+    const v = await createVideo(videoRequestSchema.parse({ title: "Look", script: "Hello.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, captions: true, captionStyle: { position: "bottom", size: "medium", look: "minimal" } }));
+    assert.deepEqual(v.captionStyle, { position: "bottom", size: "medium", look: "minimal" });
+    const plain = await createVideo(videoRequestSchema.parse({ title: "Plain", script: "Hello.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, captions: true, captionStyle: { position: "bottom", size: "medium", look: "classic" } }));
+    assert.equal(plain.captionStyle, undefined);
+  });
+
   it("keeps the share page's track off only for a HeyGen file that carries captions already", async () => {
     const { captionsBurnedIn, heygenBurnsCaptions } = await import("../captions");
     assert.equal(heygenBurnsCaptions({ captions: true }), true);

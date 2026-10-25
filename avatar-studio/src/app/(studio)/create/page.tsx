@@ -16,7 +16,7 @@ import { languageLabel } from "@/lib/language";
 import { stripPauses } from "@/lib/pauses";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
-import { CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, RESOLUTIONS, isDefaultCaptionStyle as isDefaultCaptionStyleFn, type AspectRatio, type AudioClip, type Avatar, type Background, type BrandKit, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice } from "@/lib/types";
+import { CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, RESOLUTIONS, isDefaultCaptionStyle as isDefaultCaptionStyleFn, type AspectRatio, type AudioClip, type Avatar, type Background, type BrandKit, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -67,6 +67,13 @@ const newScene = (script = "", background: Background = DEFAULT_BG, presenter: P
 const isDefaultLayout = (l: SceneLayout) => l.scale === 1 && l.x === 0 && l.y === 0;
 const TONES = ["friendly", "professional", "formal", "energetic", "calm"] as const;
 type Tab = "avatar" | "voice" | "background" | "settings";
+
+/** The stage preview's take on each caption look; "classic" follows the background so it stays readable. */
+const STAGE_LOOK: Partial<Record<CaptionLook, string>> = {
+  bold: "bg-black text-white font-bold",
+  yellow: "bg-black/75 text-yellow-400 font-semibold",
+  minimal: "bg-transparent text-white [text-shadow:0_0_4px_#000,0_1px_2px_#000]",
+};
 
 export default function CreatePage() {
   return (
@@ -473,7 +480,8 @@ function CreateInner() {
               {captions && active.script.trim() && (
                 <div
                   data-testid="stage-caption"
-                  className={`absolute ${captionStyle.position === "top" ? "top-4" : "bottom-4"} left-1/2 max-w-[85%] -translate-x-1/2 rounded-md px-3 py-1.5 text-center font-medium ${captionStyle.size === "small" ? "text-xs" : captionStyle.size === "large" ? "text-lg" : "text-sm"} ${bgIsDark ? "bg-white/90 text-slate-900" : "bg-black/80 text-white"}`}
+                  className={`absolute ${captionStyle.position === "top" ? "top-4" : "bottom-4"} left-1/2 max-w-[85%] -translate-x-1/2 rounded-md px-3 py-1.5 text-center font-medium ${captionStyle.size === "small" ? "text-xs" : captionStyle.size === "large" ? "text-lg" : "text-sm"} ${STAGE_LOOK[captionStyle.look ?? "classic"] ?? (bgIsDark ? "bg-white/90 text-slate-900" : "bg-black/80 text-white")}`}
+                  data-look={captionStyle.look ?? "classic"}
                 >
                   {stripPauses(active.script).trim().split(/(?<=[.!?])\s+/)[0].slice(0, 90)}
                 </div>
@@ -835,7 +843,7 @@ function CreateInner() {
                 {captions && (
                   <div className="rounded-lg border border-slate-200 px-3 py-3" data-testid="caption-style">
                     <div className="text-sm font-medium text-slate-800">Caption style</div>
-                    <div className="mt-0.5 text-xs text-slate-500">Where subtitles sit and how big they read in the share page's subtitle track and the subtitle file. A renderer that burns captions into the video leaves them off, so this look is the only one and the downloaded file carries no captions.</div>
+                    <div className="mt-0.5 text-xs text-slate-500">Where subtitles sit, how big they read, and how they look in the share page's subtitle track and the subtitle file. A renderer that burns captions into the video leaves them off, so this look is the only one and the downloaded file carries no captions.</div>
                     <div className="mt-2 grid gap-2 sm:grid-cols-2">
                       <div role="group" aria-label="Caption position" className="flex gap-1">
                         {CAPTION_POSITIONS.map((pos) => (
@@ -850,6 +858,16 @@ function CreateInner() {
                             {size}
                           </button>
                         ))}
+                      </div>
+                      <div role="group" aria-label="Caption look" className="flex gap-1 sm:col-span-2">
+                        {CAPTION_LOOKS.map((look) => {
+                          const on = (captionStyle.look ?? "classic") === look;
+                          return (
+                            <button key={look} type="button" aria-pressed={on} onClick={() => setCaptionStyle(look === "classic" ? { position: captionStyle.position, size: captionStyle.size } : { ...captionStyle, look })} className={`flex-1 rounded-lg border px-2 py-1.5 text-xs font-medium capitalize ${on ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}>
+                              {look}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   </div>

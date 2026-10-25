@@ -691,7 +691,7 @@ export default function VideoDetailPage() {
                   </Row>
                   <Row label="Speed">{video.speed}x</Row>
                   {video.pitch ? <Row label="Pitch">{video.pitch > 0 ? `+${video.pitch}` : video.pitch}</Row> : null}
-                  <Row label="Captions">{video.captions ? `On${video.captionStyle ? ` · ${video.captionStyle.position}, ${video.captionStyle.size}` : ""}` : "Off"}</Row>
+                  <Row label="Captions">{video.captions ? `On${video.captionStyle ? ` · ${video.captionStyle.position}, ${video.captionStyle.size}${video.captionStyle.look ? `, ${video.captionStyle.look}` : ""}` : ""}` : "Off"}</Row>
                   <Row label="Background">
                     {video.background.type === "color" ? (
                       <span className="inline-flex items-center gap-2"><span className="h-4 w-4 rounded border border-slate-200" style={{ background: video.background.value }} />{video.background.value}</span>

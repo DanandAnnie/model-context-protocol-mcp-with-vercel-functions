@@ -168,16 +168,21 @@ export interface VideoRequest {
 
 export const CAPTION_POSITIONS = ["bottom", "top"] as const;
 export const CAPTION_SIZES = ["small", "medium", "large"] as const;
+/** Subtitle looks: white on a dark box, bold on a solid box, yellow on a dark box, and white with a shadow and no box. */
+export const CAPTION_LOOKS = ["classic", "bold", "yellow", "minimal"] as const;
 export type CaptionPosition = (typeof CAPTION_POSITIONS)[number];
 export type CaptionSize = (typeof CAPTION_SIZES)[number];
-/** Where subtitles sit and how big they read: a cue setting in the WebVTT file and a size class on the player. */
+export type CaptionLook = (typeof CAPTION_LOOKS)[number];
+/** Where subtitles sit, how big they read, and how they look: a cue setting in the WebVTT file and classes on the player. */
 export interface CaptionStyle {
   position: CaptionPosition;
   size: CaptionSize;
+  /** Absent means "classic". */
+  look?: CaptionLook;
 }
 export const DEFAULT_CAPTION_STYLE: CaptionStyle = { position: "bottom", size: "medium" };
 export function isDefaultCaptionStyle(style: CaptionStyle): boolean {
-  return style.position === DEFAULT_CAPTION_STYLE.position && style.size === DEFAULT_CAPTION_STYLE.size;
+  return style.position === DEFAULT_CAPTION_STYLE.position && style.size === DEFAULT_CAPTION_STYLE.size && (style.look ?? "classic") === "classic";
 }
 
 export type WatchQuarter = 25 | 50 | 75 | 100;

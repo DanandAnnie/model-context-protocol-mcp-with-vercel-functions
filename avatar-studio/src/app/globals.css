@@ -47,3 +47,7 @@ body {
 video.cue-small::cue { font-size: 0.8em; }
 video.cue-medium::cue { font-size: 1em; }
 video.cue-large::cue { font-size: 1.4em; }
+/* Subtitle look (CaptionStyle.look); "classic" keeps the browser's white on a translucent box. */
+video.cue-look-bold::cue { font-weight: 700; background-color: rgba(0, 0, 0, 0.92); }
+video.cue-look-yellow::cue { color: #facc15; font-weight: 600; background-color: rgba(0, 0, 0, 0.75); }
+video.cue-look-minimal::cue { background-color: transparent; text-shadow: 0 0 4px #000, 0 1px 2px #000; }

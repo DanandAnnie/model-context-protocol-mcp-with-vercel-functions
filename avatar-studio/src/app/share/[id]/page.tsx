@@ -187,7 +187,7 @@ export default async function SharePage({
               className={`mx-auto w-full overflow-hidden rounded-xl bg-black ${frame}`}
             >
               {video.status === "completed" && video.videoUrl ? (
-                <SharePlayer videoId={video.id} src={video.videoUrl} poster={posterUrl(video)} captions={!!video.captions} captionSize={video.captionStyle?.size} trackDefault={!captionsBurnedIn(video)} autoplay={autoplay} loop={loop} tracks={Object.keys(video.subtitles ?? {}).map((language) => ({ language, code: languageCode(language) }))} />
+                <SharePlayer videoId={video.id} src={video.videoUrl} poster={posterUrl(video)} captions={!!video.captions} captionSize={video.captionStyle?.size} captionLook={video.captionStyle?.look} trackDefault={!captionsBurnedIn(video)} autoplay={autoplay} loop={loop} tracks={Object.keys(video.subtitles ?? {}).map((language) => ({ language, code: languageCode(language) }))} />
               ) : (
                 <div className="flex h-full w-full items-center justify-center p-10 text-center text-sm text-slate-400">
                   {video.status === "failed"

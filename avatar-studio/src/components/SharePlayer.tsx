@@ -1,6 +1,6 @@
 "use client";
 import { useRef } from "react";
-import type { CaptionSize, WatchQuarter } from "@/lib/types";
+import type { CaptionLook, CaptionSize, WatchQuarter } from "@/lib/types";
 
 /**
  * The share page's player. Reports the furthest point the viewer reaches (a quarter, half,
@@ -13,6 +13,7 @@ export function SharePlayer({
   poster,
   captions,
   captionSize = "medium",
+  captionLook = "classic",
   trackDefault = true,
   autoplay = false,
   loop = false,
@@ -23,6 +24,7 @@ export function SharePlayer({
   poster?: string;
   captions: boolean;
   captionSize?: CaptionSize;
+  captionLook?: CaptionLook;
   trackDefault?: boolean;
   /** Start muted on load (browsers allow muted autoplay only); used by embeds. */
   autoplay?: boolean;
@@ -48,7 +50,7 @@ export function SharePlayer({
       muted={autoplay}
       loop={loop}
       playsInline
-      className={`h-full w-full cue-${captionSize}`}
+      className={`h-full w-full cue-${captionSize} cue-look-${captionLook}`}
       data-testid="share-player"
       onTimeUpdate={(e) => {
         const el = e.currentTarget;

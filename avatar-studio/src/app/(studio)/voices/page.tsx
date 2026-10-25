@@ -6,6 +6,8 @@ import { api } from "@/lib/client";
 import { VoiceRow } from "@/components/VoicePicker";
 import { EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
+import { useCanEdit } from "@/hooks/useCanEdit";
+import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { languageLabel } from "@/lib/language";
@@ -16,6 +18,7 @@ const GENDERS: Array<NonNullable<Voice["gender"]>> = ["female", "male", "neutral
 const SAMPLE = "Hi, this is a quick preview of my voice. I can read your script in any tone you need.";
 
 export default function VoicesPage() {
+  const canEdit = useCanEdit();
   const { data, loading, error, refetch } = useApi<{ voices: Voice[] }>("/api/voices");
   const { data: status } = useApi<ProviderStatus>("/api/status");
   const [actionErr, setActionErr] = useState<string | null>(null);
@@ -72,9 +75,10 @@ export default function VoicesPage() {
   return (
     <>
       <SectionTitle title="Voices" subtitle="Preview any voice with your own sample text, or clone your own." />
+      {canEdit === false && <ViewOnlyNotice what="clone or change voices" />}
       <ErrorBanner message={error ?? previewErr ?? actionErr} />
       <div className="mb-6">
-        <VoiceCloner available={status?.tts !== "mock"} onCloned={() => refetch()} />
+        {canEdit !== false && <VoiceCloner available={status?.tts !== "mock"} onCloned={() => refetch()} />}
       </div>
       <div className="mb-5 grid gap-3 md:grid-cols-[1fr_2fr]">
         <input className={inputClass} placeholder="Search by name, language, or style" value={q} onChange={(e) => setQ(e.target.value)} />

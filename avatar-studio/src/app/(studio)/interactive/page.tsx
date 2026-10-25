@@ -5,6 +5,8 @@ import { AvatarGrid } from "@/components/AvatarPicker";
 import { ChatPanel, type ChatTurn } from "@/components/ChatPanel";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
+import { useCanEdit } from "@/hooks/useCanEdit";
+import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { useLiveAvatar } from "@/hooks/useLiveAvatar";
 import { api, formatDate } from "@/lib/client";
 import type { Agent, Avatar, Conversation, ProviderStatus, Voice } from "@/lib/types";
@@ -17,6 +19,7 @@ const DEFAULT_INSTRUCTIONS = "You represent a real estate team. Help visitors wi
  * the browser speaks them. A streaming renderer can replace the portrait behind /api/chat and /api/talk.
  */
 export default function InteractivePage() {
+  const canEdit = useCanEdit();
   const { data: avatarData, loading: avatarsLoading } = useApi<{ avatars: Avatar[] }>("/api/avatars");
   const { data: voiceData } = useApi<{ voices: Voice[] }>("/api/voices");
   const { data: status } = useApi<ProviderStatus>("/api/status");
@@ -202,12 +205,13 @@ export default function InteractivePage() {
             </Field>
           </div>
           <div className="mt-4 border-t border-slate-100 pt-4">
+            {canEdit === false && <ViewOnlyNotice what="save or change agents" />}
             <ErrorBanner message={saveErr} />
             <div className="flex flex-wrap items-end gap-2">
               <Field label="Share as" hint="Name shown to visitors.">
                 <input aria-label="Agent name" value={agentName} onChange={(e) => setAgentName(e.target.value)} placeholder={avatar?.name ?? "Presenter"} maxLength={60} className={`${inputClass} w-56`} />
               </Field>
-              <Button onClick={saveAgent} loading={saving} disabled={!avatar}>
+              <Button onClick={saveAgent} loading={saving} disabled={!avatar || canEdit === false}>
                 <Link2 className="h-4 w-4" /> Save and get link
               </Button>
             </div>

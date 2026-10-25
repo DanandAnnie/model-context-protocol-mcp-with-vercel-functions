@@ -4,6 +4,8 @@ import { Suspense, useState } from "react";
 import { Languages } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
+import { useCanEdit } from "@/hooks/useCanEdit";
+import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api, formatDate } from "@/lib/client";
 import type { Translation } from "@/lib/types";
 
@@ -16,6 +18,7 @@ export default function TranslatePage() {
 }
 
 function TranslateInner() {
+  const canEdit = useCanEdit();
   const params = useSearchParams();
   const { data, error, refetch } = useApi<{ translations: Translation[]; languages: string[] }>("/api/translate", {
     pollMs: 6000,
@@ -48,6 +51,7 @@ function TranslateInner() {
   return (
     <>
       <SectionTitle title="Video translate" subtitle="Dub an existing video into another language. Lip-sync depends on your provider." />
+      {canEdit === false && <ViewOnlyNotice what="start translations" />}
       <ErrorBanner message={error ?? err} />
       <div className="grid gap-6 lg:grid-cols-[1fr_1.4fr]">
         <Card className="p-5">
@@ -65,7 +69,7 @@ function TranslateInner() {
             <Field label="Title (optional)">
               <input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Product walkthrough – Spanish" />
             </Field>
-            <Button onClick={submit} loading={submitting} disabled={!/^https?:\/\//.test(sourceVideoUrl)} className="w-full">
+            <Button onClick={submit} loading={submitting} disabled={!/^https?:\/\//.test(sourceVideoUrl) || canEdit === false} className="w-full">
               <Languages className="h-4 w-4" /> Translate video
             </Button>
           </div>

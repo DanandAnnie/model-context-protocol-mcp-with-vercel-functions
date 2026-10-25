@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { Palette, Trash2, Upload } from "lucide-react";
 import { Button, Card, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
+import { useCanEdit } from "@/hooks/useCanEdit";
+import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api, isDarkHex } from "@/lib/client";
 import { MAX_PRONUNCIATIONS, formatPronunciations, parsePronunciations } from "@/lib/pronounce";
 import type { AspectRatio, Avatar, BrandKit, Resolution, Voice } from "@/lib/types";
@@ -12,6 +14,7 @@ const HEX = /^#[0-9a-fA-F]{6}$/;
 
 /** Brand kit: logo, colors, and defaults applied to every new video and the public share page. */
 export default function BrandPage() {
+  const canEdit = useCanEdit();
   const { data: brandData, loading } = useApi<{ brand: BrandKit | null }>("/api/brand");
   const { data: avatarData } = useApi<{ avatars: Avatar[] }>("/api/avatars");
   const { data: voiceData } = useApi<{ voices: Voice[] }>("/api/voices");
@@ -143,12 +146,13 @@ export default function BrandPage() {
         subtitle="Your logo, colors, and default presenter are applied to every new video and shown on shared pages."
         action={
           savedAt ? (
-            <Button variant="secondary" onClick={remove} disabled={saving}>
+            <Button variant="secondary" onClick={remove} disabled={saving || canEdit === false}>
               <Trash2 className="h-4 w-4" /> Remove brand kit
             </Button>
           ) : undefined
         }
       />
+      {canEdit === false && <ViewOnlyNotice what="change the brand kit" />}
       <ErrorBanner message={err} />
       <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
         <Card className="space-y-5 p-5">
@@ -260,7 +264,7 @@ export default function BrandPage() {
           </Field>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
             <span className="text-xs text-slate-500">{savedAt ? `Saved ${new Date(savedAt).toLocaleString()}` : "Not saved yet"}</span>
-            <Button onClick={save} loading={saving} disabled={!primaryValid || !accentValid || (!!bgType && !bgUrl.trim()) || loading}>
+            <Button onClick={save} loading={saving} disabled={!primaryValid || !accentValid || (!!bgType && !bgUrl.trim()) || loading || canEdit === false}>
               Save brand kit
             </Button>
           </div>

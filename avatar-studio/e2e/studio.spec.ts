@@ -1129,6 +1129,36 @@ test("workspaces: create, switch, isolate content, invite, join, leave, delete",
   }
 });
 
+test("a workspace viewer sees view-only notices instead of create controls", async ({ page }) => {
+  // Demo mode has one user, so stand in a workspace list where that user is a viewer.
+  await page.route("**/api/workspaces", (route) =>
+    route.request().method() === "GET"
+      ? route.fulfill({ json: { personalId: "demo-user", activeId: "ws_view", workspaces: [{ id: "ws_view", name: "Read only team", role: "viewer", members: [] }] } })
+      : route.continue(),
+  );
+  const pages: Array<[string, string]> = [
+    ["/create", "generate videos"],
+    ["/batch", "start batches"],
+    ["/translate", "start translations"],
+    ["/avatars", "add or change avatars"],
+    ["/voices", "clone or change voices"],
+    ["/brand", "change the brand kit"],
+    ["/interactive", "save or change agents"],
+  ];
+  for (const [path, what] of pages) {
+    await page.goto(path);
+    await expect(page.getByTestId("view-only"), path).toContainText(`not ${what}`);
+  }
+  await page.goto("/create");
+  await expect(page.getByRole("button", { name: "Generate video" })).toBeDisabled();
+  // The nav item stays (the page explains itself); the sidebar call-to-action button goes.
+  await expect(page.getByRole("link", { name: "Create video" })).toHaveCount(1);
+  await page.goto("/avatars");
+  await expect(page.getByRole("button", { name: "New photo avatar" })).toBeDisabled();
+  await page.goto("/voices");
+  await expect(page.getByTestId("voice-cloner")).toHaveCount(0);
+});
+
 test("demo billing upgrades to Pro and back from Settings", async ({ page }) => {
   await page.goto("/settings");
   await expect(page.getByTestId("plan-name")).toHaveText("Free");

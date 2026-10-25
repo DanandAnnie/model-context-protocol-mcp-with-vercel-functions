@@ -6,6 +6,8 @@ import { AvatarTile } from "@/components/AvatarPicker";
 import { FavoriteStar } from "@/components/FavoriteStar";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
+import { useCanEdit } from "@/hooks/useCanEdit";
+import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { api } from "@/lib/client";
 import type { Avatar, Voice } from "@/lib/types";
@@ -19,6 +21,7 @@ export default function AvatarsPage() {
 }
 
 function AvatarsInner() {
+  const canEdit = useCanEdit();
   const params = useSearchParams();
   const { data, loading, error, refetch } = useApi<{ avatars: Avatar[] }>("/api/avatars");
   const { data: voiceData } = useApi<{ voices: Voice[] }>("/api/voices");
@@ -81,11 +84,12 @@ function AvatarsInner() {
         title="Avatars"
         subtitle="Library presenters plus any photo avatars you create."
         action={
-          <Button onClick={() => setOpen(true)}>
+          <Button onClick={() => setOpen(true)} disabled={canEdit === false}>
             <Camera className="h-4 w-4" /> New photo avatar
           </Button>
         }
       />
+      {canEdit === false && <ViewOnlyNotice what="add or change avatars" />}
       <ErrorBanner message={error ?? actionErr} />
 
       <div className="mb-5 flex flex-wrap items-center gap-2">

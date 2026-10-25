@@ -92,6 +92,23 @@ export async function requireEditor(): Promise<string> {
   return ws.id;
 }
 
+/**
+ * For video reviews: the owner (as `requireEditor` resolves it, so viewers get 403), the person
+ * acting, and whether they may approve or ask for changes, which takes the workspace owner role
+ * and a session. A script with an API key can ask for a review but never decide one.
+ */
+export async function requireReviewer(): Promise<{ owner: string; user: User; canDecide: boolean }> {
+  if (await presentedApiKey()) {
+    const owner = await requireOwner();
+    return { owner, user: { id: owner }, canDecide: false };
+  }
+  const user = await currentUser();
+  const ws = await activeWorkspace(user);
+  if (!ws) return { owner: user.id, user, canDecide: false };
+  if (!canEdit(ws, user.id)) throw new ForbiddenError("Viewers can watch and comment in this workspace, not change it");
+  return { owner: ws.id, user, canDecide: canManageAccount(ws, user.id) };
+}
+
 /** The request's owner when it carries a valid key or session, else null; never throws for a missing one. */
 export async function optionalOwner(): Promise<string | null> {
   try {

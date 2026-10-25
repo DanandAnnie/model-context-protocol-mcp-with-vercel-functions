@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Clock, Film, LinkIcon, Lock, Trash2 } from "lucide-react";
 import { StatusBadge } from "./ui";
 import { daysUntilPurge, formatDate, formatSeconds, posterUrl, shareExpired } from "@/lib/client";
-import type { Video } from "@/lib/types";
+import { REVIEW_LABEL, type Video } from "@/lib/types";
 
 export function VideoCard({ video, selectable = false, selected = false, onToggle }: { video: Video; selectable?: boolean; selected?: boolean; onToggle?: () => void }) {
   const body = (
@@ -58,7 +58,17 @@ export function VideoCard({ video, selectable = false, selected = false, onToggl
         )}
       </div>
       <div className="p-3">
-        <div className="truncate text-sm font-medium text-slate-900">{video.title}</div>
+        <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1 truncate text-sm font-medium text-slate-900">{video.title}</div>
+          {video.review && (
+            <span
+              data-testid="review-badge"
+              className={`shrink-0 rounded-full px-1.5 py-0.5 text-[11px] font-medium ${video.review.status === "approved" ? "bg-emerald-50 text-emerald-800" : video.review.status === "changes" ? "bg-amber-50 text-amber-900" : "bg-brand-50 text-brand-800"}`}
+            >
+              {REVIEW_LABEL[video.review.status]}
+            </span>
+          )}
+        </div>
         <div className="mt-0.5 text-xs text-slate-500">
           {video.aspect} · {formatDate(video.createdAt)}{video.batchId ? " · batch" : ""}{video.folder ? ` · ${video.folder}` : ""}{video.views ? ` · ${video.views} ${video.views === 1 ? "view" : "views"}` : ""}
         </div>

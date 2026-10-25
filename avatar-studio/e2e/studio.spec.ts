@@ -1232,6 +1232,51 @@ test("a workspace viewer sees view-only notices instead of create controls", asy
   await expect(page.getByTestId("voice-cloner")).toHaveCount(0);
 });
 
+test("workspace videos go through review: ask, request changes, ask again, approve", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  // Reviews need a team: a personal video is refused.
+  const personal = await createVideoViaApi(page, `Solo ${tag}`);
+  expect((await page.request.post(`/api/videos/${personal.id}/review`, { data: { action: "request" } })).status()).toBe(400);
+  const ws = (await (await page.request.post("/api/workspaces", { data: { name: `Review ${tag}` } })).json()).workspace as { id: string };
+  try {
+    expect((await page.request.post("/api/workspaces/switch", { data: { id: ws.id } })).status()).toBe(200);
+    const video = await createVideoViaApi(page, `Needs sign-off ${tag}`);
+    await page.goto(`/videos/${video.id}`);
+    const panel = page.getByTestId("review-panel");
+    await panel.getByLabel("Review note").fill("Ready for the newsletter");
+    await panel.getByRole("button", { name: "Ask for review" }).click();
+    await expect(panel.getByTestId("review-status")).toHaveText("In review");
+    await expect(panel.getByTestId("review-note")).toHaveText("Ready for the newsletter");
+    // The owner asks for changes, which needs a note.
+    await expect(panel.getByRole("button", { name: "Ask for changes" })).toBeDisabled();
+    await panel.getByLabel("Review note").fill("Use the new logo");
+    await panel.getByRole("button", { name: "Ask for changes" }).click();
+    await expect(panel.getByTestId("review-status")).toHaveText("Changes requested");
+    await expect(panel.getByTestId("review-note")).toHaveText("Use the new logo");
+    await panel.getByRole("button", { name: "Ask for review again" }).click();
+    await expect(panel.getByTestId("review-status")).toHaveText("In review");
+    await panel.getByRole("button", { name: "Approve" }).click();
+    await expect(panel.getByTestId("review-status")).toHaveText("Approved");
+    await expect(panel).toContainText("Approved by you");
+    // The library shows the state and filters by it.
+    await page.goto("/videos");
+    const card = page.locator(`a[href="/videos/${video.id}"]`);
+    await expect(card.getByTestId("review-badge")).toHaveText("Approved");
+    await page.getByLabel("Filter by review").selectOption("pending");
+    await expect(card).toHaveCount(0);
+    await page.getByLabel("Filter by review").selectOption("approved");
+    await expect(card).toBeVisible();
+    // The team's feed names each step.
+    const feed = (await (await page.request.get("/api/activity")).json()).events as Array<{ kind: string; subjectId?: string }>;
+    expect(feed.filter((e) => e.subjectId === video.id).map((e) => e.kind).slice(0, 4)).toEqual(["video.approved", "video.review_requested", "video.changes_requested", "video.review_requested"]);
+    // A decided review cannot be decided again.
+    expect((await page.request.post(`/api/videos/${video.id}/review`, { data: { action: "approve" } })).status()).toBe(409);
+  } finally {
+    await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
+    expect((await page.request.delete(`/api/workspaces/${ws.id}`)).status()).toBe(204);
+  }
+});
+
 test("demo billing upgrades to Pro and back from Settings", async ({ page }) => {
   await page.goto("/settings");
   await expect(page.getByTestId("plan-name")).toHaveText("Free");

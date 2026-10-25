@@ -7,6 +7,7 @@ import { api } from "@/lib/client";
 import { VideoCard } from "@/components/VideoCard";
 import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
+import { useWorkspaceRole } from "@/hooks/useCanEdit";
 import type { VideoPage, VideoQuery } from "@/lib/services/videos";
 import { TRASH_RETENTION_DAYS, type VideoStatus } from "@/lib/types";
 
@@ -35,6 +36,9 @@ function VideosInner() {
   const [status, setStatus] = useState<"all" | VideoStatus>("all");
   const [folder, setFolder] = useState<string>("all"); // "all" | "unfiled" | folder name
   const [sort, setSort] = useState<SortKey>("newest");
+  // Reviews exist only in a workspace, so the filter shows there.
+  const inWorkspace = !!useWorkspaceRole()?.workspaceId;
+  const [review, setReview] = useState<VideoQuery["review"]>("all");
   // The trash is its own view of the same page: same search, status, and folder filters, different bulk actions.
   const [trash, setTrash] = useState(false);
   // Search as you type, one request per pause rather than per keystroke.
@@ -44,7 +48,7 @@ function VideosInner() {
   }, [q]);
   // "Show more" extends the page for the current filters only: a new filter starts again
   // from the first page in the same render, with no extra request for the old extent.
-  const filterKey = [needle, status, folder, batch ?? "", sort, trash ? "trash" : ""].join("\u0000");
+  const filterKey = [needle, status, folder, batch ?? "", sort, trash ? "trash" : "", review].join("\u0000");
   const [extent, setExtent] = useState({ key: filterKey, limit: PAGE });
   const limit = extent.key === filterKey ? extent.limit : PAGE;
   const path = useMemo(() => {
@@ -56,8 +60,9 @@ function VideosInner() {
     if (batch) params.set("batch", batch);
     if (sort !== "newest") params.set("sort", sort);
     if (trash) params.set("trash", "true");
+    if (review !== "all") params.set("review", review);
     return `/api/videos?${params}`;
-  }, [limit, needle, status, folder, batch, sort, trash]);
+  }, [limit, needle, status, folder, batch, sort, trash, review]);
   // The filtering, sorting, and paging happen on the server; the page only holds what it shows.
   const { data, loading, error, refetch } = useApi<VideoPage>(path, { pollMs: 6000, pollWhile: (d) => d.rendering > 0 });
   const videos = data?.videos ?? [];
@@ -254,6 +259,15 @@ function VideosInner() {
           >
             <Trash2 className="h-3 w-3" /> Trash{trashed ? ` (${trashed})` : ""}
           </button>
+          {inWorkspace && (
+            <select aria-label="Filter by review" value={review} onChange={(e) => setReview(e.target.value as VideoQuery["review"])} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700">
+              <option value="all">Any review state</option>
+              <option value="pending">In review</option>
+              <option value="approved">Approved</option>
+              <option value="changes">Changes requested</option>
+              <option value="none">Not reviewed</option>
+            </select>
+          )}
           <select aria-label="Sort videos" value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className="ml-auto rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700">
             <option value="newest">Newest first</option>
             <option value="oldest">Oldest first</option>

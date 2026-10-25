@@ -6,6 +6,7 @@ import { ArchiveRestore, ArrowLeft, Captions, Check, Clock, Code2, Copy, Downloa
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge, inputClass } from "@/components/ui";
 import { ViewSparkline } from "@/components/ViewSparkline";
 import { VideoComments } from "@/components/VideoComments";
+import { ReviewPanel } from "@/components/ReviewPanel";
 import { SubtitleLanguages } from "@/components/SubtitleLanguages";
 import { useApi } from "@/hooks/useApi";
 import { ApiError, api, formatDate, formatSeconds, isDarkHex, posterUrl, purgeAt, shareExpired } from "@/lib/client";
@@ -811,6 +812,7 @@ export default function VideoDetailPage() {
                   <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{video.script}</p>
                 )}
               </Card>
+              <ReviewPanel video={video} onChange={(next) => setData({ video: next })} />
               <VideoComments videoId={video.id} />
             </div>
           </div>

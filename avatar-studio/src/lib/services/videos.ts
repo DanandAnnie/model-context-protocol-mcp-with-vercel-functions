@@ -8,7 +8,8 @@ import type { AudioClip, Avatar, Scene, Video, VideoRequest, Voice, WatchQuarter
 import type { AvatarProvider, RenderCast } from "../providers/types";
 import { LOCAL_OWNER } from "../owner-id";
 import { renderLimitFor } from "../billing";
-import { ConflictError, LimitError, NotFoundError, ValidationError } from "../errors";
+import { ConflictError, ForbiddenError, LimitError, NotFoundError, ValidationError } from "../errors";
+import { isWorkspaceId, type User } from "../workspaces";
 import { getAvatar } from "./avatars";
 import { getClip, getClipAudio, saveClipAssetIds } from "./clips";
 import { listVoices } from "./voices";
@@ -190,6 +191,62 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
     base.error = err instanceof Error ? err.message : String(err);
   }
   return getStore().put("video", base);
+}
+
+export const reviewActionSchema = z
+  .object({
+    action: z.enum(["request", "approve", "changes", "withdraw"]),
+    note: z.string().trim().max(500).optional(),
+  })
+  .refine((v) => v.action !== "changes" || !!v.note, { message: "Say what should change", path: ["note"] });
+
+/**
+ * Review and approval for a workspace video. Anyone who can edit asks for a review (again after
+ * changes, which resets the decision); a workspace owner approves or asks for changes, with a note
+ * for the latter; the person who asked, or an owner, withdraws a pending request. Videos in a
+ * personal space have nobody to review them, so they are refused.
+ */
+export function reviewVideo(id: string, ownerId: string, actor: User, canDecide: boolean, input: z.infer<typeof reviewActionSchema>): Promise<Video> {
+  if (!isWorkspaceId(ownerId)) return Promise.reject(new ValidationError("Reviews are for workspace videos; switch to a workspace to ask for one"));
+  return updateKeepingCounters(id, ownerId, (video) => {
+    if (video.deletedAt) throw new ConflictError("Restore the video from the trash first");
+    const now = nowIso();
+    const by = { id: actor.id, ...(actor.email ? { email: actor.email } : {}) };
+    switch (input.action) {
+      case "request":
+        if (video.review?.status === "pending") throw new ConflictError("A review is already pending");
+        return {
+          ...video,
+          review: stripUndefined({ status: "pending" as const, requestedById: by.id, requestedByEmail: by.email, requestedAt: now, note: input.note || undefined }),
+          updatedAt: now,
+        };
+      case "approve":
+      case "changes": {
+        if (!canDecide) throw new ForbiddenError("Only workspace owners can approve videos or ask for changes");
+        if (video.review?.status !== "pending") throw new ConflictError("Ask for a review first");
+        return {
+          ...video,
+          review: stripUndefined({
+            ...video.review,
+            status: input.action === "approve" ? ("approved" as const) : ("changes" as const),
+            // An approval may carry a note of its own; without one the request's note is kept.
+            note: input.note || (input.action === "approve" ? video.review.note : undefined),
+            decidedById: by.id,
+            decidedByEmail: by.email,
+            decidedAt: now,
+          }),
+          updatedAt: now,
+        };
+      }
+      case "withdraw": {
+        if (video.review?.status !== "pending") throw new ConflictError("There is no pending review to withdraw");
+        if (!canDecide && video.review.requestedById !== actor.id) throw new ForbiddenError("Only the person who asked, or a workspace owner, can withdraw the review");
+        const next: Video = { ...video, updatedAt: now };
+        delete next.review;
+        return next;
+      }
+    }
+  });
 }
 
 /** Translated subtitle tracks a video may carry. */
@@ -582,10 +639,10 @@ const COUNTER_FIELDS = ["views", "lastViewedAt", "viewsByDay", "watch", "ctaClic
 /**
  * Fields other writers own, which an edit built from an earlier read must take from the stored
  * record rather than from its own copy: the counters, the subtitle tracks, which a translation adds
- * under the lock, and the trash mark, which a trash or restore sets under the lock; an owner edit
- * changes none of them.
+ * under the lock, the trash mark, which a trash or restore sets under the lock, and the review, which
+ * a request or decision sets under the lock; an owner edit changes none of them.
  */
-const CONCURRENT_FIELDS = [...COUNTER_FIELDS, "subtitles", "deletedAt"] as const;
+const CONCURRENT_FIELDS = [...COUNTER_FIELDS, "subtitles", "deletedAt", "review"] as const;
 
 /**
  * Writes a video built from `base` while keeping whatever counters, subtitle tracks, and trash mark
@@ -844,6 +901,8 @@ export const videoQuerySchema = z.object({
   folder: z.string().trim().max(MAX_FOLDER_NAME).optional(),
   batch: z.string().max(80).optional(),
   sort: z.enum(["newest", "oldest", "title", "views"]).default("newest"),
+  /** Review state in a workspace: "pending" (awaiting an owner), "approved", "changes", or "none" (never asked). */
+  review: z.enum(["all", "pending", "approved", "changes", "none"]).default("all"),
   /** Omit for every match (scripts); the library pages with it. */
   limit: z.coerce.number().int().min(1).max(200).optional(),
   /** `true` lists the trash (newest deletion first) instead of the library. */
@@ -882,6 +941,7 @@ export function filterVideos(videos: Video[], query: VideoQuery): Video[] {
   return videos
     .filter((v) => {
       if (query.batch && v.batchId !== query.batch) return false;
+      if (query.review !== "all" && (v.review?.status ?? "none") !== query.review) return false;
       if (query.folder !== undefined && (v.folder ?? "") !== query.folder) return false;
       if (query.status === "processing" ? v.status !== "processing" && v.status !== "queued" : query.status !== "all" && v.status !== query.status) return false;
       return !needle || `${v.title} ${v.description ?? ""} ${v.script} ${v.avatarName ?? ""} ${v.voiceName ?? ""}`.toLowerCase().includes(needle);

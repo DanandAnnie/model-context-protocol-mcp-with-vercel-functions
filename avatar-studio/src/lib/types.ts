@@ -218,6 +218,8 @@ export interface Video extends VideoRequest {
   cover?: { updatedAt: string; mimeType: string; bytes: number };
   /** A button under the share-page player: "Book a showing" → https://… */
   shareCta?: { label: string; url: string };
+  /** Review and approval in a workspace: an editor asks, an owner approves or asks for changes. */
+  review?: VideoReview;
   /** Share page views (completed videos only; one per viewer per window). */
   views?: number;
   lastViewedAt?: string;
@@ -429,6 +431,23 @@ export interface VideoComment {
 }
 
 /** What happened in an account or workspace, for its activity feed. */
+export type ReviewStatus = "pending" | "approved" | "changes";
+
+export const REVIEW_LABEL: Record<ReviewStatus, string> = { pending: "In review", approved: "Approved", changes: "Changes requested" };
+
+export interface VideoReview {
+  status: ReviewStatus;
+  /** Who asked for the review, by user id (and email when known). */
+  requestedById: string;
+  requestedByEmail?: string;
+  requestedAt: string;
+  /** The request's note, or the owner's reason when asking for changes. */
+  note?: string;
+  decidedById?: string;
+  decidedByEmail?: string;
+  decidedAt?: string;
+}
+
 export type ActivityKind =
   | "video.created"
   | "video.trashed"
@@ -444,7 +463,10 @@ export type ActivityKind =
   | "brand.saved"
   | "brand.removed"
   | "agent.created"
-  | "agent.deleted";
+  | "agent.deleted"
+  | "video.review_requested"
+  | "video.approved"
+  | "video.changes_requested";
 
 export interface ActivityEvent {
   id: string;

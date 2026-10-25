@@ -83,7 +83,7 @@ When completed the video also carries `videoUrl`, `thumbnailUrl`, and `durationS
 
 ### `GET /api/videos` — list the library
 
-Query parameters, all optional: `q` (matches title, description, script, avatar, and voice), `status` (`processing`, which includes queued, `completed`, or `failed`), `folder` (a name; pass it empty for unfiled videos), `batch`, `sort` (`newest`, `oldest`, `title`, `views`), `limit` (1–200; omit it to receive every match), and `trash` (`true` or `1` lists the trash instead of the library, newest deletion first). Returns `{ "videos", "matched", "total", "hasMore", "folders", "rendering", "trashed" }`: `matched` counts the query's results before `limit`, `total` the whole library (never the trash), `folders` the names in use, `rendering` the renders still in flight, and `trashed` the videos in the trash. The newest ten in-flight renders are refreshed from the provider on the way out, so polling the list is enough to see completions.
+Query parameters, all optional: `q` (matches title, description, script, avatar, and voice), `status` (`processing`, which includes queued, `completed`, or `failed`), `folder` (a name; pass it empty for unfiled videos), `batch`, `sort` (`newest`, `oldest`, `title`, `views`), `limit` (1–200; omit it to receive every match), `review` (`pending`, `approved`, `changes`, or `none` for videos never sent for review), and `trash` (`true` or `1` lists the trash instead of the library, newest deletion first). Returns `{ "videos", "matched", "total", "hasMore", "folders", "rendering", "trashed" }`: `matched` counts the query's results before `limit`, `total` the whole library (never the trash), `folders` the names in use, `rendering` the renders still in flight, and `trashed` the videos in the trash. The newest ten in-flight renders are refreshed from the provider on the way out, so polling the list is enough to see completions.
 
 ### `GET /api/videos/analytics` — the library's share analytics as a CSV download
 
@@ -108,6 +108,10 @@ Translated subtitle tracks. `POST` translates the script into the language with 
 
 ### `GET | POST /api/videos/:id/comments`, `DELETE /api/videos/:id/comments/:commentId`
 Review notes on a video for its owner and workspace members; viewers of the share page never see them. `GET` → `{ "comments": [{ "id", "videoId", "authorId", "authorEmail"?, "text", "createdAt" }] }` oldest first; `POST { "text" }` (up to 1000 characters, 200 comments per video) → `201 { "comment" }`, credited to the signed-in person (a script with an API key is credited to the key's owner); `DELETE` removes the caller's own comment (`403` for someone else's, `404` for a comment on another video). Comments go with the video when it is deleted for good and are part of the account export.
+
+### `POST /api/videos/:id/review` — `{ "action": "request" | "approve" | "changes" | "withdraw", "note"? }`
+
+Review and approval for a workspace video (a video in a personal space answers `400`). Anyone who can edit asks for a review, with an optional note of up to 500 characters (`409` while one is pending); a workspace owner signed in with a session approves or asks for changes (`403` for editors and API keys; `changes` needs a `note`; `409` unless a review is pending); the person who asked, or an owner, withdraws a pending request. A new request after a decision starts over. Returns `{ video }`, which carries `review: { status: "pending" | "approved" | "changes", requestedById, requestedByEmail?, requestedAt, note?, decidedById?, decidedByEmail?, decidedAt? }`; requests and decisions appear in the activity feed (`video.review_requested`, `video.approved`, `video.changes_requested`).
 
 ### `POST /api/videos/:id/retry`
 

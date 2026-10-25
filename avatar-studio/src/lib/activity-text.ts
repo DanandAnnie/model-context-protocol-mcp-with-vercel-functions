@@ -47,5 +47,11 @@ export function describeActivity(e: ActivityEvent, viewerId?: string): string {
       return `${who} shared the presenter ${what}`.trimEnd();
     case "agent.deleted":
       return `${who} deleted the shared presenter ${what}`.trimEnd();
+    case "video.review_requested":
+      return `${who} asked for a review of ${what || "a video"}`;
+    case "video.approved":
+      return `${who} approved ${what || "a video"}`;
+    case "video.changes_requested":
+      return `${who} asked for changes to ${what || "a video"}`;
   }
 }

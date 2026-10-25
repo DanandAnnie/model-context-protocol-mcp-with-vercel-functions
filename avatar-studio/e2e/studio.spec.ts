@@ -1017,7 +1017,7 @@ test("brand kit pre-fills the editor and brands the share page", async ({ page }
     // Terms to keep untranslated: one per line, repeats (ignoring case) dropped.
     await page.getByLabel("Never translate").fill("Acme Cloud\n\nacme cloud\nNimbus");
     // An uploaded logo, laid over the share player as a watermark.
-    await page.locator('input[type="file"][accept="image/*"]').first().setInputFiles({ name: "logo.png", mimeType: "image/png", buffer: Buffer.from(TINY_PNG, "base64") });
+    await page.locator('input[type="file"][accept*="image/svg+xml"]').setInputFiles({ name: "logo.png", mimeType: "image/png", buffer: Buffer.from(TINY_PNG, "base64") });
     await expect(page.getByAltText("Logo preview")).toBeVisible();
     await page.getByLabel("Logo on the player").selectOption("bottom-right");
     await page.getByRole("button", { name: "Save brand kit" }).click();
@@ -1063,6 +1063,8 @@ test("brand kit pre-fills the editor and brands the share page", async ({ page }
     await expect(mark).toHaveAttribute("data-corner", "bottom-right");
     await expect(mark).toHaveAttribute("aria-hidden", "true");
     await expect(mark).toHaveAttribute("alt", "");
+    // The logo is drawn in the corner of its box, not centred along one side.
+    await expect(mark).toHaveCSS("object-position", "100% 100%");
     expect((await (await page.request.get(`/share/${v.id}`)).text()).includes(TINY_PNG)).toBe(false);
     const logo = await page.request.get(logoSrc!);
     expect(logo.status()).toBe(200);
@@ -1078,6 +1080,9 @@ test("brand kit pre-fills the editor and brands the share page", async ({ page }
     const talkLogo = (await (await page.request.get(`/api/talk/${agent.id}`)).json()).agent.brand.logoUrl;
     expect(talkLogo).toMatch(new RegExp(`^/api/talk/${agent.id}/logo\\?v=`));
     expect(Buffer.from(await (await page.request.get(talkLogo)).body()).toString("base64")).toBe(TINY_PNG);
+    // A paused link takes the logo down with the page, as deleting the presenter does.
+    expect((await page.request.patch(`/api/agents/${agent.id}`, { data: { isPublic: false } })).ok()).toBe(true);
+    expect((await page.request.get(talkLogo)).status()).toBe(404);
     expect((await page.request.delete(`/api/agents/${agent.id}`)).ok()).toBe(true);
     expect((await page.request.get(talkLogo)).status()).toBe(404);
     // The logo follows the share page's rules: an offline link takes it down too.

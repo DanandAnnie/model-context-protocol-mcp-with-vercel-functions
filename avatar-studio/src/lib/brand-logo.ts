@@ -2,9 +2,8 @@
 // cacheable route instead of carrying it inline, so it is sent once and cached by the browser.
 import { NotFoundError } from "./errors";
 import { decodeDataUrl } from "./providers/image";
+import { LOGO_TYPES } from "./logo-types";
 import type { BrandKit } from "./types";
-
-const LOGO_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml"]);
 
 /**
  * The address a public page uses for the kit's logo: an external URL as it is, an uploaded one through
@@ -15,8 +14,14 @@ export function publicLogoSrc(brand: Pick<BrandKit, "logoUrl" | "updatedAt"> | n
   return brand.logoUrl.startsWith("data:") ? `${route}?v=${encodeURIComponent(brand.updatedAt)}` : brand.logoUrl;
 }
 
-/** The uploaded logo as an image response; 404 when the kit has none or links an external one. `?v=` responses are immutable. */
-export function logoResponse(logoUrl: string | undefined, req: Request): Response {
+/**
+ * The uploaded logo as an image response; 404 when the kit has none or links an external one. A request
+ * whose `v` matches the kit's last save may be cached for an hour (never past `expiresAt`, when the page
+ * it belongs to expires), so a replaced logo or a link taken offline is not served from caches for long;
+ * any other request is not cached at all.
+ */
+export function logoResponse(brand: Pick<BrandKit, "logoUrl" | "updatedAt"> | null | undefined, req: Request, expiresAt?: string): Response {
+  const logoUrl = brand?.logoUrl;
   if (!logoUrl?.startsWith("data:image/")) throw new NotFoundError("Logo not found");
   let logo: { bytes: Uint8Array; mimeType: string };
   try {
@@ -25,12 +30,14 @@ export function logoResponse(logoUrl: string | undefined, req: Request): Respons
     throw new NotFoundError("Logo not found");
   }
   if (!LOGO_TYPES.has(logo.mimeType)) throw new NotFoundError("Logo not found");
-  const versioned = new URL(req.url).searchParams.has("v");
+  const current = new URL(req.url).searchParams.get("v") === brand?.updatedAt;
+  const untilExpiry = expiresAt ? Math.floor((Date.parse(expiresAt) - Date.now()) / 1000) : Infinity;
+  const ttl = Math.max(0, Math.min(3600, untilExpiry));
   return new Response(logo.bytes as BodyInit, {
     headers: {
       "Content-Type": logo.mimeType,
       "Content-Length": String(logo.bytes.byteLength),
-      "Cache-Control": versioned ? "public, max-age=31536000, immutable" : "public, max-age=300",
+      "Cache-Control": current && ttl > 0 ? `public, max-age=${ttl}` : "no-store",
       "X-Content-Type-Options": "nosniff",
       // An SVG logo opened on its own runs nothing: no scripts, no requests, no same-origin access.
       "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",

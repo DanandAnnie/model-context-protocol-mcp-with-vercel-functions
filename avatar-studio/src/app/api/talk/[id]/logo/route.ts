@@ -12,7 +12,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   try {
     const agent = await getStore().get<Agent>("agent", (await ctx.params).id);
     if (!agent || !agent.isPublic) throw new NotFoundError("Logo not found");
-    return logoResponse((await getBrandKit(agent.ownerId))?.logoUrl, req);
+    return logoResponse(await getBrandKit(agent.ownerId), req);
   } catch (err) {
     return errorResponse(err);
   }

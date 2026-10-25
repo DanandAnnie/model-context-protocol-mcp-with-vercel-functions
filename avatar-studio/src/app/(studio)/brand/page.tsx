@@ -8,6 +8,7 @@ import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api, isDarkHex } from "@/lib/client";
 import { MAX_PRONUNCIATIONS, formatPronunciations, parsePronunciations } from "@/lib/pronounce";
 import { MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH, MIN_GLOSSARY_TERM_LENGTH, parseGlossary } from "@/lib/glossary";
+import { LOGO_TYPES } from "@/lib/logo-types";
 import type { AspectRatio, Avatar, BrandKit, Resolution, Voice, WatermarkCorner } from "@/lib/types";
 
 const DEFAULT_PRIMARY = "#4f46e5";
@@ -67,6 +68,10 @@ export default function BrandPage() {
     if (!file) return;
     if (file.size > 2 * 1024 * 1024) {
       setErr("Please choose a logo under 2 MB.");
+      return;
+    }
+    if (!LOGO_TYPES.has(file.type)) {
+      setErr("Please choose a PNG, JPEG, WebP, GIF, SVG, AVIF, BMP, or ICO logo.");
       return;
     }
     const reader = new FileReader();
@@ -194,13 +199,17 @@ export default function BrandPage() {
                   <Palette className="h-5 w-5 text-slate-300" />
                 )}
               </div>
-              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
+              <input ref={fileRef} type="file" accept={[...LOGO_TYPES].join(",")} className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
               <Button type="button" variant="secondary" onClick={() => fileRef.current?.click()}>
                 <Upload className="h-4 w-4" /> Upload logo
               </Button>
               <input
                 value={logoUrl.startsWith("data:") ? "" : logoUrl}
-                onChange={(e) => setLogoUrl(e.target.value)}
+                onChange={(e) => {
+                  setLogoUrl(e.target.value);
+                  // An emptied logo takes the player corner with it, as the Clear button does.
+                  if (!e.target.value.trim()) setWatermark("");
+                }}
                 placeholder={logoUrl.startsWith("data:") ? "Uploaded file" : "https://example.com/logo.png"}
                 className={`${inputClass} min-w-[200px] flex-1`}
               />

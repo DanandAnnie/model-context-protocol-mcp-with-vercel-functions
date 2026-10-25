@@ -10,6 +10,7 @@ import { listVoices } from "./voices";
 import { backgroundSchema } from "./schemas";
 import { MAX_PRONUNCIATIONS } from "../pronounce";
 import { MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH, MIN_GLOSSARY_TERM_LENGTH } from "../glossary";
+import { LOGO_TYPES, logoDataType } from "../logo-types";
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
@@ -19,6 +20,7 @@ export const brandKitSchema = z.object({
     .string()
     .max(8_000_000, "Logo must be under 6 MB")
     .refine((v) => v === "" || v.startsWith("data:image/") || /^https?:\/\//.test(v), "Logo must be an image URL or uploaded image")
+    .refine((v) => !v.startsWith("data:") || LOGO_TYPES.has(logoDataType(v) ?? ""), "Upload the logo as PNG, JPEG, WebP, GIF, SVG, AVIF, BMP, or ICO")
     .default(""),
   primaryColor: z.string().regex(HEX_COLOR, "Use a 6-digit hex color like #4f46e5"),
   accentColor: z.string().regex(HEX_COLOR, "Use a 6-digit hex color like #4f46e5").optional(),

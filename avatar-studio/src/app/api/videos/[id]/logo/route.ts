@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     const video = await getVideo((await ctx.params).id, PUBLIC_ACCESS, false);
-    return logoResponse((await getBrandKit(video.ownerId ?? LOCAL_OWNER))?.logoUrl, req);
+    return logoResponse(await getBrandKit(video.ownerId ?? LOCAL_OWNER), req, video.shareExpiresAt);
   } catch (err) {
     return errorResponse(err);
   }

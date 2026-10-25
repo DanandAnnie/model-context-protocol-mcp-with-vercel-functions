@@ -937,8 +937,15 @@ test("captions are served as SRT and VTT, security headers are set", async ({ pa
   await page.getByRole("button", { name: "Background #ffffff" }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByTestId("stage-caption")).toHaveAttribute("data-look", "minimal");
-  const axe = await new AxeBuilder({ page }).include('[data-testid="stage-caption"]').include('[data-testid="caption-style"]').withTags(["wcag2aa"]).analyze();
+  // axe can only judge contrast it can see: bring the look buttons into view and hide the presenter layered under the caption.
+  await page.getByTestId("caption-style").scrollIntoViewIfNeeded();
+  await page.getByTestId("stage-presenter").evaluate((el) => ((el as HTMLElement).style.display = "none"));
+  const axe = await new AxeBuilder({ page }).include('[data-testid="stage-caption"]').include('[data-testid="caption-style"]').withRules(["color-contrast"]).analyze();
   expect(axe.violations.map((v) => v.id)).toEqual([]);
+  expect(axe.incomplete.filter((r) => r.id === "color-contrast").flatMap((r) => r.nodes.map((n) => n.target.join(" "))), "every node's contrast was decided").toEqual([]);
+  const checked = axe.passes.filter((r) => r.id === "color-contrast").flatMap((r) => r.nodes.map((n) => n.html));
+  expect(checked.some((html) => html.includes('data-testid="stage-caption"')), "the stage caption itself was checked").toBe(true);
+  expect(checked.some((html) => html.includes('aria-pressed="true"') && html.includes("minimal")), "and the chosen look button").toBe(true);
 });
 
 test("brand kit pre-fills the editor and brands the share page", async ({ page }) => {

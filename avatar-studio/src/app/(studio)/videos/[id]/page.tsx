@@ -14,6 +14,7 @@ import { useCanEdit } from "@/hooks/useCanEdit";
 import { captionsBurnedIn } from "@/lib/captions";
 import { useApi } from "@/hooks/useApi";
 import { ApiError, api, formatDate, formatSeconds, isDarkHex, posterUrl, purgeAt, shareExpired } from "@/lib/client";
+import { socialShareLinks } from "@/lib/social";
 import { TRASH_RETENTION_DAYS, type Video } from "@/lib/types";
 
 export default function VideoDetailPage() {
@@ -132,6 +133,9 @@ export default function VideoDetailPage() {
     }
   }
 
+  // The app's own origin, read after mount (the page renders on the server first).
+  const [origin, setOrigin] = useState("");
+  useEffect(() => setOrigin(window.location.origin), []);
   async function copyShareLink() {
     if (!video) return;
     const url = `${window.location.origin}/share/${video.id}`;
@@ -767,6 +771,34 @@ export default function VideoDetailPage() {
                       </span>
                     </div>
                   </form>
+                </Card>
+              )}
+              {video.status === "completed" && (
+                <Card className="p-4" data-testid="share-social-card">
+                  <h3 className="text-sm font-semibold text-slate-900">Post the link</h3>
+                  {video.deletedAt || !shareLive || shareExpired(video) ? (
+                    <p className="mt-1 text-xs text-slate-500">{video.deletedAt ? "Restore the video from the trash first." : "Turn the share link on first."}</p>
+                  ) : (
+                    <>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Opens the network with the share link filled in; nothing is posted until you confirm there.{video.shareLocked ? " Viewers will need the password." : ""}
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="Post the link to">
+                        {socialShareLinks(`${origin}/share/${video.id}`, video.title).map((l) => (
+                          <a
+                            key={l.network}
+                            href={l.href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            data-network={l.network}
+                            className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50"
+                          >
+                            {l.label}
+                          </a>
+                        ))}
+                      </div>
+                    </>
+                  )}
                 </Card>
               )}
               {!video.deletedAt && <ViewerEmails videoId={video.id} gateOn={!!video.shareGate} />}

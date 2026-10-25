@@ -730,8 +730,9 @@ test("starred avatars and voices come first everywhere and persist", async ({ pa
   await expect(firstTile()).not.toContainText("Marcus Hill");
 });
 
-test("a finished video can be sent by email from its page", async ({ page }) => {
-  const v = await createVideoViaApi(page, `Mail ${Date.now().toString(36)}`);
+test("a finished video can be sent by email or posted to a network from its page", async ({ page, baseURL }) => {
+  const title = `Mail & more ${Date.now().toString(36)}`;
+  const v = await createVideoViaApi(page, title);
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
   // The API validates recipients and refuses an offline link.
   const bad = await page.request.post(`/api/videos/${v.id}/share`, { data: { to: ["nope"] } });
@@ -749,10 +750,20 @@ test("a finished video can be sent by email from its page", async ({ page }) => 
   await expect(page.getByTestId("share-email-status")).toContainText("Sent to 2 recipients");
   await expect(page.getByTestId("share-email-status")).toContainText("demo");
   await expect(card.getByLabel("Recipients")).toHaveValue("");
-  // The link going off disables the form rather than sending a dead link.
+  // Each network opens in a new tab with the share page filled in (and the title where it takes one).
+  const social = page.getByTestId("share-social-card").getByRole("group", { name: "Post the link to" });
+  const sharePage = encodeURIComponent(`${new URL(baseURL!).origin}/share/${v.id}`);
+  await expect(social.getByRole("link")).toHaveCount(5);
+  await expect(social.getByRole("link", { name: "LinkedIn" })).toHaveAttribute("href", `https://www.linkedin.com/sharing/share-offsite/?url=${sharePage}`);
+  await expect(social.getByRole("link", { name: "X" })).toHaveAttribute("href", `https://x.com/intent/post?url=${sharePage}&text=${encodeURIComponent(title)}`);
+  await expect(social.getByRole("link", { name: "WhatsApp" })).toHaveAttribute("target", "_blank");
+  await expect(social.getByRole("link", { name: "WhatsApp" })).toHaveAttribute("rel", "noopener noreferrer");
+  // The link going off disables the form rather than sending a dead link, and takes the network links away.
   await page.getByLabel("Share link is live").uncheck();
   await expect(card.getByText("Turn the share link on first.")).toBeVisible();
   await expect(card.getByRole("button", { name: "Send link" })).toBeDisabled();
+  await expect(page.getByTestId("share-social-card").getByText("Turn the share link on first.")).toBeVisible();
+  await expect(page.getByTestId("share-social-card").getByRole("link")).toHaveCount(0);
 });
 
 test("a custom cover image replaces the poster everywhere", async ({ page }) => {

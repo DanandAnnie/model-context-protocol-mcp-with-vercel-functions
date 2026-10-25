@@ -22,7 +22,12 @@ export function VideoComments({ videoId }: { videoId: string }) {
   // Teammates who can be mentioned: the open workspace's other members with an email.
   const { data: summary } = useApi<WorkspaceSummary>("/api/workspaces");
   const teammates = (summary?.workspaces.find((w) => w.id === summary.activeId && w.id !== summary.personalId)?.members ?? []).filter((m) => m.email && !m.you);
-  const mention = (email: string) => setDraft((d) => `${d}${d && !d.endsWith(" ") ? " " : ""}@${email} `);
+  // A chip completes an "@" or "@partial" the person already typed, else starts a new mention; the box's limit still holds.
+  const mention = (email: string) =>
+    setDraft((d) => {
+      const base = d.replace(/(^|\s)@[^\s@]*$/, "$1");
+      return `${base}${base && !/\s$/.test(base) ? " " : ""}@${email} `.slice(0, 1000);
+    });
 
   async function post() {
     const text = draft.trim();
@@ -67,7 +72,7 @@ export function VideoComments({ videoId }: { videoId: string }) {
                 <p className="whitespace-pre-wrap text-slate-800">{c.text}</p>
                 {c.mentions?.length ? (
                   <div className="mt-0.5 text-xs text-slate-500" data-testid="comment-mentions">
-                    Notified {c.mentions.map((m) => m.email).join(", ")}
+                    Mentioned {c.mentions.map((m) => m.email).join(", ")}
                   </div>
                 ) : null}
               </div>

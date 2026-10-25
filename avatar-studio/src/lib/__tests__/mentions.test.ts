@@ -3,10 +3,11 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
-import { MAX_MENTIONS, addComment, commentSchema, createVideo, findMentions, notifyMentions, videoRequestSchema } from "../services";
+import { MAX_MENTIONS, MENTION_EMAILS_PER_HOUR, addComment, commentSchema, createVideo, findMentions, notifyMentions, videoRequestSchema } from "../services";
 import { MockEmailProvider, setEmailProvider } from "../providers/email";
 import { acceptInvite, createInvite, createWorkspace, inviteSchema } from "../workspaces";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
+import { resetRateLimit } from "../rate-limit";
 
 let mail: MockEmailProvider;
 beforeEach(() => {
@@ -14,7 +15,10 @@ beforeEach(() => {
   mail = new MockEmailProvider();
   setEmailProvider(mail);
 });
-afterEach(() => setEmailProvider(undefined));
+afterEach(() => {
+  setEmailProvider(undefined);
+  for (const key of [`mention-email:sender:${alice.id}`, "mention-email:global"]) resetRateLimit(key);
+});
 
 const alice = { id: "user_alice", email: "alice@example.com" };
 const bob = { id: "user_bob", email: "Bob@Example.com" };
@@ -37,6 +41,10 @@ describe("comment mentions", () => {
     const text = "@bob@example.com. can you check? cc @alice@example.com @mallory@evil.test and again @BOB@example.com";
     assert.deepEqual(findMentions(text, ws, alice.id), [{ userId: bob.id, email: "Bob@Example.com" }]);
     assert.deepEqual(findMentions("mail bob@example.com directly", ws, alice.id), [], "an address without the @ is not a mention");
+    assert.deepEqual(findMentions("write to alice@bob@example.com", ws, carol.id), [], "the middle of a plain address is not a mention");
+    assert.deepEqual(findMentions("(@bob@example.com)", ws, alice.id).map((m) => m.userId), [bob.id], "opening punctuation may come first");
+    const accented = { members: [{ userId: "u_ob", email: "o'brien@exämple.de", role: "editor" as const, joinedAt: "" }] };
+    assert.deepEqual(findMentions("@o'brien@exämple.de hi", accented, alice.id).map((m) => m.userId), ["u_ob"]);
     const many = { members: Array.from({ length: MAX_MENTIONS + 3 }, (_, i) => ({ userId: `u${i}`, email: `p${i}@example.com`, role: "editor" as const, joinedAt: "" })) };
     assert.equal(findMentions(many.members.map((m) => `@${m.email}`).join(" "), many, "someone").length, MAX_MENTIONS);
   });
@@ -64,6 +72,16 @@ describe("comment mentions", () => {
     const comment = await addComment(video.id, commentSchema.parse({ text: "@bob@example.com @carol@example.com look" }), ws.id, alice);
     assert.equal(await notifyMentions(comment), 1);
     assert.deepEqual(mail.sent.map((m) => m.to), ["carol@example.com"]);
+  });
+
+  it("stops emailing once the author's hourly allowance is used, but still posts the comment", async () => {
+    const { ws, video } = await team();
+    const text = commentSchema.parse({ text: "@bob@example.com @carol@example.com again" });
+    for (let i = 0; i < MENTION_EMAILS_PER_HOUR / 2; i += 1) assert.equal(await notifyMentions(await addComment(video.id, text, ws.id, alice)), 2);
+    const over = await addComment(video.id, text, ws.id, alice);
+    assert.equal(over.mentions?.length, 2, "the comment and its mentions are kept");
+    assert.equal(await notifyMentions(over), 0);
+    assert.equal(mail.sent.length, MENTION_EMAILS_PER_HOUR);
   });
 
   it("does nothing in a personal space or for someone outside the workspace", async () => {

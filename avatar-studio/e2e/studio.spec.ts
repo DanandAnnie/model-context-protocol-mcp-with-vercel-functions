@@ -1570,6 +1570,11 @@ test("a mention link opens the video in its workspace, and teammates can be pick
     await expect(page.getByRole("heading", { name: `Mentioned ${tag}` })).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`/videos/${video.id}$`));
     await expect(page.getByLabel("Workspace")).toHaveValue(ws.id);
+    // A link naming a space the reader is not a member of cannot move them out of this one.
+    await page.goto(`/videos/${video.id}?ws=local#top`);
+    await expect(page.getByRole("heading", { name: `Mentioned ${tag}` })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/videos/${video.id}#top$`));
+    await expect(page.getByLabel("Workspace")).toHaveValue(ws.id);
 
     // Demo mode has one user without an email, so stand in a teammate to mention.
     await page.route("**/api/workspaces", (route) =>
@@ -1579,8 +1584,9 @@ test("a mention link opens the video in its workspace, and teammates can be pick
     );
     await page.reload();
     const chips = page.getByTestId("mention-suggestions");
+    await page.getByLabel("New comment").fill("Thoughts @b");
     await chips.getByRole("button", { name: "@bob@example.com" }).click();
-    await expect(page.getByLabel("New comment")).toHaveValue("@bob@example.com ");
+    await expect(page.getByLabel("New comment")).toHaveValue("Thoughts @bob@example.com ", { timeout: 5000 });
   } finally {
     await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
     expect((await page.request.delete(`/api/workspaces/${ws.id}`)).status()).toBe(204);

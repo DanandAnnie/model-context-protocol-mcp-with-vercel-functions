@@ -7,6 +7,7 @@ import { LOCAL_OWNER } from "../owner-id";
 import { isWorkspaceId, type User } from "../workspaces";
 import { config } from "../config";
 import { getEmailProvider, mentionEmail } from "../providers/email";
+import { reserveRateLimit } from "../rate-limit";
 import { ForbiddenError, NotFoundError, ValidationError } from "../errors";
 import { owned } from "./shared";
 
@@ -17,8 +18,16 @@ export const commentSchema = z.object({ text: z.string().trim().min(1).max(1000)
 /** How many people one comment can notify. */
 export const MAX_MENTIONS = 10;
 
-/** `@` followed by an email address; the address ends before trailing punctuation. */
-const MENTION = /@([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/g;
+/** Mention emails one person can set off per hour, and the whole instance; past either, comments still post but nobody is emailed. */
+export const MENTION_EMAILS_PER_HOUR = 60;
+export const MENTION_EMAILS_PER_HOUR_GLOBAL = 600;
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * `@` at the start or after a space or opening punctuation, followed by an email address, so the middle
+ * of a plain address (`alice@bob@example.com`) is not a mention; the address ends before trailing punctuation.
+ */
+const MENTION = /(?:^|[\s(\[,;:])@([\p{L}\p{N}._%+'-]+@[\p{L}\p{N}.-]+\.[\p{L}]{2,})/gu;
 
 /**
  * Workspace members named as `@email` in a comment, matched without regard to case, in order of first
@@ -77,6 +86,13 @@ export async function notifyMentions(comment: VideoComment): Promise<number> {
   if (!comment.mentions?.length) return 0;
   const video = await getStore().get<Video>("video", comment.videoId);
   if (!video) return 0;
+  // Posting and deleting a comment in a loop would otherwise mail teammates without limit.
+  const n = comment.mentions.length;
+  const sender = reserveRateLimit(`mention-email:sender:${comment.authorId}`, n, MENTION_EMAILS_PER_HOUR, HOUR_MS);
+  if (!sender.allowed || !reserveRateLimit("mention-email:global", n, MENTION_EMAILS_PER_HOUR_GLOBAL, HOUR_MS).allowed) {
+    console.warn(`mention emails for comment ${comment.id} skipped: hourly limit reached`);
+    return 0;
+  }
   const url = `${config.appUrl.replace(/\/$/, "")}/videos/${encodeURIComponent(video.id)}?ws=${encodeURIComponent(comment.ownerId)}`;
   let sent = 0;
   for (const m of comment.mentions) {

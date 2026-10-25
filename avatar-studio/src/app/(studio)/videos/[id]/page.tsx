@@ -38,17 +38,29 @@ export default function VideoDetailPage() {
     }
   }
   // A mention email links here with ?ws=<workspace> so a teammate whose active space is another one
-  // lands on the video rather than a "not found". The switch sets the cookie every request reads, so
-  // the page reloads without the parameter once it lands; the fetch waits until that is settled.
+  // lands on the video rather than a "not found". Only a workspace the reader belongs to and is not
+  // already in is switched to (a crafted link cannot move them out of one); the switch sets the cookie
+  // every request reads, so the page reloads without the parameter. The fetch waits until that is settled.
   const [ownerReady, setOwnerReady] = useState(false);
   useEffect(() => {
-    const ws = new URLSearchParams(window.location.search).get("ws");
+    const url = new URL(window.location.href);
+    const ws = url.searchParams.get("ws");
     if (!ws) {
       setOwnerReady(true);
       return;
     }
-    api("/api/workspaces/switch", { method: "POST", body: JSON.stringify({ id: ws }) })
-      .then(() => window.location.replace(window.location.pathname))
+    url.searchParams.delete("ws");
+    const clean = `${url.pathname}${url.search}${url.hash}`;
+    api<{ activeId: string; workspaces: Array<{ id: string }> }>("/api/workspaces")
+      .then(async ({ activeId, workspaces }) => {
+        if (ws === activeId || !workspaces.some((w) => w.id === ws)) {
+          window.history.replaceState(null, "", clean);
+          setOwnerReady(true);
+          return;
+        }
+        await api("/api/workspaces/switch", { method: "POST", body: JSON.stringify({ id: ws }) });
+        window.location.replace(clean);
+      })
       .catch(() => setOwnerReady(true));
   }, []);
   const { data, loading, error, setData, refetch } = useApi<{ video: Video }>(ownerReady ? `/api/videos/${id}` : null, {

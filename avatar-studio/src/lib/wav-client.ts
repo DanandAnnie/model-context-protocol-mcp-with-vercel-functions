@@ -1,9 +1,10 @@
 "use client";
+import { MAX_CLIP_SECONDS } from "./types";
 // Browser-side audio conversion for audio scenes. Recordings (WebM/Opus in Chrome, MP4 in Safari)
 // and uploads (MP3, M4A, WAV, ...) are decoded by the browser and re-encoded as mono 16-bit PCM
 // WAV, which every renderer accepts and whose length the server can read from the header.
 
-/** Sample rate of converted clips: clear speech, and a five-minute clip (9.6 MB) stays under the 10 MB cap. */
+/** Sample rate of converted clips: clear speech at 32 kB a second, so a full-length clip fits one upload. */
 export const CLIP_SAMPLE_RATE = 16_000;
 
 /** Encodes mono samples (-1..1) as a 16-bit PCM WAV file. */
@@ -46,8 +47,10 @@ export async function toWavDataUrl(blob: Blob): Promise<{ dataUrl: string; secon
   } finally {
     void ctx.close();
   }
+  // A recording stopped at the limit runs a fraction over it; that tail is trimmed. Anything clearly longer is refused.
+  if (decoded.duration > MAX_CLIP_SECONDS + 1) throw new Error(`Clips can be at most ${MAX_CLIP_SECONDS} seconds long; trim the audio or split it across scenes`);
   // Mix down to mono and resample in one offline render.
-  const frames = Math.max(1, Math.ceil(decoded.duration * CLIP_SAMPLE_RATE));
+  const frames = Math.max(1, Math.min(Math.ceil(decoded.duration * CLIP_SAMPLE_RATE), MAX_CLIP_SECONDS * CLIP_SAMPLE_RATE));
   const offline = new OfflineAudioContext(1, frames, CLIP_SAMPLE_RATE);
   const source = offline.createBufferSource();
   source.buffer = decoded;

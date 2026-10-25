@@ -126,6 +126,12 @@ export interface Scene {
 
 export type AudioClipType = "audio/wav" | "audio/mpeg";
 
+/**
+ * Longest audio clip, in seconds. A clip is uploaded in one request, and Vercel Functions take at most
+ * 4.5 MB per request body: 90 seconds of the editor's 16 kHz mono WAV is 2.9 MB, 3.8 MB as base64 JSON.
+ */
+export const MAX_CLIP_SECONDS = 90;
+
 /** Audio a scene can use instead of a voice; the bytes are stored separately and served by `/api/clips/:id`. */
 export interface AudioClip {
   id: string;

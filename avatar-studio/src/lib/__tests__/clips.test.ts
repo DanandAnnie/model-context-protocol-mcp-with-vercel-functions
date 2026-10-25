@@ -62,7 +62,18 @@ describe("audio clips", () => {
     await assert.rejects(createClip({ name: "Image", audio: "data:image/png;base64,AAAA" }), /audio recording/);
     await assert.rejects(createClip({ name: "Broken", audio: dataUrl(new Uint8Array([0x52, 0x49, 0x46, 0x46])) }), /malformed/);
     await assert.rejects(createClip({ name: "Blip", audio: dataUrl(wav(0.2)) }), /too short/);
-    await assert.rejects(createClip({ name: "Lecture", audio: dataUrl(wav(301, 800)) }), /at most 5 minutes/);
+    await assert.rejects(createClip({ name: "Lecture", audio: dataUrl(wav(91, 8000)) }), /at most 90 seconds/);
+    // A WAV must be PCM, and its rate comes from its sample rate, channels, and bits, not the header's byte-rate field.
+    const float = wav(2);
+    new DataView(float.buffer).setUint16(20, 3, true);
+    await assert.rejects(createClip({ name: "Float", audio: dataUrl(float) }), /WAV file is malformed/);
+    const lying = wav(2);
+    new DataView(lying.buffer).setUint32(28, 1, true);
+    assert.equal(wavSeconds(lying), 2, "a forged byte rate cannot stretch the length");
+    // An MP3 must start like one.
+    await assert.rejects(createClip({ name: "Not MP3", audio: dataUrl(new Uint8Array([1, 2, 3, 4]), "audio/mpeg"), durationSec: 2 }), /MP3 file is malformed/);
+    const id3 = await createClip({ name: "Tagged", audio: dataUrl(new Uint8Array([0x49, 0x44, 0x33, 4, 0]), "audio/mpeg"), durationSec: 2 });
+    await deleteClip(id3.id);
     // Listing reads metadata only (both clips can share a millisecond, so order is not asserted); the bytes come back from their own record.
     const listed = await listClips();
     assert.deepEqual(listed.map((c) => c.name).sort(), ["Intro take", "Phone memo"]);
@@ -78,12 +89,12 @@ describe("audio clips", () => {
   });
 
   it("caps clips per account", async () => {
-    for (let i = 0; i < MAX_CLIPS; i++) await createClip({ name: `Take ${i}`, audio: dataUrl(wav(1, 800)) });
-    await assert.rejects(createClip({ name: "One more", audio: dataUrl(wav(1, 800)) }), /At most 20 audio clips/);
+    for (let i = 0; i < MAX_CLIPS; i++) await createClip({ name: `Take ${i}`, audio: dataUrl(wav(1, 8000)) });
+    await assert.rejects(createClip({ name: "One more", audio: dataUrl(wav(1, 8000)) }), /At most 20 audio clips/);
   });
 
   it("an audio scene names its clip, drops its voice, and times the demo render by the clip", async () => {
-    const clip = await createClip({ name: "Founder intro", audio: dataUrl(wav(20, 800)) });
+    const clip = await createClip({ name: "Founder intro", audio: dataUrl(wav(20, 8000)) });
     const req = videoRequestSchema.parse({
       title: "Recorded intro",
       avatarId: STOCK_AVATARS[0].id,
@@ -106,10 +117,10 @@ describe("audio clips", () => {
   });
 
   it("a clip from another account or a deleted clip is refused before anything renders", async () => {
-    const theirs = await createClip({ name: "Theirs", audio: dataUrl(wav(2, 800)) }, "user_other");
+    const theirs = await createClip({ name: "Theirs", audio: dataUrl(wav(2, 8000)) }, "user_other");
     const base = { title: "Borrowed", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id };
     await assert.rejects(createVideo(videoRequestSchema.parse({ ...base, scenes: [{ script: "x", background: { type: "color", value: "#000000" }, audioId: theirs.id }] })), /Audio clip .* not found/);
-    const mine = await createClip({ name: "Mine", audio: dataUrl(wav(2, 800)) });
+    const mine = await createClip({ name: "Mine", audio: dataUrl(wav(2, 8000)) });
     // A failed video that named the clip cannot be retried once the clip is gone.
     const failed: Video = {
       ...videoRequestSchema.parse({ ...base, scenes: [{ script: "x", background: { type: "color", value: "#000000" }, audioId: mine.id }] }),
@@ -126,8 +137,24 @@ describe("audio clips", () => {
     await assert.rejects(retryVideo(failed.id), /Audio clip .* not found/);
   });
 
+  it("deleting the account removes clips and their audio without listing the audio", async () => {
+    const { deleteOwnerData } = await import("../services");
+    const clip = await createClip({ name: "Gone", audio: dataUrl(wav(1, 8000)) });
+    const store = getStore();
+    const listed: string[] = [];
+    const list = store.list.bind(store);
+    store.list = (async (kind: Parameters<typeof list>[0], owner?: string) => {
+      listed.push(kind);
+      return list(kind, owner);
+    }) as typeof store.list;
+    const counts = await deleteOwnerData();
+    assert.equal(counts.clip, 1);
+    assert.equal(listed.includes("clipaudio"), false, "audio rows are removed by id, never loaded");
+    assert.equal(await store.get("clipaudio", `clipaudio_${clip.id}`), null);
+  });
+
   it("the export lists clips without provider ids and leaves the audio bytes out", async () => {
-    const clip = await createClip({ name: "Export me", audio: dataUrl(wav(1, 800)) });
+    const clip = await createClip({ name: "Export me", audio: dataUrl(wav(1, 8000)) });
     await getStore().put("clip", { ...(await getStore().get<AudioClip>("clip", clip.id))!, providerAssetIds: { heygen: "asset_1" } });
     const out = await exportOwnerData();
     assert.deepEqual((out.clip as Array<Record<string, unknown>>).map((c) => [c.name, "providerAssetIds" in c]), [["Export me", false]]);

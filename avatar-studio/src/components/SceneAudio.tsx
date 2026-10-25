@@ -4,10 +4,7 @@ import { Mic, Square, Upload, X } from "lucide-react";
 import { Button, ErrorBanner, inputClass } from "@/components/ui";
 import { api, formatSeconds } from "@/lib/client";
 import { toWavDataUrl } from "@/lib/wav-client";
-import type { AudioClip } from "@/lib/types";
-
-/** Longest recording, matching the server's clip limit. */
-const MAX_RECORD_SECONDS = 300;
+import { MAX_CLIP_SECONDS, type AudioClip } from "@/lib/types";
 
 /**
  * Lets a scene use recorded or uploaded audio instead of a voice: the presenter lip-syncs to the
@@ -40,7 +37,16 @@ export function SceneAudio({
   // Until the clip list arrives (or if it fails), a scene that names a clip still shows that it speaks one.
   const clip: AudioClip | undefined = clipId ? (clips.find((c) => c.id === clipId) ?? { id: clipId, name: "Saved clip", mimeType: "audio/wav", bytes: 0, durationSec: 0, createdAt: "" }) : undefined;
 
-  useEffect(() => () => stopRecording(), []);
+  // The panel belongs to one scene (the editor keys it by scene). Leaving the scene stops a recording and drops it,
+  // and an upload that finishes afterwards is kept as a clip but not put on whatever scene is open by then.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      stopRecording();
+    };
+  }, []);
 
   async function save(blob: Blob, name: string) {
     setBusy(true);
@@ -49,7 +55,7 @@ export function SceneAudio({
       const { dataUrl } = await toWavDataUrl(blob);
       const { clip: saved } = await api<{ clip: AudioClip }>("/api/clips", { method: "POST", body: JSON.stringify({ name, audio: dataUrl }) });
       onSaved(saved);
-      onUse(saved);
+      if (mounted.current) onUse(saved);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not save the audio");
     } finally {
@@ -67,6 +73,7 @@ export function SceneAudio({
       rec.ondataavailable = (e) => e.data.size && chunks.current.push(e.data);
       rec.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
+        if (!mounted.current) return;
         const blob = new Blob(chunks.current, { type: rec.mimeType || "audio/webm" });
         if (blob.size > 0) void save(blob, `Recording ${new Date().toLocaleString()}`);
       };
@@ -76,7 +83,7 @@ export function SceneAudio({
       setSeconds(0);
       timer.current = setInterval(() => {
         setSeconds((n) => {
-          if (n + 1 >= MAX_RECORD_SECONDS) stopRecording();
+          if (n + 1 >= MAX_CLIP_SECONDS) stopRecording();
           return n + 1;
         });
       }, 1000);
@@ -93,7 +100,7 @@ export function SceneAudio({
     setRecording(false);
   }
 
-  if (clip) {
+  if (clip && !recording) {
     return (
       <div className="mb-3 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-slate-700" data-testid="scene-audio">
         <div className="flex flex-wrap items-center gap-2">

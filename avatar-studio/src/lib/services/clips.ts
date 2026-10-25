@@ -9,19 +9,19 @@ import { getStore } from "../store";
 import { decodeDataUrl } from "../providers/image";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { LOCAL_OWNER } from "../owner-id";
-import type { AudioClip, AudioClipType } from "../types";
+import { MAX_CLIP_SECONDS, type AudioClip, type AudioClipType } from "../types";
 import { owned } from "./shared";
 
-export const MAX_CLIP_BYTES = 10 * 1024 * 1024;
+/** Fits one request body on Vercel (4.5 MB) once base64-encoded: 3 MB is 4 MB as base64. */
+export const MAX_CLIP_BYTES = 3 * 1024 * 1024;
 export const MAX_CLIPS = 20;
-/** Longest clip a scene may use, in seconds. */
-export const MAX_CLIP_SECONDS = 300;
+export { MAX_CLIP_SECONDS };
 const CLIP_TYPES = new Set<AudioClipType>(["audio/wav", "audio/mpeg"]);
 
 export const clipUploadSchema = z.object({
   name: z.string().trim().min(1).max(80),
   /** A data URL: WAV (the editor converts recordings and uploads to it) or MP3. */
-  audio: z.string().min(1).max(14_000_000),
+  audio: z.string().min(1).max(4_300_000),
   /** Required for MP3, whose length cannot be read cheaply; a WAV's length is read from its header. */
   durationSec: z.number().positive().max(MAX_CLIP_SECONDS).optional(),
 });
@@ -45,7 +45,15 @@ export function wavSeconds(bytes: Uint8Array): number | null {
   for (let at = 12; at + 8 <= bytes.byteLength; ) {
     const id = tag(at);
     const size = view.getUint32(at + 4, true);
-    if (id === "fmt " && at + 20 <= bytes.byteLength) byteRate = view.getUint32(at + 16, true);
+    if (id === "fmt " && at + 24 <= bytes.byteLength) {
+      // PCM only, and the rate is computed from its parts rather than trusted from the header.
+      const format = view.getUint16(at + 8, true);
+      const channels = view.getUint16(at + 10, true);
+      const sampleRate = view.getUint32(at + 12, true);
+      const bits = view.getUint16(at + 22, true);
+      if (format !== 1 || !channels || channels > 2 || sampleRate < 8000 || sampleRate > 96_000 || (bits !== 8 && bits !== 16 && bits !== 24)) return null;
+      byteRate = (sampleRate * channels * bits) / 8;
+    }
     if (id === "data") {
       // A recorder that never patched the size leaves 0 or 0xFFFFFFFF; the rest of the file is the audio then.
       dataSize = size === 0 || size === 0xffffffff ? bytes.byteLength - at - 8 : Math.min(size, bytes.byteLength - at - 8);
@@ -78,18 +86,22 @@ export async function createClip(input: z.infer<typeof clipUploadSchema>, ownerI
   }
   const mimeType = (decoded.mimeType === "audio/x-wav" || decoded.mimeType === "audio/wave" ? "audio/wav" : decoded.mimeType) as AudioClipType;
   if (!CLIP_TYPES.has(mimeType)) throw new ValidationError("The clip must be WAV or MP3 audio");
-  if (decoded.bytes.byteLength > MAX_CLIP_BYTES) throw new ValidationError("The clip is too large (10 MB max)");
+  if (decoded.bytes.byteLength > MAX_CLIP_BYTES) throw new ValidationError("The clip is too large (3 MB max)");
   let seconds: number;
   if (mimeType === "audio/wav") {
     const read = wavSeconds(decoded.bytes);
     if (read === null) throw new ValidationError("The WAV file is malformed");
     seconds = read;
   } else {
+    // An MP3 starts with an ID3 tag or an MPEG audio frame sync.
+    const b = decoded.bytes;
+    const looksMp3 = (b.length >= 3 && b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33) || (b.length >= 2 && b[0] === 0xff && (b[1] & 0xe0) === 0xe0);
+    if (!looksMp3) throw new ValidationError("The MP3 file is malformed");
     if (!input.durationSec) throw new ValidationError("Give the length of an MP3 clip in durationSec");
     seconds = input.durationSec;
   }
   if (seconds < 0.5) throw new ValidationError("The clip is too short to speak (half a second at least)");
-  if (seconds > MAX_CLIP_SECONDS) throw new ValidationError(`Clips can be at most ${MAX_CLIP_SECONDS / 60} minutes long`);
+  if (seconds > MAX_CLIP_SECONDS) throw new ValidationError(`Clips can be at most ${MAX_CLIP_SECONDS} seconds long`);
   if ((await getStore().list<AudioClip>("clip", ownerId)).length >= MAX_CLIPS) {
     throw new ConflictError(`At most ${MAX_CLIPS} audio clips per account; delete one you no longer use`);
   }

@@ -354,7 +354,10 @@ function CreateInner() {
     const clip = sc.audioId ? clips.find((c) => c.id === sc.audioId) : undefined;
     return clip ? Math.round(clip.durationSec) : estimateSeconds(sc.script, speed);
   };
-  const seconds = scenes.reduce((sum, sc) => sum + sceneSeconds(sc), 0);
+  // Typed scenes are estimated together, as before audio scenes existed, so short scenes are not each rounded up.
+  const seconds =
+    scenes.reduce((sum, sc) => sum + (sc.audioId ? sceneSeconds(sc) : 0), 0) +
+    estimateSeconds(scenes.filter((sc) => !sc.audioId).map((sc) => sc.script).join("\n\n"), speed);
   const allScenesFilled = scenes.every((sc) => sc.script.trim().length > 0);
   const canEdit = useCanEdit();
   const canGenerate = canEdit !== false && !!avatar && !!voice && allScenesFilled && title.trim().length > 0 && !submitting;
@@ -565,6 +568,8 @@ function CreateInner() {
               </div>
             </details>
             <SceneAudio
+              // Distinct from the script box's key: both sit among the same siblings.
+              key={`audio-${activeIdx}`}
               clips={clips}
               clipId={active.audioId}
               disabled={canEdit === false}

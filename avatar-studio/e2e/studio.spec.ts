@@ -196,6 +196,12 @@ test("a scene can speak uploaded audio instead of a voice", async ({ page }) => 
   await page.locator("textarea").fill("Hi, I recorded this myself.");
   // The audio scene lasts exactly as long as its clip; the typed one is an estimate.
   await expect(page.getByTestId("scene-duration")).toHaveText(["~2s", "3s"]);
+  // Each scene has its own audio panel, one at a time.
+  await page.getByRole("button", { name: /^Scene 1,/ }).click();
+  await expect(page.getByTestId("scene-audio")).toHaveCount(1);
+  await expect(page.getByText("Or use your own audio")).toBeVisible();
+  await page.getByRole("button", { name: /^Scene 2,/ }).click();
+  await expect(page.getByTestId("scene-audio-name")).toHaveText("founder-take");
   await page.getByRole("button", { name: "Generate video" }).click();
   await page.waitForURL(/\/videos\/vid_/);
   const id = page.url().split("/").pop()!;

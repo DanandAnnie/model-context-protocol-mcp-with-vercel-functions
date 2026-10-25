@@ -4,12 +4,13 @@ import { getTtsProvider } from "../providers";
 import { getStore } from "../store";
 import { LOCAL_OWNER } from "../owner-id";
 
-const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip", "clipaudio"] as const;
+const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip"] as const;
 /**
- * Cover and clip-audio rows hold bytes; the export describes each cover from its video (`cover.mimeType`, `cover.bytes`)
- * and each audio clip from its `clip` row (name, type, size, length) instead of loading them.
+ * Cover rows hold image bytes; the export describes each cover from its video (`cover.mimeType`, `cover.bytes`) instead
+ * of loading them. Clip audio is never listed (each `clip` row names its own `clipaudio_<id>` row), so the export and
+ * the deletion below never pull audio bytes.
  */
-const EXPORT_KINDS = OWNER_KINDS.filter((k) => k !== "cover" && k !== "clipaudio") as Exclude<(typeof OWNER_KINDS)[number], "cover" | "clipaudio">[];
+const EXPORT_KINDS = OWNER_KINDS.filter((k) => k !== "cover") as Exclude<(typeof OWNER_KINDS)[number], "cover">[];
 
 /** Everything stored under an owner id, for a data export. Secrets (key hashes, webhook secret) and cover image bytes are left out. */
 export type OwnerExport = { ownerId: string; exportedAt: string } & Record<(typeof EXPORT_KINDS)[number], Record<string, unknown>[]>;
@@ -41,6 +42,8 @@ export async function deleteOwnerData(ownerId: string = LOCAL_OWNER): Promise<Re
     const items = await getStore().list<{ id: string; provider?: string }>(kind, ownerId);
     for (const item of items) {
       if (kind === "voice" && item.provider === tts.name) await tts.deleteVoice?.(item.id).catch(() => {});
+      // The clip's audio sits in its own row, removed by id so it is never loaded.
+      if (kind === "clip") await getStore().remove("clipaudio", `clipaudio_${item.id}`);
       await getStore().remove(kind, item.id);
     }
     counts[kind] = items.length;

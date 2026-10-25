@@ -137,7 +137,9 @@ export default function WorkspacePage() {
                 variant="danger"
                 disabled={busy}
                 onClick={() =>
-                  window.confirm(`Delete "${ws.name}" for good? Its videos, avatars, voices, brand kit, viewer emails, and settings are deleted for everyone. This cannot be undone.`) &&
+                  window.prompt(
+                    `Delete "${ws.name}" for good? Its videos, translations, avatars, voices, audio clips, templates, presenters and their conversations, viewer emails, brand kit, and settings are deleted for everyone, and its API keys stop working. Cancel a Pro plan first. This cannot be undone.\n\nType the workspace name to confirm.`,
+                  )?.trim() === ws.name &&
                   run(async () => {
                     await api(`/api/workspaces/${ws.id}`, { method: "DELETE" });
                     await api("/api/workspaces/switch", { method: "POST", body: JSON.stringify({ id: data!.personalId }) });

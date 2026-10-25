@@ -215,7 +215,7 @@ Returns `{ "reply": "…" }`.
 
 - `GET /api/workspaces` → `{ "personalId", "activeId", "workspaces": [...] }`
 - `POST /api/workspaces` → `{ "name" }` → `201`
-- `GET | PATCH | DELETE /api/workspaces/:id` (`PATCH` renames; owners only; `DELETE` removes the workspace and everything it owns, as the account deletion does for a person: videos with their comments, covers, and viewer emails, avatars, voices (provider clones included), clips, templates, presenters and transcripts, the brand kit, keys, the webhook, the plan, and the activity feed, then its members and invites)
+- `GET | PATCH | DELETE /api/workspaces/:id` (`PATCH` renames; owners only; `DELETE` removes the workspace and everything it owns, as the account deletion does for a person: videos with their comments, covers, and viewer emails, avatars, voices (provider clones included), clips, templates, presenters and transcripts, the brand kit, keys, the webhook, the plan, and the activity feed, then its members and invites; its keys are revoked before anything else goes. `400` while a Stripe Pro plan still renews: cancel it first)
 - `POST /api/workspaces/:id/invites` → `{ "email"?, "role": "owner" | "editor" | "viewer" }` (default `editor`) → `201 { "invite", "url" }`; `DELETE /api/workspaces/:id/invites/:token` revokes. Roles: owners manage members, billing, and the account's data; editors create, change, and delete content; viewers watch, download, and comment. While a viewer's active owner is a workspace, every route that creates, changes, or deletes content answers `403` (comments and favourites are allowed); viewers cannot mint API keys, and a member made a viewer loses the keys they minted under the workspace
 - `PATCH /api/workspaces/:id/members/:userId` → `{ "role": "owner" | "editor" | "viewer" }` (owners only; the last owner cannot be demoted); `DELETE` removes (owners) or leaves (self)
 - `POST /api/workspaces/switch` → `{ "id": "ws_…" }` or your personal id; sets the `studio_workspace` cookie (browser sessions only; keys are bound at minting)
@@ -242,7 +242,7 @@ Returns `{ "reply": "…" }`.
 ## Account data
 
 - `GET /api/account/export` downloads everything stored for the active account or workspace as JSON (key hashes, the webhook secret, and cover image bytes are left out; each video lists its cover's type and size; the activity feed is included). Session only; `403` with a key.
-- `DELETE /api/account` with `{ "confirm": "DELETE" }` removes every record of the active account or workspace (cloned voices are deleted at the provider too) and returns counts per kind. Session only; in a workspace, owners only (`403` for editors). Workspace membership is unaffected.
+- `DELETE /api/account` with `{ "confirm": "DELETE" }` removes every record of the active account or workspace (cloned voices are deleted at the provider too) and returns counts per kind; `400` while a Stripe Pro plan still renews (cancel it first, or the subscription keeps billing with no plan left to manage it). Session only; in a workspace, owners only (`403` for editors). Workspace membership is unaffected.
 
 ## Outbound webhooks
 

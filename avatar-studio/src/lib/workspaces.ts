@@ -103,14 +103,17 @@ export async function renameWorkspace(id: string, name: string, user: User): Pro
 
 /**
  * Deletes the workspace record, every API key minted under it, and its outbound webhook, so nothing
- * can act as the workspace afterwards. `purge` removes what the workspace owns (videos, viewer emails,
- * conversations, voices, and the rest); it runs first, so a failure part-way leaves the workspace in
+ * can act as the workspace afterwards. The keys go first, so no script keeps writing while the rest
+ * is removed. `purge` then removes what the workspace owns (videos, viewer emails, conversations,
+ * voices, and the rest) before the workspace record, so a failure part-way leaves the workspace in
  * place for the owner to try again rather than orphaning its data.
  */
 export async function deleteWorkspace(id: string, user: User, purge?: (ownerId: string) => Promise<unknown>): Promise<void> {
   const ws = await requireRole(id, user, ["owner"]);
-  if (purge) await purge(id);
+  // The purge deletes by owner id; never let it run on anything but this workspace's own id.
+  if (!isWorkspaceId(id) || ws.id !== id) throw new NotFoundError("Workspace not found");
   await revokeApiKeysFor(id);
+  if (purge) await purge(id);
   await deleteNotifySettings(id);
   for (const m of ws.members) await getStore().remove("membership", membershipId(id, m.userId));
   for (const i of await getStore().list<WorkspaceInvite>("invite", id)) await getStore().remove("invite", i.id);

@@ -108,4 +108,30 @@ describe("share-page email gate", () => {
     assert.equal(await getStore().get("video", v.id), null);
     assert.ok(await getStore().get("video", mine.id), "the owner's personal space is untouched");
   });
+
+  it("is refused while a Stripe plan still renews, and clears rows past a store's listing cap", async () => {
+    const { createWorkspace, deleteWorkspace } = await import("../workspaces");
+    const { deleteOwnerData } = await import("../services");
+    const { setPlan } = await import("../billing");
+    // A store that, like Supabase's API, returns only so many rows per listing.
+    class CappedStore extends MemoryStore {
+      async list<T>(kind: Parameters<MemoryStore["list"]>[0], ownerId?: string): Promise<T[]> {
+        return (await super.list<T>(kind, ownerId)).slice(0, 2);
+      }
+    }
+    globalThis.__avatarStudioStore = new CappedStore();
+    const alice = { id: "user_alice", email: "alice@example.com" };
+    const ws = await createWorkspace("Acme", alice);
+    const v = await gatedVideo(ws.id);
+    for (const n of [1, 2, 3, 4, 5]) await captureVideoLead(v, lead(`viewer${n}@example.com`));
+    await setPlan(ws.id, { plan: "pro", provider: "stripe", status: "active", customerId: "cus_1", subscriptionId: "sub_1" });
+    await assert.rejects(deleteWorkspace(ws.id, alice, deleteOwnerData), /Cancel the Pro plan/);
+    assert.ok(await getStore().get("workspace", ws.id), "a refused delete keeps the workspace");
+    assert.ok(await getStore().get("video", v.id));
+    // Once cancelled (it runs to the end of the period), the delete goes ahead and takes every lead.
+    await setPlan(ws.id, { plan: "pro", provider: "stripe", status: "active", endsAt: "2030-01-01T00:00:00.000Z" });
+    await deleteWorkspace(ws.id, alice, deleteOwnerData);
+    assert.equal(await getStore().get("workspace", ws.id), null);
+    assert.deepEqual(await getStore().list<VideoLead>("videolead", ws.id), [], "five leads gone, two per listing");
+  });
 });

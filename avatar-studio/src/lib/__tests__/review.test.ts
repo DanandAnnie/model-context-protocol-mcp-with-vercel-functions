@@ -3,11 +3,12 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
+import { getStore } from "../store";
 import { createVideo, filterVideos, getVideo, reviewActionSchema, reviewVideo, videoQuerySchema, videoRequestSchema } from "../services";
 import { describeActivity } from "../activity-text";
 import { canManageAccount, createWorkspace } from "../workspaces";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
-import type { ActivityEvent } from "../types";
+import type { ActivityEvent, Video } from "../types";
 
 beforeEach(() => {
   globalThis.__avatarStudioStore = new MemoryStore();
@@ -17,9 +18,14 @@ const alice = { id: "user_alice", email: "alice@example.com" };
 const bob = { id: "user_bob", email: "bob@example.com" };
 const act = (action: "request" | "approve" | "changes" | "withdraw", note?: string) => reviewActionSchema.parse({ action, ...(note ? { note } : {}) });
 
+/** A finished render: only those go for review. */
+async function finished(video: Video): Promise<Video> {
+  return getStore().put("video", { ...video, status: "completed" as const, videoUrl: "https://cdn.example.com/v.mp4" });
+}
+
 async function teamVideo() {
   const ws = await createWorkspace("Acme", alice);
-  const video = await createVideo(videoRequestSchema.parse({ title: "Launch teaser", script: "Hello team.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }), ws.id);
+  const video = await finished(await createVideo(videoRequestSchema.parse({ title: "Launch teaser", script: "Hello team.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }), ws.id));
   return { ws, video };
 }
 
@@ -73,6 +79,31 @@ describe("video review", () => {
     await assert.rejects(reviewVideo(video.id, ws.id, bob, false, act("request")), /Restore the video/);
   });
 
+  it("only a finished render goes for review, and a key can ask but not withdraw", async () => {
+    const ws = await createWorkspace("Acme", alice);
+    const rendering = await createVideo(videoRequestSchema.parse({ title: "Still rendering", script: "Hi.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }), ws.id);
+    await assert.rejects(reviewVideo(rendering.id, ws.id, bob, false, act("request")), /Only a finished render/);
+    const done = await finished(rendering);
+    // A script with an API key acts as the workspace: it may ask, but every key would share one requester, so it may not withdraw.
+    const key = { id: ws.id };
+    assert.equal((await reviewVideo(done.id, ws.id, key, false, act("request"))).review?.status, "pending");
+    await assert.rejects(reviewVideo(done.id, ws.id, key, false, act("withdraw")), /withdrawn by a person signed in/);
+    assert.equal((await reviewVideo(done.id, ws.id, alice, true, act("withdraw"))).review, undefined, "an owner can withdraw it");
+  });
+
+  it("changing what the share page shows clears an approval; other edits keep it", async () => {
+    const { updateVideo, videoPatchSchema } = await import("../services");
+    const { ws, video } = await teamVideo();
+    await reviewVideo(video.id, ws.id, bob, false, act("request"));
+    await reviewVideo(video.id, ws.id, alice, true, act("approve"));
+    assert.equal((await updateVideo(video.id, videoPatchSchema.parse({ folder: "Q4" }), ws.id)).review?.status, "approved", "filing it away is not a change to what viewers see");
+    assert.equal((await updateVideo(video.id, videoPatchSchema.parse({ title: "Launch teaser" }), ws.id)).review?.status, "approved", "the same title is no change");
+    assert.equal((await updateVideo(video.id, videoPatchSchema.parse({ title: "Launch teaser v2" }), ws.id)).review, undefined);
+    // A pending review stays pending through an edit: the owner reviews whatever is there when they look.
+    await reviewVideo(video.id, ws.id, bob, false, act("request"));
+    assert.equal((await updateVideo(video.id, videoPatchSchema.parse({ description: "New words" }), ws.id)).review?.status, "pending");
+  });
+
   it("an owner edit in flight keeps a review that landed meanwhile", async () => {
     const { updateVideo, videoPatchSchema } = await import("../services");
     const { ws, video } = await teamVideo();
@@ -86,7 +117,7 @@ describe("video review", () => {
 
   it("the library filters by review state, and the feed names each step", async () => {
     const { ws, video } = await teamVideo();
-    const untouched = await createVideo(videoRequestSchema.parse({ title: "Untouched", script: "Hi.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }), ws.id);
+    const untouched = await finished(await createVideo(videoRequestSchema.parse({ title: "Untouched", script: "Hi.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }), ws.id));
     const pending = await reviewVideo(video.id, ws.id, bob, false, act("request"));
     const all = [pending, untouched];
     assert.deepEqual(filterVideos(all, videoQuerySchema.parse({ review: "pending" })).map((v) => v.id), [video.id]);

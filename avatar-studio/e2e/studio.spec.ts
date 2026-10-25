@@ -1243,6 +1243,9 @@ test("workspace videos go through review: ask, request changes, ask again, appro
     const video = await createVideoViaApi(page, `Needs sign-off ${tag}`);
     await page.goto(`/videos/${video.id}`);
     const panel = page.getByTestId("review-panel");
+    // Only a finished render goes for review.
+    expect((await page.request.post(`/api/videos/${video.id}/review`, { data: { action: "request" } })).status()).toBe(409);
+    await expect(page.getByText("Completed")).toBeVisible({ timeout: 30_000 });
     await panel.getByLabel("Review note").fill("Ready for the newsletter");
     await panel.getByRole("button", { name: "Ask for review" }).click();
     await expect(panel.getByTestId("review-status")).toHaveText("In review");
@@ -1271,6 +1274,9 @@ test("workspace videos go through review: ask, request changes, ask again, appro
     expect(feed.filter((e) => e.subjectId === video.id).map((e) => e.kind).slice(0, 4)).toEqual(["video.approved", "video.review_requested", "video.changes_requested", "video.review_requested"]);
     // A decided review cannot be decided again.
     expect((await page.request.post(`/api/videos/${video.id}/review`, { data: { action: "approve" } })).status()).toBe(409);
+    // Renaming it changes what the share page shows, so the approval goes.
+    const renamed = (await (await page.request.patch(`/api/videos/${video.id}`, { data: { title: `Renamed ${tag}` } })).json()).video;
+    expect(renamed.review).toBeUndefined();
   } finally {
     await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
     expect((await page.request.delete(`/api/workspaces/${ws.id}`)).status()).toBe(204);

@@ -208,12 +208,16 @@ export const reviewActionSchema = z
  */
 export function reviewVideo(id: string, ownerId: string, actor: User, canDecide: boolean, input: z.infer<typeof reviewActionSchema>): Promise<Video> {
   if (!isWorkspaceId(ownerId)) return Promise.reject(new ValidationError("Reviews are for workspace videos; switch to a workspace to ask for one"));
+  // A script with an API key acts as the workspace itself, so every key would share one requester; keys only ask.
+  const viaKey = actor.id === ownerId;
+  if (viaKey && input.action === "withdraw") return Promise.reject(new ForbiddenError("A review asked for with an API key is withdrawn by a person signed in"));
   return updateKeepingCounters(id, ownerId, (video) => {
     if (video.deletedAt) throw new ConflictError("Restore the video from the trash first");
     const now = nowIso();
     const by = { id: actor.id, ...(actor.email ? { email: actor.email } : {}) };
     switch (input.action) {
       case "request":
+        if (video.status !== "completed") throw new ConflictError("Only a finished render can go for review");
         if (video.review?.status === "pending") throw new ConflictError("A review is already pending");
         return {
           ...video,
@@ -491,15 +495,18 @@ async function refreshNow(video: Video): Promise<Video> {
     refreshRetryAt.set(video.id, Date.now() + REFRESH_RETRY_MS);
     return video;
   }
-  const current = await getStore().get<Video>("video", video.id);
-  if (!current) return video; // deleted meanwhile; do not bring it back
-  if (!isPending(current)) return current; // someone else already recorded the outcome
-  const next: Video = { ...current, ...stripUndefined(update), updatedAt: nowIso() };
-  if (next.status !== current.status || next.videoUrl !== current.videoUrl) {
+  // Read and write under the video's lock, so an edit, review, or beacon landing as the render finishes is kept.
+  const result = await withCounterLock(video.id, async () => {
+    const current = await getStore().get<Video>("video", video.id);
+    if (!current) return { next: video }; // deleted meanwhile; do not bring it back
+    if (!isPending(current)) return { next: current }; // someone else already recorded the outcome
+    const next: Video = { ...current, ...stripUndefined(update), updatedAt: nowIso() };
+    if (next.status === current.status && next.videoUrl === current.videoUrl) return { next };
     await getStore().put("video", next);
-    await scheduleNotification(current, next);
-  }
-  return next;
+    return { next, before: current };
+  });
+  if (result.before) await scheduleNotification(result.before, result.next);
+  return result.next;
 }
 
 export const MAX_FOLDER_NAME = 40;
@@ -609,7 +616,13 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
       delete next.shareLocked;
     }
   }
-  return putKeepingCounters(next);
+  // The title, description, cover, and call-to-action are what the share page shows; an approval does not outlive a change to them.
+  const publicChange =
+    (patch.title !== undefined && patch.title !== existing.title) ||
+    (patch.description !== undefined && (patch.description || undefined) !== existing.description) ||
+    patch.cover !== undefined ||
+    (patch.shareCta !== undefined && JSON.stringify(patch.shareCta ?? null) !== JSON.stringify(existing.shareCta ?? null));
+  return putKeepingCounters(next, { dropApproval: publicChange });
 }
 
 // ---------------------------------------------------------------------------
@@ -651,7 +664,7 @@ const CONCURRENT_FIELDS = [...COUNTER_FIELDS, "subtitles", "deletedAt", "review"
  * track a translation added or removed meanwhile, or undo a trash or restore. Runs under the
  * video's counter lock.
  */
-function putKeepingCounters(base: Video): Promise<Video> {
+function putKeepingCounters(base: Video, opts: { dropApproval?: boolean } = {}): Promise<Video> {
   return withCounterLock(base.id, async () => {
     const stored = await getStore().get<Video>("video", base.id);
     // Deleted (or purged) between the caller's read and this write: never bring it back without its side records.
@@ -660,6 +673,8 @@ function putKeepingCounters(base: Video): Promise<Video> {
     for (const field of CONCURRENT_FIELDS) delete next[field];
     const theirs: Partial<Video> = {};
     for (const field of CONCURRENT_FIELDS) if (stored[field] !== undefined) Object.assign(theirs, { [field]: stored[field] });
+    // An approval covers what viewers of the share page see; changing that sends the video back to "not reviewed".
+    if (opts.dropApproval && theirs.review?.status === "approved") delete theirs.review;
     return getStore().put("video", { ...next, ...theirs });
   });
 }
@@ -881,12 +896,17 @@ export async function applyAvatarWebhook(providerName: string, body: unknown): P
   const video = await getStore().findBy<Video>("video", "providerJobId", parsed.providerJobId);
   if (!video) return null;
   // A late or repeated terminal webhook must not overwrite a recorded outcome (and the counts
-  // that landed on it since), nor announce the completion twice.
-  if (!isPending(video)) return video;
-  const next: Video = { ...video, ...stripUndefined(parsed.update), updatedAt: nowIso() };
-  await getStore().put("video", next);
-  await scheduleNotification(video, next);
-  return next;
+  // that landed on it since), nor announce the completion twice. The record is read again under the
+  // video's lock, so an edit, review, or beacon that landed after the lookup is kept.
+  const result = await withCounterLock(video.id, async () => {
+    const current = await getStore().get<Video>("video", video.id);
+    if (!current || !isPending(current)) return { next: current ?? video };
+    const next: Video = { ...current, ...stripUndefined(parsed.update), updatedAt: nowIso() };
+    await getStore().put("video", next);
+    return { next, before: current };
+  });
+  if (result.before) await scheduleNotification(result.before, result.next);
+  return result.next;
 }
 
 // ---------------------------------------------------------------------------

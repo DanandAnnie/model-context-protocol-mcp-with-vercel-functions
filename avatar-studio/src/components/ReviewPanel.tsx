@@ -22,7 +22,9 @@ export function ReviewPanel({ video, onChange }: { video: Video; onChange: (vide
   const isOwner = who.role === "owner";
   const review = video.review;
   const pending = review?.status === "pending";
-  const mayWithdraw = pending && (isOwner || review?.requestedById === who.userId);
+  // Withdrawing changes the video, which viewers cannot do (a member made a viewer keeps their old request).
+  const mayWithdraw = pending && canEdit && (isOwner || review?.requestedById === who.userId);
+  const finished = video.status === "completed";
 
   async function send(action: "request" | "approve" | "changes" | "withdraw") {
     setBusy(action);
@@ -51,7 +53,7 @@ export function ReviewPanel({ video, onChange }: { video: Video; onChange: (vide
       </div>
       <p className="mt-1 text-xs text-slate-600">
         {!review
-          ? "Ask a workspace owner to approve this video before it is shared."
+          ? "Ask a workspace owner to approve this video before it is shared. Changing its title, description, cover, or button afterwards clears an approval."
           : review.status === "pending"
             ? `Asked by ${person(review.requestedByEmail, review.requestedById)} on ${formatDate(review.requestedAt)}.`
             : `${review.status === "approved" ? "Approved" : "Changes asked for"} by ${person(review.decidedByEmail, review.decidedById)}${review.decidedAt ? ` on ${formatDate(review.decidedAt)}` : ""}.`}
@@ -73,7 +75,7 @@ export function ReviewPanel({ video, onChange }: { video: Video; onChange: (vide
           ) : null}
           <div className="flex flex-wrap gap-2">
             {canEdit && !pending && (
-              <Button className="px-3 py-1.5 text-xs" onClick={() => send("request")} loading={busy === "request"} disabled={!!busy}>
+              <Button className="px-3 py-1.5 text-xs" onClick={() => send("request")} loading={busy === "request"} disabled={!!busy || !finished} title={finished ? undefined : "A video can go for review once it has rendered"}>
                 <Send className="h-3.5 w-3.5" /> {review ? "Ask for review again" : "Ask for review"}
               </Button>
             )}

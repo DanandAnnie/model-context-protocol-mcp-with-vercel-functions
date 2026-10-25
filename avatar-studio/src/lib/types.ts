@@ -430,7 +430,7 @@ export interface VideoComment {
   createdAt: string;
 }
 
-/** What happened in an account or workspace, for its activity feed. */
+/** Where a workspace video stands in review: awaiting an owner, approved, or sent back with changes. */
 export type ReviewStatus = "pending" | "approved" | "changes";
 
 export const REVIEW_LABEL: Record<ReviewStatus, string> = { pending: "In review", approved: "Approved", changes: "Changes requested" };
@@ -448,6 +448,7 @@ export interface VideoReview {
   decidedAt?: string;
 }
 
+/** What happened in an account or workspace, for its activity feed. */
 export type ActivityKind =
   | "video.created"
   | "video.trashed"

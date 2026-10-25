@@ -21,7 +21,7 @@ import {
 } from "../services";
 import { saveNotifySettings, setNotificationFetch } from "../notifications";
 import { createApiKey, ownerForApiKey } from "../api-keys";
-import { MockBillingProvider, applyStripeEvent, getPlan, setBillingProvider, setPlan } from "../billing";
+import { StripeBillingProvider, applyStripeEvent, getPlan, setBillingProvider, setPlan } from "../billing";
 import { MockTtsProvider } from "../providers/tts/mock";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import type { Video, VideoLead } from "../types";
@@ -139,28 +139,40 @@ describe("share-page email gate", () => {
     assert.deepEqual(await getStore().list<VideoLead>("videolead", ws.id), [], "five leads gone, two per listing");
   });
 
-  it("asks Stripe before refusing, so a cancellation whose webhook was missed does not block", async () => {
+  it("asks Stripe about every subscription of the customer before deciding", async () => {
     const { deleteOwnerData } = await import("../services");
-    await setPlan("u1", { plan: "pro", provider: "stripe", status: "active", subscriptionId: "sub_gone" });
-    const asked: string[] = [];
-    const stripe = Object.assign(new MockBillingProvider(), {
-      name: "stripe",
-      subscriptionRenews: async (plan: { subscriptionId?: string }) => {
-        asked.push(plan.subscriptionId ?? "");
-        return asked.length > 1 ? false : true;
-      },
-    });
-    setBillingProvider(stripe);
+    const subs: { status: string; cancel_at_period_end?: boolean }[] = [];
+    let failure: { status: number; code: string; message: string } | null = null;
+    const urls: string[] = [];
+    setBillingProvider(new StripeBillingProvider("sk_test", "price_pro"));
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      urls.push(`${init?.method} ${String(input)}`);
+      if (failure) return new Response(JSON.stringify({ error: failure }), { status: failure.status });
+      return new Response(JSON.stringify({ data: subs }), { status: 200 });
+    }) as typeof fetch;
     try {
-      await assert.rejects(deleteOwnerData("u1"), /Cancel the Pro plan/, "Stripe says it still renews");
+      // The stored plan says Pro and renewing, but Stripe has it cancelled: a missed webhook does not block.
+      await setPlan("u1", { plan: "pro", provider: "stripe", status: "active", customerId: "cus_1", subscriptionId: "sub_1" });
+      subs.push({ status: "active", cancel_at_period_end: true }, { status: "canceled" });
       await deleteOwnerData("u1");
-      assert.deepEqual(asked, ["sub_gone", "sub_gone"]);
-      stripe.subscriptionRenews = async () => {
-        throw new Error("Stripe is down");
-      };
-      await setPlan("u1", { plan: "pro", provider: "stripe", status: "active", subscriptionId: "sub_2" });
-      await assert.rejects(deleteOwnerData("u1"), /Cancel the Pro plan/, "an unanswered lookup is treated as still renewing");
+      assert.deepEqual(urls, ["GET https://api.stripe.com/v1/subscriptions?customer=cus_1&status=all&limit=100"]);
+      // The stored plan says Free (the webhook downgraded an unpaid subscription), but Stripe still bills it.
+      await setPlan("u1", { plan: "free", provider: "stripe", customerId: "cus_1" });
+      subs.splice(0, subs.length, { status: "unpaid" });
+      await assert.rejects(deleteOwnerData("u1"), /Cancel the Pro plan/);
+      // A customer Stripe no longer has cannot be billed.
+      failure = { status: 404, code: "resource_missing", message: "No such customer: 'cus_1'" };
+      await deleteOwnerData("u1");
+      // The same code for a key of the other mode says nothing about the customer, nor does an outage.
+      await setPlan("u1", { plan: "free", provider: "stripe", customerId: "cus_1" });
+      failure = { status: 404, code: "resource_missing", message: "No such customer: 'cus_1'; a similar object exists in live mode, but a test mode key was used" };
+      await assert.rejects(deleteOwnerData("u1"), /Could not check the subscription/);
+      failure = { status: 500, code: "api_error", message: "Something went wrong" };
+      await assert.rejects(deleteOwnerData("u1"), /Could not check the subscription/);
+      assert.ok(await getStore().get("plan", "plan_u1"), "a refusal deletes nothing");
     } finally {
+      globalThis.fetch = realFetch;
       setBillingProvider(undefined);
     }
   });
@@ -175,24 +187,30 @@ describe("share-page email gate", () => {
     assert.equal((await getPlan("u9")).endsAt, undefined, "renewing again clears the date");
     assert.equal(await applyStripeEvent({ type: "customer.subscription.deleted", data: { object: { id: "sub_1", status: "canceled", metadata: { ownerId: "ws_gone" } } } }), null);
     assert.equal(await getStore().get("plan", "plan_ws_gone"), null, "no plan row comes back for a deleted workspace");
+    // A checkout that completes after its workspace went is still recorded, so the ids Stripe bills are kept.
+    assert.equal(await applyStripeEvent({ type: "checkout.session.completed", data: { object: { client_reference_id: "ws_gone", customer: "cus_9", subscription: "sub_9" } } }), "ws_gone");
+    assert.equal((await getPlan("ws_gone")).customerId, "cus_9");
   });
 
-  it("stops before deleting anything when a cloned voice cannot be removed yet, and moves on when it never can", async () => {
+  it("stops before deleting any content when a cloned voice cannot be removed, keeping its row for the retry", async () => {
     const { deleteOwnerData } = await import("../services");
     const v = await gatedVideo();
     await getStore().put("voice", { id: "clone_1", name: "Me", provider: "mock", source: "custom", ownerId: "u1" });
     const original = MockTtsProvider.prototype.deleteVoice;
-    let status = 503;
-    MockTtsProvider.prototype.deleteVoice = async () => {
-      throw Object.assign(new Error(`voice delete failed: ${status}`), { status });
+    let failWith: number | null = 401;
+    const asked: string[] = [];
+    (MockTtsProvider.prototype as { deleteVoice: (id: string) => Promise<void> }).deleteVoice = async (id: string) => {
+      asked.push(id);
+      if (failWith) throw Object.assign(new Error(`voice delete failed: ${failWith}`), { status: failWith });
     };
     try {
-      await assert.rejects(deleteOwnerData("u1"), /503/);
-      assert.ok(await getStore().get("video", v.id), "a passing failure stops the run before the videos go");
-      assert.ok(await getStore().get("voice", "clone_1"), "and keeps the row so a retry finds the clone");
-      status = 401;
+      await assert.rejects(deleteOwnerData("u1"), /Could not delete the cloned voice "Me".*401/);
+      assert.ok(await getStore().get("video", v.id), "the videos are kept");
+      assert.ok(await getStore().get("voice", "clone_1"), "and the voice row, so the clone's id is not lost");
+      failWith = null;
       const counts = await deleteOwnerData("u1");
-      assert.equal(counts.voiceLeftAtProvider, 1, "a refusal that will not change is reported, not retried for ever");
+      assert.deepEqual([counts.voice, counts.video], [1, 1]);
+      assert.deepEqual(asked, ["clone_1", "clone_1"]);
       assert.equal(await getStore().get("video", v.id), null);
     } finally {
       MockTtsProvider.prototype.deleteVoice = original;

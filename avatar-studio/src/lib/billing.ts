@@ -25,20 +25,36 @@ export async function setPlan(ownerId: string, patch: Partial<Omit<Plan, "id" | 
   return getStore().put("plan", next);
 }
 
-/** Subscription states Stripe still charges, and that can be cancelled from the billing portal. */
-const RENEWING = ["active", "trialing", "past_due", "unpaid"];
+/**
+ * Subscription states Stripe can still charge, cancellable from the billing portal. Wider than the states that
+ * give Pro (an unpaid or incomplete subscription is Free in the app but may still bill).
+ */
+const RENEWING = ["active", "trialing", "past_due", "unpaid", "incomplete"];
+
+const CANCEL_FIRST = "Cancel the Pro plan first (Settings, Manage subscription); it keeps billing otherwise";
 
 /**
- * Refuses (400) while a Stripe subscription still renews for this owner: deleting the plan row would leave
- * them billed with no way to reach the billing portal. The stored plan answers first; when it says the plan
- * renews, Stripe is asked too, so a cancellation whose webhook never arrived does not block for good.
+ * Refuses (400) while a Stripe subscription can still bill this owner: deleting the plan row would leave them
+ * billed with no way to reach the billing portal. For anyone who has been a Stripe customer, Stripe itself is
+ * asked about every subscription of theirs, so a missed webhook neither blocks a cancelled plan nor lets a renewing
+ * one through; without an answer from Stripe the stored plan decides, and a failed lookup refuses.
  */
 export async function assertNoRenewingPlan(ownerId: string): Promise<void> {
   const plan = await getPlan(ownerId);
-  if (plan.plan !== "pro" || plan.provider !== "stripe" || plan.endsAt) return;
+  if (plan.provider !== "stripe") return;
+  const storedRenews = plan.plan === "pro" && !plan.endsAt;
   const provider = getBillingProvider();
-  const renews = provider.subscriptionRenews ? await provider.subscriptionRenews(plan).catch(() => true) : true;
-  if (renews) throw new ValidationError("Cancel the Pro plan first (Settings, Manage subscription); it keeps billing otherwise");
+  if (!plan.customerId || !provider.customerRenews) {
+    if (storedRenews) throw new ValidationError(CANCEL_FIRST);
+    return;
+  }
+  let renews: boolean;
+  try {
+    renews = await provider.customerRenews(plan.customerId);
+  } catch {
+    throw new ValidationError("Could not check the subscription with Stripe; try again in a moment");
+  }
+  if (renews) throw new ValidationError(CANCEL_FIRST);
 }
 
 /** When a cancelled subscription stops: `cancel_at`, else the period end (on the items since Stripe's 2025-03-31 API). */
@@ -65,8 +81,8 @@ export interface BillingProvider {
   checkout(ownerId: string, returnUrl: string): Promise<{ url: string }>;
   /** Opens subscription management (cancel, update card); returns the URL. */
   portal(ownerId: string, returnUrl: string): Promise<{ url: string }>;
-  /** Asks the billing provider whether the plan's subscription will charge again (for when a webhook was missed). */
-  subscriptionRenews?(plan: Plan): Promise<boolean>;
+  /** Asks the billing provider whether any of the customer's subscriptions can charge again (for when a webhook was missed). */
+  customerRenews?(customerId: string): Promise<boolean>;
 }
 
 /** Demo billing: upgrades and downgrades take effect immediately, no payment. */
@@ -99,14 +115,17 @@ export class StripeBillingProvider implements BillingProvider {
     return body;
   }
 
-  async subscriptionRenews(plan: Plan): Promise<boolean> {
-    if (!plan.subscriptionId) return false;
+  async customerRenews(customerId: string): Promise<boolean> {
     try {
-      const sub = await this.call<Record<string, unknown>>(`subscriptions/${encodeURIComponent(plan.subscriptionId)}`);
-      return RENEWING.includes(String(sub.status)) && !sub.cancel_at_period_end && typeof sub.cancel_at !== "number";
+      const subs = await this.call<{ data: Array<Record<string, unknown>> }>(
+        `subscriptions?customer=${encodeURIComponent(customerId)}&status=all&limit=100`,
+      );
+      return subs.data.some((s) => RENEWING.includes(String(s.status)) && !s.cancel_at_period_end && typeof s.cancel_at !== "number");
     } catch (err) {
-      // A subscription Stripe no longer has cannot charge; any other failure is treated as "still renews".
-      if ((err as { code?: string }).code === "resource_missing") return false;
+      // A customer Stripe no longer has cannot be billed. "A similar object exists in live mode" means the key is for
+      // the other mode or account, which says nothing about the customer, so it stays an error.
+      const e = err as { code?: string; message?: string };
+      if (e.code === "resource_missing" && !/similar object exists/i.test(e.message ?? "")) return false;
       throw err;
     }
   }
@@ -178,8 +197,6 @@ export async function applyStripeEvent(event: StripeEvent): Promise<string | nul
   const obj = event.data.object;
   const meta = (obj.metadata as Record<string, string> | undefined) ?? {};
   const ownerId = (obj.client_reference_id as string | undefined) ?? meta.ownerId;
-  // A deleted workspace gets no plan row back from a late event (its subscription's final "deleted", say).
-  if (ownerId?.startsWith("ws_") && !(await getStore().get("workspace", ownerId))) return null;
   switch (event.type) {
     case "checkout.session.completed": {
       if (!ownerId) return null;
@@ -195,6 +212,9 @@ export async function applyStripeEvent(event: StripeEvent): Promise<string | nul
     case "customer.subscription.updated":
     case "customer.subscription.deleted": {
       if (!ownerId) return null;
+      // A deleted workspace gets no plan row back from its subscription's later events. A completed checkout is
+      // still recorded, so the customer and subscription ids are never lost while Stripe bills them.
+      if (ownerId.startsWith("ws_") && !(await getStore().get("workspace", ownerId))) return null;
       const status = String(obj.status ?? "");
       const endsAt = stripeEndsAt(obj);
       const active = event.type !== "customer.subscription.deleted" && ["active", "trialing", "past_due"].includes(status);

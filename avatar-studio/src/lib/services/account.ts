@@ -41,15 +41,12 @@ export async function exportOwnerData(ownerId: string = LOCAL_OWNER): Promise<Ow
  */
 const DELETE_ORDER = ["apikey", "voice", ...OWNER_KINDS.filter((k) => k !== "apikey" && k !== "voice")] as const;
 
-/** Provider answers that will not change on a retry (a revoked key, a clone under another account). */
-const PERMANENT_PROVIDER_STATUS = [400, 401, 403, 422];
-
 /**
- * Deletes everything stored under an owner id (cloned voices are removed at the provider too). Returns counts per kind,
- * plus `voiceLeftAtProvider` when the provider refused a clone for good (it can only be removed in the provider's own
- * dashboard then). A Stripe subscription that still renews is refused first (400). Each kind is listed until it comes
- * back empty, because a store may cap one listing (Supabase returns at most 1,000 rows); a passing provider failure
- * stops the run with the voice row kept, so a retry can find the clone again.
+ * Deletes everything stored under an owner id (cloned voices are removed at the provider too). Returns counts per kind.
+ * A Stripe subscription that can still bill is refused first (400). Each kind is listed until it comes back empty,
+ * because a store may cap one listing (Supabase returns at most 1,000 rows). A voice the provider fails to delete
+ * stops the run with its row kept, so the clone's id is never lost and a retry (after fixing the provider key, say)
+ * finishes the job; the provider treats a voice it no longer has as deleted.
  */
 export async function deleteOwnerData(ownerId: string = LOCAL_OWNER): Promise<Record<string, number>> {
   await assertNoRenewingPlan(ownerId);
@@ -63,13 +60,10 @@ export async function deleteOwnerData(ownerId: string = LOCAL_OWNER): Promise<Re
       // A row that is still listed after being removed would loop forever; stop and report it instead.
       if (items.every((item) => removed.has(item.id))) throw new Error(`Could not delete ${kind} records; try again`);
       for (const item of items) {
-        if (kind === "voice" && item.provider === tts.name && !removed.has(item.id)) {
-          try {
-            await tts.deleteVoice?.(item.id);
-          } catch (err) {
-            if (!PERMANENT_PROVIDER_STATUS.includes((err as { status?: number }).status ?? 0)) throw err;
-            counts.voiceLeftAtProvider = (counts.voiceLeftAtProvider ?? 0) + 1;
-          }
+        if (kind === "voice" && item.provider === tts.name) {
+          await tts.deleteVoice?.(item.id).catch((err: unknown) => {
+            throw new Error(`Could not delete the cloned voice "${(item as { name?: string }).name ?? item.id}" at the provider, so the videos and other content were kept; try again once the provider is reachable (${err instanceof Error ? err.message : String(err)})`);
+          });
         }
         // The clip's audio sits in its own row, removed by id so it is never loaded.
         if (kind === "clip") await getStore().remove("clipaudio", `clipaudio_${item.id}`);

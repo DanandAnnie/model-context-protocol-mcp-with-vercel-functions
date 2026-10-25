@@ -91,4 +91,21 @@ describe("share-page email gate", () => {
     await deleteVideo(v.id, "u1", true);
     assert.deepEqual(await getStore().list<VideoLead>("videolead", "u1"), [], "deleting the video for good removes its leads");
   });
+
+  it("goes, with everything else a workspace owns, when the workspace is deleted", async () => {
+    const { createWorkspace, deleteWorkspace } = await import("../workspaces");
+    const { deleteOwnerData } = await import("../services");
+    const alice = { id: "user_alice", email: "alice@example.com" };
+    const ws = await createWorkspace("Acme", alice);
+    const v = await gatedVideo(ws.id);
+    await captureVideoLead(v, lead("viewer@example.com"));
+    const mine = await gatedVideo(alice.id);
+    // Only an owner may delete, and a refused attempt removes nothing.
+    await assert.rejects(deleteWorkspace(ws.id, { id: "user_bob" }, deleteOwnerData), /not found/);
+    assert.equal((await getStore().list<VideoLead>("videolead", ws.id)).length, 1);
+    await deleteWorkspace(ws.id, alice, deleteOwnerData);
+    assert.deepEqual(await getStore().list<VideoLead>("videolead", ws.id), []);
+    assert.equal(await getStore().get("video", v.id), null);
+    assert.ok(await getStore().get("video", mine.id), "the owner's personal space is untouched");
+  });
 });

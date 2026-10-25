@@ -137,7 +137,7 @@ export default function WorkspacePage() {
                 variant="danger"
                 disabled={busy}
                 onClick={() =>
-                  window.confirm(`Delete "${ws.name}"? Its videos and settings become unreachable for everyone.`) &&
+                  window.confirm(`Delete "${ws.name}" for good? Its videos, avatars, voices, brand kit, viewer emails, and settings are deleted for everyone. This cannot be undone.`) &&
                   run(async () => {
                     await api(`/api/workspaces/${ws.id}`, { method: "DELETE" });
                     await api("/api/workspaces/switch", { method: "POST", body: JSON.stringify({ id: data!.personalId }) });

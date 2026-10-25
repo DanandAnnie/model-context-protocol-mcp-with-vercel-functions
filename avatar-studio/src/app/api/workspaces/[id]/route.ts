@@ -2,6 +2,7 @@ import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { currentUser } from "@/lib/owner";
 import { deleteWorkspace, getWorkspace, memberOf, renameWorkspace, workspaceNameSchema, workspaceView } from "@/lib/workspaces";
 import { NotFoundError } from "@/lib/errors";
+import { deleteOwnerData } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 type Ctx = { params: Promise<{ id: string }> };
@@ -29,7 +30,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
 export async function DELETE(_req: Request, ctx: Ctx) {
   try {
-    await deleteWorkspace((await ctx.params).id, await currentUser());
+    // Everything the workspace owns goes with it: its videos, viewer emails, and transcripts are not left behind.
+    await deleteWorkspace((await ctx.params).id, await currentUser(), deleteOwnerData);
     return new Response(null, { status: 204 });
   } catch (err) {
     return errorResponse(err);

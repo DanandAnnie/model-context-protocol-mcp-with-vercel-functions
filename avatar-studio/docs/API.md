@@ -215,7 +215,7 @@ Returns `{ "reply": "…" }`.
 
 - `GET /api/workspaces` → `{ "personalId", "activeId", "workspaces": [...] }`
 - `POST /api/workspaces` → `{ "name" }` → `201`
-- `GET | PATCH | DELETE /api/workspaces/:id` (`PATCH` renames; owners only)
+- `GET | PATCH | DELETE /api/workspaces/:id` (`PATCH` renames; owners only; `DELETE` removes the workspace and everything it owns, as the account deletion does for a person: videos with their comments, covers, and viewer emails, avatars, voices (provider clones included), clips, templates, presenters and transcripts, the brand kit, keys, the webhook, the plan, and the activity feed, then its members and invites)
 - `POST /api/workspaces/:id/invites` → `{ "email"?, "role": "owner" | "editor" | "viewer" }` (default `editor`) → `201 { "invite", "url" }`; `DELETE /api/workspaces/:id/invites/:token` revokes. Roles: owners manage members, billing, and the account's data; editors create, change, and delete content; viewers watch, download, and comment. While a viewer's active owner is a workspace, every route that creates, changes, or deletes content answers `403` (comments and favourites are allowed); viewers cannot mint API keys, and a member made a viewer loses the keys they minted under the workspace
 - `PATCH /api/workspaces/:id/members/:userId` → `{ "role": "owner" | "editor" | "viewer" }` (owners only; the last owner cannot be demoted); `DELETE` removes (owners) or leaves (self)
 - `POST /api/workspaces/switch` → `{ "id": "ws_…" }` or your personal id; sets the `studio_workspace` cookie (browser sessions only; keys are bound at minting)

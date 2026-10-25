@@ -5,6 +5,7 @@ import { SESSION_COOKIE, authMode, isValidSession } from "./auth";
 import { ForbiddenError, UnauthorizedError } from "./errors";
 import { createSupabaseServer } from "./supabase/server";
 import { WORKSPACE_COOKIE, canEdit, canManageAccount, isWorkspaceId, workspaceForMember, type User } from "./workspaces";
+import type { Workspace } from "./types";
 
 import { LOCAL_OWNER } from "./owner-id";
 export { LOCAL_OWNER };
@@ -50,10 +51,14 @@ export async function userOrOwner(owner: string): Promise<User> {
 
 /** The workspace selected by the cookie, when the user is still a member of it. */
 export async function activeWorkspaceId(user: User): Promise<string | null> {
+  return (await activeWorkspace(user))?.id ?? null;
+}
+
+/** The workspace the cookie selects, read once, when the user is still a member of it. */
+async function activeWorkspace(user: User): Promise<Workspace | null> {
   const id = (await cookies()).get(WORKSPACE_COOKIE)?.value;
   if (!id) return null;
-  const ws = await workspaceForMember(id, user.id);
-  return ws ? ws.id : null;
+  return workspaceForMember(id, user.id);
 }
 
 /**
@@ -69,7 +74,7 @@ export async function requireOwner(): Promise<string> {
     return owner;
   }
   const user = await currentUser();
-  return (await activeWorkspaceId(user)) ?? user.id;
+  return (await activeWorkspace(user))?.id ?? user.id;
 }
 
 /**
@@ -79,9 +84,9 @@ export async function requireOwner(): Promise<string> {
  */
 export async function requireEditor(): Promise<string> {
   if (await presentedApiKey()) return requireOwner();
+  // The same resolution as requireOwner, so an edit always lands on the owner a read would see.
   const user = await currentUser();
-  const id = (await cookies()).get(WORKSPACE_COOKIE)?.value;
-  const ws = id && isWorkspaceId(id) ? await workspaceForMember(id, user.id) : null;
+  const ws = await activeWorkspace(user);
   if (!ws) return user.id;
   if (!canEdit(ws, user.id)) throw new ForbiddenError("Viewers can watch and comment in this workspace, not change it");
   return ws.id;

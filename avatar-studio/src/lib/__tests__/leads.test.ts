@@ -23,6 +23,7 @@ import { saveNotifySettings, setNotificationFetch } from "../notifications";
 import { createApiKey, ownerForApiKey } from "../api-keys";
 import { StripeBillingProvider, applyStripeEvent, getPlan, setBillingProvider, setPlan } from "../billing";
 import { MockTtsProvider } from "../providers/tts/mock";
+import { ConflictError } from "../errors";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import type { Video, VideoLead } from "../types";
 
@@ -128,7 +129,7 @@ describe("share-page email gate", () => {
     for (const n of [1, 2, 3, 4, 5]) await captureVideoLead(v, lead(`viewer${n}@example.com`));
     const { secret } = await createApiKey("CI", ws.id, alice.id);
     await setPlan(ws.id, { plan: "pro", provider: "stripe", status: "active", customerId: "cus_1", subscriptionId: "sub_1" });
-    await assert.rejects(deleteWorkspace(ws.id, alice, deleteOwnerData), /Cancel the Pro plan/);
+    await assert.rejects(deleteWorkspace(ws.id, alice, deleteOwnerData), /Stripe subscription can still bill/);
     assert.ok(await getStore().get("workspace", ws.id), "a refused delete keeps the workspace");
     assert.ok(await getStore().get("video", v.id));
     assert.equal(await ownerForApiKey(secret), ws.id, "and its keys keep working");
@@ -144,12 +145,13 @@ describe("share-page email gate", () => {
     const subs: { status: string; cancel_at_period_end?: boolean }[] = [];
     let failure: { status: number; code: string; message: string } | null = null;
     const urls: string[] = [];
+    let hasMore = false;
     setBillingProvider(new StripeBillingProvider("sk_test", "price_pro"));
     const realFetch = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       urls.push(`${init?.method} ${String(input)}`);
       if (failure) return new Response(JSON.stringify({ error: failure }), { status: failure.status });
-      return new Response(JSON.stringify({ data: subs }), { status: 200 });
+      return new Response(JSON.stringify({ data: subs, has_more: hasMore }), { status: 200 });
     }) as typeof fetch;
     try {
       // The stored plan says Pro and renewing, but Stripe has it cancelled: a missed webhook does not block.
@@ -159,14 +161,28 @@ describe("share-page email gate", () => {
       assert.deepEqual(urls, ["GET https://api.stripe.com/v1/subscriptions?customer=cus_1&status=all&limit=100"]);
       // The stored plan says Free (the webhook downgraded an unpaid subscription), but Stripe still bills it.
       await setPlan("u1", { plan: "free", provider: "stripe", customerId: "cus_1" });
-      subs.splice(0, subs.length, { status: "unpaid" });
-      await assert.rejects(deleteOwnerData("u1"), /Cancel the Pro plan/);
+      for (const blocking of [{ status: "unpaid" }, { status: "incomplete" }, { status: "past_due" }]) {
+        subs.splice(0, subs.length, blocking);
+        await assert.rejects(deleteOwnerData("u1"), /Stripe subscription can still bill/, blocking.status);
+      }
+      // One scheduled to stop (`cancel_at`) does not block; a full page with more behind it is not taken as checked.
+      subs.splice(0, subs.length, { status: "active", cancel_at: 1900000000 } as { status: string });
+      await deleteOwnerData("u1");
+      await setPlan("u1", { plan: "free", provider: "stripe", customerId: "cus_1" });
+      subs.splice(0, subs.length, { status: "canceled" });
+      hasMore = true;
+      await assert.rejects(deleteOwnerData("u1"), /Could not check the subscription/);
+      hasMore = false;
       // A customer Stripe no longer has cannot be billed.
       failure = { status: 404, code: "resource_missing", message: "No such customer: 'cus_1'" };
       await deleteOwnerData("u1");
-      // The same code for a key of the other mode says nothing about the customer, nor does an outage.
+      // A test-mode customer looked up with a live key can never bill real money.
       await setPlan("u1", { plan: "free", provider: "stripe", customerId: "cus_1" });
-      failure = { status: 404, code: "resource_missing", message: "No such customer: 'cus_1'; a similar object exists in live mode, but a test mode key was used" };
+      failure = { status: 400, code: "resource_missing", message: "No such customer: 'cus_1'; a similar object exists in test mode, but a live mode key was used to make this request." };
+      await deleteOwnerData("u1");
+      // A live customer looked up with a test key may be billing, and an outage says nothing either.
+      await setPlan("u1", { plan: "free", provider: "stripe", customerId: "cus_1" });
+      failure = { status: 400, code: "resource_missing", message: "No such customer: 'cus_1'; a similar object exists in live mode, but a test mode key was used to make this request." };
       await assert.rejects(deleteOwnerData("u1"), /Could not check the subscription/);
       failure = { status: 500, code: "api_error", message: "Something went wrong" };
       await assert.rejects(deleteOwnerData("u1"), /Could not check the subscription/);
@@ -195,6 +211,7 @@ describe("share-page email gate", () => {
   it("stops before deleting any content when a cloned voice cannot be removed, keeping its row for the retry", async () => {
     const { deleteOwnerData } = await import("../services");
     const v = await gatedVideo();
+    const { secret } = await createApiKey("CI", "u1");
     await getStore().put("voice", { id: "clone_1", name: "Me", provider: "mock", source: "custom", ownerId: "u1" });
     const original = MockTtsProvider.prototype.deleteVoice;
     let failWith: number | null = 401;
@@ -204,7 +221,8 @@ describe("share-page email gate", () => {
       if (failWith) throw Object.assign(new Error(`voice delete failed: ${failWith}`), { status: failWith });
     };
     try {
-      await assert.rejects(deleteOwnerData("u1"), /Could not delete the cloned voice "Me".*401/);
+      await assert.rejects(deleteOwnerData("u1"), (err: Error) => err instanceof ConflictError && /would not delete the cloned voice "Me" \(401\)\. API keys were already removed/.test(err.message));
+      assert.equal(await ownerForApiKey(secret), null, "keys go first, and the message says so");
       assert.ok(await getStore().get("video", v.id), "the videos are kept");
       assert.ok(await getStore().get("voice", "clone_1"), "and the voice row, so the clone's id is not lost");
       failWith = null;
@@ -214,6 +232,42 @@ describe("share-page email gate", () => {
       assert.equal(await getStore().get("video", v.id), null);
     } finally {
       MockTtsProvider.prototype.deleteVoice = original;
+    }
+  });
+
+  it("treats a voice ElevenLabs no longer has as deleted, whichever way it says so", async () => {
+    const { ElevenLabsTtsProvider } = await import("../providers/tts/elevenlabs");
+    const answers = [
+      new Response("", { status: 404 }),
+      new Response(JSON.stringify({ detail: { status: "voice_not_found", message: "A voice with the voice_id does not exist." } }), { status: 400 }),
+      new Response(JSON.stringify({ detail: { status: "invalid_api_key" } }), { status: 401 }),
+    ];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => answers.shift()!) as typeof fetch;
+    try {
+      const el = new ElevenLabsTtsProvider("key");
+      await el.deleteVoice("v1");
+      await el.deleteVoice("v2");
+      await assert.rejects(el.deleteVoice("v3"), (err: Error & { status?: number }) => err.status === 401);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it("asks Stripe once for a workspace delete, before the keys are revoked", async () => {
+    const { createWorkspace, deleteWorkspace } = await import("../workspaces");
+    const { deleteOwnerData } = await import("../services");
+    const alice = { id: "user_alice", email: "alice@example.com" };
+    const ws = await createWorkspace("Acme", alice);
+    await setPlan(ws.id, { plan: "free", provider: "stripe", customerId: "cus_ws" });
+    let calls = 0;
+    setBillingProvider(Object.assign(new StripeBillingProvider("sk_test", "price_pro"), { customerRenews: async () => (calls++, false) }));
+    try {
+      await deleteWorkspace(ws.id, alice, (id) => deleteOwnerData(id, { billingChecked: true }));
+      assert.equal(calls, 1);
+      assert.equal(await getStore().get("workspace", ws.id), null);
+    } finally {
+      setBillingProvider(undefined);
     }
   });
 });

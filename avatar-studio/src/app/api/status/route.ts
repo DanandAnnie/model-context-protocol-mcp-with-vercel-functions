@@ -23,6 +23,8 @@ export async function GET() {
         proPriceLabel: config.proPriceLabel,
         subscriptionStatus: plan.status,
         endsAt: plan.endsAt,
+        // A Stripe customer can open the billing portal even on Free (an unpaid subscription still bills there).
+        billingAccount: plan.provider === "stripe" && Boolean(plan.customerId),
       },
     });
   } catch (err) {

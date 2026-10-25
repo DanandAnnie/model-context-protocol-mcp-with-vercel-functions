@@ -31,7 +31,7 @@ export async function setPlan(ownerId: string, patch: Partial<Omit<Plan, "id" | 
  */
 const RENEWING = ["active", "trialing", "past_due", "unpaid", "incomplete"];
 
-const CANCEL_FIRST = "Cancel the Pro plan first (Settings, Manage subscription); it keeps billing otherwise";
+const CANCEL_FIRST = "A Stripe subscription can still bill this account; cancel it first under Settings, Manage subscription";
 
 /**
  * Refuses (400) while a Stripe subscription can still bill this owner: deleting the plan row would leave them
@@ -117,15 +117,18 @@ export class StripeBillingProvider implements BillingProvider {
 
   async customerRenews(customerId: string): Promise<boolean> {
     try {
-      const subs = await this.call<{ data: Array<Record<string, unknown>> }>(
+      const subs = await this.call<{ data: Array<Record<string, unknown>>; has_more?: boolean }>(
         `subscriptions?customer=${encodeURIComponent(customerId)}&status=all&limit=100`,
       );
-      return subs.data.some((s) => RENEWING.includes(String(s.status)) && !s.cancel_at_period_end && typeof s.cancel_at !== "number");
+      if (subs.data.some((s) => RENEWING.includes(String(s.status)) && !s.cancel_at_period_end && typeof s.cancel_at !== "number")) return true;
+      // Past the first page nothing has been checked; the app makes one subscription per checkout, so this is a guard.
+      if (subs.has_more) throw new Error("Too many Stripe subscriptions to check");
+      return false;
     } catch (err) {
-      // A customer Stripe no longer has cannot be billed. "A similar object exists in live mode" means the key is for
-      // the other mode or account, which says nothing about the customer, so it stays an error.
+      // A customer Stripe no longer has cannot be billed, nor can a test-mode one looked up with a live key. A live
+      // customer looked up with a test key ("a similar object exists in live mode") may be billing, so that stays an error.
       const e = err as { code?: string; message?: string };
-      if (e.code === "resource_missing" && !/similar object exists/i.test(e.message ?? "")) return false;
+      if (e.code === "resource_missing" && !/exists in live mode/i.test(e.message ?? "")) return false;
       throw err;
     }
   }

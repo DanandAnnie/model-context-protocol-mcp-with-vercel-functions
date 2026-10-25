@@ -4,6 +4,7 @@ import { getTtsProvider } from "../providers";
 import { getStore } from "../store";
 import { LOCAL_OWNER } from "../owner-id";
 import { assertNoRenewingPlan } from "../billing";
+import { ConflictError } from "../errors";
 
 const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip", "videolead"] as const;
 /**
@@ -48,8 +49,9 @@ const DELETE_ORDER = ["apikey", "voice", ...OWNER_KINDS.filter((k) => k !== "api
  * stops the run with its row kept, so the clone's id is never lost and a retry (after fixing the provider key, say)
  * finishes the job; the provider treats a voice it no longer has as deleted.
  */
-export async function deleteOwnerData(ownerId: string = LOCAL_OWNER): Promise<Record<string, number>> {
-  await assertNoRenewingPlan(ownerId);
+export async function deleteOwnerData(ownerId: string = LOCAL_OWNER, opts: { billingChecked?: boolean } = {}): Promise<Record<string, number>> {
+  // A workspace delete checks billing itself, before it revokes the keys, so it is not asked twice.
+  if (!opts.billingChecked) await assertNoRenewingPlan(ownerId);
   const counts: Record<string, number> = {};
   const tts = getTtsProvider();
   for (const kind of DELETE_ORDER) {
@@ -60,9 +62,13 @@ export async function deleteOwnerData(ownerId: string = LOCAL_OWNER): Promise<Re
       // A row that is still listed after being removed would loop forever; stop and report it instead.
       if (items.every((item) => removed.has(item.id))) throw new Error(`Could not delete ${kind} records; try again`);
       for (const item of items) {
-        if (kind === "voice" && item.provider === tts.name) {
+        if (kind === "voice" && item.provider === tts.name && !removed.has(item.id)) {
           await tts.deleteVoice?.(item.id).catch((err: unknown) => {
-            throw new Error(`Could not delete the cloned voice "${(item as { name?: string }).name ?? item.id}" at the provider, so the videos and other content were kept; try again once the provider is reachable (${err instanceof Error ? err.message : String(err)})`);
+            console.error(err);
+            const status = (err as { status?: number }).status;
+            throw new ConflictError(
+              `The voice provider would not delete the cloned voice "${(item as { name?: string }).name ?? item.id}"${status ? ` (${status})` : ""}. API keys${counts.voice === undefined && removed.size ? ` and ${removed.size} other cloned voice(s)` : ""} were already removed; videos and the rest were kept. Try again once the provider answers (check its API key if this repeats).`,
+            );
           });
         }
         // The clip's audio sits in its own row, removed by id so it is never loaded.

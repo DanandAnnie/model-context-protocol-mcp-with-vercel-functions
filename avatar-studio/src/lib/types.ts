@@ -557,5 +557,5 @@ export interface ProviderStatus {
   /** Whether the voice provider can clone a voice from samples. */
   voiceCloning: boolean;
   /** Present when the request carried an owner (signed in, or open/password mode). */
-  usage?: { rendersThisMonth: number; plan: PlanId; proRendersPerMonth: number | null; proPriceLabel: string; subscriptionStatus?: string; endsAt?: string };
+  usage?: { rendersThisMonth: number; plan: PlanId; proRendersPerMonth: number | null; proPriceLabel: string; subscriptionStatus?: string; endsAt?: string; billingAccount?: boolean };
 }

@@ -70,9 +70,16 @@ export function PlanCard({ status, onChanged, canManage = true }: { status: Prov
               Manage subscription
             </Button>
           ) : (
-            <Button onClick={() => go("checkout")} loading={busy}>
-              <Sparkles className="h-4 w-4" /> Upgrade to Pro
-            </Button>
+            <div className="flex flex-wrap justify-end gap-2">
+              {usage?.billingAccount && (
+                <Button variant="secondary" onClick={() => go("portal")} loading={busy}>
+                  Manage subscription
+                </Button>
+              )}
+              <Button onClick={() => go("checkout")} loading={busy}>
+                <Sparkles className="h-4 w-4" /> Upgrade to Pro
+              </Button>
+            </div>
           )}
           <div className="text-right text-xs text-slate-500">
             Pro: {usage?.proRendersPerMonth ? `${usage.proRendersPerMonth} renders / month` : "unlimited renders"} · {usage?.proPriceLabel ?? ""}

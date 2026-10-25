@@ -31,7 +31,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
 export async function DELETE(_req: Request, ctx: Ctx) {
   try {
     // Everything the workspace owns goes with it: its videos, viewer emails, and transcripts are not left behind.
-    await deleteWorkspace((await ctx.params).id, await currentUser(), deleteOwnerData);
+    await deleteWorkspace((await ctx.params).id, await currentUser(), (id) => deleteOwnerData(id, { billingChecked: true }));
     return new Response(null, { status: 204 });
   } catch (err) {
     return errorResponse(err);

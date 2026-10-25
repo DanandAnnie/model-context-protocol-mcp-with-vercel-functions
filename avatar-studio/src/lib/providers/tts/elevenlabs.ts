@@ -61,6 +61,10 @@ export class ElevenLabsTtsProvider implements TtsProvider {
 
   async deleteVoice(voiceId: string) {
     const res = await fetch(`${BASE}/voices/${encodeURIComponent(voiceId)}`, { method: "DELETE", headers: this.headers() });
-    if (!res.ok && res.status !== 404) throw Object.assign(new Error(`ElevenLabs voice delete failed: ${res.status} ${await res.text()}`), { status: res.status });
+    if (res.ok || res.status === 404) return;
+    const body = await res.text();
+    // Some ElevenLabs endpoints answer a voice they no longer have with 400 and a "voice_not_found" status.
+    if ((res.status === 400 || res.status === 422) && /voice_(not_found|does_not_exist)/.test(body)) return;
+    throw Object.assign(new Error(`ElevenLabs voice delete failed: ${res.status} ${body}`), { status: res.status });
   }
 }

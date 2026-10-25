@@ -284,4 +284,15 @@ describe("share-page email gate", () => {
       setBillingProvider(undefined);
     }
   });
+
+  it("leaves a Stripe-billed plan alone under demo billing", async () => {
+    const { MockBillingProvider } = await import("../billing");
+    await setPlan("u1", { plan: "pro", provider: "stripe", status: "active", customerId: "cus_1", subscriptionId: "sub_1" });
+    const demo = new MockBillingProvider();
+    await assert.rejects(demo.portal("u1", "/settings"), /billed through Stripe/);
+    await assert.rejects(demo.checkout("u1", "/settings"), /billed through Stripe/);
+    assert.deepEqual([(await getPlan("u1")).provider, (await getPlan("u1")).customerId], ["stripe", "cus_1"]);
+    await demo.checkout("u2", "/settings");
+    assert.equal((await getPlan("u2")).plan, "pro", "a demo account still upgrades instantly");
+  });
 });

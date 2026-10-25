@@ -85,14 +85,25 @@ export interface BillingProvider {
   customerRenews?(customerId: string): Promise<boolean>;
 }
 
+/**
+ * A plan Stripe has billed is left alone by demo billing (a deployment whose Stripe settings went missing, say):
+ * rewriting it would hide the Stripe customer from the deletion check while Stripe may still charge them.
+ */
+async function refuseStripePlan(ownerId: string): Promise<void> {
+  const plan = await getPlan(ownerId);
+  if (plan.provider === "stripe" && plan.customerId) throw new ValidationError("This plan is billed through Stripe, which is not configured here");
+}
+
 /** Demo billing: upgrades and downgrades take effect immediately, no payment. */
 export class MockBillingProvider implements BillingProvider {
   name = "mock";
   async checkout(ownerId: string, returnUrl: string) {
+    await refuseStripePlan(ownerId);
     await setPlan(ownerId, { plan: "pro", provider: "mock", status: "active" });
     return { url: `${returnUrl}${returnUrl.includes("?") ? "&" : "?"}billing=upgraded` };
   }
   async portal(ownerId: string, returnUrl: string) {
+    await refuseStripePlan(ownerId);
     await setPlan(ownerId, { plan: "free", provider: "mock" });
     return { url: `${returnUrl}${returnUrl.includes("?") ? "&" : "?"}billing=cancelled` };
   }

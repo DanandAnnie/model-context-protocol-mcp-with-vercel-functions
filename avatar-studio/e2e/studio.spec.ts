@@ -927,8 +927,18 @@ test("captions are served as SRT and VTT, security headers are set", async ({ pa
   await expect(page.getByTestId("stage-caption")).toHaveClass(/text-xs/);
   await expect(page.getByRole("group", { name: "Caption look" }).getByRole("button", { name: "yellow" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("stage-caption")).toHaveAttribute("data-look", "yellow");
+  // Rendered, not just classed: yellow is semibold (its colour is reported in lab(), so the weight is the stable check).
+  await expect(page.getByTestId("stage-caption")).toHaveCSS("font-weight", "600");
   await page.getByRole("group", { name: "Caption look" }).getByRole("button", { name: "bold" }).click();
-  await expect(page.getByTestId("stage-caption")).toHaveClass(/font-bold/);
+  await expect(page.getByTestId("stage-caption")).toHaveCSS("font-weight", "700");
+  // The lightest look on the lightest stage at the smallest size still reads (and the look buttons pass too).
+  await page.getByRole("group", { name: "Caption look" }).getByRole("button", { name: "minimal" }).click();
+  await page.getByRole("button", { name: "Background", exact: true }).click();
+  await page.getByRole("button", { name: "Background #ffffff" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByTestId("stage-caption")).toHaveAttribute("data-look", "minimal");
+  const axe = await new AxeBuilder({ page }).include('[data-testid="stage-caption"]').include('[data-testid="caption-style"]').withTags(["wcag2aa"]).analyze();
+  expect(axe.violations.map((v) => v.id)).toEqual([]);
 });
 
 test("brand kit pre-fills the editor and brands the share page", async ({ page }) => {

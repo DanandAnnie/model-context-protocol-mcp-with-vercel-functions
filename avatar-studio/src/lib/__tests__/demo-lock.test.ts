@@ -4,8 +4,8 @@ import { describe, it } from "node:test";
 
 function status(locked: boolean) {
   // A fresh process avoids cached configuration and singleton providers.
-  const output = execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e",
-    'import { providerStatus } from "./src/lib/providers/index.ts"; console.log(JSON.stringify(providerStatus()));',
+  const output = execFileSync(process.execPath, ["--import", "tsx", "-e",
+    'const { providerStatus } = require("./src/lib/providers/index.ts"); console.log(JSON.stringify(providerStatus()));',
   ], { encoding: "utf8", env: {
     ...process.env, STUDIO_DEMO_MODE: String(locked), AVATAR_PROVIDER: "heygen",
     TTS_PROVIDER: "elevenlabs", SCRIPT_PROVIDER: "anthropic", BILLING_PROVIDER: "stripe",

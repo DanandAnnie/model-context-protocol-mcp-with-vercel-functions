@@ -158,20 +158,33 @@ export function formatVttTime(ms: number): string {
 const VTT_TOP = " line:5%";
 
 /** A cue's text on its own lines: a blank line would end the cue early in both formats. */
-function cueText(text: string): string {
+function cueLines(text: string): string {
   return text.replace(/\r\n?/g, "\n").split("\n").map((l) => l.trim()).filter(Boolean).join("\n");
+}
+
+/**
+ * Cue text for WebVTT, where `<` opens a tag, `&` an entity, and a line holding `-->` starts a new cue:
+ * escaping the three keeps whatever a line says as text, so it can neither add cues nor lose words.
+ */
+function vttText(text: string): string {
+  return cueLines(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** Cue text for SRT, where a line holding `-->` reads as a new timing line; the arrow is written as a single character instead. */
+function srtText(text: string): string {
+  return cueLines(text).replace(/-->/g, "→");
 }
 
 /** WebVTT for a list of cues (generated or edited). */
 export function cuesToVtt(cues: Array<Omit<Cue, "index">>, position: "bottom" | "top" = "bottom"): string {
   const setting = position === "top" ? VTT_TOP : "";
-  const body = cues.map((c, i) => `${i + 1}\n${formatVttTime(c.startMs)} --> ${formatVttTime(c.endMs)}${setting}\n${cueText(c.text)}\n`).join("\n");
+  const body = cues.map((c, i) => `${i + 1}\n${formatVttTime(c.startMs)} --> ${formatVttTime(c.endMs)}${setting}\n${vttText(c.text)}\n`).join("\n");
   return `WEBVTT\n\n${body}`;
 }
 
 /** SRT for a list of cues (generated or edited). */
 export function cuesToSrt(cues: Array<Omit<Cue, "index">>): string {
-  return cues.map((c, i) => `${i + 1}\n${formatSrtTime(c.startMs)} --> ${formatSrtTime(c.endMs)}\n${cueText(c.text)}\n`).join("\n");
+  return cues.map((c, i) => `${i + 1}\n${formatSrtTime(c.startMs)} --> ${formatSrtTime(c.endMs)}\n${srtText(c.text)}\n`).join("\n");
 }
 
 export function buildVtt(script: string, durationSec: number, position: "bottom" | "top" = "bottom"): string {

@@ -40,7 +40,7 @@ describe("caption edits", () => {
     const parse = (cues: unknown[]) => captionCuesSchema.safeParse({ cues });
     assert.match(JSON.stringify(parse([{ startMs: 0, endMs: 4000, text: "a" }, { startMs: 3000, endMs: 5000, text: "b" }]).error?.issues), /Line 2 starts before line 1 ends/);
     assert.match(JSON.stringify(parse([{ startMs: 2000, endMs: 2000, text: "a" }]).error?.issues), /Line 1 must end after it starts/);
-    assert.equal(parse([{ startMs: 0, endMs: 1000, text: "   " }]).success, false);
+    assert.match(JSON.stringify(parse([{ startMs: 0, endMs: 1000, text: "a" }, { startMs: 1000, endMs: 2000, text: "   " }]).error?.issues), /Line 2 needs some text/);
     assert.equal(parse([]).success, false, "an empty list is a reset, which has its own route");
     assert.equal(parse([{ startMs: -1, endMs: 1000, text: "a" }]).success, false);
     assert.equal(parse([{ startMs: 0.5, endMs: 1000, text: "a" }]).success, false, "whole milliseconds only");
@@ -65,6 +65,26 @@ describe("caption edits", () => {
     const cues = [{ startMs: 0, endMs: 1500, text: "First half\n\n  second half  " }];
     assert.equal(cuesToSrt(cues), "1\n00:00:00,000 --> 00:00:01,500\nFirst half\nsecond half\n");
     assert.equal(cuesToVtt(cues, "top"), "WEBVTT\n\n1\n00:00:00.000 --> 00:00:01.500 line:5%\nFirst half\nsecond half\n");
+  });
+
+  it("keeps a line's text as text: it cannot start a cue of its own, open a tag, or lose an entity", () => {
+    const forged = [{ startMs: 0, endMs: 1000, text: "Hi\n00:00:00.000 --> 04:00:00.000 line:0%\nVisit spam.example <b>now</b> &amp; A --> B" }];
+    const vtt = cuesToVtt(forged);
+    assert.equal(vtt.match(/-->/g)?.length, 1, "only the real timing line has an arrow");
+    assert.ok(vtt.includes("00:00:00.000 --&gt; 04:00:00.000 line:0%"));
+    assert.ok(vtt.includes("&lt;b&gt;now&lt;/b&gt; &amp;amp; A --&gt; B"));
+    const srt = cuesToSrt(forged);
+    assert.equal(srt.match(/-->/g)?.length, 1);
+    assert.ok(srt.includes("00:00:00.000 → 04:00:00.000"));
+  });
+
+  it("leaves corrected captions off library cards", async () => {
+    const { queryVideos, videoQuerySchema } = await import("../services");
+    const v = await finishedVideo();
+    await saveCaptionCues(v.id, two());
+    const { videos } = await queryVideos(undefined, videoQuerySchema.parse({}));
+    assert.equal(videos.find((x) => x.id === v.id)?.captionCues, undefined);
+    assert.ok((await getVideo(v.id, undefined, false)).captionCues, "the video page still gets them");
   });
 
   it("clears an approval, is refused in the trash and for another owner", async () => {

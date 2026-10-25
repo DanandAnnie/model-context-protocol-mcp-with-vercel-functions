@@ -337,7 +337,7 @@ export const captionCuesSchema = z
         z.object({
           startMs: z.number().int().min(0).max(MAX_CAPTION_MS),
           endMs: z.number().int().min(1).max(MAX_CAPTION_MS),
-          text: z.string().trim().min(1, "A caption line needs some text").max(MAX_CAPTION_CUE_CHARS),
+          text: z.string().trim().max(MAX_CAPTION_CUE_CHARS),
         }),
       )
       .min(1, "Keep at least one caption line, or reset the captions to follow the script")
@@ -345,6 +345,7 @@ export const captionCuesSchema = z
   })
   .superRefine(({ cues }, ctx) => {
     cues.forEach((c, i) => {
+      if (!c.text) ctx.addIssue({ code: "custom", path: ["cues", i, "text"], message: `Line ${i + 1} needs some text` });
       if (c.endMs <= c.startMs) ctx.addIssue({ code: "custom", path: ["cues", i, "endMs"], message: `Line ${i + 1} must end after it starts` });
       else if (i > 0 && c.startMs < cues[i - 1].endMs) ctx.addIssue({ code: "custom", path: ["cues", i, "startMs"], message: `Line ${i + 1} starts before line ${i} ends` });
     });
@@ -1047,8 +1048,8 @@ export async function queryVideos(ownerId: string = LOCAL_OWNER, query: VideoQue
   const matched = query.trash && query.sort === "newest" ? filtered.sort((a, b) => b.deletedAt!.localeCompare(a.deletedAt!) || b.createdAt.localeCompare(a.createdAt)) : filtered;
   const videos = query.limit ? matched.slice(0, query.limit) : matched;
   return {
-    // Subtitle text is for the video page and the share player, not for a card: it is left off the page.
-    videos: videos.map(({ subtitles: _subtitles, ...rest }) => rest),
+    // Subtitle text and corrected captions are for the video page and the share player, not for a card: they are left off the page.
+    videos: videos.map(({ subtitles: _subtitles, captionCues: _captionCues, ...rest }) => rest),
     matched: matched.length,
     total: live.length,
     hasMore: videos.length < matched.length,

@@ -1607,7 +1607,8 @@ test("captions can be corrected on the video page and serve the downloads until 
   await end1.fill("abc");
   await editor.getByRole("button", { name: "Save captions" }).click();
   await expect(editor.getByTestId("caption-status")).toContainText("Line 1 needs a start and an end");
-  await end1.fill(shown);
+  // A decimal comma, all a comma-locale phone keypad offers, reads as a point.
+  await end1.fill(shown.replace(".", ","));
   // A line added where lines follow on without a gap takes the second half of the line before it.
   await editor.getByRole("button", { name: "Add a line after line 1" }).click();
   const mid = (Math.round((Number(await editor.getByLabel("Line 1 start (seconds)").inputValue()) + Number(shown)) * 5) / 10).toFixed(1);

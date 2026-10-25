@@ -57,19 +57,53 @@ export function splitAtPauses(text: string): Array<{ text: string; pauseSec: num
 /** Seconds as a break tag wants them: `1s`, `1.5s`. */
 const breakTime = (sec: number) => `${Math.round(sec * 100) / 100}s`;
 
-/** The text with each marker as a `<break time="…"/>` tag, the form HeyGen's and ElevenLabs' text input takes. */
-export function withBreakTags(text: string): string {
+/** The longest single break each engine honours; a longer pause is written as several breaks in a row. */
+export const ELEVENLABS_MAX_BREAK_SEC = 3;
+export const MICROSOFT_MAX_BREAK_SEC = 5;
+
+/** Break tags adding up to `sec`, none longer than `maxBreakSec`. */
+function breaks(sec: number, maxBreakSec: number): string {
+  const out: string[] = [];
+  for (let left = sec; left > 0.001; left -= maxBreakSec) out.push(`<break time="${breakTime(Math.min(left, maxBreakSec))}"/>`);
+  return out.join(" ");
+}
+
+/**
+ * The text with each marker as `<break time="…"/>` tags, the form HeyGen's and ElevenLabs' text input
+ * takes; a pause longer than `maxBreakSec` becomes several breaks so the engine keeps the whole silence.
+ */
+export function withBreakTags(text: string, maxBreakSec = ELEVENLABS_MAX_BREAK_SEC): string {
   if (!hasPauses(text)) return text;
-  return text.replace(PAUSE, (_m, raw: string | undefined) => ` <break time="${breakTime(seconds(raw))}"/> `).replace(/[ \t]{2,}/g, " ").trim();
+  return text.replace(PAUSE, (_m, raw: string | undefined) => ` ${breaks(seconds(raw), maxBreakSec)} `).replace(/[ \t]{2,}/g, " ").trim();
 }
 
 function escapeXml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 }
 
-/** The text as an SSML document body with each marker as a break and everything else escaped, for engines that read SSML. */
+/**
+ * The text as an SSML fragment, everything escaped and each marker as breaks of at most five seconds: the
+ * form D-ID's Microsoft voices take with `ssml: true` (D-ID adds the `<speak>` and `<voice>` around it).
+ */
 export function toSsml(text: string): string {
-  return `<speak>${splitAtPauses(text)
-    .map((p) => escapeXml(p.text) + (p.pauseSec ? `<break time="${breakTime(p.pauseSec)}"/>` : ""))
-    .join("")}</speak>`;
+  return splitAtPauses(text)
+    .map((p) => escapeXml(p.text) + (p.pauseSec ? breaks(p.pauseSec, MICROSOFT_MAX_BREAK_SEC) : ""))
+    .join("");
+}
+
+/**
+ * Swaps each marker for a numbered token a writing model leaves alone (`[[P1]]`), so a rewrite or a
+ * translation cannot turn `[pause 2s]` into words that get spoken; `restore` puts the markers back and
+ * drops a token the model made up. A marker the model left out is gone, which reads better than a stray one.
+ */
+export function protectPauses(text: string): { text: string; restore: (out: string) => string } {
+  const markers: string[] = [];
+  const guarded = text.replace(PAUSE, (m) => {
+    markers.push(m.replace(/\s+/g, " "));
+    return `[[P${markers.length}]]`;
+  });
+  return {
+    text: guarded,
+    restore: (out) => out.replace(/\[\[\s*P(\d+)\s*\]\]/g, (_m, n: string) => markers[Number(n) - 1] ?? "").replace(/[ \t]{2,}/g, " ").trim(),
+  };
 }

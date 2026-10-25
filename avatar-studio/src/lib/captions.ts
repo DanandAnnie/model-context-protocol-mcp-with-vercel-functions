@@ -1,6 +1,6 @@
-import { splitAtPauses } from "./pauses";
 // Build an SRT subtitle file from a script and the rendered duration.
 // Sentences are timed proportionally to their word count.
+import { splitAtPauses } from "./pauses";
 
 export interface Cue {
   index: number;
@@ -137,12 +137,13 @@ export function buildCues(script: string, durationSec: number): Cue[] {
   const totalWords = parts.reduce((n, p) => n + p.sentences.reduce((m, s) => m + weight(s), 0), 0);
   if (totalWords === 0 || durationSec <= 0) return [];
   const totalMs = Math.round(durationSec * 1000);
-  // A pause before the first line or after the last shows no cue; only pauses between lines are gaps.
+  // A pause before the first line delays it and one after the last ends the captions early; pauses between lines are gaps.
   const firstPart = parts.findIndex((p) => p.sentences.length);
   const lastPart = parts.length - 1 - [...parts].reverse().findIndex((p) => p.sentences.length);
   const gapMs = parts.map((p, i) => (i >= firstPart && i < lastPart ? p.pauseSec * 1000 : 0));
   const leadMs = parts.slice(0, firstPart).reduce((n, p) => n + p.pauseSec * 1000, 0);
-  const pausesMs = gapMs.reduce((n, g) => n + g, 0) + leadMs;
+  const tailMs = parts.slice(lastPart).reduce((n, p) => n + p.pauseSec * 1000, 0);
+  const pausesMs = gapMs.reduce((n, g) => n + g, 0) + leadMs + tailMs;
   const scale = pausesMs > totalMs / 2 ? totalMs / 2 / pausesMs : 1;
   const speechMs = totalMs - Math.round(pausesMs * scale);
   const cues: Cue[] = [];
@@ -152,7 +153,7 @@ export function buildCues(script: string, durationSec: number): Cue[] {
       const words = weight(text);
       const isLast = pi === lastPart && si === part.sentences.length - 1;
       // Each cue ends where its share of the spoken time runs out, so rounding never drifts.
-      const end = isLast ? totalMs : Math.round(cursor + (words / totalWords) * speechMs);
+      const end = isLast ? totalMs - Math.round(tailMs * scale) : Math.round(cursor + (words / totalWords) * speechMs);
       cues.push({ index: cues.length + 1, startMs: cursor, endMs: Math.max(end, cursor + 1), text });
       cursor = cues[cues.length - 1].endMs;
     });

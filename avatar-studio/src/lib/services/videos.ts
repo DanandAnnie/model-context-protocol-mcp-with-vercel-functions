@@ -36,7 +36,7 @@ export const videoRequestSchema = z
     scenes: z
       .array(
         z.object({
-          script: z.string().trim().min(1).max(5000),
+          script: z.string().trim().min(1).max(5000).refine((s) => stripPauses(s).trim().length > 0, "A scene needs some words, not only pauses"),
           background: backgroundSchema,
           /** Presenter and voice for this scene; the video's when omitted. */
           avatarId: z.string().min(1).optional(),
@@ -68,8 +68,8 @@ export const videoRequestSchema = z
       }
       return { ...v, script, background: v.scenes[0].background };
     }
-    if (!v.script) {
-      ctx.addIssue({ code: "custom", path: ["script"], message: "Script is required" });
+    if (!v.script || !stripPauses(v.script).trim()) {
+      ctx.addIssue({ code: "custom", path: ["script"], message: v.script ? "The script needs some words, not only pauses" : "Script is required" });
       return z.NEVER;
     }
     return { ...v, script: v.script };
@@ -290,8 +290,9 @@ export async function addSubtitles(id: string, language: string, ownerId: string
   if (!subtitleKey(video, language) && Object.keys(video.subtitles ?? {}).length >= MAX_SUBTITLE_LANGUAGES) {
     throw new ValidationError(`At most ${MAX_SUBTITLE_LANGUAGES} subtitle languages per video`);
   }
-  // Subtitles are captions: the translator gets the words without the pause markers.
-  const text = await translate(stripPauses(video.script), language);
+  // The pause markers go along (the default translator keeps them as tokens), so the translated
+  // captions leave the same gaps; a translator that loses one only loses that gap.
+  const text = await translate(video.script, language);
   // The translation took a while: build on the record as stored under the lock, so edits made
   // meanwhile are kept and a track added or removed by a concurrent request is seen. The language
   // and the cap are decided again there, so two overlapping adds cannot store one language twice

@@ -13,6 +13,7 @@ import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib/client";
 import { languageLabel } from "@/lib/language";
+import { stripPauses } from "@/lib/pauses";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
 import { CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, RESOLUTIONS, isDefaultCaptionStyle as isDefaultCaptionStyleFn, type AspectRatio, type AudioClip, type Avatar, type Background, type BrandKit, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice } from "@/lib/types";
@@ -377,7 +378,7 @@ function CreateInner() {
   const seconds =
     scenes.reduce((sum, sc) => sum + (sc.audioId ? sceneSeconds(sc) : 0), 0) +
     estimateSeconds(scenes.filter((sc) => !sc.audioId).map((sc) => sc.script).join("\n\n"), speed);
-  const allScenesFilled = scenes.every((sc) => sc.script.trim().length > 0);
+  const allScenesFilled = scenes.every((sc) => stripPauses(sc.script).trim().length > 0);
   const canEdit = useCanEdit();
   const canGenerate = canEdit !== false && !!avatar && !!voice && allScenesFilled && title.trim().length > 0 && !submitting;
 
@@ -474,7 +475,7 @@ function CreateInner() {
                   data-testid="stage-caption"
                   className={`absolute ${captionStyle.position === "top" ? "top-4" : "bottom-4"} left-1/2 max-w-[85%] -translate-x-1/2 rounded-md px-3 py-1.5 text-center font-medium ${captionStyle.size === "small" ? "text-xs" : captionStyle.size === "large" ? "text-lg" : "text-sm"} ${bgIsDark ? "bg-white/90 text-slate-900" : "bg-black/80 text-white"}`}
                 >
-                  {active.script.trim().split(/(?<=[.!?])\s+/)[0].slice(0, 90)}
+                  {stripPauses(active.script).trim().split(/(?<=[.!?])\s+/)[0].slice(0, 90)}
                 </div>
               )}
               <span className={`absolute left-3 ${captions && captionStyle.position === "top" ? "bottom-3" : "top-3"} rounded px-2 py-0.5 text-[11px] font-medium ${bgIsDark ? "bg-white/15 text-white" : "bg-black/10 text-slate-800"}`}>
@@ -650,7 +651,7 @@ function CreateInner() {
                     className="px-3 py-1.5"
                     disabled={!active.script.trim()}
                     loading={busyId === sceneVoice.id}
-                    onClick={() => play(sceneVoice, active.script.slice(0, 400), speed).catch((e) => setErr(e.message))}
+                    onClick={() => play(sceneVoice, active.script.slice(0, 400).replace(/\[[^\]]*$/, ""), speed).catch((e) => setErr(e.message))}
                   >
                     {playingId === sceneVoice.id ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                     {playingId === sceneVoice.id ? "Stop" : "Listen"}

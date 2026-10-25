@@ -38,7 +38,9 @@ export class AnthropicScriptProvider implements ScriptProvider {
       translate: `Translate this script into ${input.language ?? "English"}. Keep it natural for a spoken presenter; do not add commentary.`,
       polish: "Tighten the wording for spoken delivery: shorter sentences, contractions, no filler. Keep meaning and length.",
     };
-    return this.complete(`${instruction[input.action]}\n\nScript:\n${input.script}`);
+    // Pauses reach the model as [[P1]]-style tokens; asking for them back keeps a pause where it belongs.
+    const keep = /\[\[P\d+\]\]/.test(input.script) ? " Tokens like [[P1]] mark pauses: keep each one, unchanged, at the matching point in the text." : "";
+    return this.complete(`${instruction[input.action]}${keep}\n\nScript:\n${input.script}`);
   }
 
   async generate(input: { topic: string; tone: string; lengthSec: number; language: string; audience?: string; source?: string }) {

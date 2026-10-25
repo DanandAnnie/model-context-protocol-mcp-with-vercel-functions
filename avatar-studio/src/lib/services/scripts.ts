@@ -1,4 +1,5 @@
 // Script writing, revision, and interactive chat. Used by API routes only.
+import { protectPauses } from "../pauses";
 import { z } from "zod";
 import { getScriptProvider } from "../providers";
 import { LOCAL_OWNER } from "../owner-id";
@@ -41,7 +42,9 @@ export const reviseSchema = z.object({
 });
 
 export async function reviseScript(input: z.infer<typeof reviseSchema>): Promise<string> {
-  return getScriptProvider().revise(input);
+  // Pause markers ride through the model as tokens it leaves alone, then come back as written.
+  const { text, restore } = protectPauses(input.script);
+  return restore(await getScriptProvider().revise({ ...input, script: text }));
 }
 
 export const chatSchema = z.object({

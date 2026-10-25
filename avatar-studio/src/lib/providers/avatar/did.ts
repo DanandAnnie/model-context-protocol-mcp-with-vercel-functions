@@ -1,5 +1,5 @@
 import type { AudioClip, Avatar, VideoRequest, Voice } from "../../types";
-import { hasPauses, toSsml, withBreakTags } from "../../pauses";
+import { ELEVENLABS_MAX_BREAK_SEC, hasPauses, toSsml, withBreakTags } from "../../pauses";
 import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
 import type { AvatarJobStatus, AvatarProvider, RenderCast } from "../types";
@@ -56,13 +56,13 @@ export class DidAvatarProvider implements AvatarProvider {
 
   /**
    * A text script for a talk. Pauses go to Microsoft voices as SSML breaks (the rest of the text escaped)
-   * and to ElevenLabs voices as break tags in the text, which both engines honour.
+   * and to ElevenLabs voices as break tags, both with `ssml: true` and split to each engine's longest break.
    */
   private textScript(script: string, voice: Voice | null) {
     const provider = this.resolveVoice(voice);
     if (!hasPauses(script)) return { type: "text", input: script, provider };
     if (provider.type === "microsoft") return { type: "text", input: toSsml(script), ssml: true, provider };
-    return { type: "text", input: withBreakTags(script), provider };
+    return { type: "text", input: withBreakTags(script, ELEVENLABS_MAX_BREAK_SEC), ssml: true, provider };
   }
 
   /** Demo voices are not D-ID voices; map them to Microsoft neural voices by gender. */

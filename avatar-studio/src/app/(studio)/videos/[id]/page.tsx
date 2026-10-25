@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArchiveRestore, ArrowLeft, Captions, Check, Clock, Code2, Copy, Download, Eye, FolderOpen, Languages, LayoutTemplate, Link2, Lock, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge, inputClass } from "@/components/ui";
 import { ViewSparkline } from "@/components/ViewSparkline";
@@ -37,7 +37,21 @@ export default function VideoDetailPage() {
       setTemplateErr(e instanceof Error ? e.message : "Could not save the template");
     }
   }
-  const { data, loading, error, setData, refetch } = useApi<{ video: Video }>(`/api/videos/${id}`, {
+  // A mention email links here with ?ws=<workspace> so a teammate whose active space is another one
+  // lands on the video rather than a "not found". The switch sets the cookie every request reads, so
+  // the page reloads without the parameter once it lands; the fetch waits until that is settled.
+  const [ownerReady, setOwnerReady] = useState(false);
+  useEffect(() => {
+    const ws = new URLSearchParams(window.location.search).get("ws");
+    if (!ws) {
+      setOwnerReady(true);
+      return;
+    }
+    api("/api/workspaces/switch", { method: "POST", body: JSON.stringify({ id: ws }) })
+      .then(() => window.location.replace(window.location.pathname))
+      .catch(() => setOwnerReady(true));
+  }, []);
+  const { data, loading, error, setData, refetch } = useApi<{ video: Video }>(ownerReady ? `/api/videos/${id}` : null, {
     pollMs: 5000,
     pollWhile: (d) => d.video.status === "processing" || d.video.status === "queued",
   });

@@ -427,6 +427,8 @@ export interface VideoComment {
   authorId: string;
   authorEmail?: string;
   text: string;
+  /** Workspace members named as `@email` in the text; each is emailed a link to the video once. */
+  mentions?: Array<{ userId: string; email: string }>;
   createdAt: string;
 }
 

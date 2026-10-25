@@ -1556,3 +1556,33 @@ test("voice cloning saves a private voice that renders and can be deleted", asyn
     await page.request.delete(`/api/voices/${voice.id}`);
   }
 });
+
+test("a mention link opens the video in its workspace, and teammates can be picked to mention", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const ws = (await (await page.request.post("/api/workspaces", { data: { name: `Mentions ${tag}` } })).json()).workspace as { id: string };
+  try {
+    expect((await page.request.post("/api/workspaces/switch", { data: { id: ws.id } })).status()).toBe(200);
+    const video = await createVideoViaApi(page, `Mentioned ${tag}`);
+    // The reader is in their personal space; the emailed link carries the workspace and switches to it.
+    await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
+    expect((await page.request.get(`/api/videos/${video.id}`)).status()).toBe(404);
+    await page.goto(`/videos/${video.id}?ws=${ws.id}`);
+    await expect(page.getByRole("heading", { name: `Mentioned ${tag}` })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/videos/${video.id}$`));
+    await expect(page.getByLabel("Workspace")).toHaveValue(ws.id);
+
+    // Demo mode has one user without an email, so stand in a teammate to mention.
+    await page.route("**/api/workspaces", (route) =>
+      route.request().method() === "GET"
+        ? route.fulfill({ json: { personalId: "local", activeId: ws.id, workspaces: [{ id: ws.id, name: `Mentions ${tag}`, role: "owner", members: [{ userId: "local", role: "owner", you: true }, { userId: "user_bob", email: "bob@example.com", role: "editor" }] }] } })
+        : route.continue(),
+    );
+    await page.reload();
+    const chips = page.getByTestId("mention-suggestions");
+    await chips.getByRole("button", { name: "@bob@example.com" }).click();
+    await expect(page.getByLabel("New comment")).toHaveValue("@bob@example.com ");
+  } finally {
+    await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
+    expect((await page.request.delete(`/api/workspaces/${ws.id}`)).status()).toBe(204);
+  }
+});

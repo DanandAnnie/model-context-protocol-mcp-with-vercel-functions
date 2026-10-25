@@ -67,6 +67,16 @@ export function setEmailProvider(p: EmailProvider | undefined) {
 export const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string);
 const escape = escapeHtml;
 
+/** Tells a workspace member they were mentioned in a comment, with the comment and a link to the video. */
+export function mentionEmail(input: { to: string; authorEmail?: string; videoTitle: string; text: string; url: string }): EmailMessage {
+  const who = input.authorEmail ?? "A teammate";
+  const subject = `${who} mentioned you on "${input.videoTitle}"`;
+  const quote = input.text.length > 600 ? `${input.text.slice(0, 600)}…` : input.text;
+  const text = `${who} mentioned you in a comment on "${input.videoTitle}":\n\n${quote}\n\nOpen the video:\n${input.url}`;
+  const html = `<p>${escape(who)} mentioned you in a comment on <strong>${escape(input.videoTitle)}</strong>:</p><blockquote style="margin:0 0 12px;padding:8px 12px;border-left:3px solid #cbd5e1;color:#334155;white-space:pre-wrap">${escape(quote)}</blockquote><p><a href="${escape(input.url)}">Open the video</a></p>`;
+  return { to: input.to, subject, text, html, ...(input.authorEmail ? { replyTo: input.authorEmail } : {}) };
+}
+
 export function inviteEmail(input: { to: string; workspaceName: string; inviterEmail?: string; role: string; url: string; expiresAt: string }): EmailMessage {
   const who = input.inviterEmail ? `${input.inviterEmail} invited you` : "You have been invited";
   const expires = new Date(input.expiresAt).toUTCString();

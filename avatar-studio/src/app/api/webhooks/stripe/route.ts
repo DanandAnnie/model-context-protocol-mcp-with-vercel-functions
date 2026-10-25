@@ -17,6 +17,12 @@ export async function POST(req: Request) {
   } catch {
     return json({ error: "Invalid JSON" }, { status: 400 });
   }
-  const owner = await applyStripeEvent(event);
-  return json({ received: true, applied: owner !== null });
+  try {
+    const owner = await applyStripeEvent(event);
+    return json({ received: true, applied: owner !== null });
+  } catch (err) {
+    // A 500 makes Stripe deliver the event again later (for instance a cancellation that did not go through).
+    console.error(err);
+    return json({ error: "Could not apply the event; Stripe will retry" }, { status: 500 });
+  }
 }

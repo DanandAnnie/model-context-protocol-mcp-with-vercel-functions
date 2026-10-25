@@ -83,6 +83,8 @@ export interface BillingProvider {
   portal(ownerId: string, returnUrl: string): Promise<{ url: string }>;
   /** Asks the billing provider whether any of the customer's subscriptions can charge again (for when a webhook was missed). */
   customerRenews?(customerId: string): Promise<boolean>;
+  /** Cancels a subscription at once (one that belongs to a workspace deleted while it was being bought). */
+  cancelSubscription?(subscriptionId: string): Promise<void>;
 }
 
 /**
@@ -114,9 +116,9 @@ export class StripeBillingProvider implements BillingProvider {
   name = "stripe";
   constructor(private secretKey: string, private pricePro: string) {}
 
-  private async call<T>(path: string, params?: Record<string, string>): Promise<T> {
+  private async call<T>(path: string, params?: Record<string, string>, method?: "DELETE"): Promise<T> {
     const res = await fetch(`https://api.stripe.com/v1/${path}`, {
-      method: params ? "POST" : "GET",
+      method: method ?? (params ? "POST" : "GET"),
       headers: { Authorization: `Bearer ${this.secretKey}`, ...(params ? { "Content-Type": "application/x-www-form-urlencoded" } : {}) },
       body: params ? new URLSearchParams(params).toString() : undefined,
       signal: AbortSignal.timeout(15_000),
@@ -141,6 +143,15 @@ export class StripeBillingProvider implements BillingProvider {
       const e = err as { code?: string; message?: string };
       if (e.code === "resource_missing" && !/exists in live mode/i.test(e.message ?? "")) return false;
       throw err;
+    }
+  }
+
+  async cancelSubscription(subscriptionId: string): Promise<void> {
+    try {
+      await this.call(`subscriptions/${encodeURIComponent(subscriptionId)}`, undefined, "DELETE");
+    } catch (err) {
+      // Already gone is what was asked for; anything else is thrown so the webhook fails and Stripe retries it.
+      if ((err as { code?: string }).code !== "resource_missing") throw err;
     }
   }
 
@@ -211,9 +222,24 @@ export async function applyStripeEvent(event: StripeEvent): Promise<string | nul
   const obj = event.data.object;
   const meta = (obj.metadata as Record<string, string> | undefined) ?? {};
   const ownerId = (obj.client_reference_id as string | undefined) ?? meta.ownerId;
+  // A workspace deleted while its checkout was open (deletion is allowed then: nothing billed yet).
+  const orphaned = Boolean(ownerId?.startsWith("ws_")) && !(await getStore().get("workspace", ownerId!));
   switch (event.type) {
     case "checkout.session.completed": {
       if (!ownerId) return null;
+      const subscription = typeof obj.subscription === "string" ? obj.subscription : undefined;
+      // Nobody can reach a deleted workspace's billing portal, so its new subscription is cancelled here. If that
+      // fails, the ids are recorded and the error fails the webhook, so Stripe retries it.
+      const cancel = getBillingProvider().cancelSubscription;
+      if (orphaned && subscription && cancel) {
+        try {
+          await cancel.call(getBillingProvider(), subscription);
+          return null;
+        } catch (err) {
+          await setPlan(ownerId, { plan: "pro", provider: "stripe", customerId: typeof obj.customer === "string" ? obj.customer : undefined, subscriptionId: subscription, status: "active" });
+          throw err;
+        }
+      }
       await setPlan(ownerId, {
         plan: "pro",
         provider: "stripe",
@@ -226,10 +252,16 @@ export async function applyStripeEvent(event: StripeEvent): Promise<string | nul
     case "customer.subscription.updated":
     case "customer.subscription.deleted": {
       if (!ownerId) return null;
-      // A deleted workspace gets no plan row back from its subscription's later events. A completed checkout is
-      // still recorded, so the customer and subscription ids are never lost while Stripe bills them.
-      if (ownerId.startsWith("ws_") && !(await getStore().get("workspace", ownerId))) return null;
       const status = String(obj.status ?? "");
+      // A deleted workspace gets no plan row back from its subscription's later events; one that can still bill
+      // (its checkout event missed) is cancelled at Stripe, failing the webhook for a retry if that fails.
+      if (orphaned) {
+        const provider = getBillingProvider();
+        if (event.type === "customer.subscription.updated" && RENEWING.includes(status) && typeof obj.id === "string" && provider.cancelSubscription) {
+          await provider.cancelSubscription(obj.id);
+        }
+        return null;
+      }
       const endsAt = stripeEndsAt(obj);
       const active = event.type !== "customer.subscription.deleted" && ["active", "trialing", "past_due"].includes(status);
       // The customer comes along when the event carries it (a missed or late checkout event would otherwise leave none).

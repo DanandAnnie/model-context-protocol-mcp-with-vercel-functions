@@ -8,12 +8,14 @@ const PUBLIC_PREFIXES = ["/login", "/auth/", "/api/auth/", "/share/", "/talk/", 
 // Caption files back the public share player's subtitle track; the view, watch, and click
 // beacons and the share-password check come from it too.
 const PUBLIC_PATTERNS = [/^\/api\/videos\/[^/]+\/(captions|cover)$/, /^\/api\/videos\/[^/]+\/(view|cta|watch|unlock)$/];
+// Only bundled non-private sample assets; public share pages need these without a session.
+const DEMO_ASSETS = new Set(["/demo/render.mp4", "/demo/poster.svg"]);
 
 export async function proxy(req: NextRequest) {
   const mode = authMode();
   if (mode === "open") return NextResponse.next();
   const { pathname } = req.nextUrl;
-  const isPublic = pathname === "/" || PUBLIC_PREFIXES.some((p) => pathname.startsWith(p)) || PUBLIC_PATTERNS.some((r) => r.test(pathname));
+  const isPublic = pathname === "/" || DEMO_ASSETS.has(pathname) || PUBLIC_PREFIXES.some((p) => pathname.startsWith(p)) || PUBLIC_PATTERNS.some((r) => r.test(pathname));
   // API calls carrying an API key skip the session check; the route validates the key itself
   // (requireOwner rejects unknown keys). Any other bearer value goes through the normal check.
   const bearer = /^Bearer\s+(\S+)/i.exec(req.headers.get("authorization") ?? "")?.[1];

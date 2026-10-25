@@ -232,12 +232,53 @@ export default function VideoDetailPage() {
       URL.revokeObjectURL(url);
     }
   }
-  async function saveCover(file: File | null) {
+  /**
+   * The frame at `time` as a cover, read from a separate video element loaded with CORS so the page's
+   * own player is never affected: a host that does not allow it fails here with a clear message, and
+   * the player keeps playing. Downscaled like an upload.
+   */
+  async function frameToCover(src: string, time: number): Promise<string> {
+    const el = document.createElement("video");
+    el.crossOrigin = "anonymous";
+    el.muted = true;
+    el.preload = "auto";
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("The video took too long to load a frame")), 15_000);
+        el.onloadeddata = () => {
+          el.onseeked = () => {
+            clearTimeout(timer);
+            resolve();
+          };
+          el.currentTime = Math.min(time, Math.max(0, el.duration - 0.05));
+        };
+        el.onerror = () => {
+          clearTimeout(timer);
+          reject(new Error("This video's host does not allow reading its frames; take a screenshot and upload it instead"));
+        };
+        el.src = src;
+      });
+      const scale = Math.min(1, 1280 / el.videoWidth);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(el.videoWidth * scale));
+      canvas.height = Math.max(1, Math.round(el.videoHeight * scale));
+      canvas.getContext("2d")!.drawImage(el, 0, 0, canvas.width, canvas.height);
+      try {
+        return canvas.toDataURL("image/jpeg", 0.85);
+      } catch {
+        throw new Error("This video's host does not allow reading its frames; take a screenshot and upload it instead");
+      }
+    } finally {
+      el.removeAttribute("src");
+      el.load();
+    }
+  }
+  async function saveCover(file: File | null, frame?: { src: string; time: number }) {
     if (!video || coverBusy) return;
     setCoverErr(null);
-    setCoverBusy(file ? "save" : "remove");
+    setCoverBusy(file || frame ? "save" : "remove");
     try {
-      const body = { cover: file ? await fileToCover(file) : null };
+      const body = { cover: frame ? await frameToCover(frame.src, frame.time) : file ? await fileToCover(file) : null };
       const { video: next } = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify(body) });
       setData({ video: next });
       void refetch();
@@ -736,7 +777,7 @@ export default function VideoDetailPage() {
               </Card>
               <Card className="p-4" data-testid="cover-card">
                 <h3 className="text-sm font-semibold text-slate-900">Cover image</h3>
-                <p className="mt-1 text-xs text-slate-500">The poster shown on the share page, in link previews, and in your library. Up to 1280px wide; 2 MB.</p>
+                <p className="mt-1 text-xs text-slate-500">The poster shown on the share page, in link previews, and in your library: upload an image, or pause the player on a frame and use it. Up to 1280px wide; 2 MB.</p>
                 <div className="mt-3 flex flex-wrap items-center gap-3">
                   {posterUrl(video) && (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -757,6 +798,18 @@ export default function VideoDetailPage() {
                       }}
                     />
                   </label>
+                  {video.status === "completed" && video.videoUrl && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="px-3 py-1.5 text-xs"
+                      onClick={() => saveCover(null, { src: video.videoUrl!, time: player.current?.currentTime ?? 0 })}
+                      disabled={!!coverBusy}
+                      title="Pause the player on the frame you want, then use it as the cover"
+                    >
+                      Use current frame
+                    </Button>
+                  )}
                   {video.cover && (
                     <Button type="button" variant="secondary" className="px-3 py-1.5 text-xs" onClick={() => saveCover(null)} loading={coverBusy === "remove"} disabled={coverBusy === "save"}>
                       Remove cover

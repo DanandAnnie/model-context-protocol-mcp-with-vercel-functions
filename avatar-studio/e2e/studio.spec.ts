@@ -835,6 +835,23 @@ test("a custom cover image replaces the poster everywhere", async ({ page }) => 
   await page.getByRole("button", { name: "Remove cover" }).click();
   await expect(page.getByRole("button", { name: "Remove cover" })).toHaveCount(0);
   await expect.poll(async () => (await page.request.get(`/api/videos/${v.id}/cover`)).status()).toBe(404);
+  // A paused frame of the video itself can be the cover, at the video's own size (capped at 1280px wide).
+  const player = page.getByTestId("video-player");
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.readyState)).toBeGreaterThanOrEqual(1);
+  await player.evaluate((el: HTMLVideoElement) => (el.currentTime = 3));
+  await page.getByRole("button", { name: "Use current frame" }).click();
+  await expect(page.getByRole("button", { name: "Remove cover" })).toBeVisible();
+  const frame = (await (await page.request.get(`/api/videos/${v.id}`)).json()).video as { cover?: { updatedAt: string; mimeType: string } };
+  expect(frame.cover?.mimeType).toBe("image/jpeg");
+  const [videoWidth, coverWidth] = await page.evaluate(async (src) => {
+    const el = document.querySelector<HTMLVideoElement>('[data-testid="video-player"]')!;
+    const img = new Image();
+    img.src = src;
+    await img.decode();
+    return [Math.min(1280, el.videoWidth), img.naturalWidth];
+  }, `/api/videos/${v.id}/cover?v=${Date.parse(frame.cover!.updatedAt)}`);
+  expect(coverWidth).toBe(videoWidth);
+  expect(coverWidth).toBeGreaterThan(1);
 });
 
 test("draft autosave survives a reload and clears after generating", async ({ page }) => {

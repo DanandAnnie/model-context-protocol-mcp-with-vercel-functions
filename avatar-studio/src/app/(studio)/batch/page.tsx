@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { Layers3, Upload } from "lucide-react";
 import { Button, Card, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
+import { useCanEdit } from "@/hooks/useCanEdit";
+import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api } from "@/lib/client";
 import type { AspectRatio, Avatar, Resolution, Voice } from "@/lib/types";
 
@@ -20,6 +22,7 @@ interface Preview {
 }
 
 export default function BatchPage() {
+  const canEdit = useCanEdit();
   const router = useRouter();
   const { data: avatarData } = useApi<{ avatars: Avatar[] }>("/api/avatars");
   const { data: voiceData } = useApi<{ voices: Voice[] }>("/api/voices");
@@ -81,11 +84,12 @@ export default function BatchPage() {
         title="Personalize at scale"
         subtitle="One script, many recipients. Each CSV row becomes its own video with {column} placeholders filled in."
         action={
-          <Button onClick={generate} disabled={!ready || busy} loading={busy}>
+          <Button onClick={generate} disabled={!ready || busy || canEdit === false} loading={busy}>
             <Layers3 className="h-4 w-4" /> Generate {preview?.rowCount ? `${preview.rowCount} videos` : "videos"}
           </Button>
         }
       />
+      {canEdit === false && <ViewOnlyNotice what="start batches" />}
       <ErrorBanner message={err} />
       <div className="grid gap-6 xl:grid-cols-[1.1fr_1fr]">
         <div className="space-y-5">

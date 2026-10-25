@@ -1079,6 +1079,12 @@ test("workspaces: create, switch, isolate content, invite, join, leave, delete",
     await expect(page.getByText(`Team video ${tag}`)).toBeVisible();
     await expect(page.getByText(`Personal ${tag}`)).toHaveCount(0);
 
+    // An owner in a workspace keeps every create control; the view-only notice is for viewers.
+    await page.goto("/create");
+    await expect(page.getByRole("button", { name: "Generate video" })).toBeVisible();
+    await expect(page.getByTestId("view-only")).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Create video" }).first()).toBeVisible();
+
     // The activity feed on the members page names the video just created.
     await page.goto("/workspace");
     const feed = page.getByTestId("activity-feed");

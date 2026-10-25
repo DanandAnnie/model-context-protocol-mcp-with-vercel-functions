@@ -6,6 +6,7 @@ import { useMobileNav } from "@/components/MobileNav";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
 import { Clapperboard, Home, Languages, Layers3, LayoutTemplate, LogOut, MessageSquare, Mic2, Palette, Settings, Users, Video, Sparkles, X } from "lucide-react";
 import { useApi } from "@/hooks/useApi";
+import { useCanEdit } from "@/hooks/useCanEdit";
 import type { ProviderStatus } from "@/lib/types";
 
 const NAV = [
@@ -26,6 +27,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { data: status } = useApi<ProviderStatus>("/api/status");
+  const canEdit = useCanEdit();
 
   async function signOut() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -56,7 +58,7 @@ export function Sidebar() {
       </Link>
 
       <WorkspaceSwitcher />
-      <div className="px-3">
+      <div className={`px-3 ${canEdit === false ? "hidden" : ""}`}>
         <Link
           href="/create"
           className="mb-4 flex w-full items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700"

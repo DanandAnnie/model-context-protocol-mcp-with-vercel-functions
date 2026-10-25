@@ -6,6 +6,8 @@ import { AvatarGrid } from "@/components/AvatarPicker";
 import { VoiceRow } from "@/components/VoicePicker";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
+import { useCanEdit } from "@/hooks/useCanEdit";
+import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib/client";
@@ -341,7 +343,8 @@ function CreateInner() {
   const words = wordCount(script);
   const seconds = estimateSeconds(script, speed);
   const allScenesFilled = scenes.every((sc) => sc.script.trim().length > 0);
-  const canGenerate = !!avatar && !!voice && allScenesFilled && title.trim().length > 0 && !submitting;
+  const canEdit = useCanEdit();
+  const canGenerate = canEdit !== false && !!avatar && !!voice && allScenesFilled && title.trim().length > 0 && !submitting;
 
   async function generate() {
     if (!avatar || !voice) return;
@@ -387,6 +390,7 @@ function CreateInner() {
           </Button>
         }
       />
+      {canEdit === false && <ViewOnlyNotice what="generate videos" />}
       <ErrorBanner message={err ?? avatarsError ?? voicesError} />
       {draftRestored && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">

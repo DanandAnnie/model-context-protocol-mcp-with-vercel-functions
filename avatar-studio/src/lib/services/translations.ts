@@ -7,11 +7,52 @@ import type { Translation } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { owned, stripUndefined } from "./shared";
 
+const languageSchema = z.string().trim().min(2).max(40);
+
 export const translationRequestSchema = z.object({
   title: z.string().trim().min(1).max(120),
   sourceVideoUrl: z.string().url(),
-  targetLanguage: z.string().trim().min(2).max(40),
+  targetLanguage: languageSchema,
 });
+
+/** How many languages one request may dub a video into. */
+export const MAX_TRANSLATION_LANGUAGES = 5;
+
+/**
+ * One video into several languages at once: `targetLanguages` (1 to 5, repeats ignored without regard
+ * to case) or, as before, a single `targetLanguage`.
+ */
+export const translationBatchSchema = z
+  .object({
+    title: z.string().trim().min(1).max(120),
+    sourceVideoUrl: z.string().url(),
+    targetLanguage: languageSchema.optional(),
+    targetLanguages: z.array(languageSchema).min(1).max(MAX_TRANSLATION_LANGUAGES).optional(),
+  })
+  .transform((v, ctx) => {
+    const all = v.targetLanguages ?? (v.targetLanguage ? [v.targetLanguage] : []);
+    const seen = new Set<string>();
+    const languages = all.filter((l) => !seen.has(l.toLowerCase()) && !!seen.add(l.toLowerCase()));
+    if (!languages.length) {
+      ctx.addIssue({ code: "custom", path: ["targetLanguages"], message: "Pick at least one language" });
+      return z.NEVER;
+    }
+    return { title: v.title, sourceVideoUrl: v.sourceVideoUrl, languages };
+  });
+
+/**
+ * Starts one dubbing job per language, one after another. With several languages each job's title
+ * names its language, so the list tells them apart; a job the provider refuses is kept as failed
+ * and the rest still start.
+ */
+export async function createTranslations(input: z.infer<typeof translationBatchSchema>, ownerId: string = LOCAL_OWNER): Promise<Translation[]> {
+  const out: Translation[] = [];
+  for (const language of input.languages) {
+    const title = input.languages.length > 1 ? `${input.title} (${language})`.slice(0, 160) : input.title;
+    out.push(await createTranslation({ title, sourceVideoUrl: input.sourceVideoUrl, targetLanguage: language }, ownerId));
+  }
+  return out;
+}
 
 export async function createTranslation(req: z.infer<typeof translationRequestSchema>, ownerId: string = LOCAL_OWNER): Promise<Translation> {
   const provider = getTranslateProvider();

@@ -9,6 +9,9 @@ import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api, formatDate } from "@/lib/client";
 import type { Translation } from "@/lib/types";
 
+/** Matches the server's limit per request. */
+const MAX_LANGUAGES = 5;
+
 export default function TranslatePage() {
   return (
     <Suspense>
@@ -26,7 +29,9 @@ function TranslateInner() {
   });
   const [title, setTitle] = useState(params.get("title") ?? "");
   const [sourceVideoUrl, setSource] = useState(params.get("source") ?? "");
-  const [targetLanguage, setLang] = useState("Spanish");
+  // Up to five languages per request, one dubbing job each.
+  const [languages, setLanguages] = useState<string[]>(["Spanish"]);
+  const toggle = (l: string) => setLanguages((prev) => (prev.includes(l) ? prev.filter((x) => x !== l) : prev.length >= MAX_LANGUAGES ? prev : [...prev, l]));
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -34,7 +39,8 @@ function TranslateInner() {
     setSubmitting(true);
     setErr(null);
     try {
-      await api("/api/translate", { method: "POST", body: JSON.stringify({ title: title || `Translation to ${targetLanguage}`, sourceVideoUrl, targetLanguage }) });
+      const fallback = languages.length === 1 ? `Translation to ${languages[0]}` : "Translation";
+      await api("/api/translate", { method: "POST", body: JSON.stringify({ title: title || fallback, sourceVideoUrl, targetLanguages: languages }) });
       setSource("");
       setTitle("");
       refetch();
@@ -59,18 +65,27 @@ function TranslateInner() {
             <Field label="Video URL" hint="A direct link to an MP4 the provider can download.">
               <input className={inputClass} value={sourceVideoUrl} onChange={(e) => setSource(e.target.value)} placeholder="https://…/video.mp4" />
             </Field>
-            <Field label="Target language">
-              <select className={inputClass} value={targetLanguage} onChange={(e) => setLang(e.target.value)}>
-                {(data?.languages ?? ["Spanish"]).map((l) => (
-                  <option key={l} value={l}>{l}</option>
-                ))}
-              </select>
-            </Field>
+            <fieldset>
+              <legend className="mb-1.5 block text-sm font-medium text-slate-700">
+                Target languages <span className="font-normal text-slate-500">· {languages.length} of up to {MAX_LANGUAGES}, one dub each</span>
+              </legend>
+              <div className="flex flex-wrap gap-1.5" data-testid="target-languages">
+                {(data?.languages ?? ["Spanish"]).map((l) => {
+                  const on = languages.includes(l);
+                  return (
+                    <label key={l} className={`cursor-pointer rounded-full border px-2.5 py-1 text-xs font-medium ${on ? "border-brand-500 bg-brand-50 text-brand-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"} ${!on && languages.length >= MAX_LANGUAGES ? "cursor-not-allowed opacity-50" : ""}`}>
+                      <input type="checkbox" className="sr-only" checked={on} disabled={!on && languages.length >= MAX_LANGUAGES} onChange={() => toggle(l)} />
+                      {l}
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
             <Field label="Title (optional)">
-              <input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Product walkthrough – Spanish" />
+              <input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} placeholder={languages.length > 1 ? "Product walkthrough (each dub adds its language)" : "Product walkthrough – Spanish"} />
             </Field>
-            <Button onClick={submit} loading={submitting} disabled={!/^https?:\/\//.test(sourceVideoUrl) || canEdit === false} className="w-full">
-              <Languages className="h-4 w-4" /> Translate video
+            <Button onClick={submit} loading={submitting} disabled={!/^https?:\/\//.test(sourceVideoUrl) || canEdit === false || languages.length === 0} className="w-full">
+              <Languages className="h-4 w-4" /> {languages.length > 1 ? `Translate into ${languages.length} languages` : "Translate video"}
             </Button>
           </div>
         </Card>

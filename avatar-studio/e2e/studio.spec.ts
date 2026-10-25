@@ -1283,6 +1283,26 @@ test("workspace videos go through review: ask, request changes, ask again, appro
   }
 });
 
+test("one video is dubbed into several languages in one go", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  await page.goto("/translate");
+  await page.getByPlaceholder("https://…/video.mp4").fill("https://cdn.example.com/walkthrough.mp4");
+  // Spanish is picked to start with; two more make three dubs.
+  const langs = page.getByTestId("target-languages");
+  await langs.getByText("French", { exact: true }).click();
+  await langs.getByText("German", { exact: true }).click();
+  await page.getByLabel("Title (optional)").fill(`Walkthrough ${tag}`);
+  await page.getByRole("button", { name: "Translate into 3 languages" }).click();
+  for (const lang of ["Spanish", "French", "German"]) await expect(page.getByText(`Walkthrough ${tag} (${lang})`)).toBeVisible();
+  // The API takes the list directly and keeps the single-language form.
+  const res = await page.request.post("/api/translate", { data: { title: `API ${tag}`, sourceVideoUrl: "https://cdn.example.com/v.mp4", targetLanguages: ["Italian", "italian", "Portuguese"] } });
+  expect(res.status()).toBe(201);
+  expect(((await res.json()).translations as Array<{ title: string }>).map((t) => t.title)).toEqual([`API ${tag} (Italian)`, `API ${tag} (Portuguese)`]);
+  const single = await page.request.post("/api/translate", { data: { title: `One ${tag}`, sourceVideoUrl: "https://cdn.example.com/v.mp4", targetLanguage: "French" } });
+  expect((await single.json()).translation.title).toBe(`One ${tag}`);
+  expect((await page.request.post("/api/translate", { data: { title: "None", sourceVideoUrl: "https://cdn.example.com/v.mp4", targetLanguages: [] } })).status()).toBe(400);
+});
+
 test("demo billing upgrades to Pro and back from Settings", async ({ page }) => {
   await page.goto("/settings");
   await expect(page.getByTestId("plan-name")).toHaveText("Free");

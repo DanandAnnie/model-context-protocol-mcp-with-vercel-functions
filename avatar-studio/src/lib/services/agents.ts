@@ -1,4 +1,5 @@
 // Shareable interactive presenters, their transcripts, and lead capture. Used by API routes only.
+import { publicLogoSrc } from "../brand-logo";
 import { z } from "zod";
 import { newId, nowIso } from "../ids";
 import { getScriptProvider } from "../providers";
@@ -179,7 +180,8 @@ export async function publicAgent(id: string) {
     ...(agent.starters?.length ? { starters: agent.starters } : {}),
     collectEmail: agent.collectEmail ?? false,
     liveVideo: getStreamingProvider().available,
-    brand: brand ? { name: brand.name, logoUrl: brand.logoUrl, primaryColor: brand.primaryColor, accentColor: brand.accentColor } : null,
+    // An uploaded logo is linked through its own route rather than sent inline with every page load.
+    brand: brand ? { name: brand.name, logoUrl: publicLogoSrc(brand, `/api/talk/${encodeURIComponent(agent.id)}/logo`), primaryColor: brand.primaryColor, accentColor: brand.accentColor } : null,
   };
 }
 

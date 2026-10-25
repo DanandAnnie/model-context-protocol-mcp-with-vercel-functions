@@ -14,6 +14,7 @@ import { config } from "@/lib/config";
 import { formatSeconds, isDarkHex, posterUrl } from "@/lib/client";
 import { languageCode } from "@/lib/language";
 import { excerpt } from "@/lib/text";
+import { publicLogoSrc } from "@/lib/brand-logo";
 import { stripPauses } from "@/lib/pauses";
 import { dimensionsFor, type WatermarkCorner } from "@/lib/types";
 import { ViewBeacon } from "@/components/ViewBeacon";
@@ -135,11 +136,7 @@ export default async function SharePage({
 
   // An uploaded logo (a data URL of up to a few megabytes) is served by its own cacheable route, so the
   // header and the player watermark share one short URL instead of carrying the image in the page.
-  const logoSrc = brand?.logoUrl
-    ? brand.logoUrl.startsWith("data:")
-      ? `/api/videos/${encodeURIComponent(video.id)}/logo?v=${encodeURIComponent(brand.updatedAt)}`
-      : brand.logoUrl
-    : undefined;
+  const logoSrc = publicLogoSrc(brand, `/api/videos/${encodeURIComponent(video.id)}/logo`);
   const watermark = logoSrc && brand?.watermark && video.status === "completed" && video.videoUrl ? brand.watermark : undefined;
 
   return (

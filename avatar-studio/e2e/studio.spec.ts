@@ -1073,6 +1073,13 @@ test("brand kit pre-fills the editor and brands the share page", async ({ page }
     const box = (await mark.boundingBox())!;
     expect(box.width).toBeGreaterThan(0);
     expect(await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.tagName, [box.x + box.width / 2, box.y + box.height / 2])).toBe("VIDEO");
+    // A shared presenter's talk page links the same file through its own route.
+    const agent = (await (await page.request.post("/api/agents", { data: { name: "Logo check", avatarId: "stock_1", isPublic: true } })).json()).agent;
+    const talkLogo = (await (await page.request.get(`/api/talk/${agent.id}`)).json()).agent.brand.logoUrl;
+    expect(talkLogo).toMatch(new RegExp(`^/api/talk/${agent.id}/logo\\?v=`));
+    expect(Buffer.from(await (await page.request.get(talkLogo)).body()).toString("base64")).toBe(TINY_PNG);
+    expect((await page.request.delete(`/api/agents/${agent.id}`)).ok()).toBe(true);
+    expect((await page.request.get(talkLogo)).status()).toBe(404);
     // The logo follows the share page's rules: an offline link takes it down too.
     await page.request.patch(`/api/videos/${v.id}`, { data: { shareDisabled: true } });
     expect((await page.request.get(logoSrc!)).status()).toBe(404);

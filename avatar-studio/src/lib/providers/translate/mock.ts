@@ -2,7 +2,7 @@ import { LANGUAGES } from "../../stock";
 import { demoAssetUrl } from "../../config";
 import type { TranslateProvider } from "../types";
 
-const SAMPLE_VIDEO = "/demo/render.mp4";
+const SAMPLE_VIDEO = "/demo/render.webm";
 
 export class MockTranslateProvider implements TranslateProvider {
   readonly name = "mock";

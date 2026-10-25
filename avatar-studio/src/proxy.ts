@@ -9,7 +9,7 @@ const PUBLIC_PREFIXES = ["/login", "/auth/", "/api/auth/", "/share/", "/talk/", 
 // beacons and the share-password check come from it too.
 const PUBLIC_PATTERNS = [/^\/api\/videos\/[^/]+\/(captions|cover)$/, /^\/api\/videos\/[^/]+\/(view|cta|watch|unlock)$/];
 // Only bundled non-private sample assets; public share pages need these without a session.
-const DEMO_ASSETS = new Set(["/demo/render.mp4", "/demo/poster.svg"]);
+const DEMO_ASSETS = new Set(["/demo/render.mp4", "/demo/render.webm", "/demo/poster.svg"]);
 
 export async function proxy(req: NextRequest) {
   const mode = authMode();

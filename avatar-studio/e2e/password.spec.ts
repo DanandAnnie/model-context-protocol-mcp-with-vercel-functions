@@ -11,9 +11,9 @@ test("pages redirect, API rejects, public paths stay open", async ({ request }) 
   expect((await request.get("/api/videos/analytics")).status()).toBe(401);
   expect((await request.get("/")).status()).toBe(200);
   expect((await request.get("/login")).status()).toBe(200);
-  const media = await request.get("/demo/render.mp4");
+  const media = await request.get("/demo/render.webm");
   expect(media.status()).toBe(200);
-  expect(media.headers()["content-type"]).toContain("video/mp4");
+  expect(media.headers()["content-type"]).toContain("video/webm");
   expect((await request.get("/demo/poster.svg")).status()).toBe(200);
 });
 

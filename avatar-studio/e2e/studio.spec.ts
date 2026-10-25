@@ -188,7 +188,7 @@ test("the avatar library filters by gender and name", async ({ page }) => {
   // Library presenters with a preview clip play it, muted, while hovered; others show nothing.
   await expect(page.getByTestId("avatar-preview-badge")).toHaveCount(2);
   await page.getByRole("img", { name: "Ava Chen" }).hover();
-  await expect(page.getByTestId("avatar-preview")).toHaveAttribute("src", /\/demo\/render\.mp4$/);
+  await expect(page.getByTestId("avatar-preview")).toHaveAttribute("src", /\/demo\/render\.webm$/);
   await expect(page.getByTestId("avatar-preview")).toHaveJSProperty("muted", true);
   // The clip sits under the favourite star, so the star still takes the click while the clip plays.
   await page.getByRole("button", { name: "Add Ava Chen to favourites" }).click();

@@ -45,7 +45,7 @@ const STOCK_NAMES: Array<{ name: string; gender: Avatar["gender"]; tags: string[
 ];
 
 /** Self-hosted, labeled simulation; demo mode does not render the selected presenter. */
-export const SAMPLE_PREVIEW_VIDEO = "/demo/render.mp4";
+export const SAMPLE_PREVIEW_VIDEO = "/demo/render.webm";
 
 export const STOCK_AVATARS: Avatar[] = STOCK_NAMES.map((p, i) => ({
   id: `stock_${i + 1}`,

@@ -81,7 +81,7 @@ export async function generateMetadata({
       images,
       videos:
         ready && video.videoUrl
-          ? [{ url: video.videoUrl, type: "video/mp4", width, height }]
+          ? [{ url: video.videoUrl, type: video.videoUrl.endsWith(".webm") ? "video/webm" : "video/mp4", width, height }]
           : undefined,
     },
     twitter: {

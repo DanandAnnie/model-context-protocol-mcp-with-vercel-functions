@@ -10,6 +10,9 @@ export const ASPECT_DIMENSIONS: Record<AspectRatio, { width: number; height: num
 
 /** Output quality; the short side of the frame in pixels. */
 export type Resolution = "720p" | "1080p";
+/** Where the brand logo sits over the share and embed player; absent means no watermark. */
+export const WATERMARK_CORNERS = ["top-left", "top-right", "bottom-left", "bottom-right"] as const;
+export type WatermarkCorner = (typeof WATERMARK_CORNERS)[number];
 export const RESOLUTIONS: Resolution[] = ["720p", "1080p"];
 
 /** Pixel dimensions for an aspect ratio at a given quality (1080p when omitted). */
@@ -322,6 +325,8 @@ export interface BrandKit {
   defaultAspect?: AspectRatio;
   defaultResolution?: Resolution;
   captionsByDefault?: boolean;
+  /** The logo laid over the share and embed player in this corner (the file itself is not changed). */
+  watermark?: WatermarkCorner;
   updatedAt: string;
 }
 

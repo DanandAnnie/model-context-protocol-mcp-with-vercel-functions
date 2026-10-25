@@ -13,9 +13,9 @@ import { LOCAL_OWNER } from "@/lib/owner";
 import { config } from "@/lib/config";
 import { formatSeconds, isDarkHex, posterUrl } from "@/lib/client";
 import { languageCode } from "@/lib/language";
-import { excerpt } from "@/lib/text";
+import { cssUrl, excerpt } from "@/lib/text";
 import { stripPauses } from "@/lib/pauses";
-import { dimensionsFor } from "@/lib/types";
+import { dimensionsFor, type WatermarkCorner } from "@/lib/types";
 import { ViewBeacon } from "@/components/ViewBeacon";
 import { ShareCta } from "@/components/ShareCta";
 import { ShareUnlock } from "@/components/ShareUnlock";
@@ -133,8 +133,13 @@ export default async function SharePage({
         ? "aspect-square max-w-[640px]"
         : "aspect-video";
 
+  // The logo is drawn from one CSS variable by the header and the player watermark, so an uploaded
+  // logo (a data URL of up to a few megabytes) is sent once in the page, not once per place it shows.
+  const logoStyle = brand?.logoUrl ? ({ "--brand-logo": cssUrl(brand.logoUrl) } as React.CSSProperties) : undefined;
+  const watermark = brand?.logoUrl && brand.watermark && video.status === "completed" && video.videoUrl ? brand.watermark : undefined;
+
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100">
+    <main className="min-h-screen bg-slate-950 text-slate-100" style={logoStyle}>
       {watching && video.status === "completed" && (
         <ViewBeacon videoId={video.id} />
       )}
@@ -148,11 +153,12 @@ export default async function SharePage({
             data-testid="share-brand"
           >
             {brand.logoUrl && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={brand.logoUrl}
-                alt={brand.name ? `${brand.name} logo` : "Logo"}
-                className="h-8 max-w-[140px] object-contain"
+              <span
+                role="img"
+                aria-label={brand.name ? `${brand.name} logo` : "Logo"}
+                className="block h-8 w-[140px] bg-contain bg-left bg-no-repeat"
+                style={{ backgroundImage: "var(--brand-logo)" }}
+                data-testid="share-logo"
               />
             )}
             {brand.name && <span>{brand.name}</span>}
@@ -184,8 +190,9 @@ export default async function SharePage({
           <ShareLeadGate videoId={video.id} brandName={brand?.name} open={!gated}>
           {gated && video.status === "completed" && <ViewBeacon videoId={video.id} />}
             <div
-              className={`mx-auto w-full overflow-hidden rounded-xl bg-black ${frame}`}
+              className={`relative mx-auto w-full overflow-hidden rounded-xl bg-black ${frame}`}
             >
+              {watermark && <Watermark corner={watermark} />}
               {video.status === "completed" && video.videoUrl ? (
                 <SharePlayer videoId={video.id} src={video.videoUrl} poster={posterUrl(video)} captions={!!video.captions} captionSize={video.captionStyle?.size} captionLook={video.captionStyle?.look} trackDefault={!captionsBurnedIn(video)} autoplay={autoplay} loop={loop} tracks={Object.keys(video.subtitles ?? {}).map((language) => ({ language, code: languageCode(language) }))} />
               ) : (
@@ -245,5 +252,26 @@ export default async function SharePage({
         )}
       </section>
     </main>
+  );
+}
+
+/** Where the logo sits; the bottom corners clear the native player controls. */
+const WATERMARK_PLACE: Record<WatermarkCorner, string> = {
+  "top-left": "left-3 top-3 bg-left-top",
+  "top-right": "right-3 top-3 bg-right-top",
+  "bottom-left": "left-3 bottom-14 bg-left-bottom",
+  "bottom-right": "right-3 bottom-14 bg-right-bottom",
+};
+
+/** The brand logo over the player, as a watermark: decorative (the header names the brand), and clicks pass through to the player. */
+function Watermark({ corner }: { corner: WatermarkCorner }) {
+  return (
+    <span
+      aria-hidden
+      className={`pointer-events-none absolute z-10 h-[12%] max-h-14 w-1/4 bg-contain bg-no-repeat opacity-80 drop-shadow ${WATERMARK_PLACE[corner]}`}
+      style={{ backgroundImage: "var(--brand-logo)" }}
+      data-testid="share-watermark"
+      data-corner={corner}
+    />
   );
 }

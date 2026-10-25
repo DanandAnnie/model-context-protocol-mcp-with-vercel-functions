@@ -16,3 +16,11 @@ export function formatTimestamp(sec: number): string {
   const s = String(total % 60).padStart(2, "0");
   return h ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
 }
+
+/**
+ * A URL as a CSS `url("…")` value. Quotes, backslashes, and control characters are percent-encoded, so
+ * the value cannot end the string early; React sets it through the style object, never as markup.
+ */
+export function cssUrl(url: string): string {
+  return `url("${url.replace(/["\\\u0000-\u001f\u007f]/g, (c) => encodeURIComponent(c))}")`;
+}

@@ -8,7 +8,7 @@ import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api, isDarkHex } from "@/lib/client";
 import { MAX_PRONUNCIATIONS, formatPronunciations, parsePronunciations } from "@/lib/pronounce";
 import { MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH, MIN_GLOSSARY_TERM_LENGTH, parseGlossary } from "@/lib/glossary";
-import type { AspectRatio, Avatar, BrandKit, Resolution, Voice } from "@/lib/types";
+import type { AspectRatio, Avatar, BrandKit, Resolution, Voice, WatermarkCorner } from "@/lib/types";
 
 const DEFAULT_PRIMARY = "#4f46e5";
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -33,6 +33,7 @@ export default function BrandPage() {
   const [aspect, setAspect] = useState<AspectRatio | "">("");
   const [resolution, setResolution] = useState<Resolution | "">("");
   const [captions, setCaptions] = useState(false);
+  const [watermark, setWatermark] = useState<WatermarkCorner | "">("");
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -58,6 +59,7 @@ export default function BrandPage() {
     setAspect(b.defaultAspect ?? "");
     setResolution(b.defaultResolution ?? "");
     setCaptions(!!b.captionsByDefault);
+    setWatermark(b.watermark ?? "");
     setSavedAt(b.updatedAt);
   }, [brandData]);
 
@@ -120,6 +122,7 @@ export default function BrandPage() {
           defaultAspect: aspect || undefined,
           defaultResolution: resolution || undefined,
           captionsByDefault: captions,
+          watermark: watermark || undefined,
         }),
       });
       setSavedAt(brand.updatedAt);
@@ -149,6 +152,7 @@ export default function BrandPage() {
       setPronunciations("");
       setGlossary("");
       setCaptions(false);
+      setWatermark("");
       setSavedAt(null);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not remove the brand kit");
@@ -279,6 +283,15 @@ export default function BrandPage() {
               <input type="checkbox" checked={captions} onChange={(e) => setCaptions(e.target.checked)} className="h-5 w-5 accent-brand-600" />
               <span className="text-sm text-slate-700">Captions on by default</span>
             </label>
+            <Field label="Logo on the player" hint={logoUrl ? "Laid over the share page and embed player of every video; the video file itself is not changed." : "Add a logo above to show it on the player."}>
+              <select value={watermark} onChange={(e) => setWatermark(e.target.value as WatermarkCorner | "")} className={inputClass}>
+                <option value="">Off</option>
+                <option value="top-left">Top left</option>
+                <option value="top-right">Top right</option>
+                <option value="bottom-left">Bottom left</option>
+                <option value="bottom-right">Bottom right</option>
+              </select>
+            </Field>
           </div>
           <Field label="Pronunciation" hint="One per line, word = how to say it (for example Nair = Nye-er). Renders say it that way; scripts and captions keep the spelling. Up to 50.">
             <textarea aria-label="Pronunciation" value={pronunciations} onChange={(e) => setPronunciations(e.target.value)} rows={3} placeholder={"Nair = Nye-er\nSaaS = sass"} className={`${inputClass} font-mono text-xs`} />

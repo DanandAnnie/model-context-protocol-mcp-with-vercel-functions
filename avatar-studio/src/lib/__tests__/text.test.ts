@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { excerpt, formatTimestamp } from "../text";
+import { cssUrl, excerpt, formatTimestamp } from "../text";
 
 describe("excerpt", () => {
   it("collapses whitespace and leaves short text alone", () => {
@@ -33,5 +33,14 @@ describe("formatTimestamp", () => {
     assert.equal(formatTimestamp(600), "10:00");
     assert.equal(formatTimestamp(3725), "1:02:05");
     assert.equal(formatTimestamp(-3), "0:00");
+  });
+});
+
+describe("cssUrl", () => {
+  it("quotes a URL so nothing in it can end the CSS string", () => {
+    assert.equal(cssUrl("https://cdn.example.com/logo.png"), 'url("https://cdn.example.com/logo.png")');
+    assert.equal(cssUrl('https://x.test/a").b{color:red}'), 'url("https://x.test/a%22).b{color:red}")');
+    assert.equal(cssUrl("https://x.test/a\\b\nc"), 'url("https://x.test/a%5Cb%0Ac")');
+    assert.equal(cssUrl("data:image/png;base64,iVBOR+/="), 'url("data:image/png;base64,iVBOR+/=")');
   });
 });

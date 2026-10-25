@@ -999,6 +999,9 @@ test("captions are served as SRT and VTT, security headers are set", async ({ pa
   expect(checked.some((html) => html.includes('aria-pressed="true"') && html.includes("minimal")), "and the chosen look button").toBe(true);
 });
 
+/** A 1x1 transparent PNG. */
+const TINY_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+
 test("brand kit pre-fills the editor and brands the share page", async ({ page }) => {
   try {
     await page.goto("/brand");
@@ -1013,15 +1016,22 @@ test("brand kit pre-fills the editor and brands the share page", async ({ page }
     await page.getByLabel("Pronunciation", { exact: true }).fill("Nair = Nye-er\nSaaS = sass");
     // Terms to keep untranslated: one per line, repeats (ignoring case) dropped.
     await page.getByLabel("Never translate").fill("Acme Cloud\n\nacme cloud\nNimbus");
+    // An uploaded logo, laid over the share player as a watermark.
+    await page.locator('input[type="file"][accept="image/*"]').first().setInputFiles({ name: "logo.png", mimeType: "image/png", buffer: Buffer.from(TINY_PNG, "base64") });
+    await expect(page.getByAltText("Logo preview")).toBeVisible();
+    await page.getByLabel("Logo on the player").selectOption("bottom-right");
     await page.getByRole("button", { name: "Save brand kit" }).click();
     await expect(page.getByText(/^Saved /)).toBeVisible();
     const kit = (await (await page.request.get("/api/brand")).json()).brand;
     expect(kit.defaultBackground).toEqual({ type: "image", value: "https://example.com/brand-bg.jpg" });
     expect(kit.pronunciations).toEqual([{ word: "Nair", sayAs: "Nye-er" }, { word: "SaaS", sayAs: "sass" }]);
     expect(kit.glossary).toEqual(["Acme Cloud", "Nimbus"]);
+    expect(kit.watermark).toBe("bottom-right");
+    expect(kit.logoUrl).toBe(`data:image/png;base64,${TINY_PNG}`);
     await page.reload();
     await expect(page.getByLabel("Pronunciation", { exact: true })).toHaveValue("Nair = Nye-er\nSaaS = sass");
     await expect(page.getByLabel("Never translate")).toHaveValue("Acme Cloud\nNimbus");
+    await expect(page.getByLabel("Logo on the player")).toHaveValue("bottom-right");
     // Plumbing only: the translate route reads the kit and answers (the demo writer copies its input, so the
     // glossary's effect is shown by the unit tests, which use a translator that rewrites every word).
     const translated = await page.request.post("/api/script", { data: { script: "Acme Cloud and Nimbus [pause 1s] ship today.", action: "translate", language: "Spanish" } });
@@ -1036,8 +1046,19 @@ test("brand kit pre-fills the editor and brands the share page", async ({ page }
     await expect(page.getByRole("button", { name: /^720p/ })).toHaveAttribute("aria-pressed", "true");
 
     const v = await createVideoViaApi(page, "Branded video");
+    await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
     await page.goto(`/share/${v.id}`);
     await expect(page.getByTestId("share-brand")).toContainText("Acme Realty");
+    // The header logo and the watermark draw on one copy of the uploaded file; the watermark is decorative and lets clicks through.
+    await expect(page.getByRole("img", { name: "Acme Realty logo" })).toHaveCSS("background-image", /data:image\/png/);
+    const mark = page.getByTestId("share-watermark");
+    await expect(mark).toHaveAttribute("data-corner", "bottom-right");
+    await expect(mark).toHaveAttribute("aria-hidden", "true");
+    await expect(mark).toHaveCSS("pointer-events", "none");
+    await expect(mark).toHaveCSS("background-image", /data:image\/png/);
+    const html = await (await page.request.get(`/share/${v.id}`)).text();
+    // Once in the markup and once in the hydration payload; an <img> per place would double that.
+    expect(html.split(TINY_PNG).length - 1).toBe(2);
     await expect(page.getByRole("link", { name: "Avatar Studio" })).toBeVisible();
   } finally {
     // The suite shares one in-memory store; later tests expect the plain defaults.

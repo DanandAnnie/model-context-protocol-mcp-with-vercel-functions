@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { nowIso } from "../ids";
 import { getStore } from "../store";
-import type { BrandKit } from "../types";
+import { WATERMARK_CORNERS, type BrandKit } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ValidationError } from "../errors";
 import { getAvatar } from "./avatars";
@@ -37,6 +37,7 @@ export const brandKitSchema = z.object({
   defaultAspect: z.enum(["16:9", "9:16", "1:1"]).optional(),
   defaultResolution: z.enum(["720p", "1080p"]).optional(),
   captionsByDefault: z.boolean().optional(),
+  watermark: z.enum(WATERMARK_CORNERS).optional(),
 });
 
 export const brandKitId = (ownerId: string) => `brand_${ownerId}`;
@@ -67,6 +68,7 @@ export async function saveBrandKit(input: z.infer<typeof brandKitSchema>, ownerI
     defaultAspect: input.defaultAspect,
     defaultResolution: input.defaultResolution,
     captionsByDefault: input.captionsByDefault,
+    ...(input.watermark ? { watermark: input.watermark } : {}),
     updatedAt: nowIso(),
   };
   return getStore().put("brand", kit);

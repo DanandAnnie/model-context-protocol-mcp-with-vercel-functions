@@ -8,13 +8,14 @@ import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } 
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
+import { SceneAudio } from "@/components/SceneAudio";
 import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib/client";
 import { languageLabel } from "@/lib/language";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
-import { CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, RESOLUTIONS, isDefaultCaptionStyle as isDefaultCaptionStyleFn, type AspectRatio, type Avatar, type Background, type BrandKit, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice } from "@/lib/types";
+import { CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, RESOLUTIONS, isDefaultCaptionStyle as isDefaultCaptionStyleFn, type AspectRatio, type AudioClip, type Avatar, type Background, type BrandKit, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -53,12 +54,13 @@ function writeDraft(d: Draft | null) {
     // Storage can be unavailable (private mode); drafts are a convenience only.
   }
 }
-const newScene = (script = "", background: Background = DEFAULT_BG, presenter: Pick<Scene, "avatarId" | "voiceId" | "layout"> = {}): Scene => ({
+const newScene = (script = "", background: Background = DEFAULT_BG, presenter: Pick<Scene, "avatarId" | "voiceId" | "layout" | "audioId"> = {}): Scene => ({
   script,
   background,
   ...(presenter.avatarId ? { avatarId: presenter.avatarId } : {}),
-  ...(presenter.voiceId ? { voiceId: presenter.voiceId } : {}),
+  ...(presenter.voiceId && !presenter.audioId ? { voiceId: presenter.voiceId } : {}),
   ...(presenter.layout ? { layout: presenter.layout } : {}),
+  ...(presenter.audioId ? { audioId: presenter.audioId } : {}),
 });
 /** True when a layout is the renderer's default and need not be stored. */
 const isDefaultLayout = (l: SceneLayout) => l.scale === 1 && l.x === 0 && l.y === 0;
@@ -79,6 +81,8 @@ function CreateInner() {
   const { data: avatarData, loading: avatarsLoading, error: avatarsError } = useApi<{ avatars: Avatar[] }>("/api/avatars");
   const { data: voiceData, loading: voicesLoading, error: voicesError } = useApi<{ voices: Voice[] }>("/api/voices");
   const { data: brandData } = useApi<{ brand: BrandKit | null }>("/api/brand");
+  const { data: clipData, error: clipsError, setData: setClipData } = useApi<{ clips: AudioClip[] }>("/api/clips");
+  const clips = clipData?.clips ?? [];
   const { play, playingId, busyId } = useVoicePreview();
 
   const [title, setTitle] = useState("Untitled video");
@@ -137,21 +141,25 @@ function CreateInner() {
   // saved; once the lists are known, drop ids they no longer contain so the scene really does use
   // the video's choice (which is what the selects would otherwise claim) instead of failing to render.
   useEffect(() => {
-    if (!avatarData || !voiceData) return;
+    // Clips that failed to load are not treated as deleted: the scene keeps its clip and the server decides.
+    if (!avatarData || !voiceData || (!clipData && !clipsError)) return;
     const avatars = new Set(avatarData.avatars.map((a) => a.id));
     const voices = new Set(voiceData.voices.map((v) => v.id));
+    const clipIds = clipData ? new Set(clipData.clips.map((c) => c.id)) : null;
     setScenes((prev) => {
       let changed = false;
       const next = prev.map((sc) => {
         const dropAvatar = !!sc.avatarId && !avatars.has(sc.avatarId);
         const dropVoice = !!sc.voiceId && !voices.has(sc.voiceId);
-        if (!dropAvatar && !dropVoice) return sc;
+        // A clip deleted since the draft or the copied video was saved: the scene goes back to a voice.
+        const dropAudio = !!sc.audioId && !!clipIds && !clipIds.has(sc.audioId);
+        if (!dropAvatar && !dropVoice && !dropAudio) return sc;
         changed = true;
-        return newScene(sc.script, sc.background, { avatarId: dropAvatar ? undefined : sc.avatarId, voiceId: dropVoice ? undefined : sc.voiceId, layout: sc.layout });
+        return newScene(sc.script, sc.background, { avatarId: dropAvatar ? undefined : sc.avatarId, voiceId: dropVoice ? undefined : sc.voiceId, layout: sc.layout, audioId: dropAudio ? undefined : sc.audioId });
       });
       return changed ? next : prev;
     });
-  }, [avatarData, voiceData, scenes]);
+  }, [avatarData, voiceData, clipData, clipsError, scenes]);
   const [aspect, setAspect] = useState<AspectRatio>("16:9");
   const [resolution, setResolution] = useState<Resolution>("1080p");
   const [captions, setCaptions] = useState(false);
@@ -341,7 +349,12 @@ function CreateInner() {
   }, [voiceData, voiceQuery, voiceLanguage, favorites.voiceIds]);
 
   const words = wordCount(script);
-  const seconds = estimateSeconds(script, speed);
+  /** A typed scene lasts as long as its words take at the chosen speed; an audio scene as long as its clip. */
+  const sceneSeconds = (sc: Scene) => {
+    const clip = sc.audioId ? clips.find((c) => c.id === sc.audioId) : undefined;
+    return clip ? Math.round(clip.durationSec) : estimateSeconds(sc.script, speed);
+  };
+  const seconds = scenes.reduce((sum, sc) => sum + sceneSeconds(sc), 0);
   const allScenesFilled = scenes.every((sc) => sc.script.trim().length > 0);
   const canEdit = useCanEdit();
   const canGenerate = canEdit !== false && !!avatar && !!voice && allScenesFilled && title.trim().length > 0 && !submitting;
@@ -456,7 +469,7 @@ function CreateInner() {
                   key={i}
                   type="button"
                   onClick={() => setActiveIdx(i)}
-                  aria-label={`Scene ${i + 1}${sc.script.trim() ? `, about ${formatSeconds(Math.max(1, estimateSeconds(sc.script, speed)))}` : ", empty"}`}
+                  aria-label={`Scene ${i + 1}${sc.script.trim() ? `, about ${formatSeconds(Math.max(1, sceneSeconds(sc)))}` : ", empty"}`}
                   aria-current={i === activeIdx ? "true" : undefined}
                   className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${
                     i === activeIdx ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
@@ -465,7 +478,7 @@ function CreateInner() {
                   <span className="h-2.5 w-2.5 rounded-full border border-black/10" style={sc.background.type === "color" ? { background: sc.background.value } : sc.background.type === "video" ? { background: "linear-gradient(135deg,#0f172a,#475569)" } : { background: "linear-gradient(135deg,#94a3b8,#cbd5e1)" }} />
                   {i + 1}
                   {sc.script.trim() ? (
-                    <span className="font-normal text-slate-400" data-testid="scene-duration">~{formatSeconds(Math.max(1, estimateSeconds(sc.script, speed)))}</span>
+                    <span className="font-normal text-slate-400" data-testid="scene-duration">{sc.audioId ? "" : "~"}{formatSeconds(Math.max(1, sceneSeconds(sc)))}</span>
                   ) : (
                     <span className="text-amber-500" title="Empty scene">•</span>
                   )}
@@ -514,12 +527,14 @@ function CreateInner() {
                     <option key={a.id} value={a.id}>{a.name}</option>
                   ))}
                 </select>
-                <select aria-label="Scene voice" className={`${inputClass} w-auto py-1 text-xs`} value={active.voiceId ?? ""} onChange={(e) => updateScene(activeIdx, { voiceId: e.target.value || undefined })}>
-                  <option value="">{voice ? `Video voice (${voice.name})` : "Video voice"}</option>
-                  {(voiceData?.voices ?? []).map((v) => (
-                    <option key={v.id} value={v.id}>{v.name}</option>
-                  ))}
-                </select>
+                {!active.audioId && (
+                  <select aria-label="Scene voice" className={`${inputClass} w-auto py-1 text-xs`} value={active.voiceId ?? ""} onChange={(e) => updateScene(activeIdx, { voiceId: e.target.value || undefined })}>
+                    <option value="">{voice ? `Video voice (${voice.name})` : "Video voice"}</option>
+                    {(voiceData?.voices ?? []).map((v) => (
+                      <option key={v.id} value={v.id}>{v.name}</option>
+                    ))}
+                  </select>
+                )}
               </div>
             )}
             <details className="mb-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="scene-layout">
@@ -549,12 +564,22 @@ function CreateInner() {
                 )}
               </div>
             </details>
+            <SceneAudio
+              clips={clips}
+              clipId={active.audioId}
+              disabled={canEdit === false}
+              onUse={(clip) => updateScene(activeIdx, { audioId: clip.id, voiceId: undefined })}
+              onClear={() => updateScene(activeIdx, { audioId: undefined })}
+              onSaved={(clip) => setClipData((prev) => ({ clips: [clip, ...(prev?.clips ?? []).filter((c) => c.id !== clip.id)] }))}
+            />
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold text-slate-900">{scenes.length > 1 ? `Scene ${activeIdx + 1} script` : "Script"}</h3>
+              <h3 className="text-sm font-semibold text-slate-900">
+                {active.audioId ? (scenes.length > 1 ? `Scene ${activeIdx + 1}: what the clip says` : "What the clip says") : scenes.length > 1 ? `Scene ${activeIdx + 1} script` : "Script"}
+              </h3>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs text-slate-500" data-testid="script-length">
                   {scenes.length > 1
-                    ? `${wordCount(active.script)} words · ~${formatSeconds(estimateSeconds(active.script, speed))} this scene · ~${formatSeconds(seconds)} total`
+                    ? `${wordCount(active.script)} words · ~${formatSeconds(sceneSeconds(active))} this scene · ~${formatSeconds(seconds)} total`
                     : `${words} words · ~${formatSeconds(seconds)}`}
                 </span>
                 <Button variant="secondary" className="px-3 py-1.5" onClick={() => setWriterOpen((v) => !v)}>
@@ -590,7 +615,7 @@ function CreateInner() {
                     </div>
                   )}
                 </div>
-                {sceneVoice && (
+                {sceneVoice && !active.audioId && (
                   <Button
                     variant="secondary"
                     className="px-3 py-1.5"
@@ -610,7 +635,7 @@ function CreateInner() {
               className={`${inputClass} min-h-[220px] resize-y leading-relaxed`}
               value={active.script}
               onChange={(e) => setScript(e.target.value)}
-              placeholder={scenes.length > 1 ? `What the avatar says in scene ${activeIdx + 1}.` : "Type what your avatar should say, or click “Write with AI”."}
+              placeholder={active.audioId ? "Type what the clip says. It becomes the captions and makes the video searchable." : scenes.length > 1 ? `What the avatar says in scene ${activeIdx + 1}.` : "Type what your avatar should say, or click “Write with AI”."}
               maxLength={5000}
             />
           </Card>

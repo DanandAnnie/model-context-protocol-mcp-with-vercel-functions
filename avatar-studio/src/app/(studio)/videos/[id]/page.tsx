@@ -648,7 +648,11 @@ export default function VideoDetailPage() {
                     )}
                   </Row>
                   <Row label="Avatar">{video.avatarName ?? video.avatarId}</Row>
-                  <Row label="Voice">{video.voiceName ?? video.voiceId}</Row>
+                  <Row label="Voice">
+                    {video.scenes?.length && video.scenes.every((sc) => sc.audioId)
+                      ? `Recorded audio${video.scenes.length === 1 && video.scenes[0].audioName ? ` (${video.scenes[0].audioName})` : ""}`
+                      : `${video.voiceName ?? video.voiceId}${video.scenes?.some((sc) => sc.audioId) ? ", plus recorded audio" : ""}`}
+                  </Row>
                   <Row label="Speed">{video.speed}x</Row>
                   {video.pitch ? <Row label="Pitch">{video.pitch > 0 ? `+${video.pitch}` : video.pitch}</Row> : null}
                   <Row label="Captions">{video.captions ? `On${video.captionStyle ? ` · ${video.captionStyle.position}, ${video.captionStyle.size}` : ""}` : "Off"}</Row>
@@ -793,9 +797,9 @@ export default function VideoDetailPage() {
                           {i + 1}
                         </span>
                         <div className="min-w-0">
-                          {(sc.avatarName || sc.voiceName || sc.layout) && (
+                          {(sc.avatarName || sc.voiceName || sc.audioId || sc.layout) && (
                             <div className="mb-0.5 text-xs text-slate-500">
-                              {[sc.avatarName, sc.voiceName, sc.layout ? `presenter ${Math.round(sc.layout.scale * 100)}%${sc.layout.x || sc.layout.y ? ", moved" : ""}` : undefined].filter(Boolean).join(" · ")}
+                              {[sc.avatarName, sc.audioId ? `recorded audio${sc.audioName ? `: ${sc.audioName}` : ""}` : sc.voiceName, sc.layout ? `presenter ${Math.round(sc.layout.scale * 100)}%${sc.layout.x || sc.layout.y ? ", moved" : ""}` : undefined].filter(Boolean).join(" · ")}
                             </div>
                           )}
                           <p className="whitespace-pre-wrap leading-relaxed text-slate-700">{sc.script}</p>

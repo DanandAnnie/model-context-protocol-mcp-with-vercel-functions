@@ -55,7 +55,7 @@ Instead of `script`, send `scenes` (1 to 20), each with its own `script` and `ba
 |---|---|---|
 | `title` | string, 1–120 | |
 | `script` | string, ≤5000 | required unless `scenes` is given |
-| `scenes` | array | each `{ script, background, avatarId?, voiceId?, layout? }`; `layout` is `{ scale: 0.5–1.5, x: -1..1, y: -1..1 }`, the presenter's size and offset in the frame (HeyGen renders it as the character's `scale` and `offset`; other renderers use their default); stored scenes also carry `avatarName` and `voiceName` |
+| `scenes` | array | each `{ script, background, avatarId?, voiceId?, audioId?, layout? }`; `audioId` names an audio clip from `/api/clips` that the presenter lip-syncs to instead of a voice speaking `script` (the script is then what the clip says, kept for captions and search; the scene's voice, speed, and pitch do not apply; HeyGen uploads the clip once as an audio asset, D-ID speaks it in a single-scene video only, and a clip of another account is a `404`), and the stored scene carries `audioName` and `audioSeconds`; `layout` is `{ scale: 0.5–1.5, x: -1..1, y: -1..1 }`, the presenter's size and offset in the frame (HeyGen renders it as the character's `scale` and `offset`; other renderers use their default); stored scenes also carry `avatarName` and `voiceName` |
 | `avatarId` | string | from `GET /api/avatars` |
 | `voiceId` | string | from `GET /api/voices` |
 | `aspect` | `16:9` \| `9:16` \| `1:1` | default `16:9` |
@@ -190,6 +190,7 @@ Returns `{ "reply": "…" }`.
 - `GET /api/voices` → `{ "voices": [...] }` (the account's cloned voices first, `source: "custom"`)
 - `POST /api/voices/clone` → `{ "name", "samples": ["data:audio/webm;base64,…"], "language"? }` (one to five audio data URLs, 10 MB total, five clones per account) → `201 { "voice" }`; `PATCH /api/voices/:id` → `{ "name" }` renames a clone (provider voices answer `404`; videos keep the name they were rendered with, and the provider's own copy of the voice keeps its name); `DELETE /api/voices/:id` removes a clone. Cloning runs on ElevenLabs when it is the voice provider; the demo provider saves the clone and previews use the browser voice
 - `POST /api/voices/preview` → `{ "voiceId", "text", "speed" }`; returns audio, or `204` with `x-tts-fallback: browser` in demo mode
+- Audio clips for audio scenes: `POST /api/clips` → `{ "name", "audio": "data:audio/wav;base64,…", "durationSec"? }` saves a WAV (its length is read from the file) or an MP3 (`durationSec` required), 10 MB and 5 minutes at most, 20 clips per account → `201 { "clip": { id, name, mimeType, bytes, durationSec, createdAt } }`. The editor records or takes any audio file the browser can decode and converts it to 16 kHz mono WAV before saving. `GET /api/clips` → `{ "clips" }` newest first (metadata only); `GET /api/clips/:id` returns the audio to the owner; `DELETE /api/clips/:id` removes a clip and its audio (rendered videos keep their footage; a retry or copy that names a deleted clip is refused, and the editor drops it from a restored scene)
 
 ## Translation
 

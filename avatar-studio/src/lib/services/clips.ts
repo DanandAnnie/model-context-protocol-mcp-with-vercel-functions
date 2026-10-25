@@ -1,0 +1,126 @@
+// Recorded or uploaded audio a scene can use instead of a typed script spoken by a voice: the
+// presenter lip-syncs to the clip. Used by API routes only.
+//
+// The metadata row (`clip`) is what lists and scenes read; the bytes live in their own row
+// (`clipaudio`), like cover images, so listing clips or loading a video never pulls audio.
+import { z } from "zod";
+import { newId, nowIso } from "../ids";
+import { getStore } from "../store";
+import { decodeDataUrl } from "../providers/image";
+import { ConflictError, NotFoundError, ValidationError } from "../errors";
+import { LOCAL_OWNER } from "../owner-id";
+import type { AudioClip, AudioClipType } from "../types";
+import { owned } from "./shared";
+
+export const MAX_CLIP_BYTES = 10 * 1024 * 1024;
+export const MAX_CLIPS = 20;
+/** Longest clip a scene may use, in seconds. */
+export const MAX_CLIP_SECONDS = 300;
+const CLIP_TYPES = new Set<AudioClipType>(["audio/wav", "audio/mpeg"]);
+
+export const clipUploadSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  /** A data URL: WAV (the editor converts recordings and uploads to it) or MP3. */
+  audio: z.string().min(1).max(14_000_000),
+  /** Required for MP3, whose length cannot be read cheaply; a WAV's length is read from its header. */
+  durationSec: z.number().positive().max(MAX_CLIP_SECONDS).optional(),
+});
+
+type ClipAudio = { id: string; clipId: string; ownerId?: string; mimeType: AudioClipType; data: string };
+
+/** Prefixed like every other side record: the Supabase table keys every kind by id alone. */
+const audioRowId = (clipId: string) => `clipaudio_${clipId}`;
+
+/**
+ * Seconds of audio in a PCM WAV file, from the `fmt ` chunk's byte rate and the `data` chunk's
+ * size; null when the bytes are not a well-formed RIFF/WAVE file.
+ */
+export function wavSeconds(bytes: Uint8Array): number | null {
+  if (bytes.byteLength < 12) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const tag = (at: number) => String.fromCharCode(bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]);
+  if (tag(0) !== "RIFF" || tag(8) !== "WAVE") return null;
+  let byteRate = 0;
+  let dataSize = -1;
+  for (let at = 12; at + 8 <= bytes.byteLength; ) {
+    const id = tag(at);
+    const size = view.getUint32(at + 4, true);
+    if (id === "fmt " && at + 20 <= bytes.byteLength) byteRate = view.getUint32(at + 16, true);
+    if (id === "data") {
+      // A recorder that never patched the size leaves 0 or 0xFFFFFFFF; the rest of the file is the audio then.
+      dataSize = size === 0 || size === 0xffffffff ? bytes.byteLength - at - 8 : Math.min(size, bytes.byteLength - at - 8);
+      break;
+    }
+    at += 8 + size + (size % 2);
+  }
+  if (!byteRate || dataSize < 0) return null;
+  return dataSize / byteRate;
+}
+
+function view(clip: AudioClip): AudioClip {
+  const { providerAssetIds: _ids, ...rest } = clip;
+  void _ids;
+  return rest;
+}
+
+export async function listClips(ownerId: string = LOCAL_OWNER): Promise<AudioClip[]> {
+  const clips = await getStore().list<AudioClip>("clip", ownerId);
+  return clips.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(view);
+}
+
+export async function createClip(input: z.infer<typeof clipUploadSchema>, ownerId: string = LOCAL_OWNER): Promise<AudioClip> {
+  if (!input.audio.startsWith("data:audio/")) throw new ValidationError("The clip must be an audio recording or file");
+  let decoded: ReturnType<typeof decodeDataUrl>;
+  try {
+    decoded = decodeDataUrl(input.audio);
+  } catch {
+    throw new ValidationError("The audio data is malformed");
+  }
+  const mimeType = (decoded.mimeType === "audio/x-wav" || decoded.mimeType === "audio/wave" ? "audio/wav" : decoded.mimeType) as AudioClipType;
+  if (!CLIP_TYPES.has(mimeType)) throw new ValidationError("The clip must be WAV or MP3 audio");
+  if (decoded.bytes.byteLength > MAX_CLIP_BYTES) throw new ValidationError("The clip is too large (10 MB max)");
+  let seconds: number;
+  if (mimeType === "audio/wav") {
+    const read = wavSeconds(decoded.bytes);
+    if (read === null) throw new ValidationError("The WAV file is malformed");
+    seconds = read;
+  } else {
+    if (!input.durationSec) throw new ValidationError("Give the length of an MP3 clip in durationSec");
+    seconds = input.durationSec;
+  }
+  if (seconds < 0.5) throw new ValidationError("The clip is too short to speak (half a second at least)");
+  if (seconds > MAX_CLIP_SECONDS) throw new ValidationError(`Clips can be at most ${MAX_CLIP_SECONDS / 60} minutes long`);
+  if ((await getStore().list<AudioClip>("clip", ownerId)).length >= MAX_CLIPS) {
+    throw new ConflictError(`At most ${MAX_CLIPS} audio clips per account; delete one you no longer use`);
+  }
+  const clip: AudioClip = { id: newId("clip"), ownerId, name: input.name, mimeType, bytes: decoded.bytes.byteLength, durationSec: Math.round(seconds * 10) / 10, createdAt: nowIso() };
+  // Bytes first: a clip row that is listed always has its audio.
+  await getStore().put<ClipAudio>("clipaudio", { id: audioRowId(clip.id), clipId: clip.id, ownerId, mimeType, data: Buffer.from(decoded.bytes).toString("base64") });
+  return view(await getStore().put("clip", clip));
+}
+
+/** The stored clip with provider asset ids, for rendering. */
+export async function getClip(id: string, ownerId: string = LOCAL_OWNER): Promise<AudioClip> {
+  return owned(await getStore().get<AudioClip>("clip", id), ownerId, `Audio clip ${id}`);
+}
+
+export async function getClipAudio(id: string, ownerId: string = LOCAL_OWNER): Promise<{ mimeType: AudioClipType; bytes: Uint8Array }> {
+  await getClip(id, ownerId);
+  const row = await getStore().get<ClipAudio>("clipaudio", audioRowId(id));
+  if (!row) throw new NotFoundError(`Audio clip ${id} has no audio`);
+  return { mimeType: row.mimeType, bytes: new Uint8Array(Buffer.from(row.data, "base64")) };
+}
+
+/** Records the provider's asset id for a clip so later renders (retries, copies) skip the upload. Keeps a clip deleted meanwhile deleted. */
+export async function saveClipAssetIds(clip: AudioClip, ids: Record<string, string>): Promise<AudioClip> {
+  const current = await getStore().get<AudioClip>("clip", clip.id);
+  if (!current) return { ...clip, providerAssetIds: { ...clip.providerAssetIds, ...ids } };
+  return getStore().put("clip", { ...current, providerAssetIds: { ...current.providerAssetIds, ...ids } });
+}
+
+/** Deletes a clip and its audio. Videos already rendered keep their footage; a retry or copy that names it is refused. */
+export async function deleteClip(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
+  await getClip(id, ownerId);
+  await getStore().remove("clip", id);
+  await getStore().remove("clipaudio", audioRowId(id));
+}

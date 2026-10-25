@@ -1,4 +1,4 @@
-import type { Avatar, Translation, Video, VideoRequest, Voice } from "../types";
+import type { AudioClip, Avatar, Translation, Video, VideoRequest, Voice } from "../types";
 
 export interface TtsProvider {
   readonly name: string;
@@ -25,6 +25,8 @@ export interface AvatarJobStatus {
 export interface RenderCast {
   avatars: Record<string, Avatar>;
   voices: Record<string, Voice>;
+  /** Audio clips the scenes name, already prepared (uploaded) for the renderer. */
+  clips?: Record<string, AudioClip>;
 }
 
 export interface AvatarProvider {
@@ -42,6 +44,11 @@ export interface AvatarProvider {
    * presenter per scene; others use `avatar` and `voice` throughout.
    */
   createVideo(req: VideoRequest, avatar: Avatar, voice: Voice | null, cast?: RenderCast): Promise<{ providerJobId: string }>;
+  /**
+   * Make an audio clip usable by this renderer, e.g. by uploading it. Returns the clip with
+   * `providerAssetIds[provider]` set; the caller persists it. Renderers without it cannot use audio scenes.
+   */
+  prepareAudio?(clip: AudioClip, audio: { bytes: Uint8Array; mimeType: string }): Promise<AudioClip>;
   getStatus(providerJobId: string): Promise<AvatarJobStatus>;
   /** Parse an inbound webhook body into a job update, or null if unrecognised. */
   parseWebhook?(body: unknown): { providerJobId: string; update: AvatarJobStatus } | null;

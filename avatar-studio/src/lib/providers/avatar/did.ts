@@ -1,7 +1,7 @@
-import type { Avatar, VideoRequest, Voice } from "../../types";
+import type { AudioClip, Avatar, VideoRequest, Voice } from "../../types";
 import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
-import type { AvatarJobStatus, AvatarProvider } from "../types";
+import type { AvatarJobStatus, AvatarProvider, RenderCast } from "../types";
 
 const BASE = "https://api.d-id.com";
 
@@ -60,15 +60,31 @@ export class DidAvatarProvider implements AvatarProvider {
     return { type: "microsoft", voice_id: female ? "en-US-JennyNeural" : "en-US-GuyNeural" };
   }
 
-  async createVideo(req: VideoRequest, avatar: Avatar, voice: Voice | null) {
+  /** D-ID speaks audio from a URL it hosts; upload the clip once and remember that URL. */
+  async prepareAudio(clip: AudioClip, audio: { bytes: Uint8Array; mimeType: string }): Promise<AudioClip> {
+    if (clip.providerAssetIds?.[this.name]) return clip;
+    const form = new FormData();
+    form.append("audio", new Blob([audio.bytes as BlobPart], { type: audio.mimeType }), audio.mimeType === "audio/mpeg" ? "clip.mp3" : "clip.wav");
+    const res = await fetch(`${BASE}/audios`, { method: "POST", headers: this.headers(), body: form });
+    if (!res.ok) throw new Error(`D-ID audio upload failed: ${res.status} ${await res.text()}`);
+    const json = (await res.json()) as { url: string };
+    return { ...clip, providerAssetIds: { ...clip.providerAssetIds, [this.name]: json.url } };
+  }
+
+  async createVideo(req: VideoRequest, avatar: Avatar, voice: Voice | null, cast?: RenderCast) {
     // A D-ID talk has one presenter and one voice; a scene asking for another cannot be honoured.
     const other = req.scenes?.find((sc) => (sc.avatarId && sc.avatarId !== req.avatarId) || (sc.voiceId && sc.voiceId !== req.voiceId));
     if (other) throw new Error("D-ID renders one presenter and one voice per video; remove the per-scene presenter or switch to HeyGen.");
+    // One talk speaks either text or one audio file, so recorded audio needs a video of a single scene.
+    const audioScene = req.scenes?.find((sc) => sc.audioId);
+    if (audioScene && (req.scenes?.length ?? 0) > 1) throw new Error("D-ID renders one clip per video; use recorded audio in a single-scene video or switch to HeyGen.");
+    const audioUrl = audioScene?.audioId ? cast?.clips?.[audioScene.audioId]?.providerAssetIds?.[this.name] : undefined;
+    if (audioScene && !audioUrl) throw new Error("The audio clip has not been uploaded to D-ID yet.");
     const sourceUrl = avatar.source === "custom" ? avatar.providerAssetIds?.[this.name] : avatar.imageUrl;
     if (!sourceUrl) throw new Error("Custom avatar has not been uploaded to D-ID yet.");
     const body = {
       source_url: sourceUrl,
-      script: { type: "text", input: req.script, provider: this.resolveVoice(voice) },
+      script: audioUrl ? { type: "audio", audio_url: audioUrl } : { type: "text", input: req.script, provider: this.resolveVoice(voice) },
       config: { stitch: true, result_format: "mp4" },
       ...(webhookUrl("did") ? { webhook: webhookUrl("did") } : {}),
       name: req.title,

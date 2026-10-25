@@ -54,6 +54,21 @@ export class HeyGenClient {
     return id;
   }
 
+  /** Upload an audio file as an asset; returns HeyGen's asset id for `voice.audio_asset_id`. */
+  async uploadAsset(bytes: Uint8Array, mimeType: string): Promise<string> {
+    const res = await fetch("https://upload.heygen.com/v1/asset", {
+      method: "POST",
+      headers: { "X-Api-Key": this.apiKey, "Content-Type": mimeType },
+      body: bytes as BodyInit,
+    });
+    const text = await res.text();
+    if (!res.ok) throw new Error(`HeyGen asset upload failed: ${res.status} ${text}`);
+    const json = JSON.parse(text) as { data?: { id?: string }; error?: unknown };
+    const id = json.data?.id;
+    if (!id) throw new Error(`HeyGen asset upload returned no id: ${text}`);
+    return id;
+  }
+
   generateVideo(body: Record<string, unknown>) {
     return this.request<{ video_id: string }>(`${V2}/video/generate`, { method: "POST", body: JSON.stringify(body) });
   }

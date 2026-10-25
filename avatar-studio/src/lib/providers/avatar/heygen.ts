@@ -1,4 +1,4 @@
-import { dimensionsFor, type Avatar, type VideoRequest, type Voice } from "../../types";
+import { dimensionsFor, type AudioClip, type Avatar, type Scene, type VideoRequest, type Voice } from "../../types";
 import { heygenBurnsCaptions } from "../../captions";
 import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
@@ -44,8 +44,15 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     return { ...avatar, providerAssetIds: { ...avatar.providerAssetIds, [this.name]: id } };
   }
 
+  /** A clip is uploaded once as a HeyGen audio asset; scenes then name it by asset id. */
+  async prepareAudio(clip: AudioClip, audio: { bytes: Uint8Array; mimeType: string }): Promise<AudioClip> {
+    if (clip.providerAssetIds?.[this.name]) return clip;
+    const id = await this.client.uploadAsset(audio.bytes, audio.mimeType);
+    return { ...clip, providerAssetIds: { ...clip.providerAssetIds, [this.name]: id } };
+  }
+
   async createVideo(req: VideoRequest, avatar: Avatar, voice: Voice | null, cast?: RenderCast) {
-    const scenes = req.scenes?.length ? req.scenes : [{ script: req.script, background: req.background }];
+    const scenes: Scene[] = req.scenes?.length ? req.scenes : [{ script: req.script, background: req.background }];
     const body = {
       title: req.title,
       // HeyGen burns captions in at its own position and size; a video with a caption style of its
@@ -60,7 +67,10 @@ export class HeyGenAvatarProvider implements AvatarProvider {
         return {
           // HeyGen places the presenter with a scale (1 = default) and an x/y offset of the frame.
           character: { ...this.character(sceneAvatar), ...(scene.layout ? { scale: scene.layout.scale, offset: { x: scene.layout.x, y: scene.layout.y } } : {}) },
-          voice: { type: "text", input_text: scene.script, voice_id: this.voiceId(sceneVoice, req.voiceId), speed: req.speed, ...(req.pitch ? { pitch: req.pitch } : {}) },
+          // An audio scene lip-syncs to its clip; speed and pitch apply to synthesised speech only.
+          voice: scene.audioId
+            ? { type: "audio", audio_asset_id: this.audioAssetId(scene.audioId, cast) }
+            : { type: "text", input_text: scene.script, voice_id: this.voiceId(sceneVoice, req.voiceId), speed: req.speed, ...(req.pitch ? { pitch: req.pitch } : {}) },
           // A video background loops for the length of the scene and fills the frame.
           background:
             scene.background.type === "video"
@@ -81,6 +91,12 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     return photoId
       ? { type: "talking_photo", talking_photo_id: photoId, talking_photo_style: "square" }
       : { type: "avatar", avatar_id: avatar.id, avatar_style: "normal" };
+  }
+
+  private audioAssetId(audioId: string, cast?: RenderCast): string {
+    const id = cast?.clips?.[audioId]?.providerAssetIds?.[this.name];
+    if (!id) throw new Error(`Audio clip ${audioId} has not been uploaded to HeyGen yet.`);
+    return id;
   }
 
   private voiceId(voice: Voice | null, fallback: string): string {

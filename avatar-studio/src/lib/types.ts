@@ -109,11 +109,34 @@ export interface Scene {
   layout?: SceneLayout;
   /** Presenter for this scene; the video's avatar when absent. */
   avatarId?: string;
-  /** Voice for this scene; the video's voice when absent. */
+  /** Voice for this scene; the video's voice when absent. Ignored when the scene uses an audio clip. */
   voiceId?: string;
+  /**
+   * Recorded or uploaded audio the presenter lip-syncs to instead of speaking `script` with a voice.
+   * `script` then holds what is said, for captions and search.
+   */
+  audioId?: string;
   /** Display names filled in when the video is created. */
   avatarName?: string;
   voiceName?: string;
+  /** The clip's name and length, filled in when the video is created. */
+  audioName?: string;
+  audioSeconds?: number;
+}
+
+export type AudioClipType = "audio/wav" | "audio/mpeg";
+
+/** Audio a scene can use instead of a voice; the bytes are stored separately and served by `/api/clips/:id`. */
+export interface AudioClip {
+  id: string;
+  ownerId?: string;
+  name: string;
+  mimeType: AudioClipType;
+  bytes: number;
+  durationSec: number;
+  /** Provider-side upload ids (HeyGen asset id, D-ID audio URL), cached after the first render. Never returned by the API. */
+  providerAssetIds?: Record<string, string>;
+  createdAt: string;
 }
 
 export interface VideoRequest {

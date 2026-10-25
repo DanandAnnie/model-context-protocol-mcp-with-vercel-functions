@@ -4,12 +4,13 @@ import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import { getStore } from "../store";
 import { EMPTY_WATCH, MAX_SCENES, TRASH_RETENTION_DAYS, isDefaultCaptionStyle } from "../types";
-import type { Avatar, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
+import type { AudioClip, Avatar, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
 import type { AvatarProvider, RenderCast } from "../providers/types";
 import { LOCAL_OWNER } from "../owner-id";
 import { renderLimitFor } from "../billing";
 import { ConflictError, LimitError, NotFoundError, ValidationError } from "../errors";
 import { getAvatar } from "./avatars";
+import { getClip, getClipAudio, saveClipAssetIds } from "./clips";
 import { listVoices } from "./voices";
 import { PUBLIC_ACCESS, owned, scheduleNotification, stripUndefined } from "./shared";
 import { SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, clearShareLock, setShareLock, shareUnlocked } from "../share-lock";
@@ -37,6 +38,8 @@ export const videoRequestSchema = z
           /** Presenter and voice for this scene; the video's when omitted. */
           avatarId: z.string().min(1).optional(),
           voiceId: z.string().min(1).optional(),
+          /** An audio clip the presenter lip-syncs to; the script is then what the clip says, for captions and search. */
+          audioId: z.string().min(1).max(64).optional(),
           layout: sceneLayoutSchema.optional(),
         }),
       )
@@ -95,12 +98,19 @@ export interface RenderContext {
   cast: RenderCast;
 }
 
-export async function resolveRenderContext(req: Pick<VideoRequest, "avatarId" | "voiceId"> & { scenes?: Array<Pick<Scene, "avatarId" | "voiceId">> }, ownerId: string): Promise<RenderContext> {
+export async function resolveRenderContext(req: Pick<VideoRequest, "avatarId" | "voiceId"> & { scenes?: Array<Pick<Scene, "avatarId" | "voiceId" | "audioId">> }, ownerId: string): Promise<RenderContext> {
   const avatarIds = Array.from(new Set([req.avatarId, ...(req.scenes ?? []).map((s) => s.avatarId).filter((id): id is string => !!id)]));
-  const [avatarList, voices] = await Promise.all([Promise.all(avatarIds.map((id) => getAvatar(id, ownerId))), listVoices(ownerId)]);
+  const clipIds = Array.from(new Set((req.scenes ?? []).map((s) => s.audioId).filter((id): id is string => !!id)));
+  const [avatarList, voices, clipList] = await Promise.all([
+    Promise.all(avatarIds.map((id) => getAvatar(id, ownerId))),
+    listVoices(ownerId),
+    // A clip from another account reads as not found, like any record the caller does not own.
+    Promise.all(clipIds.map((id) => getClip(id, ownerId))),
+  ]);
   const avatars = Object.fromEntries(avatarList.map((a) => [a.id, a]));
-  const voiceIds = Array.from(new Set([req.voiceId, ...(req.scenes ?? []).map((s) => s.voiceId).filter((id): id is string => !!id)]));
-  const cast: RenderCast = { avatars, voices: {} };
+  // An audio scene speaks its clip, so its voice is neither needed nor checked.
+  const voiceIds = Array.from(new Set([req.voiceId, ...(req.scenes ?? []).filter((s) => !s.audioId).map((s) => s.voiceId).filter((id): id is string => !!id)]));
+  const cast: RenderCast = { avatars, voices: {}, ...(clipList.length ? { clips: Object.fromEntries(clipList.map((c) => [c.id, c])) } : {}) };
   for (const id of voiceIds) {
     const voice = voices.find((v) => v.id === id);
     if (!voice) throw new ValidationError(`Voice ${id} is not available with the current voice provider`);
@@ -127,15 +137,20 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
   const provider = getAvatarProvider();
 
   // Scenes keep the names of their own presenter and voice for the library and detail page.
-  const scenes = req.scenes?.map((sc) =>
-    stripUndefined({
+  const scenes = req.scenes?.map((sc) => {
+    const clip = sc.audioId ? cast.clips?.[sc.audioId] : undefined;
+    return stripUndefined({
       ...sc,
       // The renderer's default layout is stored as absent whichever client sent it, so the page and the provider see no customisation.
       layout: sc.layout && (sc.layout.scale !== 1 || sc.layout.x !== 0 || sc.layout.y !== 0) ? sc.layout : undefined,
       avatarName: sc.avatarId ? cast.avatars[sc.avatarId]?.name : undefined,
-      voiceName: sc.voiceId ? cast.voices[sc.voiceId]?.name : undefined,
-    }),
-  );
+      // An audio scene has no voice of its own: the clip speaks.
+      voiceId: clip ? undefined : sc.voiceId,
+      voiceName: !clip && sc.voiceId ? cast.voices[sc.voiceId]?.name : undefined,
+      audioName: clip?.name,
+      audioSeconds: clip?.durationSec,
+    });
+  });
   const base: Video = {
     ...req,
     ...(scenes ? { scenes } : {}),
@@ -160,6 +175,10 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
         if (a.source === "custom") cast.avatars[a.id] = await prepareOnce(provider, a);
       }
       avatar = cast.avatars[avatar.id] ?? avatar;
+    }
+    if (cast.clips) {
+      if (!provider.prepareAudio) throw new Error(`The ${provider.name} renderer cannot lip-sync to recorded audio`);
+      for (const clip of Object.values(cast.clips)) cast.clips[clip.id] = await prepareClipOnce(provider, clip, ownerId);
     }
     // The renderer speaks the brand kit's pronunciations; the stored script and its captions keep the spelling.
     const rules = (await getBrandKit(ownerId))?.pronunciations ?? [];
@@ -281,6 +300,23 @@ function prepareOnce(provider: AvatarProvider, avatar: Avatar): Promise<Avatar> 
     return current ? getStore().put("avatar", { ...current, providerAssetIds: { ...current.providerAssetIds, ...prepared.providerAssetIds } }) : prepared;
   })().finally(() => preparing.delete(avatar.id));
   preparing.set(avatar.id, run);
+  return run;
+}
+
+/** Clip uploads in flight, so two renders naming one clip share one upload. */
+const preparingClips = new Map<string, Promise<AudioClip>>();
+
+/** Uploads a clip to the renderer once and remembers its asset id, so retries and copies reuse it. */
+function prepareClipOnce(provider: AvatarProvider, clip: AudioClip, ownerId: string): Promise<AudioClip> {
+  if (clip.providerAssetIds?.[provider.name]) return Promise.resolve(clip);
+  const key = `${provider.name}:${clip.id}`;
+  const running = preparingClips.get(key);
+  if (running) return running;
+  const run = (async () => {
+    const prepared = await provider.prepareAudio!(clip, await getClipAudio(clip.id, ownerId));
+    return prepared.providerAssetIds ? saveClipAssetIds(clip, prepared.providerAssetIds) : prepared;
+  })().finally(() => preparingClips.delete(key));
+  preparingClips.set(key, run);
   return run;
 }
 

@@ -161,6 +161,69 @@ test("each scene shows its own running time", async ({ page }) => {
   await expect(page.getByTestId("script-length")).toHaveText("5 words · ~2s this scene · ~12s total");
 });
 
+/** A mono 16-bit WAV of a quiet tone, for audio-scene uploads. */
+function toneWav(seconds: number, rate = 8000): Buffer {
+  const n = Math.round(seconds * rate);
+  const buf = Buffer.alloc(44 + n * 2);
+  buf.write("RIFF", 0);
+  buf.writeUInt32LE(36 + n * 2, 4);
+  buf.write("WAVEfmt ", 8);
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);
+  buf.writeUInt16LE(1, 22);
+  buf.writeUInt32LE(rate, 24);
+  buf.writeUInt32LE(rate * 2, 28);
+  buf.writeUInt16LE(2, 32);
+  buf.writeUInt16LE(16, 34);
+  buf.write("data", 36);
+  buf.writeUInt32LE(n * 2, 40);
+  for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(Math.sin((i / rate) * 2 * Math.PI * 440) * 3000), 44 + i * 2);
+  return buf;
+}
+
+test("a scene can speak uploaded audio instead of a voice", async ({ page }) => {
+  await page.goto("/create");
+  await page.locator("input[placeholder='Video title']").fill("Recorded intro");
+  await page.locator("textarea").fill("Typed opening line here.");
+  await page.getByRole("button", { name: "Add scene" }).click();
+  // The browser converts the upload to WAV and saves it as a reusable clip; the scene then speaks it.
+  await page.getByLabel("Upload scene audio").setInputFiles({ name: "founder-take.wav", mimeType: "audio/wav", buffer: toneWav(3) });
+  await expect(page.getByTestId("scene-audio-name")).toHaveText("founder-take");
+  await expect(page.getByText("Scene 2: what the clip says")).toBeVisible();
+  // An audio scene has no voice to pick and nothing to preview with one.
+  await expect(page.getByLabel("Scene voice")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Listen" })).toHaveCount(0);
+  await page.locator("textarea").fill("Hi, I recorded this myself.");
+  // The audio scene lasts exactly as long as its clip; the typed one is an estimate.
+  await expect(page.getByTestId("scene-duration")).toHaveText(["~2s", "3s"]);
+  await page.getByRole("button", { name: "Generate video" }).click();
+  await page.waitForURL(/\/videos\/vid_/);
+  const id = page.url().split("/").pop()!;
+  const video = (await (await page.request.get(`/api/videos/${id}`)).json()).video;
+  expect(video.scenes[1]).toMatchObject({ audioName: "founder-take", audioSeconds: 3, script: "Hi, I recorded this myself." });
+  expect(video.scenes[1].voiceId).toBeUndefined();
+  expect(video.scenes[0].audioId).toBeUndefined();
+  await expect(page.getByText("recorded audio: founder-take")).toBeVisible();
+  await expect(page.getByText(/plus recorded audio/)).toBeVisible();
+
+  // The clip is listed for reuse and its audio is served to the owner.
+  const clips = (await (await page.request.get("/api/clips")).json()).clips as Array<{ id: string; name: string; durationSec: number }>;
+  const clip = clips.find((c) => c.id === video.scenes[1].audioId)!;
+  expect(clip).toMatchObject({ name: "founder-take", durationSec: 3 });
+  const audio = await page.request.get(`/api/clips/${clip.id}`);
+  expect(audio.headers()["content-type"]).toBe("audio/wav");
+  // A new scene can reuse the saved clip, and go back to a voice.
+  await page.goto("/create");
+  await page.getByLabel("Use a saved clip").selectOption(clip.id);
+  await expect(page.getByTestId("scene-audio-name")).toHaveText("founder-take");
+  await page.getByRole("button", { name: "Use a voice instead" }).click();
+  await expect(page.getByText("Or use your own audio")).toBeVisible();
+  // The API takes WAV or MP3 only, and reads a WAV's length itself.
+  expect((await page.request.post("/api/clips", { data: { name: "Webm", audio: "data:audio/webm;base64,AAAA" } })).status()).toBe(400);
+  expect((await page.request.delete(`/api/clips/${clip.id}`)).status()).toBe(204);
+  expect((await page.request.get(`/api/clips/${clip.id}`)).status()).toBe(404);
+});
+
 test("scenes can be duplicated and reordered", async ({ page }) => {
   await page.goto("/create");
   await page.locator("textarea").fill("A.");

@@ -4,9 +4,12 @@ import { getTtsProvider } from "../providers";
 import { getStore } from "../store";
 import { LOCAL_OWNER } from "../owner-id";
 
-const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity"] as const;
-/** Cover rows hold the image bytes; the export describes each cover from its video (`cover.mimeType`, `cover.bytes`) instead of loading them. */
-const EXPORT_KINDS = OWNER_KINDS.filter((k) => k !== "cover") as Exclude<(typeof OWNER_KINDS)[number], "cover">[];
+const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip", "clipaudio"] as const;
+/**
+ * Cover and clip-audio rows hold bytes; the export describes each cover from its video (`cover.mimeType`, `cover.bytes`)
+ * and each audio clip from its `clip` row (name, type, size, length) instead of loading them.
+ */
+const EXPORT_KINDS = OWNER_KINDS.filter((k) => k !== "cover" && k !== "clipaudio") as Exclude<(typeof OWNER_KINDS)[number], "cover" | "clipaudio">[];
 
 /** Everything stored under an owner id, for a data export. Secrets (key hashes, webhook secret) and cover image bytes are left out. */
 export type OwnerExport = { ownerId: string; exportedAt: string } & Record<(typeof EXPORT_KINDS)[number], Record<string, unknown>[]>;
@@ -19,6 +22,7 @@ export async function exportOwnerData(ownerId: string = LOCAL_OWNER): Promise<Ow
       const copy = { ...item };
       if (kind === "apikey") delete copy.hash;
       if (kind === "notify") delete copy.secret;
+      if (kind === "clip") delete copy.providerAssetIds;
       if (kind === "sharelock") {
         delete copy.hash;
         delete copy.salt;

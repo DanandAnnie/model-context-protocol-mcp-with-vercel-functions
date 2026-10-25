@@ -6,6 +6,8 @@ import { SupabaseStore } from "./supabase";
 export type ItemKind = "video" | "avatar" | "translation" | "brand" | "apikey" | "notify" | "workspace" | "invite" | "membership" | "plan" | "agent" | "conversation" | "voice" | "prefs" | "template" | "sharelock" | "cover" | "comment" | "activity" | "clip" | "clipaudio" | "videolead";
 
 export interface Store {
+  /** True when every instance of the app reads the same data (a missing record is then really gone). */
+  readonly durable?: boolean;
   /** All items of a kind, optionally only those whose `ownerId` matches. */
   list<T>(kind: ItemKind, ownerId?: string): Promise<T[]>;
   get<T>(kind: ItemKind, id: string): Promise<T | null>;

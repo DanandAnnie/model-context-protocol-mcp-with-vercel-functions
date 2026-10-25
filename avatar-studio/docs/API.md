@@ -231,7 +231,7 @@ Returns `{ "reply": "…" }`.
 
 - `POST /api/billing/checkout` → `{ "url" }` to start a Pro upgrade (Stripe Checkout, or an instant upgrade with the mock); browser sessions only (`403` with a key); in a workspace, owners only (`403` for editors)
 - `POST /api/billing/portal` → `{ "url" }` for the Stripe Billing Portal (the mock downgrades to Free); same access rule as checkout
-- `POST /api/webhooks/stripe` receives Stripe events (`checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`), verified with `STRIPE_WEBHOOK_SECRET`; a subscription bought for a workspace deleted while its checkout was open is cancelled at Stripe at once (if Stripe cannot be reached the route answers `500` so Stripe delivers the event again), and later events for a deleted workspace are ignored
+- `POST /api/webhooks/stripe` receives Stripe events (`checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`), verified with `STRIPE_WEBHOOK_SECRET`; with Supabase storage (where a missing workspace is really deleted, not just unknown to one in-memory instance), a subscription bought for a workspace deleted while its checkout was open is cancelled at Stripe at once (if Stripe cannot be reached the route answers `500` so Stripe delivers the event again), and later events for a deleted workspace are ignored
 - `GET /api/status` reports `renderLimitPerMonth` for the active owner and `usage.plan`
 
 ## Preferences and health

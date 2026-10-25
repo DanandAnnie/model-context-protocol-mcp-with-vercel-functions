@@ -8,6 +8,7 @@ const TABLE = "studio_items";
  * Uses the service-role key server-side only; never expose it to the browser.
  */
 export class SupabaseStore implements Store {
+  readonly durable = true;
   private client: SupabaseClient;
 
   constructor(url: string, serviceRoleKey: string, fetchImpl: typeof fetch = fetch) {

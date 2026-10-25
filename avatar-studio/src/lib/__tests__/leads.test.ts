@@ -304,40 +304,64 @@ describe("share-page email gate", () => {
   });
 
   it("cancels at Stripe a subscription bought for a workspace deleted mid-checkout, retrying until it goes", async () => {
-    const calls: string[] = [];
-    let fail = false;
+    // A store every instance shares; the in-memory one is not trusted to say a workspace is gone.
+    class DurableStore extends MemoryStore {
+      readonly durable = true;
+    }
+    globalThis.__avatarStudioStore = new DurableStore();
+    const calls: { method?: string; url: string; body?: unknown; headers?: Record<string, string> }[] = [];
+    let answer: { status: number; body: unknown } = { status: 200, body: { id: "sub_9", status: "canceled" } };
     setBillingProvider(new StripeBillingProvider("sk_test", "price_pro"));
     const realFetch = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-      calls.push(`${init?.method} ${String(input)}`);
-      if (fail) return new Response(JSON.stringify({ error: { message: "Stripe is down", code: "api_error" } }), { status: 500 });
-      return new Response(JSON.stringify({ id: "sub_9", status: "canceled" }), { status: 200 });
+      calls.push({ method: init?.method, url: String(input), body: init?.body, headers: init?.headers as Record<string, string> });
+      return new Response(JSON.stringify(answer.body), { status: answer.status });
     }) as typeof fetch;
+    const down = { status: 500, body: { error: { message: "Stripe is down", code: "api_error" } } };
+    const ok = { status: 200, body: { id: "sub_9", status: "canceled" } };
     const checkout = { type: "checkout.session.completed", data: { object: { client_reference_id: "ws_gone", customer: "cus_9", subscription: "sub_9" } } };
+    const renewing = (id: string) => ({ type: "customer.subscription.updated", data: { object: { id, status: "active", metadata: { ownerId: "ws_gone" } } } });
     try {
       // Stripe down: the ids are kept and the event fails, so Stripe sends it again.
-      fail = true;
+      answer = down;
       await assert.rejects(applyStripeEvent(checkout), /Stripe is down/);
       assert.equal((await getPlan("ws_gone")).subscriptionId, "sub_9", "the ids are recorded while the cancellation is owed");
-      // The retry cancels it and records nothing more.
-      fail = false;
+      // The retry cancels it and takes the recorded ids away with it.
+      answer = ok;
       calls.length = 0;
-      await getStore().remove("plan", "plan_ws_gone");
       assert.equal(await applyStripeEvent(checkout), null);
-      assert.deepEqual(calls, ["DELETE https://api.stripe.com/v1/subscriptions/sub_9"]);
+      assert.deepEqual(calls.map((c) => `${c.method} ${c.url}`), ["DELETE https://api.stripe.com/v1/subscriptions/sub_9"]);
+      assert.equal(calls[0].body, undefined, "a DELETE carries no body");
+      assert.deepEqual(calls[0].headers, { Authorization: "Bearer sk_test" });
       assert.equal(await getStore().get("plan", "plan_ws_gone"), null);
-      // With the checkout event missed, a renewing subscription event cancels it too; a final "deleted" one is left alone.
+      // A subscription Stripe no longer has counts as cancelled; a live one behind a test key does not.
+      answer = { status: 404, body: { error: { code: "resource_missing", message: "No such subscription: 'sub_9'" } } };
+      assert.equal(await applyStripeEvent(checkout), null);
+      answer = { status: 404, body: { error: { code: "resource_missing", message: "No such subscription: 'sub_9'; a similar object exists in live mode, but a test mode key was used" } } };
+      await assert.rejects(applyStripeEvent(checkout), /exists in live mode/);
+      await getStore().remove("plan", "plan_ws_gone");
+      // With the checkout event missed, a renewing subscription event cancels it too and fails for a retry when it cannot.
+      answer = down;
+      await assert.rejects(applyStripeEvent(renewing("sub_10")), /Stripe is down/);
+      answer = ok;
       calls.length = 0;
-      await applyStripeEvent({ type: "customer.subscription.updated", data: { object: { id: "sub_10", status: "active", metadata: { ownerId: "ws_gone" } } } });
+      await applyStripeEvent(renewing("sub_10"));
       await applyStripeEvent({ type: "customer.subscription.updated", data: { object: { id: "sub_11", status: "canceled", metadata: { ownerId: "ws_gone" } } } });
       await applyStripeEvent({ type: "customer.subscription.deleted", data: { object: { id: "sub_10", status: "canceled", metadata: { ownerId: "ws_gone" } } } });
-      assert.deepEqual(calls, ["DELETE https://api.stripe.com/v1/subscriptions/sub_10"]);
+      assert.deepEqual(calls.map((c) => `${c.method} ${c.url}`), ["DELETE https://api.stripe.com/v1/subscriptions/sub_10"], "final events are left alone");
+      assert.equal(await getStore().get("plan", "plan_ws_gone"), null);
       // A live workspace's checkout is recorded as before, with no call to Stripe.
       const { createWorkspace } = await import("../workspaces");
       const ws = await createWorkspace("Acme", { id: "user_alice", email: "alice@example.com" });
       calls.length = 0;
       await applyStripeEvent({ type: "checkout.session.completed", data: { object: { client_reference_id: ws.id, customer: "cus_1", subscription: "sub_1" } } });
       assert.deepEqual([calls.length, (await getPlan(ws.id)).plan], [0, "pro"]);
+      // An in-memory store (another instance may hold the workspace) never cancels; the checkout is recorded instead.
+      globalThis.__avatarStudioStore = new MemoryStore();
+      calls.length = 0;
+      await applyStripeEvent(checkout);
+      await applyStripeEvent(renewing("sub_12"));
+      assert.deepEqual([calls.length, (await getPlan("ws_gone")).subscriptionId], [0, "sub_9"]);
     } finally {
       globalThis.fetch = realFetch;
       setBillingProvider(undefined);

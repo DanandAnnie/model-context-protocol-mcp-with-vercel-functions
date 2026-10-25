@@ -150,8 +150,10 @@ export class StripeBillingProvider implements BillingProvider {
     try {
       await this.call(`subscriptions/${encodeURIComponent(subscriptionId)}`, undefined, "DELETE");
     } catch (err) {
-      // Already gone is what was asked for; anything else is thrown so the webhook fails and Stripe retries it.
-      if ((err as { code?: string }).code !== "resource_missing") throw err;
+      // Already gone is what was asked for, unless the object exists in live mode behind a test key (it may be billing).
+      // Anything else is thrown so the webhook fails and Stripe retries it.
+      const e = err as { code?: string; message?: string };
+      if (e.code !== "resource_missing" || /exists in live mode/i.test(e.message ?? "")) throw err;
     }
   }
 
@@ -224,16 +226,19 @@ export async function applyStripeEvent(event: StripeEvent): Promise<string | nul
   const ownerId = (obj.client_reference_id as string | undefined) ?? meta.ownerId;
   // A workspace deleted while its checkout was open (deletion is allowed then: nothing billed yet).
   const orphaned = Boolean(ownerId?.startsWith("ws_")) && !(await getStore().get("workspace", ownerId!));
+  // Cancelling is only safe when "missing" means deleted: an in-memory store on another instance never saw it.
+  const cancel = orphaned && getStore().durable ? getBillingProvider().cancelSubscription?.bind(getBillingProvider()) : undefined;
   switch (event.type) {
     case "checkout.session.completed": {
       if (!ownerId) return null;
       const subscription = typeof obj.subscription === "string" ? obj.subscription : undefined;
       // Nobody can reach a deleted workspace's billing portal, so its new subscription is cancelled here. If that
-      // fails, the ids are recorded and the error fails the webhook, so Stripe retries it.
-      const cancel = getBillingProvider().cancelSubscription;
-      if (orphaned && subscription && cancel) {
+      // fails, the ids are recorded and the error fails the webhook, so Stripe retries it; once a retry cancels it,
+      // the ids recorded meanwhile go too.
+      if (cancel && subscription) {
         try {
-          await cancel.call(getBillingProvider(), subscription);
+          await cancel(subscription);
+          await getStore().remove("plan", planId(ownerId));
           return null;
         } catch (err) {
           await setPlan(ownerId, { plan: "pro", provider: "stripe", customerId: typeof obj.customer === "string" ? obj.customer : undefined, subscriptionId: subscription, status: "active" });
@@ -256,10 +261,7 @@ export async function applyStripeEvent(event: StripeEvent): Promise<string | nul
       // A deleted workspace gets no plan row back from its subscription's later events; one that can still bill
       // (its checkout event missed) is cancelled at Stripe, failing the webhook for a retry if that fails.
       if (orphaned) {
-        const provider = getBillingProvider();
-        if (event.type === "customer.subscription.updated" && RENEWING.includes(status) && typeof obj.id === "string" && provider.cancelSubscription) {
-          await provider.cancelSubscription(obj.id);
-        }
+        if (cancel && event.type === "customer.subscription.updated" && RENEWING.includes(status) && typeof obj.id === "string") await cancel(obj.id);
         return null;
       }
       const endsAt = stripeEndsAt(obj);

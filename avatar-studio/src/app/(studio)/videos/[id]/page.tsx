@@ -68,7 +68,7 @@ export default function VideoDetailPage() {
       })
       .catch(() => setOwnerReady(true));
   }, []);
-  const { data, loading, error, setData, refetch } = useApi<{ video: Video }>(ownerReady ? `/api/videos/${id}` : null, {
+  const { data, loading, error, setData, refetch } = useApi<{ video: Video; shareOrigin?: string }>(ownerReady ? `/api/videos/${id}` : null, {
     pollMs: 5000,
     pollWhile: (d) => d.video.status === "processing" || d.video.status === "queued",
   });
@@ -133,12 +133,17 @@ export default function VideoDetailPage() {
     }
   }
 
-  // The app's own origin, read after mount (the page renders on the server first).
-  const [origin, setOrigin] = useState("");
-  useEffect(() => setOrigin(window.location.origin), []);
+  // Where share links point: the server's public origin (APP_URL when set, as the share email uses),
+  // kept once known because local updates replace `data` with the video alone.
+  const [shareOrigin, setShareOrigin] = useState("");
+  const serverOrigin = data?.shareOrigin;
+  useEffect(() => {
+    if (serverOrigin) setShareOrigin(serverOrigin);
+  }, [serverOrigin]);
+  const shareBase = () => shareOrigin || window.location.origin;
   async function copyShareLink() {
     if (!video) return;
-    const url = `${window.location.origin}/share/${video.id}`;
+    const url = `${shareBase()}/share/${video.id}`;
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
@@ -330,7 +335,7 @@ export default function VideoDetailPage() {
     const w = video.aspect === "9:16" ? 360 : video.aspect === "1:1" ? 480 : 640;
     const h = video.aspect === "9:16" ? 640 : video.aspect === "1:1" ? 480 : 360;
     const query = [embedAutoplay ? "autoplay=1" : "", embedLoop ? "loop=1" : ""].filter(Boolean).join("&");
-    const src = `${window.location.origin}/share/${video.id}${query ? `?${query}` : ""}`;
+    const src = `${shareBase()}/share/${video.id}${query ? `?${query}` : ""}`;
     const snippet = `<iframe src="${src}" width="${w}" height="${h}" style="border:0;max-width:100%" allow="${embedAutoplay ? "autoplay; " : ""}fullscreen" title="${video.title.replace(/"/g, "&quot;")}"></iframe>`;
     try {
       await navigator.clipboard.writeText(snippet);
@@ -778,22 +783,23 @@ export default function VideoDetailPage() {
                   <h3 className="text-sm font-semibold text-slate-900">Post the link</h3>
                   {video.deletedAt || !shareLive || shareExpired(video) ? (
                     <p className="mt-1 text-xs text-slate-500">{video.deletedAt ? "Restore the video from the trash first." : "Turn the share link on first."}</p>
-                  ) : (
+                  ) : !shareOrigin ? null : (
                     <>
                       <p className="mt-1 text-xs text-slate-500">
-                        Opens the network with the share link filled in; nothing is posted until you confirm there.{video.shareLocked ? " Viewers will need the password." : ""}
+                        Each network opens in a new tab with the share link filled in; nothing is posted until you confirm there.{video.shareLocked ? " Viewers will need the password." : ""}
                       </p>
                       <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="Post the link to">
-                        {socialShareLinks(`${origin}/share/${video.id}`, video.title).map((l) => (
+                        {socialShareLinks(`${shareOrigin}/share/${video.id}`, video.title).map((l) => (
                           <a
                             key={l.network}
                             href={l.href}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                            // A mailto link hands off to the mail app; a new tab for it would be left empty.
+                            {...(l.network === "email" ? {} : { target: "_blank", rel: "noopener noreferrer" })}
                             data-network={l.network}
                             className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50"
                           >
                             {l.label}
+                            {l.network !== "email" && <span className="sr-only"> (opens in a new tab)</span>}
                           </a>
                         ))}
                       </div>

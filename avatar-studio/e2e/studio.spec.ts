@@ -753,11 +753,24 @@ test("a finished video can be sent by email or posted to a network from its page
   // Each network opens in a new tab with the share page filled in (and the title where it takes one).
   const social = page.getByTestId("share-social-card").getByRole("group", { name: "Post the link to" });
   const sharePage = encodeURIComponent(`${new URL(baseURL!).origin}/share/${v.id}`);
+  const t = encodeURIComponent(title);
+  const expected = [
+    ["LinkedIn", `https://www.linkedin.com/sharing/share-offsite/?url=${sharePage}`],
+    ["X", `https://x.com/intent/post?url=${sharePage}&text=${t}`],
+    ["Facebook", `https://www.facebook.com/sharer/sharer.php?u=${sharePage}`],
+    ["WhatsApp", `https://wa.me/?text=${t}%20${sharePage}`],
+  ];
   await expect(social.getByRole("link")).toHaveCount(5);
-  await expect(social.getByRole("link", { name: "LinkedIn" })).toHaveAttribute("href", `https://www.linkedin.com/sharing/share-offsite/?url=${sharePage}`);
-  await expect(social.getByRole("link", { name: "X" })).toHaveAttribute("href", `https://x.com/intent/post?url=${sharePage}&text=${encodeURIComponent(title)}`);
-  await expect(social.getByRole("link", { name: "WhatsApp" })).toHaveAttribute("target", "_blank");
-  await expect(social.getByRole("link", { name: "WhatsApp" })).toHaveAttribute("rel", "noopener noreferrer");
+  for (const [name, href] of expected) {
+    const link = social.getByRole("link", { name: `${name} (opens in a new tab)`, exact: true });
+    await expect(link).toHaveAttribute("href", href);
+    await expect(link).toHaveAttribute("target", "_blank");
+    await expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  }
+  // The mail app takes a mailto link itself; a new tab for it would be left empty.
+  const mail = social.getByRole("link", { name: "Email app", exact: true });
+  await expect(mail).toHaveAttribute("href", `mailto:?subject=${t}&body=${sharePage}`);
+  await expect(mail).not.toHaveAttribute("target", /.*/);
   // The link going off disables the form rather than sending a dead link, and takes the network links away.
   await page.getByLabel("Share link is live").uncheck();
   await expect(card.getByText("Turn the share link on first.")).toBeVisible();

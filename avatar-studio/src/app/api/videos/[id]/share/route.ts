@@ -1,5 +1,5 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
-import { config } from "@/lib/config";
+import { publicOrigin } from "@/lib/config";
 import { currentUser, requireEditor } from "@/lib/owner";
 import { getBrandKit } from "@/lib/services";
 import { shareEmailSchema, shareVideoByEmail } from "@/lib/share-email";
@@ -12,9 +12,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     const { id } = await ctx.params;
     const owner = await requireEditor();
     const input = shareEmailSchema.parse(await readJson(req));
-    // The link's host comes from configuration when it is set, so a forged Host header on a
-    // self-hosted instance cannot point recipients elsewhere.
-    const origin = process.env.APP_URL ? config.appUrl : new URL(req.url).origin;
+    const origin = publicOrigin(req);
     const [user, brand] = await Promise.all([currentUser().catch(() => null), getBrandKit(owner)]);
     const result = await shareVideoByEmail(id, input, owner, { origin, senderId: user?.id, senderEmail: user?.email, siteName: brand?.name || undefined });
     if (result.sent.length === 0) return json({ error: result.failed[0]?.error ?? "No email could be sent", ...result }, { status: 502 });

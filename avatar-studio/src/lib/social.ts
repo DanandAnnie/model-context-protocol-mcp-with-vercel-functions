@@ -9,10 +9,13 @@ export interface SocialLink {
   href: string;
 }
 
+/** Half of a surrogate pair with no other half, as a title cut mid-emoji ends with; `encodeURIComponent` throws on one. */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
 /** The share links for a public URL and a title, in the order the video page shows them. */
 export function socialShareLinks(url: string, title: string): SocialLink[] {
   const u = encodeURIComponent(url);
-  const text = title.trim();
+  const text = title.replace(LONE_SURROGATE, "").trim();
   return [
     { network: "linkedin", label: "LinkedIn", href: `https://www.linkedin.com/sharing/share-offsite/?url=${u}` },
     { network: "x", label: "X", href: `https://x.com/intent/post?url=${u}${text ? `&text=${encodeURIComponent(text)}` : ""}` },

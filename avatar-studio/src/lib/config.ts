@@ -61,6 +61,15 @@ export function webhookUrl(provider: string): string | undefined {
   return `${base}/api/webhooks/${provider}?secret=${encodeURIComponent(config.webhookSecret)}`;
 }
 
+/**
+ * The origin public links (share pages, emails, CSV rows) are built on: `APP_URL` when it is set, so a
+ * preview deployment, a `www.` alias, or a forged Host header cannot change where a posted link points,
+ * else the request's own origin.
+ */
+export function publicOrigin(req: Request): string {
+  return env("APP_URL")?.replace(/\/$/, "") ?? new URL(req.url).origin;
+}
+
 /** Keep demo media on the deployment being tested, including protected previews. */
 export function demoAssetUrl(path: string): string {
   const deployment = env("VERCEL_URL");

@@ -1,7 +1,8 @@
-// Share links to social networks: each carries the share page, encoded, and the title where the network takes one.
+// Share links to social networks, and the origin they are built on.
 // Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { publicOrigin } from "../config";
 import { socialShareLinks } from "../social";
 
 describe("social share links", () => {
@@ -23,10 +24,39 @@ describe("social share links", () => {
     }
   });
 
+  it("encode #, +, and non-ASCII titles, and survive a title cut mid-emoji", () => {
+    const by = Object.fromEntries(socialShareLinks("https://s.example/share/v", "Café #1 + más 🏠").map((l) => [l.network, l.href]));
+    assert.equal(by.x, "https://x.com/intent/post?url=https%3A%2F%2Fs.example%2Fshare%2Fv&text=Caf%C3%A9%20%231%20%2B%20m%C3%A1s%20%F0%9F%8F%A0");
+    assert.equal(by.email, "mailto:?subject=Caf%C3%A9%20%231%20%2B%20m%C3%A1s%20%F0%9F%8F%A0&body=https%3A%2F%2Fs.example%2Fshare%2Fv");
+    // "Open house 🏠" cut one code unit short keeps the emoji's first half, which encodeURIComponent rejects.
+    const cut = "Open house 🏠".slice(0, -1);
+    assert.throws(() => encodeURIComponent(cut), URIError);
+    const links = Object.fromEntries(socialShareLinks("https://s.example/share/v", cut).map((l) => [l.network, l.href]));
+    assert.equal(links.x, "https://x.com/intent/post?url=https%3A%2F%2Fs.example%2Fshare%2Fv&text=Open%20house");
+  });
+
   it("leave the title out when there is none", () => {
     const by = Object.fromEntries(socialShareLinks("https://s.example/share/v", " ").map((l) => [l.network, l.href]));
     assert.equal(by.x, "https://x.com/intent/post?url=https%3A%2F%2Fs.example%2Fshare%2Fv");
     assert.equal(by.whatsapp, "https://wa.me/?text=https%3A%2F%2Fs.example%2Fshare%2Fv");
     assert.equal(by.email, "mailto:?subject=A%20video%20for%20you&body=https%3A%2F%2Fs.example%2Fshare%2Fv");
+  });
+});
+
+describe("public origin", () => {
+  it("uses APP_URL when it is set, without a trailing slash, and the request's origin otherwise", () => {
+    const req = new Request("https://preview-abc.vercel.app/api/videos/vid_1");
+    const before = process.env.APP_URL;
+    try {
+      process.env.APP_URL = "https://studio.example.com/";
+      assert.equal(publicOrigin(req), "https://studio.example.com");
+      process.env.APP_URL = " ";
+      assert.equal(publicOrigin(req), "https://preview-abc.vercel.app");
+      delete process.env.APP_URL;
+      assert.equal(publicOrigin(req), "https://preview-abc.vercel.app");
+    } finally {
+      if (before === undefined) delete process.env.APP_URL;
+      else process.env.APP_URL = before;
+    }
   });
 });

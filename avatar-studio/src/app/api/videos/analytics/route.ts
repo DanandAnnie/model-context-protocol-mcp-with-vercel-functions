@@ -1,5 +1,5 @@
 import { errorResponse } from "@/lib/api-utils";
-import { config } from "@/lib/config";
+import { publicOrigin } from "@/lib/config";
 import { toCsv } from "@/lib/csv";
 import { ANALYTICS_COLUMNS, analyticsRows } from "@/lib/insights";
 import { requireOwner } from "@/lib/owner";
@@ -12,7 +12,7 @@ export async function GET(req: Request) {
   try {
     const owner = await requireOwner();
     const videos = await listVideos(owner, false);
-    const origin = process.env.APP_URL ? config.appUrl : new URL(req.url).origin;
+    const origin = publicOrigin(req);
     return new Response(toCsv([...ANALYTICS_COLUMNS], analyticsRows(videos, origin)), {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",

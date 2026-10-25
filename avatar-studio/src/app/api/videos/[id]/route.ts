@@ -1,4 +1,5 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
+import { publicOrigin } from "@/lib/config";
 import { recordRequestActivity } from "@/lib/activity-request";
 import { requireEditor, requireOwner } from "@/lib/owner";
 import { deleteVideo, getVideo, updateVideo, videoPatchSchema } from "@/lib/services";
@@ -7,10 +8,11 @@ export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export async function GET(_req: Request, ctx: Ctx) {
+/** The video, plus the origin its share link is built on (the same one the share email uses). */
+export async function GET(req: Request, ctx: Ctx) {
   try {
     const { id } = await ctx.params;
-    return json({ video: await getVideo(id, await requireOwner()) });
+    return json({ video: await getVideo(id, await requireOwner()), shareOrigin: publicOrigin(req) });
   } catch (err) {
     return errorResponse(err);
   }

@@ -16,10 +16,11 @@ import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib
 import { languageLabel } from "@/lib/language";
 import { stripPauses } from "@/lib/pauses";
 import { MAX_IMPORT_BYTES, MAX_SCRIPT_CHARS, decodeScript, legacyEncodingFor, scenesFromText } from "@/lib/script-import";
+import { renderPdf, slideScripts } from "@/lib/pdf-slides";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
 import { takeAgentDraft, type AgentDraft } from "@/lib/agent-draft";
-import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, PRESENTER_FRAMINGS, RESOLUTIONS, isDefaultCaptionStyle as isDefaultCaptionStyleFn, backdropIdOf, framingFor, isDefaultLayout, isPhotoAvatar, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS } from "@/lib/types";
+import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, PRESENTER_FRAMINGS, RESOLUTIONS, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, framingFor, isDefaultLayout, isPhotoAvatar, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -59,6 +60,9 @@ function writeDraft(d: Draft | null) {
     // Storage can be unavailable (private mode); drafts are a convenience only.
   }
 }
+/** A deck larger than this is refused before pdf.js reads it. */
+const MAX_PDF_BYTES = 50_000_000;
+
 const newScene = (script = "", background: Background = DEFAULT_BG, presenter: Pick<Scene, "avatarId" | "voiceId" | "layout" | "audioId"> = {}): Scene => ({
   script,
   background,
@@ -208,6 +212,58 @@ function CreateInner() {
     setActiveIdx(0);
     if (doc.title && (!title.trim() || title === "Untitled video")) setTitle(doc.title);
     setImportNote(`Imported ${doc.scenes.length === 1 ? "1 scene" : `${doc.scenes.length} scenes`} from ${file.name}${doc.truncated ? `; the rest did not fit (a video holds up to ${MAX_SCENES} scenes and ${MAX_SCRIPT_CHARS} characters of script)` : ""}.`);
+  }
+  const slidesInput = useRef<HTMLInputElement>(null);
+  const [slidesProgress, setSlidesProgress] = useState<string | null>(null);
+  /**
+   * Replaces the scenes with a slide deck saved as PDF, like HeyGen's PDF import: each page (up to the scene limit)
+   * becomes a scene with the page as its uploaded background image and the page's text as a first draft of the
+   * script, and the format follows the first page's shape.
+   */
+  async function importSlides(file: File | undefined) {
+    if (!file || slidesProgress) return;
+    if (file.size > MAX_PDF_BYTES) return setImportNote(`${file.name} is larger than ${MAX_PDF_BYTES / 1_000_000} MB; save the deck as a smaller PDF.`);
+    const setUp = scenes.length > 1 || scenes.some((sc) => sc.script.trim() || sc.audioId || sc.avatarId || sc.voiceId || sc.layout);
+    if (setUp && !window.confirm(`Replace the ${scenes.length === 1 ? "current scene" : `current ${scenes.length} scenes`} with the pages of ${file.name}?`)) return;
+    setImportNote(null);
+    setSlidesProgress(`Reading ${file.name}…`);
+    const made: Backdrop[] = [];
+    try {
+      const { pages, total } = await renderPdf(file, (done, of) => setSlidesProgress(`Drawing page ${done} of ${of}…`));
+      if (!pages.length) return setImportNote(`${file.name} has no pages.`);
+      const room = MAX_BACKDROPS - (backdropData?.backdrops.length ?? 0);
+      if (pages.length > room) {
+        return setImportNote(`${file.name} needs ${pages.length} background images, and ${room <= 0 ? "none are" : `only ${room} ${room === 1 ? "is" : "are"}`} left of the ${MAX_BACKDROPS} an account keeps; delete some under Background → Your images.`);
+      }
+      const base = file.name.replace(/\.pdf$/i, "").slice(0, 60) || "Slides";
+      for (const [i, page] of pages.entries()) {
+        setSlidesProgress(`Uploading page ${i + 1} of ${pages.length}…`);
+        const { backdrop } = await api<{ backdrop: Backdrop }>("/api/backdrops", { method: "POST", body: JSON.stringify({ name: `${base} – page ${i + 1}`, image: page.image }) });
+        made.push(backdrop);
+      }
+      const { scripts, truncated } = slideScripts(pages.map((p) => p.text));
+      setScenes(pages.map((_, i) => newScene(scripts[i], { type: "image", value: backdropPath(made[i].id) })));
+      setActiveIdx(0);
+      const ratio = pages[0].width / pages[0].height;
+      setAspect(ratio > 1.2 ? "16:9" : ratio < 0.83 ? "9:16" : "1:1");
+      if (!title.trim() || title === "Untitled video") setTitle(base);
+      const blank = scripts.filter((s) => !s.trim()).length;
+      setImportNote(
+        [
+          `Imported ${pages.length === 1 ? "1 page" : `${pages.length} pages`} of ${file.name} as scenes, each page behind the presenter and its text as the script to edit`,
+          total > pages.length ? `; a video holds ${MAX_SCENES} scenes, so the last ${total - pages.length} of ${total} pages were left out` : "",
+          truncated ? `; the page text was shortened to fit ${MAX_SCRIPT_CHARS} characters of script` : "",
+          blank ? `; ${blank === 1 ? "1 page has" : `${blank} pages have`} no text, so write what the presenter says there` : "",
+          ".",
+        ].join(""),
+      );
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : "The slides could not be imported";
+      setImportNote(made.length ? `${reason}. The ${made.length} pages uploaded before that are under Background → Your images.` : reason);
+    } finally {
+      if (made.length) setBackdropData((d) => ({ backdrops: [...[...made].reverse(), ...(d?.backdrops ?? [])] }));
+      setSlidesProgress(null);
+    }
   }
   /** Inserts a copy right after the scene (script, background, and presenter included) and selects it. */
   function duplicateScene(idx: number) {
@@ -675,6 +731,26 @@ function CreateInner() {
               >
                 <Upload className="h-3.5 w-3.5" /> Import script
               </button>
+              <button
+                type="button"
+                onClick={() => slidesInput.current?.click()}
+                disabled={canEdit === false || !!slidesProgress}
+                title="Each page of a slide deck saved as PDF becomes a scene: the page behind the presenter, its text as the script"
+                className="inline-flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:border-brand-400 hover:text-brand-700 disabled:opacity-50"
+              >
+                <ImageIcon className="h-3.5 w-3.5" /> {slidesProgress ?? "Import slides"}
+              </button>
+              <input
+                ref={slidesInput}
+                type="file"
+                accept=".pdf,application/pdf"
+                aria-label="Import slides from a PDF"
+                className="hidden"
+                onChange={(e) => {
+                  void importSlides(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+              />
               <input
                 ref={importInput}
                 type="file"

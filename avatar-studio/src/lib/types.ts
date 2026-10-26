@@ -162,6 +162,9 @@ export interface Backdrop {
 
 export type BackdropType = "image/png" | "image/jpeg";
 
+/** Uploaded background images an account keeps. */
+export const MAX_BACKDROPS = 50;
+
 /** The path an image background takes when it is an uploaded backdrop, and the editor's preview URL for it. */
 export const backdropPath = (id: string) => `/api/backdrops/${id}`;
 

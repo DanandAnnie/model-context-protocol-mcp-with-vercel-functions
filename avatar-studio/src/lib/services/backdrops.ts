@@ -9,12 +9,13 @@ import { getStore } from "../store";
 import { decodeDataUrl } from "../providers/image";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { LOCAL_OWNER } from "../owner-id";
-import type { Backdrop, BackdropType } from "../types";
+import { MAX_BACKDROPS, type Backdrop, type BackdropType } from "../types";
+
+export { MAX_BACKDROPS };
 import { owned } from "./shared";
 
 /** Fits one request body on Vercel (4.5 MB) once base64-encoded; the editor shrinks larger pictures before sending. */
 export const MAX_BACKDROP_BYTES = 3 * 1024 * 1024;
-export const MAX_BACKDROPS = 50;
 
 export const backdropUploadSchema = z.object({
   name: z.string().trim().min(1).max(80),

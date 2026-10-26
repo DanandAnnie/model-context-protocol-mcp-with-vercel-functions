@@ -1081,6 +1081,71 @@ test("an uploaded background image fills the stage, renders, and leaves every sc
   expect(bad.status()).toBe(400);
 });
 
+/** A minimal PDF with one landscape page per entry, each showing its lines of text in Helvetica. */
+function slidesPdf(pages: string[][], width = 960, height = 540): Buffer {
+  const objects: string[] = [];
+  const add = (body: string) => objects.push(body);
+  const catalog = add(""); // filled in once the page ids are known
+  const pagesId = add("");
+  const font = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+  const kids: number[] = [];
+  for (const lines of pages) {
+    const ops = lines.map((line, i) => `BT /F1 ${i === 0 ? 40 : 28} Tf 60 ${height - 90 - i * 60} Td (${line.replace(/[()\\]/g, "\\$&")}) Tj ET`).join("\n");
+    const content = add(`<< /Length ${Buffer.byteLength(ops)} >>\nstream\n${ops}\nendstream`);
+    kids.push(add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${width} ${height}] /Resources << /Font << /F1 ${font} 0 R >> >> /Contents ${content} 0 R >>`));
+  }
+  objects[catalog - 1] = `<< /Type /Catalog /Pages ${pagesId} 0 R >>`;
+  objects[pagesId - 1] = `<< /Type /Pages /Kids [${kids.map((k) => `${k} 0 R`).join(" ")}] /Count ${kids.length} >>`;
+  let out = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  objects.forEach((body, i) => {
+    offsets.push(Buffer.byteLength(out));
+    out += `${i + 1} 0 obj\n${body}\nendobj\n`;
+  });
+  const xref = Buffer.byteLength(out);
+  out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("")}`;
+  out += `trailer\n<< /Size ${objects.length + 1} /Root ${catalog} 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(out, "latin1");
+}
+
+test("a slide deck as PDF becomes one scene per page, each page behind the presenter", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const pdf = slidesPdf([["Welcome aboard", "Meet the team"], ["Questions?"], []]);
+  await page.getByLabel("Import slides from a PDF").setInputFiles({ name: `onboarding-${tag}.pdf`, mimeType: "application/pdf", buffer: pdf });
+  await expect(page.getByTestId("import-note")).toContainText("Imported 3 pages", { timeout: 30_000 });
+  await expect(page.getByTestId("import-note")).toContainText("1 page has no text");
+  await expect(page.locator("textarea")).toHaveValue("Welcome aboard. Meet the team.");
+  await expect(page.locator("input[placeholder='Video title']")).toHaveValue(`onboarding-${tag}`);
+  const { backdrops } = (await (await page.request.get("/api/backdrops")).json()) as { backdrops: Array<{ id: string; name: string; mimeType: string }> };
+  const mine = backdrops.filter((b) => b.name.startsWith(`onboarding-${tag} – page`));
+  expect(mine.map((b) => b.name).sort()).toEqual([1, 2, 3].map((n) => `onboarding-${tag} – page ${n}`));
+  expect(mine.every((b) => b.mimeType === "image/jpeg")).toBe(true);
+  const first = mine.find((b) => b.name.endsWith("page 1"))!;
+  await expect(page.getByTestId("stage")).toHaveCSS("background-image", new RegExp(`/api/backdrops/${first.id}`));
+  // The page was drawn: a 1080p landscape picture whose title letters show.
+  const drawn = await page.evaluate(async (id) => {
+    const img = new Image();
+    img.src = `/api/backdrops/${id}`;
+    await img.decode();
+    const c = document.createElement("canvas");
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    const ctx = c.getContext("2d")!;
+    ctx.drawImage(img, 0, 0);
+    const px = ctx.getImageData(0, 0, c.width, c.height).data;
+    let dark = 0;
+    for (let i = 0; i < px.length; i += 4) if (px[i] < 128) dark++;
+    return { w: img.naturalWidth, h: img.naturalHeight, dark };
+  }, first.id);
+  expect([drawn.w, drawn.h]).toEqual([1920, 1080]);
+  expect(drawn.dark, "the title's letters show").toBeGreaterThan(500);
+  for (const b of mine) expect((await page.request.delete(`/api/backdrops/${b.id}`)).status()).toBe(204);
+  // A file that is not a PDF says so (after confirming the scenes it would replace).
+  page.once("dialog", (d) => d.accept());
+  await page.getByLabel("Import slides from a PDF").setInputFiles({ name: "notes.pdf", mimeType: "application/pdf", buffer: Buffer.from("not a pdf") });
+  await expect(page.getByTestId("import-note")).toContainText("could not be read as a PDF", { timeout: 30_000 });
+});
+
 test("the AI script writer takes the focus and Escape closes it", async ({ page }) => {
   const write = page.getByRole("button", { name: "Write with AI" });
   await write.click();

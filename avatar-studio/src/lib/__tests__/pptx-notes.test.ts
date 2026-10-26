@@ -69,7 +69,31 @@ describe("readPptx", () => {
     assert.equal(slides[0].text, "Quarterly review");
   });
 
+  it("reads PowerPoint's line breaks, empty runs with attributes, grouped shapes, tables, and two-version shapes once", () => {
+    const br = '<a:p><a:r><a:t>First line</a:t></a:r><a:br><a:rPr lang="en-US" dirty="0"/></a:br><a:r><a:t>second line</a:t></a:r></a:p>';
+    const empty = '<a:p><a:r><a:t xml:space="preserve"/></a:r><a:r><a:rPr lang="en-US"/><a:t>Hello</a:t></a:r></a:p>';
+    const grouped = `<p:grpSp><p:nvGrpSpPr/><p:grpSpPr/>${shape("", para("In a group"))}</p:grpSp>`;
+    const table = `<p:graphicFrame><p:nvGraphicFramePr/><a:graphic><a:graphicData><a:tbl><a:tr><a:tc><a:txBody>${para("Q3 revenue")}</a:txBody></a:tc></a:tr></a:tbl></a:graphicData></a:graphic></p:graphicFrame>`;
+    const twice = `<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><mc:Choice Requires="a14">${shape(null, para("E = mc²"))}</mc:Choice><mc:Fallback>${shape(null, para("E = mc²"))}</mc:Fallback></mc:AlternateContent>`;
+    const slides = readPptx(deck([{ slide: slideXml(shape("title", br), grouped, table, twice), notes: notesXml(shape("body", empty)) }]));
+    assert.deepEqual(slides[0], { notes: "Hello", text: "First line second line\nIn a group\nQ3 revenue\nE = mc²", hidden: false });
+  });
+
+  it("keeps a slide's place when its part cannot be found, and finds parts however they are named", () => {
+    const files: Record<string, Uint8Array> = {
+      "ppt/presentation.xml": strToU8(`<p:presentation ${NS}><p:sldIdLst><p:sldId id="256" r:id="rId1"/><p:sldId id="257" r:id="rId2"/><p:sldId id="258" r:id="rId3"/></p:sldIdLst></p:presentation>`),
+      "ppt/_rels/presentation.xml.rels": strToU8(
+        `<Relationships><Relationship Id="rId1" Type="${REL}/slide" Target="/ppt/slides/intro.xml"/><Relationship Id="rId2" Type="${REL}/slide" Target="slides/gone.xml"/><Relationship Id="rId3" Type="${REL}/slide" Target="slides/slide3.xml"/></Relationships>`,
+      ),
+      "ppt/slides/intro.xml": strToU8(slideXml(shape("title", para("Intro")))),
+      "ppt/slides/slide3.xml": strToU8(slideXml(shape("title", para("Three")))),
+    };
+    assert.deepEqual(readPptx(zipSync(files)).map((s) => s.text), ["Intro", "", "Three"]);
+  });
+
   it("says plainly when the file is not a .pptx deck", () => {
+    assert.throws(() => readPptx(new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]), "secret.pptx"), /secret\.pptx is password-protected/);
+    assert.equal(readPptx(deck([{ slide: slideXml(shape("title", para("Bad &#x110000;ref"))) }]))[0].text, "Bad ref");
     assert.throws(() => readPptx(new Uint8Array([1, 2, 3]), "notes.pptx"), /notes\.pptx could not be read as a PowerPoint/);
     assert.throws(() => readPptx(zipSync({ "word/document.xml": strToU8("<w:document/>") }), "letter.pptx"), /letter\.pptx is not a PowerPoint/);
     assert.throws(() => readPptx(zipSync({ "ppt/presentation.xml": strToU8(`<p:presentation ${NS}><p:sldIdLst/></p:presentation>`) }), "empty.pptx"), /empty\.pptx has no slides/);

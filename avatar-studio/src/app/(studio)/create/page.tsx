@@ -280,8 +280,9 @@ function CreateInner() {
     if (pdf) await importSlides(pdf, deck && slides ? { name: deck.name, slides } : undefined);
   }
   /**
-   * Replaces the scenes with a PowerPoint deck's slides on the current background, each scripted from its speaker
-   * notes or, where it has none, its text. Hidden slides are left out, as in the slide show.
+   * Replaces the scenes with a PowerPoint deck's slides, each scripted from its speaker notes or, where it has none,
+   * its text. Hidden slides are left out, as in the slide show. When there are as many scenes as slides and they show
+   * pictures (the same deck imported as PDF first), each scene keeps its background; otherwise the scenes' shared background is used.
    */
   function importNotes(file: File, slides: PptxSlide[]) {
     const shown = slides.filter((sl) => !sl.hidden);
@@ -290,23 +291,28 @@ function CreateInner() {
     const current = scenesNow.current;
     if (setUpScenes(current) && !window.confirm(`Replace the ${current.length === 1 ? "current scene" : `current ${current.length} scenes`} with ${kept.length === 1 ? "the slide" : `the ${kept.length} slides`} of ${file.name}?`)) return;
     const { scripts, truncated } = slideScripts(kept.map((sl) => sl.notes || sl.text));
-    const background = current[0].background;
-    setScenes(scripts.map((script) => newScene(script, background)));
+    // A scene per slide already showing pictures (the deck's PDF, imported first) keeps them.
+    const sameCount = current.length === kept.length && current.some((sc) => sc.background.type !== "color");
+    const shared = current.every((sc) => sc.background.type === current[0].background.type && sc.background.value === current[0].background.value) ? current[0].background : DEFAULT_BG;
+    setScenes(scripts.map((script, i) => newScene(script, sameCount ? current[i].background : shared)));
     setActiveIdx(0);
     const base = file.name.replace(/\.pptx$/i, "").slice(0, 60) || "Slides";
     setTitle((t) => (!t.trim() || t === "Untitled video" ? base : t));
-    const fromText = kept.filter((sl) => !sl.notes).length;
+    const withNotes = kept.filter((sl) => sl.notes).length;
+    const fromText = kept.filter((sl) => !sl.notes && sl.text.trim()).length;
     const blank = scripts.filter((sc) => !sc.trim()).length;
     const hidden = slides.length - shown.length;
+    const over = shown.length - kept.length;
     setImportNote(
       [
-        `Imported ${kept.length === 1 ? "1 slide" : `${kept.length} slides`} of ${file.name} as scenes, each scripted from its speaker notes`,
-        fromText > blank ? `; ${fromText - blank === 1 ? "1 slide has" : `${fromText - blank} slides have`} no notes, so its text is the script` : "",
+        `Imported ${kept.length === 1 ? "1 slide" : `${kept.length} slides`} of ${file.name} as scenes, each scripted from its ${withNotes ? "speaker notes" : "slide text, since the deck has no speaker notes"}`,
+        withNotes && fromText ? `; ${fromText === 1 ? "1 slide has no notes, so its text is" : `${fromText} slides have no notes, so their text is`} the script` : "",
         hidden ? `; ${hidden === 1 ? "1 hidden slide was" : `${hidden} hidden slides were`} left out` : "",
-        shown.length > kept.length ? `; a video holds ${MAX_SCENES} scenes, so the last ${shown.length - kept.length} slides were left out` : "",
-        truncated ? `; the notes were shortened to fit ${MAX_SCRIPT_CHARS} characters of script` : "",
+        over ? `; a video holds ${MAX_SCENES} scenes, so the last ${over === 1 ? "slide was" : `${over} slides were`} left out` : "",
+        truncated ? `; the scripts were shortened to fit ${MAX_SCRIPT_CHARS} characters` : "",
         blank ? `; ${blank === 1 ? "1 slide has" : `${blank} slides have`} no notes or text, so write what the presenter says there` : "",
-        ". To show each slide behind the presenter, choose the deck saved as PDF together with the .pptx.",
+        sameCount ? "; each scene kept its background" : ". To show each slide behind the presenter, choose the deck saved as PDF together with the .pptx",
+        ".",
       ].join(""),
     );
   }
@@ -377,9 +383,9 @@ function CreateInner() {
             ? `Imported ${count === 1 ? "1 page" : `${count} pages`} of ${file.name} as scenes, each page behind the presenter and the speaker notes from ${deck.name} as the script to edit`
             : `Imported ${count === 1 ? "1 page" : `${count} pages`} of ${file.name} as scenes, each page behind the presenter and its text as the script to edit`,
           paired && !paired.matches ? `; ${deck!.name} has ${paired.slides.length === 1 ? "1 slide" : `${paired.slides.length} slides`} shown and ${file.name} ${total === 1 ? "1 page" : `${total} pages`}, so the notes were matched in order and may be off; check each scene's script` : "",
-          fromText ? `; ${fromText === 1 ? "1 page has" : `${fromText} pages have`} no notes, so its text is the script` : "",
+          fromText ? `; ${fromText === 1 ? "1 page has no notes, so its text is" : `${fromText} pages have no notes, so their text is`} the script` : "",
           total > count ? `; a video holds ${MAX_SCENES} scenes, so the last ${total - count} of ${total} pages were left out` : "",
-          truncated ? `; the ${deck ? "script" : "page text"} was shortened to fit ${MAX_SCRIPT_CHARS} characters of script` : "",
+          truncated ? `; the ${deck ? "scripts were" : "page text was"} shortened to fit ${MAX_SCRIPT_CHARS} characters of script` : "",
           blank ? `; ${blank === 1 ? "1 page has" : `${blank} pages have`} no ${deck ? "notes or text" : "text"}, so write what the presenter says there` : "",
           ".",
         ].join(""),

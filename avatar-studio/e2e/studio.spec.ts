@@ -1215,6 +1215,14 @@ test("a PowerPoint deck's speaker notes become the scripts, alone or with the de
   const mine = backdrops.filter((b) => b.name.startsWith(`kickoff-${tag} – page`));
   expect(mine).toHaveLength(2);
   await expect(page.getByTestId("stage")).toHaveCSS("background-image", new RegExp(`/api/backdrops/${mine.find((b) => b.name.endsWith("page 1"))!.id}`));
+  // The .pptx on its own over those scenes, one per slide, changes the scripts and keeps each page behind the presenter.
+  await page.locator("textarea").fill("Edited");
+  page.once("dialog", (d) => d.accept());
+  await page.getByLabel("Import slides from a PDF or PowerPoint file").setInputFiles(pptx);
+  await expect(page.getByTestId("import-note")).toContainText("each scene kept its background");
+  await expect(page.locator("textarea")).toHaveValue("Hi everyone, I'm so glad you're here.");
+  await page.getByRole("button", { name: /^Scene 2,/ }).click();
+  await expect(page.getByTestId("stage")).toHaveCSS("background-image", new RegExp(`/api/backdrops/${mine.find((b) => b.name.endsWith("page 2"))!.id}`));
   for (const b of mine) expect((await page.request.delete(`/api/backdrops/${b.id}`)).status()).toBe(204);
   // Two decks at once, or an old .ppt, are refused with a reason.
   await page.getByLabel("Import slides from a PDF or PowerPoint file").setInputFiles([pptx, { ...pptx, name: "other.pptx" }]);

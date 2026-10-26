@@ -157,11 +157,26 @@ export interface TranslateProvider {
 }
 
 /** Live video for the interactive avatar. The mock reports "unavailable" and pages fall back to the portrait. */
+/** A provider's live session as the server keeps it: its id, and a secret for driving it that never leaves the server. */
+export interface ProviderLiveSession {
+  id: string;
+  secret?: string;
+}
+
 export interface StreamingProvider {
   readonly name: string;
   readonly available: boolean;
-  /** Opens a session; the browser joins the room with the returned URL and token. */
-  createSession(input: { avatarId: string; voiceId?: string }): Promise<{ providerSessionId: string; url: string; accessToken: string }>;
-  speak(providerSessionId: string, text: string): Promise<void>;
-  stop(providerSessionId: string): Promise<void>;
+  /**
+   * Whether the browser speaks replies itself, as a command on the room's data channel (LiveAvatar); otherwise
+   * `speak` sends them from the server.
+   */
+  readonly speaksInRoom?: boolean;
+  /**
+   * Opens a session; the browser joins the room with the returned URL and token. Null when this presenter cannot be
+   * shown live, so the page keeps the portrait.
+   */
+  createSession(input: { avatarId: string; voiceId?: string; custom: boolean }): Promise<{ session: ProviderLiveSession; url: string; accessToken: string } | null>;
+  /** A reply was said; a provider whose browser speaks keeps the session alive here instead. */
+  speak(session: ProviderLiveSession, text: string): Promise<void>;
+  stop(session: ProviderLiveSession): Promise<void>;
 }

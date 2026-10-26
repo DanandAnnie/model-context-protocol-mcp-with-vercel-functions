@@ -140,4 +140,10 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - No silence is uploaded for a render refused anyway.
     - A portrait's look is not listed beside it.
     - The brand page names HeyGen as the renderer that fills the frame.
+- LiveAvatar for the interactive avatar. HeyGen retires its v1 streaming API on October 31, 2026, together with v1 and v2; its replacement is LiveAvatar.
+  - The server makes a session token with the account's `LIVEAVATAR_API_KEY` (`POST /v1/sessions/token`, FULL mode, with the configured `LIVEAVATAR_AVATAR_ID` or a library presenter's id, and `LIVEAVATAR_VOICE_ID` as the persona's voice when set). It then starts the session with that token and keeps the token server-side, for keep-alive and stop.
+  - LiveAvatar has no server call that makes the avatar speak. The browser joins the LiveKit room and sends each reply as an `avatar.speak_text` command on the `agent-control` data channel. It then tells the server, which keeps the session alive. A failed keep-alive is logged rather than thrown, so a reply is never said twice.
+  - A custom portrait without a configured LiveAvatar avatar keeps the animated portrait. A session that cannot start is stopped.
+  - HeyGen's v1 streaming adapter and its client calls are removed.
+  - The shapes follow LiveAvatar's published web SDK (`@heygen/liveavatar-web-sdk`) and two open-source clients (LiveKit's and Pipecat's LiveAvatar plugins). The docs site and API are not reachable from this build environment, so the adapter has not been run against the live API. New `liveavatar.test.ts` covers it.
 

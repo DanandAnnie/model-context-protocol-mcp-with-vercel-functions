@@ -734,7 +734,7 @@ export interface ProviderStatus {
   renderLimitPerMonth: number | null;
   /** Billing backend: "stripe" or "mock" (instant upgrades for demos). */
   billing: string;
-  /** Live video for the interactive avatar: "heygen" or "mock" (portrait only). */
+  /** Live video for the interactive avatar: "liveavatar" or "mock" (portrait only). */
   streaming: string;
   /** Whether the voice provider can clone a voice from samples. */
   voiceCloning: boolean;

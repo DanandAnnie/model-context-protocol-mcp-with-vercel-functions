@@ -4,16 +4,18 @@
 import { randomBytes } from "node:crypto";
 import { config } from "./config";
 import { NotFoundError, ValidationError } from "./errors";
-import { HeyGenStreamingProvider } from "./providers/streaming/heygen";
+import { liveAvatarFromConfig } from "./providers/streaming/liveavatar";
 import { MockStreamingProvider } from "./providers/streaming/mock";
-import type { StreamingProvider } from "./providers/types";
+import type { ProviderLiveSession, StreamingProvider } from "./providers/types";
+import { getStore } from "./store";
+import type { Avatar } from "./types";
 
 export const SESSION_TTL_MS = 10 * 60 * 1000;
 export const MAX_SESSIONS_PER_SCOPE = 3;
 
 interface LiveSession {
   id: string;
-  providerSessionId: string;
+  provider: ProviderLiveSession;
   /** What the session may speak for: an agent id, or `owner:<id>` for the interactive page. */
   scope: string;
   clientKey: string;
@@ -29,8 +31,7 @@ declare global {
 
 export function getStreamingProvider(): StreamingProvider {
   if (globalThis.__avatarStudioStreaming) return globalThis.__avatarStudioStreaming;
-  const p: StreamingProvider =
-    config.avatarProvider === "heygen" && config.heygenApiKey && config.streamingEnabled ? new HeyGenStreamingProvider(config.heygenApiKey) : new MockStreamingProvider();
+  const p: StreamingProvider = liveAvatarFromConfig() ?? new MockStreamingProvider();
   globalThis.__avatarStudioStreaming = p;
   return p;
 }
@@ -58,10 +59,20 @@ export async function openLiveSession(input: { avatarId: string; voiceId?: strin
   const mine = [...sessions().values()].filter((s) => s.clientKey === input.clientKey || s.scope === input.scope);
   if (mine.filter((s) => s.clientKey === input.clientKey).length >= MAX_SESSIONS_PER_SCOPE) throw new ValidationError("Too many live sessions; close one first");
   if (mine.filter((s) => s.scope === input.scope).length >= MAX_SESSIONS_PER_SCOPE * 4) throw new ValidationError("This presenter is busy; try again shortly");
-  const created = await provider.createSession({ avatarId: input.avatarId, voiceId: input.voiceId });
+  // A custom portrait is one of the app's own avatars; a provider may have no live counterpart for it.
+  const custom = !!(await getStore().get<Avatar>("avatar", input.avatarId));
+  const created = await provider.createSession({ avatarId: input.avatarId, voiceId: input.voiceId, custom });
+  if (!created) return null;
   const id = `live_${randomBytes(12).toString("base64url")}`;
-  sessions().set(id, { id, providerSessionId: created.providerSessionId, scope: input.scope, clientKey: input.clientKey, expiresAt: now + SESSION_TTL_MS });
-  return { sessionId: id, url: created.url, accessToken: created.accessToken, expiresAt: new Date(now + SESSION_TTL_MS).toISOString() };
+  sessions().set(id, { id, provider: created.session, scope: input.scope, clientKey: input.clientKey, expiresAt: now + SESSION_TTL_MS });
+  return {
+    sessionId: id,
+    url: created.url,
+    accessToken: created.accessToken,
+    expiresAt: new Date(now + SESSION_TTL_MS).toISOString(),
+    // The browser then speaks each reply on the room's data channel and tells the server it did.
+    ...(provider.speaksInRoom ? { speakInRoom: true } : {}),
+  };
 }
 
 function requireSession(sessionId: string, scope: string, now = Date.now()): LiveSession {
@@ -74,7 +85,7 @@ function requireSession(sessionId: string, scope: string, now = Date.now()): Liv
 
 export async function speakLive(sessionId: string, scope: string, text: string, now = Date.now()): Promise<void> {
   const s = requireSession(sessionId, scope, now);
-  await getStreamingProvider().speak(s.providerSessionId, text.slice(0, 1500));
+  await getStreamingProvider().speak(s.provider, text.slice(0, 1500));
 }
 
 export async function closeLiveSession(sessionId: string, scope: string, now = Date.now()): Promise<void> {
@@ -82,7 +93,7 @@ export async function closeLiveSession(sessionId: string, scope: string, now = D
   const s = sessions().get(sessionId);
   if (!s || s.scope !== scope) return;
   sessions().delete(sessionId);
-  await getStreamingProvider().stop(s.providerSessionId);
+  await getStreamingProvider().stop(s.provider);
 }
 
 /** Test hook. */

@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/client";
+import { COMMAND_TOPIC, speakCommand } from "@/lib/live-commands";
 
 /** Pinned LiveKit browser SDK, loaded only once a live session exists (never in demo mode). */
 const LIVEKIT_UMD = "https://cdn.jsdelivr.net/npm/livekit-client@2.5.7/dist/livekit-client.umd.js";
@@ -11,7 +12,9 @@ interface LiveRoom {
   on(event: string, cb: (...args: unknown[]) => void): LiveRoom;
   connect(url: string, token: string): Promise<void>;
   disconnect(): Promise<void>;
+  localParticipant: { publishData(data: Uint8Array, options: { reliable: boolean; topic: string }): Promise<void> };
 }
+
 interface LiveTrack {
   kind: string;
   attach(el: HTMLMediaElement): HTMLMediaElement;
@@ -44,6 +47,8 @@ export function useLiveAvatar(opts: { enabled: boolean; openPath: string; openBo
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const sessionRef = useRef<string | null>(null);
   const roomRef = useRef<LiveRoom | null>(null);
+  /** Whether replies are spoken in the room (LiveAvatar) rather than sent from the server. */
+  const inRoomRef = useRef(false);
   const { enabled, openPath, sessionPath, key } = opts;
   const bodyJson = JSON.stringify(opts.openBody);
 
@@ -61,13 +66,14 @@ export function useLiveAvatar(opts: { enabled: boolean; openPath: string; openBo
     setStatus("connecting");
     (async () => {
       try {
-        const res = await api<{ available: boolean; sessionId?: string; url?: string; accessToken?: string }>(openPath, { method: "POST", body: bodyJson });
+        const res = await api<{ available: boolean; sessionId?: string; url?: string; accessToken?: string; speakInRoom?: boolean }>(openPath, { method: "POST", body: bodyJson });
         if (cancelled) return;
         if (!res.available || !res.sessionId || !res.url || !res.accessToken) {
           setStatus("unavailable");
           return;
         }
         sessionRef.current = res.sessionId;
+        inRoomRef.current = !!res.speakInRoom;
         const lk = await loadLiveKit();
         if (cancelled) return;
         const room = new lk.Room({ adaptiveStream: true });
@@ -103,6 +109,12 @@ export function useLiveAvatar(opts: { enabled: boolean; openPath: string; openBo
       const sessionId = sessionRef.current;
       if (!sessionId || status !== "live") return false;
       try {
+        if (inRoomRef.current && roomRef.current) {
+          await roomRef.current.localParticipant.publishData(speakCommand(text, crypto.randomUUID()), { reliable: true, topic: COMMAND_TOPIC });
+          // Said: the server only keeps the session alive, so its answer never makes the page say it again.
+          void api(sessionPath(sessionId), { method: "POST", body: JSON.stringify({ text }) }).catch(() => {});
+          return true;
+        }
         await api(sessionPath(sessionId), { method: "POST", body: JSON.stringify({ text }) });
         return true;
       } catch {

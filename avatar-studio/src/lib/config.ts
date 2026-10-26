@@ -27,7 +27,13 @@ export const config = {
   /** The app's public address as configured; links an outside service must open (proofread lines) need it. */
   publicAppUrl: env("APP_URL")?.replace(/\/$/, ""),
   webhookSecret: env("WEBHOOK_SECRET"),
-  /** Live video for the interactive avatar (HeyGen Streaming) when the HeyGen key is set. */
+  /** HeyGen's LiveAvatar (live video for the interactive avatar); its own key, from app.liveavatar.com. */
+  liveAvatarApiKey: providerSecret("LIVEAVATAR_API_KEY"),
+  /** The LiveAvatar avatar every live session shows; LiveAvatar's avatars are its own, not HeyGen's video looks. */
+  liveAvatarAvatarId: env("LIVEAVATAR_AVATAR_ID"),
+  /** A LiveAvatar voice for live sessions; the avatar's own voice when unset. */
+  liveAvatarVoiceId: env("LIVEAVATAR_VOICE_ID"),
+  /** Live video for the interactive avatar when the LiveAvatar key is set; false keeps the portrait only. */
   streamingEnabled: (env("STREAMING_AVATAR") ?? "true").toLowerCase() !== "false",
   /** "resend" sends workspace invites by email; anything else only produces links. */
   emailProvider: (env("EMAIL_PROVIDER") ?? "mock").toLowerCase(),

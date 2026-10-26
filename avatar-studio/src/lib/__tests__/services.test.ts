@@ -2580,18 +2580,20 @@ describe("live avatar sessions", () => {
     const spoken: string[] = [];
     const stopped: string[] = [];
     let n = 0;
+    const asked: boolean[] = [];
     const fake: StreamingProvider = {
       name: "fake",
       available: true,
-      async createSession() {
+      async createSession({ custom }) {
+        asked.push(custom);
         n += 1;
-        return { providerSessionId: `p${n}`, url: "wss://live.example", accessToken: `t${n}` };
+        return { session: { id: `p${n}`, secret: `secret${n}` }, url: "wss://live.example", accessToken: `t${n}` };
       },
-      async speak(id, text) {
-        spoken.push(`${id}:${text}`);
+      async speak(session, text) {
+        spoken.push(`${session.id}:${text}`);
       },
-      async stop(id) {
-        stopped.push(id);
+      async stop(session) {
+        stopped.push(session.id);
       },
     };
     setStreamingProvider(fake);
@@ -2599,6 +2601,8 @@ describe("live avatar sessions", () => {
       const t0 = 1_000_000;
       const s = await openLiveSession({ avatarId: "stock_1", scope: "agent_1", clientKey: "c1" }, t0);
       assert.ok(s && s.sessionId.startsWith("live_") && s.url === "wss://live.example");
+      assert.equal(JSON.stringify(s).includes("secret1"), false, "the provider's session secret stays on the server");
+      assert.equal("speakInRoom" in s!, false);
       await speakLive(s!.sessionId, "agent_1", "Hello", t0 + 1000);
       assert.deepEqual(spoken, ["p1:Hello"]);
       await assert.rejects(speakLive(s!.sessionId, "agent_2", "Hi", t0 + 1000), /not found/, "another presenter cannot drive the session");
@@ -2613,6 +2617,10 @@ describe("live avatar sessions", () => {
       await assert.rejects(speakLive(s!.sessionId, "agent_1", "Hi", t0 + 2000), /not found/, "closed sessions are gone");
 
       const late = await openLiveSession({ avatarId: "stock_1", scope: "agent_9", clientKey: "c9" }, t0);
+      // The provider is told when the presenter is one of the app's own portraits.
+      const portrait = await createAvatar({ name: "Dana", imageUrl: `data:image/png;base64,${Buffer.from("png").toString("base64")}` }, "live_owner");
+      await openLiveSession({ avatarId: portrait.id, scope: "agent_8", clientKey: "c8" }, t0);
+      assert.deepEqual([asked[0], asked.at(-1)], [false, true]);
       await assert.rejects(speakLive(late!.sessionId, "agent_9", "Hi", t0 + SESSION_TTL_MS + 1), /not found/, "idle sessions expire");
     } finally {
       setStreamingProvider(undefined);

@@ -2233,6 +2233,50 @@ test("interactive avatar answers a visitor in character", async ({ page }) => {
   expect((await page.request.post("/api/chat", { data: { avatarId: "stock_1", messages: [] } })).status()).toBe(400);
 });
 
+test("a LiveAvatar session speaks each reply in the room and only tells the server it did", async ({ page }) => {
+  // LiveAvatar is not reachable from tests: its status, session, and LiveKit's browser SDK are stood in for, and the
+  // stand-in room records what the page sends on its data channel.
+  await page.route("**/api/status", async (route) => {
+    const res = await route.fetch();
+    await route.fulfill({ response: res, json: { ...(await res.json()), streaming: "liveavatar" } });
+  });
+  await page.route("https://cdn.jsdelivr.net/npm/livekit-client@*/dist/livekit-client.umd.js", (route) =>
+    route.fulfill({
+      contentType: "text/javascript",
+      body: `window.__published = [];
+        window.LivekitClient = { Room: class {
+          constructor() { this.localParticipant = { publishData: async (data, opts) => { window.__published.push({ text: new TextDecoder().decode(data), topic: opts.topic, reliable: opts.reliable }); } }; }
+          on() { return this; }
+          async connect(url, token) { window.__joined = [url, token]; }
+          async disconnect() {}
+        } };`,
+    }),
+  );
+  const told: string[] = [];
+  await page.route("**/api/live", (route) => route.fulfill({ json: { available: true, sessionId: "live_test", url: "wss://room.example", accessToken: "lk_token", expiresAt: new Date(Date.now() + 600_000).toISOString(), speakInRoom: true } }));
+  await page.route("**/api/live/live_test", async (route) => {
+    if (route.request().method() === "POST") told.push((route.request().postDataJSON() as { text: string }).text);
+    await route.fulfill({ status: route.request().method() === "DELETE" ? 204 : 200, json: route.request().method() === "DELETE" ? undefined : { ok: true } });
+  });
+  await page.goto("/interactive");
+  await expect(page.getByText("Live", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { __joined: string[] }).__joined)).toEqual(["wss://room.example", "lk_token"]);
+  await page.getByLabel("Your message").fill("Hi there");
+  await page.getByRole("button", { name: "Send" }).click();
+  const reply = page.locator("[data-testid=chat-log] [data-role=assistant]").first();
+  await expect(reply).toContainText(/^Hi, I'm /);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __published: unknown[] }).__published.length)).toBe(1);
+  const [sent] = await page.evaluate(() => (window as unknown as { __published: Array<{ text: string; topic: string; reliable: boolean }> }).__published);
+  expect(sent.topic).toBe("agent-control");
+  expect(sent.reliable).toBe(true);
+  const command = JSON.parse(sent.text) as { event_id: string; event_type: string; text: string };
+  expect(command.event_type).toBe("avatar.speak_text");
+  expect(command.event_id).toMatch(/^[0-9a-f-]{36}$/);
+  expect(command.text).toBe((await reply.textContent())?.trim());
+  await expect.poll(() => told.length).toBe(1);
+  expect(told[0]).toBe(command.text);
+});
+
 test("interactive avatar takes a spoken question when the browser can transcribe", async ({ page }) => {
   // Headless Chromium has no working recogniser; stand in a minimal Web Speech API that hears one sentence.
   await page.addInitScript(() => {

@@ -243,5 +243,37 @@ describe("scenesFromText", () => {
     // A Western file read on a Japanese system falls back to Windows-1252: "We’re live — “today”."
     const western = new Uint8Array([0x57, 0x65, 0x92, 0x72, 0x65, 0x20, 0x6c, 0x69, 0x76, 0x65, 0x20, 0x97, 0x20, 0x93, 0x74, 0x6f, 0x64, 0x61, 0x79, 0x94, 0x2e]);
     assert.equal(decodeScript(western, "shift_jis"), "We’re live — “today”.");
+    // A real Shift_JIS or GBK file cut off mid-character keeps its text, with one � where it was cut.
+    const sjis = [0x82, 0xb1, 0x82, 0xf1, 0x82, 0xc9, 0x82, 0xbf, 0x82, 0xcd, 0x81, 0x41, 0x8a, 0x46, 0x82, 0xb3, 0x82, 0xf1, 0x81, 0x42];
+    assert.equal(decodeScript(new Uint8Array([...sjis, 0x82]), "shift_jis"), "こんにちは、皆さん。\ufffd");
+    const gbk = [0xb4, 0xf3, 0xbc, 0xd2, 0xba, 0xc3, 0xa3, 0xac, 0xbb, 0xb6, 0xd3, 0xad, 0xa1, 0xa3];
+    assert.equal(decodeScript(new Uint8Array([...gbk, 0xb4]), "gbk"), "大家好，欢迎。\ufffd");
+    // So does a longer one holding a pasted UTF-8 emoji.
+    const emoji = new Uint8Array([...sjis, ...sjis, ...sjis, ...new TextEncoder().encode("😀"), ...sjis]);
+    assert.ok(decodeScript(emoji, "shift_jis").startsWith("こんにちは、皆さん。"));
+  });
+
+  it("reads chat answers with several fences, example fences, titled images, and short replies", () => {
+    // Two versions to choose from: both are read, without their fence lines.
+    const versions = ["Here are two versions.", "", "**Version A (energetic):**", "", "```markdown", "**HOST:** Hey everyone, welcome back!", "```", "", "**Version B (calm):**", "", "```markdown", "**HOST:** Hello, and welcome.", "```", "", "Which one do you prefer?"].join("\n");
+    const two = scenesFromText(versions).scenes.join("\n");
+    assert.ok(two.includes("HOST: Hey everyone, welcome back!") && two.includes("HOST: Hello, and welcome."), two);
+    assert.ok(!two.includes("```") && !two.includes("**"), two);
+    // A script followed by a code block in the sign-off: the script's close is its own, and no fence is spoken.
+    const signOff = ["Here's your script:", "", "```markdown", "# Launch", "", "We ship today.", "```", "", "To turn it into captions, run:", "", "```bash", "npx captions script.md", "```"].join("\n");
+    const signed = scenesFromText(signOff).scenes.join("\n");
+    assert.ok(signed.includes("We ship today.") && !signed.includes("```"), signed);
+    // A fence that holds only a heading is an example in the prose, which is the script.
+    const example = "In this video I'll show you how to make a heading. Type a hash, a space, and your text:\n\n```markdown\n# My Heading\n```\n\nThat's all there is to it.";
+    const shown = scenesFromText(example).scenes.join("\n");
+    assert.ok(shown.includes("how to make a heading") && shown.includes("That's all there is to it."), shown);
+    // An embedded image with a title leaves its alt text, and what follows it is kept.
+    for (const title of [' "Q3 sales"', " 'Q3 sales'", " (Q3 sales)"]) {
+      const doc = `Intro.\n\n![Chart](data:image/png;base64,${"iVBOR".repeat(6000)}${title})\n\nOutro.`;
+      assert.deepEqual(scenesFromText(doc), { scenes: ["Intro.", "Chart", "Outro."], truncated: false }, title);
+    }
+    // A label used as a reference elsewhere still keeps its short replies.
+    const replies = scenesFromText("[Scene 1][HOST]: Welcome to the show!\n\n[GUEST]: Thanks for having me.\n\n[HOST]: Absolutely!\n\n[HOST]: (laughs)").scenes.join("\n");
+    assert.ok(replies.includes("Absolutely!") && replies.includes("(laughs)"), replies);
   });
 });

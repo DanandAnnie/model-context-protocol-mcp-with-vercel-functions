@@ -42,7 +42,7 @@ const LINK_TARGET = String.raw`(?:<[^<>]*>|[a-z][a-z0-9+.-]*:\S+|\.{0,2}\/\S*|#[
 const LINK_DEFINITION = new RegExp(String.raw`^\s{0,3}\[[^\]^][^\]]*\]:\s*` + LINK_TARGET + String.raw`(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*$`, "i");
 const FOOTNOTE_DEFINITION = /^\s{0,3}\[\^[^\]]+\]:/;
 /** Any reference definition's shape: dropped when the document refers to its label. */
-const REFERENCE_DEFINITION = /^\s{0,3}\[([^\]^][^\]]*)\]:\s*\S+(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*$/;
+const REFERENCE_DEFINITION = /^\s{0,3}\[([^\]^][^\]]*)\]:\s*(\S+)(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*$/;
 // A table's header rule has a pipe; a bare --- is a scene break.
 const TABLE_RULE = /^(?=[^|]*\|)\s*\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?\s*$/;
 const PAUSE = new RegExp(PAUSE_MARKER, "gi");
@@ -81,8 +81,11 @@ export function decodeScript(bytes: Uint8Array, legacy = "windows-1252"): string
   if (bad <= 0 || valid >= bad) return utf8;
   if (legacy !== "windows-1252") {
     try {
-      // Strictly: a Western file read on a Japanese, Chinese, or Korean system is not valid in that code page.
-      return new TextDecoder(legacy, { fatal: true }).decode(bytes);
+      const text = new TextDecoder(legacy).decode(bytes);
+      // A file in that code page has at most a stray bad byte (a pasted character, or one cut short at its end); a
+      // Western file read on a Japanese, Chinese, or Korean system has many.
+      const errors = text.replace(/\ufffd+$/, "").match(/\ufffd/g)?.length ?? 0;
+      if (errors === 0 || errors * 20 < (text.match(/[^\x00-\x7f]/g)?.length ?? 0)) return text;
     } catch {
       // Not that code page (or one this runtime does not know): Windows-1252 below.
     }
@@ -306,21 +309,30 @@ function withoutDocumentFence(lines: string[]): string[] {
 }
 
 /**
- * Where a ```markdown (or md) fence opens, and the last fence of the same marker without a label after it, which
- * closes it even when code blocks sit inside (a chat answer often holds a ```bash block inside the script).
+ * Each ```markdown (or md) fence and the fence that closes it. A chat answer often holds a ```bash block inside
+ * the script: a labelled fence of the same marker opens such a block, the next bare one closes it, and the first
+ * bare fence with no block open closes the script.
  */
-function markdownFenceSpan(lines: string[]): { open: number; close: number } | undefined {
-  const open = lines.findIndex((l) => {
-    const f = FENCE.exec(l);
-    return !!f && MARKDOWN_FENCE.has(f[2].toLowerCase());
-  });
-  if (open < 0) return undefined;
-  const marker = FENCE.exec(lines[open])![1];
-  for (let i = lines.length - 1; i > open; i--) {
+function markdownFenceSpans(lines: string[]): { open: number; close: number }[] {
+  const spans: { open: number; close: number }[] = [];
+  let open = -1;
+  let marker = "";
+  let inner = false;
+  for (let i = 0; i < lines.length; i++) {
     const f = FENCE.exec(lines[i]);
-    if (f && f[1] === marker && !f[2]) return { open, close: i };
+    if (!f) continue;
+    if (open < 0) {
+      if (MARKDOWN_FENCE.has(f[2].toLowerCase())) [open, marker, inner] = [i, f[1], false];
+    } else if (f[1] === marker) {
+      if (f[2]) inner = true;
+      else if (inner) inner = false;
+      else {
+        spans.push({ open, close: i });
+        open = -1;
+      }
+    }
   }
-  return undefined;
+  return spans;
 }
 
 /** HTML comments removed; one that never closes is left as text, and the search stops there. */
@@ -359,6 +371,10 @@ function withoutDataImages(text: string): string {
     let end = start;
     while (end < text.length && text[end] !== ")" && text[end] !== ">" && !/\s/.test(text[end])) end++;
     if (text[end] === ">") end++;
+    // An image's optional title: ![alt](data:… "title").
+    const titled = /\s+(?:"[^"\n]{0,300}"|'[^'\n]{0,300}'|\([^()\n]{0,300}\))\s*(?=\))/y;
+    titled.lastIndex = end;
+    if (titled.test(text)) end = titled.lastIndex;
     if (end >= text.length) break;
     if (text[end] !== ")") {
       from = end;
@@ -409,12 +425,17 @@ export function scenesFromText(text: string, { markdown = true }: { markdown?: b
   // A chat answer: a short lead-in, the script in a ```markdown fence (perhaps holding code blocks of its own),
   // a short sign-off. The fence's content is the script; with little around it, only the content is read.
   let skip = new Set<number>();
-  const span = markdown ? markdownFenceSpan(lines) : undefined;
-  if (span) {
+  // Several such fences (two versions to choose from) are all read, without their fence lines; so is one that
+  // holds only a heading, which is an example in the prose around it rather than the script.
+  const spans = markdown ? markdownFenceSpans(lines) : [];
+  if (spans.length === 1) {
+    const [span] = spans;
     const outside = [...lines.slice(0, span.open), ...lines.slice(span.close + 1)].filter((l) => l.trim());
-    if (outside.length <= 4 && outside.every((l) => l.length <= 300)) lines = withoutFrontMatter(lines.slice(span.open + 1, span.close));
+    const inside = lines.slice(span.open + 1, span.close);
+    const prose = inside.some((l) => l.trim() && !HEADING.test(l));
+    if (prose && outside.length <= 4 && outside.every((l) => l.length <= 300)) lines = withoutFrontMatter(inside);
     else skip = new Set([span.open, span.close]);
-  }
+  } else skip = new Set(spans.flatMap((s) => [s.open, s.close]));
   // Labels the document refers to ([text][label], [label][]): a definition of one is never spoken, whatever it points at.
   const referenced = new Set<string>();
   if (markdown) for (const m of source.matchAll(/\]\[([^\][\n]{1,200})\]|\[([^\][\n]{1,200})\]\[\]/g)) referenced.add((m[1] ?? m[2]).trim().toLowerCase());
@@ -473,7 +494,8 @@ export function scenesFromText(text: string, { markdown = true }: { markdown?: b
       footnote = FOOTNOTE_DEFINITION.test(line);
       if (footnote || LINK_DEFINITION.test(line) || TABLE_RULE.test(line)) continue;
       const definition = REFERENCE_DEFINITION.exec(line);
-      if (definition && referenced.has(definition[1].trim().toLowerCase())) continue;
+      // Unless its target reads as a reply ("[HOST]: Absolutely!", "[HOST]: (laughs)"), which no link points at.
+      if (definition && referenced.has(definition[1].trim().toLowerCase()) && !/^\(|[.!?…]$/.test(definition[2])) continue;
     }
     // Reading stops well past what a video keeps; the rest could only be left out.
     if (read > READ_CHARS) {

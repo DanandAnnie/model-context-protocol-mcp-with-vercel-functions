@@ -1,6 +1,7 @@
 // Thin HTTP client for the HeyGen public API (https://docs.heygen.com).
 const V1 = "https://api.heygen.com/v1";
 const V2 = "https://api.heygen.com/v2";
+const V3 = "https://api.heygen.com/v3";
 
 export class HeyGenClient {
   constructor(private apiKey: string) {}
@@ -83,12 +84,15 @@ export class HeyGenClient {
     }>(`${V1}/video_status.get?video_id=${encodeURIComponent(videoId)}`);
   }
 
+  /** Video Translate (v3): one id per output language. */
   createTranslation(body: Record<string, unknown>) {
-    return this.request<{ video_translate_id: string }>(`${V2}/video_translate`, { method: "POST", body: JSON.stringify(body) });
+    return this.request<{ video_translation_ids: string[] }>(`${V3}/video-translations`, { method: "POST", body: JSON.stringify(body) });
   }
 
   translationStatus(id: string) {
-    return this.request<{ status: string; url?: string; message?: string }>(`${V2}/video_translate/${encodeURIComponent(id)}`);
+    return this.request<{ status: string; video_url?: string; failure_message?: string; srt_caption_url?: string; vtt_caption_url?: string }>(
+      `${V3}/video-translations/${encodeURIComponent(id)}`,
+    );
   }
 
   // ---- Streaming (Interactive Avatar) ----

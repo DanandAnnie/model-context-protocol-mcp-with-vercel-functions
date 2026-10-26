@@ -7,7 +7,7 @@ import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api, formatDate } from "@/lib/client";
-import { MAX_TRANSLATION_SPEAKERS, type Translation } from "@/lib/types";
+import { MAX_TRANSLATION_SPEAKERS, type Translation, type TranslationQuality } from "@/lib/types";
 
 /** Matches the server's limit per request. */
 const MAX_LANGUAGES = 5;
@@ -34,6 +34,9 @@ function TranslateInner() {
   const toggle = (l: string) => setLanguages((prev) => (prev.includes(l) ? prev.filter((x) => x !== l) : prev.length >= MAX_LANGUAGES ? prev : [...prev, l]));
   const [lipSync, setLipSync] = useState(true);
   const [speakers, setSpeakers] = useState(0);
+  const [quality, setQuality] = useState<TranslationQuality>("speed");
+  const [removeMusic, setRemoveMusic] = useState(false);
+  const [enhanceSpeech, setEnhanceSpeech] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -42,7 +45,7 @@ function TranslateInner() {
     setErr(null);
     try {
       const fallback = languages.length === 1 ? `Translation to ${languages[0]}` : "Translation";
-      await api("/api/translate", { method: "POST", body: JSON.stringify({ title: title || fallback, sourceVideoUrl, targetLanguages: languages, ...(lipSync ? {} : { audioOnly: true }), ...(speakers ? { speakers } : {}) }) });
+      await api("/api/translate", { method: "POST", body: JSON.stringify({ title: title || fallback, sourceVideoUrl, targetLanguages: languages, ...(lipSync ? {} : { audioOnly: true }), ...(speakers ? { speakers } : {}), ...(quality === "precision" ? { quality } : {}), ...(removeMusic ? { removeMusic } : {}), ...(enhanceSpeech ? { enhanceSpeech } : {}) }) });
       setSource("");
       setTitle("");
       // The next video may have a different cast; the lip-sync choice is a preference and stays.
@@ -104,6 +107,24 @@ function TranslateInner() {
                 </select>
               </Field>
             </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Quality" hint="Precision takes longer for a more natural translation and delivery.">
+                <select className={inputClass} value={quality} disabled={canEdit === false} onChange={(e) => setQuality(e.target.value as TranslationQuality)}>
+                  <option value="speed">Speed</option>
+                  <option value="precision">Precision</option>
+                </select>
+              </Field>
+              <div className="space-y-2 pt-1">
+                <label className="flex items-start gap-2 text-sm text-slate-700">
+                  <input type="checkbox" className="mt-0.5" checked={removeMusic} disabled={canEdit === false} onChange={(e) => setRemoveMusic(e.target.checked)} />
+                  <span>Remove background music</span>
+                </label>
+                <label className="flex items-start gap-2 text-sm text-slate-700">
+                  <input type="checkbox" className="mt-0.5" checked={enhanceSpeech} disabled={canEdit === false} onChange={(e) => setEnhanceSpeech(e.target.checked)} />
+                  <span>Enhance speech</span>
+                </label>
+              </div>
+            </div>
             <Field label="Title (optional)">
               <input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} placeholder={languages.length > 1 ? "Product walkthrough (each dub adds its language)" : "Product walkthrough – Spanish"} />
             </Field>
@@ -127,13 +148,31 @@ function TranslateInner() {
                       <div className="mt-0.5 text-xs text-slate-500" data-testid="translation-meta">
                         → {t.targetLanguage}
                         {t.audioOnly ? " · voice only" : ""}
-                        {t.speakers ? ` · ${t.speakers} ${t.speakers === 1 ? "speaker" : "speakers"}` : ""} · {formatDate(t.createdAt)}
+                        {t.speakers ? ` · ${t.speakers} ${t.speakers === 1 ? "speaker" : "speakers"}` : ""}
+                        {t.quality === "precision" ? " · precision" : ""}
+                        {t.removeMusic ? " · no music" : ""}
+                        {t.enhanceSpeech ? " · enhanced speech" : ""} · {formatDate(t.createdAt)}
                       </div>
                       {t.error && <div className="mt-1 text-xs text-rose-600">{t.error}</div>}
                     </div>
                     <StatusBadge status={t.status} />
                   </div>
                   {t.status === "completed" && t.videoUrl && <video src={t.videoUrl} controls className="mt-3 w-full rounded-lg bg-black" />}
+                  {t.status === "completed" && (t.captionUrls?.srt || t.captionUrls?.vtt) && (
+                    <div className="mt-2 flex flex-wrap gap-3 text-xs" data-testid="translation-captions">
+                      <span className="text-slate-500">Subtitles in {t.targetLanguage}:</span>
+                      {t.captionUrls.srt && (
+                        <a href={t.captionUrls.srt} target="_blank" rel="noreferrer" className="font-medium text-brand-700 hover:underline">
+                          SRT
+                        </a>
+                      )}
+                      {t.captionUrls.vtt && (
+                        <a href={t.captionUrls.vtt} target="_blank" rel="noreferrer" className="font-medium text-brand-700 hover:underline">
+                          VTT
+                        </a>
+                      )}
+                    </div>
+                  )}
                 </Card>
               ))}
             </div>

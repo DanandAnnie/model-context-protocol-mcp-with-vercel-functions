@@ -1,4 +1,4 @@
-import type { AudioClip, Avatar, Translation, Video, VideoRequest, Voice } from "../types";
+import type { AudioClip, Avatar, Translation, TranslationRequest, Video, VideoRequest, Voice } from "../types";
 
 export interface TtsProvider {
   readonly name: string;
@@ -106,8 +106,8 @@ export function splitKnowledge(instructions: string): { own: string; reference: 
 
 export interface TranslateProvider {
   readonly name: string;
-  createTranslation(input: { sourceVideoUrl: string; targetLanguage: string; title: string; audioOnly?: boolean; speakers?: number }): Promise<{ providerJobId: string }>;
-  getStatus(providerJobId: string): Promise<Pick<Translation, "status" | "videoUrl" | "error">>;
+  createTranslation(input: TranslationRequest): Promise<{ providerJobId: string }>;
+  getStatus(providerJobId: string): Promise<Pick<Translation, "status" | "videoUrl" | "error" | "captionUrls">>;
   supportedLanguages(): string[];
   parseWebhook?(body: unknown): { providerJobId: string; update: Pick<Translation, "status" | "videoUrl" | "error"> } | null;
 }

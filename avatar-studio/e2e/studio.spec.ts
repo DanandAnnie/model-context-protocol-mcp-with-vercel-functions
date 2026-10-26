@@ -2025,6 +2025,26 @@ test("a dub can be voice only and name its speakers", async ({ page }) => {
   expect((await page.request.post("/api/translate", { data: { title: "Too many", sourceVideoUrl: "https://cdn.example.com/v.mp4", targetLanguage: "French", speakers: 11 } })).status()).toBe(400);
 });
 
+test("a dub can be made at precision, without the music, and with cleaner speech", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  await page.goto("/translate");
+  await page.getByPlaceholder("https://…/video.mp4").fill("https://cdn.example.com/podcast.mp4");
+  await page.getByLabel("Quality").selectOption("precision");
+  await page.getByLabel("Remove background music").check();
+  await page.getByLabel("Enhance speech").check();
+  await page.getByLabel("Title (optional)").fill(`Podcast ${tag}`);
+  await page.getByRole("button", { name: "Translate video" }).click();
+  const card = page.locator("div", { has: page.getByText(`Podcast ${tag}`, { exact: true }) }).getByTestId("translation-meta").first();
+  await expect(card).toContainText("→ Spanish · precision · no music · enhanced speech");
+  // They are preferences, so they stay set for the next video.
+  await expect(page.getByLabel("Quality")).toHaveValue("precision");
+  await expect(page.getByLabel("Remove background music")).toBeChecked();
+  const list = (await (await page.request.get("/api/translate")).json()).translations as Array<{ title: string; quality?: string; removeMusic?: boolean; enhanceSpeech?: boolean }>;
+  const made = list.find((t) => t.title === `Podcast ${tag}`);
+  expect([made?.quality, made?.removeMusic, made?.enhanceSpeech]).toEqual(["precision", true, true]);
+  expect((await page.request.post("/api/translate", { data: { title: "Bad", sourceVideoUrl: "https://cdn.example.com/v.mp4", targetLanguage: "French", quality: "best" } })).status()).toBe(400);
+});
+
 test("a share page can ask for an email before playing, and the owner sees who watched", async ({ page, browser }) => {
   const v = await createVideoViaApi(page, `Gated ${Date.now().toString(36)}`);
   await page.goto(`/videos/${v.id}`);

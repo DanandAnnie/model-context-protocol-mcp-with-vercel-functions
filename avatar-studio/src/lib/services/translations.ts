@@ -3,18 +3,29 @@ import { z } from "zod";
 import { newId, nowIso } from "../ids";
 import { getTranslateProvider, getTranslateProviderByName } from "../providers";
 import { getStore } from "../store";
-import { MAX_TRANSLATION_SPEAKERS, type Translation } from "../types";
+import { MAX_TRANSLATION_SPEAKERS, TRANSLATION_QUALITIES, type Translation } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { owned, stripUndefined } from "./shared";
 
 const languageSchema = z.string().trim().min(2).max(40);
-/** How a dub is made: voice only or lip-synced, and how many people speak. */
+/** How a dub is made: voice only or lip-synced, how many people speak, its quality, and its audio. */
 /** `null` reads as "not set" (lip-synced, speakers detected), as an API client may send for an empty field. */
 const unsetIfNull = (v: unknown) => (v === null ? undefined : v);
 const dubOptions = {
   audioOnly: z.preprocess(unsetIfNull, z.boolean().optional()),
   speakers: z.preprocess(unsetIfNull, z.number().int().min(1).max(MAX_TRANSLATION_SPEAKERS).optional()),
+  quality: z.preprocess(unsetIfNull, z.enum(TRANSLATION_QUALITIES).optional()),
+  removeMusic: z.preprocess(unsetIfNull, z.boolean().optional()),
+  enhanceSpeech: z.preprocess(unsetIfNull, z.boolean().optional()),
 };
+/** The options as stored: the defaults (lip-synced, detected speakers, speed, music kept, speech as recorded) as no field at all. */
+const setOptions = (v: { audioOnly?: boolean; speakers?: number; quality?: string; removeMusic?: boolean; enhanceSpeech?: boolean }) => ({
+  ...(v.audioOnly ? { audioOnly: true } : {}),
+  ...(v.speakers ? { speakers: v.speakers } : {}),
+  ...(v.quality === "precision" ? { quality: "precision" as const } : {}),
+  ...(v.removeMusic ? { removeMusic: true } : {}),
+  ...(v.enhanceSpeech ? { enhanceSpeech: true } : {}),
+});
 
 export const translationRequestSchema = z.object({
   title: z.string().trim().min(1).max(120),
@@ -46,7 +57,7 @@ export const translationBatchSchema = z
       ctx.addIssue({ code: "custom", path: ["targetLanguages"], message: "Pick at least one language" });
       return z.NEVER;
     }
-    return { title: v.title, sourceVideoUrl: v.sourceVideoUrl, languages, ...(v.audioOnly ? { audioOnly: true } : {}), ...(v.speakers ? { speakers: v.speakers } : {}) };
+    return { title: v.title, sourceVideoUrl: v.sourceVideoUrl, languages, ...setOptions(v) };
   });
 
 /**
@@ -58,7 +69,7 @@ export async function createTranslations(input: z.infer<typeof translationBatchS
   const out: Translation[] = [];
   for (const language of input.languages) {
     const title = input.languages.length > 1 ? `${input.title} (${language})`.slice(0, 160) : input.title;
-    out.push(await createTranslation({ title, sourceVideoUrl: input.sourceVideoUrl, targetLanguage: language, audioOnly: input.audioOnly, speakers: input.speakers }, ownerId));
+    out.push(await createTranslation({ title, sourceVideoUrl: input.sourceVideoUrl, targetLanguage: language, ...setOptions(input) }, ownerId));
   }
   return out;
 }
@@ -66,8 +77,11 @@ export async function createTranslations(input: z.infer<typeof translationBatchS
 export async function createTranslation(req: z.infer<typeof translationRequestSchema>, ownerId: string = LOCAL_OWNER): Promise<Translation> {
   const provider = getTranslateProvider();
   const base: Translation = {
-    // A lip-synced dub is the default and is stored as no flag at all.
-    ...stripUndefined({ ...req, audioOnly: req.audioOnly || undefined }),
+    // Default options (a lip-synced dub at speed, music and speech as recorded) are stored as no field at all.
+    title: req.title,
+    sourceVideoUrl: req.sourceVideoUrl,
+    targetLanguage: req.targetLanguage,
+    ...setOptions(req),
     id: newId("tr"),
     ownerId,
     status: "queued",
@@ -116,6 +130,16 @@ export async function applyTranslationWebhook(providerName: string, body: unknow
   if (!parsed) return null;
   const item = await getStore().findBy<Translation>("translation", "providerJobId", parsed.providerJobId);
   if (!item) return null;
-  const next: Translation = { ...item, ...stripUndefined(parsed.update), updatedAt: nowIso() };
+  let update: Partial<Translation> = parsed.update;
+  // A completion callback carries the video only; the job's status also has its subtitle files.
+  if (update.status === "completed") {
+    try {
+      const status = await provider.getStatus(parsed.providerJobId);
+      if (status.status === "completed") update = { ...update, ...stripUndefined(status) };
+    } catch (err) {
+      console.error(`translation status after webhook failed for ${item.id}:`, err);
+    }
+  }
+  const next: Translation = { ...item, ...stripUndefined(update), updatedAt: nowIso() };
   return getStore().put("translation", next);
 }

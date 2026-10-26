@@ -311,7 +311,17 @@ export interface TranslationRequest {
   audioOnly?: boolean;
   /** How many people speak in the source video, so each gets a voice of their own; the provider guesses when absent. */
   speakers?: number;
+  /** "precision" takes longer for a more natural dub; the faster "speed" mode when absent. */
+  quality?: TranslationQuality;
+  /** Leave the source's background music out of the dub. */
+  removeMusic?: boolean;
+  /** Clean up the speech audio (noise, room echo). */
+  enhanceSpeech?: boolean;
 }
+
+/** How a dub is made: quickly, or more slowly for a more natural result. */
+export const TRANSLATION_QUALITIES = ["speed", "precision"] as const;
+export type TranslationQuality = (typeof TRANSLATION_QUALITIES)[number];
 
 /** The most speakers a dub can tell apart. */
 export const MAX_TRANSLATION_SPEAKERS = 10;
@@ -323,6 +333,8 @@ export interface Translation extends TranslationRequest {
   provider: string;
   providerJobId?: string;
   videoUrl?: string;
+  /** Subtitle files of the dub in its language, where the provider makes them. */
+  captionUrls?: { srt?: string; vtt?: string };
   error?: string;
   createdAt: string;
   updatedAt: string;

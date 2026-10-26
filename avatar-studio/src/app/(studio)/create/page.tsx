@@ -232,13 +232,19 @@ function CreateInner() {
   /** Replaces the scenes with a text, Markdown, or Word document's, one per paragraph or section, on the first scene's background. */
   async function importScript(file: File | undefined) {
     if (!file) return;
-    const word = /\.docx$/i.test(file.name) || file.type === DOCX_TYPE;
-    if (file.size > (word ? MAX_DOCX_BYTES : MAX_IMPORT_BYTES)) return setImportNote(`${file.name} is larger than ${(word ? MAX_DOCX_BYTES : MAX_IMPORT_BYTES) / 1_000_000} MB; import a plain-text, Markdown, or Word script.`);
+    const named = /\.(docx|docm|dotx|dotm|doc)$/i.test(file.name) || file.type === DOCX_TYPE;
+    if (file.size > (named ? MAX_DOCX_BYTES : MAX_IMPORT_BYTES)) {
+      return setImportNote(named ? `${file.name} is larger than ${MAX_DOCX_BYTES / 1_000_000} MB; remove its pictures or save it as plain text.` : `${file.name} is larger than ${MAX_IMPORT_BYTES / 1_000_000} MB; import a plain-text, Markdown, or Word script.`);
+    }
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    // A Word file is known by its first bytes too (a zip, or an older compound file), so one picked under another
+    // name is read as Word or refused with a reason, never imported as binary noise.
+    const word = named || (bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04) || (bytes[0] === 0xd0 && bytes[1] === 0xcf && bytes[2] === 0x11 && bytes[3] === 0xe0);
     let doc: ReturnType<typeof scenesFromText>;
     if (word) {
       // A Word document's headings start scenes (as a Markdown file's do) and its title names the video; its words are taken as written.
       try {
-        const read = readDocx(new Uint8Array(await file.arrayBuffer()), file.name);
+        const read = readDocx(bytes, file.name);
         doc = scenesFromText(read.text, { markdown: false });
         if (read.title) doc = { ...doc, title: read.title };
       } catch (e) {
@@ -247,7 +253,7 @@ function CreateInner() {
     } else {
       // Markdown is read as Markdown (list markers, emphasis, and links are not spoken); any other text as written.
       // A file not in UTF-8 is read in the code page Windows uses for the browser's language.
-      doc = scenesFromText(decodeScript(new Uint8Array(await file.arrayBuffer()), legacyEncodingFor(navigator.language)), { markdown: /\.(md|markdown)$/i.test(file.name) || file.type === "text/markdown" });
+      doc = scenesFromText(decodeScript(bytes, legacyEncodingFor(navigator.language)), { markdown: /\.(md|markdown)$/i.test(file.name) || file.type === "text/markdown" });
     }
     if (!doc.scenes.length) return setImportNote(`No script found in ${file.name}.`);
     // Anything already set up (a script, a clip, a presenter, a layout, more than one scene) is only replaced once confirmed.

@@ -437,6 +437,9 @@ test("importing a script file makes one scene per section", async ({ page }) => 
   // An old .doc says how to save it rather than importing nothing.
   await page.getByLabel("Import a script file").setInputFiles({ name: "old.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", buffer: Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]) });
   await expect(page.getByTestId("import-note")).toContainText("old.docx is password-protected or a Word 97–2003 file");
+  // One picked under another name is known by its first bytes, not imported as noise.
+  await page.getByLabel("Import a script file").setInputFiles({ name: "minutes.txt", mimeType: "text/plain", buffer: Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]) });
+  await expect(page.getByTestId("import-note")).toContainText("minutes.txt is password-protected or a Word 97–2003 file");
 });
 
 test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page }) => {

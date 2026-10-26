@@ -1268,6 +1268,10 @@ describe("personalized batches", () => {
     const empty = "name,msg\nAlice,\nBob,Hello Bob\nCara,[pause 2s]";
     assert.equal(previewBatch("{msg}", empty).problem, "Rows 1, 3 leave the script empty; fill in their cells.");
     assert.equal(previewBatch("{msg}", "name,msg\nAlice,\u200b\nBob,Hi").problem, "Row 1 leaves the script empty; fill in its cells.");
+    assert.equal(previewBatch("{msg}", "name,msg\nAlice,\u200f\nBob,\u202a\u00ad\nCara,Hi").problem, "Rows 1, 2 leave the script empty; fill in their cells.");
+    // Text joined by invisible characters (an emoji family, a Persian word with a non-joiner) is still text.
+    assert.equal(previewBatch("{msg}", "name,msg\nAlice,👨\u200d👩\u200d👧\nBob,می\u200cخواهم").problem, null);
+    assert.equal(previewBatch("\u200b", "name,msg\nAlice,Hi").problem, "The script is empty; write what the presenter says, with {column} placeholders for each row.");
     await assert.rejects(createBatch({ ...base, csv: empty }, "batch-empty"), /Rows 1, 3 leave the script empty/);
     const long = `name,msg\nAlice,Hi\nBob,${"word ".repeat(1200)}`;
     assert.equal(previewBatch("{msg}", long).problem, "Row 2 makes the script longer than the 5000 characters a video holds.");

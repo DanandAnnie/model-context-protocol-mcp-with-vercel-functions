@@ -12,6 +12,8 @@ import { getBrandKit } from "./brand";
 import { stripPauses } from "../pauses";
 
 export const MAX_BATCH_ROWS = 100;
+/** Characters that show nothing: zero-width spaces and joiners, direction marks and embeddings, a soft hyphen, a byte-order mark. */
+const INVISIBLE = /[\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g;
 /** What one video's script may hold, as for a video made in the editor. */
 const MAX_ROW_SCRIPT = 5000;
 
@@ -23,11 +25,11 @@ export function rowScriptProblems(scriptTemplate: string, rows: Array<Record<str
   const empty: number[] = [];
   const tooLong: number[] = [];
   // A template with nothing to say (no words, only pauses) is the problem itself, not its rows' cells.
-  if (!stripPauses(scriptTemplate).trim()) return { empty, tooLong, blankTemplate: true };
+  if (!stripPauses(scriptTemplate).replace(INVISIBLE, "").trim()) return { empty, tooLong, blankTemplate: true };
   rows.forEach((row, i) => {
     const script = fillTemplate(scriptTemplate, row).trim();
     // Invisible characters a spreadsheet can leave in a cell (zero-width spaces, a byte-order mark) say nothing either.
-    if (!stripPauses(script).replace(/[\u200b-\u200d\u2060\ufeff]/g, "").trim()) empty.push(i + 1);
+    if (!stripPauses(script).replace(INVISIBLE, "").trim()) empty.push(i + 1);
     else if (script.length > MAX_ROW_SCRIPT) tooLong.push(i + 1);
   });
   return { empty, tooLong, blankTemplate: false };

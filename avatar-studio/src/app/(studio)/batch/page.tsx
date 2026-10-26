@@ -7,7 +7,7 @@ import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api } from "@/lib/client";
-import type { AspectRatio, Avatar, Resolution, Voice } from "@/lib/types";
+import { VOICE_EMOTIONS, type AspectRatio, type Avatar, type Background, type CaptionStyle, type Resolution, type Voice, type VideoTemplate, type VoiceEmotion } from "@/lib/types";
 
 const SAMPLE_CSV = `name,property,move_in
 Jordan,12 Elm Street,November 1
@@ -34,6 +34,14 @@ export default function BatchPage() {
   const [aspect, setAspect] = useState<AspectRatio>("16:9");
   const [resolution, setResolution] = useState<Resolution>("1080p");
   const [captions, setCaptions] = useState(false);
+  const [speed, setSpeed] = useState(1);
+  const [pitch, setPitch] = useState(0);
+  const [emotion, setEmotion] = useState<VoiceEmotion | "">("");
+  // Set only by a saved template: the batch API takes them, the page has no controls of its own for them.
+  const [captionStyle, setCaptionStyle] = useState<CaptionStyle | undefined>();
+  const [background, setBackground] = useState<Background | undefined>();
+  const [startedFrom, setStartedFrom] = useState("");
+  const { data: templateData } = useApi<{ templates: VideoTemplate[] }>("/api/templates");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -55,6 +63,29 @@ export default function BatchPage() {
     return () => clearTimeout(t);
   }, [template, csv]);
 
+  // A saved template brings its script (scenes joined, one paragraph each) and every setting the batch takes.
+  function startFrom(id: string) {
+    setStartedFrom(id);
+    const t = templateData?.templates.find((x) => x.id === id);
+    if (!t) {
+      // "None": drop the settings the page has no controls for, so they do not ride along unseen.
+      setCaptionStyle(undefined);
+      setBackground(undefined);
+      return;
+    }
+    setTemplate(t.scenes.map((sc) => sc.script.trim()).filter(Boolean).join("\n\n"));
+    if (t.avatarId && avatarData?.avatars.some((a) => a.id === t.avatarId)) setAvatarId(t.avatarId);
+    if (t.voiceId && voiceData?.voices.some((v) => v.id === t.voiceId)) setVoiceId(t.voiceId);
+    setAspect(t.aspect);
+    setResolution(t.resolution ?? "1080p");
+    setCaptions(t.captions);
+    setCaptionStyle(t.captionStyle);
+    setSpeed(t.speed);
+    setPitch(t.pitch ?? 0);
+    setEmotion(t.emotion ?? "");
+    setBackground(t.scenes[0]?.background);
+  }
+
   function onFile(file: File | undefined) {
     if (!file) return;
     file.text().then(setCsv);
@@ -66,7 +97,7 @@ export default function BatchPage() {
     try {
       const result = await api<{ batchId: string; videos: unknown[]; skipped: Array<{ row: number; reason: string }>; failed: Array<{ row: number; reason: string }> }>("/api/videos/batch", {
         method: "POST",
-        body: JSON.stringify({ title, scriptTemplate: template, csv, avatarId, voiceId, aspect, resolution, captions }),
+        body: JSON.stringify({ title, scriptTemplate: template, csv, avatarId, voiceId, aspect, resolution, captions, ...(captions && captionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...(background ? { background } : {}) }),
       });
       const note = `${result.skipped.length ? `&skipped=${result.skipped.length}` : ""}${result.failed.length ? `&failed=${result.failed.length}` : ""}`;
       router.push(`/videos?batch=${result.batchId}${note}`);
@@ -94,6 +125,18 @@ export default function BatchPage() {
       <div className="grid gap-6 xl:grid-cols-[1.1fr_1fr]">
         <div className="space-y-5">
           <Card className="space-y-4 p-4">
+            {!!templateData?.templates.length && (
+              <Field label="Start from a saved template" hint="Fills in its script and settings; scenes become paragraphs of one script, using the first scene's background.">
+                <select className={inputClass} value={startedFrom} onChange={(e) => startFrom(e.target.value)} aria-label="Start from a saved template">
+                  <option value="">None</option>
+                  {templateData.templates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.title}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
             <Field label="Batch title" hint="Each video is titled with this plus the first column of its row.">
               <input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} />
             </Field>
@@ -136,6 +179,22 @@ export default function BatchPage() {
               <span className="text-sm font-medium text-slate-800">Captions</span>
               <input type="checkbox" checked={captions} onChange={(e) => setCaptions(e.target.checked)} className="h-5 w-5 accent-brand-600" />
             </label>
+            <Field label={`Speaking speed · ${speed.toFixed(2)}x`}>
+              <input type="range" min={0.5} max={1.5} step={0.05} value={speed} onChange={(e) => setSpeed(Number(e.target.value))} aria-label="Speaking speed" className="w-full accent-brand-600" />
+            </Field>
+            <Field label={`Voice pitch · ${pitch > 0 ? `+${pitch}` : pitch === 0 ? "natural" : pitch}`} hint="HeyGen shifts the voice; other renderers keep its natural pitch.">
+              <input type="range" min={-50} max={50} step={5} value={pitch} onChange={(e) => setPitch(Number(e.target.value))} aria-label="Voice pitch" className="w-full accent-brand-600" />
+            </Field>
+            <Field label="Voice emotion" hint="HeyGen voices that support it speak in this style.">
+              <select className={inputClass} value={emotion} onChange={(e) => setEmotion((VOICE_EMOTIONS as readonly string[]).includes(e.target.value) ? (e.target.value as VoiceEmotion) : "")} aria-label="Voice emotion">
+                <option value="">Natural</option>
+                {VOICE_EMOTIONS.map((e) => (
+                  <option key={e} value={e}>
+                    {e}
+                  </option>
+                ))}
+              </select>
+            </Field>
           </Card>
         </div>
 

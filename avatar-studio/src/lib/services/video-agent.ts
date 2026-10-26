@@ -53,8 +53,8 @@ function cut(text: string, max: number): string {
   const head = text.slice(0, max);
   const end = Math.max(...[". ", "! ", "? "].map((p) => head.lastIndexOf(p)));
   if (end > max / 2) return head.slice(0, end + 1);
-  // Between words, and never inside a pause marker the cut would leave half of.
-  return head.replace(/\s+\S*$/, "").replace(/\s*\[[^\]]*$/, "").trim();
+  // Between words, and never inside a pause marker the cut would leave half of ("[pause", "[ pause 2").
+  return head.replace(/\s+\S*$/, "").replace(/\s*\[\s*(?:pause(?:\s+\d{0,2}(?:[.,]\d{0,2})?\s*s?)?\s*)?$/i, "").trim();
 }
 
 /**
@@ -70,8 +70,11 @@ export function fitPlan(plan: VideoPlan): VideoPlan["scenes"] {
     if (out.length >= Math.min(MAX_PLANNED_SCENES, MAX_SCENES)) break;
     const room = MAX_SCRIPT - used - (out.length ? 2 : 0);
     if (script.length > room) {
-      const kept = out.length ? "" : cut(script, room);
-      if (stripPauses(kept).trim()) out.push({ ...scene, script: kept });
+      if (out.length) break;
+      // A first scene longer than a whole video is cut; one that leaves only pauses gives way to the next.
+      const kept = cut(script, room);
+      if (!stripPauses(kept).trim()) continue;
+      out.push({ ...scene, script: kept });
       break;
     }
     out.push({ ...scene, script });

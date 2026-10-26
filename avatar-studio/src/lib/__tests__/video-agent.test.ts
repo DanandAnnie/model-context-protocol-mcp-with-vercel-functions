@@ -143,6 +143,17 @@ describe("video agent", () => {
     assert.equal(marker[0].script, "a".repeat(4990));
     const pauses = fitPlan({ title: "t", orientation: "landscape", scenes: [{ script: `${"[pause 1s] ".repeat(600)}Hello there.`, framing: "full" }] });
     assert.deepEqual(pauses, []);
+    // ...and the next scene takes its place; a bracket in the prose is not taken for a marker.
+    const next = fitPlan({ title: "t", orientation: "landscape", scenes: [{ script: `${"[pause 1s] ".repeat(600)}Hello there.`, framing: "full" }, { script: "Welcome aboard.", framing: "full" }] });
+    assert.deepEqual(next.map((sc) => sc.script), ["Welcome aboard."]);
+    const bracket = fitPlan({ title: "t", orientation: "landscape", scenes: [{ script: `Press the [ key, then ${"word ".repeat(1200)}`, framing: "full" }] });
+    assert.ok(bracket[0].script.length > 4900, `${bracket[0].script.length} characters kept`);
+    for (const marker of ["[pause 2s]", "[ pause 1.5s ]", "[pause]", "[ pause 2 s]"]) {
+      for (let at = 4985; at <= 5000; at++) {
+        const [scene] = fitPlan({ title: "t", orientation: "landscape", scenes: [{ script: `${"a ".repeat(at / 2)}${marker} more words here`, framing: "full" }] });
+        assert.ok(!/\[[^\]]*$/.test(scene.script), `${marker} at ${at}: ${scene.script.slice(-20)}`);
+      }
+    }
   });
 
   it("writes from a web page and renders the plan as one video", async () => {

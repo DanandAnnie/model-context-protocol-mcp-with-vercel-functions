@@ -135,6 +135,8 @@ export interface Scene {
   avatarId?: string;
   /** Voice for this scene; the video's voice when absent. Ignored when the scene uses an audio clip. */
   voiceId?: string;
+  /** Speaking speed for this scene (0.5–1.5); the video's when absent. Ignored when the scene uses an audio clip. */
+  speed?: number;
   /**
    * Recorded or uploaded audio the presenter lip-syncs to instead of speaking `script` with a voice.
    * `script` then holds what is said, for captions and search.

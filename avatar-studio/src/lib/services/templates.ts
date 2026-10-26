@@ -17,6 +17,7 @@ const sceneSchema = z.object({
   background: backgroundSchema,
   avatarId: z.string().min(1).optional(),
   voiceId: z.string().min(1).optional(),
+  speed: z.number().min(0.5).max(1.5).optional(),
   layout: sceneLayoutSchema.optional(),
 });
 
@@ -62,6 +63,7 @@ export async function createTemplate(input: TemplateInput, ownerId: string = LOC
       background: sc.background,
       ...(sc.avatarId ? { avatarId: sc.avatarId } : {}),
       ...(sc.voiceId ? { voiceId: sc.voiceId } : {}),
+      ...(sc.speed ? { speed: sc.speed } : {}),
       ...(sc.layout ? { layout: sc.layout } : {}),
     }));
     base = {

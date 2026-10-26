@@ -44,6 +44,8 @@ export const videoRequestSchema = z
           /** Presenter and voice for this scene; the video's when omitted. */
           avatarId: z.string().min(1).optional(),
           voiceId: z.string().min(1).optional(),
+          /** Speaking speed for this scene; the video's when omitted. */
+          speed: z.number().min(0.5).max(1.5).optional(),
           /** An audio clip the presenter lip-syncs to; the script is then what the clip says, for captions and search. */
           audioId: z.string().min(1).max(64).optional(),
           layout: sceneLayoutSchema.optional(),
@@ -242,6 +244,8 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
       avatarName: sc.avatarId ? cast.avatars[sc.avatarId]?.name : undefined,
       // An audio scene has no voice of its own: the clip speaks.
       voiceId: clip ? undefined : sc.voiceId,
+      // A clip has its own pace; a scene's speed equal to the video's says nothing of its own.
+      speed: clip || sc.speed === undefined || sc.speed === req.speed ? undefined : sc.speed,
       voiceName: !clip && sc.voiceId ? cast.voices[sc.voiceId]?.name : undefined,
       audioName: clip?.name,
       audioSeconds: clip?.durationSec,
@@ -476,11 +480,16 @@ export const captionCuesSchema = z
     });
   });
 
-/** The running time captions are timed to: the rendered length, or a reading-speed estimate while the provider has not reported one. */
-export function captionDurationSec(video: Pick<Video, "script" | "durationSec" | "speed">): number {
+/**
+ * The running time captions are timed to: the rendered length, or a reading-speed estimate while the provider has
+ * not reported one (each scene at its own speed when scenes set one).
+ */
+export function captionDurationSec(video: Pick<Video, "script" | "durationSec" | "speed"> & { scenes?: Array<Pick<Scene, "script" | "speed">> }): number {
   if (video.durationSec) return video.durationSec;
-  const words = stripPauses(video.script).trim().split(/\s+/).filter(Boolean).length;
-  return Math.max(1, Math.round(words / 2.5 / (video.speed || 1) + pauseSeconds(video.script)));
+  const words = (text: string) => stripPauses(text).trim().split(/\s+/).filter(Boolean).length;
+  const parts = video.scenes?.length ? video.scenes : [{ script: video.script }];
+  const seconds = parts.reduce((sum, sc) => sum + words(sc.script) / 2.5 / (("speed" in sc && sc.speed) || video.speed || 1) + pauseSeconds(sc.script), 0);
+  return Math.max(1, Math.round(seconds));
 }
 
 /**

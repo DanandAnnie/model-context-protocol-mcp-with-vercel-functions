@@ -74,6 +74,9 @@ function writeDraft(key: string, d: Draft | null) {
 /** Thrown when the user declines to replace the scenes once a deck's page count is known. */
 class ImportCancelled extends Error {}
 
+/** The paces a scene can take instead of the video's (the video's own speed is the default choice). */
+const SCENE_SPEEDS = [0.75, 0.85, 0.9, 1, 1.1, 1.15, 1.25];
+
 /** A deck larger than this is refused before pdf.js reads it. */
 const MAX_PDF_BYTES = 50_000_000;
 /** A PowerPoint file larger than this is refused before it is unpacked (its pictures and video count, though only its text is read). */
@@ -97,13 +100,15 @@ function slidesForPages(slides: PptxSlide[], pages: number): { slides: PptxSlide
   return { slides: shown, matches: shown.length === pages };
 }
 
-const newScene = (script = "", background: Background = DEFAULT_BG, presenter: Pick<Scene, "avatarId" | "voiceId" | "layout" | "audioId"> = {}): Scene => ({
+const newScene = (script = "", background: Background = DEFAULT_BG, presenter: Pick<Scene, "avatarId" | "voiceId" | "layout" | "audioId" | "speed"> = {}): Scene => ({
   script,
   background,
   ...(presenter.avatarId ? { avatarId: presenter.avatarId } : {}),
   ...(presenter.voiceId && !presenter.audioId ? { voiceId: presenter.voiceId } : {}),
   ...(presenter.layout ? { layout: presenter.layout } : {}),
   ...(presenter.audioId ? { audioId: presenter.audioId } : {}),
+  // A clip keeps its own pace.
+  ...(presenter.speed && !presenter.audioId ? { speed: presenter.speed } : {}),
 });
 const FRAMING_LABELS: Record<PresenterFraming, string> = { full: "Full", closeUp: "Close-up", circle: "Circle" };
 /** The same stacks the share player's captions use (globals.css), so the stage previews the chosen typeface. */
@@ -470,7 +475,7 @@ function CreateInner() {
         const dropAudio = !!sc.audioId && !!clipIds && !clipIds.has(sc.audioId);
         if (!dropAvatar && !dropVoice && !dropAudio) return sc;
         changed = true;
-        return newScene(sc.script, sc.background, { avatarId: dropAvatar ? undefined : sc.avatarId, voiceId: dropVoice ? undefined : sc.voiceId, layout: sc.layout, audioId: dropAudio ? undefined : sc.audioId });
+        return newScene(sc.script, sc.background, { avatarId: dropAvatar ? undefined : sc.avatarId, voiceId: dropVoice ? undefined : sc.voiceId, layout: sc.layout, audioId: dropAudio ? undefined : sc.audioId, speed: sc.speed });
       });
       return changed ? next : prev;
     });
@@ -726,15 +731,17 @@ function CreateInner() {
   }, [voiceData, voiceQuery, voiceLanguage, favorites.voiceIds]);
 
   const words = wordCount(script);
-  /** A typed scene lasts as long as its words take at the chosen speed; an audio scene as long as its clip. */
+  /** A typed scene lasts as long as its words take at its speed (its own, else the video's); an audio scene as long as its clip. */
   const sceneSeconds = (sc: Scene) => {
     const clip = sc.audioId ? clips.find((c) => c.id === sc.audioId) : undefined;
-    return clip ? Math.round(clip.durationSec) : estimateSeconds(sc.script, speed);
+    return clip ? Math.round(clip.durationSec) : estimateSeconds(sc.script, sc.speed ?? speed);
   };
-  // Typed scenes are estimated together, as before audio scenes existed, so short scenes are not each rounded up.
+  // Typed scenes at one speed are estimated together, as before audio scenes existed, so short scenes are not each rounded up.
+  const typedBySpeed = new Map<number, string[]>();
+  for (const sc of scenes) if (!sc.audioId) typedBySpeed.set(sc.speed ?? speed, [...(typedBySpeed.get(sc.speed ?? speed) ?? []), sc.script]);
   const seconds =
     scenes.reduce((sum, sc) => sum + (sc.audioId ? sceneSeconds(sc) : 0), 0) +
-    estimateSeconds(scenes.filter((sc) => !sc.audioId).map((sc) => sc.script).join("\n\n"), speed);
+    [...typedBySpeed].reduce((sum, [pace, scripts]) => sum + estimateSeconds(scripts.join("\n\n"), pace), 0);
   const allScenesFilled = scenes.every((sc) => stripPauses(sc.script).trim().length > 0);
   // The server takes up to 5000 characters of script across all scenes (joined by a blank line).
   const scriptChars = scenes.map((sc) => sc.script.trim()).join("\n\n").length;
@@ -981,6 +988,15 @@ function CreateInner() {
                   ))}
                 </select>
                 {!active.audioId && (
+                  // HeyGen speaks each scene at its own pace, as its studio lets each scene set one.
+                  <select aria-label="Scene speed" className={`${inputClass} w-auto py-1 text-xs`} value={active.speed ?? ""} onChange={(e) => updateScene(activeIdx, { speed: e.target.value ? Number(e.target.value) : undefined })}>
+                    <option value="">{`Video speed (${speed.toFixed(2)}x)`}</option>
+                    {[...new Set([...SCENE_SPEEDS, ...(active.speed ? [active.speed] : [])])].sort((x, y) => x - y).map((v) => (
+                      <option key={v} value={v}>{`${v.toFixed(2)}x`}</option>
+                    ))}
+                  </select>
+                )}
+                {!active.audioId && (
                   <select aria-label="Scene voice" className={`${inputClass} w-auto py-1 text-xs`} value={active.voiceId ?? ""} onChange={(e) => updateScene(activeIdx, { voiceId: e.target.value || undefined })}>
                     <option value="">{voice ? `Video voice (${voice.name})` : "Video voice"}</option>
                     {(voiceData?.voices ?? []).map((v) => (
@@ -1119,7 +1135,7 @@ function CreateInner() {
                     className="px-3 py-1.5"
                     disabled={!active.script.trim()}
                     loading={busyId === sceneVoice.id}
-                    onClick={() => play(sceneVoice, active.script.slice(0, 400).replace(/\[[^\]]*$/, ""), speed).catch((e) => setErr(e.message))}
+                    onClick={() => play(sceneVoice, active.script.slice(0, 400).replace(/\[[^\]]*$/, ""), active.speed ?? speed).catch((e) => setErr(e.message))}
                   >
                     {playingId === sceneVoice.id ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                     {playingId === sceneVoice.id ? "Stop" : "Listen"}

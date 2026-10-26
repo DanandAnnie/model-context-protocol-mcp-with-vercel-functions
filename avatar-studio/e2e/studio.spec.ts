@@ -457,6 +457,8 @@ test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page 
   await page.getByLabel("Scene avatar").selectOption({ label: "Marcus Hill" });
   await page.getByLabel("Scene voice").selectOption({ label: "Olivia" });
   await expect(page.getByTestId("stage-avatar")).toHaveAttribute("alt", "Marcus Hill");
+  // And its own pace, which the scene's running time follows.
+  await page.getByLabel("Scene speed").selectOption("0.75");
   // The presenter can be sized and moved per scene; the stage preview follows and the scene stores it.
   await page.getByTestId("scene-layout").locator("summary").click();
   await page.getByLabel("Presenter size").fill("1.2");
@@ -483,6 +485,7 @@ test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page 
   const id = page.url().split("/").pop()!;
   const video = (await (await page.request.get(`/api/videos/${id}`)).json()).video;
   expect(video.pitch).toBe(10);
+  expect(video.scenes.map((sc: { speed?: number }) => sc.speed)).toEqual([undefined, 0.75]);
   expect(video.emotion).toBe("Friendly");
   await expect(page.getByText("Voice emotion")).toBeVisible();
   expect(video.scenes).toHaveLength(2);
@@ -492,12 +495,13 @@ test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page 
   expect((await page.request.post("/api/videos", { data: { title: "Bad", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9", background: { type: "video", value: "loop.mp4" } } })).status()).toBe(400);
   expect(video.scenes[0].layout).toBeUndefined();
   await expect(page.getByText("Script · 2 scenes")).toBeVisible();
-  await expect(page.getByText("Marcus Hill · Olivia · presenter in a circle, 120%, moved")).toBeVisible();
+  await expect(page.getByText("Marcus Hill · Olivia · 0.75x speed · presenter in a circle, 120%, moved")).toBeVisible();
   // Edit a copy keeps the scene's presenter.
   await page.goto(`/create?from=${id}`);
   await expect(page.getByText(/2 scenes/)).toBeVisible();
   await page.getByRole("button", { name: /^Scene 2,/ }).click();
   await expect(page.getByLabel("Scene voice")).toHaveValue("stock_voice_3");
+  await expect(page.getByLabel("Scene speed")).toHaveValue("0.75");
   // And the copy keeps the voice settings.
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByLabel("Voice emotion")).toHaveValue("Friendly");

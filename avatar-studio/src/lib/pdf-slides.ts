@@ -36,7 +36,8 @@ export function pageText(runs: TextRun[]): string {
 /**
  * The scripts for a deck's pages: each page's lines joined into sentences, ending in a full stop where a line has
  * no closing punctuation (a slide title or bullet), and the whole kept within a video's script budget by giving each
- * page an equal share, cut at a word. `truncated` is true when anything was cut.
+ * page an equal share, cut at a word. The budget counts the blank line the editor and the server put between scenes.
+ * `truncated` is true when anything was cut.
  */
 export function slideScripts(texts: string[], budget = MAX_SCRIPT_CHARS): { scripts: string[]; truncated: boolean } {
   const spoken = texts.map((t) =>
@@ -48,10 +49,11 @@ export function slideScripts(texts: string[], budget = MAX_SCRIPT_CHARS): { scri
       .join(" "),
   );
   const total = spoken.reduce((n, s) => n + s.length, 0);
-  if (total <= budget) return { scripts: spoken, truncated: false };
+  const room = Math.max(0, budget - SCENE_SEPARATOR.length * Math.max(0, spoken.length - 1));
+  if (total <= room) return { scripts: spoken, truncated: false };
   // Room left by short pages goes to the long ones.
   const scripts = [...spoken];
-  let left = budget;
+  let left = room;
   let open = scripts.map((_, i) => i).sort((a, b) => scripts[a].length - scripts[b].length);
   while (open.length) {
     const share = Math.floor(left / open.length);
@@ -66,61 +68,118 @@ export function slideScripts(texts: string[], budget = MAX_SCRIPT_CHARS): { scri
   return { scripts, truncated: true };
 }
 
+/** How scenes are joined into the video's script, which the 5000-character limit applies to. */
+const SCENE_SEPARATOR = "\n\n";
+
 function cutAtWord(text: string, max: number): string {
   if (text.length <= max) return text;
+  if (max <= 1) return "";
   const cut = text.slice(0, Math.max(0, max - 1));
   const space = cut.lastIndexOf(" ");
   return `${(space > max / 2 ? cut.slice(0, space) : cut).trim()}…`;
 }
 
-/** The longest edge a page is drawn at: a 1080p frame's width. */
-const PAGE_EDGE = 1920;
+/** The frames a deck is drawn into, by the first page's shape: the video's format at 1080p. */
+export const SLIDE_FRAMES = {
+  "16:9": { width: 1920, height: 1080 },
+  "9:16": { width: 1080, height: 1920 },
+  "1:1": { width: 1080, height: 1080 },
+} as const;
+export type SlideAspect = keyof typeof SLIDE_FRAMES;
+
+/** The format for a page of this shape: wide pages (16:9 and 4:3 alike) landscape, tall ones portrait. */
+export function slideAspect(width: number, height: number): SlideAspect {
+  const ratio = width / height;
+  return ratio > 1.2 ? "16:9" : ratio < 0.83 ? "9:16" : "1:1";
+}
+
 /** What one background image may weigh on the server. */
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
+/** How long pdf.js may take to open a deck before the import gives up (a worker that never loads would never answer). */
+const OPEN_TIMEOUT_MS = 60_000;
+
+/** The worker's address, emitted by the bundler next to the app's other static files. */
+const WORKER_URL = () => new URL("pdfjs-dist/legacy/build/pdf.worker.min.mjs", import.meta.url).toString();
+
+/** The canvas as a JPEG data URL under the server's size cap, lowering the quality until it fits. */
+function encode(canvas: HTMLCanvasElement): string {
+  for (const quality of [0.85, 0.7, 0.55, 0.4]) {
+    const url = canvas.toDataURL("image/jpeg", quality);
+    if (!url.startsWith("data:image/jpeg")) throw new Error("This browser could not encode the slide; try a smaller PDF");
+    if ((url.length - url.indexOf(",") - 1) * 0.75 <= MAX_IMAGE_BYTES) return url;
+  }
+  throw new Error("A slide is too detailed to fit in 3 MB even at low quality");
+}
 
 /**
- * Renders up to `MAX_SCENES` pages of a PDF in the browser. `total` is the deck's page count, so the caller can say
- * when pages were left out. Throws a readable error for a file pdf.js cannot open (not a PDF, password-protected).
+ * Draws up to `MAX_SCENES` pages of a PDF in the browser, one at a time, each centred in the frame of the format the
+ * first page's shape calls for (so a 4:3 slide is letterboxed in white rather than cropped by the stage), and hands
+ * each to `onPage` (which uploads it) before drawing the next, so only one page's picture is held at a time.
+ * `onStart` hears how many pages will be drawn before any is, and may throw to stop (for instance when the account
+ * has no room for that many images). Throws a readable error for a file pdf.js cannot open (not a PDF,
+ * password-protected) or a worker that fails to load.
  */
-export async function renderPdf(file: File, onPage?: (done: number, of: number) => void): Promise<{ pages: SlidePage[]; total: number }> {
+export async function renderPdf(
+  file: File,
+  handlers: {
+    onStart?: (info: { count: number; total: number; aspect: SlideAspect }) => void | Promise<void>;
+    onPage: (page: SlidePage, index: number, count: number) => Promise<void>;
+  },
+): Promise<{ count: number; total: number; aspect: SlideAspect }> {
   // The legacy build: the modern one calls very new JavaScript (Map.prototype.getOrInsertComputed, for one) that
   // current Chrome and Safari releases do not all have yet; the legacy build carries polyfills for it.
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  if (!pdfjs.GlobalWorkerOptions.workerPort) {
-    pdfjs.GlobalWorkerOptions.workerPort = new Worker(new URL("pdfjs-dist/legacy/build/pdf.worker.min.mjs", import.meta.url), { type: "module" });
-  }
+  // pdf.js starts the worker itself from this address and reports one that fails to load.
+  if (!pdfjs.GlobalWorkerOptions.workerSrc) pdfjs.GlobalWorkerOptions.workerSrc = WORKER_URL();
   const task = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
   let doc: Awaited<typeof task.promise>;
   try {
-    doc = await task.promise;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(Object.assign(new Error("timeout"), { name: "TimeoutException" })), OPEN_TIMEOUT_MS);
+    });
+    doc = await Promise.race([task.promise, timeout]).finally(() => clearTimeout(timer));
   } catch (err) {
-    await task.destroy();
+    await task.destroy().catch(() => undefined);
     const name = (err as { name?: string }).name;
-    throw new Error(name === "PasswordException" ? `${file.name} is password-protected; save a copy without the password` : `${file.name} could not be read as a PDF`);
+    if (name === "PasswordException") throw new Error(`${file.name} is password-protected; save a copy without the password`);
+    if (name === "TimeoutException") throw new Error("The PDF reader did not start; reload the page and try again");
+    throw new Error(`${file.name} could not be read as a PDF`);
   }
   try {
     const count = Math.min(doc.numPages, MAX_SCENES);
-    const pages: SlidePage[] = [];
-    for (let n = 1; n <= count; n++) {
-      const page = await doc.getPage(n);
-      const base = page.getViewport({ scale: 1 });
-      const viewport = page.getViewport({ scale: PAGE_EDGE / Math.max(base.width, base.height) });
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.round(viewport.width);
-      canvas.height = Math.round(viewport.height);
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("This browser cannot draw the slides");
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      await page.render({ canvas, canvasContext: ctx, viewport }).promise;
-      let image = canvas.toDataURL("image/jpeg", 0.85);
-      if ((image.length - image.indexOf(",") - 1) * 0.75 > MAX_IMAGE_BYTES) image = canvas.toDataURL("image/jpeg", 0.6);
-      const text = pageText((await page.getTextContent()).items as TextRun[]);
-      pages.push({ image, text, width: canvas.width, height: canvas.height });
-      page.cleanup();
-      onPage?.(n, count);
+    const first = (await doc.getPage(1)).getViewport({ scale: 1 });
+    const aspect = slideAspect(first.width, first.height);
+    const frame = SLIDE_FRAMES[aspect];
+    await handlers.onStart?.({ count, total: doc.numPages, aspect });
+    const canvas = document.createElement("canvas");
+    canvas.width = frame.width;
+    canvas.height = frame.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("This browser cannot draw the slides");
+    try {
+      for (let n = 1; n <= count; n++) {
+        const page = await doc.getPage(n);
+        const base = page.getViewport({ scale: 1 });
+        const scale = Math.min(frame.width / base.width, frame.height / base.height);
+        const viewport = page.getViewport({ scale });
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, frame.width, frame.height);
+        // Centred: the page's own transform is offset by the bars on either side.
+        const offset: [number, number, number, number, number, number] = [1, 0, 0, 1, (frame.width - viewport.width) / 2, (frame.height - viewport.height) / 2];
+        await page.render({ canvas, viewport, transform: offset }).promise;
+        const text = pageText((await page.getTextContent()).items as TextRun[]);
+        const image = encode(canvas);
+        page.cleanup();
+        await handlers.onPage({ image, text, width: frame.width, height: frame.height }, n - 1, count);
+      }
+    } finally {
+      // Hand the bitmap back at once instead of waiting for garbage collection (iOS caps canvas memory).
+      canvas.width = 0;
+      canvas.height = 0;
     }
-    return { pages, total: doc.numPages };
+    return { count, total: doc.numPages, aspect };
   } finally {
     await task.destroy();
   }

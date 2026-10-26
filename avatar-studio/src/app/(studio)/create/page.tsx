@@ -215,53 +215,75 @@ function CreateInner() {
   }
   const slidesInput = useRef<HTMLInputElement>(null);
   const [slidesProgress, setSlidesProgress] = useState<string | null>(null);
+  // The scenes as they are now, so an import that took a while can tell whether they were edited meanwhile.
+  const scenesNow = useRef(scenes);
+  scenesNow.current = scenes;
   /**
    * Replaces the scenes with a slide deck saved as PDF, like HeyGen's PDF import: each page (up to the scene limit)
    * becomes a scene with the page as its uploaded background image and the page's text as a first draft of the
-   * script, and the format follows the first page's shape.
+   * script, and the format follows the first page's shape. Pages are drawn and uploaded one at a time.
    */
   async function importSlides(file: File | undefined) {
     if (!file || slidesProgress) return;
     if (file.size > MAX_PDF_BYTES) return setImportNote(`${file.name} is larger than ${MAX_PDF_BYTES / 1_000_000} MB; save the deck as a smaller PDF.`);
-    const setUp = scenes.length > 1 || scenes.some((sc) => sc.script.trim() || sc.audioId || sc.avatarId || sc.voiceId || sc.layout);
-    if (setUp && !window.confirm(`Replace the ${scenes.length === 1 ? "current scene" : `current ${scenes.length} scenes`} with the pages of ${file.name}?`)) return;
+    const setUp = (list: Scene[]) => list.length > 1 || list.some((sc) => sc.script.trim() || sc.audioId || sc.avatarId || sc.voiceId || sc.layout);
+    if (setUp(scenes) && !window.confirm(`Replace the ${scenes.length === 1 ? "current scene" : `current ${scenes.length} scenes`} with the pages of ${file.name}?`)) return;
+    const before = scenesNow.current;
     setImportNote(null);
     setSlidesProgress(`Reading ${file.name}…`);
+    const base = file.name.replace(/\.pdf$/i, "").slice(0, 60) || "Slides";
     const made: Backdrop[] = [];
+    const texts: string[] = [];
     try {
-      const { pages, total } = await renderPdf(file, (done, of) => setSlidesProgress(`Drawing page ${done} of ${of}…`));
-      if (!pages.length) return setImportNote(`${file.name} has no pages.`);
-      const room = MAX_BACKDROPS - (backdropData?.backdrops.length ?? 0);
-      if (pages.length > room) {
-        return setImportNote(`${file.name} needs ${pages.length} background images, and ${room <= 0 ? "none are" : `only ${room} ${room === 1 ? "is" : "are"}`} left of the ${MAX_BACKDROPS} an account keeps; delete some under Background → Your images.`);
+      const { count, total, aspect: deckAspect } = await renderPdf(file, {
+        // The image allowance is read fresh, not from a list that may be stale or still loading.
+        onStart: async ({ count }) => {
+          const { backdrops } = await api<{ backdrops: Backdrop[] }>("/api/backdrops");
+          const room = MAX_BACKDROPS - backdrops.length;
+          if (count > room) {
+            throw new Error(`${file.name} needs ${count} background images, and ${room <= 0 ? "none are" : `only ${room} ${room === 1 ? "is" : "are"}`} left of the ${MAX_BACKDROPS} an account keeps; delete some under Background → Your images`);
+          }
+        },
+        onPage: async (page, i, of) => {
+          setSlidesProgress(`Importing page ${i + 1} of ${of}…`);
+          const { backdrop } = await api<{ backdrop: Backdrop }>("/api/backdrops", { method: "POST", body: JSON.stringify({ name: `${base} – page ${i + 1}`, image: page.image }) });
+          made.push(backdrop);
+          texts.push(page.text);
+        },
+      });
+      if (!count) return setImportNote(`${file.name} has no pages.`);
+      // Scenes edited while the deck was importing are not replaced without asking again.
+      if (scenesNow.current !== before && setUp(scenesNow.current) && !window.confirm(`The scenes changed while ${file.name} was importing. Replace them with its pages anyway?`)) {
+        return setImportNote(`The ${count} pages of ${file.name} are under Background → Your images; the scenes were left as they are.`);
       }
-      const base = file.name.replace(/\.pdf$/i, "").slice(0, 60) || "Slides";
-      for (const [i, page] of pages.entries()) {
-        setSlidesProgress(`Uploading page ${i + 1} of ${pages.length}…`);
-        const { backdrop } = await api<{ backdrop: Backdrop }>("/api/backdrops", { method: "POST", body: JSON.stringify({ name: `${base} – page ${i + 1}`, image: page.image }) });
-        made.push(backdrop);
-      }
-      const { scripts, truncated } = slideScripts(pages.map((p) => p.text));
-      setScenes(pages.map((_, i) => newScene(scripts[i], { type: "image", value: backdropPath(made[i].id) })));
+      const { scripts, truncated } = slideScripts(texts);
+      // The new images join the list in the same update as the scenes, so the check for scenes naming an image that
+      // is gone never sees one without the other.
+      setBackdropData((d) => ({ backdrops: [...[...made].reverse(), ...(d?.backdrops ?? []).filter((b) => !made.some((m) => m.id === b.id))] }));
+      setScenes(made.map((b, i) => newScene(scripts[i], { type: "image", value: backdropPath(b.id) })));
       setActiveIdx(0);
-      const ratio = pages[0].width / pages[0].height;
-      setAspect(ratio > 1.2 ? "16:9" : ratio < 0.83 ? "9:16" : "1:1");
-      if (!title.trim() || title === "Untitled video") setTitle(base);
-      const blank = scripts.filter((s) => !s.trim()).length;
+      setAspect(deckAspect);
+      setTitle((t) => (!t.trim() || t === "Untitled video" ? base : t));
+      const blank = scripts.filter((sc) => !sc.trim()).length;
       setImportNote(
         [
-          `Imported ${pages.length === 1 ? "1 page" : `${pages.length} pages`} of ${file.name} as scenes, each page behind the presenter and its text as the script to edit`,
-          total > pages.length ? `; a video holds ${MAX_SCENES} scenes, so the last ${total - pages.length} of ${total} pages were left out` : "",
+          `Imported ${count === 1 ? "1 page" : `${count} pages`} of ${file.name} as scenes, each page behind the presenter and its text as the script to edit`,
+          total > count ? `; a video holds ${MAX_SCENES} scenes, so the last ${total - count} of ${total} pages were left out` : "",
           truncated ? `; the page text was shortened to fit ${MAX_SCRIPT_CHARS} characters of script` : "",
           blank ? `; ${blank === 1 ? "1 page has" : `${blank} pages have`} no text, so write what the presenter says there` : "",
           ".",
         ].join(""),
       );
     } catch (e) {
-      const reason = e instanceof Error ? e.message : "The slides could not be imported";
-      setImportNote(made.length ? `${reason}. The ${made.length} pages uploaded before that are under Background → Your images.` : reason);
+      const reason = (e instanceof Error ? e.message : "The slides could not be imported").replace(/\.$/, "");
+      setImportNote(made.length ? `${reason}. The ${made.length} pages uploaded before that are under Background → Your images.` : `${reason}.`);
     } finally {
-      if (made.length) setBackdropData((d) => ({ backdrops: [...[...made].reverse(), ...(d?.backdrops ?? [])] }));
+      // The list is read again rather than patched, so it is right even if it had not loaded when the import began.
+      if (made.length) {
+        await api<{ backdrops: Backdrop[] }>("/api/backdrops")
+          .then((fresh) => setBackdropData(fresh))
+          .catch(() => setBackdropData((d) => (d ? { backdrops: [...[...made].reverse(), ...d.backdrops.filter((b) => !made.some((m) => m.id === b.id))] } : d)));
+      }
       setSlidesProgress(null);
     }
   }
@@ -734,7 +756,7 @@ function CreateInner() {
               <button
                 type="button"
                 onClick={() => slidesInput.current?.click()}
-                disabled={canEdit === false || !!slidesProgress}
+                disabled={canEdit !== true || !!slidesProgress}
                 title="Each page of a slide deck saved as PDF becomes a scene: the page behind the presenter, its text as the script"
                 className="inline-flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:border-brand-400 hover:text-brand-700 disabled:opacity-50"
               >

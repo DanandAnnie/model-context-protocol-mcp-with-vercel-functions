@@ -11,7 +11,25 @@ describe("pageText", () => {
   });
 });
 
+describe("slideAspect", () => {
+  it("frames wide pages, 4:3 included, as landscape, tall ones as portrait, and near-square ones square", async () => {
+    const { slideAspect } = await import("../pdf-slides");
+    assert.deepEqual([slideAspect(960, 540), slideAspect(1024, 768), slideAspect(612, 792), slideAspect(540, 960), slideAspect(500, 500)], ["16:9", "16:9", "9:16", "9:16", "1:1"]);
+  });
+});
+
 describe("slideScripts", () => {
+  it("counts the blank line between scenes, so a full deck joins to no more than the budget", () => {
+    // 20 pages of 249 characters fit the raw budget (4980) but not once joined (4980 + 19 * 2 = 5018).
+    const texts = Array.from({ length: 20 }, () => `${"a".repeat(248)}.`);
+    const { scripts, truncated } = slideScripts(texts);
+    assert.equal(truncated, true);
+    assert.ok(scripts.join("\n\n").length <= 5000, `joined ${scripts.join("\n\n").length}`);
+    // Text with no spaces (Chinese, say) is cut to its share exactly and still fits.
+    const cjk = slideScripts(Array.from({ length: 20 }, () => "字".repeat(400)));
+    assert.ok(cjk.scripts.join("\n\n").length <= 5000);
+  });
+
   it("turns titles and bullets into sentences, leaving finished ones alone", () => {
     const { scripts, truncated } = slideScripts(["Welcome aboard\n• Meet the team\n- Read the handbook.", "Questions?", ""]);
     assert.deepEqual(scripts, ["Welcome aboard. Meet the team. Read the handbook.", "Questions?", ""]);

@@ -1140,6 +1140,28 @@ test("a slide deck as PDF becomes one scene per page, each page behind the prese
   expect([drawn.w, drawn.h]).toEqual([1920, 1080]);
   expect(drawn.dark, "the title's letters show").toBeGreaterThan(500);
   for (const b of mine) expect((await page.request.delete(`/api/backdrops/${b.id}`)).status()).toBe(204);
+  // A 4:3 deck is landscape and letterboxed in white, not cropped: the page's top line is still in the picture.
+  page.once("dialog", (d) => d.accept());
+  await page.getByLabel("Import slides from a PDF").setInputFiles({ name: `classic-${tag}.pdf`, mimeType: "application/pdf", buffer: slidesPdf([["Top of the slide"]], 1024, 768) });
+  await expect(page.getByTestId("import-note")).toContainText("Imported 1 page", { timeout: 30_000 });
+  const classic = ((await (await page.request.get("/api/backdrops")).json()) as { backdrops: Array<{ id: string; name: string }> }).backdrops.find((b) => b.name === `classic-${tag} – page 1`)!;
+  const framed = await page.evaluate(async (id) => {
+    const img = new Image();
+    img.src = `/api/backdrops/${id}`;
+    await img.decode();
+    const c = document.createElement("canvas");
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    const ctx = c.getContext("2d")!;
+    ctx.drawImage(img, 0, 0);
+    const px = ctx.getImageData(0, 0, c.width, c.height).data;
+    let dark = 0;
+    for (let y = 0; y < 200; y++) for (let x = 0; x < c.width; x++) if (px[(y * c.width + x) * 4] < 128) dark++;
+    return { w: img.naturalWidth, h: img.naturalHeight, topDark: dark };
+  }, classic.id);
+  expect([framed.w, framed.h]).toEqual([1920, 1080]);
+  expect(framed.topDark, "the title near the top of a 4:3 page survives").toBeGreaterThan(200);
+  expect((await page.request.delete(`/api/backdrops/${classic.id}`)).status()).toBe(204);
   // A file that is not a PDF says so (after confirming the scenes it would replace).
   page.once("dialog", (d) => d.accept());
   await page.getByLabel("Import slides from a PDF").setInputFiles({ name: "notes.pdf", mimeType: "application/pdf", buffer: Buffer.from("not a pdf") });

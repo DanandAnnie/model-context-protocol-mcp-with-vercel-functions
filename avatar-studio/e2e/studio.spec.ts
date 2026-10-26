@@ -1268,6 +1268,16 @@ test("the video agent writes from an attached document, read in the browser", as
   // A PDF with no words (a scan, say) is refused with a reason; nothing is attached.
   await page.getByLabel("Attach a document").setInputFiles({ name: "scan.pdf", mimeType: "application/pdf", buffer: slidesPdf([[]]) });
   await expect(page.getByText(/^No text found in scan\.pdf/)).toBeVisible({ timeout: 30_000 });
+  // A PDF is known by its first bytes, whatever it is named.
+  await page.getByLabel("Attach a document").setInputFiles({ name: "report", mimeType: "", buffer: slidesPdf([["Unnamed but still a PDF."]]) });
+  await expect(page.getByTestId("agent-document")).toContainText("report", { timeout: 30_000 });
+  // The focus moves to Remove; clicking the file's name does not remove it (it once sat inside a label for that button).
+  await expect(page.getByRole("button", { name: "Remove report" })).toBeFocused();
+  await expect(page.getByRole("status").filter({ hasText: "report attached" })).toBeVisible();
+  await page.getByTestId("agent-document").getByText(/^report ·/).click();
+  await expect(page.getByTestId("agent-document")).toBeVisible();
+  await page.getByRole("button", { name: "Remove report" }).click();
+  await expect(page.getByLabel("Attach a document")).toBeFocused();
   await page.getByLabel("Attach a document").setInputFiles({ name: "flyer.pdf", mimeType: "application/pdf", buffer: slidesPdf([["Open house is Saturday at noon."], ["Parking is behind the building."]]) });
   await expect(page.getByTestId("agent-document")).toContainText("flyer.pdf", { timeout: 30_000 });
   const sent = page.waitForRequest((r) => r.url().endsWith("/api/video-agent") && r.method() === "POST");

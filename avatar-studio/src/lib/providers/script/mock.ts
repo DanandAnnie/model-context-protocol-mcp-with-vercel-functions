@@ -55,8 +55,9 @@ export class MockScriptProvider implements ScriptProvider {
     const topic = about.length > 60 ? `${about.slice(0, 60).replace(/\s+\S*$/, "")}…` : about;
     const title = topic.charAt(0).toUpperCase() + topic.slice(1);
     const count = Math.max(3, Math.min(6, Math.round(lengthSec / 15)));
+    // The lines naming each source (a document and a page together) say where facts come from; they are not spoken.
     const points = source
-      ? source.replace(/\s+/g, " ").split(/(?<=[.!?])\s+/).filter((s) => s.length > 20)
+      ? source.replace(/^From the (?:attached document ".*"|web page \S+):$/gm, "").replace(/\s+/g, " ").split(/(?<=[.!?])\s+/).filter((s) => s.length > 20)
       : [
           `Here's why ${topic} matters: it changes how you get results day to day.`,
           "First, understand the problem you're solving. Then pick one clear action and measure what happens.",

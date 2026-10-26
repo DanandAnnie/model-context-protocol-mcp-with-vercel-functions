@@ -26,7 +26,7 @@ export const videoAgentSchema = z.object({
   document: z
     .object({
       name: z.string().trim().min(1).max(200),
-      text: z.string().trim().min(1, "The attached document has no text").max(MAX_DOCUMENT_CHARS, `An attached document is read up to ${MAX_DOCUMENT_CHARS} characters`),
+      text: z.string().trim().min(1, "The attached document has no text").max(MAX_DOCUMENT_CHARS, `An attached document is read up to ${MAX_DOCUMENT_CHARS.toLocaleString("en-US")} characters`),
     })
     .optional(),
   /** Presenter and voice; the brand kit's defaults (then the first ones) when omitted. */

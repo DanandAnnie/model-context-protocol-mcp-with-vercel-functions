@@ -1,6 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FileText, PencilLine, Sparkles, X } from "lucide-react";
 import { Button, Card, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
@@ -42,12 +42,23 @@ export default function VideoAgentPage() {
   const [doc, setDoc] = useState<{ name: string; text: string; truncated: boolean } | null>(null);
   const [reading, setReading] = useState(false);
   const [docErr, setDocErr] = useState<string | null>(null);
+  // The focus follows the control that replaces the one pressed: Remove once a file is attached, the file field once removed.
+  const fileInput = useRef<HTMLInputElement>(null);
+  const removeButton = useRef<HTMLButtonElement>(null);
+  const moveFocus = useRef(false);
+  useEffect(() => {
+    if (!moveFocus.current) return;
+    moveFocus.current = false;
+    (doc ? removeButton.current : fileInput.current)?.focus();
+  }, [doc]);
   async function attach(file: File | undefined) {
     if (!file) return;
     setReading(true);
     setDocErr(null);
     try {
-      setDoc({ name: file.name.slice(0, 200), ...(await documentText(file, navigator.language)) });
+      const read = await documentText(file, navigator.language);
+      moveFocus.current = true;
+      setDoc({ name: file.name.slice(0, 200), ...read });
     } catch (e) {
       setDoc(null);
       setDocErr(e instanceof Error ? e.message : `${file.name} could not be read`);
@@ -118,21 +129,37 @@ export default function VideoAgentPage() {
               <input className={inputClass} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" inputMode="url" />
             </Field>
             {!urlOk && <p className="text-xs text-red-600">Enter a full address starting with http:// or https://</p>}
-            <Field label="Document (optional)" hint="A PDF, Word, PowerPoint, or text file the agent writes from, using only its facts. It is read in your browser; only its words are sent.">
+            {/* Not a Field: a label around the attached file would hand every click on it to the Remove button. */}
+            <div>
+              <span id="agent-document-label" className="mb-1.5 block text-sm font-medium text-slate-700">
+                Document (optional)
+              </span>
               {doc ? (
                 <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm" data-testid="agent-document">
                   <FileText className="h-4 w-4 shrink-0 text-slate-400" />
                   <span className="min-w-0 flex-1 truncate">
                     {doc.name} · {doc.text.length.toLocaleString()} characters{doc.truncated ? " (the start of it; the rest was left out)" : ""}
                   </span>
-                  <button type="button" onClick={() => setDoc(null)} aria-label={`Remove ${doc.name}`} className="rounded p-1 text-slate-500 hover:bg-slate-200">
+                  <button
+                    ref={removeButton}
+                    type="button"
+                    onClick={() => {
+                      moveFocus.current = true;
+                      setDoc(null);
+                    }}
+                    aria-label={`Remove ${doc.name}`}
+                    className="rounded p-1 text-slate-500 hover:bg-slate-200"
+                  >
                     <X className="h-4 w-4" />
                   </button>
                 </div>
               ) : (
                 <input
+                  ref={fileInput}
                   type="file"
                   aria-label="Attach a document"
+                  aria-describedby={docErr ? "agent-document-error agent-document-hint" : "agent-document-hint"}
+                  aria-invalid={docErr ? true : undefined}
                   accept=".pdf,.docx,.pptx,.txt,.md,.markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain,text/markdown"
                   disabled={reading || canEdit === false}
                   onChange={(e) => {
@@ -142,9 +169,19 @@ export default function VideoAgentPage() {
                   className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-slate-200"
                 />
               )}
-            </Field>
-            {reading && <p className="text-xs text-slate-500" role="status">Reading the document…</p>}
-            {docErr && <p className="text-xs text-red-600" role="alert">{docErr}</p>}
+              <span id="agent-document-hint" className="mt-1 block text-xs text-slate-500">
+                A PDF, Word, PowerPoint, or text file the agent writes from, using only its facts. It is read in your browser; only its name and words are sent.
+              </span>
+            </div>
+            {/* Always present, so screen readers hear each change: reading, then what was attached. */}
+            <p className="text-xs text-slate-500" role="status">
+              {reading ? "Reading the document…" : doc ? `${doc.name} attached, ${doc.text.length.toLocaleString()} characters.` : ""}
+            </p>
+            {docErr && (
+              <p id="agent-document-error" className="text-xs text-red-600" role="alert">
+                {docErr}
+              </p>
+            )}
             <div className="flex flex-col gap-2 sm:flex-row">
               <Button onClick={() => run("generate")} loading={busy === "generate"} disabled={!ready} className="flex-1">
                 <Sparkles className="h-4 w-4" /> Generate video

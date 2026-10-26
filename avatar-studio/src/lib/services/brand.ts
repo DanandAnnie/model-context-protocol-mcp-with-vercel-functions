@@ -111,14 +111,20 @@ export const brandImportSchema = z.object({ url: z.string().trim().min(1, "Enter
  * as https). Up to three redirects are followed, each to a public address; nothing is saved.
  */
 export async function importBrandFromWebsite(input: z.infer<typeof brandImportSchema>, fetchImpl?: FetchLike): Promise<BrandSuggestion> {
-  const raw = /^[a-z][a-z\d+.-]*:/i.test(input.url) ? input.url : `https://${input.url}`;
+  // "acme.com:8080" names a port, not a scheme; only "scheme://" is taken as given.
+  const raw = /^[a-z][a-z\d+.-]*:\/\//i.test(input.url) ? input.url : `https://${input.url}`;
   let page: { html: string; url: string };
   try {
     page = await fetchPageHtml(new URL(raw).toString(), fetchImpl, "Website", 3);
   } catch (err) {
     throw new ValidationError(err instanceof TypeError ? "Enter a website address like https://example.com" : err instanceof Error ? err.message : "The website could not be read");
   }
-  const suggestion = brandFromHtml(page.html, page.url);
+  let suggestion: BrandSuggestion;
+  try {
+    suggestion = brandFromHtml(page.html, page.url);
+  } catch {
+    throw new ValidationError("That page could not be read for brand details; fill the kit in by hand");
+  }
   if (!suggestion.name && !suggestion.logoUrl && !suggestion.primaryColor) throw new ValidationError("That page names no brand name, logo, or colour; fill the kit in by hand");
   return suggestion;
 }

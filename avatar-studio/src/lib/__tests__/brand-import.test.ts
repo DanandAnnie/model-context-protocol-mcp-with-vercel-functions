@@ -47,6 +47,34 @@ describe("brandFromHtml", () => {
     assert.deepEqual(brandFromHtml(page(""), "https://b.example/"), { sourceUrl: "https://b.example/" });
   });
 
+  it("finds the brand in a page title, drops markup in it, and links only https logos", () => {
+    assert.equal(brandFromHtml(page("<title>Home | Acme</title>"), "https://www.acme.example/").name, "Acme", "the part naming the host");
+    assert.equal(brandFromHtml(page("<title>Our listings - Portland homes - Maple</title>"), "https://x.example/").name, "Maple", "else the shortest part");
+    assert.equal(brandFromHtml(page('<meta property="og:site_name" content="&lt;b&gt;Acme&lt;/b&gt; &#x110000; &#99999999;">'), "https://a.example/").name, "Acme &#x110000; &#99999999;");
+    assert.equal(brandFromHtml(page('<link rel="apple-touch-icon" href="http://a.example/touch.png"><link rel="icon" href="/fav.png">'), "https://a.example/").logoUrl, "https://a.example/fav.png");
+  });
+
+  it("reads a hostile megabyte page in linear time", () => {
+    const mb = (unit: string) => unit.repeat(Math.ceil(1_000_000 / unit.length));
+    const pages = [
+      mb("<script type=application/ld+json "),
+      mb("<meta "),
+      mb("<meta ") + ">",
+      page(`<meta name="${"a".repeat(3000)}`) + mb("x"),
+      page(`<style>${mb("-")}</style>`),
+      page(`<style>${mb("--brand")}</style>`),
+      page(`<title>${mb("&aaaaaaaa")}</title>`),
+      page(`<script type="application/ld+json">[${"1,".repeat(300_000)}{"logo":"https://a.example/l.png"}]</script>`),
+      mb("<title>"),
+    ];
+    for (const html of pages) {
+      const started = performance.now();
+      brandFromHtml(html, "https://a.example/");
+      const ms = performance.now() - started;
+      assert.ok(ms < 1500, `${html.slice(0, 40)}… took ${Math.round(ms)} ms`);
+    }
+  });
+
   it("reads colours written as short hex, hex with alpha, and rgb()", () => {
     assert.equal(normalizeColor("#0Af"), "#00aaff");
     assert.equal(normalizeColor("#0f766e80"), "#0f766e");
@@ -78,5 +106,12 @@ describe("importBrandFromWebsite", () => {
     const bare = async () => new Response(page(""), { headers: { "content-type": "text/html" } });
     await assert.rejects(importBrandFromWebsite({ url: "https://203.0.113.5/" }, bare), /names no brand name, logo, or colour/);
     await assert.rejects(importBrandFromWebsite({ url: "ftp://203.0.113.5/" }, bare), /http/i);
+    // A port is not a scheme, and a redirect to nonsense says so.
+    const asked: string[] = [];
+    const ok = async (url: string) => (asked.push(url), new Response(html, { headers: { "content-type": "text/html" } }));
+    await importBrandFromWebsite({ url: "203.0.113.5:8443/about" }, ok);
+    assert.deepEqual(asked, ["https://203.0.113.5:8443/about"]);
+    const nonsense = async () => new Response(null, { status: 302, headers: { location: "http://[::1" } });
+    await assert.rejects(importBrandFromWebsite({ url: "https://203.0.113.5/" }, nonsense), /not a web address/);
   });
 });

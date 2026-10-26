@@ -1608,6 +1608,17 @@ test("the brand kit can be filled in from a website, for review before saving", 
   await expect(page.getByLabel("Accent color", { exact: true })).toHaveValue("#f59e0b");
   await expect(page.getByAltText("Logo preview")).toHaveAttribute("src", "http://localhost:3100/demo/poster.svg");
   expect((await (await page.request.get("/api/brand")).json()).brand?.name ?? "").not.toBe("Maple Street Realty");
+  // A second site asks before replacing what is filled in; declining keeps it.
+  await page.unroute("**/api/brand/import");
+  await page.route("**/api/brand/import", (route) => route.fulfill({ json: { suggestion: { sourceUrl: "https://other.example/", name: "Other Co", primaryColor: "#dc2626" } } }));
+  let asked = "";
+  page.once("dialog", (d) => ((asked = d.message()), d.dismiss()));
+  await page.getByLabel("Website address").fill("other.example");
+  await page.getByRole("button", { name: "Fill in" }).click();
+  await expect(page.getByTestId("brand-import-status")).toHaveText("Kept what you had; other.example offered nothing for the empty fields.");
+  expect(asked).toBe("Replace your name and colours with the ones from other.example? Cancel keeps yours and fills in only what is empty.");
+  await expect(page.getByPlaceholder("Acme Realty")).toHaveValue("Maple Street Realty");
+  await expect(page.getByLabel("Primary color", { exact: true })).toHaveValue("#0f766e");
 });
 
 test("brand kit pre-fills the editor and brands the share page", async ({ page }) => {

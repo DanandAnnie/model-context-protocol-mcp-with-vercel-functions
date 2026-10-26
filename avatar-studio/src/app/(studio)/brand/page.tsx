@@ -119,15 +119,23 @@ export default function BrandPage() {
     setImporting(true);
     setImportErr(null);
     setImportNote(null);
+    setErr(null);
     try {
       const { suggestion: s } = await api<{ suggestion: BrandSuggestion }>("/api/brand/import", { method: "POST", body: JSON.stringify({ url: site.trim() }) });
-      const found: string[] = [];
-      if (s.name) (setName(s.name), found.push("the name"));
-      if (s.logoUrl) (setLogoUrl(s.logoUrl), setLogoNotice(null), found.push("a logo"));
-      if (s.primaryColor) (setPrimary(s.primaryColor), found.push(s.accentColor ? "two colours" : "a colour"));
-      if (s.accentColor) setAccent(s.accentColor);
       const host = new URL(s.sourceUrl).host;
-      setImportNote(`Filled in ${found.join(", ").replace(/, ([^,]*)$/, " and $1")} from ${host}. Check them, then save the brand kit.`);
+      // What is already filled in (typed, uploaded, or saved) is replaced only when the person agrees.
+      const colours = !!s.primaryColor && (primary.toLowerCase() !== DEFAULT_PRIMARY || !!accent) && (primary.toLowerCase() !== s.primaryColor || (accent || undefined) !== s.accentColor);
+      const clashes = [s.name && name.trim() && name.trim() !== s.name ? "name" : "", s.logoUrl && logoUrl && logoUrl !== s.logoUrl ? "logo" : "", colours ? "colours" : ""].filter(Boolean);
+      const replace = !clashes.length || window.confirm(`Replace your ${clashes.join(" and ").replace(/ and (?=.* and )/, ", ")} with the ones from ${host}? Cancel keeps yours and fills in only what is empty.`);
+      const found: string[] = [];
+      if (s.name && (replace || !name.trim())) (setName(s.name), found.push("the name"));
+      if (s.logoUrl && (replace || !logoUrl)) (setLogoUrl(s.logoUrl), setLogoNotice(null), found.push("a logo"));
+      if (s.primaryColor && (replace || !colours)) {
+        setPrimary(s.primaryColor);
+        setAccent(s.accentColor ?? "");
+        found.push(s.accentColor ? "two colours" : "a colour");
+      }
+      setImportNote(found.length ? `Filled in ${found.join(", ").replace(/, ([^,]*)$/, " and $1")} from ${host}. Check them, then save the brand kit.` : `Kept what you had; ${host} offered nothing for the empty fields.`);
     } catch (e) {
       setImportErr(e instanceof Error ? e.message : "The website could not be read");
     } finally {
@@ -295,7 +303,7 @@ export default function BrandPage() {
               <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
                 {logoUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={logoUrl} alt="Logo preview" className="h-full w-full object-contain p-1" onError={() => setErr("That logo URL could not be loaded.")} />
+                  <img src={logoUrl} alt="Logo preview" className="h-full w-full object-contain p-1" onError={() => setLogoNotice("That logo could not be loaded; paste another image URL or upload the file.")} />
                 ) : (
                   <Palette className="h-5 w-5 text-slate-300" />
                 )}

@@ -8,12 +8,12 @@ export const MAX_SOURCE_CHARS = 6000;
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", "#39": "'" };
 
 export function decodeEntities(s: string): string {
-  return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) => {
+  // Bounded repeats keep a long run of letters or digits linear; a number that names no character stays as written.
+  return s.replace(/&(#x[0-9a-f]{1,8}|#\d{1,8}|[a-z]{1,32});/gi, (m, e: string) => {
     const key = e.toLowerCase();
     if (key in ENTITIES) return ENTITIES[key];
-    if (key.startsWith("#x")) return String.fromCodePoint(parseInt(key.slice(2), 16));
-    if (key.startsWith("#")) return String.fromCodePoint(parseInt(key.slice(1), 10));
-    return m;
+    const code = key.startsWith("#x") ? parseInt(key.slice(2), 16) : key.startsWith("#") ? parseInt(key.slice(1), 10) : NaN;
+    return code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff) ? String.fromCodePoint(code) : m;
   });
 }
 
@@ -64,7 +64,11 @@ export async function fetchPageHtml(url: string, fetchImpl?: FetchLike, what = "
     if (REDIRECTS.has(res.status) && follow) {
       const location = res.headers.get("location");
       if (!location || hop >= follow) throw new Error("That address redirects too many times; paste the final page URL");
-      current = new URL(location, current).toString();
+      try {
+        current = new URL(location, current).toString();
+      } catch {
+        throw new Error("That address redirects somewhere that is not a web address; paste the final page URL");
+      }
       continue;
     }
     if (!res.ok) throw new Error(`The page returned ${res.status}`);

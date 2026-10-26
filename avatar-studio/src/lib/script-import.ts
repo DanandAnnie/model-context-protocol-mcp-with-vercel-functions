@@ -33,22 +33,29 @@ const SETEXT = /^\s{0,3}=+\s*$/;
 const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/;
 const BULLET = /^\s*[-*+]\s+(?:\[[ xX]\]\s+)?/;
 const ORDERED = /^\s*(\d{1,3})[.)]\s+/;
-const FENCE = /^\s{0,3}(```|~~~)\s*([^\s`]*)/;
+const FENCE = /^\s{0,3}(`{3,}|~{3,})\s*([^\s`]*)/;
+/** Fence labels whose content is the script itself in Markdown: only the fence lines are dropped. */
+const MARKDOWN_FENCE = new Set(["markdown", "md"]);
 // What a link reference definition points at: <…>, a URL with a scheme, a path, an anchor, or a domain.
 // "[GUEST]: Thanks." and "[HOST]: 10:30am" are lines of script.
-const LINK_TARGET = String.raw`(?:<[^<>]*>|[a-z][a-z0-9+.-]*:\S+|\.{0,2}\/\S*|#\S+|www\.\S+|[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}(?:[/?#]\S*)?)`;
+const LINK_TARGET = String.raw`(?:<[^<>]*>|[a-z][a-z0-9+.-]*:\S+|\.{0,2}\/\S*|#[a-z][\w-]*|www\.\S+|[\w-]+(?:\.[\w-]+)+\/\S*)`;
 const LINK_DEFINITION = new RegExp(String.raw`^\s{0,3}\[[^\]^][^\]]*\]:\s*` + LINK_TARGET + String.raw`(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*$`, "i");
 const FOOTNOTE_DEFINITION = /^\s{0,3}\[\^[^\]]+\]:/;
 // A table's header rule has a pipe; a bare --- is a scene break.
 const TABLE_RULE = /^(?=[^|]*\|)\s*\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?\s*$/;
 const PAUSE = new RegExp(PAUSE_MARKER, "gi");
 // Tags a document may use for formatting; anything else between < and > is prose ("from <1% to >5%", "a <b and c>").
-const TAG = /<\/?(?:a|abbr|b|big|blockquote|br|center|cite|code|del|div|em|font|h[1-6]|hr|i|img|ins|kbd|li|mark|ol|p|pre|q|s|small|span|strike|strong|sub|sup|table|tbody|td|th|thead|tr|tt|u|ul)(?:\s+[a-z-]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+))*\s*\/?>/gi;
+const TAG = /<\/?(?:a|abbr|article|aside|b|big|blockquote|br|center|details|figcaption|figure|section|summary|cite|code|del|div|em|font|h[1-6]|hr|i|img|ins|kbd|li|mark|ol|p|pre|q|s|small|span|strike|strong|sub|sup|table|tbody|td|th|thead|tr|tt|u|ul)(?:\s+[a-z-]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+))*\s*\/?>/gi;
 // A link destination: no spaces, one level of parentheses ("…/Mercury_(planet)"), and an optional quoted title.
 const DESTINATION = String.raw`\((?:[^()\s]|\([^()\s]*\))*(?:\s+"[^"]*")?\)`;
 // Sentence ends: Latin punctuation before a space, and CJK, Arabic, and Devanagari full stops anywhere.
-const SENTENCE_END = /[.!?…]["'”’)\]]*(?=\s|$)|[。！？؟।]["'”’」』)\]]*/g;
-const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", mdash: "—", ndash: "–", hellip: "…", rsquo: "’", lsquo: "‘", rdquo: "”", ldquo: "“" };
+const SENTENCE_END = /[.!?…]["'”’“»)\]]*(?=\s|$)|[。！？．؟।۔]["'”’」』)\]]*/g;
+const ENTITIES: Record<string, string> = {
+  amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", mdash: "—", ndash: "–", hellip: "…", rsquo: "’", lsquo: "‘", rdquo: "”", ldquo: "“",
+  laquo: "«", raquo: "»", bull: "•", middot: "·", deg: "°", times: "×", copy: "©", reg: "®", trade: "™", euro: "€", pound: "£", yen: "¥", cent: "¢",
+  iexcl: "¡", iquest: "¿", szlig: "ß", aacute: "á", eacute: "é", iacute: "í", oacute: "ó", uacute: "ú", agrave: "à", egrave: "è", ccedil: "ç",
+  ntilde: "ñ", auml: "ä", ouml: "ö", uuml: "ü", Auml: "Ä", Ouml: "Ö", Uuml: "Ü", Eacute: "É",
+};
 /** Marks a line inside a code fence, to be read as written. */
 const VERBATIM = "\u0001";
 /** Fence info strings that mean "this is the document itself", as a chat assistant wraps a script. */
@@ -58,19 +65,42 @@ const DOCUMENT_FENCE = new Set(["", "markdown", "md", "text", "txt", "plaintext"
  * A file's text, whatever a word processor saved it as: UTF-16 by its byte-order mark, UTF-8 when it is valid
  * UTF-8, and otherwise Windows-1252 (what Word's "Plain Text" export writes by default on Windows).
  */
-export function decodeScript(bytes: Uint8Array): string {
+export function decodeScript(bytes: Uint8Array, legacy = "windows-1252"): string {
   if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder("utf-16le").decode(bytes.subarray(2));
   if (bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder("utf-16be").decode(bytes.subarray(2));
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    // Mapped here rather than by TextDecoder, which some runtimes read as Latin-1 (losing dashes and curly quotes).
-    let out = "";
-    for (let i = 0; i < bytes.length; i += 8192) {
-      out += String.fromCharCode(...Array.from(bytes.subarray(i, i + 8192), (b) => (b >= 0x80 && b < 0xa0 ? CP1252_C1.charCodeAt(b - 0x80) : b)));
+  const utf8 = new TextDecoder("utf-8").decode(bytes);
+  // UTF-8 with a stray byte or two keeps its text (each bad byte becomes one �); a file in which most
+  // non-ASCII bytes are not UTF-8 was saved in the system's legacy code page.
+  const bad = utf8.match(/\ufffd/g)?.length ?? 0;
+  const nonAscii = utf8.match(/[^\x00-\x7f]/g)?.length ?? 0;
+  if (!bad || bad / nonAscii < 0.3) return utf8;
+  if (legacy !== "windows-1252") {
+    try {
+      return new TextDecoder(legacy).decode(bytes);
+    } catch {
+      // An encoding this runtime does not know: Windows-1252 below.
     }
-    return out;
   }
+  // Mapped here rather than by TextDecoder, which some runtimes read as Latin-1 (losing dashes and curly quotes).
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 8192) {
+    out += String.fromCharCode(...Array.from(bytes.subarray(i, i + 8192), (b) => (b >= 0x80 && b < 0xa0 ? CP1252_C1.charCodeAt(b - 0x80) : b)));
+  }
+  return out;
+}
+
+/** The legacy code page Windows saves plain text in for a language (as `navigator.language` gives it). */
+export function legacyEncodingFor(language: string): string {
+  const lang = language.toLowerCase();
+  if (/^zh-(tw|hk|mo)|^zh-hant/.test(lang)) return "big5";
+  const base = lang.split("-")[0];
+  const pages: Record<string, string> = {
+    ru: "windows-1251", uk: "windows-1251", bg: "windows-1251", sr: "windows-1251", be: "windows-1251", mk: "windows-1251",
+    zh: "gbk", ja: "shift_jis", ko: "euc-kr", el: "windows-1253", tr: "windows-1254", he: "windows-1255", ar: "windows-1256", fa: "windows-1256",
+    pl: "windows-1250", cs: "windows-1250", sk: "windows-1250", hu: "windows-1250", ro: "windows-1250", hr: "windows-1250", sl: "windows-1250",
+    lt: "windows-1257", lv: "windows-1257", et: "windows-1257", vi: "windows-1258", th: "windows-874",
+  };
+  return pages[base] ?? "windows-1252";
 }
 /** Windows-1252's characters for bytes 0x80–0x9F (the rest of the code page is Latin-1). */
 const CP1252_C1 = "\u20ac\u0081\u201a\u0192\u201e\u2026\u2020\u2021\u02c6\u2030\u0160\u2039\u0152\u008d\u017d\u008f\u0090\u2018\u2019\u201c\u201d\u2022\u2013\u2014\u02dc\u2122\u0161\u203a\u0153\u009d\u017e\u0178";
@@ -92,7 +122,11 @@ function spokenMarkdown(text: string): string {
       .replace(/\[([^\]]+)\]\[[^\]]*\]/g, "$1")
       .replace(/<((?:https?:\/\/|mailto:)[^<>\s]+|[^<>\s@]+@[^<>\s@]+)>/gi, "$1")
       .replace(TAG, "")
-      .replace(/&(#\d{1,5}|[a-z]{2,6});/gi, (m, name: string) => (name[0] === "#" ? String.fromCharCode(Number(name.slice(1))) : (ENTITIES[name.toLowerCase()] ?? m)))
+      .replace(/&(#x[\da-f]{1,6}|#\d{1,7}|[a-z]{2,8});/gi, (m, name: string) => {
+        if (name[0] !== "#") return ENTITIES[name] ?? ENTITIES[name.toLowerCase()] ?? m;
+        const code = name[1].toLowerCase() === "x" ? parseInt(name.slice(2), 16) : Number(name.slice(1));
+        return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
+      })
       // Emphasis within a paragraph, each marker closed by its own kind (a bold may hold a single *), and no
       // further than the paragraph, so an unclosed one costs no more than a scan.
       .replace(/\*\*(?=\S)((?:[^*\n]|\*(?!\*))+?)(?<=\S)\*\*|__(?=\S)((?:[^_\n]|_(?!_))+?)(?<=\S)__|~~(?=\S)([^~\n]+?)(?<=\S)~~/g, (_, a, b, c) => a ?? b ?? c)
@@ -102,10 +136,15 @@ function spokenMarkdown(text: string): string {
 
 /** Text as it would be read aloud: code spans keep their text as written, the rest is read as Markdown. */
 function spokenInline(text: string): string {
+  // Pause markers are script, not links or references: held aside while Markdown is read.
+  const pauses: string[] = [];
+  text = text.replace(PAUSE, (m) => `\ue100${pauses.push(m) - 1}\ue101`);
   const parts = text.split("`");
   // An unmatched backtick is just a character.
   if (parts.length % 2 === 0) parts.splice(parts.length - 2, 2, `${parts[parts.length - 2]}\`${parts[parts.length - 1]}`);
-  return unhide(parts.map((p, i) => (i % 2 ? p : spokenMarkdown(p))).join("")).trim();
+  return unhide(parts.map((p, i) => (i % 2 ? p : spokenMarkdown(p))).join(""))
+    .replace(/\ue100(\d+)\ue101/g, (_, i: string) => pauses[Number(i)])
+    .trim();
 }
 
 /** A line's own Markdown taken off (quote and list markers, table pipes), escapes held, ready to join its paragraph. */
@@ -141,7 +180,8 @@ function paragraphs(lines: string[], markdown: boolean): string[] {
         pieces.push(raw.slice(1).trim());
       } else if (!markdown) pieces.push(raw.trim());
       else {
-        const line = raw.replace(/^\s*(?:>\s?)+/, "");
+        // A quote's markers, and an Obsidian callout's [!NOTE] tag, are not spoken.
+        const line = raw.replace(/^\s*(?:>\s?)+(?:\[![a-z]+\][+-]?\s*)?/i, "");
         const ordered = ORDERED.exec(line);
         inList = BULLET.test(line) || (!!ordered && (i === 0 || inList || ordered[1] === "1"));
         prose.push(lineText(line, inList));
@@ -271,6 +311,31 @@ function withoutComments(text: string): string {
   return out + text.slice(at);
 }
 
+/**
+ * Images embedded as data: URLs replaced by their alt text, in one pass: each `](data:` is closed by the next `)`,
+ * and when none follows, no later one can close either.
+ */
+function withoutDataImages(text: string): string {
+  let out = "";
+  let at = 0;
+  for (;;) {
+    const mid = text.indexOf("](data:", at);
+    if (mid < 0) break;
+    const close = text.indexOf(")", mid);
+    if (close < 0) break;
+    const open = text.lastIndexOf("![", mid);
+    const alt = open >= at && mid - open <= 1000 ? text.slice(open + 2, mid) : undefined;
+    if (alt === undefined || alt.includes("]") || alt.includes("\n")) {
+      out += text.slice(at, mid + 7);
+      at = mid + 7;
+      continue;
+    }
+    out += text.slice(at, open) + alt;
+    at = close + 1;
+  }
+  return out + text.slice(at);
+}
+
 /** Blocks with only pauses join their neighbour (the one before, or else the one after), so no scene is a pause alone. */
 function joinPauseOnly(blocks: string[]): string[] {
   const out: string[] = [];
@@ -298,18 +363,20 @@ export function scenesFromText(text: string, { markdown = true }: { markdown?: b
   let source = text.replace(/^﻿/, "").replace(/\r\n?/g, "\n");
   // Embedded images (data: URLs, as document exports inline them) can be far longer than a line is read; they
   // leave their alt text, like any other image.
-  if (markdown) source = withoutComments(source).replace(/!\[([^\]\n]*)\]\(<?data:[^)\s]*>?\)/g, "$1");
+  if (markdown) source = withoutDataImages(withoutComments(source));
   let lines = source.split("\n");
-  if (markdown) lines = withoutDocumentFence(withoutFrontMatter(lines));
-  // Where each fence kind next appears, so an opening fence with no close is read as an ordinary line.
-  const fenceAt: Record<string, number[]> = { "```": [], "~~~": [] };
-  if (markdown) lines.forEach((l, i) => { const f = FENCE.exec(l); if (f) fenceAt[f[1]].push(i); });
-  // Lines are read in order, so each kind keeps a pointer past the fences already behind.
-  const fencePtr: Record<string, number> = { "```": 0, "~~~": 0 };
+  if (markdown) lines = withoutFrontMatter(withoutDocumentFence(withoutFrontMatter(lines)));
+  // Where each fence marker next appears, so an opening fence with no close is read as an ordinary line.
+  const fenceAt = new Map<string, number[]>();
+  if (markdown) lines.forEach((l, i) => { const f = FENCE.exec(l); if (f) fenceAt.set(f[1], [...(fenceAt.get(f[1]) ?? []), i]); });
+  // Lines are read in order, so each marker keeps a pointer past the fences already behind.
+  const fencePtr = new Map<string, number>();
   const nextFence = (kind: string, after: number) => {
-    const at = fenceAt[kind];
-    while (fencePtr[kind] < at.length && at[fencePtr[kind]] <= after) fencePtr[kind]++;
-    return at[fencePtr[kind]] ?? -1;
+    const at = fenceAt.get(kind) ?? [];
+    let ptr = fencePtr.get(kind) ?? 0;
+    while (ptr < at.length && at[ptr] <= after) ptr++;
+    fencePtr.set(kind, ptr);
+    return at[ptr] ?? -1;
   };
   let title: string | undefined;
   const sections: string[][] = [[]];
@@ -318,11 +385,17 @@ export function scenesFromText(text: string, { markdown = true }: { markdown?: b
   let read = 0;
   let cutShort = false;
   let fence: string | undefined;
+  // A ```markdown fence inside the document (a chat answer's lead-in, then the script): its closing line is skipped.
+  let markdownFence: string | undefined;
   let footnote = false;
   for (let i = 0; i < lines.length; i++) {
     let line = lines[i];
     if (markdown) {
       const opens = FENCE.exec(line);
+      if (markdownFence && opens && opens[1] === markdownFence && !opens[2]) {
+        markdownFence = undefined;
+        continue;
+      }
       if (fence) {
         if (opens && opens[1] === fence && !opens[2]) fence = undefined;
         else {
@@ -334,8 +407,11 @@ export function scenesFromText(text: string, { markdown = true }: { markdown?: b
       }
       // A backtick fence's info has no backtick (```npm i``` is inline code). A fence that never closes fences
       // nothing: its own line is markup, and what follows is read as Markdown.
-      if (opens && !(opens[1] === "```" && line.slice(line.indexOf("```") + 3).includes("`"))) {
-        if (nextFence(opens[1], i) > i) fence = opens[1];
+      if (opens && !(opens[1][0] === "`" && line.slice(line.indexOf(opens[1]) + opens[1].length).includes("`"))) {
+        if (nextFence(opens[1], i) > i) {
+          if (MARKDOWN_FENCE.has(opens[2].toLowerCase()) && !markdownFence) markdownFence = opens[1];
+          else fence = opens[1];
+        }
         continue;
       }
       // Definitions and table rules are never spoken; a footnote's indented continuation lines go with it.
@@ -393,7 +469,8 @@ export function scenesFromText(text: string, { markdown = true }: { markdown?: b
     if (piece) kept.push(piece);
     break;
   }
-  let scenes = explicit ? kept : pack(kept);
+  // More sections or paragraphs than a video has scenes are packed together, so text that fits is never dropped.
+  let scenes = pack(kept);
   if (scenes.length > MAX_SCENES) {
     scenes = scenes.slice(0, MAX_SCENES);
     truncated = true;

@@ -2,7 +2,7 @@
 // Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { MAX_SCRIPT_CHARS, decodeScript, scenesFromText } from "../script-import";
+import { MAX_SCRIPT_CHARS, decodeScript, legacyEncodingFor, scenesFromText } from "../script-import";
 import { videoRequestSchema } from "../services";
 import { MAX_SCENES } from "../types";
 
@@ -127,11 +127,11 @@ describe("scenesFromText", () => {
     // An early short sentence does not use up the cut: an unpunctuated transcript is kept to the room left.
     const transcript = scenesFromText(`Hi. ${"word ".repeat(2000)}`).scenes;
     assert.ok(transcript[0].length > MAX_SCRIPT_CHARS - 50, String(transcript[0].length));
-    // More sections than a video has scenes: the first ones are kept.
+    // More sections than a video has scenes are packed together, so text that fits is all kept.
     const sections = scenesFromText(Array.from({ length: MAX_SCENES + 3 }, (_, i) => `Section ${i + 1}.`).join("\n\n---\n\n"));
     assert.equal(sections.scenes.length, MAX_SCENES);
-    assert.equal(sections.scenes[0], "Section 1.");
-    assert.equal(sections.truncated, true);
+    assert.equal(sections.scenes.join("\n\n"), Array.from({ length: MAX_SCENES + 3 }, (_, i) => `Section ${i + 1}.`).join("\n\n"));
+    assert.equal(sections.truncated, false);
     assert.ok(renders(sections.scenes));
   });
 
@@ -193,5 +193,37 @@ describe("scenesFromText", () => {
     assert.equal(decodeScript(be), text);
     // "Café – “quoted”" in Windows-1252, which is not valid UTF-8.
     assert.equal(decodeScript(new Uint8Array([0x43, 0x61, 0x66, 0xe9, 0x20, 0x96, 0x20, 0x93, 0x71, 0x75, 0x6f, 0x74, 0x65, 0x64, 0x94])), "Café – “quoted”");
+  });
+
+  it("keeps pause markers, chat lead-ins, callouts, entities, and one-word calls to action", () => {
+    // A chat answer: a lead-in, the script in a ```markdown fence, a sign-off.
+    assert.deepEqual(
+      scenesFromText("Here's your script:\n\n```markdown\n# Product Launch\n\n## Scene 1\n**HOST:** Welcome to *our* launch.\n\n## Scene 2\n- First point\n```\n\nLet me know if you want changes.").scenes,
+      ["Here's your script:", "HOST: Welcome to our launch.", "First point\n\nLet me know if you want changes."],
+    );
+    assert.deepEqual(scenesFromText("````markdown\n# Launch\nHello **there**.\n````").scenes, ["Hello there."]);
+    // Front matter inside a whole-document fence.
+    assert.deepEqual(scenesFromText("```markdown\n---\ntitle: Launch\nduration: 60s\n---\n\n# Launch\n\nHello there.\n```"), { title: "Launch", scenes: ["Hello there."], truncated: false });
+    // Pause markers next to brackets are kept.
+    assert.deepEqual(scenesFromText("Ready? [pause][pause] Go!\n\n[HOST][pause 2s] Welcome back.\n\nNext [pause 1.5s](beat) line.").scenes, ["Ready? [pause][pause] Go!", "[HOST][pause 2s] Welcome back.", "Next [pause 1.5s](beat) line."]);
+    // Notion and Obsidian callouts, more entities.
+    assert.deepEqual(scenesFromText("<aside>💡 Tip here.</aside>\n\n> [!NOTE]\n> Remember this.\n\nWe&#x27;re at the caf&eacute; &copy; 2026 &euro;5 &#128512;").scenes, ["💡 Tip here.", "Remember this.", "We're at the café © 2026 €5 😀"]);
+    // A reply that is only a domain or a name is script; a definition with a path or scheme is not.
+    assert.deepEqual(scenesFromText("[HOST]: acme.com\n\n[GUEST]: Mr.Smith\n\n[HOST]: #1 (drumroll)\n\n[x]: https://acme.com\n[y]: acme.com/docs").scenes, ["[HOST]: acme.com", "[GUEST]: Mr.Smith", "[HOST]: #1 (drumroll)"]);
+    // Quadratic inputs stay fast.
+    for (const doc of ["![".repeat(60_000), "![a](data:".repeat(12_000)]) {
+      const started = Date.now();
+      scenesFromText(doc);
+      assert.ok(Date.now() - started < 1500, `took ${Date.now() - started} ms`);
+    }
+  });
+
+  it("keeps a UTF-8 file with a stray byte as UTF-8, and reads a legacy file in the language's code page", () => {
+    const utf8 = new TextEncoder().encode("大家好 Café “quoted” we’re");
+    const stray = new Uint8Array([...utf8, 0x92, ...new TextEncoder().encode(" more")]);
+    assert.equal(decodeScript(stray), "大家好 Café “quoted” we’re� more");
+    // "Привет" in Windows-1251.
+    assert.equal(decodeScript(new Uint8Array([0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2]), legacyEncodingFor("ru-RU")), "Привет");
+    assert.deepEqual(["ru-RU", "zh-CN", "zh-TW", "ja", "en-US", "pl"].map(legacyEncodingFor), ["windows-1251", "gbk", "big5", "shift_jis", "windows-1252", "windows-1250"]);
   });
 });

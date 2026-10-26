@@ -475,6 +475,32 @@ test("library sorts by date, title, and views", async ({ page }) => {
   await expect(titles.first()).toHaveText("Zulu sortcheck");
 });
 
+test("the share page transcript plays the video from a line and marks the line being spoken", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Transcript ${Date.now().toString(36)}`, { script: "First we open the doors. [pause 1s] Then the team walks you through every room. Finally we hand over the keys." });
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  const { cues } = (await (await page.request.get(`/api/videos/${v.id}/captions?format=json`)).json()) as { cues: Array<{ startMs: number; text: string }> };
+  expect(cues.length).toBeGreaterThan(1);
+  await page.goto(`/share/${v.id}`);
+  const transcript = page.getByTestId("share-transcript");
+  await expect(page.getByRole("heading", { name: "Transcript", exact: true })).toBeVisible();
+  // The lines are the captions, pause markers left out, each with its start time.
+  await expect(transcript.getByRole("button")).toHaveCount(cues.length);
+  await expect(transcript).not.toContainText("[pause");
+  const line = transcript.getByRole("button").nth(1);
+  await expect(line).toContainText(cues[1].text.split("\n")[0]);
+  const player = page.getByTestId("share-player");
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.readyState)).toBeGreaterThanOrEqual(1);
+  const duration = await player.evaluate((el: HTMLVideoElement) => el.duration);
+  await line.click();
+  const target = Math.min(cues[1].startMs / 1000, duration);
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.currentTime)).toBeGreaterThanOrEqual(target - 0.25);
+  await player.evaluate((el: HTMLVideoElement) => el.pause());
+  // Within the demo clip's length, the line clicked is the one marked.
+  if (cues[1].startMs / 1000 < duration && (cues[2]?.startMs ?? Infinity) / 1000 > duration) await expect(line).toHaveAttribute("aria-current", "true");
+  await player.evaluate((el: HTMLVideoElement) => (el.currentTime = 0));
+  await expect(transcript.getByRole("button").first()).toHaveAttribute("aria-current", "true");
+});
+
 test("share page offers a download only when the owner allows it", async ({ page }) => {
   const v = await createVideoViaApi(page, `Downloadable ${Date.now().toString(36)}`);
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");

@@ -50,6 +50,7 @@ export function SharePlayer({
       muted={autoplay}
       loop={loop}
       playsInline
+      id="share-player"
       className={`h-full w-full cue-${captionSize} cue-look-${captionLook}`}
       data-testid="share-player"
       onTimeUpdate={(e) => {

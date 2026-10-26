@@ -6,6 +6,7 @@ import { Sparkles } from "lucide-react";
 import {
   NotFoundError,
   PUBLIC_ACCESS,
+  captionCuesFor,
   getBrandKit,
   getVideo,
 } from "@/lib/services";
@@ -25,6 +26,7 @@ import { SharePlayer } from "@/components/SharePlayer";
 import { captionsBurnedIn } from "@/lib/captions";
 import { shareCookieName, shareGateCookieName, shareUnlocked } from "@/lib/share-lock";
 import { ShareLeadGate } from "@/components/ShareLeadGate";
+import { ShareTranscript } from "@/components/ShareTranscript";
 
 export const dynamic = "force-dynamic";
 
@@ -238,9 +240,14 @@ export default async function SharePage({
                 {video.description}
               </p>
             )}
-            <p className="mt-6 whitespace-pre-wrap text-sm leading-relaxed text-slate-300">
-              {stripPauses(video.script)}
-            </p>
+            {/* Once there is a video, the script is its transcript: the caption lines (corrected ones when an editor saved them), each playing from its time. */}
+            {video.status === "completed" && video.videoUrl ? (
+              <ShareTranscript playerId="share-player" cues={captionCuesFor(video).cues.map(({ startMs, text }) => ({ startMs, text }))} />
+            ) : (
+              <p className="mt-6 whitespace-pre-wrap text-sm leading-relaxed text-slate-300">
+                {stripPauses(video.script)}
+              </p>
+            )}
           </ShareLeadGate>
         )}
         {brand && (brand.name || brand.logoUrl) && (

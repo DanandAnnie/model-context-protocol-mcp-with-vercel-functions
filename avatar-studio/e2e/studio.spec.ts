@@ -755,6 +755,17 @@ test("share page offers a download only when the owner allows it", async ({ page
   await expect(page.getByTestId("share-player")).toHaveAttribute("autoplay", "");
   await expect(page.getByTestId("share-player")).toHaveAttribute("loop", "");
   await expect(page.getByTestId("share-player")).toHaveJSProperty("muted", true);
+  // The page an embed loads is the player alone, filling the frame it is given, controls included.
+  const viewport = page.viewportSize();
+  await page.setViewportSize({ width: 640, height: 360 });
+  await page.goto(`/share/${v.id}?embed=1`);
+  const box = (await page.getByTestId("share-player").boundingBox())!;
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(361);
+  expect(box.height).toBeGreaterThan(330);
+  await expect(page.getByTestId("share-transcript")).toHaveCount(0);
+  await expect(page.getByTestId("share-cta")).toHaveCount(0);
+  if (viewport) await page.setViewportSize(viewport);
   await page.goto(`/videos/${v.id}`);
   await expect(page.getByTestId("cta-clicks")).toHaveText("1");
   // Views land on today's bar of the per-day sparkline.
@@ -1743,11 +1754,11 @@ test("folders filter the library and share views are counted once per viewer", a
   expect((await (await page.request.get(`/api/videos/${a.id}`)).json()).video.views).toBe(1);
 
   await page.goto(`/videos/${a.id}`);
-  await expect(page.getByRole("button", { name: "Move to a folder" })).toContainText(folder);
-  await page.getByRole("button", { name: "Move to a folder" }).click();
+  await expect(page.getByRole("button", { name: /^Move to a folder/ })).toContainText(folder);
+  await page.getByRole("button", { name: /^Move to a folder/ }).click();
   await page.getByLabel("Folder name").fill("Archive");
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("button", { name: "Move to a folder" })).toContainText("Archive");
+  await expect(page.getByRole("button", { name: /^Move to a folder/ })).toContainText("Archive");
   expect((await (await page.request.get(`/api/videos/${a.id}`)).json()).video.folder).toBe("Archive");
 
   // The library renames and removes the chosen folder; the actions only show for a real folder.
@@ -2643,6 +2654,11 @@ test("a multi-scene video has chapters: the share page jumps to a scene and the 
   await player.evaluate((el: HTMLVideoElement) => (el.currentTime = 0));
   await expect(chapters.getByRole("button").first()).toHaveAttribute("aria-current", "true");
   await expect(chapters.locator('[aria-current="true"]')).toHaveCount(1);
+  // On a phone the chapter titles are cut with an ellipsis rather than pushing the page sideways.
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.reload();
+  await expect(chapters.getByRole("button")).toHaveCount(3);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
 
 test("a video can be made in other sizes, each a new video with the same scenes", async ({ page }) => {
@@ -2664,9 +2680,14 @@ test("a video can be made in other sizes, each a new video with the same scenes"
   await page.getByRole("button", { name: "Make 1 size" }).click();
   const made = page.getByTestId("other-sizes").getByRole("link");
   await expect(made).toHaveText(/ \(9:16\)$/);
-  // A size that started is not offered again.
-  await expect(page.getByLabel("9:16 portrait")).toBeDisabled();
-  await expect(page.getByRole("button", { name: /^Make/ })).toBeDisabled();
+  // Focus moves to the size just made, and a size the video has is not offered again, after a reload too.
+  await expect(made).toBeFocused();
+  await expect(page.getByLabel("9:16 portrait")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Make 1 size" })).toBeVisible();
+  await page.reload();
+  await expect(page.getByTestId("other-sizes").getByRole("link")).toHaveText(/ \(9:16\)$/);
+  await expect(page.getByLabel("9:16 portrait")).toHaveCount(0);
+  await expect(page.getByLabel("1:1 square")).toBeVisible();
   await made.click();
   await page.waitForURL((url) => /\/videos\/vid_/.test(url.pathname) && !url.pathname.endsWith(v.id));
   await expect(page.getByText("Made from")).toBeVisible();
@@ -2675,8 +2696,25 @@ test("a video can be made in other sizes, each a new video with the same scenes"
   expect(copy.aspect).toBe("9:16");
   expect(copy.resizedFrom).toBe(v.id);
   expect(copy.scenes.map((sc: { script: string }) => sc.script)).toEqual(["Welcome to twelve Maple Street.", "Call Dana to book a showing."]);
-  await page.getByRole("link", { name: sizesTitle, exact: true }).click();
+  // A copy offers only the shape still missing: never the original's own.
+  await expect(page.getByLabel("16:9 landscape")).toHaveCount(0);
+  await expect(page.getByLabel("1:1 square")).toBeVisible();
+  await page.getByRole("link", { name: sizesTitle, exact: true }).first().click();
   await page.waitForURL(new RegExp(`/videos/${v.id}`));
+});
+
+test("a script the AI writer replaced can be taken back", async ({ page }) => {
+  const box = page.locator("textarea");
+  await box.fill("My own words about the open house.");
+  await page.getByRole("button", { name: "Write with AI" }).click();
+  await page.getByPlaceholder(/What is the video about/).fill("an open house this weekend");
+  await page.getByRole("button", { name: "Write script" }).click();
+  await expect(box).not.toHaveValue("My own words about the open house.");
+  await expect(box).toBeFocused();
+  await expect(page.getByText("Written by AI.")).toBeVisible();
+  await page.getByRole("button", { name: "Undo the rewrite" }).click();
+  await expect(box).toHaveValue("My own words about the open house.");
+  await expect(page.getByRole("button", { name: "Undo the rewrite" })).toHaveCount(0);
 });
 
 test("a dub can be voice only and name its speakers", async ({ page }) => {

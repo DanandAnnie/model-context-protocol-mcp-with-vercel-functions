@@ -445,8 +445,9 @@ export default function VideoDetailPage() {
     if (!video) return;
     const w = video.aspect === "9:16" ? 360 : video.aspect === "1:1" ? 480 : 640;
     const h = video.aspect === "9:16" ? 640 : video.aspect === "1:1" ? 480 : 360;
-    const query = [embedAutoplay ? "autoplay=1" : "", embedLoop ? "loop=1" : ""].filter(Boolean).join("&");
-    const src = `${shareBase()}/share/${video.id}${query ? `?${query}` : ""}`;
+    // The embed page is the player alone, filling the iframe.
+    const query = ["embed=1", embedAutoplay ? "autoplay=1" : "", embedLoop ? "loop=1" : ""].filter(Boolean).join("&");
+    const src = `${shareBase()}/share/${video.id}?${query}`;
     const snippet = `<iframe src="${src}" width="${w}" height="${h}" style="border:0;max-width:100%" allow="${embedAutoplay ? "autoplay; " : ""}fullscreen" title="${video.title.replace(/"/g, "&quot;")}"></iframe>`;
     try {
       await navigator.clipboard.writeText(snippet);
@@ -801,7 +802,8 @@ export default function VideoDetailPage() {
                         onClick={() => setFolderDraft(video.folder ?? "")}
                         className="inline-flex items-center gap-1.5 rounded px-1 text-slate-900 hover:bg-slate-100"
                         title="Move to a folder"
-                        aria-label="Move to a folder"
+                        // The folder it is in now is part of the name, so a screen reader hears it too.
+                        aria-label={`Move to a folder (now ${video.folder ?? "unfiled"})`}
                       >
                         <FolderOpen className="h-3.5 w-3.5 text-slate-400" />
                         {video.folder ?? "Unfiled"}
@@ -1062,7 +1064,8 @@ export default function VideoDetailPage() {
                 )}
               </Card>
               <VideoChapters video={video} />
-              {(canEdit !== false || video.resizedFrom) && <OtherSizes video={video} canEdit={canEdit !== false} />}
+              {/* Offered once the role is known to allow it, so a viewer never sees a button the server would refuse. */}
+              {(canEdit === true || video.resizedFrom) && <OtherSizes video={video} canEdit={canEdit === true} />}
               <ReviewPanel video={video} onChange={(next) => setData({ video: next })} />
               <VideoComments videoId={video.id} player={video.status === "completed" && video.videoUrl ? player : undefined} />
             </div>

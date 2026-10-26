@@ -243,6 +243,7 @@ function VideosInner() {
           {STATUSES.map((s) => (
             <button
               key={s}
+              aria-pressed={status === s}
               onClick={() => setStatus(s)}
               className={`rounded-full px-3 py-1 text-xs font-medium ${status === s ? "bg-slate-900 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
             >

@@ -60,9 +60,10 @@ export function ShareChapters({ playerId, chapters: all }: { playerId: string; c
       <h2 id="share-chapters-title" className="mb-2 text-sm font-semibold text-slate-200">
         Chapters
       </h2>
-      <ol className="grid gap-1 sm:grid-cols-2" data-testid="share-chapters">
+      {/* One column of rows that never grow past it on a phone, where a long title is cut with an ellipsis. */}
+      <ol className="grid grid-cols-1 gap-1 sm:grid-cols-2" data-testid="share-chapters">
         {chapters.map((c, i) => (
-          <li key={i}>
+          <li key={i} className="min-w-0">
             <button
               type="button"
               onClick={() => playFrom(c.startMs)}

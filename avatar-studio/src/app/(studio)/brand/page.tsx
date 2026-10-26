@@ -425,7 +425,7 @@ export default function BrandPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Default aspect ratio">
               <select value={aspect} onChange={(e) => setAspect(e.target.value as AspectRatio | "")} className={inputClass}>
-                <option value="">16:9 (standard)</option>
+                <option value="">No default (16:9)</option>
                 <option value="16:9">16:9 landscape</option>
                 <option value="9:16">9:16 vertical</option>
                 <option value="1:1">1:1 square</option>

@@ -48,7 +48,7 @@ export function PlanCard({ status, onChanged, canManage = true }: { status: Prov
               {plan === "pro" ? "Pro" : "Free"}
             </span>
             <span className="text-sm text-slate-600">
-              {usage ? `${usage.rendersThisMonth} of ${limit ?? "unlimited"} renders used this month` : "…"}
+              {usage ? (limit ? `${usage.rendersThisMonth} of ${limit} renders used this month` : `${usage.rendersThisMonth} renders this month, no limit`) : "…"}
             </span>
           </div>
           {usage?.subscriptionStatus && plan === "pro" && (

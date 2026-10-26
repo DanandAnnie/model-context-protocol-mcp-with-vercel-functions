@@ -95,18 +95,23 @@ export async function generateMetadata({
   };
 }
 
-/** Public, sidebar-free player page for sharing a finished video. `?autoplay=1` starts it muted and `?loop=1` repeats it (for embeds). */
+/**
+ * Public, sidebar-free player page for sharing a finished video. `?autoplay=1` starts it muted and `?loop=1` repeats it;
+ * `?embed=1` is the page an embed's iframe loads: the player alone, filling the frame (the password and email forms
+ * still come first where the owner set them).
+ */
 export default async function SharePage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ autoplay?: string; loop?: string }>;
+  searchParams: Promise<{ autoplay?: string; loop?: string; embed?: string }>;
 }) {
   const { id } = await params;
   const query = await searchParams;
   const autoplay = query.autoplay === "1";
   const loop = query.loop === "1";
+  const embed = query.embed === "1";
   let video;
   try {
     video = await getVideo(id, PUBLIC_ACCESS);
@@ -125,6 +130,25 @@ export default async function SharePage({
   // An uploaded logo (a data URL of up to a few megabytes) is served by its own cacheable route, so the
   // header and the player watermark share one short URL instead of carrying the image in the page.
   const logoSrc = publicLogoSrc(brand, `/api/videos/${encodeURIComponent(video.id)}/logo`);
+
+  if (embed) {
+    return (
+      <main className="flex h-screen w-screen items-center justify-center overflow-hidden bg-black text-slate-100">
+        <h1 className="sr-only">{video.title}</h1>
+        {!unlocked ? (
+          <div className="w-full max-w-sm p-4">
+            <ShareUnlock videoId={video.id} />
+          </div>
+        ) : gated ? (
+          <div className="max-h-full w-full max-w-md overflow-y-auto p-4">
+            <ShareLeadGate videoId={video.id} brandName={brand?.name} autoplay={autoplay} loop={loop} embed />
+          </div>
+        ) : (
+          <ShareWatch body={shareBodyFor(video, brand)} autoplay={autoplay} loop={loop} embed />
+        )}
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">

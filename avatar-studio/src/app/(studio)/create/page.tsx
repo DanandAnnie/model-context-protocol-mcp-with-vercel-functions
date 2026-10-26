@@ -556,16 +556,28 @@ function CreateInner() {
   const [assistTone, setAssistTone] = useState<(typeof TONES)[number]>("professional");
   const [assistLanguage, setAssistLanguage] = useState("Spanish");
 
+  /** The script a rewrite (the AI writer or Improve) replaced, while the scene still holds what the rewrite wrote. */
+  const [rewriteUndo, setRewriteUndo] = useState<{ idx: number; before: string; after: string; note: string } | null>(null);
+  /** Replaces a scene's script with a rewrite, keeping what it held so the rewrite can be taken back. */
+  function applyRewrite(idx: number, before: string, after: string, note: string) {
+    updateScene(idx, { script: after });
+    setRewriteUndo(before.trim() && before !== after ? { idx, before, after, note } : null);
+    // Back to the script, rather than lost with the panel that wrote it.
+    requestAnimationFrame(() => scriptRef.current?.focus());
+  }
   async function revise(action: "shorten" | "expand" | "tone" | "translate" | "polish") {
     if (!active.script.trim()) return;
+    // The scene asked about, even if another is chosen while the answer comes.
+    const idx = activeIdx;
+    const before = active.script;
     setAssistBusy(true);
     setErr(null);
     try {
       const { script: out } = await api<{ script: string }>("/api/script", {
         method: "POST",
-        body: JSON.stringify({ action, script: active.script, tone: action === "tone" ? assistTone : undefined, language: action === "translate" ? assistLanguage : undefined }),
+        body: JSON.stringify({ action, script: before, tone: action === "tone" ? assistTone : undefined, language: action === "translate" ? assistLanguage : undefined }),
       });
-      setScript(out);
+      applyRewrite(idx, before, out, action === "translate" ? `Translated to ${assistLanguage}.` : "Rewritten.");
       setAssistOpen(false);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not revise the script");
@@ -879,7 +891,7 @@ function CreateInner() {
       <div className="grid gap-6 xl:grid-cols-[1.1fr_1fr]">
         {/* Left column: stage + script. min-w-0 lets the columns shrink below their content width on phones. */}
         <div className="min-w-0 space-y-5">
-          <input className={`${inputClass} text-base font-medium`} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Video title" />
+          <input aria-label="Video title" className={`${inputClass} text-base font-medium`} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Video title" />
 
           <Card className="overflow-hidden">
             {/* A portrait stage is sized by its height and takes its width from the ratio, so it really is 9:16 (a width-first box capped in height came out near square and cropped portrait slides); the height is also capped by the screen's width, so a narrow phone keeps the shape. */}
@@ -1146,6 +1158,23 @@ function CreateInner() {
                     {silentIssue}
                   </span>
                 )}
+                {rewriteUndo && rewriteUndo.idx === activeIdx && scenes[activeIdx]?.script === rewriteUndo.after && (
+                  <span className="inline-flex items-center gap-2 text-xs text-slate-600" role="status">
+                    {rewriteUndo.note}
+                    <button
+                      type="button"
+                      aria-label="Undo the rewrite"
+                      className="font-medium text-brand-700 underline"
+                      onClick={() => {
+                        updateScene(rewriteUndo.idx, { script: rewriteUndo.before });
+                        setRewriteUndo(null);
+                        scriptRef.current?.focus();
+                      }}
+                    >
+                      Undo
+                    </button>
+                  </span>
+                )}
                 {!allScenesFilled && scenes.every((sc) => sc.script.trim()) && (
                   <span role="alert" className="text-xs font-medium text-rose-600">
                     Every scene is silent; give at least one some words
@@ -1305,7 +1334,7 @@ function CreateInner() {
                   setWriterOpen(false);
                   writerButton.current?.focus();
                 }}
-                onScript={(s) => { setScript(s); setWriterOpen(false); }}
+                onScript={(s) => { applyRewrite(activeIdx, active.script, s, "Written by AI."); setWriterOpen(false); }}
               />
             )}
             <textarea

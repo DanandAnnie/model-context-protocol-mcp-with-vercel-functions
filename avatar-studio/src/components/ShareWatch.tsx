@@ -10,18 +10,19 @@ import { ShareChapters } from "./ShareChapters";
 import { ViewBeacon } from "./ViewBeacon";
 
 /** A share page's player, button, download link, description, and transcript, from what the server let this viewer see. */
-export function ShareWatch({ body, autoplay, loop, focus = false }: { body: ShareBody; autoplay: boolean; loop: boolean; focus?: boolean }) {
+export function ShareWatch({ body, autoplay, loop, focus = false, embed = false }: { body: ShareBody; autoplay: boolean; loop: boolean; focus?: boolean; embed?: boolean }) {
   // Shown in place of the email form, it takes the focus the form's button had, rather than leaving it on the page.
   const frameRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (focus) frameRef.current?.focus();
   }, [focus]);
-  const frame = body.aspect === "9:16" ? "aspect-[9/16] max-w-[420px]" : body.aspect === "1:1" ? "aspect-square max-w-[640px]" : "aspect-video";
+  // Embedded, the player is all there is: it fills the frame it was given, its shape kept inside it.
+  const frame = embed ? "h-full" : body.aspect === "9:16" ? "aspect-[9/16] max-w-[420px]" : body.aspect === "1:1" ? "aspect-square max-w-[640px]" : "aspect-video";
   const { player, cta } = body;
   return (
     <>
       {body.status === "completed" && <ViewBeacon videoId={body.videoId} />}
-      <div ref={frameRef} tabIndex={focus ? -1 : undefined} role={focus ? "region" : undefined} aria-label={focus ? "Video" : undefined} className={`relative mx-auto w-full overflow-hidden rounded-xl bg-black focus:outline-none ${frame}`}>
+      <div ref={frameRef} tabIndex={focus ? -1 : undefined} role={focus ? "region" : undefined} aria-label={focus ? "Video" : undefined} className={`relative mx-auto w-full overflow-hidden bg-black focus:outline-none ${embed ? "" : "rounded-xl"} ${frame}`}>
         {body.watermark && (
           // The logo belongs to the page, not the video file, so it is not shown when the player goes fullscreen
           // or picture-in-picture; decorative (the header names the brand), and clicks pass through to the player.
@@ -55,7 +56,7 @@ export function ShareWatch({ body, autoplay, loop, focus = false }: { body: Shar
           </div>
         )}
       </div>
-      {(cta || body.download) && (
+      {!embed && (cta || body.download) && (
         <p className="mt-4 flex flex-wrap items-center gap-3">
           {cta && <ShareCta videoId={body.videoId} label={cta.label} url={cta.url} background={cta.background} dark={cta.dark} />}
           {body.download && (
@@ -71,14 +72,14 @@ export function ShareWatch({ body, autoplay, loop, focus = false }: { body: Shar
           )}
         </p>
       )}
-      {body.description && (
+      {!embed && body.description && (
         <p className="mt-6 whitespace-pre-wrap text-base leading-relaxed text-slate-100" data-testid="share-description">
           {body.description}
         </p>
       )}
-      {body.chapters && body.chapters.length > 1 && <ShareChapters playerId={SHARE_PLAYER_ID} chapters={body.chapters} />}
+      {!embed && body.chapters && body.chapters.length > 1 && <ShareChapters playerId={SHARE_PLAYER_ID} chapters={body.chapters} />}
       {/* Once there is a video, the script is its transcript: the caption lines (corrected ones when an editor saved them), each playing from its time. */}
-      {body.transcripts ? (
+      {embed ? null : body.transcripts ? (
         <ShareTranscript playerId={SHARE_PLAYER_ID} transcripts={body.transcripts} />
       ) : (
         <p className="mt-6 whitespace-pre-wrap text-sm leading-relaxed text-slate-300">{body.script}</p>

@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
-import { createVideo, deleteVideo, getVideo, rendersThisMonth, resizeSchema, resizeVideo, updateVideo, videoRequestSchema } from "../services";
+import { createVideo, deleteVideo, getVideo, rendersThisMonth, resizeSchema, resizeVideo, updateVideo, videoRequestSchema, videoSizes } from "../services";
 import { ConflictError, LimitError, ValidationError } from "../errors";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import { getStore } from "../store";
@@ -54,11 +54,23 @@ describe("other sizes", () => {
     const [cut] = (await resizeVideo(emoji.id, { aspects: ["1:1"] }, "agent")).videos;
     assert.equal(cut.title, `${"A".repeat(112)}😀 (1:1)`);
     assert.equal(cut.title.isWellFormed(), true);
-    // A size made from a size is titled and linked from the original.
-    const [portrait] = made;
+    // A size the video already has is never made again, from the original or from a size of it.
+    await assert.rejects(resizeVideo(original.id, { aspects: ["9:16", "1:1"] }, "agent"), /already has those sizes/);
+    await assert.rejects(resizeVideo(made[0].id, { aspects: ["16:9"] }, "agent"), /already has a 16:9 size/);
+    assert.deepEqual((await videoSizes(made[1].id, "agent")).map((v) => [v.id, v.aspect]), [[original.id, "16:9"], [made[0].id, "9:16"], [made[1].id, "1:1"]]);
+    // A size made from a size is titled and linked from the original; a trashed size can be made again.
+    const second = await createVideo(source(), "agent");
+    const [portrait] = (await resizeVideo(second.id, { aspects: ["9:16"] }, "agent")).videos;
     const [fromPortrait] = (await resizeVideo(portrait.id, { aspects: ["1:1"] }, "agent")).videos;
     assert.equal(fromPortrait.title, "Open house tour (1:1)");
-    assert.equal(fromPortrait.resizedFrom, original.id);
+    assert.equal(fromPortrait.resizedFrom, second.id);
+    await deleteVideo(fromPortrait.id, "agent");
+    assert.equal((await resizeVideo(second.id, { aspects: ["1:1"] }, "agent")).videos.length, 1);
+    // A title of flags (two code units each) keeps within the 120 the request schema counts.
+    const flags = await createVideo({ ...source(), title: `Tour ${"🇬🇧".repeat(57)}!` }, "agent");
+    const [flagged] = (await resizeVideo(flags.id, { aspects: ["1:1"] }, "agent")).videos;
+    assert.ok(flagged.title.length <= 120 && flagged.title.endsWith(" (1:1)") && flagged.title.isWellFormed());
+    assert.doesNotThrow(() => videoRequestSchema.parse({ ...source(), title: flagged.title }));
   });
 
   it("keeps the corrected captions and subtitle languages, and a retried size keeps its link", async () => {

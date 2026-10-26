@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { shareTrackId } from "@/lib/share-player";
 import { formatTimestamp } from "@/lib/text";
 
 type Cue = { startMs: number; endMs: number; text: string };
@@ -20,10 +21,11 @@ export function ShareTranscript({ playerId, transcripts }: { playerId: string; t
   useEffect(() => {
     const el = document.getElementById(playerId) as HTMLVideoElement | null;
     if (!el) return;
-    // Translated tracks are labelled with their language; the script's own track, or none, means the script.
+    // Translated tracks carry an id made from their language (a label could be anything, even "Captions");
+    // the script's own track, or none, means the script.
     const follow = () => {
       const showing = Array.from(el.textTracks).find((t) => t.mode === "showing");
-      const i = showing ? transcripts.findIndex((t) => t.language && t.language === showing.label) : -1;
+      const i = showing?.id ? transcripts.findIndex((t) => t.language && shareTrackId(t.language) === showing.id) : -1;
       setWhich(i > 0 ? i : 0);
     };
     follow();
@@ -59,7 +61,7 @@ export function ShareTranscript({ playerId, transcripts }: { playerId: string; t
     if (line.offsetTop < box.scrollTop || line.offsetTop + line.offsetHeight > box.scrollTop + box.clientHeight) {
       box.scrollTop = line.offsetTop - box.clientHeight / 3;
     }
-  }, [active]);
+  }, [active, cues]);
 
   function playFrom(startMs: number) {
     const el = document.getElementById(playerId) as HTMLVideoElement | null;
@@ -74,7 +76,7 @@ export function ShareTranscript({ playerId, transcripts }: { playerId: string; t
       <h2 id="share-transcript-title" className="mb-2 text-sm font-semibold text-slate-200">
         Transcript{shown.language ? ` · ${shown.language}` : ""}
       </h2>
-      <ol ref={list} lang={shown.code} className="relative max-h-80 space-y-0.5 overflow-y-auto rounded-lg border border-slate-800 bg-slate-900/60 p-2" data-testid="share-transcript">
+      <ol ref={list} lang={shown.language ? (shown.code ?? "und") : undefined} className="relative max-h-80 space-y-0.5 overflow-y-auto rounded-lg border border-slate-800 bg-slate-900/60 p-2" data-testid="share-transcript">
         {cues.map((cue, i) => (
           <li key={i}>
             <button

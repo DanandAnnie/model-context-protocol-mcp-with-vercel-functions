@@ -9,6 +9,8 @@ import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api } from "@/lib/client";
 import { VOICE_EMOTIONS, type AspectRatio, type Avatar, type Background, type CaptionStyle, type Resolution, type Voice, type VideoTemplate, type VoiceEmotion } from "@/lib/types";
 
+const MAX_BATCH_SCRIPT = 5000;
+
 const SAMPLE_CSV = `name,property,move_in
 Jordan,12 Elm Street,November 1
 Priya,48 Harbor View,November 15`;
@@ -41,6 +43,8 @@ export default function BatchPage() {
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle | undefined>();
   const [background, setBackground] = useState<Background | undefined>();
   const [startedFrom, setStartedFrom] = useState("");
+  // A template's presenter and voice, held until both lists have loaded (a template can be picked first).
+  const [cast, setCast] = useState<{ avatarId?: string; voiceId?: string } | null>(null);
   const { data: templateData } = useApi<{ templates: VideoTemplate[] }>("/api/templates");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
@@ -52,6 +56,17 @@ export default function BatchPage() {
   useEffect(() => {
     if (!voiceId && voiceData?.voices.length) setVoiceId(voiceData.voices[0].id);
   }, [voiceData, voiceId]);
+
+  // Apply a template's presenter and voice once both lists are in, like the editor's copy prefill:
+  // a voice that is gone gives way to the presenter's own default, a presenter that is gone keeps the choice.
+  useEffect(() => {
+    if (!cast || !avatarData || !voiceData) return;
+    const a = avatarData.avatars.find((x) => x.id === cast.avatarId);
+    const v = voiceData.voices.find((x) => x.id === cast.voiceId) ?? (a?.defaultVoiceId ? voiceData.voices.find((x) => x.id === a.defaultVoiceId) : undefined);
+    if (a) setAvatarId(a.id);
+    if (v) setVoiceId(v.id);
+    setCast(null);
+  }, [cast, avatarData, voiceData]);
 
   // Live preview, debounced.
   useEffect(() => {
@@ -66,16 +81,22 @@ export default function BatchPage() {
   // A saved template brings its script (scenes joined, one paragraph each) and every setting the batch takes.
   function startFrom(id: string) {
     setStartedFrom(id);
+    setErr(null);
     const t = templateData?.templates.find((x) => x.id === id);
     if (!t) {
       // "None": drop the settings the page has no controls for, so they do not ride along unseen.
       setCaptionStyle(undefined);
       setBackground(undefined);
+      setCast(null);
       return;
     }
-    setTemplate(t.scenes.map((sc) => sc.script.trim()).filter(Boolean).join("\n\n"));
-    if (t.avatarId && avatarData?.avatars.some((a) => a.id === t.avatarId)) setAvatarId(t.avatarId);
-    if (t.voiceId && voiceData?.voices.some((v) => v.id === t.voiceId)) setVoiceId(t.voiceId);
+    const script = t.scenes.map((sc) => sc.script.trim()).filter(Boolean).join("\n\n");
+    setTemplate(script);
+    // Each template scene may hold 5000 characters; one batch script may hold 5000 in all.
+    if (script.length > MAX_BATCH_SCRIPT) setErr(`This template's scenes add up to ${script.length} characters; a batch script takes at most ${MAX_BATCH_SCRIPT}. Shorten it to generate.`);
+    // The first scene's own presenter and voice lead, as they do in the editor; every row uses one cast.
+    const first = t.scenes[0];
+    setCast({ avatarId: first?.avatarId ?? t.avatarId, voiceId: first?.voiceId ?? t.voiceId });
     setAspect(t.aspect);
     setResolution(t.resolution ?? "1080p");
     setCaptions(t.captions);
@@ -126,7 +147,7 @@ export default function BatchPage() {
         <div className="space-y-5">
           <Card className="space-y-4 p-4">
             {!!templateData?.templates.length && (
-              <Field label="Start from a saved template" hint="Fills in its script and settings; scenes become paragraphs of one script, using the first scene's background.">
+              <Field label="Start from a saved template" hint="Fills in its script and settings; scenes become paragraphs of one script, spoken by the first scene's presenter and voice over its background.">
                 <select className={inputClass} value={startedFrom} onChange={(e) => startFrom(e.target.value)} aria-label="Start from a saved template">
                   <option value="">None</option>
                   {templateData.templates.map((t) => (
@@ -141,7 +162,7 @@ export default function BatchPage() {
               <input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} />
             </Field>
             <Field label="Script template" hint={preview?.columns.length ? `Available placeholders: ${preview.columns.map((c) => `{${c}}`).join(" ")}` : "Use {column} placeholders that match your CSV header."}>
-              <textarea className={`${inputClass} min-h-[140px] resize-y leading-relaxed`} value={template} onChange={(e) => setTemplate(e.target.value)} maxLength={5000} />
+              <textarea className={`${inputClass} min-h-[140px] resize-y leading-relaxed`} value={template} onChange={(e) => setTemplate(e.target.value)} maxLength={MAX_BATCH_SCRIPT} />
             </Field>
             <Field label="Recipients (CSV)" hint="First row is the header. Up to 100 rows per batch.">
               <textarea className={`${inputClass} min-h-[140px] resize-y font-mono text-xs`} value={csv} onChange={(e) => setCsv(e.target.value)} />

@@ -1056,12 +1056,27 @@ test("personalized batch creates one video per CSV row", async ({ page }) => {
   });
   expect(tpl.status()).toBe(201);
   const tplId = ((await tpl.json()) as { template: { id: string } }).template.id;
-  await page.goto("/batch");
-  await page.getByLabel("Start from a saved template").selectOption(tplId);
-  await expect(page.locator("textarea").first()).toHaveValue("Hi {name}.\n\nSee you at {property}.");
-  await expect(page.getByLabel("Voice emotion")).toHaveValue("Serious");
-  await expect(page.getByLabel("Aspect ratio")).toHaveValue("9:16");
-  await expect(page.getByText("Speaking speed · 1.20x")).toBeVisible();
+  try {
+    await page.goto("/batch");
+    await page.getByLabel("Start from a saved template").selectOption(tplId);
+    await expect(page.locator("textarea").first()).toHaveValue("Hi {name}.\n\nSee you at {property}.");
+    await expect(page.getByLabel("Voice emotion")).toHaveValue("Serious");
+    await expect(page.getByLabel("Aspect ratio")).toHaveValue("9:16");
+    await expect(page.getByText("Speaking speed · 1.20x")).toBeVisible();
+    // The settings the page has no controls for (caption style, background) reach every row too.
+    await page.getByRole("button", { name: "Generate 2 videos" }).click();
+    await page.waitForURL(/\/videos\?batch=batch_/);
+    const fromTpl = new URL(page.url()).searchParams.get("batch");
+    const rows = ((await (await page.request.get("/api/videos")).json()).videos as Array<{ batchId?: string; aspect: string; speed: number; emotion?: string; captions: boolean; captionStyle?: { position: string; size: string }; background: { value: string } }>).filter((v) => v.batchId === fromTpl);
+    expect(rows).toHaveLength(2);
+    for (const v of rows) {
+      expect([v.aspect, v.speed, v.emotion, v.captions]).toEqual(["9:16", 1.2, "Serious", true]);
+      expect(v.captionStyle).toMatchObject({ position: "top", size: "large" });
+      expect(v.background.value).toBe("#112233");
+    }
+  } finally {
+    await page.request.delete(`/api/templates/${tplId}`);
+  }
 });
 
 test("captions are served as SRT and VTT, security headers are set", async ({ page, request }) => {

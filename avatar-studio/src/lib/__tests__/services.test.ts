@@ -516,6 +516,22 @@ describe("captions", () => {
     assert.equal("pitch" in (await createTemplate(tplSchema.parse({ fromVideoId: flat.id }))), false);
   });
 
+  it("keeps a voice emotion through a retry and a template, in HeyGen's own spelling only", async () => {
+    const { createTemplate, templateInputSchema: tplSchema } = await import("../services/templates");
+    const { retryVideo } = await import("../services");
+    const { getStore } = await import("../store");
+    const req = { title: "E", script: "Hi.", avatarId: "stock_1", voiceId: STOCK_VOICES[0].id, aspect: "16:9" as const, background: { type: "color" as const, value: "#fff" }, captions: false, speed: 1 };
+    const plain = await createVideo(req);
+    assert.equal("emotion" in plain, false, "no emotion is the voice's natural delivery");
+    const bright = await createVideo(videoRequestSchema.parse({ ...req, emotion: "Excited" }));
+    assert.equal(bright.emotion, "Excited");
+    assert.equal((await createTemplate(tplSchema.parse({ fromVideoId: bright.id }))).emotion, "Excited");
+    assert.equal("emotion" in (await createTemplate(tplSchema.parse({ fromVideoId: plain.id }))), false);
+    await getStore().put("video", { ...bright, id: "vid_emotion_failed", status: "failed", providerJobId: undefined });
+    assert.equal((await retryVideo("vid_emotion_failed")).emotion, "Excited");
+    for (const bad of ["excited", "Angry", ""]) assert.equal(videoRequestSchema.safeParse({ ...req, emotion: bad }).success, false, bad);
+  });
+
   it("stores the default caption style as absent whichever client spelled it out", async () => {
     const req = { title: "C", script: "Hi.", avatarId: "stock_1", voiceId: STOCK_VOICES[0].id, aspect: "16:9" as const, background: { type: "color" as const, value: "#fff" }, captions: true, speed: 1 };
     const plain = await createVideo({ ...req, captionStyle: { position: "bottom", size: "medium" } });
@@ -662,6 +678,21 @@ describe("scenes", () => {
     assert.equal("pitch" in (sent as unknown as { video_inputs: Array<{ voice: object }> }).video_inputs[0].voice, false);
     assert.equal(videoRequestSchema.safeParse({ ...req, pitch: 51 }).success, false);
     assert.equal(videoRequestSchema.safeParse({ ...req, pitch: 2.5 }).success, false);
+    // An emotion reaches every scene whose voice can take one; a voice HeyGen says cannot is sent none.
+    type Voiced = { video_inputs: Array<{ voice: { emotion?: string } }> };
+    await heygen.createVideo({ ...req, emotion: "Soothing" }, ava, emma, cast);
+    assert.deepEqual((sent as unknown as Voiced).video_inputs.map((i) => i.voice.emotion), ["Soothing", "Soothing"]);
+    await heygen.createVideo({ ...req, emotion: "Soothing" }, ava, emma, { ...cast, voices: { ...cast.voices, [james.id]: { ...james, emotionSupport: false } } });
+    assert.deepEqual((sent as unknown as Voiced).video_inputs.map((i) => i.voice.emotion), ["Soothing", undefined]);
+    await heygen.createVideo(req, ava, emma, cast);
+    assert.equal("emotion" in (sent as unknown as Voiced).video_inputs[0].voice, false);
+    // The voice list carries HeyGen's per-voice flag, and leaves it out when HeyGen does not say.
+    const { HeyGenTtsProvider } = await import("../providers/tts/heygen");
+    const tts = new HeyGenTtsProvider("key");
+    (tts as unknown as { client: { listVoices: () => Promise<unknown> } }).client.listVoices = async () => ({
+      voices: [{ voice_id: "a", name: "A", emotion_support: true }, { voice_id: "b", name: "B", emotion_support: false }, { voice_id: "c", name: "C" }],
+    });
+    assert.deepEqual((await tts.listVoices()).map((v) => v.emotionSupport), [true, false, undefined]);
     // A video background loops and fills the frame; an image is passed by URL; a colour as a value.
     const withVideo = videoRequestSchema.parse({ ...req, scenes: [{ ...req.scenes![0], background: { type: "video", value: "https://cdn.example.com/loop.mp4" } }, { ...req.scenes![1], background: { type: "image", value: "https://cdn.example.com/bg.jpg" } }] });
     await heygen.createVideo(withVideo, ava, emma, cast);

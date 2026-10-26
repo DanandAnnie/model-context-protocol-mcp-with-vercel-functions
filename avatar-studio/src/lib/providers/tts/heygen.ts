@@ -19,6 +19,7 @@ export class HeyGenTtsProvider implements TtsProvider {
       language: v.language,
       gender: (v.gender?.toLowerCase() as Voice["gender"]) ?? undefined,
       previewUrl: v.preview_audio,
+      ...(typeof v.emotion_support === "boolean" ? { emotionSupport: v.emotion_support } : {}),
     }));
   }
 

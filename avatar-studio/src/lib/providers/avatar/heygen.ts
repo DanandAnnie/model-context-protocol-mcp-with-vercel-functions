@@ -68,10 +68,11 @@ export class HeyGenAvatarProvider implements AvatarProvider {
         return {
           // HeyGen places the presenter with a scale (1 = default) and an x/y offset of the frame.
           character: { ...this.character(sceneAvatar), ...(scene.layout ? { scale: scene.layout.scale, offset: { x: scene.layout.x, y: scene.layout.y } } : {}) },
-          // An audio scene lip-syncs to its clip; speed and pitch apply to synthesised speech only.
+          // An audio scene lip-syncs to its clip; speed, pitch, and emotion apply to synthesised speech only.
+          // An emotion goes to voices that can take one: HeyGen says per voice, and one it says nothing about is sent it.
           voice: scene.audioId
             ? { type: "audio", audio_asset_id: this.audioAssetId(scene.audioId, cast) }
-            : { type: "text", input_text: withBreakTags(scene.script), voice_id: this.voiceId(sceneVoice, req.voiceId), speed: req.speed, ...(req.pitch ? { pitch: req.pitch } : {}) },
+            : { type: "text", input_text: withBreakTags(scene.script), voice_id: this.voiceId(sceneVoice, req.voiceId), speed: req.speed, ...(req.pitch ? { pitch: req.pitch } : {}), ...(req.emotion && sceneVoice?.emotionSupport !== false ? { emotion: req.emotion } : {}) },
           // A video background loops for the length of the scene and fills the frame.
           background:
             scene.background.type === "video"

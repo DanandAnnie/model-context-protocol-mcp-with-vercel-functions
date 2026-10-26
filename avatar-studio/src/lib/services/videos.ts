@@ -21,13 +21,13 @@ import { clearCover, setCover } from "../cover";
 import { shareOffline } from "../client";
 import { bumpViewsByDay } from "../insights";
 
-import { backgroundSchema, captionStyleSchema, pitchSchema, sceneLayoutSchema } from "./schemas";
+import { backgroundSchema, captionStyleSchema, emotionSchema, pitchSchema, sceneLayoutSchema } from "./schemas";
 import { getBrandKit } from "./brand";
 import { spokenCopy } from "../pronounce";
 import { clearComments } from "./comments";
 import { clearVideoLeads } from "./leads";
 import { reviseScript } from "./scripts";
-export { backgroundSchema, captionStyleSchema, pitchSchema, sceneLayoutSchema };
+export { backgroundSchema, captionStyleSchema, emotionSchema, pitchSchema, sceneLayoutSchema };
 
 export const videoRequestSchema = z
   .object({
@@ -59,6 +59,7 @@ export const videoRequestSchema = z
     captionStyle: captionStyleSchema.optional(),
     speed: z.number().min(0.5).max(1.5).default(1),
     pitch: pitchSchema.optional(),
+    emotion: emotionSchema.optional(),
   })
   .transform((v, ctx) => {
     if (v.scenes) {
@@ -928,6 +929,7 @@ export async function retryVideo(id: string, ownerId: string = LOCAL_OWNER): Pro
     ...(failed.captionStyle ? { captionStyle: failed.captionStyle } : {}),
     speed: failed.speed,
     ...(failed.pitch ? { pitch: failed.pitch } : {}),
+    ...(failed.emotion ? { emotion: failed.emotion } : {}),
   };
   // One write: the provider's webhook can land as soon as the job exists, so nothing may overwrite the stored video afterwards.
   return createVideo(req, ownerId, undefined, false, { folder: failed.folder, description: failed.description, batchId: failed.batchId, rowLabel: failed.rowLabel, retryOf: failed.id });

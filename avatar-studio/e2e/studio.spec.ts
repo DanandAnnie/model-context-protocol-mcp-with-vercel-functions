@@ -386,11 +386,15 @@ test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page 
   await page.getByRole("button", { name: "Settings" }).click();
   await page.getByLabel("Voice pitch").fill("10");
   await expect(page.getByText(/Voice pitch · \+10/)).toBeVisible();
+  // And given a speaking style, which the video page lists.
+  await page.getByLabel("Voice emotion").selectOption("Friendly");
   await page.getByRole("button", { name: "Generate video" }).click();
   await page.waitForURL(/\/videos\/vid_/);
   const id = page.url().split("/").pop()!;
   const video = (await (await page.request.get(`/api/videos/${id}`)).json()).video;
   expect(video.pitch).toBe(10);
+  expect(video.emotion).toBe("Friendly");
+  await expect(page.getByText("Voice emotion")).toBeVisible();
   expect(video.scenes).toHaveLength(2);
   expect(video.script).toBe("Scene one says hello.\n\nScene two says goodbye.");
   expect(video.scenes[0].avatarName).toBeUndefined();
@@ -404,6 +408,10 @@ test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page 
   await expect(page.getByText(/2 scenes/)).toBeVisible();
   await page.getByRole("button", { name: /^Scene 2,/ }).click();
   await expect(page.getByLabel("Scene voice")).toHaveValue("stock_voice_3");
+  // And the copy keeps the voice settings.
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByLabel("Voice emotion")).toHaveValue("Friendly");
+  await expect(page.getByText(/Voice pitch · \+10/)).toBeVisible();
   // A scene whose presenter was deleted since falls back to the video's and still renders.
   const custom = await page.request.post("/api/avatars", { data: { name: "Gone soon", imageUrl: "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%2F%3E" } });
   expect(custom.status()).toBe(201);

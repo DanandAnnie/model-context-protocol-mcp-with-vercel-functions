@@ -16,7 +16,7 @@ import { languageLabel } from "@/lib/language";
 import { stripPauses } from "@/lib/pauses";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
-import { CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, RESOLUTIONS, isDefaultCaptionStyle as isDefaultCaptionStyleFn, type AspectRatio, type AudioClip, type Avatar, type Background, type BrandKit, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice } from "@/lib/types";
+import { CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, RESOLUTIONS, isDefaultCaptionStyle as isDefaultCaptionStyleFn, type AspectRatio, type AudioClip, type Avatar, type Background, type BrandKit, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -31,6 +31,7 @@ interface Draft {
   captionStyle?: CaptionStyle;
   speed: number;
   pitch?: number;
+  emotion?: VoiceEmotion;
   avatarId?: string;
   voiceId?: string;
   savedAt: string;
@@ -65,6 +66,8 @@ const newScene = (script = "", background: Background = DEFAULT_BG, presenter: P
 });
 /** True when a layout is the renderer's default and need not be stored. */
 const isDefaultLayout = (l: SceneLayout) => l.scale === 1 && l.x === 0 && l.y === 0;
+/** An emotion the renderer takes, or "" (natural) for anything else. */
+const asEmotion = (v: unknown): VoiceEmotion | "" => ((VOICE_EMOTIONS as readonly unknown[]).includes(v) ? (v as VoiceEmotion) : "");
 const TONES = ["friendly", "professional", "formal", "energetic", "calm"] as const;
 type Tab = "avatar" | "voice" | "background" | "settings";
 
@@ -204,6 +207,7 @@ function CreateInner() {
   const isDefaultCaptionStyle = isDefaultCaptionStyleFn(captionStyle);
   const [speed, setSpeed] = useState(1);
   const [pitch, setPitch] = useState(0);
+  const [emotion, setEmotion] = useState<VoiceEmotion | "">("");
   const [tab, setTab] = useState<Tab>("avatar");
   const [writerOpen, setWriterOpen] = useState(params.get("writer") === "1");
   const [assistOpen, setAssistOpen] = useState(false);
@@ -254,6 +258,8 @@ function CreateInner() {
     setCaptionStyle(d.captionStyle ?? DEFAULT_CAPTION_STYLE);
     setSpeed(d.speed);
     setPitch(d.pitch ?? 0);
+    // A draft is the browser's own copy, so a value no longer offered is dropped rather than sent.
+    setEmotion(asEmotion(d.emotion));
     setPrefill({ avatarId: d.avatarId, voiceId: d.voiceId });
     setDraftRestored(d.savedAt);
   }, [templateId, fromId]);
@@ -263,10 +269,10 @@ function CreateInner() {
     if (!hydrated.current) return;
     const empty = scenes.every((sc) => !sc.script.trim()) && title === "Untitled video";
     const t = setTimeout(() => {
-      writeDraft(empty ? null : { title, scenes, aspect, resolution, captions, ...(isDefaultCaptionStyle ? {} : { captionStyle }), speed, ...(pitch ? { pitch } : {}), avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
+      writeDraft(empty ? null : { title, scenes, aspect, resolution, captions, ...(isDefaultCaptionStyle ? {} : { captionStyle }), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
     }, 400);
     return () => clearTimeout(t);
-  }, [title, scenes, aspect, resolution, captions, captionStyle, isDefaultCaptionStyle, speed, pitch, avatar, voice]);
+  }, [title, scenes, aspect, resolution, captions, captionStyle, isDefaultCaptionStyle, speed, pitch, emotion, avatar, voice]);
 
   function discardDraft() {
     writeDraft(null);
@@ -323,6 +329,7 @@ function CreateInner() {
         setCaptionStyle(template.captionStyle ?? DEFAULT_CAPTION_STYLE);
         setSpeed(template.speed);
         setPitch(template.pitch ?? 0);
+        setEmotion(template.emotion ?? "");
         setPrefill({ avatarId: template.avatarId, voiceId: template.voiceId });
       })
       .catch((e) => setErr(e instanceof Error ? e.message : "Could not load the template"));
@@ -343,6 +350,7 @@ function CreateInner() {
         setCaptionStyle(video.captionStyle ?? DEFAULT_CAPTION_STYLE);
         setSpeed(video.speed);
         setPitch(video.pitch ?? 0);
+        setEmotion(video.emotion ?? "");
         setPrefill({ avatarId: video.avatarId, voiceId: video.voiceId });
       })
       .catch((e) => setErr(e instanceof Error ? e.message : "Could not load the original video"));
@@ -406,7 +414,7 @@ function CreateInner() {
     try {
       const { video } = await api<{ video: Video }>("/api/videos", {
         method: "POST",
-        body: JSON.stringify({ title, scenes, avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}) }),
+        body: JSON.stringify({ title, scenes, avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}) }),
       });
       writeDraft(null);
       router.push(`/videos/${video.id}`);
@@ -427,7 +435,7 @@ function CreateInner() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canGenerate, title, scenes, avatar, voice, aspect, captions, captionStyle, isDefaultCaptionStyle, speed, pitch]);
+  }, [canGenerate, title, scenes, avatar, voice, aspect, captions, captionStyle, isDefaultCaptionStyle, speed, pitch, emotion]);
 
   const stageAspect = aspect === "9:16" ? "aspect-[9/16]" : aspect === "1:1" ? "aspect-square" : "aspect-video";
   const bgIsDark = (background.type === "color" && isDarkHex(background.value)) || background.type === "video";
@@ -842,6 +850,23 @@ function CreateInner() {
                 </Field>
                 <Field label={`Voice pitch · ${pitch > 0 ? `+${pitch}` : pitch === 0 ? "natural" : pitch}`} hint="HeyGen shifts the voice up or down; other renderers keep its natural pitch.">
                   <input type="range" min={-50} max={50} step={5} value={pitch} onChange={(e) => setPitch(Number(e.target.value))} aria-label="Voice pitch" className="w-full accent-brand-600" />
+                </Field>
+                <Field
+                  label="Voice emotion"
+                  hint={
+                    voice?.emotionSupport === false
+                      ? "This voice always speaks in its natural style; the emotion applies to scenes whose voice supports one."
+                      : "HeyGen voices that support it speak in this style; other renderers keep the voice's natural delivery."
+                  }
+                >
+                  <select value={emotion} onChange={(e) => setEmotion(asEmotion(e.target.value))} aria-label="Voice emotion" className={inputClass}>
+                    <option value="">Natural</option>
+                    {VOICE_EMOTIONS.map((e) => (
+                      <option key={e} value={e}>
+                        {e}
+                      </option>
+                    ))}
+                  </select>
                 </Field>
                 <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-3">
                   <span>

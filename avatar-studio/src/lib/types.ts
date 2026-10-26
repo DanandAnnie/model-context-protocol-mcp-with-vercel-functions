@@ -57,6 +57,8 @@ export interface Voice {
   gender?: "male" | "female" | "neutral";
   previewUrl?: string;
   tags?: string[];
+  /** Whether the voice can take an emotion (HeyGen reports it per voice); absent when the provider does not say. */
+  emotionSupport?: boolean;
   /** "custom" for a cloned voice owned by an account; absent for provider voices. */
   source?: "provider" | "custom";
   ownerId?: string;
@@ -80,6 +82,7 @@ export interface VideoTemplate {
   captionStyle?: CaptionStyle;
   speed: number;
   pitch?: number;
+  emotion?: VoiceEmotion;
   /** The video it was saved from, when it was. */
   sourceVideoId?: string;
   createdAt: string;
@@ -167,7 +170,13 @@ export interface VideoRequest {
   speed: number;
   /** Voice pitch shift from -50 to 50 (HeyGen; other renderers use the voice's natural pitch); absent means none. */
   pitch?: number;
+  /** Speaking style for voices that support one (HeyGen); absent means the voice's natural delivery. */
+  emotion?: VoiceEmotion;
 }
+
+/** HeyGen's voice emotions, in its own spelling, which is what its API takes. */
+export const VOICE_EMOTIONS = ["Excited", "Friendly", "Serious", "Soothing", "Broadcaster"] as const;
+export type VoiceEmotion = (typeof VOICE_EMOTIONS)[number];
 
 export const CAPTION_POSITIONS = ["bottom", "top"] as const;
 export const CAPTION_SIZES = ["small", "medium", "large"] as const;

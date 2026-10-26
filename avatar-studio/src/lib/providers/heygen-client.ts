@@ -35,7 +35,7 @@ export class HeyGenClient {
 
   listVoices() {
     return this.request<{
-      voices: Array<{ voice_id: string; name: string; language?: string; gender?: string; preview_audio?: string }>;
+      voices: Array<{ voice_id: string; name: string; language?: string; gender?: string; preview_audio?: string; emotion_support?: boolean }>;
     }>(`${V2}/voices`);
   }
 

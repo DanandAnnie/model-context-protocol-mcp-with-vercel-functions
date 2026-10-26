@@ -777,7 +777,15 @@ export default function VideoDetailPage() {
                   </Row>
                   <Row label="Speed">{video.speed}x</Row>
                   {video.pitch ? <Row label="Pitch">{video.pitch > 0 ? `+${video.pitch}` : video.pitch}</Row> : null}
-                  {video.emotion ? <Row label="Voice emotion">{video.provider === "heygen" ? video.emotion : `${video.emotion} (not applied: this renderer keeps the voice's natural delivery)`}</Row> : null}
+                  {video.emotion ? (
+                    <Row label="Voice emotion">
+                      {video.provider !== "heygen"
+                        ? `${video.emotion} (not applied: this renderer keeps the voice's natural delivery)`
+                        : video.scenes?.length && video.scenes.every((sc) => sc.audioId)
+                          ? `${video.emotion} (not applied: every scene plays recorded audio)`
+                          : video.emotion}
+                    </Row>
+                  ) : null}
                   <Row label="Captions">{video.captions ? `On${video.captionStyle ? ` · ${video.captionStyle.position}, ${video.captionStyle.size}${video.captionStyle.look ? `, ${video.captionStyle.look}` : ""}` : ""}` : "Off"}</Row>
                   <Row label="Background">
                     {video.background.type === "color" ? (

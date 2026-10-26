@@ -882,13 +882,21 @@ test("discarding a restored draft resets its voice settings", async ({ page }) =
   await page.locator("textarea").fill("A draft with a mood.");
   await page.getByRole("button", { name: "Settings" }).click();
   await page.getByLabel("Voice emotion").selectOption("Excited");
-  await page.waitForTimeout(700);
+  await page.getByRole("checkbox", { name: /Captions/ }).check();
+  const position = page.getByRole("group", { name: "Caption position" });
+  await position.getByRole("button", { name: "top" }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("avatar-studio:draft") ?? "{}").emotion)).toBe("Excited");
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("avatar-studio:draft") ?? "{}").captionStyle?.position)).toBe("top");
   await page.reload();
   await expect(page.getByText("Restored your unsent draft")).toBeVisible();
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByLabel("Voice emotion")).toHaveValue("Excited");
+  await expect(position.getByRole("button", { name: "top" })).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "Discard draft" }).click();
   await expect(page.getByLabel("Voice emotion")).toHaveValue("");
+  // Captions go back off with the rest; switched on again, they start from the default style.
+  await page.getByRole("checkbox", { name: /Captions/ }).check();
+  await expect(position.getByRole("button", { name: "bottom" })).toHaveAttribute("aria-pressed", "true");
 });
 
 test("draft autosave survives a reload and clears after generating", async ({ page }) => {

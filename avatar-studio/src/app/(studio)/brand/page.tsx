@@ -30,6 +30,15 @@ export default function BrandPage() {
   const [bgUrl, setBgUrl] = useState("");
   // Uploaded images, so the kit's default background can be one of them like any scene's.
   const { data: backdropData, error: backdropError, setData: setBackdropData } = useApi<{ backdrops: Backdrop[] }>("/api/backdrops");
+  // An uploaded image that is gone (deleted here, or elsewhere and so taken off the saved kit) is not offered for saving.
+  useEffect(() => {
+    if (!backdropData) return;
+    const id = backdropIdOf({ type: "image", value: bgUrl });
+    if (id && !backdropData.backdrops.some((b) => b.id === id)) {
+      setBgUrl("");
+      setBgType("");
+    }
+  }, [backdropData, bgUrl]);
   const [pronunciations, setPronunciations] = useState("");
   const [glossary, setGlossary] = useState("");
   const [forced, setForced] = useState("");
@@ -43,6 +52,8 @@ export default function BrandPage() {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Shown next to the Save button, where the person is when a save is refused (the banner at the top is out of view).
+  const [saveErr, setSaveErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const hydrated = useRef(false);
 
@@ -101,50 +112,50 @@ export default function BrandPage() {
   async function save() {
     const rules = parsePronunciations(pronunciations);
     if (rules.length > MAX_PRONUNCIATIONS) {
-      setErr(`Up to ${MAX_PRONUNCIATIONS} pronunciations (you have ${rules.length}).`);
+      setSaveErr(`Up to ${MAX_PRONUNCIATIONS} pronunciations (you have ${rules.length}).`);
       return;
     }
     const badRule = rules.find((r) => r.word.length > 40 || r.sayAs.length > 80);
     if (badRule) {
-      setErr(`Pronunciation "${badRule.word.slice(0, 20)}": the word is at most 40 characters and the spelling at most 80.`);
+      setSaveErr(`Pronunciation "${badRule.word.slice(0, 20)}": the word is at most 40 characters and the spelling at most 80.`);
       return;
     }
     const terms = parseGlossary(glossary);
     if (terms.length > MAX_GLOSSARY_TERMS) {
-      setErr(`Up to ${MAX_GLOSSARY_TERMS} terms to keep untranslated (you have ${terms.length}).`);
+      setSaveErr(`Up to ${MAX_GLOSSARY_TERMS} terms to keep untranslated (you have ${terms.length}).`);
       return;
     }
     const longTerm = terms.find((t) => t.length > MAX_GLOSSARY_TERM_LENGTH);
     if (longTerm) {
-      setErr(`"${longTerm.slice(0, 20)}…": a term to keep untranslated is at most ${MAX_GLOSSARY_TERM_LENGTH} characters.`);
+      setSaveErr(`"${longTerm.slice(0, 20)}…": a term to keep untranslated is at most ${MAX_GLOSSARY_TERM_LENGTH} characters.`);
       return;
     }
     // A one-letter term would hold back every "a" or "I" in a script.
     const shortTerm = terms.find((t) => t.length < MIN_GLOSSARY_TERM_LENGTH);
     if (shortTerm) {
-      setErr(`"${shortTerm}": a term to keep untranslated is at least ${MIN_GLOSSARY_TERM_LENGTH} characters.`);
+      setSaveErr(`"${shortTerm}": a term to keep untranslated is at least ${MIN_GLOSSARY_TERM_LENGTH} characters.`);
       return;
     }
     const parsed = parseForcedTranslations(forced);
     if (parsed.bad.length) {
-      setErr(`Always translate, line ${parsed.bad[0]}: write it as term = translation, with [Language] at the end for one language only.`);
+      setSaveErr(`Always translate, line ${parsed.bad[0]}: write it as term = translation, with [Language] at the end for one language only.`);
       return;
     }
     if (parsed.badLanguage.length) {
-      setErr(`Always translate, line ${parsed.badLanguage[0].line}: "${parsed.badLanguage[0].language.slice(0, 30)}" is not a language name (for example [German] or [Spanish (Mexico)]).`);
+      setSaveErr(`Always translate, line ${parsed.badLanguage[0].line}: "${parsed.badLanguage[0].language.slice(0, 30)}" is not a language name (for example [German] or [Spanish (Mexico)]).`);
       return;
     }
     if (parsed.rules.length > MAX_FORCED_TRANSLATIONS) {
-      setErr(`Up to ${MAX_FORCED_TRANSLATIONS} translation rules (you have ${parsed.rules.length}).`);
+      setSaveErr(`Up to ${MAX_FORCED_TRANSLATIONS} translation rules (you have ${parsed.rules.length}).`);
       return;
     }
     const badForced = parsed.rules.find((r) => r.term.length < MIN_GLOSSARY_TERM_LENGTH || r.term.length > MAX_GLOSSARY_TERM_LENGTH || r.translation.length > MAX_FORCED_TRANSLATION_LENGTH || (r.language !== undefined && (r.language.length < 2 || r.language.length > 40)));
     if (badForced) {
-      setErr(`Always translate "${badForced.term.slice(0, 20)}": the term is ${MIN_GLOSSARY_TERM_LENGTH} to ${MAX_GLOSSARY_TERM_LENGTH} characters, the translation at most ${MAX_FORCED_TRANSLATION_LENGTH}, and a language 2 to 40.`);
+      setSaveErr(`Always translate "${badForced.term.slice(0, 20)}": the term is ${MIN_GLOSSARY_TERM_LENGTH} to ${MAX_GLOSSARY_TERM_LENGTH} characters, the translation at most ${MAX_FORCED_TRANSLATION_LENGTH}, and a language 2 to 40.`);
       return;
     }
     setSaving(true);
-    setErr(null);
+    setSaveErr(null);
     try {
       const { brand } = await api<{ brand: BrandKit }>("/api/brand", {
         method: "PUT",
@@ -167,7 +178,7 @@ export default function BrandPage() {
       });
       setSavedAt(brand.updatedAt);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Could not save the brand kit");
+      setSaveErr(e instanceof Error ? e.message : "Could not save the brand kit");
     } finally {
       setSaving(false);
     }
@@ -311,7 +322,17 @@ export default function BrandPage() {
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Default background" hint="What sits behind the presenter in every new video. A video loops on HeyGen; other renderers use their default.">
-              <select aria-label="Default background" value={bgType} onChange={(e) => setBgType(e.target.value as typeof bgType)} className={inputClass}>
+              <select
+                aria-label="Default background"
+                value={bgType}
+                onChange={(e) => {
+                  const next = e.target.value as typeof bgType;
+                  // An uploaded image's path means nothing as a video URL (or as nothing): start that field empty.
+                  if (next !== "image" && backdropIdOf({ type: "image", value: bgUrl })) setBgUrl("");
+                  setBgType(next);
+                }}
+                className={inputClass}
+              >
                 <option value="">Primary colour</option>
                 <option value="image">Image (uploaded or by URL)</option>
                 <option value="video">Video URL</option>
@@ -372,8 +393,7 @@ export default function BrandPage() {
           <Field label="Always translate as" hint="One rule per line, term = translation; add [Language] at the end for a rule in that language only. Translations, subtitle languages, and dubs that keep the glossary use the translation word for word, so pick a form that reads right without inflection. Up to 50.">
             <textarea aria-label="Always translate as" value={forced} onChange={(e) => setForced(e.target.value)} rows={3} placeholder={"CEO = Geschäftsführer [German]\nfree trial = essai gratuit [French]"} className={`${inputClass} font-mono text-xs`} />
           </Field>
-          {/* The banner at the top is out of view down here, so a refused save says so next to the button too. */}
-          <ErrorBanner message={err} />
+          <ErrorBanner message={saveErr} />
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
             <span className="text-xs text-slate-500">{savedAt ? `Saved ${new Date(savedAt).toLocaleString()}` : "Not saved yet"}</span>
             <Button onClick={save} loading={saving} disabled={!primaryValid || !accentValid || (!!bgType && !bgUrl.trim()) || loading || canEdit === false}>

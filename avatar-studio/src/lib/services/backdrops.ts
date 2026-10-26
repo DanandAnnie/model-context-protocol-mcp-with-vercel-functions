@@ -100,23 +100,42 @@ export const PLAIN_BACKGROUND: Background = { type: "color", value: "#f1f5f9" };
 
 /**
  * Deletes a backdrop and its image. Videos already rendered keep their footage; a retry or copy that names it is
- * refused. The owner's templates and brand kit stop naming it (a plain background takes its place), so a batch or a
- * new video started from them still renders instead of failing on an image that is gone.
+ * refused. The owner's templates and brand kit stop naming it first (a plain background takes its place), so a batch
+ * or a new video started from them still renders, and a delete that fails part-way can be run again to finish: the
+ * image is only removed once nothing of the owner's names it.
  */
 export async function deleteBackdrop(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
   await getBackdrop(id, ownerId);
+  const names = (bg: Background | undefined) => backdropIdOf(bg) === id;
+  for (const kit of await getStore().list<BrandKit>("brand", ownerId)) {
+    await rewriteIfNamed<BrandKit>("brand", kit, (k) => names(k.defaultBackground), (k) => {
+      const { defaultBackground: _gone, ...rest } = k;
+      void _gone;
+      return rest as BrandKit;
+    });
+  }
+  for (const tpl of await getStore().list<VideoTemplate>("template", ownerId)) {
+    await rewriteIfNamed<VideoTemplate>("template", tpl, (t) => t.scenes.some((sc) => names(sc.background)), (t) => ({
+      ...t,
+      scenes: t.scenes.map((sc) => (names(sc.background) ? { ...sc, background: PLAIN_BACKGROUND } : sc)),
+    }));
+  }
   // Bytes first: a failure part-way leaves the listed row, so deleting again finishes the job instead of orphaning the image.
   await getStore().remove("backdropdata", dataRowId(id));
   await getStore().remove("backdrop", id);
-  const names = (bg: Background | undefined) => backdropIdOf(bg) === id;
-  for (const kit of await getStore().list<BrandKit>("brand", ownerId)) {
-    if (!names(kit.defaultBackground)) continue;
-    const { defaultBackground: _gone, ...rest } = kit;
-    void _gone;
-    await getStore().put("brand", { ...rest, updatedAt: nowIso() });
+}
+
+/**
+ * Rewrites a record that still names the image, conditionally on its `updatedAt`, so a save that lands meanwhile
+ * (new glossary terms in the brand kit, say) is read again and kept rather than overwritten.
+ */
+async function rewriteIfNamed<T extends { id: string; updatedAt: string }>(kind: "brand" | "template", first: T, named: (item: T) => boolean, rewrite: (item: T) => T): Promise<void> {
+  let current: T | null = first;
+  for (let attempt = 0; attempt < 5 && current; attempt++) {
+    if (!named(current)) return;
+    const next = { ...rewrite(current), updatedAt: new Date(Math.max(Date.now(), Date.parse(current.updatedAt) + 1)).toISOString() };
+    if (await getStore().putIf(kind, next, "updatedAt", current.updatedAt)) return;
+    current = await getStore().get<T>(kind, first.id);
   }
-  for (const tpl of await getStore().list<VideoTemplate>("template", ownerId)) {
-    if (!tpl.scenes.some((sc) => names(sc.background))) continue;
-    await getStore().put("template", { ...tpl, scenes: tpl.scenes.map((sc) => (names(sc.background) ? { ...sc, background: PLAIN_BACKGROUND } : sc)), updatedAt: nowIso() });
-  }
+  if (current && named(current)) throw new ConflictError("The brand kit or a template kept changing while the image was being deleted; try again");
 }

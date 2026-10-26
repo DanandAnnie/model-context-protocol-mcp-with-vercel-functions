@@ -165,6 +165,54 @@ describe("background images kept with a template, the brand kit, and the store",
     assert.equal(batch.videos[0].status, "processing");
   });
 
+  it("the tidy-up touches only the owner's records and keeps a brand kit saved meanwhile", async () => {
+    const { brandKitSchema, getBrandKit, saveBrandKit } = await import("../services");
+    const office = await createBackdrop({ name: "Office", image: dataUrl(PNG) });
+    // Another account's template that names the same path (as text) is theirs and stays as it is.
+    await getStore().put("template", { id: "tpl_theirs", ownerId: "user_other", title: "Theirs", scenes: [{ script: "x", background: { type: "image", value: backdropPath(office.id) } }], aspect: "16:9", captions: false, speed: 1, createdAt: "", updatedAt: "" });
+    await saveBrandKit(brandKitSchema.parse({ name: "Acme", primaryColor: "#4f46e5", defaultBackground: { type: "image", value: backdropPath(office.id) } }));
+    // A kit save lands between the delete's read and its write: the first conditional write loses, and the retry keeps it.
+    const store = getStore();
+    const putIf = store.putIf.bind(store);
+    let raced = false;
+    store.putIf = (async (kind: Parameters<typeof putIf>[0], item: { id: string }, field: string, expected: string) => {
+      if (kind === "brand" && !raced) {
+        raced = true;
+        const kit = (await getBrandKit())!;
+        await store.put("brand", { ...kit, name: "Acme Renamed", updatedAt: new Date(Date.now() + 5).toISOString() });
+      }
+      return putIf(kind, item, field, expected);
+    }) as typeof store.putIf;
+    try {
+      await deleteBackdrop(office.id);
+    } finally {
+      store.putIf = putIf;
+    }
+    const kit = (await getBrandKit())!;
+    assert.deepEqual([kit.name, kit.defaultBackground], ["Acme Renamed", undefined]);
+    assert.equal((await store.get<{ scenes: Array<{ background: { value: string } }> }>("template", "tpl_theirs"))!.scenes[0].background.value, backdropPath(office.id));
+  });
+
+  it("a delete that fails while tidying keeps the image, so deleting again finishes the job", async () => {
+    const { createTemplate, getTemplate, templateInputSchema } = await import("../services");
+    const office = await createBackdrop({ name: "Office", image: dataUrl(PNG) });
+    const tpl = await createTemplate(templateInputSchema.parse({ title: "Deck", scenes: [{ script: "One", background: { type: "image", value: backdropPath(office.id) } }], avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }));
+    const store = getStore();
+    const putIf = store.putIf.bind(store);
+    store.putIf = (async () => {
+      throw new Error("store down");
+    }) as typeof store.putIf;
+    try {
+      await assert.rejects(deleteBackdrop(office.id), /store down/);
+    } finally {
+      store.putIf = putIf;
+    }
+    assert.ok(await store.get("backdrop", office.id), "the image is still there to delete again");
+    await deleteBackdrop(office.id);
+    assert.equal((await getTemplate(tpl.id)).scenes[0].background.type, "color");
+    assert.equal(await store.get("backdrop", office.id), null);
+  });
+
   it("saving a video as a template gives a scene whose image was deleted a plain background", async () => {
     const { createTemplate, templateInputSchema } = await import("../services");
     const office = await createBackdrop({ name: "Office", image: dataUrl(PNG) });

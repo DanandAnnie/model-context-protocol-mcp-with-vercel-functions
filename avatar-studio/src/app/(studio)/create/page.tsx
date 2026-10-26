@@ -31,9 +31,8 @@ const DRAFT_KEY = "avatar-studio:draft";
  * Each space keeps its own draft: one started in Personal never shows up, or loses its uploaded images, in a
  * workspace (the images are the space's own). Personal keeps the original key, so drafts saved before survive.
  */
-function draftKeyFor(spaces: { personalId: string; activeId: string } | null, failed: boolean): string | null {
-  if (spaces) return spaces.activeId === spaces.personalId ? DRAFT_KEY : `${DRAFT_KEY}:${spaces.activeId}`;
-  return failed ? DRAFT_KEY : null;
+function draftKeyFor(spaces: { personalId: string; activeId: string } | null): string | null {
+  return spaces ? (spaces.activeId === spaces.personalId ? DRAFT_KEY : `${DRAFT_KEY}:${spaces.activeId}`) : null;
 }
 
 interface Draft {
@@ -420,7 +419,10 @@ function CreateInner() {
   const hydrated = useRef(false);
   // The draft belongs to the space being worked in, so nothing is restored or saved until that is known.
   const { data: spaces, error: spacesError } = useApi<{ personalId: string; activeId: string }>("/api/workspaces");
-  const draftKey = draftKeyFor(spaces, !!spacesError);
+  // Unknown (the list failed to load), no draft is restored or saved: guessing Personal would show its draft in a
+  // workspace and spoil it there. A template, a copy, or a plan still opens.
+  const draftKey = draftKeyFor(spaces);
+  const spacesKnown = !!spaces || !!spacesError;
   const templateId = params.get("template");
   const fromId = params.get("from");
   // A Video Agent plan to review (?plan=agent), read once: a refresh comes back to the autosaved draft of it.
@@ -429,7 +431,7 @@ function CreateInner() {
 
   // Restore an unsent draft on a plain visit (not when a template or copy is requested).
   useEffect(() => {
-    if (hydrated.current || !draftKey) return;
+    if (hydrated.current || !spacesKnown) return;
     hydrated.current = true;
     if (templateId || fromId) return;
     if (params.get("plan") === "agent") {
@@ -447,6 +449,8 @@ function CreateInner() {
         return;
       }
     }
+    // Nothing to restore without the space's key, or over words typed while the space was being looked up.
+    if (!draftKey || scenesNow.current.some((sc) => sc.script.trim())) return;
     const d = readDraft(draftKey);
     if (!d) return;
     setTitle(d.title);
@@ -463,7 +467,7 @@ function CreateInner() {
     setEmotion(asEmotion(d.emotion));
     setPrefill({ avatarId: d.avatarId, voiceId: d.voiceId });
     setDraftRestored(d.savedAt);
-  }, [templateId, fromId, params, draftKey]);
+  }, [templateId, fromId, params, draftKey, spacesKnown]);
 
   // Autosave the editor state (debounced) so a refresh never loses work.
   useEffect(() => {
@@ -696,8 +700,8 @@ function CreateInner() {
           <input className={`${inputClass} text-base font-medium`} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Video title" />
 
           <Card className="overflow-hidden">
-            {/* A portrait stage is sized by its height and takes its width from the ratio, so it really is 9:16 (a width-first box capped in height came out near square and cropped portrait slides). */}
-            <div data-testid="stage" className={`relative mx-auto ${aspect === "9:16" ? "h-[520px] max-h-[70vh] max-w-full" : "w-full"} ${stageAspect} flex items-end justify-center overflow-hidden`} style={background.type === "color" ? { background: background.value } : background.type === "image" ? { backgroundImage: `url(${background.value})`, backgroundSize: "cover", backgroundPosition: "center" } : { background: "#0f172a" }}>
+            {/* A portrait stage is sized by its height and takes its width from the ratio, so it really is 9:16 (a width-first box capped in height came out near square and cropped portrait slides); the height is also capped by the screen's width, so a narrow phone keeps the shape. */}
+            <div data-testid="stage" className={`relative mx-auto ${aspect === "9:16" ? "h-[min(520px,70vh,calc((100vw_-_5rem)*16/9))] max-w-full" : "w-full"} ${stageAspect} flex items-end justify-center overflow-hidden`} style={background.type === "color" ? { background: background.value } : background.type === "image" ? { backgroundImage: `url(${background.value})`, backgroundSize: "cover", backgroundPosition: "center" } : { background: "#0f172a" }}>
               {/* Only a complete URL is previewed, so a half-typed one is not requested keystroke by keystroke. */}
               {background.type === "video" && /^https?:\/\/\S+\.\S+/.test(background.value) && (
                 <video key={background.value} src={background.value} muted loop autoPlay playsInline aria-hidden="true" data-testid="stage-video" className="absolute inset-0 h-full w-full object-cover" />

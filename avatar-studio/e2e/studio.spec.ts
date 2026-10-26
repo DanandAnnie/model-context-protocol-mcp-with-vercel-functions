@@ -1180,7 +1180,11 @@ test("each space keeps its own draft, so a workspace never shows or spoils the p
   const ws = (await (await page.request.post("/api/workspaces", { data: { name: `Drafts ${tag}` } })).json()).workspace as { id: string };
   try {
     expect((await page.request.post("/api/workspaces/switch", { data: { id: ws.id } })).status()).toBe(200);
+    // The editor restores a draft once it knows the space; wait for that answer before checking nothing came back.
+    const spaces = page.waitForResponse((r) => r.url().endsWith("/api/workspaces") && r.request().method() === "GET");
     await page.goto("/create");
+    await spaces;
+    await page.waitForTimeout(300);
     // The workspace starts clean: no personal script, no note about a "deleted" image it cannot see.
     await expect(page.getByRole("button", { name: "Generate video" })).toBeVisible();
     await expect(page.locator("textarea")).toHaveValue("");
@@ -1209,6 +1213,9 @@ test("a portrait video has a portrait stage, at desktop and phone width", async 
   };
   await expect.poll(ratio).toBeCloseTo(9 / 16, 2);
   await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(ratio).toBeCloseTo(9 / 16, 2);
+  // The narrowest phones too, where the column is under the 292 pixels a 520-pixel-high stage would need.
+  await page.setViewportSize({ width: 320, height: 640 });
   await expect.poll(ratio).toBeCloseTo(9 / 16, 2);
 });
 

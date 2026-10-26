@@ -442,6 +442,36 @@ test("importing a script file makes one scene per section", async ({ page }) => 
   await expect(page.getByTestId("import-note")).toContainText("minutes.txt is password-protected or a Word 97–2003 file");
 });
 
+test("photo avatar motion is set in the editor, kept with the video and its copy", async ({ page }) => {
+  await page.locator("input[placeholder='Video title']").fill("Moving portrait");
+  await page.locator("textarea").fill("Welcome to the open house.");
+  await page.getByRole("button", { name: "Settings" }).click();
+  const group = page.getByTestId("photo-motion");
+  // A library presenter is not a photo avatar, so the panel says nothing applies yet.
+  await expect(group).toContainText("no scene shows one now");
+  await group.getByLabel("Expressiveness").selectOption("high");
+  await group.getByLabel("Gestures (optional)").fill("  Nods warmly and   gestures toward the room ");
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
+  await page.getByRole("button", { name: "Generate video" }).click();
+  expect((await sent).postDataJSON()).toMatchObject({ expressiveness: "high", motionPrompt: "Nods warmly and   gestures toward the room" });
+  await page.waitForURL(/\/videos\/vid_/);
+  const id = page.url().split("/").pop()!;
+  const video = (await (await page.request.get(`/api/videos/${id}`)).json()).video;
+  expect([video.expressiveness, video.motionPrompt]).toEqual(["high", "Nods warmly and gestures toward the room"]);
+  await expect(page.getByText("high expressiveness · “Nods warmly and gestures toward the room” (not applied by this renderer)")).toBeVisible();
+  await page.goto(`/create?from=${id}`);
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByTestId("photo-motion").getByLabel("Expressiveness")).toHaveValue("high");
+  await expect(page.getByTestId("photo-motion").getByLabel("Gestures (optional)")).toHaveValue("Nods warmly and gestures toward the room");
+  // Back to the default sends nothing.
+  await page.getByTestId("photo-motion").getByLabel("Expressiveness").selectOption("low");
+  await page.getByTestId("photo-motion").getByLabel("Gestures (optional)").fill("");
+  const again = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
+  await page.getByRole("button", { name: "Generate video" }).click();
+  const body = (await again).postDataJSON() as Record<string, unknown>;
+  expect("expressiveness" in body || "motionPrompt" in body).toBe(false);
+});
+
 test("a scene can leave the presenter out and let its picture fill the frame", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Kitchen tour");
   await page.locator("textarea").fill("Welcome in, let me show you around.");

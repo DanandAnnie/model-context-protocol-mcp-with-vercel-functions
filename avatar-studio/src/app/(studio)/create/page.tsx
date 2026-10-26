@@ -25,7 +25,7 @@ import { findTemplate } from "@/lib/templates";
 import { capSceneText, fitSceneTextEdit, sceneTextLength } from "@/lib/scene-text";
 import { graphemes } from "@/lib/text";
 import { takeAgentDraft, type AgentDraft } from "@/lib/agent-draft";
-import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, framingFor, isDefaultLayout, isPhotoAvatar, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS } from "@/lib/types";
+import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, framingFor, isDefaultLayout, isPhotoAvatar, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, type PhotoExpressiveness } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -50,6 +50,8 @@ interface Draft {
   speed: number;
   pitch?: number;
   emotion?: VoiceEmotion;
+  expressiveness?: PhotoExpressiveness;
+  motionPrompt?: string;
   avatarId?: string;
   voiceId?: string;
   savedAt: string;
@@ -168,6 +170,10 @@ const restoredCaptionStyle = (s: CaptionStyle): CaptionStyle =>
   });
 /** A caption style with the default look and font left out, as the server stores it. */
 const withoutDefaults = ({ look, font, ...rest }: CaptionStyle): CaptionStyle => ({ ...rest, ...(look && look !== "classic" ? { look } : {}), ...(font && font !== "sans" ? { font } : {}) });
+/** An expressiveness this build offers, or "low" (HeyGen's default) for anything else. */
+const asExpressiveness = (v: unknown): PhotoExpressiveness => ((PHOTO_EXPRESSIVENESS as readonly unknown[]).includes(v) ? (v as PhotoExpressiveness) : "low");
+/** A gesture description from a draft, a copy, or a template: a string within the limit, or none. */
+const asMotionPrompt = (v: unknown): string => (typeof v === "string" ? v.slice(0, MAX_MOTION_PROMPT) : "");
 /** An emotion the renderer takes, or "" (natural) for anything else. */
 const asEmotion = (v: unknown): VoiceEmotion | "" => ((VOICE_EMOTIONS as readonly unknown[]).includes(v) ? (v as VoiceEmotion) : "");
 const TONES = ["friendly", "professional", "formal", "energetic", "calm"] as const;
@@ -488,6 +494,12 @@ function CreateInner() {
   }
   // A scene may name its own presenter and voice; otherwise it uses the video's.
   const sceneAvatar = (active.avatarId && avatarData?.avatars.find((a) => a.id === active.avatarId)) || avatar;
+  // Whether any scene shows a photo avatar, which is all the photo avatar motion settings apply to.
+  const photoInUse = scenes.some((sc) => {
+    if (sc.hidePresenter) return false;
+    const a = (sc.avatarId && avatarData?.avatars.find((x) => x.id === sc.avatarId)) || avatar;
+    return !!a && isPhotoAvatar(a);
+  });
   // What the scene's presenter will get: a photo avatar has no close-up, so it is previewed and listed in full.
   const framing: PresenterFraming = framingFor(layout.framing, sceneAvatar ?? undefined);
   const photoPresenter = !!sceneAvatar && isPhotoAvatar(sceneAvatar);
@@ -553,6 +565,10 @@ function CreateInner() {
   }, [loneSpeed]);
   const [pitch, setPitch] = useState(0);
   const [emotion, setEmotion] = useState<VoiceEmotion | "">("");
+  const [expressiveness, setExpressiveness] = useState<PhotoExpressiveness>("low");
+  const [motionPrompt, setMotionPrompt] = useState("");
+  /** Both apply to photo avatars only; anything else is sent as none. */
+  const motion = { ...(expressiveness !== "low" ? { expressiveness } : {}), ...(motionPrompt.trim() ? { motionPrompt: motionPrompt.trim() } : {}) };
   const [tab, setTab] = useState<Tab>("avatar");
   const [writerOpen, setWriterOpen] = useState(params.get("writer") === "1");
   const [assistOpen, setAssistOpen] = useState(false);
@@ -682,6 +698,8 @@ function CreateInner() {
     setPitch(d.pitch ?? 0);
     // A draft is the browser's own copy, so a value no longer offered is dropped rather than sent.
     setEmotion(asEmotion(d.emotion));
+    setExpressiveness(asExpressiveness(d.expressiveness));
+    setMotionPrompt(asMotionPrompt(d.motionPrompt));
     setPrefill({ avatarId: d.avatarId, voiceId: d.voiceId });
     setDraftRestored(d.savedAt);
   }, [draftSource, params, editKey, spacesKnown]);
@@ -691,10 +709,10 @@ function CreateInner() {
     if (!hydrated.current || !editKey) return;
     const empty = !scenes.some(hasContent) && title === "Untitled video";
     const t = setTimeout(() => {
-      writeDraft(editKey, empty ? null : { title, scenes, aspect, resolution, captions, ...(isDefaultCaptionStyle ? {} : { captionStyle }), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
+      writeDraft(editKey, empty ? null : { title, scenes, aspect, resolution, captions, ...(isDefaultCaptionStyle ? {} : { captionStyle }), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...(expressiveness !== "low" ? { expressiveness } : {}), ...(motionPrompt ? { motionPrompt } : {}), avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
     }, 400);
     return () => clearTimeout(t);
-  }, [title, scenes, aspect, resolution, captions, captionStyle, isDefaultCaptionStyle, speed, pitch, emotion, avatar, voice, editKey]);
+  }, [title, scenes, aspect, resolution, captions, captionStyle, isDefaultCaptionStyle, speed, pitch, emotion, expressiveness, motionPrompt, avatar, voice, editKey]);
 
   function discardDraft() {
     if (editKey) writeDraft(editKey, null);
@@ -712,6 +730,8 @@ function CreateInner() {
     setSpeed(1);
     setPitch(0);
     setEmotion("");
+    setExpressiveness("low");
+    setMotionPrompt("");
     setCaptionStyle(DEFAULT_CAPTION_STYLE);
     // Back to a fresh editor's presenter and voice: the first ones, then the brand kit's defaults on top.
     setAvatar(null);
@@ -768,6 +788,8 @@ function CreateInner() {
         setSpeed(template.speed);
         setPitch(template.pitch ?? 0);
         setEmotion(template.emotion ?? "");
+        setExpressiveness(asExpressiveness(template.expressiveness));
+        setMotionPrompt(asMotionPrompt(template.motionPrompt));
         setPrefill({ avatarId: template.avatarId, voiceId: template.voiceId });
       })
       .catch((e) => setErr(e instanceof Error ? e.message : "Could not load the template"));
@@ -790,6 +812,8 @@ function CreateInner() {
         setSpeed(video.speed);
         setPitch(video.pitch ?? 0);
         setEmotion(video.emotion ?? "");
+        setExpressiveness(asExpressiveness(video.expressiveness));
+        setMotionPrompt(asMotionPrompt(video.motionPrompt));
         setPrefill({ avatarId: video.avatarId, voiceId: video.voiceId });
       })
       .catch((e) => setErr(e instanceof Error ? e.message : "Could not load the original video"));
@@ -866,7 +890,7 @@ function CreateInner() {
     try {
       const { video } = await api<{ video: Video }>("/api/videos", {
         method: "POST",
-        body: JSON.stringify({ title, scenes: scenes.map(sentScene), avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}) }),
+        body: JSON.stringify({ title, scenes: scenes.map(sentScene), avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...motion }),
       });
       if (editKey) writeDraft(editKey, null);
       router.push(`/videos/${video.id}`);
@@ -1621,6 +1645,31 @@ function CreateInner() {
                     ))}
                   </select>
                 </Field>
+                <div role="group" aria-labelledby="photo-motion-title" className="space-y-2 rounded-lg border border-slate-200 px-3 py-3" data-testid="photo-motion">
+                  <div id="photo-motion-title" className="text-sm font-medium text-slate-800">Photo avatar motion</div>
+                  <p id="photo-motion-hint" className="text-xs text-slate-500">
+                    {photoInUse
+                      ? "How a photo avatar moves as it speaks, on HeyGen (Avatar IV). Other presenters keep their own motion, and D-ID and the demo renderer ignore it."
+                      : "For photo avatars only (an uploaded portrait or a HeyGen photo avatar); no scene shows one now, so nothing here applies yet."}
+                  </p>
+                  <Field label="Expressiveness">
+                    <select value={expressiveness} onChange={(e) => setExpressiveness(asExpressiveness(e.target.value))} aria-describedby="photo-motion-hint" className={inputClass}>
+                      <option value="low">Low (natural)</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                    </select>
+                  </Field>
+                  <Field label="Gestures (optional)">
+                    <input
+                      value={motionPrompt}
+                      onChange={(e) => setMotionPrompt(e.target.value)}
+                      maxLength={MAX_MOTION_PROMPT}
+                      placeholder="Nods warmly and gestures toward the room with an open hand"
+                      aria-describedby="photo-motion-hint"
+                      className={inputClass}
+                    />
+                  </Field>
+                </div>
                 <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-3">
                   <span>
                     <span className="block text-sm font-medium text-slate-800">Captions</span>

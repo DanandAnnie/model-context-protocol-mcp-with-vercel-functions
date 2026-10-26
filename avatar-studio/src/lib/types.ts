@@ -96,6 +96,8 @@ export interface VideoTemplate {
   speed: number;
   pitch?: number;
   emotion?: VoiceEmotion;
+  expressiveness?: PhotoExpressiveness;
+  motionPrompt?: string;
   /** The video it was saved from, when it was. */
   sourceVideoId?: string;
   createdAt: string;
@@ -284,7 +286,20 @@ export interface VideoRequest {
   pitch?: number;
   /** Speaking style for voices that support one (HeyGen); absent means the voice's natural delivery. */
   emotion?: VoiceEmotion;
+  /**
+   * How much a photo avatar moves its face as it speaks (HeyGen's Avatar IV); absent means HeyGen's default, low.
+   * Applies to scenes whose presenter is a photo avatar; other presenters and renderers ignore it.
+   */
+  expressiveness?: PhotoExpressiveness;
+  /** Body motion and gestures for photo avatars, in words (HeyGen's motion prompt); absent means none. */
+  motionPrompt?: string;
 }
+
+/** HeyGen's expressiveness levels for photo avatars; "low" is its default and is stored as absent. */
+export const PHOTO_EXPRESSIVENESS = ["low", "medium", "high"] as const;
+export type PhotoExpressiveness = (typeof PHOTO_EXPRESSIVENESS)[number];
+/** Longest gesture description a video takes. */
+export const MAX_MOTION_PROMPT = 300;
 
 /** HeyGen's voice emotions, in its own spelling, which is what its API takes. */
 export const VOICE_EMOTIONS = ["Excited", "Friendly", "Serious", "Soothing", "Broadcaster"] as const;

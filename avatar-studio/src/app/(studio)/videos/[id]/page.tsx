@@ -856,12 +856,12 @@ export default function VideoDetailPage() {
                   <Row label="Speed">{video.speed}x{video.speed !== 1 && video.provider !== "heygen" && video.provider !== "mock" ? " (not applied by this renderer)" : ""}</Row>
                   {video.pitch ? <Row label="Pitch">{video.pitch > 0 ? `+${video.pitch}` : video.pitch}</Row> : null}
                   {video.emotion ? (
-                    <Row label="Voice emotion">
-                      {video.provider !== "heygen"
-                        ? `${video.emotion} (not applied: this renderer keeps the voice's natural delivery)`
-                        : video.scenes?.length && video.scenes.every((sc) => sc.audioId)
-                          ? `${video.emotion} (not applied: every scene plays recorded audio)`
-                          : video.emotion}
+                    <Row label="Voice emotion">{`${video.emotion} (not applied: no renderer takes an emotion since HeyGen's v3 API)`}</Row>
+                  ) : null}
+                  {video.expressiveness || video.motionPrompt ? (
+                    <Row label="Photo avatar motion">
+                      {[video.expressiveness ? `${video.expressiveness} expressiveness` : "", video.motionPrompt ? `“${video.motionPrompt}”` : ""].filter(Boolean).join(" · ")}
+                      {video.provider !== "heygen" ? " (not applied by this renderer)" : " (photo avatars only)"}
                     </Row>
                   ) : null}
                   <Row label="Captions">{video.captions ? `On${video.captionStyle ? ` · ${video.captionStyle.position}, ${video.captionStyle.size}${video.captionStyle.look ? `, ${video.captionStyle.look}` : ""}${video.captionStyle.font ? `, ${video.captionStyle.font} type` : ""}` : ""}` : "Off"}</Row>

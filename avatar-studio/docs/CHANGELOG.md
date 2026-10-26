@@ -171,4 +171,9 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The checkbox's hint is no longer part of its accessible name.
     - The batch page says templates' scenes without the presenter are not used.
     - The docs cover the template field and the README sentence reads in order again.
+- Photo avatar motion (HeyGen's Avatar IV expressiveness and motion prompt). A video can set how much a photo avatar's face moves (`expressiveness`: low, medium, or high) and its gestures in words (`motionPrompt`, up to 300 characters, one line).
+  - HeyGen gets both on every scene whose presenter is a photo avatar, meaning an uploaded portrait or a HeyGen photo avatar look. It gets neither for video avatars, which refuse a motion prompt on HeyGen's default engine, or for scenes without the presenter.
+  - The editor's Settings tab has a "Photo avatar motion" panel that says when no scene shows a photo avatar. Drafts, copies, templates, retries, and other sizes keep it.
+  - The video page lists it. The page's emotion row now says that no renderer takes an emotion since HeyGen's v3 API.
+  - New `photo-motion.test.ts` and an e2e test, which fails when a copy drops the setting.
 

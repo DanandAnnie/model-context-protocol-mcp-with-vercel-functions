@@ -2,7 +2,7 @@
 // imports no service, so any service may import it without creating a cycle.
 import { z } from "zod";
 import { graphemes } from "../text";
-import { BACKGROUND_FITS, CAPTION_FONTS, CAPTION_POSITIONS, CAPTION_LOOKS, CAPTION_SIZES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SIZES, VOICE_EMOTIONS, backdropIdOf } from "../types";
+import { MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, BACKGROUND_FITS, CAPTION_FONTS, CAPTION_POSITIONS, CAPTION_LOOKS, CAPTION_SIZES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SIZES, VOICE_EMOTIONS, backdropIdOf } from "../types";
 
 export const backgroundSchema = z
   .object({ type: z.enum(["color", "image", "video"]), value: z.string().min(1).max(2000, "A background must be a colour or a URL of at most 2000 characters"), fit: z.enum(BACKGROUND_FITS).optional() })
@@ -16,6 +16,19 @@ export const captionStyleSchema = z
   .object({ position: z.enum(CAPTION_POSITIONS), size: z.enum(CAPTION_SIZES), look: z.enum(CAPTION_LOOKS).optional(), font: z.enum(CAPTION_FONTS).optional() })
   // "classic" and "sans" are what an unnamed look and font mean, so they are stored as absent.
   .transform(({ look, font, ...rest }) => ({ ...rest, ...(look && look !== "classic" ? { look } : {}), ...(font && font !== "sans" ? { font } : {}) }));
+/** A photo avatar's expressiveness; the default, "low", is stored as absent. Optional where it is used. */
+export const expressivenessSchema = z
+  .enum(PHOTO_EXPRESSIVENESS)
+  .transform((v) => (v === "low" ? undefined : v))
+  .optional();
+/** A photo avatar's gestures in words, one line; blank is none. */
+export const motionPromptSchema = z
+  .string()
+  .max(MAX_MOTION_PROMPT * 4)
+  .transform((v) => v.replace(/\s+/g, " ").trim())
+  .refine((v) => v.length <= MAX_MOTION_PROMPT, `Describe the gestures in at most ${MAX_MOTION_PROMPT} characters`)
+  .transform((v) => v || undefined)
+  .optional();
 /** Voice pitch shift, -50..50 whole steps; HeyGen applies it, other renderers keep the voice's natural pitch. */
 export const pitchSchema = z.number().int().min(-50).max(50);
 /** Speaking style; HeyGen applies it to voices that support one, other renderers keep the voice's natural delivery. */

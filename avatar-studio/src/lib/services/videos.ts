@@ -24,13 +24,13 @@ import { clearCover, setCover } from "../cover";
 import { shareOffline } from "../client";
 import { bumpViewsByDay } from "../insights";
 
-import { backgroundSchema, captionStyleSchema, emotionSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema } from "./schemas";
+import { backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema } from "./schemas";
 import { getBrandKit } from "./brand";
 import { spokenCopy } from "../pronounce";
 import { clearComments } from "./comments";
 import { clearVideoLeads } from "./leads";
 import { reviseScript } from "./scripts";
-export { backgroundSchema, captionStyleSchema, emotionSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema };
+export { backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema };
 
 export const videoRequestSchema = z
   .object({
@@ -71,6 +71,8 @@ export const videoRequestSchema = z
     speed: z.number().min(0.5).max(1.5).default(1),
     pitch: pitchSchema.optional(),
     emotion: emotionSchema.optional(),
+    expressiveness: expressivenessSchema,
+    motionPrompt: motionPromptSchema,
   })
   .transform((v, ctx) => {
     if (v.scenes) {
@@ -302,6 +304,8 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
   // renderer sees one shape (and burns captions in when it can).
   if (base.captionStyle && isDefaultCaptionStyle(base.captionStyle)) delete base.captionStyle;
   if (!base.pitch) delete base.pitch; // no shift is stored as absent
+  if (!base.expressiveness) delete base.expressiveness;
+  if (!base.motionPrompt) delete base.motionPrompt;
 
   try {
     if (provider.prepareAvatar) {
@@ -1159,6 +1163,8 @@ function requestOf(video: Video): VideoRequest {
     speed: video.speed,
     ...(video.pitch ? { pitch: video.pitch } : {}),
     ...(video.emotion ? { emotion: video.emotion } : {}),
+    ...(video.expressiveness ? { expressiveness: video.expressiveness } : {}),
+    ...(video.motionPrompt ? { motionPrompt: video.motionPrompt } : {}),
   };
 }
 

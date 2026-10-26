@@ -1,4 +1,4 @@
-import { backdropIdOf, type AudioClip, type Avatar, type Backdrop, type Background, type Scene, type VideoRequest, type Voice } from "../../types";
+import { backdropIdOf, isPhotoAvatar, type AudioClip, type Avatar, type Backdrop, type Background, type Scene, type VideoRequest, type Voice } from "../../types";
 import { silentSeconds, withBreakTags } from "../../pauses";
 import { heygenBurnsCaptions } from "../../captions";
 import { webhookUrl } from "../../config";
@@ -117,8 +117,9 @@ export class HeyGenAvatarProvider implements AvatarProvider {
   async createVideo(req: VideoRequest, avatar: Avatar, voice: Voice | null, cast?: RenderCast) {
     const scenes: Scene[] = req.scenes?.length ? req.scenes : [{ script: req.script, background: req.background }];
     // Every scene's presenter, clip, voice, and background is checked before anything is uploaded for the render.
+    const sceneAvatarOf = (scene: Scene) => (scene.avatarId && cast?.avatars[scene.avatarId]) || avatar;
     const parts = scenes.map((scene) => {
-      const sceneAvatar = (scene.avatarId && cast?.avatars[scene.avatarId]) || avatar;
+      const sceneAvatar = sceneAvatarOf(scene);
       const sceneVoice = (scene.voiceId && cast?.voices[scene.voiceId]) || voice;
       const hidden = !!scene.hidePresenter && scene.background.type !== "color";
       return {
@@ -161,7 +162,10 @@ export class HeyGenAvatarProvider implements AvatarProvider {
             ? { type: "image", source, ...(silent && !clip ? { duration: silent } : sound) }
             : { type: "video", source, playback: { mode: "loop", mute: true }, ...sound };
         }
-        return { type: "avatar_video", input: { type: "avatar", avatar_id: avatarId, ...sound, background } };
+        // A photo avatar moves as asked (Avatar IV); HeyGen refuses a motion prompt for a video avatar on that engine.
+        const photo = isPhotoAvatar(sceneAvatarOf(scene));
+        const motion = photo ? { ...(req.expressiveness ? { expressiveness: req.expressiveness } : {}), ...(req.motionPrompt ? { motion_prompt: req.motionPrompt } : {}) } : {};
+        return { type: "avatar_video", input: { type: "avatar", avatar_id: avatarId, ...sound, ...motion, background } };
       }),
     };
     const data = await this.client.generateVideo(body);

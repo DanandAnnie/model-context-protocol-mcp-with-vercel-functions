@@ -81,9 +81,13 @@ export function decodeScript(bytes: Uint8Array, legacy = "windows-1252"): string
   if (bad <= 0 || valid >= bad) return utf8;
   if (legacy !== "windows-1252") {
     try {
-      // Some decoders (EUC-KR, Big5) pass a byte they cannot place through as a C1 control, which no real text
-      // holds: it is a bad byte like any other.
-      const text = new TextDecoder(legacy).decode(bytes).replace(/[\x80-\x9f]/g, "\ufffd");
+      // A single-byte page (Cyrillic, Greek, Central European, …) is read strictly: a byte it leaves undefined
+      // means the file was written in another one. (Its C1 bytes, as in a pasted emoji, are defined.)
+      if (!/^(?:shift_jis|gbk|gb18030|big5|euc-kr|euc-jp)$/.test(legacy)) return new TextDecoder(legacy, { fatal: true }).decode(bytes);
+      let text = new TextDecoder(legacy).decode(bytes);
+      // Some double-byte decoders (EUC-KR, Big5) pass a byte they cannot place through as a C1 control, which no
+      // real text holds: it is a bad byte like any other.
+      text = text.replace(/[\x80-\x9f]/g, "\ufffd");
       if (!text.includes("\ufffd")) return text;
       // Only a double-byte file, whose high bytes come in runs, is let off a few bad bytes; a Western file's
       // accents and curly quotes stand alone, and often pair with the next letter into a valid character.
@@ -447,11 +451,11 @@ export function scenesFromText(text: string, { markdown = true }: { markdown?: b
     const outside = [...lines.slice(0, span.open), ...lines.slice(span.close + 1)].filter((l) => l.trim());
     const inside = lines.slice(span.open + 1, span.close);
     const prose = inside.some((l) => l.trim() && !HEADING.test(l));
-    // A bare fence outside that closes no code block of its own means the script went on past this close.
+    // A bare fence after the close that closes no code block of its own means the script went on past it.
     const marker = FENCE.exec(lines[span.open])![1];
     let block = false;
     let stray = false;
-    for (const l of outside) {
+    for (const l of lines.slice(span.close + 1)) {
       const f = FENCE.exec(l);
       if (!f || f[1] !== marker) continue;
       if (f[2]) block = true;

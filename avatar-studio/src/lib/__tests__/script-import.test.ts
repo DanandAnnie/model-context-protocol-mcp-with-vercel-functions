@@ -256,6 +256,9 @@ describe("scenesFromText", () => {
       assert.equal(decodeScript(cp1252(word), page), word, page);
       for (const short of ["Café", "Hello everyone, and welcome…", "He said “hi”"]) assert.equal(decodeScript(cp1252(short), page), short, `${page}: ${short}`);
     }
+    // A single-byte page keeps its letters around a pasted emoji, whose bytes it reads as control characters.
+    const polish = [0x44, 0x7a, 0x69, 0x65, 0xf1, 0x20, 0x64, 0x6f, 0x62, 0x72, 0x79, 0x2c, 0x20, 0x7a, 0x61, 0x6c, 0x6f, 0x67, 0x75, 0x6a, 0x20, 0x73, 0x69, 0xea, 0x2e, 0x20, 0x84, 0x4e, 0x6f, 0x77, 0x79, 0x94];
+    assert.ok(decodeScript(new Uint8Array([...polish, 0x20, ...new TextEncoder().encode("😀")]), "windows-1250").startsWith("Dzień dobry, zaloguj się. „Nowy”"));
     // So does a longer one holding a pasted UTF-8 emoji.
     const emoji = new Uint8Array([...sjis, ...sjis, ...sjis, ...new TextEncoder().encode("😀"), ...sjis]);
     assert.ok(decodeScript(emoji, "shift_jis").startsWith("こんにちは、皆さん。"));
@@ -276,6 +279,9 @@ describe("scenesFromText", () => {
     assert.ok(bare.includes("Open a terminal") && bare.includes("npm start") && bare.includes("Then the app opens."), bare);
     const open = scenesFromText(["Here you go:", "```markdown", "**HOST:** Welcome to the show!", "```bash", "npm i", "```", "**HOST:** That's it."].join("\n")).scenes.join("\n");
     assert.ok(open.includes("HOST: Welcome to the show!") && open.includes("HOST: That's it.") && !open.includes("```") && !open.includes("**"), open);
+    // A code block in the lead-in is not part of the script.
+    const leadIn = scenesFromText(["```", "npm i", "```", "Then read:", "```markdown", "# Launch", "", "Welcome to the launch.", "```"].join("\n"));
+    assert.deepEqual(leadIn, { scenes: ["Welcome to the launch."], title: "Launch", truncated: false });
     // A fence that holds only a heading is an example in the prose, which is the script.
     const example = "In this video I'll show you how to make a heading. Type a hash, a space, and your text:\n\n```markdown\n# My Heading\n```\n\nThat's all there is to it.";
     const shown = scenesFromText(example).scenes.join("\n");

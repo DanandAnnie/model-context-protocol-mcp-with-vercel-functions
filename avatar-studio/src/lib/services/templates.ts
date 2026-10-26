@@ -9,7 +9,7 @@ import { LOCAL_OWNER } from "../owner-id";
 import { LimitError, NotFoundError, ValidationError } from "../errors";
 import { owned } from "./shared";
 import { PLAIN_BACKGROUND, getBackdrop } from "./backdrops";
-import { backgroundSchema, captionStyleSchema, emotionSchema, pitchSchema, sceneLayoutSchema } from "./videos";
+import { backgroundSchema, captionStyleSchema, emotionSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema } from "./videos";
 
 export const MAX_TEMPLATES = 50;
 
@@ -29,6 +29,7 @@ const sceneSchema = z.object({
   voiceId: z.string().min(1).optional(),
   speed: z.number().min(0.5).max(1.5).optional(),
   layout: sceneLayoutSchema.optional(),
+  overlay: sceneTextSchema.optional(),
 });
 
 /** Either copy a video the owner has (`fromVideoId`, title optional) or spell the template out. */
@@ -80,6 +81,7 @@ export async function createTemplate(input: TemplateInput, ownerId: string = LOC
       ...(sc.voiceId ? { voiceId: sc.voiceId } : {}),
       ...(sc.speed ? { speed: sc.speed } : {}),
       ...(sc.layout ? { layout: sc.layout } : {}),
+      ...(sc.overlay ? { overlay: sc.overlay } : {}),
     }));
     base = {
       title: input.title ?? video.title,

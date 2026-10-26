@@ -23,13 +23,13 @@ import { clearCover, setCover } from "../cover";
 import { shareOffline } from "../client";
 import { bumpViewsByDay } from "../insights";
 
-import { backgroundSchema, captionStyleSchema, emotionSchema, pitchSchema, sceneLayoutSchema } from "./schemas";
+import { backgroundSchema, captionStyleSchema, emotionSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema } from "./schemas";
 import { getBrandKit } from "./brand";
 import { spokenCopy } from "../pronounce";
 import { clearComments } from "./comments";
 import { clearVideoLeads } from "./leads";
 import { reviseScript } from "./scripts";
-export { backgroundSchema, captionStyleSchema, emotionSchema, pitchSchema, sceneLayoutSchema };
+export { backgroundSchema, captionStyleSchema, emotionSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema };
 
 export const videoRequestSchema = z
   .object({
@@ -51,6 +51,8 @@ export const videoRequestSchema = z
           /** An audio clip the presenter lip-syncs to; the script is then what the clip says, for captions and search. */
           audioId: z.string().min(1).max(64).optional(),
           layout: sceneLayoutSchema.optional(),
+          /** Text shown on screen for the scene (a title, a lower third). */
+          overlay: sceneTextSchema.optional(),
         }),
       )
       .min(1)

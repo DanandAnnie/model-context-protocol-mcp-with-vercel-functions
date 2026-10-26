@@ -134,12 +134,38 @@ export const isDefaultLayout = (l: SceneLayout) => l.scale === 1 && l.x === 0 &&
 
 export const DEFAULT_LAYOUT: SceneLayout = { scale: 1, x: 0, y: 0 };
 
+/** Where a scene's on-screen text sits, and how large it is. */
+export const SCENE_TEXT_POSITIONS = ["top", "center", "bottom"] as const;
+export type SceneTextPosition = (typeof SCENE_TEXT_POSITIONS)[number];
+export const SCENE_TEXT_SIZES = ["small", "medium", "large"] as const;
+export type SceneTextSize = (typeof SCENE_TEXT_SIZES)[number];
+/** Where on-screen text sits, as a share of the frame's height (the middle of the line); the stage and HeyGen share it. */
+export const SCENE_TEXT_Y: Record<SceneTextPosition, number> = { top: 0.12, center: 0.5, bottom: 0.82 };
+/** Text height as a share of the frame's shorter side, so a portrait video gets the same size of text as a wide one. */
+export const SCENE_TEXT_SCALE: Record<SceneTextSize, number> = { small: 0.045, medium: 0.065, large: 0.09 };
+/** Longest on-screen text a scene shows: a title or a lower third, not a paragraph. */
+export const MAX_SCENE_TEXT = 120;
+
+/**
+ * Text shown on screen for the whole scene, as HeyGen's text elements: a title, a name and role, a price.
+ * The defaults (top, medium, white) are stored as absent.
+ */
+export interface SceneText {
+  text: string;
+  position?: SceneTextPosition;
+  size?: SceneTextSize;
+  /** `#rrggbb`; white when absent. */
+  color?: string;
+}
+
 export interface Scene {
   /** Spoken text for this scene. */
   script: string;
   background: Background;
   /** Presenter size and position for this scene; the renderer's default when absent. */
   layout?: SceneLayout;
+  /** Text shown on screen for this scene; none when absent. */
+  overlay?: SceneText;
   /** Presenter for this scene; the video's avatar when absent. */
   avatarId?: string;
   /** Voice for this scene; the video's voice when absent. Ignored when the scene uses an audio clip. */

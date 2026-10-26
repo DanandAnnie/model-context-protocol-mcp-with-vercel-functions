@@ -23,7 +23,7 @@ import { readDocx } from "@/lib/docx-text";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
 import { takeAgentDraft, type AgentDraft } from "@/lib/agent-draft";
-import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, PRESENTER_FRAMINGS, RESOLUTIONS, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, framingFor, isDefaultLayout, isPhotoAvatar, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS } from "@/lib/types";
+import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, framingFor, isDefaultLayout, isPhotoAvatar, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -101,7 +101,7 @@ function slidesForPages(slides: PptxSlide[], pages: number): { slides: PptxSlide
   return { slides: shown, matches: shown.length === pages };
 }
 
-const newScene = (script = "", background: Background = DEFAULT_BG, presenter: Pick<Scene, "avatarId" | "voiceId" | "layout" | "audioId" | "speed"> = {}): Scene => ({
+const newScene = (script = "", background: Background = DEFAULT_BG, presenter: Pick<Scene, "avatarId" | "voiceId" | "layout" | "audioId" | "speed" | "overlay"> = {}): Scene => ({
   script,
   background,
   ...(presenter.avatarId ? { avatarId: presenter.avatarId } : {}),
@@ -110,7 +110,20 @@ const newScene = (script = "", background: Background = DEFAULT_BG, presenter: P
   ...(presenter.audioId ? { audioId: presenter.audioId } : {}),
   // A clip keeps its own pace.
   ...(presenter.speed && !presenter.audioId ? { speed: presenter.speed } : {}),
+  ...(restoredOverlay(presenter.overlay) ? { overlay: restoredOverlay(presenter.overlay) } : {}),
 });
+/** On-screen text from a draft, a copy, or a template: anything this build does not offer is dropped, and blank text is none. */
+function restoredOverlay(o: SceneText | undefined): SceneText | undefined {
+  if (!o || typeof o.text !== "string" || !o.text.trim()) return undefined;
+  return {
+    text: o.text.slice(0, MAX_SCENE_TEXT),
+    ...(o.position && o.position !== "top" && SCENE_TEXT_POSITIONS.includes(o.position) ? { position: o.position } : {}),
+    ...(o.size && o.size !== "medium" && SCENE_TEXT_SIZES.includes(o.size) ? { size: o.size } : {}),
+    ...(typeof o.color === "string" && /^#[0-9a-f]{6}$/i.test(o.color) && o.color.toLowerCase() !== "#ffffff" ? { color: o.color.toLowerCase() } : {}),
+  };
+}
+const TEXT_POSITION_LABELS = { top: "Top", center: "Middle", bottom: "Bottom" } as const;
+const TEXT_SIZE_LABELS = { small: "Small", medium: "Medium", large: "Large" } as const;
 const FRAMING_LABELS: Record<PresenterFraming, string> = { full: "Full", closeUp: "Close-up", circle: "Circle" };
 /** The same stacks the share player's captions use (globals.css), so the stage previews the chosen typeface. */
 const CAPTION_FONT_STACKS: Record<CaptionFont, string> = {
@@ -862,7 +875,7 @@ function CreateInner() {
 
           <Card className="overflow-hidden">
             {/* A portrait stage is sized by its height and takes its width from the ratio, so it really is 9:16 (a width-first box capped in height came out near square and cropped portrait slides); the height is also capped by the screen's width, so a narrow phone keeps the shape. */}
-            <div data-testid="stage" className={`relative mx-auto ${aspect === "9:16" ? "h-[min(520px,70vh,calc((100vw_-_5rem)*16/9))] max-w-full" : "w-full"} ${stageAspect} flex items-end justify-center overflow-hidden`} style={background.type === "color" ? { background: background.value } : background.type === "image" ? { backgroundImage: `url(${background.value})`, backgroundSize: background.fit ?? "cover", backgroundPosition: "center", backgroundRepeat: "no-repeat", backgroundColor: "#000" } : { background: background.fit ? "#000" : "#0f172a" }} data-fit={background.type === "color" ? undefined : (background.fit ?? "cover")}>
+            <div data-testid="stage" className={`relative mx-auto ${aspect === "9:16" ? "h-[min(520px,70vh,calc((100vw_-_5rem)*16/9))] max-w-full" : "w-full"} ${stageAspect} flex items-end justify-center overflow-hidden [container-type:size]`} style={background.type === "color" ? { background: background.value } : background.type === "image" ? { backgroundImage: `url(${background.value})`, backgroundSize: background.fit ?? "cover", backgroundPosition: "center", backgroundRepeat: "no-repeat", backgroundColor: "#000" } : { background: background.fit ? "#000" : "#0f172a" }} data-fit={background.type === "color" ? undefined : (background.fit ?? "cover")}>
               {/* Only a complete URL is previewed, so a half-typed one is not requested keystroke by keystroke. */}
               {background.type === "video" && /^https?:\/\/\S+\.\S+/.test(background.value) && (
                 <video key={background.value} src={background.value} muted loop autoPlay playsInline aria-hidden="true" data-testid="stage-video" className={`absolute inset-0 h-full w-full ${background.fit === "contain" ? "object-contain" : "object-cover"}`} />
@@ -889,6 +902,17 @@ function CreateInner() {
                 </div>
               ) : (
                 <Skeleton className="h-3/4 w-1/3" />
+              )}
+              {active.overlay?.text.trim() && (
+                // Placed and sized as a share of the frame, as the renderer places it, so the preview holds at any stage size.
+                <div
+                  data-testid="stage-text"
+                  data-position={active.overlay.position ?? "top"}
+                  className="pointer-events-none absolute left-1/2 w-[90%] -translate-x-1/2 -translate-y-1/2 whitespace-pre-wrap break-words text-center font-bold leading-tight [text-shadow:0_1px_3px_rgba(0,0,0,0.6)]"
+                  style={{ top: `${SCENE_TEXT_Y[active.overlay.position ?? "top"] * 100}%`, fontSize: `${SCENE_TEXT_SCALE[active.overlay.size ?? "medium"] * 100}cqmin`, color: active.overlay.color ?? "#ffffff", fontFamily: "Arial, Helvetica, sans-serif" }}
+                >
+                  {active.overlay.text.trim()}
+                </div>
               )}
               {captions && stripPauses(active.script).trim() && (
                 <div
@@ -1266,6 +1290,13 @@ function CreateInner() {
               onChange={(e) => setScript(e.target.value)}
               placeholder={active.audioId ? "Type what the clip says. It becomes the captions and makes the video searchable." : scenes.length > 1 ? `What the avatar says in scene ${activeIdx + 1}.` : "Type what your avatar should say, or click “Write with AI”."}
               maxLength={5000}
+            />
+            <SceneTextFields
+              key={`text-${activeIdx}`}
+              overlay={active.overlay}
+              scene={scenes.length > 1 ? activeIdx + 1 : undefined}
+              disabled={canEdit === false}
+              onChange={(overlay) => updateScene(activeIdx, { overlay })}
             />
           </Card>
         </div>
@@ -1679,6 +1710,50 @@ function FindReplace({
           <X className="h-4 w-4" />
         </button>
       </div>
+    </div>
+  );
+}
+
+/** A scene's on-screen text: what it says, and where, how large, and in what colour it shows. Cleared text removes it. */
+function SceneTextFields({ overlay, scene, disabled, onChange }: { overlay?: SceneText; scene?: number; disabled: boolean; onChange: (overlay: SceneText | undefined) => void }) {
+  const text = overlay?.text ?? "";
+  const set = (patch: Partial<SceneText>) => {
+    const next = { ...overlay, text, ...patch };
+    onChange(next.text ? restoredOverlay(next) ?? { text: next.text } : undefined);
+  };
+  return (
+    <div className="mt-3 space-y-2">
+      <label className="block text-xs font-medium text-slate-600" htmlFor="scene-text">
+        On-screen text{scene ? ` for scene ${scene}` : ""} <span className="font-normal text-slate-400">(optional: a title, a name and role, a price)</span>
+      </label>
+      <input
+        id="scene-text"
+        className={inputClass}
+        value={text}
+        maxLength={MAX_SCENE_TEXT}
+        disabled={disabled}
+        placeholder="Shown over the scene for its whole length"
+        onChange={(e) => set({ text: e.target.value })}
+      />
+      {text.trim() && (
+        <div className="flex flex-wrap items-center gap-2">
+          <select aria-label="Text position" className={`${inputClass} w-auto`} disabled={disabled} value={overlay?.position ?? "top"} onChange={(e) => set({ position: e.target.value as SceneText["position"] })}>
+            {SCENE_TEXT_POSITIONS.map((p) => (
+              <option key={p} value={p}>{TEXT_POSITION_LABELS[p]}</option>
+            ))}
+          </select>
+          <select aria-label="Text size" className={`${inputClass} w-auto`} disabled={disabled} value={overlay?.size ?? "medium"} onChange={(e) => set({ size: e.target.value as SceneText["size"] })}>
+            {SCENE_TEXT_SIZES.map((sz) => (
+              <option key={sz} value={sz}>{TEXT_SIZE_LABELS[sz]}</option>
+            ))}
+          </select>
+          <label className="inline-flex items-center gap-2 text-xs text-slate-600">
+            Colour
+            <input type="color" aria-label="Text colour" disabled={disabled} value={overlay?.color ?? "#ffffff"} onChange={(e) => set({ color: e.target.value })} className="h-8 w-10 cursor-pointer rounded border border-slate-200 bg-white p-0.5" />
+          </label>
+          <span className="text-xs text-slate-400">{text.length}/{MAX_SCENE_TEXT}</span>
+        </div>
+      )}
     </div>
   );
 }

@@ -2512,6 +2512,39 @@ test("a scene of only pauses is a silent one, held without a word", async ({ pag
   await expect(page.getByText(/silent for 4s/)).toBeVisible();
 });
 
+test("a scene can show text on screen, placed, sized, and coloured, and a copy keeps it", async ({ page }) => {
+  await page.locator("input[placeholder='Video title']").fill(`On screen ${Date.now().toString(36)}`);
+  await page.locator("textarea").fill("Welcome to the open house.");
+  const text = page.getByLabel("On-screen text");
+  await text.fill("12 Maple Street");
+  const stage = page.getByTestId("stage-text");
+  await expect(stage).toHaveText("12 Maple Street");
+  await expect(stage).toHaveAttribute("data-position", "top");
+  await page.getByLabel("Text position").selectOption("bottom");
+  await page.getByLabel("Text size").selectOption("large");
+  await page.getByLabel("Text colour").fill("#facc15");
+  await expect(stage).toHaveAttribute("data-position", "bottom");
+  await expect(stage).toHaveCSS("color", "rgb(250, 204, 21)");
+  // Another scene starts without text; clearing a field removes the text from its scene.
+  await page.getByRole("button", { name: "Add scene" }).click();
+  await page.locator("textarea").fill("Priced to sell.");
+  await expect(page.getByTestId("stage-text")).toHaveCount(0);
+  await expect(page.getByLabel("On-screen text for scene 2")).toHaveValue("");
+  await page.getByLabel("On-screen text for scene 2").fill("Gone soon");
+  await page.getByLabel("On-screen text for scene 2").fill("");
+  await expect(page.getByLabel("Text position")).toHaveCount(0);
+  await page.getByRole("button", { name: "Generate video" }).click();
+  await page.waitForURL(/\/videos\/vid_/);
+  const id = page.url().split("/videos/")[1].split(/[?#]/)[0];
+  const video = (await (await page.request.get(`/api/videos/${id}`)).json()).video;
+  expect(video.scenes.map((sc: { overlay?: unknown }) => sc.overlay)).toEqual([{ text: "12 Maple Street", position: "bottom", size: "large", color: "#facc15" }, undefined]);
+  await expect(page.getByText(/text “12 Maple Street”/)).toBeVisible();
+  // A copy opens with the scene's text in the editor.
+  await page.goto(`/create?from=${id}`);
+  await expect(page.getByLabel("On-screen text for scene 1")).toHaveValue("12 Maple Street");
+  await expect(page.getByTestId("stage-text")).toHaveAttribute("data-position", "bottom");
+});
+
 test("a dub can be voice only and name its speakers", async ({ page }) => {
   const tag = Date.now().toString(36);
   await page.goto("/translate");

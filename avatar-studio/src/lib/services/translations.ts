@@ -104,6 +104,10 @@ export async function createTranslation(req: z.infer<typeof translationRequestSc
 const LINK_TTL_MS = 60 * 60 * 1000;
 /** Jobs a listing asks the provider about at once; the rest wait for the next poll. */
 const LIST_REFRESHES = 5;
+/** The least time between two status reads of one job from listings, however many tabs poll. */
+const MIN_CHECK_GAP_MS = 15_000;
+/** When each job was last asked about from a listing, in this server instance. */
+const lastChecked = new Map<string, number>();
 
 const running = (t: Translation) => t.status === "processing" || t.status === "queued";
 function linksExpire(t: Translation): boolean {
@@ -126,8 +130,11 @@ async function refreshTranslation(item: Translation): Promise<Translation> {
     update = await getTranslateProviderByName(item.provider).getStatus(item.providerJobId!);
   } catch (err) {
     console.error(`translation refresh failed for ${item.id}:`, err);
-    // A finished job whose links could not be renewed waits a full period before the next try.
-    return item.status === "completed" ? getStore().put("translation", { ...item, updatedAt: nowIso() }) : item;
+    if (item.status !== "completed") return item;
+    // A finished job whose links could not be renewed waits a full period before the next try, unless another
+    // request renewed it meanwhile.
+    const current = (await getStore().get<Translation>("translation", item.id)) ?? item;
+    return current.updatedAt === item.updatedAt ? getStore().put("translation", { ...current, updatedAt: nowIso() }) : current;
   }
   const current = (await getStore().get<Translation>("translation", item.id)) ?? item;
   if (current.updatedAt !== item.updatedAt) return current;
@@ -140,9 +147,23 @@ async function refreshTranslation(item: Translation): Promise<Translation> {
 export async function listTranslations(ownerId: string = LOCAL_OWNER): Promise<Translation[]> {
   const items = await getStore().list<Translation>("translation", ownerId);
   items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  // The page polls this list, so it moves running jobs on (webhooks or not) and renews expiring links.
-  const stale = items.filter(due).slice(0, LIST_REFRESHES);
-  const fresh = await Promise.all(stale.map(refreshTranslation));
+  // The page polls this list, so it moves running jobs on (webhooks or not) and renews expiring links: the jobs
+  // asked about longest ago first, each at most every 15 seconds, and a failure leaves the listing as stored.
+  const now = Date.now();
+  const stale = items
+    .filter((t) => due(t) && now - (lastChecked.get(t.id) ?? 0) >= MIN_CHECK_GAP_MS)
+    .sort((a, b) => (lastChecked.get(a.id) ?? 0) - (lastChecked.get(b.id) ?? 0))
+    .slice(0, LIST_REFRESHES);
+  for (const t of stale) lastChecked.set(t.id, now);
+  if (lastChecked.size > 10_000) for (const [id, at] of lastChecked) if (now - at > LINK_TTL_MS) lastChecked.delete(id);
+  const fresh = await Promise.all(
+    stale.map((t) =>
+      refreshTranslation(t).catch((err) => {
+        console.error(`translation refresh failed for ${t.id}:`, err);
+        return t;
+      }),
+    ),
+  );
   const byId = new Map(fresh.map((t) => [t.id, t]));
   return items.map((t) => byId.get(t.id) ?? t);
 }

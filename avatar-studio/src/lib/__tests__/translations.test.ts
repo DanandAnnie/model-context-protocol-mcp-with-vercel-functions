@@ -130,6 +130,28 @@ describe("multi-language translation", () => {
     }
   });
 
+  it("asks about each job at most every 15 seconds, oldest-asked first, and survives a store that fails", async () => {
+    const { getStore } = await import("../store");
+    const job = (id: string, createdAt: string, providerJobId: string) => ({ id, ownerId: "u-g", title: id, sourceVideoUrl: base.sourceVideoUrl, targetLanguage: "French", status: "processing" as const, provider: "mock", providerJobId, createdAt, updatedAt: createdAt });
+    // Five newer jobs the provider cannot answer for, and one older job that is done.
+    for (let i = 0; i < 5; i++) await getStore().put("translation", job(`tr_stuck${i}`, `2026-01-0${i + 2}T00:00:00Z`, "not-a-mock-id"));
+    await getStore().put("translation", job("tr_older", "2026-01-01T00:00:00Z", `mock_tr_${Date.now() - 60_000}`));
+    assert.equal((await listTranslations("u-g")).find((t) => t.id === "tr_older")?.status, "processing", "five slots went to the newer jobs");
+    assert.equal((await listTranslations("u-g")).find((t) => t.id === "tr_older")?.status, "completed", "the job not yet asked about goes first");
+    // A store that fails while refreshing leaves the listing as stored instead of failing it.
+    await getStore().put("translation", job("tr_fresh", "2026-02-01T00:00:00Z", `mock_tr_${Date.now() - 60_000}`));
+    const store = getStore() as unknown as { put: (...a: unknown[]) => Promise<unknown> };
+    const put = store.put.bind(store);
+    store.put = async () => {
+      throw new Error("store down");
+    };
+    try {
+      assert.equal((await listTranslations("u-g")).find((t) => t.id === "tr_fresh")?.status, "processing");
+    } finally {
+      store.put = put;
+    }
+  });
+
   it("moves running jobs on from the list, keeps a newer write, and renews HeyGen's expiring links", async () => {
     const { config } = await import("../config");
     const { getStore } = await import("../store");
@@ -173,7 +195,20 @@ describe("multi-language translation", () => {
         return ok({ status: "completed", video_url: "https://files.heygen.ai/poll.mp4" });
       };
       const raced = (await listTranslations("u-r")).find((t) => t.id === "tr_race");
-      assert.deepEqual(raced?.captionUrls, { srt: "https://files.heygen.ai/cb.srt" });
+      assert.deepEqual([raced?.videoUrl, raced?.captionUrls], ["https://files.heygen.ai/cb.mp4", { srt: "https://files.heygen.ai/cb.srt" }]);
+
+      // A failed renewal never writes an expired link back over one a parallel request just renewed.
+      await getStore().put("translation", job("tr_par", { status: "completed", provider: "heygen", providerJobId: "vt_par", videoUrl: "https://files.heygen.ai/expired.mp4" }));
+      respond = () => {
+        void getStore().put("translation", job("tr_par", { status: "completed", provider: "heygen", providerJobId: "vt_par", videoUrl: "https://files.heygen.ai/renewed.mp4", updatedAt: new Date().toISOString() }));
+        return new Response("busy", { status: 500 });
+      };
+      assert.equal((await listTranslations("u-r")).find((t) => t.id === "tr_par")?.videoUrl, "https://files.heygen.ai/renewed.mp4");
+
+      // A job HeyGen knows under neither API fails instead of being asked about forever.
+      await getStore().put("translation", job("tr_gone", { status: "processing", provider: "heygen", providerJobId: "gone_1" }));
+      respond = () => new Response("not found", { status: 404 });
+      assert.deepEqual((await listTranslations("u-r")).find((t) => t.id === "tr_gone")?.status, "failed");
 
       // A late failure callback does not undo a finished dub.
       const late = await applyTranslationWebhook("heygen", { event_type: "video_translate.fail", event_data: { video_translation_id: "vt_race", msg: "late" } });

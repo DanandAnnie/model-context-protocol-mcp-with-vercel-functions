@@ -16,7 +16,7 @@ import { languageLabel } from "@/lib/language";
 import { stripPauses } from "@/lib/pauses";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
-import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, RESOLUTIONS, isDefaultCaptionStyle as isDefaultCaptionStyleFn, type AspectRatio, type AudioClip, type Avatar, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS } from "@/lib/types";
+import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, PRESENTER_FRAMINGS, RESOLUTIONS, isDefaultCaptionStyle as isDefaultCaptionStyleFn, isDefaultLayout, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -64,8 +64,7 @@ const newScene = (script = "", background: Background = DEFAULT_BG, presenter: P
   ...(presenter.layout ? { layout: presenter.layout } : {}),
   ...(presenter.audioId ? { audioId: presenter.audioId } : {}),
 });
-/** True when a layout is the renderer's default and need not be stored. */
-const isDefaultLayout = (l: SceneLayout) => l.scale === 1 && l.x === 0 && l.y === 0;
+const FRAMING_LABELS: Record<PresenterFraming, string> = { full: "Full", closeUp: "Close-up", circle: "Circle" };
 /** The same stacks the share player's captions use (globals.css), so the stage previews the chosen typeface. */
 const CAPTION_FONT_STACKS: Record<CaptionFont, string> = {
   sans: "inherit",
@@ -151,6 +150,7 @@ function CreateInner() {
   }
   const setBackground = (value: Background) => updateScene(activeIdx, { background: value });
   const layout: SceneLayout = active.layout ?? DEFAULT_LAYOUT;
+  const framing: PresenterFraming = layout.framing ?? "full";
   // The default layout is stored as absent, so an untouched scene renders exactly as before.
   const setLayout = (value: SceneLayout) => updateScene(activeIdx, { layout: isDefaultLayout(value) ? undefined : value });
   function updateScene(idx: number, patch: Partial<Scene>) {
@@ -504,14 +504,15 @@ function CreateInner() {
               )}
               {sceneAvatar ? (
                 // The offset moves a frame-sized layer so one unit is half the frame on either axis; the scale stays on the portrait.
-                <div data-testid="stage-presenter" className="absolute inset-0 flex items-end justify-center" style={{ transform: `translate(${layout.x * 50}%, ${layout.y * 50}%)` }}>
+                // A close-up zooms toward the head and shoulders; a circle crops the portrait into a disc over the background.
+                <div data-testid="stage-presenter" data-framing={framing} className={`absolute inset-0 flex justify-center ${framing === "circle" ? "items-center" : "items-end"}`} style={{ transform: `translate(${layout.x * 50}%, ${layout.y * 50}%)` }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                   data-testid="stage-avatar"
                   src={sceneAvatar.imageUrl}
                   alt={sceneAvatar.name}
-                  className={`${aspect === "16:9" ? "h-[92%]" : "h-[80%]"} max-w-[80%] object-contain object-bottom drop-shadow-xl`}
-                  style={{ transform: `scale(${layout.scale})`, transformOrigin: "bottom center" }}
+                  className={framing === "circle" ? `${aspect === "16:9" ? "h-[60%]" : "w-[55%]"} aspect-square rounded-full bg-white/70 object-cover object-top shadow-xl ring-4 ring-white/80` : `${aspect === "16:9" ? "h-[92%]" : "h-[80%]"} max-w-[80%] object-contain object-bottom drop-shadow-xl`}
+                  style={{ transform: `scale(${framing === "closeUp" ? layout.scale * 1.8 : layout.scale})`, transformOrigin: framing === "closeUp" ? "center 20%" : framing === "circle" ? "center" : "bottom center" }}
                   onError={(e) => {
                     const img = e.currentTarget;
                     if (!img.dataset.fallback) {
@@ -619,8 +620,22 @@ function CreateInner() {
             )}
             <details className="mb-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="scene-layout">
               <summary className="cursor-pointer select-none font-medium text-slate-700">
-                Presenter layout{isDefaultLayout(layout) ? "" : ` · ${Math.round(layout.scale * 100)}%${layout.x || layout.y ? ", moved" : ""}`}
+                Presenter layout{isDefaultLayout(layout) ? "" : ` · ${[framing !== "full" ? FRAMING_LABELS[framing].toLowerCase() : "", layout.scale !== 1 ? `${Math.round(layout.scale * 100)}%` : "", layout.x || layout.y ? "moved" : ""].filter(Boolean).join(", ")}`}
               </summary>
+              <div className="mt-2 flex flex-wrap items-center gap-2" role="group" aria-label="Presenter framing">
+                <span className="mr-1">Framing</span>
+                {PRESENTER_FRAMINGS.map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    aria-pressed={framing === f}
+                    onClick={() => setLayout({ ...layout, framing: f })}
+                    className={`rounded-md border px-2 py-1 ${framing === f ? "border-brand-600 bg-brand-50 text-brand-700" : "border-slate-200 bg-white hover:border-slate-300"}`}
+                  >
+                    {FRAMING_LABELS[f]}
+                  </button>
+                ))}
+              </div>
               <div className="mt-2 grid gap-2 sm:grid-cols-3">
                 <label className="block">
                   <span className="mb-1 block">Size · {Math.round(layout.scale * 100)}%</span>
@@ -636,7 +651,7 @@ function CreateInner() {
                 </label>
               </div>
               <div className="mt-2 flex items-center justify-between gap-2">
-                <span className="text-slate-500">Applies to this scene. HeyGen renders the size and position; other renderers use their default.</span>
+                <span className="text-slate-500">Applies to this scene. HeyGen renders the framing, size, and position (a photo avatar has no close-up); other renderers use their default.</span>
                 {!isDefaultLayout(layout) && (
                   <button type="button" onClick={() => setLayout(DEFAULT_LAYOUT)} className="text-brand-700 hover:underline">
                     Reset

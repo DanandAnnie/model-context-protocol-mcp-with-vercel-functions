@@ -1,7 +1,7 @@
 // Field schemas shared by the video, template, batch, and brand kit services. A leaf module: it
 // imports no service, so any service may import it without creating a cycle.
 import { z } from "zod";
-import { CAPTION_FONTS, CAPTION_POSITIONS, CAPTION_LOOKS, CAPTION_SIZES, VOICE_EMOTIONS } from "../types";
+import { CAPTION_FONTS, CAPTION_POSITIONS, CAPTION_LOOKS, CAPTION_SIZES, PRESENTER_FRAMINGS, VOICE_EMOTIONS } from "../types";
 
 export const backgroundSchema = z
   .object({ type: z.enum(["color", "image", "video"]), value: z.string().min(1).max(2000, "A background must be a colour or a URL of at most 2000 characters") })
@@ -16,4 +16,7 @@ export const pitchSchema = z.number().int().min(-50).max(50);
 /** Speaking style; HeyGen applies it to voices that support one, other renderers keep the voice's natural delivery. */
 export const emotionSchema = z.enum(VOICE_EMOTIONS);
 /** Presenter size and position in the frame; see `SceneLayout`. */
-export const sceneLayoutSchema = z.object({ scale: z.number().min(0.5).max(1.5), x: z.number().min(-1).max(1), y: z.number().min(-1).max(1) });
+export const sceneLayoutSchema = z
+  .object({ scale: z.number().min(0.5).max(1.5), x: z.number().min(-1).max(1), y: z.number().min(-1).max(1), framing: z.enum(PRESENTER_FRAMINGS).optional() })
+  // The full frame is the default, stored as absent like the default look of a caption.
+  .transform(({ framing, ...rest }) => (framing && framing !== "full" ? { ...rest, framing } : rest));

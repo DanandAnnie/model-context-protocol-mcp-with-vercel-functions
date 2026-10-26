@@ -995,7 +995,7 @@ export default function VideoDetailPage() {
                         <div className="min-w-0">
                           {(sc.avatarName || sc.voiceName || sc.audioId || sc.layout) && (
                             <div className="mb-0.5 text-xs text-slate-500">
-                              {[sc.avatarName, sc.audioId ? `recorded audio${sc.audioName ? `: ${sc.audioName}` : ""}` : sc.voiceName, sc.layout ? `presenter ${Math.round(sc.layout.scale * 100)}%${sc.layout.x || sc.layout.y ? ", moved" : ""}` : undefined].filter(Boolean).join(" · ")}
+                              {[sc.avatarName, sc.audioId ? `recorded audio${sc.audioName ? `: ${sc.audioName}` : ""}` : sc.voiceName, sc.layout ? `presenter ${[sc.layout.framing === "closeUp" ? "close-up" : sc.layout.framing === "circle" ? "in a circle" : "", sc.layout.scale !== 1 || !sc.layout.framing ? `${Math.round(sc.layout.scale * 100)}%` : "", sc.layout.x || sc.layout.y ? "moved" : ""].filter(Boolean).join(", ")}` : undefined].filter(Boolean).join(" · ")}
                             </div>
                           )}
                           <p className="whitespace-pre-wrap leading-relaxed text-slate-700">{sc.script}</p>

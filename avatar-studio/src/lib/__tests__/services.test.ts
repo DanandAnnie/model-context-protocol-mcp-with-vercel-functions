@@ -715,6 +715,18 @@ describe("scenes", () => {
     assert.throws(() => videoRequestSchema.parse({ ...req, scenes: [{ ...req.scenes![0], layout: { scale: 2, x: 0, y: 0 } }] }), "the scale is bounded");
     const plain = await createVideo(videoRequestSchema.parse({ title: "Plain", avatarId: "stock_1", voiceId: "stock_voice_1", scenes: [{ script: "Hi.", background: { type: "color", value: "#fff" }, layout: { scale: 1, x: 0, y: 0 } }] }));
     assert.equal("layout" in plain.scenes![0], false, "an explicit default layout is stored as absent");
+    // A framing becomes HeyGen's avatar style; the full frame is the default, sent as "normal" and stored as absent.
+    const framed = videoRequestSchema.parse({ ...req, scenes: [{ ...req.scenes![0], layout: { scale: 1, x: 0, y: 0, framing: "circle" } }, { ...req.scenes![1], layout: { scale: 1, x: 0, y: 0, framing: "closeUp" } }] });
+    await heygen.createVideo(framed, ava, emma, cast);
+    assert.deepEqual(sent!.video_inputs.map((i) => (i.character as { avatar_style?: string }).avatar_style), ["circle", "closeUp"]);
+    // A photo avatar has a square or a circle only: a close-up keeps its square.
+    const photo = { ...ava, source: "custom" as const, providerAssetIds: { heygen: "tp_1" } };
+    const photoStyle = (f?: "closeUp" | "circle") => (heygen as unknown as { character: (a: typeof photo, f?: string) => { talking_photo_style?: string } }).character(photo, f).talking_photo_style;
+    assert.deepEqual([photoStyle(), photoStyle("closeUp"), photoStyle("circle")], ["square", "square", "circle"]);
+    assert.equal((await createVideo(videoRequestSchema.parse({ title: "Full", avatarId: "stock_1", voiceId: "stock_voice_1", scenes: [{ script: "Hi.", background: { type: "color", value: "#fff" }, layout: { scale: 1, x: 0, y: 0, framing: "full" } }] }))).scenes![0].layout, undefined);
+    const circled = await createVideo(videoRequestSchema.parse({ title: "Circle", avatarId: "stock_1", voiceId: "stock_voice_1", scenes: [{ script: "Hi.", background: { type: "color", value: "#fff" }, layout: { scale: 1, x: 0, y: 0, framing: "circle" } }] }));
+    assert.deepEqual(circled.scenes![0].layout, { scale: 1, x: 0, y: 0, framing: "circle" });
+    assert.equal(videoRequestSchema.safeParse({ ...req, scenes: [{ ...req.scenes![0], layout: { scale: 1, x: 0, y: 0, framing: "square" } }] }).success, false, "only the three framings");
     // A scene voice from another provider is refused like the video's voice would be.
     await assert.rejects(heygen.createVideo(req, ava, emma, { ...cast, voices: { ...cast.voices, [james.id]: { ...james, provider: "elevenlabs" } } }), /HeyGen voice/);
     await assert.rejects(new DidAvatarProvider("key").createVideo(req, ava, emma), /one presenter and one voice per video/);

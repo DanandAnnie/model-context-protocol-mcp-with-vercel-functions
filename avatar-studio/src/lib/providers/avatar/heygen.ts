@@ -1,4 +1,4 @@
-import { dimensionsFor, type AudioClip, type Avatar, type Scene, type VideoRequest, type Voice } from "../../types";
+import { dimensionsFor, type AudioClip, type Avatar, type PresenterFraming, type Scene, type VideoRequest, type Voice } from "../../types";
 import { withBreakTags } from "../../pauses";
 import { heygenBurnsCaptions } from "../../captions";
 import { webhookUrl } from "../../config";
@@ -67,7 +67,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
         const sceneVoice = (scene.voiceId && cast?.voices[scene.voiceId]) || voice;
         return {
           // HeyGen places the presenter with a scale (1 = default) and an x/y offset of the frame.
-          character: { ...this.character(sceneAvatar), ...(scene.layout ? { scale: scene.layout.scale, offset: { x: scene.layout.x, y: scene.layout.y } } : {}) },
+          character: { ...this.character(sceneAvatar, scene.layout?.framing), ...(scene.layout ? { scale: scene.layout.scale, offset: { x: scene.layout.x, y: scene.layout.y } } : {}) },
           // An audio scene lip-syncs to its clip; speed, pitch, and emotion apply to synthesised speech only.
           // An emotion goes to voices that can take one: HeyGen says per voice, and one it says nothing about is sent it.
           voice: scene.audioId
@@ -87,12 +87,13 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     return { providerJobId: data.video_id };
   }
 
-  private character(avatar: Avatar) {
+  /** HeyGen's character for a presenter, in the scene's framing; a talking photo has a square or a circle only, so a close-up keeps its square. */
+  private character(avatar: Avatar, framing?: PresenterFraming) {
     const photoId = avatar.source === "custom" ? avatar.providerAssetIds?.[this.name] : avatar.tags?.includes("photo avatar") ? avatar.id : undefined;
     if (avatar.source === "custom" && !photoId) throw new Error(`Custom avatar "${avatar.name}" has not been uploaded to HeyGen yet.`);
     return photoId
-      ? { type: "talking_photo", talking_photo_id: photoId, talking_photo_style: "square" }
-      : { type: "avatar", avatar_id: avatar.id, avatar_style: "normal" };
+      ? { type: "talking_photo", talking_photo_id: photoId, talking_photo_style: framing === "circle" ? "circle" : "square" }
+      : { type: "avatar", avatar_id: avatar.id, avatar_style: framing === "closeUp" ? "closeUp" : framing === "circle" ? "circle" : "normal" };
   }
 
   private audioAssetId(audioId: string, cast?: RenderCast): string {

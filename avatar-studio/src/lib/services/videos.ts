@@ -3,7 +3,7 @@ import { z } from "zod";
 import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import { getStore } from "../store";
-import { EMPTY_WATCH, MAX_SCENES, TRASH_RETENTION_DAYS, isDefaultCaptionStyle } from "../types";
+import { EMPTY_WATCH, MAX_SCENES, TRASH_RETENTION_DAYS, isDefaultCaptionStyle, isDefaultLayout } from "../types";
 import type { AudioClip, Avatar, CaptionCue, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
 import { buildCues } from "../captions";
 import { wellFormed } from "../text";
@@ -148,7 +148,7 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
     return stripUndefined({
       ...sc,
       // The renderer's default layout is stored as absent whichever client sent it, so the page and the provider see no customisation.
-      layout: sc.layout && (sc.layout.scale !== 1 || sc.layout.x !== 0 || sc.layout.y !== 0) ? sc.layout : undefined,
+      layout: sc.layout && !isDefaultLayout(sc.layout) ? sc.layout : undefined,
       avatarName: sc.avatarId ? cast.avatars[sc.avatarId]?.name : undefined,
       // An audio scene has no voice of its own: the clip speaks.
       voiceId: clip ? undefined : sc.voiceId,

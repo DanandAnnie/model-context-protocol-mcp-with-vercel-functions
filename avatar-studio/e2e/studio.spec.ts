@@ -378,6 +378,10 @@ test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page 
   await expect(page.getByTestId("stage-avatar")).toHaveCSS("transform", /matrix\(1\.2, 0, 0, 1\.2, 0, 0\)/);
   await expect(page.getByTestId("stage-presenter")).toHaveCSS("transform", /matrix\(1, 0, 0, 1, [1-9]\d*(\.\d+)?, 0\)/);
   await expect(page.getByTestId("scene-layout")).toContainText("120%, moved");
+  // And framed in a circle over the background, which the stage previews.
+  await page.getByRole("group", { name: "Presenter framing" }).getByRole("button", { name: "Circle" }).click();
+  await expect(page.getByTestId("stage-presenter")).toHaveAttribute("data-framing", "circle");
+  await expect(page.getByTestId("scene-layout")).toContainText("circle, 120%, moved");
   await page.getByRole("button", { name: /^Scene 1,/ }).click();
   await expect(page.getByTestId("scene-layout")).not.toContainText("120%");
   await expect(page.getByTestId("stage-avatar")).not.toHaveAttribute("alt", "Marcus Hill");
@@ -398,11 +402,11 @@ test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page 
   expect(video.scenes).toHaveLength(2);
   expect(video.script).toBe("Scene one says hello.\n\nScene two says goodbye.");
   expect(video.scenes[0].avatarName).toBeUndefined();
-  expect(video.scenes[1]).toMatchObject({ avatarId: "stock_2", avatarName: "Marcus Hill", voiceId: "stock_voice_3", voiceName: "Olivia", layout: { scale: 1.2, x: 0.5, y: 0 }, background: { type: "video", value: "https://example.com/loop.mp4" } });
+  expect(video.scenes[1]).toMatchObject({ avatarId: "stock_2", avatarName: "Marcus Hill", voiceId: "stock_voice_3", voiceName: "Olivia", layout: { scale: 1.2, x: 0.5, y: 0, framing: "circle" }, background: { type: "video", value: "https://example.com/loop.mp4" } });
   expect((await page.request.post("/api/videos", { data: { title: "Bad", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9", background: { type: "video", value: "loop.mp4" } } })).status()).toBe(400);
   expect(video.scenes[0].layout).toBeUndefined();
   await expect(page.getByText("Script · 2 scenes")).toBeVisible();
-  await expect(page.getByText("Marcus Hill · Olivia")).toBeVisible();
+  await expect(page.getByText("Marcus Hill · Olivia · presenter in a circle, 120%, moved")).toBeVisible();
   // Edit a copy keeps the scene's presenter.
   await page.goto(`/create?from=${id}`);
   await expect(page.getByText(/2 scenes/)).toBeVisible();

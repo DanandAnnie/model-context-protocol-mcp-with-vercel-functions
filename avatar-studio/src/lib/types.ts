@@ -98,12 +98,23 @@ export interface Background {
   value: string;
 }
 
-/** Where the presenter sits in the frame: `scale` 0.5–1.5 (1 is the renderer's default size), `x` and `y` offsets of -1..1 as a share of the frame (0 is the default spot). */
+/**
+ * How the presenter is framed: the whole presenter, a close-up of the head and shoulders, or a circle
+ * cut-out over the background (HeyGen's avatar styles; a photo avatar has no close-up and shows its full frame).
+ */
+export const PRESENTER_FRAMINGS = ["full", "closeUp", "circle"] as const;
+export type PresenterFraming = (typeof PRESENTER_FRAMINGS)[number];
+
+/** Where the presenter sits in the frame: `scale` 0.5–1.5 (1 is the renderer's default size), `x` and `y` offsets of -1..1 as a share of the frame (0 is the default spot), and the framing (full when absent). */
 export interface SceneLayout {
   scale: number;
   x: number;
   y: number;
+  framing?: PresenterFraming;
 }
+
+/** True when a layout is the renderer's default and need not be stored. */
+export const isDefaultLayout = (l: SceneLayout) => l.scale === 1 && l.x === 0 && l.y === 0 && (l.framing ?? "full") === "full";
 
 export const DEFAULT_LAYOUT: SceneLayout = { scale: 1, x: 0, y: 0 };
 

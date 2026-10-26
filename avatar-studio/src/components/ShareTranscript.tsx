@@ -15,7 +15,8 @@ export function ShareTranscript({ playerId, cues }: { playerId: string; cues: Ar
     const el = document.getElementById(playerId) as HTMLVideoElement | null;
     if (!el) return;
     const sync = () => {
-      const ms = el.currentTime * 1000;
+      // Whole milliseconds: a seek to startMs / 1000 can read back a hair earlier, which would mark the line before.
+      const ms = Math.round(el.currentTime * 1000);
       // The last line that has started, unless it has ended too (a pause, or after the last line): then none.
       let i = -1;
       while (i + 1 < cues.length && cues[i + 1].startMs <= ms) i++;

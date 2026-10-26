@@ -496,7 +496,7 @@ test("the share page transcript plays the video from a line and marks the line b
   await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.currentTime)).toBeGreaterThanOrEqual(target - 0.25);
   await player.evaluate((el: HTMLVideoElement) => el.pause());
   // The line marked is the one spoken where the player stopped: the clicked one, or a later one if playback ran on.
-  const at = (await player.evaluate((el: HTMLVideoElement) => el.currentTime)) * 1000;
+  const at = Math.round((await player.evaluate((el: HTMLVideoElement) => el.currentTime)) * 1000);
   const spoken = cues.findIndex((c) => c.startMs <= at && at < c.endMs);
   expect(spoken).toBeGreaterThanOrEqual(1);
   await expect(transcript.getByRole("button").nth(spoken)).toHaveAttribute("aria-current", "true");

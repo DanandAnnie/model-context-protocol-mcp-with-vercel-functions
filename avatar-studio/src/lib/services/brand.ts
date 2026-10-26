@@ -12,6 +12,9 @@ import { backgroundSchema } from "./schemas";
 import { MAX_PRONUNCIATIONS } from "../pronounce";
 import { MAX_FORCED_TRANSLATIONS, MAX_FORCED_TRANSLATION_LENGTH, MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH, MIN_GLOSSARY_TERM_LENGTH } from "../glossary";
 import { servableLogo } from "../brand-logo";
+import { brandFromHtml, type BrandSuggestion } from "../brand-import";
+import type { FetchLike } from "../safe-fetch";
+import { fetchPageHtml } from "../webpage";
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
@@ -100,3 +103,23 @@ export async function saveBrandKit(input: z.infer<typeof brandKitSchema>, ownerI
 export async function deleteBrandKit(ownerId: string = LOCAL_OWNER): Promise<void> {
   await getStore().remove("brand", brandKitId(ownerId));
 }
+
+export const brandImportSchema = z.object({ url: z.string().trim().min(1, "Enter the website's address").max(2000) });
+
+/**
+ * A brand kit's name, logo, and colours read from a company's public web page (an address without a scheme is taken
+ * as https). Up to three redirects are followed, each to a public address; nothing is saved.
+ */
+export async function importBrandFromWebsite(input: z.infer<typeof brandImportSchema>, fetchImpl?: FetchLike): Promise<BrandSuggestion> {
+  const raw = /^[a-z][a-z\d+.-]*:/i.test(input.url) ? input.url : `https://${input.url}`;
+  let page: { html: string; url: string };
+  try {
+    page = await fetchPageHtml(new URL(raw).toString(), fetchImpl, "Website", 3);
+  } catch (err) {
+    throw new ValidationError(err instanceof TypeError ? "Enter a website address like https://example.com" : err instanceof Error ? err.message : "The website could not be read");
+  }
+  const suggestion = brandFromHtml(page.html, page.url);
+  if (!suggestion.name && !suggestion.logoUrl && !suggestion.primaryColor) throw new ValidationError("That page names no brand name, logo, or colour; fill the kit in by hand");
+  return suggestion;
+}
+

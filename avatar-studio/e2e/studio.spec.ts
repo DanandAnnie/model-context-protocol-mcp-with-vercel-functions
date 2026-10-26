@@ -1590,6 +1590,26 @@ test("captions are served as SRT and VTT, security headers are set", async ({ pa
 /** A 1x1 transparent PNG. */
 const TINY_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 
+test("the brand kit can be filled in from a website, for review before saving", async ({ page }) => {
+  await page.goto("/brand");
+  // The server will not fetch a private address, and says so.
+  await page.getByLabel("Website address").fill("localhost");
+  await page.getByRole("button", { name: "Fill in" }).click();
+  await expect(page.getByTestId("brand-import-status")).toContainText(/public|private|not allowed/i);
+  // A public site is read on the server (stood in for here); its details fill the form and nothing is saved yet.
+  await page.route("**/api/brand/import", (route) =>
+    route.fulfill({ json: { suggestion: { sourceUrl: "https://www.maple.example/", name: "Maple Street Realty", logoUrl: "http://localhost:3100/demo/poster.svg", primaryColor: "#0f766e", accentColor: "#f59e0b" } } }),
+  );
+  await page.getByLabel("Website address").fill("maple.example");
+  await page.getByLabel("Website address").press("Enter");
+  await expect(page.getByTestId("brand-import-status")).toHaveText("Filled in the name, a logo and two colours from www.maple.example. Check them, then save the brand kit.");
+  await expect(page.getByPlaceholder("Acme Realty")).toHaveValue("Maple Street Realty");
+  await expect(page.getByLabel("Primary color", { exact: true })).toHaveValue("#0f766e");
+  await expect(page.getByLabel("Accent color", { exact: true })).toHaveValue("#f59e0b");
+  await expect(page.getByAltText("Logo preview")).toHaveAttribute("src", "http://localhost:3100/demo/poster.svg");
+  expect((await (await page.request.get("/api/brand")).json()).brand?.name ?? "").not.toBe("Maple Street Realty");
+});
+
 test("brand kit pre-fills the editor and brands the share page", async ({ page }) => {
   try {
     await page.goto("/brand");

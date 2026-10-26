@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Palette, Trash2, Upload } from "lucide-react";
+import { Globe, Palette, Trash2, Upload } from "lucide-react";
 import { Button, Card, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
@@ -10,6 +10,7 @@ import { api, isDarkHex } from "@/lib/client";
 import { MAX_PRONUNCIATIONS, formatPronunciations, parsePronunciations } from "@/lib/pronounce";
 import { MAX_FORCED_TRANSLATIONS, MAX_FORCED_TRANSLATION_LENGTH, MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH, MIN_GLOSSARY_TERM_LENGTH, formatForcedTranslations, parseForcedTranslations, parseGlossary } from "@/lib/glossary";
 import { LOGO_TYPES, logoDataUrlValid, logoFileType } from "@/lib/logo-types";
+import type { BrandSuggestion } from "@/lib/brand-import";
 import { backdropIdOf, type AspectRatio, type Avatar, type Backdrop, type BrandKit, type Resolution, type Voice, type WatermarkCorner } from "@/lib/types";
 
 const DEFAULT_PRIMARY = "#4f46e5";
@@ -56,6 +57,11 @@ export default function BrandPage() {
   // Shown next to the Save button, where the person is when a save is refused (the banner at the top is out of view).
   const [saveErr, setSaveErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Filling the form from a company's website, as HeyGen imports a brand kit from one; nothing is saved until Save.
+  const [site, setSite] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [importNote, setImportNote] = useState<string | null>(null);
+  const [importErr, setImportErr] = useState<string | null>(null);
   const hydrated = useRef(false);
 
   // Load the saved kit into the form once.
@@ -106,6 +112,27 @@ export default function BrandPage() {
       setLogoNotice(null);
     };
     reader.readAsDataURL(file);
+  }
+
+  async function importSite() {
+    if (!site.trim() || importing) return;
+    setImporting(true);
+    setImportErr(null);
+    setImportNote(null);
+    try {
+      const { suggestion: s } = await api<{ suggestion: BrandSuggestion }>("/api/brand/import", { method: "POST", body: JSON.stringify({ url: site.trim() }) });
+      const found: string[] = [];
+      if (s.name) (setName(s.name), found.push("the name"));
+      if (s.logoUrl) (setLogoUrl(s.logoUrl), setLogoNotice(null), found.push("a logo"));
+      if (s.primaryColor) (setPrimary(s.primaryColor), found.push(s.accentColor ? "two colours" : "a colour"));
+      if (s.accentColor) setAccent(s.accentColor);
+      const host = new URL(s.sourceUrl).host;
+      setImportNote(`Filled in ${found.join(", ").replace(/, ([^,]*)$/, " and $1")} from ${host}. Check them, then save the brand kit.`);
+    } catch (e) {
+      setImportErr(e instanceof Error ? e.message : "The website could not be read");
+    } finally {
+      setImporting(false);
+    }
   }
 
   const primaryValid = HEX.test(primary);
@@ -236,6 +263,25 @@ export default function BrandPage() {
       <ErrorBanner message={err} />
       <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
         <Card className="space-y-5 p-5">
+          <section aria-labelledby="brand-import-title">
+            <h3 id="brand-import-title" className="mb-1.5 block text-sm font-medium text-slate-700">Fill from a website</h3>
+            <form
+              className="flex gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                importSite();
+              }}
+            >
+              <input aria-label="Website address" value={site} onChange={(e) => setSite(e.target.value)} placeholder="acme.com" maxLength={2000} className={inputClass} disabled={loading || canEdit === false} />
+              <Button type="submit" variant="secondary" loading={importing} disabled={!site.trim() || loading || canEdit === false}>
+                <Globe className="h-4 w-4" /> Fill in
+              </Button>
+            </form>
+            <span role="status" className="mt-2 block text-xs empty:hidden" data-testid="brand-import-status">
+              {importErr ? <span className="text-rose-700">{importErr}</span> : importNote ? <span className="text-emerald-700">{importNote}</span> : null}
+            </span>
+            <p className="mt-1 text-xs text-slate-500">Reads the brand name, logo, and colours your website declares, for you to check before saving.</p>
+          </section>
           <Field label="Brand name" hint="Shown in the header of shared videos.">
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Acme Realty" maxLength={80} className={inputClass} disabled={loading} />
           </Field>

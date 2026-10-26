@@ -2,14 +2,17 @@
 import { useState } from "react";
 import { Mail } from "lucide-react";
 import { api } from "@/lib/client";
+import type { ShareBody } from "@/lib/share-body";
+import { ShareWatch } from "./ShareWatch";
 
 /**
- * The form a viewer fills in before a gated share page plays: an email, and a name if they like. Once the
- * email is in, the player (`children`) shows straight away rather than after a reload, because an embedded
- * page in a browser that blocks third-party cookies would otherwise never remember the pass.
+ * The form a viewer fills in before a gated share page plays: an email, and a name if they like. The page
+ * carries nothing else; the player and the rest arrive in the answer once the email is in, and show straight
+ * away rather than after a reload, because an embedded page in a browser that blocks third-party cookies would
+ * otherwise never remember the pass.
  */
-export function ShareLeadGate({ videoId, brandName, open, children }: { videoId: string; brandName?: string; open: boolean; children: React.ReactNode }) {
-  const [passed, setPassed] = useState(open);
+export function ShareLeadGate({ videoId, brandName, autoplay, loop }: { videoId: string; brandName?: string; autoplay: boolean; loop: boolean }) {
+  const [body, setBody] = useState<ShareBody | null>(null);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -21,8 +24,8 @@ export function ShareLeadGate({ videoId, brandName, open, children }: { videoId:
     setBusy(true);
     setError(null);
     try {
-      await api(`/api/videos/${videoId}/lead`, { method: "POST", body: JSON.stringify({ email: email.trim(), ...(name.trim() ? { name: name.trim() } : {}) }) });
-      setPassed(true);
+      const res = await api<{ body: ShareBody }>(`/api/videos/${videoId}/lead`, { method: "POST", body: JSON.stringify({ email: email.trim(), ...(name.trim() ? { name: name.trim() } : {}) }) });
+      setBody(res.body);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not continue");
     } finally {
@@ -30,7 +33,7 @@ export function ShareLeadGate({ videoId, brandName, open, children }: { videoId:
     }
   }
 
-  if (passed) return <>{children}</>;
+  if (body) return <ShareWatch body={body} autoplay={autoplay} loop={loop} focus />;
 
   const field = "w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-slate-500 focus:outline-none";
   return (

@@ -51,6 +51,11 @@ export default function VideoDetailPage() {
   const [draftTitle, setDraftTitle] = useState("");
   const [renameErr, setRenameErr] = useState<string | null>(null);
   const [savedTemplate, setSavedTemplate] = useState<string | null>(null);
+  // The button turns into a link once saved; the focus moves to the link rather than falling to the page.
+  const savedTemplateLink = useRef<HTMLAnchorElement>(null);
+  useEffect(() => {
+    if (savedTemplate) savedTemplateLink.current?.focus();
+  }, [savedTemplate]);
   const [templateErr, setTemplateErr] = useState<string | null>(null);
   async function saveAsTemplate() {
     if (!video) return;
@@ -112,6 +117,14 @@ export default function VideoDetailPage() {
   const { data: libraryData } = useApi<{ videos: Video[] }>("/api/videos");
   const folders = Array.from(new Set((libraryData?.videos ?? []).map((v) => v.folder).filter((f): f is string => !!f))).sort();
   const [folderDraft, setFolderDraft] = useState<string | null>(null);
+  // Enter or Escape in the folder field hands the focus back to the folder button, as the title does.
+  const folderButton = useRef<HTMLButtonElement>(null);
+  const refocusFolder = useRef(false);
+  useEffect(() => {
+    if (folderDraft !== null || !refocusFolder.current) return;
+    refocusFolder.current = false;
+    folderButton.current?.focus();
+  }, [folderDraft]);
   const [folderErr, setFolderErr] = useState<string | null>(null);
   /**
    * Folds a PATCH response into the page's record. Merging (rather than replacing) means two saves
@@ -482,6 +495,8 @@ export default function VideoDetailPage() {
     try {
       const { video: back } = await api<{ video: Video }>(`/api/videos/${video.id}/restore`, { method: "POST" });
       setData({ video: back });
+      // The banner with the Restore button goes away; the focus moves to the title rather than the page.
+      requestAnimationFrame(() => titleButton.current?.focus());
     } catch (e) {
       setRenameErr(e instanceof Error ? e.message : "Could not restore the video");
     } finally {
@@ -524,6 +539,9 @@ export default function VideoDetailPage() {
                   onBlur={saveTitle}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
+                      // Without this, an unchanged title closes the field at once, the title button takes the focus,
+                      // and the same Enter then presses it and opens the field again.
+                      e.preventDefault();
                       refocusTitle.current = true;
                       saveTitle();
                     }
@@ -672,7 +690,7 @@ export default function VideoDetailPage() {
                   <Copy className="h-4 w-4" /> Edit a copy
                 </Link>
                 {savedTemplate ? (
-                  <Link href="/templates" className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100">
+                  <Link ref={savedTemplateLink} href="/templates" className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100">
                     <Check className="h-4 w-4" /> Saved · View templates
                   </Link>
                 ) : (
@@ -773,6 +791,7 @@ export default function VideoDetailPage() {
                   <Row label="Folder">
                     {folderDraft === null ? (
                       <button
+                        ref={folderButton}
                         type="button"
                         onClick={() => setFolderDraft(video.folder ?? "")}
                         className="inline-flex items-center gap-1.5 rounded px-1 text-slate-900 hover:bg-slate-100"
@@ -794,8 +813,15 @@ export default function VideoDetailPage() {
                           onChange={(e) => setFolderDraft(e.target.value)}
                           onBlur={saveFolder}
                           onKeyDown={(e) => {
-                            if (e.key === "Enter") saveFolder();
-                            if (e.key === "Escape") setFolderDraft(null);
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              refocusFolder.current = true;
+                              saveFolder();
+                            }
+                            if (e.key === "Escape") {
+                              refocusFolder.current = true;
+                              setFolderDraft(null);
+                            }
                           }}
                           className="w-36 rounded border border-slate-200 px-2 py-0.5 text-right text-sm focus:border-brand-500 focus:outline-none"
                         />

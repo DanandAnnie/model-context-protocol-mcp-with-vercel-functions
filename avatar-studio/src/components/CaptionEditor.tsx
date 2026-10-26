@@ -162,7 +162,10 @@ export function CaptionEditor({ video, burnedIn, onUpdated }: { video: Video; bu
                     <button type="button" onClick={() => addAfter(i)} disabled={rows.length >= MAX_CUES} aria-label={`Add a line after line ${i + 1}`} title="Add a line after this one" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
                       <Plus className="h-4 w-4" />
                     </button>
-                    <button type="button" onClick={() => setRows((r) => r && r.filter((_, j) => j !== i))} disabled={rows.length <= 1} aria-label={`Remove line ${i + 1}`} title="Remove this line" className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-700">
+                    <button type="button" onClick={() => {
+                        setRows((r) => r && r.filter((_, j) => j !== i));
+                        setSaved(false);
+                      }} disabled={rows.length <= 1} aria-label={`Remove line ${i + 1}`} title="Remove this line" className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-700">
                       <Trash2 className="h-4 w-4" />
                     </button>
                   </span>

@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { LayoutTemplate, Trash2 } from "lucide-react";
 import { Card, ErrorBanner, SectionTitle } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
@@ -19,12 +19,15 @@ export default function TemplatesPage() {
 
   const { data: mine, error, refetch } = useApi<{ templates: VideoTemplate[] }>("/api/templates");
   const [removeErr, setRemoveErr] = useState<string | null>(null);
+  // A deleted template's card (and the button pressed) is gone; the focus moves to the list's heading.
+  const mineHeading = useRef<HTMLHeadingElement>(null);
   async function remove(t: VideoTemplate) {
     if (!window.confirm(`Delete the template "${t.title}"?`)) return;
     setRemoveErr(null);
     try {
       await api(`/api/templates/${t.id}`, { method: "DELETE" });
       await refetch();
+      mineHeading.current?.focus();
     } catch (e) {
       setRemoveErr(e instanceof Error ? e.message : "Could not delete the template");
     }
@@ -35,7 +38,7 @@ export default function TemplatesPage() {
       <SectionTitle title="Templates" subtitle="Start from a proven script. Placeholders in {braces} are yours to fill in." />
       <ErrorBanner message={error ?? removeErr} />
       <section className="mb-8" data-testid="my-templates">
-        <h2 className="mb-1 text-sm font-semibold text-slate-900">My templates</h2>
+        <h2 ref={mineHeading} tabIndex={-1} className="mb-1 text-sm font-semibold text-slate-900 focus:outline-none">My templates</h2>
         <p className="mb-4 text-xs text-slate-500">Save any video as a template from its page: scenes, presenter, voice, and settings come along.</p>
         {mine && mine.templates.length === 0 ? (
           <p className="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-6 text-center text-sm text-slate-500">No saved templates yet.</p>

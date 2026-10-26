@@ -21,6 +21,8 @@ interface Preview {
   columns: string[];
   rowCount: number;
   missing: string[];
+  /** Rows whose filled-in script is empty or too long, in words. */
+  problem?: string | null;
   samples: Array<{ label: string; script: string }>;
 }
 
@@ -153,7 +155,7 @@ export default function BatchPage() {
     }
   }
 
-  const ready = !!preview && preview.rowCount > 0 && preview.missing.length === 0 && !!avatarId && !!voiceId && title.trim().length > 0;
+  const ready = !!preview && preview.rowCount > 0 && preview.missing.length === 0 && !preview.problem && !!avatarId && !!voiceId && title.trim().length > 0;
 
   return (
     <>
@@ -193,9 +195,19 @@ export default function BatchPage() {
             </Field>
             <Field label="Recipients (CSV)" hint="First row is the header. Up to 100 rows per batch.">
               <textarea className={`${inputClass} min-h-[140px] resize-y font-mono text-xs`} value={csv} onChange={(e) => setCsv(e.target.value)} />
-              <label className="mt-2 inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-brand-600 hover:underline">
+              {/* Visually hidden rather than display:none, so the upload can be reached and opened from the keyboard. */}
+              <label className="mt-2 inline-flex cursor-pointer items-center gap-2 rounded text-xs font-medium text-brand-600 hover:underline focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-brand-500">
                 <Upload className="h-3.5 w-3.5" /> Upload a .csv file
-                <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
+                <input
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="sr-only"
+                  onChange={(e) => {
+                    onFile(e.target.files?.[0]);
+                    // The same file can be picked again after the box was edited.
+                    e.target.value = "";
+                  }}
+                />
               </label>
             </Field>
           </Card>
@@ -258,6 +270,11 @@ export default function BatchPage() {
               {preview.missing.length > 0 && (
                 <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                   The script uses placeholders the CSV does not have: {preview.missing.map((m) => `{${m}}`).join(", ")}
+                </div>
+              )}
+              {preview.problem && (
+                <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="batch-row-problem">
+                  {preview.problem}
                 </div>
               )}
               <ol className="mt-3 space-y-3">

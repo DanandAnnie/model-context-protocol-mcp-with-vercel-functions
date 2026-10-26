@@ -1,6 +1,6 @@
 "use client";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useRef, useState } from "react";
 import { Check, Languages } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
@@ -54,6 +54,8 @@ function TranslateInner() {
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // Once a dub starts the form is cleared and its button disabled; the focus moves to the URL field for the next one.
+  const sourceInput = useRef<HTMLInputElement>(null);
   async function submit() {
     setSubmitting(true);
     setErr(null);
@@ -65,6 +67,7 @@ function TranslateInner() {
       // The next video may have a different cast; the lip-sync choice is a preference and stays.
       setSpeakers(0);
       refetch();
+      sourceInput.current?.focus();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Translation failed");
       refetch();
@@ -84,7 +87,7 @@ function TranslateInner() {
         <Card className="p-5">
           <div className="space-y-4">
             <Field label="Video URL" hint="A direct link to an MP4 the provider can download.">
-              <input className={inputClass} value={sourceVideoUrl} onChange={(e) => setSource(e.target.value)} placeholder="https://…/video.mp4" />
+              <input ref={sourceInput} className={inputClass} value={sourceVideoUrl} onChange={(e) => setSource(e.target.value)} placeholder="https://…/video.mp4" />
             </Field>
             <fieldset>
               <legend className="mb-1.5 block text-sm font-medium text-slate-700">
@@ -94,7 +97,7 @@ function TranslateInner() {
                 {(data?.languages ?? ["Spanish"]).map((l) => {
                   const on = languages.includes(l);
                   return (
-                    <label key={l} className={`cursor-pointer rounded-full border px-2.5 py-1 text-xs font-medium ${on ? "border-brand-500 bg-brand-50 text-brand-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"} ${!on && languages.length >= MAX_LANGUAGES ? "cursor-not-allowed opacity-50" : ""}`}>
+                    <label key={l} className={`cursor-pointer rounded-full border px-2.5 py-1 text-xs font-medium has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-brand-500 ${on ? "border-brand-500 bg-brand-50 text-brand-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"} ${!on && languages.length >= MAX_LANGUAGES ? "cursor-not-allowed opacity-50" : ""}`}>
                       <input type="checkbox" className="sr-only" checked={on} disabled={!on && languages.length >= MAX_LANGUAGES} onChange={() => toggle(l)} />
                       {l}
                     </label>

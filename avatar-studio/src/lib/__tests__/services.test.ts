@@ -1262,6 +1262,22 @@ describe("personalized batches", () => {
     assert.equal((await listVideos("batch-user")).length, 2);
   });
 
+  it("refuses a batch with a row whose filled-in script is empty or too long, before any row starts", async () => {
+    const { createBatch, previewBatch } = await import("../services");
+    const base = { title: "Notes", scriptTemplate: "{msg}", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, aspect: "16:9" as const, resolution: "1080p" as const, background: { type: "color" as const, value: "#fff" }, captions: false, speed: 1 };
+    const empty = "name,msg\nAlice,\nBob,Hello Bob\nCara,[pause 2s]";
+    assert.equal(previewBatch("{msg}", empty).problem, "Rows 1, 3 leave the script empty; fill in their cells.");
+    await assert.rejects(createBatch({ ...base, csv: empty }, "batch-empty"), /Rows 1, 3 leave the script empty/);
+    const long = `name,msg\nAlice,Hi\nBob,${"word ".repeat(1200)}`;
+    assert.equal(previewBatch("{msg}", long).problem, "Row 2 makes the script longer than the 5000 characters a video holds.");
+    await assert.rejects(createBatch({ ...base, csv: long }, "batch-long"), /Row 2 makes the script longer than the 5000 characters a video holds/);
+    assert.equal((await listVideos("batch-empty")).length + (await listVideos("batch-long")).length, 0, "no row of a refused batch renders");
+    // Missing columns are the message while there are any; the row check waits for them.
+    assert.equal(previewBatch("{msg} {city}", empty).problem, null);
+    assert.equal(previewBatch("{msg}", "name,msg\nAlice,Hi").problem, null);
+    assert.equal(previewBatch("{msg}", "name,msg\nAlice,\nBob,Hi").problem, "Row 1 leaves the script empty; fill in its cells.");
+  });
+
   it("puts the brand kit's background behind batch rows unless the batch names one", async () => {
     const { createBatch, batchRequestSchema, saveBrandKit, brandKitSchema } = await import("../services");
     const req = (extra: Record<string, unknown> = {}) => batchRequestSchema.parse({ title: "Hi", scriptTemplate: "Hi {name}.", csv: "name\nAda", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, ...extra });

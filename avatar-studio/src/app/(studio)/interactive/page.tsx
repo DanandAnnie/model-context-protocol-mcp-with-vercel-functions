@@ -142,6 +142,8 @@ export default function InteractivePage() {
     try {
       await api(`/api/agents/${agent.id}`, { method: "DELETE" });
       if (savedLink?.endsWith(agent.id)) setSavedLink(null);
+      // Its transcripts went with it; a panel left open would offer a download that no longer exists.
+      if (transcriptsFor?.id === agent.id) setTranscriptsFor(null);
       await refetchAgents();
     } catch (e) {
       setSaveErr(e instanceof Error ? e.message : "Could not delete the presenter");
@@ -263,7 +265,7 @@ export default function InteractivePage() {
                   <div className="min-w-0">
                     <div className="truncate text-sm font-medium text-slate-900">{a.name}</div>
                     <div className="text-xs text-slate-500">
-                      {a.conversations} {a.conversations === 1 ? "conversation" : "conversations"} · {a.messages} {a.messages === 1 ? "message" : "messages"} · {a.isPublic ? "link on" : "link off"} · {formatDate(a.createdAt)}
+                      {a.conversations} {a.conversations === 1 ? "conversation" : "conversations"} · {a.messages} {a.messages === 1 ? "question" : "questions"} · {a.isPublic ? "link on" : "link off"} · {formatDate(a.createdAt)}
                       {a.knowledgeUrl && <> · knows {(() => { try { return new URL(a.knowledgeUrl).hostname; } catch { return "a page"; } })()}</>}
                     </div>
                   </div>

@@ -98,7 +98,8 @@ function TalkInner() {
         ) : !agent ? (
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-8 text-center">
             <h1 className="text-lg font-semibold">This presenter is not available</h1>
-            <p className="mt-2 text-sm text-slate-400">{error ?? "The link may have been turned off or deleted."}</p>
+            {/* A missing or switched-off presenter answers with the heading's own words; other errors (the network) say what went wrong. */}
+            <p className="mt-2 text-sm text-slate-400">{error && error !== "This presenter is not available" ? error : "The link may have been turned off or deleted."}</p>
           </div>
         ) : (
           <>

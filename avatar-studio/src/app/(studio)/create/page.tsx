@@ -772,7 +772,7 @@ function CreateInner() {
       {unfilled.length > 0 && (
         <div role="status" data-testid="unfilled-placeholders" className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
           Fill in {unfilled.slice(0, 4).join(", ")}
-          {unfilled.length > 4 ? ` and ${unfilled.length - 4} more` : ""} before generating: the presenter would read {unfilled.length === 1 ? "it" : "them"} out as written.
+          {unfilled.length > 4 ? ` and ${unfilled.length - 4} more` : ""} with your own words: if the video is generated as it is, the presenter reads {unfilled.length === 1 ? "it" : "them"} out as written.
         </div>
       )}
       {fromAgent && (

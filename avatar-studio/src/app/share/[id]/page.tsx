@@ -8,26 +8,19 @@ import {
   PUBLIC_ACCESS,
   getBrandKit,
   getVideo,
-  transcriptsFor,
 } from "@/lib/services";
 import { LOCAL_OWNER } from "@/lib/owner";
 import { config } from "@/lib/config";
-import { formatSeconds, isDarkHex, posterUrl } from "@/lib/client";
-import { languageCode } from "@/lib/language";
+import { formatSeconds, posterUrl } from "@/lib/client";
 import { excerpt } from "@/lib/text";
 import { publicLogoSrc } from "@/lib/brand-logo";
-import { watermarkPlace } from "@/lib/watermark";
 import { stripPauses } from "@/lib/pauses";
-import { dimensionsFor, type WatermarkCorner } from "@/lib/types";
-import { ViewBeacon } from "@/components/ViewBeacon";
-import { ShareCta } from "@/components/ShareCta";
+import { dimensionsFor } from "@/lib/types";
 import { ShareUnlock } from "@/components/ShareUnlock";
-import { SharePlayer } from "@/components/SharePlayer";
-import { SHARE_PLAYER_ID } from "@/lib/share-player";
-import { captionsBurnedIn } from "@/lib/captions";
 import { shareCookieName, shareGateCookieName, shareUnlocked } from "@/lib/share-lock";
 import { ShareLeadGate } from "@/components/ShareLeadGate";
-import { ShareTranscript } from "@/components/ShareTranscript";
+import { ShareWatch } from "@/components/ShareWatch";
+import { shareBodyFor } from "@/lib/share-body";
 
 export const dynamic = "force-dynamic";
 
@@ -124,30 +117,17 @@ export default async function SharePage({
 
   const brand = await getBrandKit(video.ownerId ?? LOCAL_OWNER);
   const accent = brand?.accentColor ?? brand?.primaryColor;
-  const ctaBackground = accent ?? "#4f46e5";
   const jar = await cookies();
   const unlocked = await shareUnlocked(video, jar.get(shareCookieName(video.id))?.value);
   // The email gate comes after the password: a viewer who has not given an email yet sees the form, not the player.
   const gated = unlocked && !!video.shareGate && !jar.get(shareGateCookieName(video.id));
-  const watching = unlocked && !gated;
-
-  const frame =
-    video.aspect === "9:16"
-      ? "aspect-[9/16] max-w-[420px]"
-      : video.aspect === "1:1"
-        ? "aspect-square max-w-[640px]"
-        : "aspect-video";
 
   // An uploaded logo (a data URL of up to a few megabytes) is served by its own cacheable route, so the
   // header and the player watermark share one short URL instead of carrying the image in the page.
   const logoSrc = publicLogoSrc(brand, `/api/videos/${encodeURIComponent(video.id)}/logo`);
-  const watermark = logoSrc && brand?.watermark && video.status === "completed" && video.videoUrl ? brand.watermark : undefined;
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
-      {watching && video.status === "completed" && (
-        <ViewBeacon videoId={video.id} />
-      )}
       {accent && (
         <div className="h-1.5" style={{ background: accent }} aria-hidden />
       )}
@@ -189,67 +169,14 @@ export default async function SharePage({
         {!unlocked ? (
           <ShareUnlock videoId={video.id} />
         ) : (
-          // The gate shows the player itself once the email is in, so an embed whose browser drops
-          // third-party cookies still plays; the cookie only spares a returning viewer the form.
-          <ShareLeadGate videoId={video.id} brandName={brand?.name} open={!gated}>
-          {gated && video.status === "completed" && <ViewBeacon videoId={video.id} />}
-            <div
-              className={`relative mx-auto w-full overflow-hidden rounded-xl bg-black ${frame}`}
-            >
-              {watermark && logoSrc && <Watermark corner={watermark} src={logoSrc} captioned={!!video.captions} />}
-              {video.status === "completed" && video.videoUrl ? (
-                <SharePlayer videoId={video.id} src={video.videoUrl} poster={posterUrl(video)} captions={!!video.captions} captionSize={video.captionStyle?.size} captionLook={video.captionStyle?.look} captionFont={video.captionStyle?.font} trackDefault={!captionsBurnedIn(video)} autoplay={autoplay} loop={loop} tracks={Object.keys(video.subtitles ?? {}).map((language) => ({ language, code: languageCode(language) }))} />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center p-10 text-center text-sm text-slate-400">
-                  {video.status === "failed"
-                    ? "This video could not be rendered."
-                    : "This video is still rendering. Check back in a minute."}
-                </div>
-              )}
-            </div>
-            {(video.shareCta ||
-              (video.shareDownload &&
-                video.status === "completed" &&
-                video.videoUrl)) && (
-              <p className="mt-4 flex flex-wrap items-center gap-3">
-                {video.shareCta && (
-                  <ShareCta
-                    videoId={video.id}
-                    label={video.shareCta.label}
-                    url={video.shareCta.url}
-                    background={ctaBackground}
-                    dark={isDarkHex(ctaBackground)}
-                  />
-                )}
-                {video.shareDownload &&
-                  video.status === "completed" &&
-                  video.videoUrl && (
-                    <a
-                      href={video.videoUrl}
-                      download
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-700"
-                    >
-                      Download video
-                    </a>
-                  )}
-              </p>
-            )}
-            {video.description && (
-              <p className="mt-6 whitespace-pre-wrap text-base leading-relaxed text-slate-100" data-testid="share-description">
-                {video.description}
-              </p>
-            )}
-            {/* Once there is a video, the script is its transcript: the caption lines (corrected ones when an editor saved them), each playing from its time. */}
-            {video.status === "completed" && video.videoUrl ? (
-              <ShareTranscript playerId={SHARE_PLAYER_ID} transcripts={transcriptsFor(video).map((t) => ({ ...t, ...(t.language ? { code: languageCode(t.language) } : {}) }))} />
-            ) : (
-              <p className="mt-6 whitespace-pre-wrap text-sm leading-relaxed text-slate-300">
-                {stripPauses(video.script)}
-              </p>
-            )}
-          </ShareLeadGate>
+          // A gated page carries only the form: the player, button, download link, and transcript come back in
+          // the gate's answer once an email is in, so the page source holds none of them, and an embed whose
+          // browser drops third-party cookies still plays without a reload. The cookie spares a returning viewer the form.
+          gated ? (
+            <ShareLeadGate videoId={video.id} brandName={brand?.name} autoplay={autoplay} loop={loop} />
+          ) : (
+            <ShareWatch body={shareBodyFor(video, brand)} autoplay={autoplay} loop={loop} />
+          )
         )}
         {brand && (brand.name || brand.logoUrl) && (
           <p className="mt-10 text-xs text-slate-500">
@@ -261,24 +188,5 @@ export default async function SharePage({
         )}
       </section>
     </main>
-  );
-}
-
-/**
- * The brand logo over the player, as a watermark: decorative (the header names the brand), and clicks
- * pass through to the player. It belongs to the page, not the video file, so it is not shown when the
- * player goes fullscreen or picture-in-picture.
- */
-function Watermark({ corner, src, captioned }: { corner: WatermarkCorner; src: string; captioned: boolean }) {
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src}
-      alt=""
-      aria-hidden
-      className={`pointer-events-none absolute z-10 h-[9%] max-h-12 w-[18%] object-contain opacity-80 drop-shadow ${watermarkPlace(corner, captioned)}`}
-      data-testid="share-watermark"
-      data-corner={corner}
-    />
   );
 }

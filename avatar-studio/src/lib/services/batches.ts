@@ -9,8 +9,36 @@ import { ValidationError } from "../errors";
 import { fillTemplate, parseCsv, placeholdersIn } from "../csv";
 import { backgroundSchema, captionStyleSchema, createVideo, emotionSchema, pitchSchema, rendersThisMonth, resolveRenderContext } from "./videos";
 import { getBrandKit } from "./brand";
+import { stripPauses } from "../pauses";
 
 export const MAX_BATCH_ROWS = 100;
+/** What one video's script may hold, as for a video made in the editor. */
+const MAX_ROW_SCRIPT = 5000;
+
+/**
+ * Rows whose filled-in script could not render: nothing to say (the placeholders' cells are empty) or more than
+ * a video holds. Row numbers count data rows from 1, as the preview and the results do.
+ */
+export function rowScriptProblems(scriptTemplate: string, rows: Array<Record<string, string>>): { empty: number[]; tooLong: number[] } {
+  const empty: number[] = [];
+  const tooLong: number[] = [];
+  rows.forEach((row, i) => {
+    const script = fillTemplate(scriptTemplate, row).trim();
+    if (!stripPauses(script).trim()) empty.push(i + 1);
+    else if (script.length > MAX_ROW_SCRIPT) tooLong.push(i + 1);
+  });
+  return { empty, tooLong };
+}
+
+/** The problems above in words, or null when every row is fine. */
+export function rowScriptMessage({ empty, tooLong }: { empty: number[]; tooLong: number[] }): string | null {
+  const list = (rows: number[]) => (rows.length > 5 ? `${rows.slice(0, 5).join(", ")} and ${rows.length - 5} more` : rows.join(", "));
+  const parts = [
+    empty.length ? `${empty.length === 1 ? `row ${list(empty)} leaves the script empty; fill in its cells` : `rows ${list(empty)} leave the script empty; fill in their cells`}` : "",
+    tooLong.length ? `${tooLong.length === 1 ? `row ${list(tooLong)} makes` : `rows ${list(tooLong)} make`} the script longer than the ${MAX_ROW_SCRIPT} characters a video holds` : "",
+  ].filter(Boolean);
+  return parts.length ? `${parts.join("; ").replace(/^./, (c) => c.toUpperCase())}.` : null;
+}
 
 export const batchRequestSchema = z.object({
   title: z.string().trim().min(1).max(120),
@@ -46,7 +74,9 @@ export function previewBatch(scriptTemplate: string, csv: string, limit = 3) {
   const used = placeholdersIn(scriptTemplate);
   const missing = used.filter((c) => !table.columns.includes(c));
   const samples = table.rows.slice(0, limit).map((row) => ({ label: row[table.columns[0]] ?? "", script: fillTemplate(scriptTemplate, row) }));
-  return { columns: table.columns, rowCount: table.rows.length, missing, samples };
+  // Only meaningful once every placeholder has a column; until then the missing columns are the message.
+  const problem = missing.length ? null : rowScriptMessage(rowScriptProblems(scriptTemplate, table.rows));
+  return { columns: table.columns, rowCount: table.rows.length, missing, samples, problem };
 }
 
 export async function createBatch(input: z.infer<typeof batchRequestSchema>, ownerId: string = LOCAL_OWNER): Promise<BatchResult> {
@@ -55,6 +85,9 @@ export async function createBatch(input: z.infer<typeof batchRequestSchema>, own
   if (table.rows.length > MAX_BATCH_ROWS) throw new ValidationError(`A batch can have at most ${MAX_BATCH_ROWS} rows`);
   const missing = placeholdersIn(input.scriptTemplate).filter((c) => !table.columns.includes(c));
   if (missing.length) throw new ValidationError(`The script uses columns the CSV does not have: ${missing.join(", ")}`);
+  // Checked for every row before any starts, as a video from the editor is: no row renders an empty or oversized script.
+  const problem = rowScriptMessage(rowScriptProblems(input.scriptTemplate, table.rows));
+  if (problem) throw new ValidationError(problem);
 
   const batchId = newId("batch");
   const labelColumn = table.columns[0];

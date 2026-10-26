@@ -53,7 +53,7 @@ export function ReviewPanel({ video, onChange }: { video: Video; onChange: (vide
       </div>
       <p className="mt-1 text-xs text-slate-600">
         {!review
-          ? "Ask a workspace owner to approve this video before it is shared. Changing its title, description, cover, or button afterwards clears an approval."
+          ? "Ask a workspace owner to approve this video before it is shared. Changing its title, description, cover, button, captions, or subtitles afterwards clears an approval."
           : review.status === "pending"
             ? `Asked by ${person(review.requestedByEmail, review.requestedById)} on ${formatDate(review.requestedAt)}.`
             : `${review.status === "approved" ? "Approved" : "Changes asked for"} by ${person(review.decidedByEmail, review.decidedById)}${review.decidedAt ? ` on ${formatDate(review.decidedAt)}` : ""}.`}

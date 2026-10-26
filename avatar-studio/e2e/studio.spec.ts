@@ -523,6 +523,17 @@ test("captions, share page, rename, and library filters", async ({ page }) => {
   expect((await (await page.request.get(`/api/videos/${a.id}`)).json()).video.title).toBe("Renamed video");
   // The keyboard user is back on the title, not at the top of the page.
   await expect(page.locator("button[title='Rename']")).toBeFocused();
+  // Enter on an unchanged (or emptied) title closes the field too, rather than the same key reopening it.
+  await page.keyboard.press("Enter");
+  await expect(page.getByLabel("Video title")).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByLabel("Video title")).toHaveCount(0);
+  await expect(page.locator("button[title='Rename']")).toBeFocused();
+  await page.keyboard.press("Enter");
+  await page.getByLabel("Video title").fill("");
+  await page.keyboard.press("Enter");
+  await expect(page.getByLabel("Video title")).toHaveCount(0);
+  await expect(page.locator("button[title='Rename']")).toHaveText("Renamed video");
 });
 
 test("library sorts by date, title, and views", async ({ page }) => {
@@ -1389,7 +1400,16 @@ test("personalized batch creates one video per CSV row", async ({ page }) => {
   await page.locator("textarea").first().fill("Hi {name}, see you at {property} on {move_in}. Also {oops}.");
   await expect(page.getByText(/placeholders the CSV does not have: \{oops\}/)).toBeVisible();
   await expect(page.getByRole("button", { name: /Generate/ })).toBeDisabled();
+  // A row whose cells leave the script empty is named, and the batch cannot start, as an empty video cannot.
+  await page.locator("textarea").first().fill("{oops2}");
+  await page.locator("textarea").nth(1).fill("name,oops2\nJordan,\nPriya,Hello Priya");
+  await expect(page.getByTestId("batch-row-problem")).toHaveText("Row 1 leaves the script empty; fill in its cells.");
+  await expect(page.getByRole("button", { name: /Generate/ })).toBeDisabled();
+  // The CSV upload is reachable from the keyboard (hidden visually, not removed from the tab order).
+  await expect(page.locator('input[type="file"][accept*="csv"]')).not.toHaveCSS("display", "none");
+  await page.locator('input[type="file"][accept*="csv"]').setInputFiles({ name: "people.csv", mimeType: "text/csv", buffer: Buffer.from("name,property,move_in\nJordan,12 Elm Street,November 1\nPriya,48 Harbor View,November 15") });
   await page.locator("textarea").first().fill("Hi {name}, see you at {property} on {move_in}.");
+  await expect(page.getByTestId("batch-row-problem")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Generate 2 videos" })).toBeEnabled();
   await page.getByLabel("Output quality").selectOption("720p");
   // Every row is spoken with the same voice settings.
@@ -2279,6 +2299,12 @@ test("captions can be corrected on the video page and serve the downloads until 
   const overlap = await page.request.put(`/api/videos/${v.id}/captions`, { data: { cues: [{ startMs: 0, endMs: 2000, text: "a" }, { startMs: 1000, endMs: 3000, text: "b" }] } });
   expect(overlap.status()).toBe(400);
   expect(JSON.stringify(await overlap.json())).toContain("Line 2 starts before line 1 ends");
+  // Removing a line is an unsaved change like any other, so "saved" no longer shows.
+  await editor.getByRole("button", { name: "Remove line 2" }).click();
+  await expect(editor.getByTestId("caption-status")).not.toHaveText("Captions saved");
+  await editor.getByRole("button", { name: "Save captions" }).click();
+  await expect(editor.getByTestId("caption-status")).toHaveText("Captions saved");
+  expect(await (await page.request.get(`/api/videos/${v.id}/captions`)).text()).not.toContain("A line of my own.");
 
   await editor.getByRole("button", { name: "Follow the script" }).click();
   await expect(editor.getByTestId("captions-edited")).toHaveCount(0);
@@ -2484,10 +2510,17 @@ test("a share page can ask for an email before playing, and the owner sees who w
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.shareGate).toBe(true);
   await expect(page.getByTestId("viewer-emails")).toContainText("Viewer emails · 0");
 
-  // The link preview carries neither the video nor the script, which would stand in for the form.
+  // Neither the link preview nor the page source carries the video, its download, button, or script, which would stand in for the form.
+  const patched = await page.request.patch(`/api/videos/${v.id}`, { data: { shareDownload: true, shareCta: { label: "Book a tour", url: "https://example.com/tour" } } });
+  expect(patched.ok()).toBe(true);
+  const { video: stored } = (await (await page.request.get(`/api/videos/${v.id}`)).json()) as { video: { videoUrl: string } };
   const html = await (await page.request.get(`/share/${v.id}`)).text();
   expect(html).not.toContain('property="og:video"');
   expect(html).not.toMatch(/<meta[^>]+og:description[^>]+Hello there/);
+  expect(html).not.toContain(stored.videoUrl);
+  expect(html).not.toContain("Hello there");
+  expect(html).not.toContain("Book a tour");
+  expect(html).not.toContain("Download video");
   // A visitor with no cookies meets the form, not the player.
   const visitor = await browser.newContext();
   const share = await visitor.newPage();
@@ -2498,6 +2531,10 @@ test("a share page can ask for an email before playing, and the owner sees who w
   await share.getByLabel("Your name (optional)").fill("Vee");
   await share.getByRole("button", { name: "Watch video" }).click();
   await expect(share.locator("video")).toBeVisible();
+  // Past the form, the page shows what it held back: the button, the download, and the transcript.
+  await expect(share.getByRole("link", { name: "Book a tour" })).toBeVisible();
+  await expect(share.getByRole("link", { name: "Download video" })).toBeVisible();
+  await expect(share.getByText(/Hello there/).first()).toBeVisible();
   // The pass is remembered for this video.
   await share.reload();
   await expect(share.locator("video")).toBeVisible();

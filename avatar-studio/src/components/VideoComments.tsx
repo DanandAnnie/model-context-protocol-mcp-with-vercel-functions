@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { MessageSquare, Trash2 } from "lucide-react";
 import { Button, Card, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
@@ -60,6 +60,8 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
       return `${base}${base && !/\s$/.test(base) ? " " : ""}@${email} `.slice(0, 1000);
     });
 
+  // After posting or deleting, the focus goes to the comment box: the button pressed is disabled or gone.
+  const box = useRef<HTMLTextAreaElement>(null);
   async function post() {
     const text = draft.trim();
     if (!text || busy) return;
@@ -70,6 +72,7 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
       setDraft("");
       setPinAt(null);
       await refetch();
+      box.current?.focus();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not post the comment");
     } finally {
@@ -82,6 +85,7 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
     try {
       await api(`/api/videos/${videoId}/comments/${c.id}`, { method: "DELETE" });
       await refetch();
+      box.current?.focus();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not remove the comment");
     }
@@ -140,7 +144,7 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
           void post();
         }}
       >
-        <textarea aria-label="New comment" value={draft} onChange={(e) => setDraft(e.target.value)} rows={2} maxLength={1000} placeholder={teammates.length ? "Leave a note for the team; type @ and a teammate's email to notify them" : "Leave a note for the team"} className={inputClass} />
+        <textarea ref={box} aria-label="New comment" value={draft} onChange={(e) => setDraft(e.target.value)} rows={2} maxLength={1000} placeholder={teammates.length ? "Leave a note for the team; type @ and a teammate's email to notify them" : "Leave a note for the team"} className={inputClass} />
         {teammates.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500" data-testid="mention-suggestions">
             <span>Mention:</span>

@@ -1062,7 +1062,7 @@ test("an uploaded background image fills the stage, renders, and leaves every sc
   await page.reload();
   await expect(page.getByText("Restored your unsent draft")).toBeVisible();
   await page.getByRole("button", { name: "Background", exact: true }).click();
-  await expect(page.getByTestId("missing-backdrop")).toBeVisible();
+  await expect(page.getByTestId("import-note")).toContainText("has been deleted, so they have a plain background now");
   await expect(page.getByTestId("stage")).toHaveCSS("background-image", "none");
   await expect(page.getByRole("button", { name: `Use office-${tag}` })).toHaveCount(0);
   expect((await page.request.get(`/api/backdrops/${office.id}`)).status()).toBe(404);
@@ -1166,6 +1166,50 @@ test("a slide deck as PDF becomes one scene per page, each page behind the prese
   page.once("dialog", (d) => d.accept());
   await page.getByLabel("Import slides from a PDF").setInputFiles({ name: "notes.pdf", mimeType: "application/pdf", buffer: Buffer.from("not a pdf") });
   await expect(page.getByTestId("import-note")).toContainText("could not be read as a PDF", { timeout: 30_000 });
+});
+
+test("each space keeps its own draft, so a workspace never shows or spoils the personal one", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
+  await page.locator("textarea").fill(`Personal draft ${tag}`);
+  await page.getByRole("button", { name: "Background", exact: true }).click();
+  await page.getByLabel("Background image file").setInputFiles({ name: `mine-${tag}.png`, mimeType: "image/png", buffer: png });
+  await expect(page.getByRole("button", { name: `Use mine-${tag}` })).toHaveAttribute("aria-pressed", "true");
+  const mine = ((await (await page.request.get("/api/backdrops")).json()) as { backdrops: Array<{ id: string; name: string }> }).backdrops.find((b) => b.name === `mine-${tag}`)!;
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("avatar-studio:draft") ?? "")).toContain(`/api/backdrops/${mine.id}`);
+  const ws = (await (await page.request.post("/api/workspaces", { data: { name: `Drafts ${tag}` } })).json()).workspace as { id: string };
+  try {
+    expect((await page.request.post("/api/workspaces/switch", { data: { id: ws.id } })).status()).toBe(200);
+    await page.goto("/create");
+    // The workspace starts clean: no personal script, no note about a "deleted" image it cannot see.
+    await expect(page.getByRole("button", { name: "Generate video" })).toBeVisible();
+    await expect(page.locator("textarea")).toHaveValue("");
+    await expect(page.getByTestId("import-note")).toHaveCount(0);
+    await page.locator("textarea").fill(`Team draft ${tag}`);
+    await expect.poll(() => page.evaluate((id) => localStorage.getItem(`avatar-studio:draft:${id}`) ?? "", ws.id)).toContain(`Team draft ${tag}`);
+    expect((await page.request.post("/api/workspaces/switch", { data: { id: "local" } })).status()).toBe(200);
+    await page.goto("/create");
+    // Back in Personal, the draft and its image are as they were.
+    await expect(page.locator("textarea")).toHaveValue(`Personal draft ${tag}`);
+    await expect(page.getByTestId("stage")).toHaveCSS("background-image", new RegExp(`/api/backdrops/${mine.id}`));
+  } finally {
+    await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
+    await page.request.delete(`/api/workspaces/${ws.id}`);
+    await page.request.delete(`/api/backdrops/${mine.id}`);
+    await page.evaluate((id) => localStorage.removeItem(`avatar-studio:draft:${id}`), ws.id);
+  }
+});
+
+test("a portrait video has a portrait stage, at desktop and phone width", async ({ page }) => {
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: /^9:16/ }).click();
+  const ratio = async () => {
+    const box = (await page.getByTestId("stage").boundingBox())!;
+    return box.width / box.height;
+  };
+  await expect.poll(ratio).toBeCloseTo(9 / 16, 2);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(ratio).toBeCloseTo(9 / 16, 2);
 });
 
 test("the AI script writer takes the focus and Escape closes it", async ({ page }) => {

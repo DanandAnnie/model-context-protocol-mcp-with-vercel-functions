@@ -24,7 +24,17 @@ import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
+/** Where the personal space's draft is kept; a workspace's has its id after it (see `draftKeyFor`). */
 const DRAFT_KEY = "avatar-studio:draft";
+
+/**
+ * Each space keeps its own draft: one started in Personal never shows up, or loses its uploaded images, in a
+ * workspace (the images are the space's own). Personal keeps the original key, so drafts saved before survive.
+ */
+function draftKeyFor(spaces: { personalId: string; activeId: string } | null, failed: boolean): string | null {
+  if (spaces) return spaces.activeId === spaces.personalId ? DRAFT_KEY : `${DRAFT_KEY}:${spaces.activeId}`;
+  return failed ? DRAFT_KEY : null;
+}
 
 interface Draft {
   title: string;
@@ -41,9 +51,9 @@ interface Draft {
   savedAt: string;
 }
 
-function readDraft(): Draft | null {
+function readDraft(key: string): Draft | null {
   try {
-    const raw = window.localStorage.getItem(DRAFT_KEY);
+    const raw = window.localStorage.getItem(key);
     if (!raw) return null;
     const d = JSON.parse(raw) as Draft;
     return Array.isArray(d.scenes) && d.scenes.length ? d : null;
@@ -52,14 +62,17 @@ function readDraft(): Draft | null {
   }
 }
 
-function writeDraft(d: Draft | null) {
+function writeDraft(key: string, d: Draft | null) {
   try {
-    if (d) window.localStorage.setItem(DRAFT_KEY, JSON.stringify(d));
-    else window.localStorage.removeItem(DRAFT_KEY);
+    if (d) window.localStorage.setItem(key, JSON.stringify(d));
+    else window.localStorage.removeItem(key);
   } catch {
     // Storage can be unavailable (private mode); drafts are a convenience only.
   }
 }
+/** Thrown when the user declines to replace the scenes once a deck's page count is known. */
+class ImportCancelled extends Error {}
+
 /** A deck larger than this is refused before pdf.js reads it. */
 const MAX_PDF_BYTES = 50_000_000;
 
@@ -137,7 +150,6 @@ function CreateInner() {
   const clips = clipData?.clips ?? [];
   // Uploaded background images; the picker adds and removes them here, so the list is always the editor's.
   const { data: backdropData, error: backdropError, setData: setBackdropData } = useApi<{ backdrops: Backdrop[] }>("/api/backdrops");
-  const [missingBackdrop, setMissingBackdrop] = useState(false);
   const { play, playingId, busyId } = useVoicePreview();
 
   const [title, setTitle] = useState("Untitled video");
@@ -218,6 +230,7 @@ function CreateInner() {
   // The scenes as they are now, so an import that took a while can tell whether they were edited meanwhile.
   const scenesNow = useRef(scenes);
   scenesNow.current = scenes;
+  const aspectNow = useRef<AspectRatio>("16:9");
   /**
    * Replaces the scenes with a slide deck saved as PDF, like HeyGen's PDF import: each page (up to the scene limit)
    * becomes a scene with the page as its uploaded background image and the page's text as a first draft of the
@@ -227,8 +240,9 @@ function CreateInner() {
     if (!file || slidesProgress) return;
     if (file.size > MAX_PDF_BYTES) return setImportNote(`${file.name} is larger than ${MAX_PDF_BYTES / 1_000_000} MB; save the deck as a smaller PDF.`);
     const setUp = (list: Scene[]) => list.length > 1 || list.some((sc) => sc.script.trim() || sc.audioId || sc.avatarId || sc.voiceId || sc.layout);
-    if (setUp(scenes) && !window.confirm(`Replace the ${scenes.length === 1 ? "current scene" : `current ${scenes.length} scenes`} with the pages of ${file.name}?`)) return;
-    const before = scenesNow.current;
+    // Snapshots taken once the user has agreed, to tell whether the scenes or the format were changed during the import.
+    let before = scenesNow.current;
+    let aspectBefore = aspectNow.current;
     setImportNote(null);
     setSlidesProgress(`Reading ${file.name}…`);
     const base = file.name.replace(/\.pdf$/i, "").slice(0, 60) || "Slides";
@@ -237,12 +251,19 @@ function CreateInner() {
     try {
       const { count, total, aspect: deckAspect } = await renderPdf(file, {
         // The image allowance is read fresh, not from a list that may be stale or still loading.
+        // The allowance is checked before asking to replace anything, so the question is never followed by a refusal.
         onStart: async ({ count }) => {
           const { backdrops } = await api<{ backdrops: Backdrop[] }>("/api/backdrops");
           const room = MAX_BACKDROPS - backdrops.length;
           if (count > room) {
             throw new Error(`${file.name} needs ${count} background images, and ${room <= 0 ? "none are" : `only ${room} ${room === 1 ? "is" : "are"}`} left of the ${MAX_BACKDROPS} an account keeps; delete some under Background → Your images`);
           }
+          const current = scenesNow.current;
+          if (setUp(current) && !window.confirm(`Replace the ${current.length === 1 ? "current scene" : `current ${current.length} scenes`} with ${count === 1 ? "the page" : `the ${count} pages`} of ${file.name}?`)) {
+            throw new ImportCancelled();
+          }
+          before = scenesNow.current;
+          aspectBefore = aspectNow.current;
         },
         onPage: async (page, i, of) => {
           setSlidesProgress(`Importing page ${i + 1} of ${of}…`);
@@ -262,7 +283,8 @@ function CreateInner() {
       setBackdropData((d) => ({ backdrops: [...[...made].reverse(), ...(d?.backdrops ?? []).filter((b) => !made.some((m) => m.id === b.id))] }));
       setScenes(made.map((b, i) => newScene(scripts[i], { type: "image", value: backdropPath(b.id) })));
       setActiveIdx(0);
-      setAspect(deckAspect);
+      // A format picked while the deck was importing is the user's choice and stays.
+      if (aspectNow.current === aspectBefore) setAspect(deckAspect);
       setTitle((t) => (!t.trim() || t === "Untitled video" ? base : t));
       const blank = scripts.filter((sc) => !sc.trim()).length;
       setImportNote(
@@ -275,6 +297,7 @@ function CreateInner() {
         ].join(""),
       );
     } catch (e) {
+      if (e instanceof ImportCancelled) return;
       const reason = (e instanceof Error ? e.message : "The slides could not be imported").replace(/\.$/, "");
       setImportNote(made.length ? `${reason}. The ${made.length} pages uploaded before that are under Background → Your images.` : `${reason}.`);
     } finally {
@@ -349,11 +372,12 @@ function CreateInner() {
         changed = true;
         return { ...sc, background: DEFAULT_BG };
       });
-      if (changed) setMissingBackdrop(true);
+      if (changed) setImportNote("A background image some scenes used has been deleted, so they have a plain background now.");
       return changed ? next : prev;
     });
   }, [backdropData, scenes]);
   const [aspect, setAspect] = useState<AspectRatio>("16:9");
+  aspectNow.current = aspect;
   const [resolution, setResolution] = useState<Resolution>("1080p");
   const [captions, setCaptions] = useState(false);
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>(DEFAULT_CAPTION_STYLE);
@@ -394,6 +418,9 @@ function CreateInner() {
   const [prefill, setPrefill] = useState<{ avatarId?: string; voiceId?: string } | null>(null);
   const [draftRestored, setDraftRestored] = useState<string | null>(null);
   const hydrated = useRef(false);
+  // The draft belongs to the space being worked in, so nothing is restored or saved until that is known.
+  const { data: spaces, error: spacesError } = useApi<{ personalId: string; activeId: string }>("/api/workspaces");
+  const draftKey = draftKeyFor(spaces, !!spacesError);
   const templateId = params.get("template");
   const fromId = params.get("from");
   // A Video Agent plan to review (?plan=agent), read once: a refresh comes back to the autosaved draft of it.
@@ -402,7 +429,7 @@ function CreateInner() {
 
   // Restore an unsent draft on a plain visit (not when a template or copy is requested).
   useEffect(() => {
-    if (hydrated.current) return;
+    if (hydrated.current || !draftKey) return;
     hydrated.current = true;
     if (templateId || fromId) return;
     if (params.get("plan") === "agent") {
@@ -420,7 +447,7 @@ function CreateInner() {
         return;
       }
     }
-    const d = readDraft();
+    const d = readDraft(draftKey);
     if (!d) return;
     setTitle(d.title);
     setScenes(d.scenes.map((sc) => newScene(sc.script, sc.background, { ...sc, layout: restoredLayout(sc.layout) })));
@@ -436,20 +463,20 @@ function CreateInner() {
     setEmotion(asEmotion(d.emotion));
     setPrefill({ avatarId: d.avatarId, voiceId: d.voiceId });
     setDraftRestored(d.savedAt);
-  }, [templateId, fromId, params]);
+  }, [templateId, fromId, params, draftKey]);
 
   // Autosave the editor state (debounced) so a refresh never loses work.
   useEffect(() => {
-    if (!hydrated.current) return;
+    if (!hydrated.current || !draftKey) return;
     const empty = scenes.every((sc) => !sc.script.trim()) && title === "Untitled video";
     const t = setTimeout(() => {
-      writeDraft(empty ? null : { title, scenes, aspect, resolution, captions, ...(isDefaultCaptionStyle ? {} : { captionStyle }), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
+      writeDraft(draftKey, empty ? null : { title, scenes, aspect, resolution, captions, ...(isDefaultCaptionStyle ? {} : { captionStyle }), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
     }, 400);
     return () => clearTimeout(t);
-  }, [title, scenes, aspect, resolution, captions, captionStyle, isDefaultCaptionStyle, speed, pitch, emotion, avatar, voice]);
+  }, [title, scenes, aspect, resolution, captions, captionStyle, isDefaultCaptionStyle, speed, pitch, emotion, avatar, voice, draftKey]);
 
   function discardDraft() {
-    writeDraft(null);
+    if (draftKey) writeDraft(draftKey, null);
     setTitle("Untitled video");
     setScenes([newScene()]);
     setActiveIdx(0);
@@ -604,7 +631,7 @@ function CreateInner() {
         method: "POST",
         body: JSON.stringify({ title, scenes, avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}) }),
       });
-      writeDraft(null);
+      if (draftKey) writeDraft(draftKey, null);
       router.push(`/videos/${video.id}`);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not start the render");
@@ -669,7 +696,8 @@ function CreateInner() {
           <input className={`${inputClass} text-base font-medium`} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Video title" />
 
           <Card className="overflow-hidden">
-            <div data-testid="stage" className={`relative mx-auto w-full ${stageAspect} ${aspect === "9:16" ? "max-h-[520px]" : ""} flex items-end justify-center overflow-hidden`} style={background.type === "color" ? { background: background.value } : background.type === "image" ? { backgroundImage: `url(${background.value})`, backgroundSize: "cover", backgroundPosition: "center" } : { background: "#0f172a" }}>
+            {/* A portrait stage is sized by its height and takes its width from the ratio, so it really is 9:16 (a width-first box capped in height came out near square and cropped portrait slides). */}
+            <div data-testid="stage" className={`relative mx-auto ${aspect === "9:16" ? "h-[520px] max-h-[70vh] max-w-full" : "w-full"} ${stageAspect} flex items-end justify-center overflow-hidden`} style={background.type === "color" ? { background: background.value } : background.type === "image" ? { backgroundImage: `url(${background.value})`, backgroundSize: "cover", backgroundPosition: "center" } : { background: "#0f172a" }}>
               {/* Only a complete URL is previewed, so a half-typed one is not requested keystroke by keystroke. */}
               {background.type === "video" && /^https?:\/\/\S+\.\S+/.test(background.value) && (
                 <video key={background.value} src={background.value} muted loop autoPlay playsInline aria-hidden="true" data-testid="stage-video" className="absolute inset-0 h-full w-full object-cover" />
@@ -748,8 +776,9 @@ function CreateInner() {
               <button
                 type="button"
                 onClick={() => importInput.current?.click()}
+                disabled={!!slidesProgress}
                 title="Each paragraph, or each part between headings or --- lines, becomes a scene"
-                className="inline-flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:border-brand-400 hover:text-brand-700"
+                className="inline-flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:border-brand-400 hover:text-brand-700 disabled:opacity-50"
               >
                 <Upload className="h-3.5 w-3.5" /> Import script
               </button>
@@ -1084,11 +1113,6 @@ function CreateInner() {
                     />
                   </div>
                 </div>
-                {missingBackdrop && (
-                  <p role="status" data-testid="missing-backdrop" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                    A background image this video used has been deleted, so those scenes use a plain background now.
-                  </p>
-                )}
                 <BackdropPicker
                   value={background}
                   onChange={setBackground}

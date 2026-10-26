@@ -9,7 +9,7 @@ import { getStore } from "../store";
 import { decodeDataUrl } from "../providers/image";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { LOCAL_OWNER } from "../owner-id";
-import { MAX_BACKDROPS, type Backdrop, type BackdropType } from "../types";
+import { MAX_BACKDROPS, backdropIdOf, type Backdrop, type BackdropType, type Background, type BrandKit, type VideoTemplate } from "../types";
 
 export { MAX_BACKDROPS };
 import { owned } from "./shared";
@@ -53,7 +53,8 @@ export async function createBackdrop(input: z.infer<typeof backdropUploadSchema>
   }
   if (decoded.bytes.byteLength > MAX_BACKDROP_BYTES) throw new ValidationError("The image is too large (3 MB max)");
   const mimeType = sniff(decoded.bytes);
-  if (!mimeType) throw new ValidationError("The background must be a PNG or JPEG image");
+  // The editor turns WebP and GIF into JPEG before sending, so anything else here is not a picture at all.
+  if (!mimeType) throw new ValidationError("That file is not a picture this app can use (PNG, JPEG, WebP, or GIF)");
   if ((await getStore().list<Backdrop>("backdrop", ownerId)).length >= MAX_BACKDROPS) {
     throw new ConflictError(`At most ${MAX_BACKDROPS} background images per account; delete one you no longer use`);
   }
@@ -94,10 +95,28 @@ export async function saveBackdropAssetIds(backdrop: Backdrop, ids: Record<strin
   return next;
 }
 
-/** Deletes a backdrop and its image. Videos already rendered keep their footage; a retry, copy, or template that names it is refused. */
+/** What a template scene or the brand kit shows in place of an image that was deleted: the editor's plain background. */
+export const PLAIN_BACKGROUND: Background = { type: "color", value: "#f1f5f9" };
+
+/**
+ * Deletes a backdrop and its image. Videos already rendered keep their footage; a retry or copy that names it is
+ * refused. The owner's templates and brand kit stop naming it (a plain background takes its place), so a batch or a
+ * new video started from them still renders instead of failing on an image that is gone.
+ */
 export async function deleteBackdrop(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
   await getBackdrop(id, ownerId);
   // Bytes first: a failure part-way leaves the listed row, so deleting again finishes the job instead of orphaning the image.
   await getStore().remove("backdropdata", dataRowId(id));
   await getStore().remove("backdrop", id);
+  const names = (bg: Background | undefined) => backdropIdOf(bg) === id;
+  for (const kit of await getStore().list<BrandKit>("brand", ownerId)) {
+    if (!names(kit.defaultBackground)) continue;
+    const { defaultBackground: _gone, ...rest } = kit;
+    void _gone;
+    await getStore().put("brand", { ...rest, updatedAt: nowIso() });
+  }
+  for (const tpl of await getStore().list<VideoTemplate>("template", ownerId)) {
+    if (!tpl.scenes.some((sc) => names(sc.background))) continue;
+    await getStore().put("template", { ...tpl, scenes: tpl.scenes.map((sc) => (names(sc.background) ? { ...sc, background: PLAIN_BACKGROUND } : sc)), updatedAt: nowIso() });
+  }
 }

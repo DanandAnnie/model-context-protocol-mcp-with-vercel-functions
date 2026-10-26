@@ -95,7 +95,7 @@ export function BackdropPicker({
   }
 
   async function remove(b: Backdrop) {
-    if (!window.confirm(`Delete "${b.name}"? Scenes using it go back to a plain background; videos already rendered keep it.`)) return;
+    if (!window.confirm(`Delete "${b.name}"? Scenes, templates, and the brand kit using it go back to a plain background; videos already rendered keep it.`)) return;
     setErr(null);
     try {
       await api(`/api/backdrops/${b.id}`, { method: "DELETE" });
@@ -120,7 +120,7 @@ export function BackdropPicker({
         <input
           ref={input}
           type="file"
-          accept="image/png,image/jpeg,image/webp"
+          accept="image/png,image/jpeg,image/webp,image/gif"
           aria-label="Background image file"
           className="hidden"
           onChange={(e) => {
@@ -131,7 +131,7 @@ export function BackdropPicker({
       </div>
       <ErrorBanner message={loadError ?? err} />
       {backdrops.length === 0 ? (
-        <p className="text-xs text-slate-500">Upload a PNG, JPEG, or WebP picture (a slide, a photo of the office, a product shot) to show it behind the avatar. Large pictures are shrunk to fit.</p>
+        <p className="text-xs text-slate-500">Upload a PNG, JPEG, WebP, or GIF picture (a slide, a photo of the office, a product shot) to show it behind the avatar. Large pictures are shrunk to fit.</p>
       ) : (
         <div className="grid grid-cols-3 gap-2">
           {backdrops.map((b) => (
@@ -152,9 +152,9 @@ export function BackdropPicker({
                   type="button"
                   onClick={() => remove(b)}
                   aria-label={`Delete ${b.name}`}
-                  className="absolute right-1 top-1 rounded-full bg-white/90 p-1 text-slate-600 shadow hover:text-rose-600"
+                  className="absolute right-1 top-1 rounded-full bg-white/90 p-1.5 text-slate-600 shadow hover:text-rose-600"
                 >
-                  <Trash2 className="h-3 w-3" />
+                  <Trash2 className="h-3.5 w-3.5" />
                 </button>
               )}
             </div>

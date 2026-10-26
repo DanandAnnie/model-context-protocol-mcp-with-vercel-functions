@@ -5,11 +5,12 @@ import { Button, Card, ErrorBanner, Field, SectionTitle, inputClass } from "@/co
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
+import { BackdropPicker } from "@/components/BackdropPicker";
 import { api, isDarkHex } from "@/lib/client";
 import { MAX_PRONUNCIATIONS, formatPronunciations, parsePronunciations } from "@/lib/pronounce";
 import { MAX_FORCED_TRANSLATIONS, MAX_FORCED_TRANSLATION_LENGTH, MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH, MIN_GLOSSARY_TERM_LENGTH, formatForcedTranslations, parseForcedTranslations, parseGlossary } from "@/lib/glossary";
 import { LOGO_TYPES, logoDataUrlValid, logoFileType } from "@/lib/logo-types";
-import type { AspectRatio, Avatar, BrandKit, Resolution, Voice, WatermarkCorner } from "@/lib/types";
+import { backdropIdOf, type AspectRatio, type Avatar, type Backdrop, type BrandKit, type Resolution, type Voice, type WatermarkCorner } from "@/lib/types";
 
 const DEFAULT_PRIMARY = "#4f46e5";
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -27,6 +28,8 @@ export default function BrandPage() {
   const [accent, setAccent] = useState("");
   const [bgType, setBgType] = useState<"" | "image" | "video">("");
   const [bgUrl, setBgUrl] = useState("");
+  // Uploaded images, so the kit's default background can be one of them like any scene's.
+  const { data: backdropData, error: backdropError, setData: setBackdropData } = useApi<{ backdrops: Backdrop[] }>("/api/backdrops");
   const [pronunciations, setPronunciations] = useState("");
   const [glossary, setGlossary] = useState("");
   const [forced, setForced] = useState("");
@@ -310,16 +313,26 @@ export default function BrandPage() {
             <Field label="Default background" hint="What sits behind the presenter in every new video. A video loops on HeyGen; other renderers use their default.">
               <select aria-label="Default background" value={bgType} onChange={(e) => setBgType(e.target.value as typeof bgType)} className={inputClass}>
                 <option value="">Primary colour</option>
-                <option value="image">Image URL</option>
+                <option value="image">Image (uploaded or by URL)</option>
                 <option value="video">Video URL</option>
               </select>
             </Field>
-            {bgType && (
-              <Field label={bgType === "video" ? "Background video URL" : "Background image URL"} hint="A public URL; the kit cannot be saved while this is empty.">
+            {bgType && !(bgType === "image" && backdropIdOf({ type: "image", value: bgUrl })) && (
+              <Field label={bgType === "video" ? "Background video URL" : "Background image URL"} hint={bgType === "image" ? "A public URL, or pick one of your images below; the kit cannot be saved without one." : "A public URL; the kit cannot be saved while this is empty."}>
                 <input aria-label="Default background URL" value={bgUrl} onChange={(e) => setBgUrl(e.target.value)} placeholder={bgType === "video" ? "https://…/loop.mp4" : "https://…/background.jpg"} className={inputClass} maxLength={2000} />
               </Field>
             )}
           </div>
+          {bgType === "image" && (
+            <BackdropPicker
+              value={{ type: "image", value: bgUrl }}
+              onChange={(bg) => setBgUrl(bg.value)}
+              backdrops={backdropData?.backdrops ?? []}
+              setBackdrops={(update) => setBackdropData((d) => ({ backdrops: update(d?.backdrops ?? []) }))}
+              loadError={backdropError}
+              canEdit={canEdit !== false}
+            />
+          )}
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Default aspect ratio">
               <select value={aspect} onChange={(e) => setAspect(e.target.value as AspectRatio | "")} className={inputClass}>
@@ -359,6 +372,8 @@ export default function BrandPage() {
           <Field label="Always translate as" hint="One rule per line, term = translation; add [Language] at the end for a rule in that language only. Translations, subtitle languages, and dubs that keep the glossary use the translation word for word, so pick a form that reads right without inflection. Up to 50.">
             <textarea aria-label="Always translate as" value={forced} onChange={(e) => setForced(e.target.value)} rows={3} placeholder={"CEO = Geschäftsführer [German]\nfree trial = essai gratuit [French]"} className={`${inputClass} font-mono text-xs`} />
           </Field>
+          {/* The banner at the top is out of view down here, so a refused save says so next to the button too. */}
+          <ErrorBanner message={err} />
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
             <span className="text-xs text-slate-500">{savedAt ? `Saved ${new Date(savedAt).toLocaleString()}` : "Not saved yet"}</span>
             <Button onClick={save} loading={saving} disabled={!primaryValid || !accentValid || (!!bgType && !bgUrl.trim()) || loading || canEdit === false}>
@@ -399,7 +414,7 @@ export default function BrandPage() {
               <li>Aspect: {aspect || "16:9"}</li>
               <li>Quality: {resolution || "1080p"}</li>
               <li>Captions: {captions ? "on" : "off"}</li>
-              <li>Background: {primaryValid ? primary : DEFAULT_PRIMARY}</li>
+              <li>Background: {bgType === "video" && bgUrl.trim() ? "looping video" : bgType === "image" && bgUrl.trim() ? (backdropIdOf({ type: "image", value: bgUrl.trim() }) ? "uploaded image" : "image") : primaryValid ? primary : DEFAULT_PRIMARY}</li>
             </ul>
             <p className="mt-3 text-xs text-slate-500">Templates keep their own aspect ratio; copies keep every setting of the original.</p>
           </Card>

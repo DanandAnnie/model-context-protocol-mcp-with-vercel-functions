@@ -7,7 +7,7 @@ import type { Video, VideoTemplate } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { LimitError, NotFoundError, ValidationError } from "../errors";
 import { owned } from "./shared";
-import { getBackdrop } from "./backdrops";
+import { PLAIN_BACKGROUND, getBackdrop } from "./backdrops";
 import { backgroundSchema, captionStyleSchema, emotionSchema, pitchSchema, sceneLayoutSchema } from "./videos";
 
 export const MAX_TEMPLATES = 50;
@@ -96,8 +96,19 @@ export async function createTemplate(input: TemplateInput, ownerId: string = LOC
       ...(input.emotion ? { emotion: input.emotion } : {}),
     };
   }
-  // An uploaded background image must be the owner's and still there, as a render would check.
-  for (const id of new Set(base.scenes.map((sc) => backdropIdOf(sc.background)).filter((id): id is string => !!id))) await getBackdrop(id, ownerId);
+  // An uploaded background image must be the owner's and still there, as a render would check. Copied from a video,
+  // a scene whose image has since been deleted gets a plain background instead, so the video can still be kept as a template.
+  const ids = new Set(base.scenes.map((sc) => backdropIdOf(sc.background)).filter((id): id is string => !!id));
+  const gone = new Set<string>();
+  for (const id of ids) {
+    try {
+      await getBackdrop(id, ownerId);
+    } catch (err) {
+      if (!input.fromVideoId || !(err instanceof NotFoundError)) throw err;
+      gone.add(id);
+    }
+  }
+  if (gone.size) base = { ...base, scenes: base.scenes.map((sc) => (gone.has(backdropIdOf(sc.background) ?? "") ? { ...sc, background: PLAIN_BACKGROUND } : sc)) };
   return getStore().put("template", { ...base, id: newId("tpl"), ownerId, createdAt: nowIso(), updatedAt: nowIso() });
 }
 

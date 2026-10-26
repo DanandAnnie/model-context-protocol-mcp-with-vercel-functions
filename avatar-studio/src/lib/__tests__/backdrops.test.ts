@@ -46,13 +46,13 @@ describe("background images", () => {
 
   it("refuses what is not a PNG or JPEG, an oversized file, and more than the cap", async () => {
     await assert.rejects(createBackdrop({ name: "x", image: "data:text/plain;base64,aGk=" }), /must be an image/);
-    await assert.rejects(createBackdrop({ name: "x", image: dataUrl(new Uint8Array([1, 2, 3, 4])) }), /PNG or JPEG/);
-    await assert.rejects(createBackdrop({ name: "x", image: dataUrl(new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]), "image/gif") }), /PNG or JPEG/);
+    await assert.rejects(createBackdrop({ name: "x", image: dataUrl(new Uint8Array([1, 2, 3, 4])) }), /not a picture/);
+    await assert.rejects(createBackdrop({ name: "x", image: dataUrl(new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]), "image/gif") }), /not a picture/);
     const big = new Uint8Array(3 * 1024 * 1024 + 1);
     big.set(PNG);
     await assert.rejects(createBackdrop({ name: "x", image: dataUrl(big) }), /too large/);
     for (let i = 0; i < MAX_BACKDROPS; i++) await createBackdrop({ name: `b${i}`, image: dataUrl(PNG) });
-    await assert.rejects(createBackdrop({ name: "one more", image: dataUrl(PNG) }), /At most 50/);
+    await assert.rejects(createBackdrop({ name: "one more", image: dataUrl(PNG) }), /At most 100/);
   });
 
   it("names a backdrop by its path only when the background is an image at that path", () => {
@@ -102,9 +102,11 @@ describe("background images", () => {
     await saveBrandKit(brandKitSchema.parse({ name: "Acme", primaryColor: "#4f46e5", defaultBackground: { type: "image", value: backdropPath(office.id) } }));
     const fromKit = await createBatch(base);
     assert.deepEqual(fromKit.videos.map((v) => [v.status, v.background.value]), [["processing", backdropPath(office.id)], ["processing", backdropPath(office.id)]]);
-    await deleteBackdrop(office.id);
+    // Gone without the delete that would tidy the kit (removed from the store directly), the kit's image is still
+    // refused up front, not row by row.
+    await getStore().remove("backdrop", office.id);
     await assert.rejects(createBatch({ ...base, background: { type: "image", value: backdropPath(office.id) } }), /Background image .* not found/);
-    await assert.rejects(createBatch(base), /Background image .* not found/, "a kit image deleted since is refused up front, not row by row");
+    await assert.rejects(createBatch(base), /Background image .* not found/);
   });
 
   it("the export lists images without provider ids or bytes, and deleting the account removes both rows", async () => {
@@ -138,6 +140,38 @@ describe("background images kept with a template, the brand kit, and the store",
     const kit = (id: string) => brandKitSchema.parse({ name: "Acme", primaryColor: "#4f46e5", defaultBackground: { type: "image", value: backdropPath(id) } });
     await assert.rejects(saveBrandKit(kit(theirs.id)), /Background image .* not found/);
     assert.equal((await saveBrandKit(kit(mine.id))).defaultBackground?.value, backdropPath(mine.id));
+  });
+
+  it("deleting an image takes it off the owner's templates and brand kit, so they still render", async () => {
+    const { brandKitSchema, createTemplate, getBrandKit, getTemplate, saveBrandKit, templateInputSchema } = await import("../services");
+    const office = await createBackdrop({ name: "Office", image: dataUrl(PNG) });
+    const keep = await createBackdrop({ name: "Keep", image: dataUrl(PNG) });
+    const tpl = await createTemplate(
+      templateInputSchema.parse({
+        title: "Deck",
+        scenes: [{ script: "One", background: { type: "image", value: backdropPath(office.id) } }, { script: "Two", background: { type: "image", value: backdropPath(keep.id) } }],
+        avatarId: STOCK_AVATARS[0].id,
+        voiceId: STOCK_VOICES[0].id,
+      }),
+    );
+    await saveBrandKit(brandKitSchema.parse({ name: "Acme", primaryColor: "#4f46e5", defaultBackground: { type: "image", value: backdropPath(office.id) } }));
+    // Another account's template naming the same path is not touched (it could never render it anyway).
+    await deleteBackdrop(office.id);
+    assert.deepEqual((await getTemplate(tpl.id)).scenes.map((sc) => sc.background), [{ type: "color", value: "#f1f5f9" }, { type: "image", value: backdropPath(keep.id) }]);
+    assert.equal((await getBrandKit())?.defaultBackground, undefined);
+    assert.equal((await getBrandKit())?.name, "Acme", "the rest of the kit stays");
+    // A batch with no background of its own now renders on the kit's colour instead of failing.
+    const batch = await createBatch({ title: "B", scriptTemplate: "Hi {name}", csv: "name\nAmy", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, aspect: "16:9", resolution: "1080p", captions: false, speed: 1 });
+    assert.equal(batch.videos[0].status, "processing");
+  });
+
+  it("saving a video as a template gives a scene whose image was deleted a plain background", async () => {
+    const { createTemplate, templateInputSchema } = await import("../services");
+    const office = await createBackdrop({ name: "Office", image: dataUrl(PNG) });
+    const video = await createVideo(request([sceneWith(backdropPath(office.id)), sceneWith("https://cdn.example/bg.jpg")]));
+    await deleteBackdrop(office.id);
+    const tpl = await createTemplate(templateInputSchema.parse({ fromVideoId: video.id }));
+    assert.deepEqual(tpl.scenes.map((sc) => sc.background), [{ type: "color", value: "#f1f5f9" }, { type: "image", value: "https://cdn.example/bg.jpg" }]);
   });
 
   it("an upload whose listed row cannot be written takes its bytes back out", async () => {

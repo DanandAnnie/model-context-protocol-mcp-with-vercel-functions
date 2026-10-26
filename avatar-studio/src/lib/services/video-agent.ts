@@ -126,12 +126,25 @@ export async function planVideo(input: VideoAgentInput, ownerId: string = LOCAL_
     scenes: scenes.map((sc) => ({ script: sc.script, background, ...(sc.framing === "closeUp" ? { layout: { scale: 1, x: 0, y: 0, framing: "closeUp" as const } } : {}) })),
     avatarId: avatar.id,
     voiceId: voice.id,
-    // Left to the agent: a plan for a vertical format is 9:16; otherwise the brand kit's format, else landscape.
-    aspect: input.orientation === "auto" ? (plan.orientation === "portrait" ? "9:16" : (kit?.defaultAspect ?? "16:9")) : ASPECTS[input.orientation],
+    // Left to the agent: a plan for a vertical format is 9:16, a prompt asking for a wide one 16:9; otherwise the
+    // brand kit's format, else landscape.
+    aspect:
+      input.orientation !== "auto"
+        ? ASPECTS[input.orientation]
+        : plan.orientation === "portrait"
+          ? "9:16"
+          : asksForLandscape(input.prompt)
+            ? "16:9"
+            : (kit?.defaultAspect ?? "16:9"),
     resolution: kit?.defaultResolution ?? "1080p",
     // Agent videos are watched on mute as often as not: captions on unless the kit says otherwise.
     captions: kit?.captionsByDefault ?? true,
   };
+}
+
+/** Whether a prompt names a wide format itself ("a widescreen YouTube explainer"), which no brand default overrides. */
+export function asksForLandscape(prompt: string): boolean {
+  return /\b(landscape|widescreen|wide[- ]screen|horizontal|youtube|16\s*:\s*9)\b/i.test(prompt);
 }
 
 /** Plans and renders in one step, like HeyGen's one-shot "generate" mode. */

@@ -57,19 +57,22 @@ export default function BatchPage() {
   // Without a kit (or when it cannot be read) the first presenter and voice in the lists.
   const { data: brandData, error: brandError } = useApi<{ brand: BrandKit | null }>("/api/brand");
   const brandApplied = useRef(false);
+  // Settings changed by hand before the kit arrived keep the hand's choice.
+  const touched = useRef(new Set<"aspect" | "resolution" | "captions">());
   useEffect(() => {
     if (brandApplied.current || !avatarData || !voiceData || (!brandData && !brandError)) return;
     brandApplied.current = true;
-    const b = startedFrom ? null : (brandData?.brand ?? null);
+    const b = brandData?.brand ?? null;
     const a = (b?.defaultAvatarId ? avatarData.avatars.find((x) => x.id === b.defaultAvatarId) : undefined) ?? avatarData.avatars[0];
     const v = [b?.defaultVoiceId, a?.defaultVoiceId].map((id) => (id ? voiceData.voices.find((x) => x.id === id) : undefined)).find(Boolean) ?? voiceData.voices[0];
-    // A saved template picked before the lists loaded applies its own cast right after this.
+    // A saved template picked before the lists loaded applies its own cast right after this (the kit's presenter
+    // and voice stay as the fallback for a template whose own are gone), and brings its own format and quality.
     setAvatarId((prev) => prev || a?.id || "");
     setVoiceId((prev) => prev || v?.id || "");
-    if (!b) return;
-    if (b.defaultAspect) setAspect(b.defaultAspect);
-    if (b.defaultResolution) setResolution(b.defaultResolution);
-    if (b.captionsByDefault != null) setCaptions(b.captionsByDefault);
+    if (!b || startedFrom) return;
+    if (b.defaultAspect && !touched.current.has("aspect")) setAspect(b.defaultAspect);
+    if (b.defaultResolution && !touched.current.has("resolution")) setResolution(b.defaultResolution);
+    if (b.captionsByDefault != null && !touched.current.has("captions")) setCaptions(b.captionsByDefault);
   }, [brandData, brandError, avatarData, voiceData, startedFrom]);
   /** A presenter picked by hand brings its own voice, when it has one. */
   function pickAvatar(id: string) {
@@ -208,21 +211,21 @@ export default function BatchPage() {
               </select>
             </Field>
             <Field label="Aspect ratio">
-              <select className={inputClass} value={aspect} onChange={(e) => setAspect(e.target.value as AspectRatio)}>
+              <select className={inputClass} value={aspect} onChange={(e) => (touched.current.add("aspect"), setAspect(e.target.value as AspectRatio))}>
                 <option value="16:9">16:9 Landscape</option>
                 <option value="9:16">9:16 Portrait</option>
                 <option value="1:1">1:1 Square</option>
               </select>
             </Field>
             <Field label="Output quality">
-              <select className={inputClass} value={resolution} onChange={(e) => setResolution(e.target.value as Resolution)}>
+              <select className={inputClass} value={resolution} onChange={(e) => (touched.current.add("resolution"), setResolution(e.target.value as Resolution))}>
                 <option value="1080p">1080p Full HD</option>
                 <option value="720p">720p HD</option>
               </select>
             </Field>
             <label className="flex items-center justify-between self-end rounded-lg border border-slate-200 px-3 py-2.5">
               <span className="text-sm font-medium text-slate-800">Captions</span>
-              <input type="checkbox" checked={captions} onChange={(e) => setCaptions(e.target.checked)} className="h-5 w-5 accent-brand-600" />
+              <input type="checkbox" checked={captions} onChange={(e) => (touched.current.add("captions"), setCaptions(e.target.checked))} className="h-5 w-5 accent-brand-600" />
             </label>
             <Field label={`Speaking speed · ${speed.toFixed(2)}x`}>
               <input type="range" min={0.5} max={1.5} step={0.05} value={speed} onChange={(e) => setSpeed(Number(e.target.value))} aria-label="Speaking speed" className="w-full accent-brand-600" />

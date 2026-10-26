@@ -56,6 +56,7 @@ describe("video agent", () => {
     assert.equal((await planVideo(videoAgentSchema.parse({ prompt: "Explain our refund policy" }))).aspect, "1:1");
     assert.equal((await planVideo(videoAgentSchema.parse({ prompt: "Make a TikTok about our app" }))).aspect, "9:16", "a vertical format the plan asks for still wins");
     assert.equal((await planVideo(videoAgentSchema.parse({ prompt: "Explain our refund policy", orientation: "landscape" }))).aspect, "16:9", "and so does a format the user picked");
+    assert.equal((await planVideo(videoAgentSchema.parse({ prompt: "A widescreen YouTube explainer about our refund policy" }))).aspect, "16:9", "or one the prompt names");
   });
 
   it("applies the brand kit: presenter, voice, background, quality, and captions", async () => {

@@ -29,6 +29,12 @@ function AvatarsInner() {
   const { data: status } = useApi<ProviderStatus>("/api/status");
   const voices = voiceData?.voices ?? [];
   const [open, setOpen] = useState(params.get("new") === "1");
+  const newButton = useRef<HTMLButtonElement>(null);
+  /** Closes the panel and gives the focus back to the button that opened it, rather than losing it with the panel. */
+  const closePanel = () => {
+    setOpen(false);
+    requestAnimationFrame(() => newButton.current?.focus());
+  };
   const [filter, setFilter] = useState<"all" | "custom" | "library">("all");
   const [gender, setGender] = useState<"all" | NonNullable<Avatar["gender"]>>("all");
   const [q, setQ] = useState("");
@@ -86,7 +92,7 @@ function AvatarsInner() {
         title="Avatars"
         subtitle="Library presenters plus any photo avatars you create."
         action={
-          <Button onClick={() => setOpen(true)} disabled={canEdit === false}>
+          <Button ref={newButton} onClick={() => setOpen(true)} disabled={canEdit === false}>
             <Camera className="h-4 w-4" /> New photo avatar
           </Button>
         }
@@ -112,11 +118,11 @@ function AvatarsInner() {
             ))}
           </select>
         )}
-        <input className={`${inputClass} w-auto max-w-[220px] py-1 text-xs`} placeholder="Search by name or style" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input aria-label="Search avatars" className={`${inputClass} w-auto max-w-[220px] py-1 text-xs`} placeholder="Search by name or style" value={q} onChange={(e) => setQ(e.target.value)} />
         {data && <span className="text-xs text-slate-500">{avatars.length} of {data.avatars.length}</span>}
       </div>
 
-      {open && <CreateAvatarPanel voices={voices} canGenerate={!!status?.portraitGeneration} demo={status?.avatar === "mock"} onClose={() => setOpen(false)} onCreated={() => { setOpen(false); refetch(); }} />}
+      {open && <CreateAvatarPanel voices={voices} canGenerate={!!status?.portraitGeneration} demo={status?.avatar === "mock"} onClose={closePanel} onCreated={() => { closePanel(); refetch(); }} />}
 
       {loading ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
@@ -237,11 +243,14 @@ function CreateAvatarPanel({ voices, canGenerate, demo, onClose, onCreated }: { 
 
   useEffect(() => stopCamera, []);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  /** Escape inside the panel closes it, asking first when a picture or a name would be lost with it. */
+  function onPanelKey(e: React.KeyboardEvent) {
+    if (e.key !== "Escape") return;
+    e.stopPropagation();
+    if ((imageUrl || name.trim()) && !window.confirm("Discard this photo avatar? The picture and name are not saved.")) return;
+    stopCamera();
+    onClose();
+  }
 
   function onFile(file: File | undefined) {
     if (!file) return;
@@ -268,7 +277,7 @@ function CreateAvatarPanel({ voices, canGenerate, demo, onClose, onCreated }: { 
   }
 
   return (
-    <Card className="mb-6 p-5">
+    <Card className="mb-6 p-5" onKeyDown={onPanelKey}>
       <div className="grid gap-5 md:grid-cols-[180px_1fr]">
         <div
           onClick={() => !camera && fileRef.current?.click()}
@@ -306,7 +315,13 @@ function CreateAvatarPanel({ voices, canGenerate, demo, onClose, onCreated }: { 
             </button>
           )}
         </div>
+        {/* The tile is for pointers; this is the same upload for the keyboard and screen readers. */}
         <div className="space-y-4">
+          {!camera && (
+            <Button type="button" variant="secondary" className="px-3 py-1.5" onClick={() => fileRef.current?.click()}>
+              <Upload className="h-4 w-4" /> Upload a portrait
+            </Button>
+          )}
           <Field label="Avatar name">
             <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Dan – office" />
           </Field>

@@ -240,6 +240,9 @@ function CreateInner() {
     setScenes((prev) => prev.filter((_, i) => i !== idx));
     setActiveIdx(Math.max(0, idx - 1));
   }
+  // A move to either end disables the button pressed; the focus goes to the other one rather than being lost.
+  const moveLeft = useRef<HTMLButtonElement>(null);
+  const moveRight = useRef<HTMLButtonElement>(null);
   /** Swaps a scene with its neighbour and keeps it selected. */
   function moveScene(idx: number, dir: -1 | 1) {
     const j = idx + dir;
@@ -556,39 +559,49 @@ function CreateInner() {
   const [assistTone, setAssistTone] = useState<(typeof TONES)[number]>("professional");
   const [assistLanguage, setAssistLanguage] = useState("Spanish");
 
-  /** The script a rewrite (the AI writer or Improve) replaced, while the scene still holds what the rewrite wrote. */
-  const [rewriteUndo, setRewriteUndo] = useState<{ idx: number; before: string; after: string; note: string } | null>(null);
   /**
-   * Replaces a scene's script with a rewrite, keeping what it held so the rewrite can be taken back. Nothing is written
-   * when the scene no longer holds the script that was sent (typed in, moved, or removed while the answer came): the
-   * rewrite would land on other words, or another scene, and its Undo would then wipe that scene's own script.
+   * The script a rewrite (the AI writer or Improve) replaced, while the scene still holds what the rewrite wrote. The
+   * scene is the one object the rewrite wrote: scenes are never changed in place, so it is the same object until that
+   * scene is edited, wherever it has moved.
    */
-  function applyRewrite(idx: number, before: string, after: string, note: string): boolean {
-    if (scenesNow.current[idx]?.script !== before) {
-      setErr("The scene changed while it was being rewritten, so the rewrite was not applied. Try again.");
+  const [rewriteUndo, setRewriteUndo] = useState<{ scene: Scene; before: string; note: string } | null>(null);
+  /** Why the last rewrite was not applied, shown beside the script it was for. */
+  const [rewriteErr, setRewriteErr] = useState<string | null>(null);
+  /**
+   * Replaces a scene's script with a rewrite, keeping what it held so the rewrite can be taken back. The rewrite goes to
+   * the scene it was asked for (`target`, as it was then), wherever that scene has moved; nothing is written when that
+   * scene has since been edited or removed, so a rewrite never lands on other words or another scene, and its Undo never
+   * wipes that scene's own script.
+   */
+  function applyRewrite(target: Scene, after: string, note: string): boolean {
+    if (!scenesNow.current.includes(target)) {
+      setRewriteErr("The scene changed while it was being rewritten, so the rewrite was not applied. Try again.");
       return false;
     }
-    setScenes((prev) => prev.map((sc, i) => (i === idx && sc.script === before ? { ...sc, script: after } : sc)));
-    setRewriteUndo(before.trim() && before !== after ? { idx, before, after, note } : null);
+    const updated: Scene = { ...target, script: after };
+    setScenes((prev) => prev.map((sc) => (sc === target ? updated : sc)));
+    setActiveIdx(scenesNow.current.indexOf(target));
+    setRewriteErr(null);
+    setRewriteUndo(target.script.trim() && target.script !== after ? { scene: updated, before: target.script, note } : null);
     // Back to the script, rather than lost with the panel that wrote it.
     requestAnimationFrame(() => scriptRef.current?.focus());
     return true;
   }
   async function revise(action: "shorten" | "expand" | "tone" | "translate" | "polish") {
     if (!active.script.trim()) return;
-    // The scene asked about, even if another is chosen while the answer comes.
-    const idx = activeIdx;
+    // The scene asked about, even if another is chosen or it is moved while the answer comes.
+    const target = active;
     const before = active.script;
     setAssistBusy(true);
-    setErr(null);
+    setRewriteErr(null);
     try {
       const { script: out } = await api<{ script: string }>("/api/script", {
         method: "POST",
         body: JSON.stringify({ action, script: before, tone: action === "tone" ? assistTone : undefined, language: action === "translate" ? assistLanguage : undefined }),
       });
-      if (applyRewrite(idx, before, out, action === "translate" ? `Translated to ${assistLanguage}.` : "Rewritten.")) setAssistOpen(false);
+      if (applyRewrite(target, out, action === "translate" ? `Translated to ${assistLanguage}.` : "Rewritten.")) setAssistOpen(false);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Could not revise the script");
+      setRewriteErr(e instanceof Error ? e.message : "Could not revise the script");
     } finally {
       setAssistBusy(false);
     }
@@ -1036,10 +1049,10 @@ function CreateInner() {
               <span className="ml-auto flex items-center gap-1">
                 {scenes.length > 1 && (
                   <>
-                    <button type="button" onClick={() => moveScene(activeIdx, -1)} disabled={activeIdx === 0} aria-label="Move scene left" title="Move scene earlier" className="rounded-full p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40">
+                    <button ref={moveLeft} type="button" onClick={() => { moveScene(activeIdx, -1); if (activeIdx === 1) requestAnimationFrame(() => moveRight.current?.focus()); }} disabled={activeIdx === 0} aria-label="Move scene left" title="Move scene earlier" className="rounded-full p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40">
                       <ChevronLeft className="h-4 w-4" />
                     </button>
-                    <button type="button" onClick={() => moveScene(activeIdx, 1)} disabled={activeIdx === scenes.length - 1} aria-label="Move scene right" title="Move scene later" className="rounded-full p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40">
+                    <button ref={moveRight} type="button" onClick={() => { moveScene(activeIdx, 1); if (activeIdx === scenes.length - 2) requestAnimationFrame(() => moveLeft.current?.focus()); }} disabled={activeIdx === scenes.length - 1} aria-label="Move scene right" title="Move scene later" className="rounded-full p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40">
                       <ChevronRight className="h-4 w-4" />
                     </button>
                   </>
@@ -1166,7 +1179,12 @@ function CreateInner() {
                     {silentIssue}
                   </span>
                 )}
-                {rewriteUndo && rewriteUndo.idx === activeIdx && scenes[activeIdx]?.script === rewriteUndo.after && (
+                {rewriteErr && (
+                  <span role="alert" className="text-xs font-medium text-rose-600">
+                    {rewriteErr}
+                  </span>
+                )}
+                {rewriteUndo && scenes[activeIdx] === rewriteUndo.scene && (
                   <span className="inline-flex items-center gap-2 text-xs text-slate-600" role="status">
                     {rewriteUndo.note}
                     <button
@@ -1174,8 +1192,8 @@ function CreateInner() {
                       aria-label="Undo the rewrite"
                       className="font-medium text-brand-700 underline"
                       onClick={() => {
-                        const { idx, before, after } = rewriteUndo;
-                        setScenes((prev) => prev.map((sc, i) => (i === idx && sc.script === after ? { ...sc, script: before } : sc)));
+                        const { scene, before } = rewriteUndo;
+                        setScenes((prev) => prev.map((sc) => (sc === scene ? { ...sc, script: before } : sc)));
                         setRewriteUndo(null);
                         scriptRef.current?.focus();
                       }}
@@ -1302,6 +1320,8 @@ function CreateInner() {
                   const { before } = findDone;
                   setScenes((prev) => prev.map((sc, i) => (before[i] !== undefined && before[i] !== sc.script ? { ...sc, script: before[i] } : sc)));
                   setFindDone(null);
+                  // The Undo button goes with what it undid; the focus goes back to the search.
+                  requestAnimationFrame(() => findInput.current?.focus());
                 }}
                 onChange={(patch) => {
                   setFindDone(null);
@@ -1329,6 +1349,8 @@ function CreateInner() {
                   setScenes((prev) => prev.map((sc, i) => (after[i] === sc.script ? sc : { ...sc, script: after[i] })));
                   setFindIssue(null);
                   setFindDone({ note: `Replaced ${count} ${count === 1 ? "match" : "matches"}.`, before, after });
+                  // Replace all is disabled once nothing is left to replace; the focus goes back to the search.
+                  requestAnimationFrame(() => findInput.current?.focus());
                 }}
                 onClose={() => {
                   setFindOpen(false);
@@ -1343,7 +1365,7 @@ function CreateInner() {
                   setWriterOpen(false);
                   writerButton.current?.focus();
                 }}
-                onScript={(s) => { if (applyRewrite(activeIdx, active.script, s, "Written by AI.")) setWriterOpen(false); }}
+                onScript={(s) => { if (applyRewrite(active, s, "Written by AI.")) setWriterOpen(false); }}
               />
             )}
             <textarea

@@ -24,7 +24,7 @@ const DEMO_PITCH = [0.85, 1, 1.2];
  * Designs a voice from a written description, as HeyGen's voice designer does: the provider offers a few previews of a
  * sample, the one chosen is kept as a voice of the account, usable in every video like a cloned one.
  */
-export function VoiceDesigner({ available, onSaved }: { available: boolean; onSaved: (v: Voice) => void }) {
+export function VoiceDesigner({ available, onSaved, ownCount, limit }: { available: boolean; onSaved: (v: Voice) => void; ownCount: number; limit: number }) {
   const id = useId();
   const [description, setDescription] = useState("");
   const [text, setText] = useState("");
@@ -50,6 +50,17 @@ export function VoiceDesigner({ available, onSaved }: { available: boolean; onSa
     setPlaying(null);
   }
   useEffect(() => stop, []);
+  const errRef = useRef<HTMLParagraphElement>(null);
+  const full = ownCount >= limit;
+  // A voice deleted elsewhere on the page makes room: the refusal it answered no longer holds.
+  useEffect(() => {
+    if (!full) setErr((e) => (e && /voices of your own/.test(e) ? null : e));
+  }, [full]);
+  /** The button that was pressed is disabled while it works, dropping the focus; a failure takes it instead. */
+  const fail = (message: string) => {
+    setErr(message);
+    requestAnimationFrame(() => errRef.current?.focus());
+  };
 
   async function design() {
     stop();
@@ -65,7 +76,7 @@ export function VoiceDesigner({ available, onSaved }: { available: boolean; onSa
       setChosen(null);
       requestAnimationFrame(() => firstPreview.current?.focus());
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Could not design the voice");
+      fail(e instanceof Error ? e.message : "Could not design the voice");
     } finally {
       setBusy(null);
     }
@@ -112,7 +123,7 @@ export function VoiceDesigner({ available, onSaved }: { available: boolean; onSa
       // The previews have gone with the Save button; the focus goes back to the start rather than being lost.
       requestAnimationFrame(() => descriptionRef.current?.focus());
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Could not save the voice");
+      fail(e instanceof Error ? e.message : "Could not save the voice");
     } finally {
       setBusy(null);
     }
@@ -130,7 +141,7 @@ export function VoiceDesigner({ available, onSaved }: { available: boolean; onSa
         {!available && " Voice design needs ElevenLabs as the voice provider; in demo mode the voice is saved, and the previews and the saved voice use the browser's voice."}
       </p>
       {err && (
-        <p role="alert" className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+        <p ref={errRef} tabIndex={-1} role="alert" className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 focus:outline-none">
           {err}
         </p>
       )}
@@ -171,8 +182,11 @@ export function VoiceDesigner({ available, onSaved }: { available: boolean; onSa
         <p id={`${id}-text`} className={`-mt-2 text-xs ${textShort ? "text-amber-700" : "text-slate-500"}`}>
           {textShort ? `The previews need at least 100 characters to read (${text.trim().length} so far), or leave it empty.` : "100 to 1000 characters, read by each preview."}
         </p>
-        <div className="flex justify-end">
-          <Button variant="secondary" onClick={design} loading={busy === "design"} disabled={short || textShort || busy !== null}>
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          <span className={`text-xs ${full ? "text-amber-700" : "text-slate-500"}`} data-testid="own-voices">
+            {full ? `You keep ${limit} voices of your own, the most an account may; delete one to design another.` : `${ownCount} of ${limit} voices of your own used.`}
+          </span>
+          <Button variant="secondary" onClick={design} loading={busy === "design"} disabled={short || textShort || full || busy !== null}>
             <Wand2 className="h-4 w-4" /> {previews ? "Design again" : "Design previews"}
           </Button>
         </div>

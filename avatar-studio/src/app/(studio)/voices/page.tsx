@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Mic2, Pencil, Trash2 } from "lucide-react";
 import { VoiceCloner } from "@/components/VoiceCloner";
 import { VoiceDesigner } from "@/components/VoiceDesigner";
@@ -16,6 +16,9 @@ import type { ProviderStatus, Voice } from "@/lib/types";
 
 const GENDERS: Array<NonNullable<Voice["gender"]>> = ["female", "male", "neutral"];
 
+/** The voices of its own an account may keep, cloned or designed (`MAX_CLONED_VOICES` on the server). */
+const MAX_OWN_VOICES = 5;
+
 const SAMPLE = "Hi, this is a quick preview of my voice. I can read your script in any tone you need.";
 
 export default function VoicesPage() {
@@ -23,6 +26,7 @@ export default function VoicesPage() {
   const { data, loading, error, refetch } = useApi<{ voices: Voice[] }>("/api/voices");
   const { data: status } = useApi<ProviderStatus>("/api/status");
   const [actionErr, setActionErr] = useState<string | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   async function renameVoice(v: Voice) {
     const answer = window.prompt("Voice name", v.name);
     if (answer === null) return;
@@ -42,6 +46,8 @@ export default function VoicesPage() {
     try {
       await api(`/api/voices/${v.id}`, { method: "DELETE" });
       await refetch();
+      // The row and its buttons are gone; the focus goes to the search above the list.
+      searchRef.current?.focus();
     } catch (e) {
       setActionErr(e instanceof Error ? e.message : "Could not delete the voice");
     }
@@ -82,12 +88,12 @@ export default function VoicesPage() {
         <div className={`mb-6 grid gap-4 ${canEdit === true && status?.voiceDesign ? "lg:grid-cols-2" : ""}`}>
           <VoiceCloner available={status?.tts !== "mock"} onCloned={() => refetch()} />
           {/* Shown once the role is known: a viewer never sees it while the workspace is still loading. */}
-          {canEdit === true && status?.voiceDesign && <VoiceDesigner available={status.tts !== "mock"} onSaved={() => refetch()} />}
+          {canEdit === true && status?.voiceDesign && <VoiceDesigner available={status.tts !== "mock"} ownCount={(data?.voices ?? []).filter((v) => v.source === "custom").length} limit={MAX_OWN_VOICES} onSaved={() => refetch()} />}
         </div>
       )}
       <div className="mb-5 grid gap-3 md:grid-cols-[1fr_2fr]">
-        <input className={inputClass} placeholder="Search by name, language, or style" value={q} onChange={(e) => setQ(e.target.value)} />
-        <input className={inputClass} value={sample} onChange={(e) => setSample(e.target.value)} placeholder="Sample text to speak" />
+        <input ref={searchRef} aria-label="Search voices" className={inputClass} placeholder="Search by name, language, or style" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input aria-label="Sample text to speak" className={inputClass} value={sample} onChange={(e) => setSample(e.target.value)} placeholder="Sample text to speak" />
       </div>
       {(languages.length > 1 || genders.length > 1) && (
         <div className="mb-5 flex flex-wrap items-center gap-2">
@@ -119,9 +125,10 @@ export default function VoicesPage() {
       ) : voices.length === 0 ? (
         <EmptyState icon={<Mic2 className="h-8 w-8" />} title="No voices match" />
       ) : (
-        <div className="grid gap-2 md:grid-cols-2" data-testid="voice-list">
+        // Columns that can shrink below their content, so a long voice name truncates rather than pushing the page sideways.
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-2" data-testid="voice-list">
           {voices.map((v) => (
-            <div key={v.id} className="relative">
+            <div key={v.id} className="relative min-w-0">
               <VoiceRow
                 voice={v}
                 playing={playingId === v.id}

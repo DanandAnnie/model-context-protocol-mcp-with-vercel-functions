@@ -42,7 +42,7 @@ export function VoiceRow({
           e.stopPropagation();
           onPreview();
         }}
-        aria-label={playing ? "Stop preview" : "Play preview"}
+        aria-label={playing ? `Stop the preview of ${voice.name}` : `Play a preview of ${voice.name}`}
         className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-900 text-white hover:bg-slate-700"
       >
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : playing ? <Pause className="h-4 w-4" /> : <Play className="ml-0.5 h-4 w-4" />}

@@ -1166,7 +1166,9 @@ async function sizeFamily(video: Video, ownerId: string): Promise<Video[]> {
 /** A video's sizes: the original and every live (not trashed) size made from it, the original first. */
 export async function videoSizes(id: string, ownerId: string = LOCAL_OWNER): Promise<Array<Pick<Video, "id" | "title" | "aspect" | "status">>> {
   const video = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
-  return (await sizeFamily(video, ownerId)).filter((v) => !v.deletedAt).map(({ id: vid, title, aspect, status }) => ({ id: vid, title, aspect, status }));
+  // Sizes still rendering are asked about, as the library does, so a finished size does not read "rendering" for good.
+  const live = await refreshPending((await sizeFamily(video, ownerId)).filter((v) => !v.deletedAt));
+  return live.map(({ id: vid, title, aspect, status }) => ({ id: vid, title, aspect, status }));
 }
 
 /**

@@ -177,7 +177,7 @@ function VideosInner() {
       )}
       {hasAny && (
         <div className="mb-5 flex flex-wrap items-center gap-2">
-          <input className={`${inputClass} max-w-xs`} placeholder="Search title, description, script, avatar, voice" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input aria-label="Search videos" className={`${inputClass} max-w-xs`} placeholder="Search title, description, script, avatar, voice" value={q} onChange={(e) => setQ(e.target.value)} />
           {folders.length > 0 && (
             <select aria-label="Folder" value={folder} onChange={(e) => setFolder(e.target.value)} className={`${inputClass} w-auto`}>
               <option value="all">All folders</option>

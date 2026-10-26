@@ -1,5 +1,5 @@
 "use client";
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { Button, Card } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
@@ -17,7 +17,14 @@ type Size = Pick<Video, "id" | "title" | "aspect" | "status">;
  */
 export function OtherSizes({ video, canEdit }: { video: Video; canEdit: boolean }) {
   const id = useId();
-  const { data, error: sizesError, setData } = useApi<{ sizes: Size[] }>(`/api/videos/${video.id}/sizes`);
+  const { data, error: sizesError, setData, refetch } = useApi<{ sizes: Size[] }>(`/api/videos/${video.id}/sizes`);
+  // While a size is still rendering the list is asked again, so it reads "rendering" only while it is.
+  const rendering = (data?.sizes ?? []).some((s) => s.id !== video.id && (s.status === "queued" || s.status === "processing"));
+  useEffect(() => {
+    if (!rendering) return;
+    const timer = setInterval(() => void refetch(), 5000);
+    return () => clearInterval(timer);
+  }, [rendering, refetch]);
   // The original, when there is one: a link to a video since deleted for good would lead nowhere.
   const { data: original, error: originalError } = useApi<{ video: Video }>(video.resizedFrom ? `/api/videos/${video.resizedFrom}` : null);
   const sizes = data?.sizes ?? [];

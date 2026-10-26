@@ -27,6 +27,10 @@ export function PortraitGenerator({ name, demo, current, onPortrait }: { name: s
   const currentNow = useRef(current);
   currentNow.current = current;
   const [held, setHeld] = useState<string | null>(null);
+  // The Draw button is disabled while it runs, which drops the focus; the outcome takes it instead.
+  const noteRef = useRef<HTMLParagraphElement>(null);
+  const errRef = useRef<HTMLParagraphElement>(null);
+  const focusOutcome = (el: { current: HTMLElement | null }) => requestAnimationFrame(() => el.current?.focus());
 
   async function generate() {
     const mine = ++run.current;
@@ -46,10 +50,12 @@ export function PortraitGenerator({ name, demo, current, onPortrait }: { name: s
           if (currentNow.current !== pictureAtStart) {
             setHeld(out.imageUrl);
             setNote("The presenter is drawn, but you chose another picture meanwhile, so the preview keeps yours.");
+            focusOutcome(noteRef);
             return;
           }
           onPortrait(out.imageUrl);
           setNote("The portrait is in the preview. Name the presenter and create the avatar, or describe them again for another.");
+          focusOutcome(noteRef);
           return;
         }
         if (out.status === "failed") throw new Error(out.error ?? "The presenter could not be drawn");
@@ -60,6 +66,7 @@ export function PortraitGenerator({ name, demo, current, onPortrait }: { name: s
       if (run.current !== mine) return;
       setNote(null);
       setErr(e instanceof Error ? e.message : "The presenter could not be drawn");
+      focusOutcome(errRef);
     } finally {
       if (run.current === mine) setBusy(false);
     }
@@ -93,7 +100,7 @@ export function PortraitGenerator({ name, demo, current, onPortrait }: { name: s
           <Wand2 className="h-4 w-4" /> Draw presenter
         </Button>
       </div>
-      <p role="status" className={note ? "mt-2 text-xs text-slate-600" : "sr-only"}>
+      <p ref={noteRef} tabIndex={-1} role="status" className={note ? "mt-2 text-xs text-slate-600 focus:outline-none" : "sr-only"}>
         {note ?? ""}
       </p>
       {held && (
@@ -104,13 +111,14 @@ export function PortraitGenerator({ name, demo, current, onPortrait }: { name: s
             onPortrait(held);
             setHeld(null);
             setNote("The drawn portrait is in the preview.");
+            focusOutcome(noteRef);
           }}
         >
           Use the drawn portrait
         </button>
       )}
       {err && (
-        <p role="alert" className="mt-2 text-xs text-rose-600">
+        <p ref={errRef} tabIndex={-1} role="alert" className="mt-2 text-xs text-rose-600 focus:outline-none">
           {err}
         </p>
       )}

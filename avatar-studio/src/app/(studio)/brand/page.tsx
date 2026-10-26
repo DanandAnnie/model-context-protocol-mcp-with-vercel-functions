@@ -318,6 +318,7 @@ export default function BrandPage() {
                 <Upload className="h-4 w-4" /> Upload logo
               </Button>
               <input
+                aria-label="Logo URL"
                 value={logoUrl.startsWith("data:") ? "" : logoUrl}
                 onChange={(e) => {
                   setLogoUrl(e.target.value);

@@ -2691,6 +2691,9 @@ test("a video can be made in other sizes, each a new video with the same scenes"
   // Focus moves to the size just made, and a size the video has is not offered again, after a reload too.
   await expect(made).toBeFocused();
   await expect(page.getByLabel("9:16 portrait")).toHaveCount(0);
+  // The card asks again while the size renders, so it stops saying so without a reload.
+  await expect(page.getByTestId("other-sizes")).toContainText("rendering");
+  await expect(page.getByTestId("other-sizes")).not.toContainText("rendering", { timeout: 30_000 });
   await expect(page.getByRole("button", { name: "Make 1 size" })).toBeVisible();
   await page.reload();
   await expect(page.getByTestId("other-sizes").getByRole("link")).toHaveText(/ \(9:16\)$/);
@@ -2730,15 +2733,15 @@ test("a script the AI writer replaced can be taken back", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Undo the rewrite" })).toHaveCount(0);
 });
 
-test("a rewrite that comes back after its scene moved is not written over another scene", async ({ page }) => {
+test("a rewrite follows its scene when it moves, and is refused only when that scene was edited", async ({ page }) => {
   const box = page.locator("textarea");
   await box.fill("Hi there! One. Two. Three. Four.");
   await page.getByRole("button", { name: "Add scene" }).click();
   await box.fill("The second scene's own words.");
   await page.getByRole("button", { name: /^Scene 1,/ }).click();
-  // The answer is held until the scene has been moved.
+  // Each answer is held until the scenes have been changed.
   let release!: () => void;
-  const held = new Promise<void>((resolve) => (release = resolve));
+  let held = new Promise<void>((resolve) => (release = resolve));
   await page.route("**/api/script", async (route) => {
     await held;
     await route.continue();
@@ -2746,13 +2749,42 @@ test("a rewrite that comes back after its scene moved is not written over anothe
   await page.getByRole("button", { name: "Improve" }).click();
   await page.getByRole("button", { name: "Shorten", exact: true }).click();
   await page.getByRole("button", { name: "Move scene right" }).click();
+  // Moved to the end, the focus goes to the button that can still move it.
+  await expect(page.getByRole("button", { name: "Move scene left" })).toBeFocused();
   release();
-  await expect(page.getByText("The scene changed while it was being rewritten", { exact: false })).toBeVisible();
-  // Each scene keeps its own words, and there is no Undo that could wipe one.
-  await expect(box).toHaveValue("Hi there! One. Two. Three. Four.");
-  await expect(page.getByRole("button", { name: "Undo the rewrite" })).toHaveCount(0);
+  // The rewrite lands on the scene it was asked for, now the second, and the other keeps its own words.
+  await expect(page.getByText("Rewritten.")).toBeVisible();
+  await expect(box).toHaveValue("Hi there! One. Two.");
   await page.getByRole("button", { name: /^Scene 1,/ }).click();
   await expect(box).toHaveValue("The second scene's own words.");
+  // Typed in while the answer comes, the scene keeps what was typed and says why the rewrite was not applied.
+  held = new Promise<void>((resolve) => (release = resolve));
+  await page.getByRole("button", { name: "Improve" }).click();
+  await page.getByRole("button", { name: "Shorten", exact: true }).click();
+  await box.fill("Words typed meanwhile.");
+  release();
+  await expect(page.getByRole("alert").filter({ hasText: "The scene changed while it was being rewritten" })).toBeVisible();
+  await expect(box).toHaveValue("Words typed meanwhile.");
+  await expect(page.getByRole("button", { name: "Undo the rewrite" })).toHaveCount(0);
+});
+
+test("the AI writer fills the empty scene it was opened on, even after it moves past another empty one", async ({ page }) => {
+  await page.getByRole("button", { name: "Add scene" }).click();
+  await page.getByRole("button", { name: /^Scene 1,/ }).click();
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/api/script", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await page.getByRole("button", { name: "Write with AI" }).click();
+  await page.getByPlaceholder(/What is the video about/).fill("an open house this weekend");
+  await page.getByRole("button", { name: "Write script" }).click();
+  await page.getByRole("button", { name: "Move scene right" }).click();
+  release();
+  // The written scene is now the second; the first is the other empty scene, still empty.
+  await expect(page.getByRole("button", { name: /^Scene 2, about/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Scene 1, empty/ })).toBeVisible();
 });
 
 test("a voice can be designed from a description, chosen from previews, and kept", async ({ page }) => {
@@ -2775,8 +2807,10 @@ test("a voice can be designed from a description, chosen from previews, and kept
   await expect(previews.getByRole("button", { name: "Play preview 2" })).toBeVisible();
   const save = designer.getByRole("button", { name: "Save voice" });
   await expect(save).toBeDisabled();
+  await expect(designer.getByTestId("own-voices")).toHaveText("0 of 5 voices of your own used.");
   await previews.getByRole("radio", { name: "Preview 2" }).check();
-  const name = `Narrator ${Date.now().toString(36)}`;
+  // As long a name as a voice may have (60 characters), to see it fits a phone screen too.
+  const name = `Narrator ${Date.now().toString(36)}`.padEnd(60, " x").slice(0, 60).trimEnd();
   await designer.getByLabel("Name for the voice").fill(name);
   try {
     await save.click();
@@ -2788,6 +2822,13 @@ test("a voice can be designed from a description, chosen from previews, and kept
     await expect(page.getByText(name, { exact: true })).toBeVisible();
     const voices = (await (await page.request.get("/api/voices")).json()).voices as Array<{ id: string; name: string; tags?: string[] }>;
     expect(voices.find((v) => v.name === name)?.tags).toEqual(["designed voice"]);
+    await expect(designer.getByTestId("own-voices")).toHaveText("1 of 5 voices of your own used.");
+    await page.setViewportSize({ width: 390, height: 844 });
+    const del = page.getByRole("button", { name: `Delete ${name}` });
+    await del.scrollIntoViewIfNeeded();
+    const box = (await del.boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(390);
+    expect(await page.locator("main").evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
   } finally {
     // Kept or not, the voice goes, so it never counts toward the account's five in later tests.
     const voices = (await (await page.request.get("/api/voices")).json()).voices as Array<{ id: string; name: string }>;
@@ -2797,9 +2838,16 @@ test("a voice can be designed from a description, chosen from previews, and kept
 
 test("a presenter can be drawn from a description and kept as a photo avatar", async ({ page }) => {
   await page.goto("/avatars");
-  await page.getByRole("button", { name: "New photo avatar" }).click();
+  const opener = page.getByRole("button", { name: "New photo avatar" });
+  await opener.click();
   const name = `Drawn ${Date.now().toString(36)}`;
   await page.getByLabel("Avatar name").fill(name);
+  // Escape asks before a name or picture is thrown away; declined, the panel stays as it was.
+  page.once("dialog", (d) => void d.dismiss());
+  await page.getByLabel("Avatar name").press("Escape");
+  await expect(page.getByLabel("Avatar name")).toHaveValue(name);
+  // The upload is a button too, for the keyboard.
+  await expect(page.getByRole("button", { name: "Upload a portrait" })).toBeVisible();
   const generator = page.getByTestId("portrait-generator");
   const draw = generator.getByRole("button", { name: "Draw presenter" });
   await generator.getByLabel("Or describe a presenter").fill("A woman");
@@ -2807,10 +2855,19 @@ test("a presenter can be drawn from a description and kept as a photo avatar", a
   await generator.getByRole("button", { name: "Use an example" }).click();
   await draw.click();
   await expect(generator.getByRole("status")).toContainText("The portrait is in the preview");
+  // The Draw button was disabled while it ran; the outcome has the focus instead of the page.
+  await expect(generator.getByRole("status")).toBeFocused();
   await expect(page.getByRole("img", { name: "Portrait preview" })).toHaveAttribute("src", /^data:image\/svg\+xml/);
   await page.getByRole("button", { name: "Create avatar" }).click();
   try {
     await expect(page.getByRole("img", { name, exact: true })).toBeVisible();
+    // The panel has gone; the focus is back on the button that opened it.
+    await expect(opener).toBeFocused();
+    await opener.click();
+    // Escape belongs to the panel: from inside it, an untouched panel closes without asking.
+    await page.getByLabel("Avatar name").press("Escape");
+    await expect(page.getByLabel("Avatar name")).toHaveCount(0);
+    await expect(opener).toBeFocused();
     // The API refuses a description too short to draw from.
     expect((await page.request.post("/api/avatars/generate", { data: { name, prompt: "Short" } })).status()).toBe(400);
   } finally {

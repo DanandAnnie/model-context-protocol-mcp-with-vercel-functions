@@ -2,6 +2,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Pause, Play, Wand2 } from "lucide-react";
 import { Button, Card, Field, inputClass } from "@/components/ui";
+import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { api } from "@/lib/client";
 import type { Voice } from "@/lib/types";
 
@@ -56,10 +57,11 @@ export function VoiceDesigner({ available, onSaved, ownCount, limit }: { availab
   useEffect(() => {
     if (!full) setErr((e) => (e && /voices of your own/.test(e) ? null : e));
   }, [full]);
-  /** The button that was pressed is disabled while it works, dropping the focus; a failure takes it instead. */
+  /** The button that was pressed is disabled while it works, dropping the focus; the new previews or a failure take it. */
+  const focusAfterRender = useFocusAfterRender();
   const fail = (message: string) => {
     setErr(message);
-    requestAnimationFrame(() => errRef.current?.focus());
+    focusAfterRender(() => errRef.current);
   };
 
   async function design() {
@@ -74,7 +76,7 @@ export function VoiceDesigner({ available, onSaved, ownCount, limit }: { availab
       // The previews belong to this description: saving one keeps the description it was made from.
       setDesignedFor(description.trim());
       setChosen(null);
-      requestAnimationFrame(() => firstPreview.current?.focus());
+      focusAfterRender(() => firstPreview.current);
     } catch (e) {
       fail(e instanceof Error ? e.message : "Could not design the voice");
     } finally {

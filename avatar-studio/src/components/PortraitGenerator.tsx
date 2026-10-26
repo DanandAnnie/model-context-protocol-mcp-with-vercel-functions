@@ -2,6 +2,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Wand2 } from "lucide-react";
 import { Button, inputClass } from "@/components/ui";
+import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { api } from "@/lib/client";
 
 /** How often a portrait is checked, and how long it may take before the panel stops waiting. */
@@ -30,7 +31,8 @@ export function PortraitGenerator({ name, demo, current, onPortrait }: { name: s
   // The Draw button is disabled while it runs, which drops the focus; the outcome takes it instead.
   const noteRef = useRef<HTMLParagraphElement>(null);
   const errRef = useRef<HTMLParagraphElement>(null);
-  const focusOutcome = (el: { current: HTMLElement | null }) => requestAnimationFrame(() => el.current?.focus());
+  const focusAfterRender = useFocusAfterRender();
+  const focusOutcome = (el: { current: HTMLElement | null }) => focusAfterRender(() => el.current);
 
   async function generate() {
     const mine = ++run.current;

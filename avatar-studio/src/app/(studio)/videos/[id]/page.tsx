@@ -13,6 +13,7 @@ import { ViewerEmails } from "@/components/ViewerEmails";
 import { VideoChapters } from "@/components/VideoChapters";
 import { OtherSizes } from "@/components/OtherSizes";
 import { useCanEdit } from "@/hooks/useCanEdit";
+import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { captionsBurnedIn } from "@/lib/captions";
 import { silentSeconds } from "@/lib/pauses";
 import { useApi } from "@/hooks/useApi";
@@ -45,6 +46,7 @@ export default function VideoDetailPage() {
   const [editing, setEditing] = useState(false);
   // Enter or Escape in the title field hands the focus back to the title, not to the page body.
   const titleButton = useRef<HTMLButtonElement>(null);
+  const focusAfterRender = useFocusAfterRender();
   const refocusTitle = useRef(false);
   useEffect(() => {
     if (editing || !refocusTitle.current) return;
@@ -500,7 +502,7 @@ export default function VideoDetailPage() {
       const { video: back } = await api<{ video: Video }>(`/api/videos/${video.id}/restore`, { method: "POST" });
       setData({ video: back });
       // The banner with the Restore button goes away; the focus moves to the title rather than the page.
-      requestAnimationFrame(() => titleButton.current?.focus());
+      focusAfterRender(() => titleButton.current);
     } catch (e) {
       setRenameErr(e instanceof Error ? e.message : "Could not restore the video");
     } finally {

@@ -3,6 +3,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { Button, Card } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
+import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { api } from "@/lib/client";
 import { sceneTextFits, type AspectRatio, type Video } from "@/lib/types";
 
@@ -41,6 +42,7 @@ export function OtherSizes({ video, canEdit }: { video: Video; canEdit: boolean 
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const listRef = useRef<HTMLUListElement>(null);
+  const focusAfterRender = useFocusAfterRender();
   const tight = (aspect: AspectRatio) => (video.scenes ?? []).map((sc, i) => (sc.overlay && !sceneTextFits(sc.overlay, aspect) ? i + 1 : 0)).filter(Boolean);
   const canMake = canEdit && !video.deletedAt;
   const others = sizes.filter((s) => s.id !== video.id);
@@ -63,7 +65,7 @@ export function OtherSizes({ video, canEdit }: { video: Video; canEdit: boolean 
       const problems = [...videos.filter((v) => v.status === "failed").map((v) => `${v.aspect}: ${v.error ?? "the render could not be started"}`), ...failed.map((f) => `${f.aspect}: ${f.error}`)];
       if (problems.length) setErr(problems.join("; "));
       // Focus goes to the size just made, rather than being lost with the button that may have gone away.
-      if (started.length) requestAnimationFrame(() => listRef.current?.querySelector<HTMLAnchorElement>(`a[href="/videos/${started[0].id}"]`)?.focus());
+      if (started.length) focusAfterRender(() => listRef.current?.querySelector<HTMLAnchorElement>(`a[href="/videos/${started[0].id}"]`));
     } catch (e) {
       setErr(e instanceof Error ? e.message : "The other sizes could not be started");
     } finally {

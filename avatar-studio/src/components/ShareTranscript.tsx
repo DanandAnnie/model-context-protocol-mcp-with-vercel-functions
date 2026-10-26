@@ -7,7 +7,7 @@ import { formatTimestamp } from "@/lib/text";
  * and the line being spoken is marked as the video plays (scrolled into view inside the list only, so
  * the page itself never jumps).
  */
-export function ShareTranscript({ playerId, cues }: { playerId: string; cues: Array<{ startMs: number; text: string }> }) {
+export function ShareTranscript({ playerId, cues }: { playerId: string; cues: Array<{ startMs: number; endMs: number; text: string }> }) {
   const [active, setActive] = useState(-1);
   const list = useRef<HTMLOListElement>(null);
 
@@ -16,10 +16,10 @@ export function ShareTranscript({ playerId, cues }: { playerId: string; cues: Ar
     if (!el) return;
     const sync = () => {
       const ms = el.currentTime * 1000;
-      // The last line that has started; before the first one starts, none.
+      // The last line that has started, unless it has ended too (a pause, or after the last line): then none.
       let i = -1;
       while (i + 1 < cues.length && cues[i + 1].startMs <= ms) i++;
-      setActive(i);
+      setActive(i >= 0 && ms < cues[i].endMs ? i : -1);
     };
     el.addEventListener("timeupdate", sync);
     el.addEventListener("seeked", sync);

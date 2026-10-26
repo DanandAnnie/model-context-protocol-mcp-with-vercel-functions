@@ -478,7 +478,7 @@ test("library sorts by date, title, and views", async ({ page }) => {
 test("the share page transcript plays the video from a line and marks the line being spoken", async ({ page }) => {
   const v = await createVideoViaApi(page, `Transcript ${Date.now().toString(36)}`, { script: "First we open the doors. [pause 1s] Then the team walks you through every room. Finally we hand over the keys." });
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
-  const { cues } = (await (await page.request.get(`/api/videos/${v.id}/captions?format=json`)).json()) as { cues: Array<{ startMs: number; text: string }> };
+  const { cues } = (await (await page.request.get(`/api/videos/${v.id}/captions?format=json`)).json()) as { cues: Array<{ startMs: number; endMs: number; text: string }> };
   expect(cues.length).toBeGreaterThan(1);
   await page.goto(`/share/${v.id}`);
   const transcript = page.getByTestId("share-transcript");
@@ -495,8 +495,12 @@ test("the share page transcript plays the video from a line and marks the line b
   const target = Math.min(cues[1].startMs / 1000, duration);
   await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.currentTime)).toBeGreaterThanOrEqual(target - 0.25);
   await player.evaluate((el: HTMLVideoElement) => el.pause());
-  // Within the demo clip's length, the line clicked is the one marked.
-  if (cues[1].startMs / 1000 < duration && (cues[2]?.startMs ?? Infinity) / 1000 > duration) await expect(line).toHaveAttribute("aria-current", "true");
+  // The line marked is the one spoken where the player stopped: the clicked one, or a later one if playback ran on.
+  const at = (await player.evaluate((el: HTMLVideoElement) => el.currentTime)) * 1000;
+  const spoken = cues.findIndex((c) => c.startMs <= at && at < c.endMs);
+  expect(spoken).toBeGreaterThanOrEqual(1);
+  await expect(transcript.getByRole("button").nth(spoken)).toHaveAttribute("aria-current", "true");
+  await expect(transcript.locator('[aria-current="true"]')).toHaveCount(1);
   await player.evaluate((el: HTMLVideoElement) => (el.currentTime = 0));
   await expect(transcript.getByRole("button").first()).toHaveAttribute("aria-current", "true");
 });

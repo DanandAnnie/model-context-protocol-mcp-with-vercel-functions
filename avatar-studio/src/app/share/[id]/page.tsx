@@ -23,6 +23,7 @@ import { ViewBeacon } from "@/components/ViewBeacon";
 import { ShareCta } from "@/components/ShareCta";
 import { ShareUnlock } from "@/components/ShareUnlock";
 import { SharePlayer } from "@/components/SharePlayer";
+import { SHARE_PLAYER_ID } from "@/lib/share-player";
 import { captionsBurnedIn } from "@/lib/captions";
 import { shareCookieName, shareGateCookieName, shareUnlocked } from "@/lib/share-lock";
 import { ShareLeadGate } from "@/components/ShareLeadGate";
@@ -242,7 +243,7 @@ export default async function SharePage({
             )}
             {/* Once there is a video, the script is its transcript: the caption lines (corrected ones when an editor saved them), each playing from its time. */}
             {video.status === "completed" && video.videoUrl ? (
-              <ShareTranscript playerId="share-player" cues={captionCuesFor(video).cues.map(({ startMs, text }) => ({ startMs, text }))} />
+              <ShareTranscript playerId={SHARE_PLAYER_ID} cues={captionCuesFor(video).cues.map(({ startMs, endMs, text }) => ({ startMs, endMs, text }))} />
             ) : (
               <p className="mt-6 whitespace-pre-wrap text-sm leading-relaxed text-slate-300">
                 {stripPauses(video.script)}

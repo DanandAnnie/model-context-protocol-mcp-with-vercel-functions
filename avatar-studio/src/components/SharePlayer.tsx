@@ -1,5 +1,6 @@
 "use client";
 import { useRef } from "react";
+import { SHARE_PLAYER_ID } from "@/lib/share-player";
 import type { CaptionLook, CaptionSize, WatchQuarter } from "@/lib/types";
 
 /**
@@ -50,7 +51,7 @@ export function SharePlayer({
       muted={autoplay}
       loop={loop}
       playsInline
-      id="share-player"
+      id={SHARE_PLAYER_ID}
       className={`h-full w-full cue-${captionSize} cue-look-${captionLook}`}
       data-testid="share-player"
       onTimeUpdate={(e) => {

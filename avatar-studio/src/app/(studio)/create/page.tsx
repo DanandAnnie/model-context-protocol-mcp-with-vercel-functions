@@ -292,6 +292,8 @@ function CreateInner() {
     // Back to a fresh editor's presenter and voice: the first ones, then the brand kit's defaults on top.
     setAvatar(null);
     setVoice(null);
+    // A draft restored before the lists loaded still has its presenter waiting to be applied; drop it.
+    setPrefill(null);
     brandApplied.current = false;
     setDraftRestored(null);
   }

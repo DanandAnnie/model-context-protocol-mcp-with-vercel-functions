@@ -339,6 +339,8 @@ test("templates pre-fill the editor and edit-a-copy restores settings", async ({
   await page.locator("a[href='/create?template=listing-walkthrough']").click();
   await page.waitForURL(/\/create\?template=/);
   await expect(page.locator("textarea")).toHaveValue(/Welcome to \{address\}/);
+  // The template's blanks are pointed out, since the presenter would read them out as written.
+  await expect(page.getByTestId("unfilled-placeholders")).toContainText("Fill in {address}, {bedrooms}");
   await expect(page.locator("input[placeholder='Video title']")).toHaveValue("Property listing walkthrough");
   await expect(page.getByText("9:16 preview")).toBeVisible();
   await page.getByRole("button", { name: "Voice" }).click();
@@ -2121,6 +2123,48 @@ test("a dub can follow the brand glossary: terms kept as written and fixed trans
     await expect(plain.getByTestId("translation-meta")).toBeVisible();
     await expect(plain.getByTestId("translation-meta")).not.toContainText("brand term");
     await expect(plain.getByTestId("translation-meta")).not.toContainText("fixed translation");
+  } finally {
+    const restored = before ? await page.request.put("/api/brand", { data: before }) : await page.request.delete("/api/brand");
+    expect(restored.ok()).toBe(true);
+  }
+});
+
+test("brand defaults reach the batch and interactive pages, and Ctrl+Enter renders with the settings on screen", async ({ page }) => {
+  const before = (await (await page.request.get("/api/brand")).json()).brand;
+  const avatars = ((await (await page.request.get("/api/avatars")).json()).avatars as Array<{ id: string; name: string }>);
+  const voices = ((await (await page.request.get("/api/voices")).json()).voices as Array<{ id: string }>);
+  const avatar = avatars[3];
+  const voice = voices[2];
+  try {
+    expect((await page.request.put("/api/brand", { data: { name: "Acme", primaryColor: "#1e3a8a", defaultAvatarId: avatar.id, defaultVoiceId: voice.id, defaultAspect: "9:16", defaultResolution: "720p", captionsByDefault: true } })).ok()).toBe(true);
+    // A fresh batch starts from the kit.
+    await page.goto("/batch");
+    await expect(page.getByLabel("Avatar")).toHaveValue(avatar.id);
+    // The voice select comes before "Voice emotion" and "Voice pitch".
+    await expect(page.getByLabel("Voice").first()).toHaveValue(voice.id);
+    await expect(page.getByLabel("Aspect ratio")).toHaveValue("9:16");
+    await expect(page.getByLabel("Output quality")).toHaveValue("720p");
+    // A CSV saved by a spreadsheet in Windows-1252 keeps its accents.
+    await page.locator("input[type=file]").setInputFiles({ name: "people.csv", mimeType: "text/csv", buffer: Buffer.from("name,property,move_in\nJosé,Café Street,May 1\n", "latin1") });
+    await expect(page.getByText(/Hi José, welcome to Café Street!/)).toBeVisible();
+
+    // Every presenter can answer on the interactive page, starting with the kit's.
+    await page.goto("/interactive");
+    const grid = page.getByTestId("avatar-grid");
+    await expect(grid.getByRole("button")).toHaveCount(avatars.length);
+    await expect(page.getByLabel("Voice")).toHaveValue(voice.id);
+
+    // The editor starts at the kit's 720p; switched to 1080p, the shortcut renders at 1080p.
+    await page.goto("/create");
+    await page.locator("textarea").first().fill("A short script for the shortcut.");
+    await page.locator("input[placeholder='Video title']").fill(`Shortcut ${Date.now().toString(36)}`);
+    await page.getByRole("button", { name: "Settings" }).click();
+    await expect(page.getByRole("button", { name: /^720p/ })).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("button", { name: /^1080p/ }).click();
+    const sent = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
+    await page.keyboard.press("Control+Enter");
+    expect(JSON.parse((await sent).postData() ?? "{}").resolution).toBe("1080p");
+    await page.waitForURL(/\/videos\/vid_/);
   } finally {
     const restored = before ? await page.request.put("/api/brand", { data: before }) : await page.request.delete("/api/brand");
     expect(restored.ok()).toBe(true);

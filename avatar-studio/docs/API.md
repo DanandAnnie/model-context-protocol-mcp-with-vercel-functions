@@ -144,7 +144,7 @@ The beacons answer `{ "views" | "watch" | "clicks", "counted" }` and never fail 
 }
 ```
 
-`background`, `captions`, `captionStyle`, `speed`, `pitch`, `emotion`, and `resolution` take the same values and defaults as a single video. `POST` returns `{ "batchId", "videos", "skipped", "failed" }`. Rows beyond the monthly allowance are skipped; rows the provider rejected are reported in `failed`. Up to 100 rows per batch.
+`background`, `captions`, `captionStyle`, `speed`, `pitch`, `emotion`, and `resolution` take the same values and defaults as a single video, except that a batch without a `background` gets the brand kit's (its default background, else its primary colour), as the editor does; the batch page also starts from the kit's presenter, voice, format, quality, and captions setting. `POST` returns `{ "batchId", "videos", "skipped", "failed" }`. Rows beyond the monthly allowance are skipped; rows the provider rejected are reported in `failed`. Up to 100 rows per batch.
 
 ## Scripts
 
@@ -174,7 +174,7 @@ Actions: `shorten`, `expand`, `tone`, `translate`, `polish`. Returns `{ "script"
 { "prompt": "A TikTok explaining three tips for staging a home", "lengthSec": 60, "language": "English", "orientation": "auto", "mode": "generate" }
 ```
 
-The script writer plans the video: a title, one scene per idea (a hook and a call to action framed as close-ups), and a frame orientation (portrait for social formats, landscape otherwise). `prompt` is 3–10,000 characters; `url` (optional) is a public web page the plan uses as its only source of facts, under the same rules as the script writer's; `avatarId` and `voiceId` (optional) choose the presenter and voice, else the brand kit's defaults, else the first ones listed (a chosen presenter brings its own default voice); `orientation` is `auto`, `landscape`, `portrait`, or `square`; `lengthSec` is 15–300 (default 60); `mode` is `generate` (default) or `plan`. Every scene gets the brand kit's background, captions are on unless the kit turns them off, and the kit's quality applies; the plan keeps to ten scenes and the 5000 characters a video holds.
+The script writer plans the video: a title, one scene per idea (a hook and a call to action framed as close-ups), and a frame orientation (portrait for social formats, landscape otherwise). `prompt` is 3–10,000 characters; `url` (optional) is a public web page the plan uses as its only source of facts, under the same rules as the script writer's; `avatarId` and `voiceId` (optional) choose the presenter and voice, else the brand kit's defaults, else the first ones listed (a chosen presenter brings its own default voice); `orientation` is `auto`, `landscape`, `portrait`, or `square` (`auto` is 9:16 for a plan in a vertical format, else the brand kit's default format, else 16:9); `lengthSec` is 15–300 (default 60); `mode` is `generate` (default) or `plan`. Every scene gets the brand kit's background, captions are on unless the kit turns them off, and the kit's quality applies; the plan keeps to ten scenes and the 5000 characters a video holds.
 
 - `mode: "generate"` renders straight away and answers `201 { "video", "draft" }`, counted against the render allowance like `POST /api/videos` (`502` with the failed video if the render could not start).
 - `mode: "plan"` answers `{ "draft" }` without rendering: `{ title, scenes: [{ script, background, layout? }], avatarId, voiceId, aspect, resolution, captions }`, a body `POST /api/videos` takes as is. The Video Agent page opens it in the editor for review.

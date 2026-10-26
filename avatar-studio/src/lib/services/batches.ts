@@ -8,6 +8,7 @@ import { renderLimitFor } from "../billing";
 import { ValidationError } from "../errors";
 import { fillTemplate, parseCsv, placeholdersIn } from "../csv";
 import { backgroundSchema, captionStyleSchema, createVideo, emotionSchema, pitchSchema, rendersThisMonth, resolveRenderContext } from "./videos";
+import { getBrandKit } from "./brand";
 
 export const MAX_BATCH_ROWS = 100;
 
@@ -21,7 +22,8 @@ export const batchRequestSchema = z.object({
   voiceId: z.string().min(1),
   aspect: z.enum(["16:9", "9:16", "1:1"]).default("16:9"),
   resolution: z.enum(["720p", "1080p"]).default("1080p"),
-  background: backgroundSchema.default({ type: "color", value: "#f1f5f9" }),
+  /** Behind every row; when absent, the brand kit's background (its default, else its primary colour), else light grey. */
+  background: backgroundSchema.optional(),
   captions: z.boolean().default(false),
   captionStyle: captionStyleSchema.optional(),
   speed: z.number().min(0.5).max(1.5).default(1),
@@ -60,6 +62,8 @@ export async function createBatch(input: z.infer<typeof batchRequestSchema>, own
   // Resolve avatar and voice once (they may cost provider round-trips) and reserve
   // the allowance for the whole batch before starting any row.
   const ctx = await resolveRenderContext(input, ownerId);
+  const kit = input.background ? null : await getBrandKit(ownerId);
+  const background = input.background ?? kit?.defaultBackground ?? (kit ? { type: "color" as const, value: kit.primaryColor } : { type: "color" as const, value: "#f1f5f9" });
   const limit = await renderLimitFor(ownerId);
   const used = limit ? await rendersThisMonth(ownerId) : 0;
   const allowedRows = limit ? Math.max(0, Math.min(table.rows.length, limit - used)) : table.rows.length;
@@ -81,7 +85,7 @@ export async function createBatch(input: z.infer<typeof batchRequestSchema>, own
         voiceId: input.voiceId,
         aspect: input.aspect,
         resolution: input.resolution,
-        background: input.background,
+        background,
         captions: input.captions,
         ...(input.captionStyle ? { captionStyle: input.captionStyle } : {}),
         speed: input.speed,

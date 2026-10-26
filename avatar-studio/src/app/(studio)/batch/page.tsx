@@ -1,13 +1,14 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Layers3, Upload } from "lucide-react";
 import { Button, Card, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api } from "@/lib/client";
-import { VOICE_EMOTIONS, type AspectRatio, type Avatar, type Background, type CaptionStyle, type Resolution, type Voice, type VideoTemplate, type VoiceEmotion } from "@/lib/types";
+import { decodeScript, legacyEncodingFor } from "@/lib/script-import";
+import { VOICE_EMOTIONS, type AspectRatio, type Avatar, type Background, type BrandKit, type CaptionStyle, type Resolution, type Voice, type VideoTemplate, type VoiceEmotion } from "@/lib/types";
 
 const MAX_BATCH_SCRIPT = 5000;
 
@@ -51,12 +52,31 @@ export default function BatchPage() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // A fresh batch starts from the brand kit, as the editor does: its presenter and voice (or the presenter's own
+  // voice), format, quality, and captions; the server gives the rows the kit's background. A saved template wins.
+  // Without a kit (or when it cannot be read) the first presenter and voice in the lists.
+  const { data: brandData, error: brandError } = useApi<{ brand: BrandKit | null }>("/api/brand");
+  const brandApplied = useRef(false);
   useEffect(() => {
-    if (!avatarId && avatarData?.avatars.length) setAvatarId(avatarData.avatars[0].id);
-  }, [avatarData, avatarId]);
-  useEffect(() => {
-    if (!voiceId && voiceData?.voices.length) setVoiceId(voiceData.voices[0].id);
-  }, [voiceData, voiceId]);
+    if (brandApplied.current || !avatarData || !voiceData || (!brandData && !brandError)) return;
+    brandApplied.current = true;
+    const b = startedFrom ? null : (brandData?.brand ?? null);
+    const a = (b?.defaultAvatarId ? avatarData.avatars.find((x) => x.id === b.defaultAvatarId) : undefined) ?? avatarData.avatars[0];
+    const v = [b?.defaultVoiceId, a?.defaultVoiceId].map((id) => (id ? voiceData.voices.find((x) => x.id === id) : undefined)).find(Boolean) ?? voiceData.voices[0];
+    // A saved template picked before the lists loaded applies its own cast right after this.
+    setAvatarId((prev) => prev || a?.id || "");
+    setVoiceId((prev) => prev || v?.id || "");
+    if (!b) return;
+    if (b.defaultAspect) setAspect(b.defaultAspect);
+    if (b.defaultResolution) setResolution(b.defaultResolution);
+    if (b.captionsByDefault != null) setCaptions(b.captionsByDefault);
+  }, [brandData, brandError, avatarData, voiceData, startedFrom]);
+  /** A presenter picked by hand brings its own voice, when it has one. */
+  function pickAvatar(id: string) {
+    setAvatarId(id);
+    const own = avatarData?.avatars.find((x) => x.id === id)?.defaultVoiceId;
+    if (own && voiceData?.voices.some((v) => v.id === own)) setVoiceId(own);
+  }
 
   // Apply a template's presenter and voice once both lists are in, like the editor's copy prefill:
   // a voice that is gone gives way to the presenter's own default, a presenter that is gone keeps the choice.
@@ -110,7 +130,8 @@ export default function BatchPage() {
 
   function onFile(file: File | undefined) {
     if (!file) return;
-    file.text().then(setCsv);
+    // Spreadsheets often save CSV in the system's legacy encoding (Excel's "CSV" is Windows-1252 in the West).
+    file.arrayBuffer().then((buf) => setCsv(decodeScript(new Uint8Array(buf), legacyEncodingFor(navigator.language))));
   }
 
   async function generate() {
@@ -177,7 +198,7 @@ export default function BatchPage() {
           </Card>
           <Card className="grid gap-4 p-4 sm:grid-cols-2">
             <Field label="Avatar">
-              <select className={inputClass} value={avatarId} onChange={(e) => setAvatarId(e.target.value)}>
+              <select className={inputClass} value={avatarId} onChange={(e) => pickAvatar(e.target.value)}>
                 {(avatarData?.avatars ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
             </Field>

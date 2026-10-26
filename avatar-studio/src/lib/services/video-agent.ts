@@ -126,7 +126,8 @@ export async function planVideo(input: VideoAgentInput, ownerId: string = LOCAL_
     scenes: scenes.map((sc) => ({ script: sc.script, background, ...(sc.framing === "closeUp" ? { layout: { scale: 1, x: 0, y: 0, framing: "closeUp" as const } } : {}) })),
     avatarId: avatar.id,
     voiceId: voice.id,
-    aspect: input.orientation === "auto" ? (plan.orientation === "portrait" ? "9:16" : "16:9") : ASPECTS[input.orientation],
+    // Left to the agent: a plan for a vertical format is 9:16; otherwise the brand kit's format, else landscape.
+    aspect: input.orientation === "auto" ? (plan.orientation === "portrait" ? "9:16" : (kit?.defaultAspect ?? "16:9")) : ASPECTS[input.orientation],
     resolution: kit?.defaultResolution ?? "1080p",
     // Agent videos are watched on mute as often as not: captions on unless the kit says otherwise.
     captions: kit?.captionsByDefault ?? true,

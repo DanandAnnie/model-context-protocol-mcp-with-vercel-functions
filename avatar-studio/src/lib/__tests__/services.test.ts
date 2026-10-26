@@ -1185,6 +1185,17 @@ describe("personalized batches", () => {
     assert.equal((await listVideos("batch-user")).length, 2);
   });
 
+  it("puts the brand kit's background behind batch rows unless the batch names one", async () => {
+    const { createBatch, batchRequestSchema, saveBrandKit, brandKitSchema } = await import("../services");
+    const req = (extra: Record<string, unknown> = {}) => batchRequestSchema.parse({ title: "Hi", scriptTemplate: "Hi {name}.", csv: "name\nAda", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, ...extra });
+    assert.deepEqual((await createBatch(req(), "batch-plain")).videos[0].background, { type: "color", value: "#f1f5f9" }, "light grey without a kit");
+    await saveBrandKit(brandKitSchema.parse({ name: "Acme", primaryColor: "#1e3a8a" }), "batch-brand");
+    assert.deepEqual((await createBatch(req(), "batch-brand")).videos[0].background, { type: "color", value: "#1e3a8a" });
+    await saveBrandKit(brandKitSchema.parse({ name: "Acme", primaryColor: "#1e3a8a", defaultBackground: { type: "image", value: "https://cdn.example.com/office.jpg" } }), "batch-brand");
+    assert.deepEqual((await createBatch(req(), "batch-brand")).videos[0].background, { type: "image", value: "https://cdn.example.com/office.jpg" });
+    assert.deepEqual((await createBatch(req({ background: { type: "color", value: "#ffffff" } }), "batch-brand")).videos[0].background, { type: "color", value: "#ffffff" }, "a batch's own background wins");
+  });
+
   it("rejects missing columns and stops at the allowance", async () => {
     const { createBatch } = await import("../services");
     const { config } = await import("../config");

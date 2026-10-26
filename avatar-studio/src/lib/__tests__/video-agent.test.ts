@@ -51,6 +51,13 @@ describe("video agent", () => {
     assert.equal((await planVideo(videoAgentSchema.parse({ prompt: "Make a TikTok about us", orientation: "square" }))).aspect, "1:1");
   });
 
+  it("leaves the format to the brand kit when the agent chooses and the plan is not for a vertical format", async () => {
+    await saveBrandKit(brandKitSchema.parse({ name: "Acme", primaryColor: "#1e3a8a", defaultAspect: "1:1" }));
+    assert.equal((await planVideo(videoAgentSchema.parse({ prompt: "Explain our refund policy" }))).aspect, "1:1");
+    assert.equal((await planVideo(videoAgentSchema.parse({ prompt: "Make a TikTok about our app" }))).aspect, "9:16", "a vertical format the plan asks for still wins");
+    assert.equal((await planVideo(videoAgentSchema.parse({ prompt: "Explain our refund policy", orientation: "landscape" }))).aspect, "16:9", "and so does a format the user picked");
+  });
+
   it("applies the brand kit: presenter, voice, background, quality, and captions", async () => {
     const avatar = STOCK_AVATARS[2];
     const voice = STOCK_VOICES[3];

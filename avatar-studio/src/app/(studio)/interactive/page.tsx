@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Code2, Copy, Link2, MessagesSquare, Trash2 } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { ChatPanel, type ChatTurn } from "@/components/ChatPanel";
@@ -9,7 +9,7 @@ import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { useLiveAvatar } from "@/hooks/useLiveAvatar";
 import { api, formatDate } from "@/lib/client";
-import type { Agent, Avatar, Conversation, ProviderStatus, Voice } from "@/lib/types";
+import type { Agent, Avatar, BrandKit, Conversation, ProviderStatus, Voice } from "@/lib/types";
 
 const DEFAULT_INSTRUCTIONS = "You represent a real estate team. Help visitors with open houses, listings, and how to book a showing. Be warm and concise.";
 
@@ -66,12 +66,24 @@ export default function InteractivePage() {
     }
   }
 
+  // Starts from the brand kit's presenter and voice (or the presenter's own voice), else the first in each list.
+  const { data: brandData, error: brandError } = useApi<{ brand: BrandKit | null }>("/api/brand");
+  const startApplied = useRef(false);
   useEffect(() => {
-    if (!avatar && avatarData?.avatars.length) setAvatar(avatarData.avatars[0]);
-  }, [avatarData, avatar]);
-  useEffect(() => {
-    if (!voice && voiceData?.voices.length) setVoice(voiceData.voices[0]);
-  }, [voiceData, voice]);
+    if (startApplied.current || !avatarData?.avatars.length || !voiceData?.voices.length || (!brandData && !brandError)) return;
+    startApplied.current = true;
+    const b = brandData?.brand;
+    const a = (b?.defaultAvatarId ? avatarData.avatars.find((x) => x.id === b.defaultAvatarId) : undefined) ?? avatarData.avatars[0];
+    const v = [b?.defaultVoiceId, a.defaultVoiceId].map((id) => (id ? voiceData.voices.find((x) => x.id === id) : undefined)).find(Boolean) ?? voiceData.voices[0];
+    setAvatar((prev) => prev ?? a);
+    setVoice((prev) => prev ?? v);
+  }, [avatarData, voiceData, brandData, brandError]);
+  /** A presenter picked by hand brings its own voice, when it has one. */
+  function pickAvatar(a: Avatar) {
+    setAvatar(a);
+    const own = a.defaultVoiceId ? voiceData?.voices.find((v) => v.id === a.defaultVoiceId) : undefined;
+    if (own) setVoice(own);
+  }
 
   const live = useLiveAvatar({
     enabled: !!avatar && status?.streaming !== "mock" && status !== null,
@@ -186,7 +198,14 @@ export default function InteractivePage() {
           <h3 className="text-sm font-semibold text-slate-900">Presenter setup</h3>
           <div className="mt-3">
             <Field label="Who answers">
-              {avatarsLoading ? <Skeleton className="h-24" /> : <AvatarGrid avatars={avatarData?.avatars.slice(0, 6) ?? []} selectedId={avatar?.id} onSelect={setAvatar} compact />}
+              {avatarsLoading ? (
+                <Skeleton className="h-24" />
+              ) : (
+                // Every presenter, own and stock, in a box that scrolls once the list is long.
+                <div className="max-h-80 overflow-y-auto pr-1">
+                  <AvatarGrid avatars={avatarData?.avatars ?? []} selectedId={avatar?.id} onSelect={pickAvatar} compact />
+                </div>
+              )}
             </Field>
           </div>
           <div className="mt-4 space-y-3">

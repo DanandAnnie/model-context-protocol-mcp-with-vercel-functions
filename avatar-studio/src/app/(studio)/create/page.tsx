@@ -488,6 +488,8 @@ function CreateInner() {
   // The server takes up to 5000 characters of script across all scenes (joined by a blank line).
   const scriptChars = scenes.map((sc) => sc.script.trim()).join("\n\n").length;
   const scriptTooLong = scriptChars > MAX_SCRIPT_CHARS;
+  // A template's {placeholders} left in a script would be read out as they are.
+  const unfilled = [...new Set(scenes.flatMap((sc) => sc.script.match(/\{[\p{L}_][\p{L}\p{N}_ -]{0,39}\}/gu) ?? []))];
   const canEdit = useCanEdit();
   const canGenerate = canEdit !== false && !!avatar && !!voice && allScenesFilled && !scriptTooLong && title.trim().length > 0 && !submitting;
 
@@ -508,18 +510,20 @@ function CreateInner() {
     }
   }
 
-  // Ctrl/Cmd+Enter generates from anywhere in the editor.
+  // Ctrl/Cmd+Enter generates from anywhere in the editor, with every setting as it is now (the handler reads
+  // the latest render function rather than the one from when it was attached).
+  const generateNow = useRef(generate);
+  generateNow.current = generate;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && canGenerate) {
         e.preventDefault();
-        generate();
+        generateNow.current();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canGenerate, title, scenes, avatar, voice, aspect, captions, captionStyle, isDefaultCaptionStyle, speed, pitch, emotion]);
+  }, [canGenerate]);
 
   const stageAspect = aspect === "9:16" ? "aspect-[9/16]" : aspect === "1:1" ? "aspect-square" : "aspect-video";
   const bgIsDark = (background.type === "color" && isDarkHex(background.value)) || background.type === "video";
@@ -537,6 +541,12 @@ function CreateInner() {
       />
       {canEdit === false && <ViewOnlyNotice what="generate videos" />}
       <ErrorBanner message={err ?? avatarsError ?? voicesError} />
+      {unfilled.length > 0 && (
+        <div role="status" data-testid="unfilled-placeholders" className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
+          Fill in {unfilled.slice(0, 4).join(", ")}
+          {unfilled.length > 4 ? ` and ${unfilled.length - 4} more` : ""} before generating: the presenter would read {unfilled.length === 1 ? "it" : "them"} out as written.
+        </div>
+      )}
       {fromAgent && (
         <div role="status" data-testid="agent-plan" className="mb-4 rounded-lg border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm text-brand-900">
           The Video Agent planned {scenes.length === 1 ? "this scene" : `these ${scenes.length} scenes`}. Review and edit them, then generate.

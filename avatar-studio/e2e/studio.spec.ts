@@ -1616,7 +1616,7 @@ test("personalized batch creates one video per CSV row", async ({ page }) => {
   expect(mine.every((v) => (v as { emotion?: string; pitch?: number }).emotion === "Friendly" && (v as { pitch?: number }).pitch === 10)).toBe(true);
   // A saved template fills in the script (its scenes as paragraphs) and its settings.
   const tpl = await page.request.post("/api/templates", {
-    data: { title: `Batch start ${Date.now().toString(36)}`, scenes: [{ script: "Hi {name}.", background: { type: "color", value: "#112233" } }, { script: "See you at {property}.", background: { type: "color", value: "#112233" } }], aspect: "9:16", captions: true, captionStyle: { position: "top", size: "large" }, speed: 1.2, emotion: "Serious" },
+    data: { title: `Batch start ${Date.now().toString(36)}`, scenes: [{ script: "Hi {name}.", background: { type: "color", value: "#112233" } }, { script: "See you at {property}.", background: { type: "color", value: "#112233" } }], aspect: "9:16", captions: true, captionStyle: { position: "top", size: "large" }, speed: 1.2, emotion: "Serious", expressiveness: "high", motionPrompt: "Waves hello" },
   });
   expect(tpl.status()).toBe(201);
   const tplId = ((await tpl.json()) as { template: { id: string } }).template.id;
@@ -1627,16 +1627,17 @@ test("personalized batch creates one video per CSV row", async ({ page }) => {
     await expect(page.getByLabel("Voice emotion")).toHaveValue("Serious");
     await expect(page.getByLabel("Aspect ratio")).toHaveValue("9:16");
     await expect(page.getByText("Speaking speed · 1.20x")).toBeVisible();
-    // The settings the page has no controls for (caption style, background) reach every row too.
+    // The settings the page has no controls for (caption style, background, photo avatar motion) reach every row too.
     await page.getByRole("button", { name: "Generate 2 videos" }).click();
     await page.waitForURL(/\/videos\?batch=batch_/);
     const fromTpl = new URL(page.url()).searchParams.get("batch");
-    const rows = ((await (await page.request.get("/api/videos")).json()).videos as Array<{ batchId?: string; aspect: string; speed: number; emotion?: string; captions: boolean; captionStyle?: { position: string; size: string }; background: { value: string } }>).filter((v) => v.batchId === fromTpl);
+    const rows = ((await (await page.request.get("/api/videos")).json()).videos as Array<{ batchId?: string; aspect: string; speed: number; emotion?: string; captions: boolean; captionStyle?: { position: string; size: string }; background: { value: string }; expressiveness?: string; motionPrompt?: string }>).filter((v) => v.batchId === fromTpl);
     expect(rows).toHaveLength(2);
     for (const v of rows) {
       expect([v.aspect, v.speed, v.emotion, v.captions]).toEqual(["9:16", 1.2, "Serious", true]);
       expect(v.captionStyle).toMatchObject({ position: "top", size: "large" });
       expect(v.background.value).toBe("#112233");
+      expect([v.expressiveness, v.motionPrompt]).toEqual(["high", "Waves hello"]);
     }
   } finally {
     await page.request.delete(`/api/templates/${tplId}`);

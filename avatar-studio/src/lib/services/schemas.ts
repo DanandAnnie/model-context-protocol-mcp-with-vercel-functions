@@ -24,7 +24,7 @@ export const expressivenessSchema = z
 /** A photo avatar's gestures in words, one line; blank is none. */
 export const motionPromptSchema = z
   .string()
-  .max(MAX_MOTION_PROMPT * 4)
+  .max(MAX_MOTION_PROMPT * 4, `Describe the gestures in at most ${MAX_MOTION_PROMPT} characters`)
   .transform((v) => v.replace(/\s+/g, " ").trim())
   .refine((v) => v.length <= MAX_MOTION_PROMPT, `Describe the gestures in at most ${MAX_MOTION_PROMPT} characters`)
   .transform((v) => v || undefined)

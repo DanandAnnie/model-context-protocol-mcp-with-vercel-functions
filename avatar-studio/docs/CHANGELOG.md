@@ -177,3 +177,9 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
   - The video page lists it. The page's emotion row now says that no renderer takes an emotion since HeyGen's v3 API.
   - New `photo-motion.test.ts` and an e2e test, which fails when a copy drops the setting.
 
+  - An independent review of `c5a90d9` found the request bodies valid against HeyGen's v3 schema and the photo-avatar check right for every presenter that reaches HeyGen. Its findings are fixed, each with a test that fails without the fix:
+    - A batch started from a template dropped the motion setting, and the batch API had no field for it. The batch API now takes `expressiveness` and `motionPrompt`, and the batch page carries them from the template like caption style and background.
+    - A gestures text over 1,200 characters got zod's generic length message instead of the documented "at most 300 characters".
+    - The video page no longer says "(photo avatars only)" for a HeyGen video whose scenes all leave the presenter out.
+    - The editor panel no longer says "no scene shows one" while the presenter list is still loading.
+    - The tests now check that retries, other sizes, batch rows, and spelled-out templates keep the setting, and the hidden-scene check is no longer vacuous. The API docs list the template fields and say other sizes keep photo avatar motion.

@@ -1648,7 +1648,7 @@ function CreateInner() {
                 <div role="group" aria-labelledby="photo-motion-title" className="space-y-2 rounded-lg border border-slate-200 px-3 py-3" data-testid="photo-motion">
                   <div id="photo-motion-title" className="text-sm font-medium text-slate-800">Photo avatar motion</div>
                   <p id="photo-motion-hint" className="text-xs text-slate-500">
-                    {photoInUse
+                    {photoInUse || !avatarData
                       ? "How a photo avatar moves as it speaks, on HeyGen (Avatar IV). Other presenters keep their own motion, and D-ID and the demo renderer ignore it."
                       : "For photo avatars only (an uploaded portrait or a HeyGen photo avatar); no scene shows one now, so nothing here applies yet."}
                   </p>

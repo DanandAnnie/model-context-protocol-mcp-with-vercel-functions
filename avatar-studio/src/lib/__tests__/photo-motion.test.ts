@@ -4,9 +4,10 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
-import { createTemplate, createVideo, templateInputSchema, videoRequestSchema } from "../services";
+import { batchRequestSchema, createBatch, createTemplate, createVideo, resizeVideo, retryVideo, templateInputSchema, videoRequestSchema } from "../services";
+import { getStore } from "../store";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
-import type { Avatar } from "../types";
+import type { Avatar, Video } from "../types";
 
 beforeEach(() => {
   globalThis.__avatarStudioStore = new MemoryStore();
@@ -33,6 +34,30 @@ describe("photo avatar motion", () => {
     assert.equal("expressiveness" in plain || "motionPrompt" in plain, false);
     const template = await createTemplate({ fromVideoId: video.id }, "mover");
     assert.deepEqual([template.expressiveness, template.motionPrompt], ["medium", "Gestures toward the room"]);
+    const spelled = await createTemplate(templateInputSchema.parse({ title: "T", scenes: [{ script: "Hi.", background: { type: "color", value: "#fff" } }], expressiveness: "high", motionPrompt: "Waves" }), "mover");
+    assert.deepEqual([spelled.expressiveness, spelled.motionPrompt], ["high", "Waves"], "a spelled-out template keeps them too");
+  });
+
+  it("is kept by a retry, by other sizes, and by every row of a batch", async () => {
+    const motion = { expressiveness: "high" as const, motionPrompt: "Nods warmly" };
+    const failed: Video = {
+      ...videoRequestSchema.parse({ ...base, ...motion }),
+      id: "vid_failed_motion",
+      ownerId: "mover",
+      status: "failed",
+      provider: "mock",
+      error: "boom",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await getStore().put("video", failed);
+    const retried = await retryVideo(failed.id, "mover");
+    assert.deepEqual([retried.expressiveness, retried.motionPrompt], ["high", "Nods warmly"]);
+    const [square] = (await resizeVideo(retried.id, { aspects: ["1:1"] }, "mover")).videos;
+    assert.deepEqual([square.expressiveness, square.motionPrompt], ["high", "Nods warmly"]);
+    const batch = await createBatch(batchRequestSchema.parse({ title: "B", scriptTemplate: "Hi {name}", csv: "name\nAmy\nBen", avatarId: base.avatarId, voiceId: base.voiceId, ...motion }), "mover");
+    assert.deepEqual(batch.videos.map((v) => [v.expressiveness, v.motionPrompt]), [["high", "Nods warmly"], ["high", "Nods warmly"]]);
+    assert.match(JSON.stringify(batchRequestSchema.safeParse({ title: "B", scriptTemplate: "Hi", csv: "a\nb", avatarId: "a", voiceId: "v", motionPrompt: "x".repeat(2000) }).error?.issues), /at most 300 characters/, "the same limit, said the same way, however long");
   });
 
   it("reaches HeyGen for scenes whose presenter is a photo avatar, and no others", async () => {
@@ -62,12 +87,13 @@ describe("photo avatar motion", () => {
     });
     await heygen.createVideo(req, studio, voice, { avatars: { [studio.id]: studio, [photoLook.id]: photoLook, [portrait.id]: portrait }, voices: { [voice.id]: voice } });
     const inputs = sent!.scenes.map((sc) => sc.input ?? {});
-    assert.deepEqual(inputs.map((i) => [i.expressiveness, i.motion_prompt]), [
+    assert.deepEqual(inputs.slice(0, 3).map((i) => [i.expressiveness, i.motion_prompt]), [
       [undefined, undefined],
       ["high", "Nods and smiles"],
       ["high", "Nods and smiles"],
-      [undefined, undefined],
     ], "a video avatar on Avatar IV takes neither; HeyGen refuses a motion prompt for one");
+    assert.equal(sent!.scenes[3].type, "image", "a scene without the presenter is a picture, with no presenter input to move");
+    assert.equal(JSON.stringify(sent!.scenes[3]).includes("motion_prompt") || JSON.stringify(sent!.scenes[3]).includes("expressiveness"), false);
     assert.equal(inputs[2].avatar_id, "look_mine");
   });
 });

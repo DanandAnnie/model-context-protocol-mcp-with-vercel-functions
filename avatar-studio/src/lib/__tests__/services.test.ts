@@ -539,6 +539,13 @@ describe("captions", () => {
     assert.equal((await getVideo(plain.id)).captionStyle, undefined);
     const styled = await createVideo({ ...req, captionStyle: { position: "bottom", size: "large" } });
     assert.deepEqual(styled.captionStyle, { position: "bottom", size: "large" });
+    // A typeface of its own is a style of its own; the player's default one is stored as absent, like the classic look.
+    const parse = (style: unknown) => videoRequestSchema.parse({ ...req, captionStyle: style }).captionStyle;
+    assert.deepEqual(parse({ position: "bottom", size: "medium", look: "classic", font: "sans" }), { position: "bottom", size: "medium" });
+    assert.equal("captionStyle" in (await createVideo(videoRequestSchema.parse({ ...req, captionStyle: { position: "bottom", size: "medium", font: "sans" } }))), false);
+    const serif = await createVideo(videoRequestSchema.parse({ ...req, captionStyle: { position: "bottom", size: "medium", font: "serif" } }));
+    assert.deepEqual(serif.captionStyle, { position: "bottom", size: "medium", font: "serif" });
+    assert.equal(videoRequestSchema.safeParse({ ...req, captionStyle: { position: "bottom", size: "medium", font: "comic" } }).success, false);
   });
 
   it("returns nothing for empty input", async () => {

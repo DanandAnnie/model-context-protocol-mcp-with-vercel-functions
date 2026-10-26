@@ -1049,7 +1049,7 @@ test("personalized batch creates one video per CSV row", async ({ page }) => {
 });
 
 test("captions are served as SRT and VTT, security headers are set", async ({ page, request }) => {
-  const v = await createVideoViaApi(page, "Caption formats", { captions: true, captionStyle: { position: "top", size: "large", look: "yellow" } });
+  const v = await createVideoViaApi(page, "Caption formats", { captions: true, captionStyle: { position: "top", size: "large", look: "yellow", font: "serif" } });
   const vtt = await request.get(`/api/videos/${v.id}/captions?format=vtt`);
   expect(vtt.headers()["content-type"]).toContain("text/vtt");
   expect(await vtt.text()).toMatch(/^WEBVTT/);
@@ -1071,10 +1071,11 @@ test("captions are served as SRT and VTT, security headers are set", async ({ pa
   await page.goto(`/share/${v.id}`);
   await expect(page.getByTestId("share-player")).toHaveClass(/cue-large/);
   await expect(page.getByTestId("share-player")).toHaveClass(/cue-look-yellow/);
+  await expect(page.getByTestId("share-player")).toHaveClass(/cue-font-serif/);
   // The track is on from the start: the demo renderer (like D-ID, or HeyGen with a style) burns no captions into the file.
   await expect(page.getByTestId("share-player").locator("track")).toHaveAttribute("default", "");
   await page.goto(`/videos/${v.id}`);
-  await expect(page.getByText("On · top, large, yellow")).toBeVisible();
+  await expect(page.getByText("On · top, large, yellow, serif type")).toBeVisible();
   // The editor offers the style once captions are on, previews it on the stage, and a copy keeps it.
   await page.goto(`/create?from=${v.id}`);
   await page.getByRole("button", { name: "Settings" }).click();
@@ -1084,6 +1085,12 @@ test("captions are served as SRT and VTT, security headers are set", async ({ pa
   await expect(page.getByTestId("stage-caption")).toHaveClass(/text-xs/);
   await expect(page.getByRole("group", { name: "Caption look" }).getByRole("button", { name: "yellow" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("stage-caption")).toHaveAttribute("data-look", "yellow");
+  // The typeface comes along too, and the stage sets its caption in it.
+  await expect(page.getByRole("group", { name: "Caption font" }).getByRole("button", { name: "serif" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("stage-caption")).toHaveCSS("font-family", /Georgia/);
+  await page.getByRole("group", { name: "Caption font" }).getByRole("button", { name: "mono" }).click();
+  await expect(page.getByTestId("stage-caption")).toHaveAttribute("data-font", "mono");
+  await expect(page.getByTestId("stage-caption")).toHaveCSS("font-family", /monospace/);
   // Rendered, not just classed: yellow is semibold (its colour is reported in lab(), so the weight is the stable check).
   await expect(page.getByTestId("stage-caption")).toHaveCSS("font-weight", "600");
   await page.getByRole("group", { name: "Caption look" }).getByRole("button", { name: "bold" }).click();

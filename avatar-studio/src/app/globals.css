@@ -51,3 +51,7 @@ video.cue-large::cue { font-size: 1.4em; }
 video.cue-look-bold::cue { font-weight: 700; background-color: rgba(0, 0, 0, 0.92); }
 video.cue-look-yellow::cue { color: #facc15; font-weight: 600; background-color: rgba(0, 0, 0, 0.75); }
 video.cue-look-minimal::cue { background-color: transparent; text-shadow: 0 0 4px #000, 0 1px 2px #000; }
+/* Caption typefaces: system stacks only, so a viewer's player never waits on a font download. */
+video.cue-font-serif::cue { font-family: Georgia, "Times New Roman", serif; }
+video.cue-font-rounded::cue { font-family: ui-rounded, "SF Pro Rounded", "Arial Rounded MT Bold", "Nunito", system-ui, sans-serif; }
+video.cue-font-mono::cue { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }

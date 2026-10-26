@@ -16,7 +16,7 @@ import { languageLabel } from "@/lib/language";
 import { stripPauses } from "@/lib/pauses";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
-import { CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, RESOLUTIONS, isDefaultCaptionStyle as isDefaultCaptionStyleFn, type AspectRatio, type AudioClip, type Avatar, type Background, type BrandKit, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS } from "@/lib/types";
+import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, RESOLUTIONS, isDefaultCaptionStyle as isDefaultCaptionStyleFn, type AspectRatio, type AudioClip, type Avatar, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -66,6 +66,15 @@ const newScene = (script = "", background: Background = DEFAULT_BG, presenter: P
 });
 /** True when a layout is the renderer's default and need not be stored. */
 const isDefaultLayout = (l: SceneLayout) => l.scale === 1 && l.x === 0 && l.y === 0;
+/** The same stacks the share player's captions use (globals.css), so the stage previews the chosen typeface. */
+const CAPTION_FONT_STACKS: Record<CaptionFont, string> = {
+  sans: "inherit",
+  serif: 'Georgia, "Times New Roman", serif',
+  rounded: 'ui-rounded, "SF Pro Rounded", "Arial Rounded MT Bold", "Nunito", system-ui, sans-serif',
+  mono: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
+};
+/** A caption style with the default look and font left out, as the server stores it. */
+const withoutDefaults = ({ look, font, ...rest }: CaptionStyle): CaptionStyle => ({ ...rest, ...(look && look !== "classic" ? { look } : {}), ...(font && font !== "sans" ? { font } : {}) });
 /** An emotion the renderer takes, or "" (natural) for anything else. */
 const asEmotion = (v: unknown): VoiceEmotion | "" => ((VOICE_EMOTIONS as readonly unknown[]).includes(v) ? (v as VoiceEmotion) : "");
 const TONES = ["friendly", "professional", "formal", "energetic", "calm"] as const;
@@ -511,6 +520,8 @@ function CreateInner() {
                   data-testid="stage-caption"
                   className={`absolute ${captionStyle.position === "top" ? "top-4" : "bottom-4"} left-1/2 max-w-[85%] -translate-x-1/2 rounded-md px-3 py-1.5 text-center ${captionStyle.size === "small" ? "text-xs" : captionStyle.size === "large" ? "text-lg" : "text-sm"} ${stageLook(captionStyle.look ?? "classic", bgIsDark)}`}
                   data-look={captionStyle.look ?? "classic"}
+                  data-font={captionStyle.font ?? "sans"}
+                  style={{ fontFamily: CAPTION_FONT_STACKS[captionStyle.font ?? "sans"] }}
                 >
                   {stripPauses(active.script).trim().split(/(?<=[.!?])\s+/)[0].slice(0, 90)}
                 </div>
@@ -911,8 +922,18 @@ function CreateInner() {
                         {CAPTION_LOOKS.map((look) => {
                           const on = (captionStyle.look ?? "classic") === look;
                           return (
-                            <button key={look} type="button" aria-pressed={on} onClick={() => setCaptionStyle(look === "classic" ? { position: captionStyle.position, size: captionStyle.size } : { ...captionStyle, look })} className={`flex-1 rounded-lg border px-2 py-1.5 text-xs font-medium capitalize ${on ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}>
+                            <button key={look} type="button" aria-pressed={on} onClick={() => setCaptionStyle(withoutDefaults({ ...captionStyle, look }))} className={`flex-1 rounded-lg border px-2 py-1.5 text-xs font-medium capitalize ${on ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}>
                               {look}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div role="group" aria-label="Caption font" className="flex gap-1 sm:col-span-2">
+                        {CAPTION_FONTS.map((font) => {
+                          const on = (captionStyle.font ?? "sans") === font;
+                          return (
+                            <button key={font} type="button" aria-pressed={on} onClick={() => setCaptionStyle(withoutDefaults({ ...captionStyle, font }))} style={{ fontFamily: CAPTION_FONT_STACKS[font] }} className={`flex-1 rounded-lg border px-2 py-1.5 text-xs font-medium capitalize ${on ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}>
+                              {font}
                             </button>
                           );
                         })}

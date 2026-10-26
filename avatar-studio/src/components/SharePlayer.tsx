@@ -2,7 +2,7 @@
 import { useRef } from "react";
 import { SHARE_PLAYER_ID, shareTrackId } from "@/lib/share-player";
 import { wellFormed } from "@/lib/text";
-import type { CaptionLook, CaptionSize, WatchQuarter } from "@/lib/types";
+import type { CaptionFont, CaptionLook, CaptionSize, WatchQuarter } from "@/lib/types";
 
 /**
  * The share page's player. Reports the furthest point the viewer reaches (a quarter, half,
@@ -16,6 +16,7 @@ export function SharePlayer({
   captions,
   captionSize = "medium",
   captionLook = "classic",
+  captionFont = "sans",
   trackDefault = true,
   autoplay = false,
   loop = false,
@@ -27,6 +28,7 @@ export function SharePlayer({
   captions: boolean;
   captionSize?: CaptionSize;
   captionLook?: CaptionLook;
+  captionFont?: CaptionFont;
   trackDefault?: boolean;
   /** Start muted on load (browsers allow muted autoplay only); used by embeds. */
   autoplay?: boolean;
@@ -53,7 +55,7 @@ export function SharePlayer({
       loop={loop}
       playsInline
       id={SHARE_PLAYER_ID}
-      className={`h-full w-full cue-${captionSize} cue-look-${captionLook}`}
+      className={`h-full w-full cue-${captionSize} cue-look-${captionLook} cue-font-${captionFont}`}
       data-testid="share-player"
       onTimeUpdate={(e) => {
         const el = e.currentTarget;

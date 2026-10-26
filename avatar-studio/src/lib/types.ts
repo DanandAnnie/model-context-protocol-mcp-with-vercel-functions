@@ -185,16 +185,21 @@ export const CAPTION_LOOKS = ["classic", "bold", "yellow", "minimal"] as const;
 export type CaptionPosition = (typeof CAPTION_POSITIONS)[number];
 export type CaptionSize = (typeof CAPTION_SIZES)[number];
 export type CaptionLook = (typeof CAPTION_LOOKS)[number];
+/** Typefaces the share player can set captions in; "sans" is the player's own and the default. */
+export const CAPTION_FONTS = ["sans", "serif", "rounded", "mono"] as const;
+export type CaptionFont = (typeof CAPTION_FONTS)[number];
 /** Where subtitles sit, how big they read, and how they look: a cue setting in the WebVTT file and classes on the player. */
 export interface CaptionStyle {
   position: CaptionPosition;
   size: CaptionSize;
   /** Absent means "classic". */
   look?: CaptionLook;
+  /** Absent means "sans". */
+  font?: CaptionFont;
 }
 export const DEFAULT_CAPTION_STYLE: CaptionStyle = { position: "bottom", size: "medium" };
 export function isDefaultCaptionStyle(style: CaptionStyle): boolean {
-  return style.position === DEFAULT_CAPTION_STYLE.position && style.size === DEFAULT_CAPTION_STYLE.size && (style.look ?? "classic") === "classic";
+  return style.position === DEFAULT_CAPTION_STYLE.position && style.size === DEFAULT_CAPTION_STYLE.size && (style.look ?? "classic") === "classic" && (style.font ?? "sans") === "sans";
 }
 
 export type WatchQuarter = 25 | 50 | 75 | 100;

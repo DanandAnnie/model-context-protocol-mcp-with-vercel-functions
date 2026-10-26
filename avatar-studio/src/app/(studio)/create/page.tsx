@@ -22,6 +22,8 @@ import { readPptx, type PptxSlide } from "@/lib/pptx-notes";
 import { readDocx } from "@/lib/docx-text";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
+import { capSceneText, fitSceneTextEdit, sceneTextLength } from "@/lib/scene-text";
+import { graphemes } from "@/lib/text";
 import { takeAgentDraft, type AgentDraft } from "@/lib/agent-draft";
 import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, framingFor, isDefaultLayout, isPhotoAvatar, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS } from "@/lib/types";
 
@@ -114,14 +116,6 @@ const newScene = (script = "", background: Background = DEFAULT_BG, presenter: P
   ...(presenter.speed && !presenter.audioId ? { speed: presenter.speed } : {}),
   ...(restoredOverlay(presenter.overlay) ? { overlay: restoredOverlay(presenter.overlay) } : {}),
 });
-/**
- * On-screen text within its limit, counted as stored: whole characters (an emoji is one) once the spaces are collapsed.
- * Text past the limit is cut there; text within it is kept as typed.
- */
-function capSceneText(raw: string): string {
-  const collapsed = Array.from(raw.replace(/\s+/g, " ").trim());
-  return collapsed.length <= MAX_SCENE_TEXT ? raw : collapsed.slice(0, MAX_SCENE_TEXT).join("");
-}
 /** On-screen text from a draft, a copy, or a template: anything this build does not offer is dropped, and blank text is none. */
 function restoredOverlay(o: SceneText | undefined): SceneText | undefined {
   if (!o || typeof o.text !== "string" || !o.text.trim()) return undefined;
@@ -553,8 +547,8 @@ function CreateInner() {
   const [findWhole, setFindWhole] = useState(false);
   // The last Replace all: what it said and the scripts before and after, so it can be undone while nothing else changed.
   const [findDone, setFindDone] = useState<{ note: string; before: string[]; after: string[] } | null>(null);
-  /** Why the last Replace all changed nothing (the result would not fit), until the search changes. */
-  const [findIssue, setFindIssue] = useState<string | null>(null);
+  /** Why the last Replace all changed nothing (the result would not fit), while the search and the scripts are unchanged. */
+  const [findIssue, setFindIssue] = useState<{ note: string; scripts: string } | null>(null);
   const findButton = useRef<HTMLButtonElement>(null);
   const findInput = useRef<HTMLInputElement>(null);
   const improveButton = useRef<HTMLButtonElement>(null);
@@ -1175,6 +1169,7 @@ function CreateInner() {
                   onClick={() => {
                     setFindOpen((v) => !v);
                     setFindDone(null);
+                    setFindIssue(null);
                     requestAnimationFrame(() => findInput.current?.focus());
                   }}
                 >
@@ -1256,9 +1251,11 @@ function CreateInner() {
                 matchCase={findCase}
                 wholeWord={findWhole}
                 // The note (and Undo) stand only while the scripts are as the replacement left them.
-                done={findDone && findDone.after.join("\u0000") === scenes.map((sc) => sc.script).join("\u0000") ? findDone.note : findIssue}
+                // A refusal is said first; either note stands only while the scripts are as it found them.
+                note={(findIssue && findIssue.scripts === scenes.map((sc) => sc.script).join("\u0000") ? findIssue.note : null) ?? (findDone && findDone.after.join("\u0000") === scenes.map((sc) => sc.script).join("\u0000") ? findDone.note : null)}
+                undoable={!!findDone && findDone.after.join("\u0000") === scenes.map((sc) => sc.script).join("\u0000")}
                 skipped={[
-                  scenes.some((sc) => sc.audioId) ? "what recorded clips say" : "",
+                  scenes.some((sc) => sc.audioId) ? "recorded clips' transcripts" : "",
                   scenes.some((sc) => sc.overlay?.text.trim()) ? "on-screen text" : "",
                 ].filter(Boolean)}
                 busy={assistBusy}
@@ -1284,9 +1281,11 @@ function CreateInner() {
                   if (!count) return;
                   const after = before.map((t, i) => (findable[i] ? scripts[i] : t));
                   // Refused rather than made: a video holds MAX_SCRIPT_CHARS across its scenes, and Generate would then be blocked.
-                  const length = after.map((t) => t.trim()).join("\n\n").length;
-                  if (length > MAX_SCRIPT_CHARS) {
-                    setFindIssue(`Not replaced: the script would be ${length} of ${MAX_SCRIPT_CHARS} characters`);
+                  // A replacement that shortens a script already over the limit is still made.
+                  const measure = (list: string[]) => list.map((t) => t.trim()).join("\n\n").length;
+                  const length = measure(after);
+                  if (length > MAX_SCRIPT_CHARS && length > measure(before)) {
+                    setFindIssue({ note: `Not replaced: the script would be ${length} of ${MAX_SCRIPT_CHARS} characters`, scripts: before.join("\u0000") });
                     return;
                   }
                   setScenes((prev) => prev.map((sc, i) => (after[i] === sc.script ? sc : { ...sc, script: after[i] })));
@@ -1295,6 +1294,7 @@ function CreateInner() {
                 }}
                 onClose={() => {
                   setFindOpen(false);
+                  setFindIssue(null);
                   findButton.current?.focus();
                 }}
               />
@@ -1660,7 +1660,8 @@ function FindReplace({
   replacement,
   matchCase,
   wholeWord,
-  done,
+  note,
+  undoable,
   skipped,
   busy,
   onChange,
@@ -1674,8 +1675,10 @@ function FindReplace({
   replacement: string;
   matchCase: boolean;
   wholeWord: boolean;
-  /** What the last Replace all did, while it can still be undone. */
-  done: string | null;
+  /** What the last Replace all did or why it did nothing, while the scripts are as it left them. */
+  note: string | null;
+  /** Whether the last Replace all can still be undone. */
+  undoable: boolean;
   /** What the editor holds that is not searched, named for the note under the fields. */
   skipped: string[];
   /** An Improve request is rewriting a scene; replacing now would be overwritten by its answer. */
@@ -1688,7 +1691,7 @@ function FindReplace({
   const counts = countMatches(scripts, find, { matchCase, wholeWord });
   const total = counts.reduce((a, b) => a + b, 0);
   const inScenes = counts.filter(Boolean).length;
-  const status = done ?? (busy ? "Waiting for Improve to finish" : !find ? "" : total ? `${total} ${total === 1 ? "match" : "matches"}${scripts.length > 1 ? ` in ${inScenes} ${inScenes === 1 ? "scene" : "scenes"}` : ""}` : "No matches");
+  const status = note ?? (busy ? "Waiting for Improve to finish" : !find ? "" : total ? `${total} ${total === 1 ? "match" : "matches"}${scripts.length > 1 ? ` in ${inScenes} ${inScenes === 1 ? "scene" : "scenes"}` : ""}` : "No matches");
   return (
     <div
       id="find-replace"
@@ -1706,6 +1709,7 @@ function FindReplace({
         <input
           ref={inputRef}
           aria-label="Find"
+          aria-describedby={skipped.length ? "find-skipped" : undefined}
           placeholder="Find in every scene's script"
           value={find}
           onChange={(e) => onChange({ find: e.target.value })}
@@ -1745,7 +1749,7 @@ function FindReplace({
         <span role="status" className="min-w-0 flex-1 text-slate-500" data-testid="find-status">
           {status}
         </span>
-        {done && (
+        {undoable && (
           <Button variant="secondary" className="px-3 py-1.5" onClick={onUndo}>
             Undo
           </Button>
@@ -1757,7 +1761,11 @@ function FindReplace({
           <X className="h-4 w-4" />
         </button>
       </div>
-      {skipped.length > 0 && <p className="text-xs text-slate-500">Searches what the presenter says; {skipped.join(" and ")} {skipped.length > 1 ? "are" : "is"} left as typed.</p>}
+      {skipped.length > 0 && (
+        <p id="find-skipped" className="text-xs text-slate-500">
+          Searches the typed scripts; {skipped.join(" and ")} {skipped.length > 1 ? "are" : "is"} not changed.
+        </p>
+      )}
     </div>
   );
 }
@@ -1785,8 +1793,17 @@ function SceneTextFields({ overlay, aspect, captionsAt, scene, disabled, onChang
         disabled={disabled}
         placeholder="Shown over the scene for its whole length"
         onChange={(e) => {
-          // Pasted text past the limit is cut there rather than refused.
-          set({ text: capSceneText(e.target.value) });
+          // A composition (an input method building a character) is left alone until it ends.
+          if ((e.nativeEvent as InputEvent).isComposing) return set({ text: e.target.value });
+          const el = e.currentTarget;
+          const fitted = fitSceneTextEdit(text, e.target.value);
+          if (!fitted) return set({ text: e.target.value });
+          set({ text: fitted.text });
+          requestAnimationFrame(() => el.setSelectionRange(fitted.caret, fitted.caret));
+        }}
+        onCompositionEnd={(e) => {
+          const el = e.currentTarget;
+          if (sceneTextLength(el.value) > MAX_SCENE_TEXT) set({ text: capSceneText(el.value) });
         }}
       />
       {text.trim() && (
@@ -1809,7 +1826,7 @@ function SceneTextFields({ overlay, aspect, captionsAt, scene, disabled, onChang
       )}
       {shown && (
         <div id={`${id}-notes`} className="space-y-1 text-xs">
-          <p className="text-slate-400">{Array.from(shown).length}/{MAX_SCENE_TEXT} characters, shown on one line</p>
+          <p className="text-slate-400">{graphemes(shown).length}/{MAX_SCENE_TEXT} characters, shown on one line</p>
           {!sceneTextFits({ ...overlay, text: shown }, aspect) && (
             <p role="alert" className="font-medium text-amber-700">Too long for one line across a {aspect} frame at this size: shorten it or choose a smaller size, or it runs off the edges.</p>
           )}

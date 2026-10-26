@@ -1,6 +1,7 @@
 // Field schemas shared by the video, template, batch, and brand kit services. A leaf module: it
 // imports no service, so any service may import it without creating a cycle.
 import { z } from "zod";
+import { graphemes } from "../text";
 import { BACKGROUND_FITS, CAPTION_FONTS, CAPTION_POSITIONS, CAPTION_LOOKS, CAPTION_SIZES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SIZES, VOICE_EMOTIONS, backdropIdOf } from "../types";
 
 export const backgroundSchema = z
@@ -30,10 +31,11 @@ export const sceneTextSchema = z
     // Measured once its spaces are collapsed, as it is stored and shown.
     text: z
       .string()
-      .max(5000)
+      // Room for the spaces the editor keeps as typed; the limit is checked on what is stored.
+      .max(20_000)
       .transform((t) => t.replace(/\s+/g, " ").trim())
-      // Whole characters, as the editor counts them, so an emoji is one.
-      .refine((t) => Array.from(t).length <= MAX_SCENE_TEXT, `On-screen text must be ${MAX_SCENE_TEXT} characters or fewer`),
+      // The characters a reader sees, as the editor counts them: a flag or an emoji with a skin tone is one.
+      .refine((t) => graphemes(t).length <= MAX_SCENE_TEXT, `On-screen text must be ${MAX_SCENE_TEXT} characters or fewer`),
     position: z.enum(SCENE_TEXT_POSITIONS).optional(),
     size: z.enum(SCENE_TEXT_SIZES).optional(),
     color: z.string().regex(/^#[0-9a-fA-F]{6}$/, "A text colour must be a hex colour such as #ffffff").optional(),

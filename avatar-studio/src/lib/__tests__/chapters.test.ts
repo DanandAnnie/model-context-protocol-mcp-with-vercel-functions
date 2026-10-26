@@ -89,6 +89,30 @@ describe("chapters", () => {
     assert.deepEqual(fixed.map((c) => c.title), ["12 Maple Street", "The kitchen was remodeled last spring.", "Take a look", "Call Dana today to book a showing."]);
     const removed = videoChapters({ ...withPause, captionCues: auto.filter((_, i) => i !== 1) });
     assert.deepEqual(removed.map((c) => [c.startMs, c.title]), plain.map((c, i) => [c.startMs, i === 1 ? "The kitchen was redone last spring." : c.title]));
+    // Captions saved as they were, or with every time shifted, keep each scene's own lines: never the line that ends
+    // the scene before, nor the first line of the scene after.
+    const tour3 = video(
+      [
+        { script: "Welcome to twelve Maple Street, with a big garden out back. Come in.", background: bg },
+        { script: "The kitchen was redone last spring. It has an island.", background: bg },
+        { script: "Call Dana today. She is waiting for you.", background: bg },
+      ],
+      { durationSec: 20 },
+    );
+    const base = videoChapters(tour3);
+    const same = captionCuesFor(tour3).cues;
+    assert.deepEqual(videoChapters({ ...tour3, captionCues: same }), base, "saved unchanged");
+    for (const shift of [-2000, 3000]) {
+      const moved = same.map((c, i) => (i === 0 ? c : { ...c, startMs: Math.max(0, c.startMs + shift), endMs: Math.max(1, c.endMs + shift) }));
+      const titles = videoChapters({ ...tour3, captionCues: moved }).map((c) => c.title);
+      assert.deepEqual(titles, base.map((c) => c.title), `shifted by ${shift} ms`);
+    }
+    // With a scene's lines deleted, the others go to the scene their middle falls in; that scene keeps its estimate.
+    const firstOfScene2 = same.findIndex((c) => c.text.startsWith("The kitchen"));
+    const without2 = videoChapters({ ...tour3, captionCues: same.filter((c) => !/kitchen|island/.test(c.text)) });
+    assert.deepEqual(without2.map((c) => c.title), base.map((c) => c.title));
+    assert.equal(without2[1].startMs, sceneBoundsMs(tour3)![1].startMs);
+    assert.ok(firstOfScene2 > 0);
     // A silent scene without on-screen text is no chapter, unless it opens the video.
     const opens = video([{ script: "[pause 2s]", background: bg }, { script: "Hello there, and welcome.", background: bg }], { durationSec: 6 });
     assert.deepEqual(videoChapters(opens).map((c) => c.title), ["Opening", "Hello there, and welcome."]);

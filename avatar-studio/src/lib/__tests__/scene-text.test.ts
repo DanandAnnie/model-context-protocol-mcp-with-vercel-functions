@@ -70,3 +70,25 @@ describe("scene text", () => {
     assert.equal("text" in sent!.video_inputs[2], false, "a scene without text sends none");
   });
 });
+
+describe("on-screen text limit in the editor", () => {
+  it("counts what a reader sees and cuts only what was typed or pasted", async () => {
+    const { capSceneText, fitSceneTextEdit, sceneTextLength } = await import("../scene-text");
+    assert.equal(sceneTextLength("🇺🇸 👍🏽 👨‍👩‍👧"), 5, "a flag, a skin tone, and a family are one each");
+    assert.equal(sceneTextLength("  a   b  "), 3);
+    const full = `${"x".repeat(119)}Z`;
+    assert.equal(fitSceneTextEdit(full.slice(0, 119), full), null, "within the limit nothing is cut");
+    // Typed in the middle of a full field: the keystroke is refused, the text around it kept.
+    assert.deepEqual(fitSceneTextEdit(full, `${"x".repeat(60)}Q${"x".repeat(59)}Z`), { text: full, caret: 60 });
+    // Pasted in the middle: only what fits of the paste goes in.
+    const half = `${"a".repeat(50)}${"b".repeat(50)}`;
+    assert.deepEqual(fitSceneTextEdit(half, `${"a".repeat(50)}${"P".repeat(40)}${"b".repeat(50)}`), { text: `${"a".repeat(50)}${"P".repeat(20)}${"b".repeat(50)}`, caret: 70 });
+    // An emoji pasted at the limit is never split.
+    const nearly = "y".repeat(119);
+    assert.deepEqual(fitSceneTextEdit(nearly, `${nearly}🇺🇸🇺🇸`), { text: `${nearly}🇺🇸`, caret: 119 + "🇺🇸".length });
+    assert.equal(capSceneText(`${"y".repeat(119)}🇺🇸 more`), `${"y".repeat(119)}🇺🇸`);
+    // The server counts the same way, and spaces beyond the limit before collapsing are no problem.
+    assert.deepEqual(sceneTextSchema.parse({ text: "🇺🇸".repeat(120) }), { text: "🇺🇸".repeat(120) });
+    assert.deepEqual(sceneTextSchema.parse({ text: `Open${" ".repeat(6000)}house` }), { text: "Open house" });
+  });
+});

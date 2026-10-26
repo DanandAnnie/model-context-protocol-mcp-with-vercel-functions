@@ -1,9 +1,9 @@
 // Scene timing and chapters. How long each scene of a video runs (its words at its pace, its pauses, or its clip),
 // shared by the captions, which are timed within each scene's share of the running time, and by the chapters that
 // let a viewer jump to a scene. Pure: no store or provider, so the browser can use it too.
-import { spokenWords } from "./captions";
+import { buildCues, spokenWords } from "./captions";
 import { pauseSeconds, stripPauses } from "./pauses";
-import { formatTimestamp } from "./text";
+import { formatTimestamp, graphemes } from "./text";
 import type { Scene, Video } from "./types";
 
 export type TimedScene = Pick<Scene, "script" | "speed" | "audioSeconds"> & Partial<Pick<Scene, "overlay" | "audioId">>;
@@ -57,9 +57,9 @@ export function sceneBoundsMs(video: Timed): Array<{ startMs: number; endMs: num
 /** Longest chapter title, in characters; longer ones end at a word with an ellipsis. */
 const MAX_TITLE = 60;
 
-/** A title of at most MAX_TITLE characters (whole characters, so an emoji is never split), cut back to a word when it must be cut. */
+/** A title of at most MAX_TITLE characters (as a reader counts them, so an emoji or a flag is never split), cut back to a word when it must be cut. */
 function shortTitle(text: string): string {
-  const chars = Array.from(text);
+  const chars = graphemes(text);
   if (chars.length <= MAX_TITLE) return text;
   // A space right after the limit means the words that fit end there.
   const cut = chars.slice(0, MAX_TITLE).join("");
@@ -75,39 +75,57 @@ function chapterTitle(scene: TimedScene, index: number, said: string): string {
   return shortTitle(text.replace(/[\s,;:–-]+$/, "") || text);
 }
 
-/** How far before its estimated start a scene's first corrected caption line may sit and still count as the scene's. */
-const EARLY_MS = 1500;
+type Cue = { startMs: number; endMs: number; text: string };
+
+/**
+ * Corrected caption lines shared out among the scenes, each line to exactly one scene. With as many lines as the
+ * captions timed from the scripts would have, an editor changed words or times but kept the lines, so they are the
+ * scenes' in order, however far their times moved. Otherwise (lines added or removed) each goes to the scene its middle
+ * falls in.
+ */
+function cuesByScene(video: Timed, bounds: Array<{ startMs: number; endMs: number }>, cues: Cue[]): Cue[][] {
+  const counts = video.scenes!.map((sc, i) => buildCues(sc.script, (bounds[i].endMs - bounds[i].startMs) / 1000, 0.9).length);
+  const out: Cue[][] = bounds.map(() => []);
+  if (counts.reduce((a, b) => a + b, 0) === cues.length) {
+    let at = 0;
+    counts.forEach((n, i) => (out[i] = cues.slice(at, (at += n))));
+    return out;
+  }
+  for (const cue of cues) {
+    const mid = (cue.startMs + cue.endMs) / 2;
+    const i = bounds.findIndex((b) => mid < b.endMs);
+    out[i < 0 ? bounds.length - 1 : i].push(cue);
+  }
+  return out;
+}
 
 /**
  * One chapter per scene of a video of two scenes or more, starting where its scene does; none otherwise.
  *
- * - When an editor corrected the captions, a scene's chapter starts at its first corrected line (one starting within
- *   the scene's share of the running time, or just before it) and, without on-screen text, takes its lines' words, so a
- *   jump lands where the transcript says and a word removed from the captions is not shown again. A scene with no
- *   corrected line of its own keeps its estimated start and its script's words.
+ * - When an editor corrected the captions, a scene's chapter starts at its first corrected line (see `cuesByScene`)
+ *   and, without on-screen text, takes its lines' words, so a jump lands where the transcript says and a word removed
+ *   from the captions is not shown again. A scene left with no line keeps its estimated start and its script's words.
  * - A silent scene with no on-screen text is no chapter of its own (it would say only "Pause"), unless it opens the
  *   video, whose first chapter is always at 0:00.
  * - Scenes that would start within the same second as the chapter before are left out, so no two chapters share a time.
  */
-export function videoChapters(video: Timed & { captionCues?: Array<{ startMs: number; text: string }> }): Chapter[] {
+export function videoChapters(video: Timed & { captionCues?: Cue[] }): Chapter[] {
   const bounds = sceneBoundsMs(video);
   if (!bounds) return [];
-  const cues = video.captionCues?.length ? video.captionCues : null;
+  const own = video.captionCues?.length ? cuesByScene(video, bounds, video.captionCues) : null;
   const chapters: Chapter[] = [];
   video.scenes!.forEach((sc, i) => {
     const silent = !sc.audioId && !stripPauses(sc.script).trim();
-    const shown = sc.overlay?.text.trim();
-    if (i > 0 && silent && !shown) return;
+    if (i > 0 && silent && !sc.overlay?.text.trim()) return;
     let startMs = i === 0 ? 0 : bounds[i].startMs;
     let said = stripPauses(sc.script);
-    if (cues && !silent) {
-      const after = chapters.at(-1)?.startMs ?? -1;
-      const lo = i === 0 ? 0 : bounds[i].startMs - EARLY_MS;
-      const own = cues.filter((c) => c.startMs >= lo && c.startMs < bounds[i].endMs && c.startMs > after);
-      if (own.length) {
-        if (i > 0) startMs = own[0].startMs;
-        said = own.map((c) => c.text).join(" ");
-      }
+    const lines = own?.[i] ?? [];
+    if (own && lines.length) {
+      if (i > 0) startMs = lines[0].startMs;
+      said = lines.map((c) => c.text).join(" ");
+    } else if (own && sc.audioId) {
+      // A clip whose lines were all removed has no words left to show.
+      said = "";
     }
     const previous = chapters.at(-1);
     if (previous && Math.floor(startMs / 1000) <= Math.floor(previous.startMs / 1000)) return;

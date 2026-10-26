@@ -1,3 +1,4 @@
+import { graphemes } from "./text";
 // Shared domain types for Avatar Studio.
 
 export type AspectRatio = "16:9" | "9:16" | "1:1";
@@ -152,7 +153,7 @@ const TEXT_EM_PER_CHAR = 0.62;
 export function sceneTextFits(overlay: SceneText, aspect: AspectRatio): boolean {
   const { width, height } = ASPECT_DIMENSIONS[aspect];
   const fontPx = Math.min(width, height) * SCENE_TEXT_SCALE[overlay.size ?? "medium"];
-  return Array.from(overlay.text.replace(/\s+/g, " ").trim()).length * TEXT_EM_PER_CHAR * fontPx <= width * 0.9;
+  return graphemes(overlay.text.replace(/\s+/g, " ").trim()).length * TEXT_EM_PER_CHAR * fontPx <= width * 0.9;
 }
 /** Longest on-screen text a scene shows: a title or a lower third, not a paragraph. */
 export const MAX_SCENE_TEXT = 120;

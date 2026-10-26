@@ -9,7 +9,7 @@ import { formatTimestamp } from "@/lib/text";
  * A multi-scene video's chapters, one per scene, as the share page lists them, with a copy in the form a video
  * description takes ("0:00 Welcome"), so a video posted to YouTube keeps them.
  */
-export function VideoChapters({ video }: { video: Timed & { status?: string; captionCues?: Array<{ startMs: number; text: string }> } }) {
+export function VideoChapters({ video }: { video: Timed & { status?: string; captionCues?: Array<{ startMs: number; endMs: number; text: string }> } }) {
   const [copied, setCopied] = useState(false);
   const chapters = videoChapters(video);
   if (chapters.length < 2) return null;

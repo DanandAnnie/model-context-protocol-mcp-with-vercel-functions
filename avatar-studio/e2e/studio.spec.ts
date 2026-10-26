@@ -2497,10 +2497,15 @@ test("find and replace changes every scene's script, pause markers left whole", 
   await page.getByRole("button", { name: "Replace all" }).click();
   await expect(page.getByTestId("find-status")).toHaveText(/^Not replaced: the script would be \d+ of 5000 characters$/);
   await expect(box).toHaveValue(long);
+  // A refusal has nothing to undo, and the note goes once the scripts change.
+  await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeHidden();
+  await box.fill(Array(399).fill("Oak").join(" "));
+  await expect(page.getByTestId("find-status")).toHaveText("400 matches in 2 scenes");
   // On-screen text is not searched, and the panel says so.
-  await expect(page.getByText("left as typed")).toHaveCount(0);
+  await expect(page.getByText("is not changed")).toHaveCount(0);
   await page.getByLabel("On-screen text for scene 1").fill("Oak Lane open house");
-  await expect(page.getByText("Searches what the presenter says; on-screen text is left as typed.")).toBeVisible();
+  await expect(page.getByText("Searches the typed scripts; on-screen text is not changed.")).toBeVisible();
+  await expect(page.getByLabel("Find", { exact: true })).toHaveAttribute("aria-describedby", "find-skipped");
   await page.getByLabel("Find", { exact: true }).focus();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("group", { name: "Find and replace" })).toBeHidden();
@@ -2586,6 +2591,15 @@ test("on-screen text survives a reload, a voice that is gone, and warns when it 
   await page.getByLabel("Text size").selectOption("small");
   await page.getByLabel("On-screen text").fill("Dana Lee, Listing agent");
   await expect(page.getByText("Too long for one line")).toHaveCount(0);
+  // A full field takes no more: a key typed in the middle changes nothing, and the end is not lost.
+  const field = page.getByLabel("On-screen text");
+  const full = `${"x".repeat(119)}Z`;
+  await field.fill(full);
+  await field.evaluate((el: HTMLInputElement) => el.setSelectionRange(60, 60));
+  await page.keyboard.type("Q");
+  await expect(field).toHaveValue(full);
+  await expect(page.getByText("120/120 characters, shown on one line")).toBeVisible();
+  await expect.poll(() => field.evaluate((el: HTMLInputElement) => el.selectionStart)).toBe(60);
 });
 
 test("a multi-scene video has chapters: the share page jumps to a scene and the video page copies them for YouTube", async ({ page, context }) => {

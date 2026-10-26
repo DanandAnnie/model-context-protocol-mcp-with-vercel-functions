@@ -13,8 +13,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     const text = await req.text();
     const input = text.trim() ? proofreadLinesSchema.parse(JSON.parse(text)) : undefined;
     const translation = await dubProofread(id, input, owner);
-    // The provider refused: the lines stay open and the job says why.
-    if (translation.proofreadStage === "ready") return json({ translation, error: translation.error }, { status: 502 });
+    // The provider refused (the lines are open again) or did not answer (they stay claimed for now): the job says why.
+    if (translation.proofreadStage) return json({ translation, error: translation.error }, { status: 502 });
     return json({ translation });
   } catch (err) {
     return errorResponse(err instanceof SyntaxError ? new ValidationError("Request body must be JSON") : err);

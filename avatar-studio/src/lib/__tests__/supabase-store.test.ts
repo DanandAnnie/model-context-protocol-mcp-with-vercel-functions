@@ -61,6 +61,9 @@ describe("SupabaseStore", () => {
     assert.equal(call.query.kind, "eq.translation");
     assert.equal(call.query.id, "eq.tr_1");
     assert.equal(call.query["data->>updatedAt"], "eq.a");
+    // Without asking for the row back PostgREST answers 204 whether or not it matched, and every write would read as lost.
+    assert.equal(call.query.select, "id");
+    assert.match(call.headers.prefer ?? "", /return=representation/);
     assert.deepEqual((call.body as { data: unknown }).data, { id: "tr_1", updatedAt: "b" });
     respond = () => [];
     assert.equal(await store.putIf("translation", { id: "tr_1", updatedAt: "c" }, "updatedAt", "a"), false, "no row matched: someone wrote first");

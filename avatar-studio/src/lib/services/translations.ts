@@ -65,7 +65,7 @@ function proofreadSrtUrl(id: string, token: string, provider: string): string {
 function assertProofreadReachable(provider: string) {
   const url = config.publicAppUrl;
   if (provider === "mock") return;
-  if (!url || !/^https:\/\//i.test(url) || /^https:\/\/(localhost|127\.|\[::1\])/i.test(url)) {
+  if (!url || !/^https:\/\//i.test(url) || /^https:\/\/(localhost|127\.[\d.]+|\[::1\])(:\d+)?(\/|$)/i.test(url)) {
     throw new ValidationError("Proofread dubs need APP_URL set to this app's public https address, so the dubbing provider can read the corrected lines");
   }
 }
@@ -176,7 +176,13 @@ const due = (t: Translation) =>
   (t.proofreadStage === "preparing" && !!t.providerProofreadId) ||
   (!!t.providerJobId && (running(t) || (t.status === "completed" && Date.now() - Date.parse(t.updatedAt) > LINK_TTL_MS && linksExpire(t))));
 
-/** A proofread whose lines are being translated: stores them once they are ready, or the reason it failed. */
+/** How long lines may take to be translated before the proofread is given up (it is asked about until then). */
+const PROOFREAD_GIVE_UP_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * A proofread whose lines are being translated: stores them once they are ready, or the reason it failed. The write
+ * is conditional on the job being as it was read, so a slow poll never overwrites corrections or a dub's claim.
+ */
 async function refreshProofread(item: Translation): Promise<Translation> {
   const provider = getTranslateProviderByName(item.provider);
   if (!provider.getProofread) return item;
@@ -185,20 +191,25 @@ async function refreshProofread(item: Translation): Promise<Translation> {
     result = await provider.getProofread(item.providerProofreadId!, item);
   } catch (err) {
     console.error(`proofread refresh failed for ${item.id}:`, err);
-    return item;
+    result = { status: "preparing" };
   }
-  if (result.status === "preparing") return item;
-  const current = (await getStore().get<Translation>("translation", item.id)) ?? item;
-  if (current.updatedAt !== item.updatedAt || current.proofreadStage !== "preparing") return current;
+  if (result.status === "preparing") {
+    if (Date.now() - Date.parse(item.createdAt) < PROOFREAD_GIVE_UP_MS) return item;
+    result = { status: "failed", error: "The lines were still not ready to proofread after a day" };
+  }
   if (result.status === "ready" && result.cues.length > MAX_CAPTION_CUES) {
     result = { status: "failed", error: `The video has more than ${MAX_CAPTION_CUES} lines, too many to proofread here` };
   }
+  let next: Translation;
   if (result.status === "failed") {
-    const { proofreadStage: _stage, ...rest } = current;
-    return getStore().put("translation", { ...rest, status: "failed", error: result.error, updatedAt: nowIso() });
+    const { proofreadStage: _stage, ...rest } = item;
+    next = { ...rest, status: "failed", error: result.error, updatedAt: after(item.updatedAt) };
+  } else {
+    const cues: CaptionCue[] = result.cues.map(({ startMs, endMs, text }) => ({ startMs, endMs, text: text.slice(0, MAX_CAPTION_CUE_CHARS) }));
+    next = { ...item, proofreadStage: "ready", proofreadCues: cues, updatedAt: after(item.updatedAt) };
   }
-  const cues: CaptionCue[] = result.cues.map(({ startMs, endMs, text }) => ({ startMs, endMs, text: text.slice(0, MAX_CAPTION_CUE_CHARS) }));
-  return getStore().put("translation", { ...current, proofreadStage: "ready", proofreadCues: cues, updatedAt: nowIso() });
+  if (await getStore().putIf("translation", next, "updatedAt", item.updatedAt)) return next;
+  return (await getStore().get<Translation>("translation", item.id)) ?? item;
 }
 
 /**
@@ -312,13 +323,40 @@ export async function dubProofread(id: string, input: z.infer<typeof proofreadLi
     ({ providerJobId } = await provider.dubProofread(item.providerProofreadId, srtUrl, cuesToSrt(cues)));
   } catch (err) {
     console.error(`proofread dub failed for ${id}:`, err);
-    const error = `The dub could not be started: ${err instanceof Error ? err.message : String(err)}`;
-    return shown(await getStore().put("translation", { ...claimed, proofreadStage: "ready", error, updatedAt: nowIso() }));
+    const reason = err instanceof Error ? err.message : String(err);
+    if (unanswered(err)) {
+      // The provider may have started the dub without saying so: the lines stay claimed, and open again (with a
+      // warning to check the provider first) only once a start would have shown up.
+      const error = `The dubbing provider did not answer (${reason}), so the dub may have started. If it does not appear, the lines open again in two minutes.`;
+      return shown(await getStore().put("translation", { ...claimed, error, updatedAt: after(claimed.updatedAt) }));
+    }
+    return shown(await getStore().put("translation", { ...claimed, proofreadStage: "ready", error: `The dub could not be started: ${reason}`, updatedAt: after(claimed.updatedAt) }));
   }
   const { proofreadStage: _stage, error: _error, ...rest } = claimed;
   const now = nowIso();
-  // The provider is dubbing now: a failure to record that is an error, but never reopens the lines for a second dub.
-  return shown(await getStore().put("translation", { ...rest, providerJobId, status: "processing", dubStartedAt: now, updatedAt: now }));
+  const started: Translation = { ...rest, providerJobId, status: "processing", dubStartedAt: now, updatedAt: after(claimed.updatedAt) };
+  // The provider is dubbing now. Recording that is retried; if it still fails the job id is logged, and the lines
+  // (still claimed) open again after two minutes with the warning to check the provider first.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return shown(await getStore().put("translation", started));
+    } catch (err) {
+      if (attempt >= 3) {
+        console.error(`proofread dub ${providerJobId} started for ${id} but could not be recorded:`, err);
+        throw new Error(`The dub started (provider job ${providerJobId}) but could not be recorded; it is in your provider account`);
+      }
+    }
+  }
+}
+
+/**
+ * True for a failure that does not say whether the provider acted: no answer in time, the connection dropped, or a
+ * server error. A refusal (a 4xx, or an error in the provider's answer) is definite.
+ */
+function unanswered(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  if (err.name === "TimeoutError" || err.name === "AbortError" || err instanceof TypeError) return true;
+  return / failed: 5\d\d\b/.test(err.message);
 }
 
 /** The proofread lines as an SRT file, for the provider to read; only with the job's secret. */

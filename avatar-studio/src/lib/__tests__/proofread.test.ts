@@ -52,6 +52,14 @@ describe("proofread dubs", () => {
     const saved = await saveProofreadLines(job.id, proofreadLinesSchema.parse({ lines: ["Hola y bienvenidos a Avatar Studio.", "En un minuto te enseño cómo se hace un video.", "¡Empecemos!"] }), "u-pr");
     assert.equal(saved.proofreadCues?.[1].text, "En un minuto te enseño cómo se hace un video.");
     assert.equal(saved.proofreadCues?.[1].startMs, ready.proofreadCues?.[1].startMs, "timing stays as translated");
+    // Two saves of the same version at once: one wins, the other is told to reload.
+    const version = saved.updatedAt;
+    const both = await Promise.allSettled([
+      saveProofreadLines(job.id, proofreadLinesSchema.parse({ lines: ["a", "b", "c"], basedOn: version }), "u-pr"),
+      saveProofreadLines(job.id, proofreadLinesSchema.parse({ lines: ["d", "e", "f"], basedOn: version }), "u-pr"),
+    ]);
+    assert.deepEqual(both.map((r) => r.status).sort(), ["fulfilled", "rejected"]);
+    await saveProofreadLines(job.id, proofreadLinesSchema.parse({ lines: ["Hola y bienvenidos a Avatar Studio.", "En un minuto te enseño cómo se hace un video.", "¡Empecemos!"] }), "u-pr");
     // Someone who opened the lines before that save cannot overwrite it.
     await assert.rejects(dubProofread(job.id, proofreadLinesSchema.parse({ lines: ["x", "y", "z"], basedOn: ready.updatedAt }), "u-pr"), /changed since you opened them/);
 
@@ -148,6 +156,18 @@ describe("proofread dubs", () => {
         { startMs: 2500, endMs: 4000, text: "Adiós" },
       ]);
 
+      // HeyGen does not answer in time: the dub may have started, so the lines stay claimed (and say why) until a start would show.
+      respond = (m) => {
+        if (m === "PUT") return ok({});
+        throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+      };
+      const unanswered = await dubProofread("tr_hg", undefined, "u-hg");
+      assert.equal(unanswered.proofreadStage, "dubbing");
+      assert.match(unanswered.error ?? "", /did not answer.*may have started/);
+      await assert.rejects(dubProofread("tr_hg", undefined, "u-hg"), ConflictError);
+      await getStore().put("translation", { ...(await stored("tr_hg")), updatedAt: new Date(Date.now() - 5 * 60_000).toISOString() });
+      assert.equal((await getTranslation("tr_hg", "u-hg")).proofreadStage, "ready", "two minutes on, the lines open again");
+
       // HeyGen refuses: the job says why and the lines can be dubbed again.
       respond = (m) => (m === "PUT" ? ok({}) : new Response("no credits", { status: 402 }));
       const refused = await dubProofread("tr_hg", proofreadLinesSchema.parse({ lines: ["Hola a todos", "Adiós"] }), "u-hg");
@@ -174,6 +194,19 @@ describe("proofread dubs", () => {
       respond = () => ok({ status: "completed", video_url: "https://files.heygen.ai/pr.mp4" });
       assert.equal((await getTranslation("tr_hg", "u-hg")).videoUrl, "https://files.heygen.ai/pr.mp4");
 
+      // A poll whose answer lands after someone else wrote the job (another poll that already stored and corrected
+      // the lines) leaves that write alone.
+      await getStore().put("translation", { ...job, id: "tr_race", providerProofreadId: "pr_race" });
+      respond = (_m, url) => {
+        if (url.endsWith("/proofreads/pr_race")) {
+          void getStore().put("translation", { ...job, id: "tr_race", providerProofreadId: "pr_race", proofreadStage: "ready", proofreadCues: [{ startMs: 0, endMs: 1000, text: "Corregido" }], updatedAt: new Date(Date.now() + 1000).toISOString() });
+          return ok({ status: "completed" });
+        }
+        return url.endsWith("/srt") ? ok({ srt_url: "https://files.heygen.ai/r.srt" }) : new Response("1\n00:00:00,000 --> 00:00:01,000\nOriginal\n");
+      };
+      assert.equal((await getTranslation("tr_race", "u-hg")).proofreadCues?.[0].text, "Corregido");
+      assert.equal((await stored("tr_race")).proofreadCues?.[0].text, "Corregido");
+
       // A proofread HeyGen could not translate fails the job.
       await getStore().put("translation", { ...job, id: "tr_bad", providerProofreadId: "pr_bad" });
       respond = () => ok({ status: "failed", failure_message: "No speech found" });
@@ -183,9 +216,18 @@ describe("proofread dubs", () => {
       await getStore().put("translation", { ...job, id: "tr_srt5", providerProofreadId: "pr_5" });
       respond = (_m, url) => (url.endsWith("/proofreads/pr_5") ? ok({ status: "completed" }) : url.endsWith("/srt") ? ok({ srt_url: "https://files.heygen.ai/x.srt" }) : new Response("busy", { status: 503 }));
       assert.equal((await getTranslation("tr_srt5", "u-hg")).proofreadStage, "preparing");
-      respond = (_m, url) => (url.endsWith("/proofreads/pr_5") ? ok({ status: "completed" }) : url.endsWith("/srt") ? ok({ srt_url: "https://files.heygen.ai/x.srt" }) : new Response("expired", { status: 403 }));
+      // A 403 right after completion may be a file not written yet, so it is asked about again too.
+      respond = (_m, url) => (url.endsWith("/proofreads/pr_5") ? ok({ status: "completed" }) : url.endsWith("/srt") ? ok({ srt_url: "https://files.heygen.ai/x.srt" }) : new Response("not yet", { status: 403 }));
+      assert.equal((await getTranslation("tr_srt5", "u-hg")).proofreadStage, "preparing");
+      respond = (_m, url) => (url.endsWith("/proofreads/pr_5") ? ok({ status: "completed" }) : url.endsWith("/srt") ? ok({ srt_url: "https://files.heygen.ai/x.srt" }) : new Response("gone", { status: 410 }));
       const unreadable = await getTranslation("tr_srt5", "u-hg");
-      assert.deepEqual([unreadable.status, unreadable.error], ["failed", "HeyGen's translated lines could not be read (403)"]);
+      assert.deepEqual([unreadable.status, unreadable.error], ["failed", "HeyGen's translated lines could not be read (410)"]);
+      // Lines that never become readable are given up after a day instead of being asked about forever.
+      await getStore().put("translation", { ...job, id: "tr_slow", providerProofreadId: "pr_slow", createdAt: new Date(Date.now() - 25 * 3600_000).toISOString() });
+      respond = () => ok({ status: "running" });
+      const slow = await getTranslation("tr_slow", "u-hg");
+      assert.deepEqual([slow.status, slow.proofreadStage], ["failed", undefined]);
+      assert.match(slow.error ?? "", /after a day/);
     } finally {
       globalThis.fetch = realFetch;
       (config as { heygenApiKey?: string }).heygenApiKey = original;

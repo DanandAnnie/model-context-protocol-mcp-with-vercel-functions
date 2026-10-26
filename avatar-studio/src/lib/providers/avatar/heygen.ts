@@ -111,7 +111,8 @@ export class HeyGenAvatarProvider implements AvatarProvider {
    * One studio video (v3 `POST /v3/videos`, `type: "studio"`): a scene per scene of the request, each with its own
    * presenter, voice or clip, speed, and background, composed by HeyGen on one canvas of the video's shape and quality.
    * HeyGen's v3 API places every presenter itself and has no on-screen text element, framing, background fit, or
-   * emotion, so those settings are kept with the video but not sent.
+   * emotion, so those settings are kept with the video but not sent. A scene without the presenter is a whole-frame
+   * `image` or `video` scene of its background, narrated by its voice or clip, or silent.
    */
   async createVideo(req: VideoRequest, avatar: Avatar, voice: Voice | null, cast?: RenderCast) {
     const scenes: Scene[] = req.scenes?.length ? req.scenes : [{ script: req.script, background: req.background }];
@@ -119,9 +120,11 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     const parts = scenes.map((scene) => {
       const sceneAvatar = (scene.avatarId && cast?.avatars[scene.avatarId]) || avatar;
       const sceneVoice = (scene.voiceId && cast?.voices[scene.voiceId]) || voice;
+      const hidden = !!scene.hidePresenter && scene.background.type !== "color";
       return {
         scene,
-        avatarId: this.lookId(sceneAvatar),
+        hidden,
+        avatarId: hidden ? undefined : this.lookId(sceneAvatar),
         clip: scene.audioId ? this.audioAssetId(scene.audioId, cast) : undefined,
         silent: scene.audioId ? 0 : silentSeconds(scene.script),
         voiceId: scene.audioId ? undefined : this.voiceId(sceneVoice, req.voiceId),
@@ -130,7 +133,9 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     });
     // HeyGen's v3 studio has no silence input: a scene of only pauses lip-syncs to an uploaded clip of silence that long.
     const silences = new Map<number, string>();
-    for (const sec of new Set(parts.map((p) => p.silent).filter(Boolean))) {
+    // (A silent picture is simply held for that long.)
+    const needSilence = parts.filter((p) => p.silent && !(p.hidden && p.scene.background.type === "image"));
+    for (const sec of new Set(needSilence.map((p) => p.silent))) {
       silences.set(sec, await this.client.uploadAsset(silentWav(sec), "audio/wav", `silence-${sec}s.wav`));
     }
     const body = {
@@ -142,24 +147,21 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       // own is captioned by the share page's subtitle track instead, so the chosen look is the only one.
       ...(heygenBurnsCaptions(req) ? { caption: { file_format: "srt", style: "default" } } : {}),
       ...(webhookUrl("heygen") ? { callback_url: webhookUrl("heygen") } : {}),
-      scenes: parts.map(({ scene, avatarId, clip, silent, voiceId, background }) => {
+      scenes: parts.map(({ scene, hidden, avatarId, clip, silent, voiceId, background }) => {
         const audio = clip ?? (silent ? silences.get(silent) : undefined);
-        return {
-          type: "avatar_video",
-          input: {
-            type: "avatar",
-            avatar_id: avatarId,
-            // An audio scene lip-syncs to its clip, a silent one to its silence; speed and pitch apply to speech only.
-            ...(audio
-              ? { audio_asset_id: audio }
-              : {
-                  script: withBreakTags(scene.script),
-                  voice_id: voiceId,
-                  voice_settings: { speed: scene.speed ?? req.speed ?? 1, ...(req.pitch ? { pitch: req.pitch } : {}) },
-                }),
-            background,
-          },
-        };
+        // An audio scene lip-syncs to its clip, a silent one to its silence; speed and pitch apply to speech only.
+        const sound = audio
+          ? { audio_asset_id: audio }
+          : { script: withBreakTags(scene.script), voice_id: voiceId, voice_settings: { speed: scene.speed ?? req.speed ?? 1, ...(req.pitch ? { pitch: req.pitch } : {}) } };
+        if (hidden) {
+          const { source } = background as { source: unknown };
+          // A picture is narrated, or held as long as the silence; a video loops muted under the narration, as it
+          // does behind a presenter, for as long as the scene's audio runs.
+          return scene.background.type === "image"
+            ? { type: "image", source, ...(silent && !clip ? { duration: silent } : sound) }
+            : { type: "video", source, playback: { mode: "loop", mute: true }, ...sound };
+        }
+        return { type: "avatar_video", input: { type: "avatar", avatar_id: avatarId, ...sound, background } };
       }),
     };
     const data = await this.client.generateVideo(body);

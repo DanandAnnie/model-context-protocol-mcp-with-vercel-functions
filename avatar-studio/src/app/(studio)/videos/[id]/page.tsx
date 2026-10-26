@@ -865,7 +865,7 @@ export default function VideoDetailPage() {
                     {video.background.type === "color" ? (
                       <span className="inline-flex items-center gap-2"><span className="h-4 w-4 rounded border border-slate-200" style={{ background: video.background.value }} />{video.background.value}</span>
                     ) : (
-                      `${video.background.type === "video" ? "Video" : "Image"}${video.background.fit === "contain" ? `, shown whole${video.provider !== "heygen" ? " (not applied by this renderer)" : ""}` : ""}`
+                      `${video.background.type === "video" ? "Video" : "Image"}${video.background.fit === "contain" ? ", shown whole (preview only)" : ""}`
                     )}
                   </Row>
                 </dl>
@@ -1044,9 +1044,9 @@ export default function VideoDetailPage() {
                           {i + 1}
                         </span>
                         <div className="min-w-0">
-                          {(sc.avatarName || sc.voiceName || sc.audioId || sc.layout || sc.speed || sc.background.fit || sc.overlay || silentSeconds(sc.script) > 0) && (
+                          {(sc.hidePresenter || sc.avatarName || sc.voiceName || sc.audioId || sc.layout || sc.speed || sc.background.fit || sc.overlay || silentSeconds(sc.script) > 0) && (
                             <div className="mb-0.5 text-xs text-slate-500">
-                              {[sc.avatarName, sc.audioId ? `recorded audio${sc.audioName ? `: ${sc.audioName}` : ""}` : silentSeconds(sc.script) ? `silent for ${silentSeconds(sc.script)}s` : sc.voiceName, !sc.audioId && sc.speed ? `${sc.speed.toFixed(2)}x speed${video.provider !== "heygen" && video.provider !== "mock" ? " (not applied by this renderer)" : ""}` : undefined, sc.layout ? `presenter ${[sc.layout.framing === "closeUp" ? "close-up" : sc.layout.framing === "circle" ? "in a circle" : "", sc.layout.scale !== 1 || !sc.layout.framing ? `${Math.round(sc.layout.scale * 100)}%` : "", sc.layout.x || sc.layout.y ? "moved" : ""].filter(Boolean).join(", ")}${video.provider !== "heygen" ? " (not applied by this renderer)" : ""}` : undefined, sc.background.fit === "contain" ? `background shown whole${video.provider !== "heygen" ? " (not applied by this renderer)" : ""}` : undefined, sc.overlay ? `text “${sc.overlay.text}”${video.provider !== "heygen" ? " (not applied by this renderer)" : ""}` : undefined].filter(Boolean).join(" · ")}
+                              {[sc.hidePresenter ? `no presenter: the ${sc.background.type === "video" ? "video" : "picture"} fills the frame` : sc.avatarName, sc.audioId ? `recorded audio${sc.audioName ? `: ${sc.audioName}` : ""}` : silentSeconds(sc.script) ? `silent for ${silentSeconds(sc.script)}s` : sc.voiceName, !sc.audioId && sc.speed ? `${sc.speed.toFixed(2)}x speed${video.provider !== "heygen" && video.provider !== "mock" ? " (not applied by this renderer)" : ""}` : undefined, sc.layout ? `presenter ${[sc.layout.framing === "closeUp" ? "close-up" : sc.layout.framing === "circle" ? "in a circle" : "", sc.layout.scale !== 1 || !sc.layout.framing ? `${Math.round(sc.layout.scale * 100)}%` : "", sc.layout.x || sc.layout.y ? "moved" : ""].filter(Boolean).join(", ")} (preview only)` : undefined, sc.background.fit === "contain" ? "background shown whole (preview only)" : undefined, sc.overlay ? `text “${sc.overlay.text}” (preview only)` : undefined].filter(Boolean).join(" · ")}
                             </div>
                           )}
                           <p className="whitespace-pre-wrap leading-relaxed text-slate-700">{sc.script}</p>
@@ -1058,7 +1058,7 @@ export default function VideoDetailPage() {
                   <>
                     {video.scenes?.[0]?.overlay && (
                       <p className="mt-2 text-xs text-slate-500">
-                        On-screen text “{video.scenes[0].overlay.text}”{video.provider !== "heygen" ? " (not applied by this renderer)" : ""}
+                        On-screen text “{video.scenes[0].overlay.text}” (preview only)
                       </p>
                     )}
                     <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{video.script}</p>

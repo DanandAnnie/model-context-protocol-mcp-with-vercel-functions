@@ -25,12 +25,13 @@ const sceneSchema = z.object({
       if (problem) ctx.addIssue({ code: "custom", message: problem });
     }),
   background: backgroundSchema,
+  hidePresenter: z.literal(true).optional(),
   avatarId: z.string().min(1).optional(),
   voiceId: z.string().min(1).optional(),
   speed: z.number().min(0.5).max(1.5).optional(),
   layout: sceneLayoutSchema.optional(),
   overlay: sceneTextSchema.optional(),
-});
+}).refine((sc) => !sc.hidePresenter || sc.background.type !== "color", { path: ["hidePresenter"], message: "A scene without the presenter shows its picture or video: give it an image or video background" });
 
 /** Either copy a video the owner has (`fromVideoId`, title optional) or spell the template out. */
 export const templateInputSchema = z.object({
@@ -77,6 +78,7 @@ export async function createTemplate(input: TemplateInput, ownerId: string = LOC
     const scenes = (video.scenes?.length ? video.scenes : [{ script: video.script, background: video.background }]).map((sc) => ({
       script: sc.script,
       background: sc.background,
+      ...(sc.hidePresenter ? { hidePresenter: true as const } : {}),
       ...(sc.avatarId ? { avatarId: sc.avatarId } : {}),
       ...(sc.voiceId ? { voiceId: sc.voiceId } : {}),
       ...(sc.speed ? { speed: sc.speed } : {}),

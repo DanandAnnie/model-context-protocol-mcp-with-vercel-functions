@@ -190,6 +190,11 @@ export interface Scene {
   layout?: SceneLayout;
   /** Text shown on screen for this scene; none when absent. */
   overlay?: SceneText;
+  /**
+   * The scene shows its picture or video background over the whole frame, with no presenter: narrated by the voice
+   * (or a clip), or silent. Only a scene with an image or video background can hide the presenter.
+   */
+  hidePresenter?: true;
   /** Presenter for this scene; the video's avatar when absent. */
   avatarId?: string;
   /** Voice for this scene; the video's voice when absent. Ignored when the scene uses an audio clip. */

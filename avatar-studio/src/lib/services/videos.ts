@@ -44,6 +44,8 @@ export const videoRequestSchema = z
           // (Its length is checked below, where an audio scene, whose script is only what the clip says, is known.)
           script: z.string().trim().min(1).max(5000),
           background: backgroundSchema,
+          /** No presenter: the scene's picture or video fills the frame, narrated or silent. */
+          hidePresenter: z.literal(true).optional(),
           /** Presenter and voice for this scene; the video's when omitted. */
           avatarId: z.string().min(1).optional(),
           voiceId: z.string().min(1).optional(),
@@ -80,6 +82,11 @@ export const videoRequestSchema = z
       const silence = v.scenes.findIndex((s) => !s.audioId && silentProblem(s.script));
       if (silence >= 0) {
         ctx.addIssue({ code: "custom", path: ["scenes", silence, "script"], message: silentProblem(v.scenes[silence].script)! });
+        return z.NEVER;
+      }
+      const bare = v.scenes.findIndex((s) => s.hidePresenter && s.background.type === "color");
+      if (bare >= 0) {
+        ctx.addIssue({ code: "custom", path: ["scenes", bare, "hidePresenter"], message: "A scene without the presenter shows its picture or video: give it an image or video background" });
         return z.NEVER;
       }
       if (!v.scenes.some((s) => s.audioId || !silentSeconds(s.script))) {
@@ -258,8 +265,10 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
     return stripUndefined({
       ...sc,
       // The renderer's default layout is stored as absent whichever client sent it, so the page and the provider see no customisation.
-      layout: layout && !isDefaultLayout(layout) ? layout : undefined,
-      avatarName: sc.avatarId ? cast.avatars[sc.avatarId]?.name : undefined,
+      // A scene without the presenter has neither a presenter of its own nor a layout for one.
+      layout: layout && !isDefaultLayout(layout) && !sc.hidePresenter ? layout : undefined,
+      avatarId: sc.hidePresenter ? undefined : sc.avatarId,
+      avatarName: sc.avatarId && !sc.hidePresenter ? cast.avatars[sc.avatarId]?.name : undefined,
       // An audio scene has no voice of its own: the clip speaks.
       voiceId: clip ? undefined : sc.voiceId,
       // A clip has its own pace and a silent scene none; a scene's chosen speed is kept, even one equal to the video's,

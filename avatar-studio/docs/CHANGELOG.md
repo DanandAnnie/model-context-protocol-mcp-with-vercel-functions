@@ -157,4 +157,10 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The speak call reports `spoken: false` when the browser said the reply.
     - The demo-lock test now proves streaming is locked.
     - The README states what a visitor's room token allows.
+- Scenes without the presenter, as HeyGen's scenes without an avatar: a scene with an image or video background can leave the presenter out (`hidePresenter: true`), and its picture or video then fills the frame.
+  - It is narrated by the scene's voice, plays its clip, or holds in silence. HeyGen renders it as a v3 whole-frame `image` or `video` scene: a silent picture is held for its `duration`, and a video loops muted under the narration. D-ID refuses it.
+  - The editor has a "Show the presenter" checkbox per scene. It is disabled on a colour background, and choosing a colour brings the presenter back. A hidden scene hides the presenter from the stage and drops the presenter and layout controls.
+  - Copies, templates, and drafts keep it, and the video page lists it.
+  - The video page also stops claiming that HeyGen applies layout, background fit, or on-screen text: since v3 they are labelled preview only.
+  - New `hide-presenter.test.ts` and an e2e test, which fails when a copy drops the setting.
 

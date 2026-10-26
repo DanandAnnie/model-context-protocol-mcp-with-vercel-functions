@@ -442,6 +442,54 @@ test("importing a script file makes one scene per section", async ({ page }) => 
   await expect(page.getByTestId("import-note")).toContainText("minutes.txt is password-protected or a Word 97–2003 file");
 });
 
+test("a scene can leave the presenter out and let its picture fill the frame", async ({ page }) => {
+  await page.locator("input[placeholder='Video title']").fill("Kitchen tour");
+  await page.locator("textarea").fill("Welcome in, let me show you around.");
+  await page.getByRole("button", { name: "Add scene" }).click();
+  await page.locator("textarea").fill("The kitchen was redone last spring.");
+  const show = page.getByRole("checkbox", { name: /Show the presenter in scene 2/ });
+  // A colour cannot stand in for the presenter, so the choice waits for a picture or video.
+  await expect(show).toBeChecked();
+  await expect(show).toBeDisabled();
+  await expect(page.getByTestId("scene-show-presenter")).toContainText("give the scene an image or video background first");
+  await page.getByRole("button", { name: "Background" }).click();
+  await page.getByLabel("Image URL").fill("https://example.com/kitchen.jpg");
+  await expect(show).toBeEnabled();
+  await show.uncheck();
+  // The stage shows the picture alone, and nothing about a presenter is offered for the scene.
+  await expect(page.getByTestId("stage-avatar")).toHaveCount(0);
+  await expect(page.getByTestId("scene-layout")).toHaveCount(0);
+  await expect(page.getByLabel("Scene avatar")).toHaveCount(0);
+  await expect(page.getByLabel("Scene voice")).toBeVisible();
+  await expect(page.getByTestId("scene-show-presenter")).toContainText("The picture fills the frame and the voice narrates it");
+  // The first scene still has its presenter.
+  await page.getByRole("button", { name: /^Scene 1,/ }).click();
+  await expect(page.getByTestId("stage-avatar")).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: /Show the presenter in scene 1/ })).toBeChecked();
+  await page.getByRole("button", { name: /^Scene 2,/ }).click();
+  await expect(page.getByTestId("stage-avatar")).toHaveCount(0);
+  await page.getByRole("button", { name: "Generate video" }).click();
+  await page.waitForURL(/\/videos\/vid_/);
+  const id = page.url().split("/").pop()!;
+  const video = (await (await page.request.get(`/api/videos/${id}`)).json()).video;
+  expect(video.scenes[0].hidePresenter).toBeUndefined();
+  expect(video.scenes[1]).toMatchObject({ hidePresenter: true, background: { type: "image", value: "https://example.com/kitchen.jpg" } });
+  await expect(page.getByText(/no presenter: the picture fills the frame/)).toBeVisible();
+  // A copy keeps it, and going back to a colour brings the presenter back.
+  await page.goto(`/create?from=${id}`);
+  await page.getByRole("button", { name: /^Scene 2,/ }).click();
+  await expect(page.getByRole("checkbox", { name: /Show the presenter in scene 2/ })).not.toBeChecked();
+  await expect(page.getByTestId("stage-avatar")).toHaveCount(0);
+  await page.getByRole("button", { name: "Background" }).click();
+  await page.getByLabel("Background #0f172a").click();
+  await expect(page.getByRole("checkbox", { name: /Show the presenter in scene 2/ })).toBeChecked();
+  await expect(page.getByTestId("stage-avatar")).toBeVisible();
+  // The API refuses a colour scene without the presenter.
+  const bad = await page.request.post("/api/videos", { data: { title: "Bad", avatarId: "stock_1", voiceId: "stock_voice_1", scenes: [{ script: "Hi.", background: { type: "color", value: "#000000" }, hidePresenter: true }] } });
+  expect(bad.status()).toBe(400);
+  expect(JSON.stringify(await bad.json())).toMatch(/image or video background/);
+});
+
 test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Two scene demo");
   await page.locator("textarea").fill("Scene one says hello.");
@@ -501,7 +549,7 @@ test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page 
   await expect(page.getByText("Script · 2 scenes")).toBeVisible();
   await expect(page.getByText("Marcus Hill · Olivia · 0.75x speed · presenter in a circle, 120%, moved")).toBeVisible();
   // The demo renderer neither places the presenter nor fits the background, and the line says so.
-  await expect(page.getByText(/· background shown whole \(not applied by this renderer\)$/)).toBeVisible();
+  await expect(page.getByText(/· background shown whole \(preview only\)$/)).toBeVisible();
   // Edit a copy keeps the scene's presenter.
   await page.goto(`/create?from=${id}`);
   await expect(page.getByText(/2 scenes/)).toBeVisible();

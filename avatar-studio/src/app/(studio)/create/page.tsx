@@ -105,9 +105,11 @@ function slidesForPages(slides: PptxSlide[], pages: number): { slides: PptxSlide
   return { slides: shown, matches: shown.length === pages };
 }
 
-const newScene = (script = "", background: Background = DEFAULT_BG, presenter: Pick<Scene, "avatarId" | "voiceId" | "layout" | "audioId" | "speed" | "overlay"> = {}): Scene => ({
+const newScene = (script = "", background: Background = DEFAULT_BG, presenter: Pick<Scene, "avatarId" | "voiceId" | "layout" | "audioId" | "speed" | "overlay" | "hidePresenter"> = {}): Scene => ({
   script,
   background,
+  // Only a picture or video can stand in for the presenter.
+  ...(presenter.hidePresenter === true && background.type !== "color" ? { hidePresenter: true as const } : {}),
   ...(presenter.avatarId ? { avatarId: presenter.avatarId } : {}),
   ...(presenter.voiceId && !presenter.audioId ? { voiceId: presenter.voiceId } : {}),
   ...(presenter.layout ? { layout: presenter.layout } : {}),
@@ -226,7 +228,12 @@ function CreateInner() {
     });
   }
   // Another picture or video keeps the scene's fit; the Fit buttons set it.
-  const setBackground = (value: Background) => updateScene(activeIdx, { background: value.type !== "color" && background.type !== "color" && background.fit && !value.fit ? { ...value, fit: background.fit } : value });
+  const setBackground = (value: Background) =>
+    updateScene(activeIdx, {
+      background: value.type !== "color" && background.type !== "color" && background.fit && !value.fit ? { ...value, fit: background.fit } : value,
+      // A colour cannot fill the frame in the presenter's place, so the presenter comes back.
+      ...(value.type === "color" ? { hidePresenter: undefined } : {}),
+    });
   const layout: SceneLayout = active.layout ?? DEFAULT_LAYOUT;
   // The default layout is stored as absent, so an untouched scene renders exactly as before.
   const setLayout = (value: SceneLayout) => updateScene(activeIdx, { layout: isDefaultLayout(value) ? undefined : value });
@@ -924,7 +931,7 @@ function CreateInner() {
               {background.type === "video" && /^https?:\/\/\S+\.\S+/.test(background.value) && (
                 <video key={background.value} src={background.value} muted loop autoPlay playsInline aria-hidden="true" data-testid="stage-video" className={`absolute inset-0 h-full w-full ${background.fit === "contain" ? "object-contain" : "object-cover"}`} />
               )}
-              {sceneAvatar ? (
+              {active.hidePresenter ? null : sceneAvatar ? (
                 // The offset moves a frame-sized layer so one unit is half the frame on either axis; the scale stays on the portrait.
                 // A close-up zooms toward the head and shoulders; a circle crops the portrait into a disc over the background.
                 <div data-testid="stage-presenter" data-framing={framing} className={`absolute inset-0 flex justify-center ${framing === "circle" ? "items-center" : "items-end"}`} style={{ transform: `translate(${layout.x * 50}%, ${layout.y * 50}%)` }}>
@@ -1078,10 +1085,30 @@ function CreateInner() {
                 </button>
               </p>
             )}
+            <label className="mb-3 flex items-start gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="scene-show-presenter">
+              <input
+                type="checkbox"
+                className="mt-0.5 accent-brand-600"
+                checked={!active.hidePresenter}
+                disabled={canEdit === false || (background.type === "color" && !active.hidePresenter)}
+                aria-describedby="show-presenter-hint"
+                onChange={(e) => updateScene(activeIdx, { hidePresenter: e.target.checked ? undefined : true })}
+              />
+              <span>
+                <span className="font-medium text-slate-700">Show the presenter{scenes.length > 1 ? ` in scene ${activeIdx + 1}` : ""}</span>
+                <span id="show-presenter-hint" className="block text-slate-500">
+                  {background.type === "color"
+                    ? "To show only a picture or video here, give the scene an image or video background first."
+                    : active.hidePresenter
+                    ? `The ${background.type === "video" ? "video" : "picture"} fills the frame and ${active.audioId ? "the clip plays" : silentSeconds(active.script) ? "holds in silence" : "the voice narrates it"}. HeyGen renders it; D-ID always shows its presenter.`
+                    : `Turn off to let the ${background.type === "video" ? "video" : "picture"} fill the frame, with the voice over it.`}
+                </span>
+              </span>
+            </label>
             {scenes.length > 1 && (
               <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="scene-presenter">
-                <span className="font-medium">Scene {activeIdx + 1} presenter</span>
-                <select aria-label="Scene avatar" className={`${inputClass} w-auto py-1 text-xs`} value={active.avatarId ?? ""} onChange={(e) => {
+                <span className="font-medium">Scene {activeIdx + 1} {active.hidePresenter ? "voice" : "presenter"}</span>
+                {!active.hidePresenter && <select aria-label="Scene avatar" className={`${inputClass} w-auto py-1 text-xs`} value={active.avatarId ?? ""} onChange={(e) => {
                   const picked = avatarData?.avatars.find((a) => a.id === e.target.value);
                   // A presenter's default voice comes along unless the scene already has a voice of its own.
                   const voiceId = picked?.defaultVoiceId && !active.voiceId && voiceData?.voices.some((v) => v.id === picked.defaultVoiceId) ? picked.defaultVoiceId : active.voiceId;
@@ -1091,7 +1118,7 @@ function CreateInner() {
                   {(avatarData?.avatars ?? []).map((a) => (
                     <option key={a.id} value={a.id}>{a.name}</option>
                   ))}
-                </select>
+                </select>}
                 {!active.audioId && !silentSeconds(active.script) && (
                   // HeyGen speaks each scene at its own pace, as its studio lets each scene set one.
                   <select aria-label="Scene speed" title="HeyGen speaks this scene at its own pace; D-ID keeps its natural pace" className={`${inputClass} w-auto py-1 text-xs`} value={active.speed ?? ""} onChange={(e) => updateScene(activeIdx, { speed: e.target.value ? Number(e.target.value) : undefined })}>
@@ -1112,7 +1139,7 @@ function CreateInner() {
                 )}
               </div>
             )}
-            <details className="mb-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="scene-layout">
+            {!active.hidePresenter && <details className="mb-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="scene-layout">
               <summary className="cursor-pointer select-none font-medium text-slate-700">
                 Presenter layout{isDefaultLayout(shownLayout) ? "" : ` · ${[framing !== "full" ? FRAMING_LABELS[framing].toLowerCase() : "", layout.scale !== 1 ? `${Math.round(layout.scale * 100)}%` : "", layout.x || layout.y ? "moved" : ""].filter(Boolean).join(", ")}`}
               </summary>
@@ -1154,7 +1181,7 @@ function CreateInner() {
                   </button>
                 )}
               </div>
-            </details>
+            </details>}
             <SceneAudio
               // Distinct from the script box's key: both sit among the same siblings.
               key={`audio-${activeIdx}`}
@@ -1172,7 +1199,7 @@ function CreateInner() {
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs text-slate-500" data-testid="script-length">
                   {!active.audioId && silentSeconds(active.script)
-                    ? `Silent scene: the presenter holds for ${formatSeconds(silentSeconds(active.script))}${scenes.length > 1 ? ` · ~${formatSeconds(seconds)} total` : ""}`
+                    ? `Silent scene: the ${active.hidePresenter ? (background.type === "video" ? "video plays" : "picture holds") : "presenter holds"} for ${formatSeconds(silentSeconds(active.script))}${scenes.length > 1 ? ` · ~${formatSeconds(seconds)} total` : ""}`
                     : scenes.length > 1
                     ? `${wordCount(active.script)} words · ~${formatSeconds(sceneSeconds(active))} this scene · ~${formatSeconds(seconds)} total`
                     : `${words} words · ~${formatSeconds(seconds)}`}

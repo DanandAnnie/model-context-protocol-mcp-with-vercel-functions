@@ -278,7 +278,12 @@ const translateFor = (ownerId: string): Translator => (script, language) => revi
 
 /** The stored key for a language, matched without regard to case so "spanish" and "Spanish" are one track. */
 function subtitleKey(video: Video, language: string): string | undefined {
-  return Object.keys(video.subtitles ?? {}).find((k) => sameLanguage(k, language));
+  return findLanguage(Object.keys(video.subtitles ?? {}), language);
+}
+
+/** The stored key for a language: the exact name when the video carries it, else the first that names the same track. */
+function findLanguage(keys: string[], language: string): string | undefined {
+  return keys.find((k) => k === language) ?? keys.find((k) => sameLanguage(k, language));
 }
 
 /**
@@ -336,7 +341,7 @@ export function removeSubtitles(id: string, language: string, ownerId: string = 
 
 /** The subtitle text for a language the video carries, matched without regard to case; undefined when it has none. */
 export function subtitlesFor(video: Pick<Video, "subtitles">, language: string): { language: string; text: string } | undefined {
-  const key = Object.keys(video.subtitles ?? {}).find((k) => sameLanguage(k, language));
+  const key = findLanguage(Object.keys(video.subtitles ?? {}), language);
   return key ? { language: key, text: video.subtitles![key] } : undefined;
 }
 

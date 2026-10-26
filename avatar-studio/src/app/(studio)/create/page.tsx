@@ -73,6 +73,14 @@ const CAPTION_FONT_STACKS: Record<CaptionFont, string> = {
   rounded: 'ui-rounded, "SF Pro Rounded", "Arial Rounded MT Bold", "Nunito", system-ui, sans-serif',
   mono: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
 };
+/** A caption style from a draft an older build saved: any value this build does not offer falls back to the default. */
+const restoredCaptionStyle = (s: CaptionStyle): CaptionStyle =>
+  withoutDefaults({
+    position: CAPTION_POSITIONS.includes(s.position) ? s.position : DEFAULT_CAPTION_STYLE.position,
+    size: CAPTION_SIZES.includes(s.size) ? s.size : DEFAULT_CAPTION_STYLE.size,
+    look: s.look && CAPTION_LOOKS.includes(s.look) ? s.look : undefined,
+    font: s.font && CAPTION_FONTS.includes(s.font) ? s.font : undefined,
+  });
 /** A caption style with the default look and font left out, as the server stores it. */
 const withoutDefaults = ({ look, font, ...rest }: CaptionStyle): CaptionStyle => ({ ...rest, ...(look && look !== "classic" ? { look } : {}), ...(font && font !== "sans" ? { font } : {}) });
 /** An emotion the renderer takes, or "" (natural) for anything else. */
@@ -268,7 +276,7 @@ function CreateInner() {
     setResolution(d.resolution ?? "1080p");
     setCaptions(d.captions);
     // A draft is the browser's own copy, saved by whatever build ran then: keep only a look and typeface this build offers.
-    setCaptionStyle(d.captionStyle ? withoutDefaults({ ...d.captionStyle, look: CAPTION_LOOKS.includes(d.captionStyle.look as CaptionLook) ? d.captionStyle.look : undefined, font: CAPTION_FONTS.includes(d.captionStyle.font as CaptionFont) ? d.captionStyle.font : undefined }) : DEFAULT_CAPTION_STYLE);
+    setCaptionStyle(d.captionStyle ? restoredCaptionStyle(d.captionStyle) : DEFAULT_CAPTION_STYLE);
     setSpeed(d.speed);
     setPitch(d.pitch ?? 0);
     // A draft is the browser's own copy, so a value no longer offered is dropped rather than sent.

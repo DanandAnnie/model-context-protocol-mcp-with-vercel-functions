@@ -43,5 +43,10 @@ describe("share player track ids", () => {
     assert.equal(subtitlesFor((await getStore().get<Video>("video", v.id))!, sent)?.text, "Qapla'.");
     const after = await removeSubtitles(v.id, sent);
     assert.deepEqual(Object.keys(after.subtitles ?? {}), []);
+    // Two such keys read alike once repaired; the exact name still picks its own track.
+    await getStore().put<Video>("video", { ...after, subtitles: { "X \uD83D": "one", "X \uDE00": "two" } });
+    const fresh = (await getStore().get<Video>("video", v.id))!;
+    assert.equal(subtitlesFor(fresh, "X \uDE00")?.text, "two");
+    assert.deepEqual(Object.keys((await removeSubtitles(v.id, "X \uDE00")).subtitles ?? {}), ["X \uD83D"]);
   });
 });

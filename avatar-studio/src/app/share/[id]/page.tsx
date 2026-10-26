@@ -136,7 +136,7 @@ export default async function SharePage({
       <main className="flex h-screen w-screen items-center justify-center overflow-hidden bg-black text-slate-100">
         <h1 className="sr-only">{video.title}</h1>
         {!unlocked ? (
-          <div className="w-full max-w-sm p-4">
+          <div className="max-h-full w-full max-w-sm overflow-y-auto p-4">
             <ShareUnlock videoId={video.id} />
           </div>
         ) : gated ? (

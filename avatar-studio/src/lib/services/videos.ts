@@ -1153,22 +1153,37 @@ export const resizeSchema = z.object({
 /** The shapes a title of another size ends with, so a size made from a size is titled from the original. */
 const SIZE_SUFFIX = / \((?:16:9|9:16|1:1)\)$/;
 
+/** A video's family: the original and every size made from it, trashed ones included, the original first. */
+async function sizeFamily(video: Video, ownerId: string): Promise<Video[]> {
+  const rootId = video.resizedFrom ?? video.id;
+  const now = Date.now();
+  const all = await getStore().list<Video>("video", ownerId);
+  const family = all.filter((v) => !purgeDue(v, now) && (v.id === rootId || v.resizedFrom === rootId));
+  family.sort((a, b) => Number(b.id === rootId) - Number(a.id === rootId) || a.createdAt.localeCompare(b.createdAt));
+  return family;
+}
+
 /** A video's sizes: the original and every live (not trashed) size made from it, the original first. */
 export async function videoSizes(id: string, ownerId: string = LOCAL_OWNER): Promise<Array<Pick<Video, "id" | "title" | "aspect" | "status">>> {
   const video = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
-  const rootId = video.resizedFrom ?? video.id;
-  const all = await getStore().list<Video>("video", ownerId);
-  const family = all.filter((v) => !v.deletedAt && (v.id === rootId || v.resizedFrom === rootId));
-  family.sort((a, b) => Number(b.id === rootId) - Number(a.id === rootId) || a.createdAt.localeCompare(b.createdAt));
-  return family.map(({ id: vid, title, aspect, status }) => ({ id: vid, title, aspect, status }));
+  return (await sizeFamily(video, ownerId)).filter((v) => !v.deletedAt).map(({ id: vid, title, aspect, status }) => ({ id: vid, title, aspect, status }));
 }
 
-/** A title of at most `max` characters as the request schema counts them (UTF-16 units), cut at whole characters. */
+/**
+ * A title of at most `max` characters as the request schema counts them (UTF-16 units), cut at whole characters; a
+ * single character longer than the room (a letter with a long run of combining marks) is cut by code point instead.
+ */
 function fitTitle(text: string, max: number): string {
   let out = "";
   for (const ch of graphemes(text)) {
     if (out.length + ch.length > max) break;
     out += ch;
+  }
+  if (!out.trim()) {
+    for (const ch of Array.from(text)) {
+      if (out.length + ch.length > max) break;
+      out += ch;
+    }
   }
   return out.trimEnd();
 }
@@ -1184,8 +1199,13 @@ export async function resizeVideo(id: string, input: z.infer<typeof resizeSchema
   const source = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
   if (purgeDue(source, Date.now())) throw new NotFoundError(`Video ${id} not found`);
   if (source.deletedAt) throw new ConflictError("Restore the video from the trash before making other sizes");
-  // A shape the video already has (the original's, or a size made from it that is not in the trash) is not made again.
-  const existing = new Set((await videoSizes(id, ownerId)).map((v) => v.aspect));
+  // A shape the video already has is not made again: the original's (even in the trash, as it can be restored) and
+  // each size made from it that is not in the trash. A size whose render could not be started used no render and holds
+  // nothing to watch, so its shape can be made again.
+  const rootId = source.resizedFrom ?? source.id;
+  const existing = new Set(
+    (await sizeFamily(source, ownerId)).filter((v) => v.id === rootId || (!v.deletedAt && v.status !== "failed")).map((v) => v.aspect),
+  );
   existing.add(source.aspect);
   const aspects = input.aspects.filter((a) => !existing.has(a));
   if (!aspects.length) throw new ValidationError(input.aspects.length === 1 ? `The video already has a ${input.aspects[0]} size` : "The video already has those sizes");

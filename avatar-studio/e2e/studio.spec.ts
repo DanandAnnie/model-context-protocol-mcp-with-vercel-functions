@@ -763,6 +763,12 @@ test("share page offers a download only when the owner allows it", async ({ page
   expect(box.y).toBeGreaterThanOrEqual(0);
   expect(box.y + box.height).toBeLessThanOrEqual(361);
   expect(box.height).toBeGreaterThan(330);
+  // In a frame wider than the (square) video, the player keeps its shape, centred, so its logo and captions sit on the
+  // picture rather than in black bars.
+  await page.setViewportSize({ width: 900, height: 360 });
+  const wide = (await page.getByTestId("share-player").boundingBox())!;
+  expect(Math.abs(wide.width - 360)).toBeLessThanOrEqual(1);
+  expect(Math.abs(wide.x - 270)).toBeLessThanOrEqual(1);
   await expect(page.getByTestId("share-transcript")).toHaveCount(0);
   await expect(page.getByTestId("share-cta")).toHaveCount(0);
   if (viewport) await page.setViewportSize(viewport);
@@ -2686,8 +2692,9 @@ test("a video can be made in other sizes, each a new video with the same scenes"
   await expect(page.getByRole("button", { name: "Make 1 size" })).toBeVisible();
   await page.reload();
   await expect(page.getByTestId("other-sizes").getByRole("link")).toHaveText(/ \(9:16\)$/);
-  await expect(page.getByLabel("9:16 portrait")).toHaveCount(0);
+  // The card has loaded (it offers the square) before the portrait's absence means anything.
   await expect(page.getByLabel("1:1 square")).toBeVisible();
+  await expect(page.getByLabel("9:16 portrait")).toHaveCount(0);
   await made.click();
   await page.waitForURL((url) => /\/videos\/vid_/.test(url.pathname) && !url.pathname.endsWith(v.id));
   await expect(page.getByText("Made from")).toBeVisible();
@@ -2697,8 +2704,12 @@ test("a video can be made in other sizes, each a new video with the same scenes"
   expect(copy.resizedFrom).toBe(v.id);
   expect(copy.scenes.map((sc: { script: string }) => sc.script)).toEqual(["Welcome to twelve Maple Street.", "Call Dana to book a showing."]);
   // A copy offers only the shape still missing: never the original's own.
-  await expect(page.getByLabel("16:9 landscape")).toHaveCount(0);
   await expect(page.getByLabel("1:1 square")).toBeVisible();
+  await expect(page.getByLabel("16:9 landscape")).toHaveCount(0);
+  // Made from the copy, the square is linked beside the original, and the focus goes to it, not the first link.
+  await page.getByRole("button", { name: "Make 1 size" }).click();
+  await expect(page.getByRole("link", { name: `${sizesTitle} (1:1)` })).toBeFocused();
+  await expect(page.getByText("This video has every size.")).toBeVisible();
   await page.getByRole("link", { name: sizesTitle, exact: true }).first().click();
   await page.waitForURL(new RegExp(`/videos/${v.id}`));
 });
@@ -2715,6 +2726,31 @@ test("a script the AI writer replaced can be taken back", async ({ page }) => {
   await page.getByRole("button", { name: "Undo the rewrite" }).click();
   await expect(box).toHaveValue("My own words about the open house.");
   await expect(page.getByRole("button", { name: "Undo the rewrite" })).toHaveCount(0);
+});
+
+test("a rewrite that comes back after its scene moved is not written over another scene", async ({ page }) => {
+  const box = page.locator("textarea");
+  await box.fill("Hi there! One. Two. Three. Four.");
+  await page.getByRole("button", { name: "Add scene" }).click();
+  await box.fill("The second scene's own words.");
+  await page.getByRole("button", { name: /^Scene 1,/ }).click();
+  // The answer is held until the scene has been moved.
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/api/script", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await page.getByRole("button", { name: "Improve" }).click();
+  await page.getByRole("button", { name: "Shorten", exact: true }).click();
+  await page.getByRole("button", { name: "Move scene right" }).click();
+  release();
+  await expect(page.getByText("The scene changed while it was being rewritten", { exact: false })).toBeVisible();
+  // Each scene keeps its own words, and there is no Undo that could wipe one.
+  await expect(box).toHaveValue("Hi there! One. Two. Three. Four.");
+  await expect(page.getByRole("button", { name: "Undo the rewrite" })).toHaveCount(0);
+  await page.getByRole("button", { name: /^Scene 1,/ }).click();
+  await expect(box).toHaveValue("The second scene's own words.");
 });
 
 test("a dub can be voice only and name its speakers", async ({ page }) => {

@@ -558,12 +558,21 @@ function CreateInner() {
 
   /** The script a rewrite (the AI writer or Improve) replaced, while the scene still holds what the rewrite wrote. */
   const [rewriteUndo, setRewriteUndo] = useState<{ idx: number; before: string; after: string; note: string } | null>(null);
-  /** Replaces a scene's script with a rewrite, keeping what it held so the rewrite can be taken back. */
-  function applyRewrite(idx: number, before: string, after: string, note: string) {
-    updateScene(idx, { script: after });
+  /**
+   * Replaces a scene's script with a rewrite, keeping what it held so the rewrite can be taken back. Nothing is written
+   * when the scene no longer holds the script that was sent (typed in, moved, or removed while the answer came): the
+   * rewrite would land on other words, or another scene, and its Undo would then wipe that scene's own script.
+   */
+  function applyRewrite(idx: number, before: string, after: string, note: string): boolean {
+    if (scenesNow.current[idx]?.script !== before) {
+      setErr("The scene changed while it was being rewritten, so the rewrite was not applied. Try again.");
+      return false;
+    }
+    setScenes((prev) => prev.map((sc, i) => (i === idx && sc.script === before ? { ...sc, script: after } : sc)));
     setRewriteUndo(before.trim() && before !== after ? { idx, before, after, note } : null);
     // Back to the script, rather than lost with the panel that wrote it.
     requestAnimationFrame(() => scriptRef.current?.focus());
+    return true;
   }
   async function revise(action: "shorten" | "expand" | "tone" | "translate" | "polish") {
     if (!active.script.trim()) return;
@@ -577,8 +586,7 @@ function CreateInner() {
         method: "POST",
         body: JSON.stringify({ action, script: before, tone: action === "tone" ? assistTone : undefined, language: action === "translate" ? assistLanguage : undefined }),
       });
-      applyRewrite(idx, before, out, action === "translate" ? `Translated to ${assistLanguage}.` : "Rewritten.");
-      setAssistOpen(false);
+      if (applyRewrite(idx, before, out, action === "translate" ? `Translated to ${assistLanguage}.` : "Rewritten.")) setAssistOpen(false);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not revise the script");
     } finally {
@@ -1166,7 +1174,8 @@ function CreateInner() {
                       aria-label="Undo the rewrite"
                       className="font-medium text-brand-700 underline"
                       onClick={() => {
-                        updateScene(rewriteUndo.idx, { script: rewriteUndo.before });
+                        const { idx, before, after } = rewriteUndo;
+                        setScenes((prev) => prev.map((sc, i) => (i === idx && sc.script === after ? { ...sc, script: before } : sc)));
                         setRewriteUndo(null);
                         scriptRef.current?.focus();
                       }}
@@ -1334,7 +1343,7 @@ function CreateInner() {
                   setWriterOpen(false);
                   writerButton.current?.focus();
                 }}
-                onScript={(s) => { applyRewrite(activeIdx, active.script, s, "Written by AI."); setWriterOpen(false); }}
+                onScript={(s) => { if (applyRewrite(activeIdx, active.script, s, "Written by AI.")) setWriterOpen(false); }}
               />
             )}
             <textarea

@@ -90,6 +90,25 @@ describe("other sizes", () => {
     assert.equal(retried.resizedFrom, original.id);
   });
 
+  it("makes again a size that could not start, and never the shape of an original in the trash", async () => {
+    const original = await createVideo(source(), "agent");
+    const [portrait] = (await resizeVideo(original.id, { aspects: ["9:16"] }, "agent")).videos;
+    // The renderer refused to start it: it used no render, holds nothing, and its shape is offered again.
+    await getStore().put("video", { ...(await getVideo(portrait.id, "agent")), status: "failed", error: "provider down" });
+    assert.equal((await videoSizes(original.id, "agent")).find((v) => v.id === portrait.id)?.status, "failed", "listed, marked failed");
+    const [again] = (await resizeVideo(original.id, { aspects: ["9:16"] }, "agent")).videos;
+    assert.equal(again.aspect, "9:16");
+    await assert.rejects(resizeVideo(original.id, { aspects: ["9:16"] }, "agent"), /already has a 9:16 size/);
+    // An original in the trash can be restored, so a size of it never makes the original's shape a second time.
+    await deleteVideo(original.id, "agent");
+    assert.deepEqual((await videoSizes(again.id, "agent")).map((v) => v.id), [portrait.id, again.id]);
+    await assert.rejects(resizeVideo(again.id, { aspects: ["16:9"] }, "agent"), /already has a 16:9 size/);
+    // A title that is one character longer than the room (a letter and a run of combining marks) is cut, not emptied.
+    const marks = await createVideo({ ...source(), title: `e${"\u0301".repeat(118)}` }, "agent");
+    const [square] = (await resizeVideo(marks.id, { aspects: ["1:1"] }, "agent")).videos;
+    assert.ok(square.title.startsWith("e\u0301") && square.title.endsWith(" (1:1)") && square.title.length <= 120);
+  });
+
   it("refuses its own shape, a trashed video, someone else's, and more sizes than the allowance has left", async () => {
     const original = await createVideo(source(), "agent");
     await assert.rejects(resizeVideo(original.id, { aspects: ["16:9"] }, "agent"), ValidationError);

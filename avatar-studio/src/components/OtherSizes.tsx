@@ -17,11 +17,13 @@ type Size = Pick<Video, "id" | "title" | "aspect" | "status">;
  */
 export function OtherSizes({ video, canEdit }: { video: Video; canEdit: boolean }) {
   const id = useId();
-  const { data, setData } = useApi<{ sizes: Size[] }>(`/api/videos/${video.id}/sizes`);
+  const { data, error: sizesError, setData } = useApi<{ sizes: Size[] }>(`/api/videos/${video.id}/sizes`);
   // The original, when there is one: a link to a video since deleted for good would lead nowhere.
   const { data: original, error: originalError } = useApi<{ video: Video }>(video.resizedFrom ? `/api/videos/${video.resizedFrom}` : null);
   const sizes = data?.sizes ?? [];
-  const have = new Set<AspectRatio>([video.aspect, ...sizes.map((s) => s.aspect)]);
+  // A size whose render could not be started holds nothing, so its shape is offered again (as the server allows); the
+  // original's shape counts even while it is in the trash, as it can be restored.
+  const have = new Set<AspectRatio>([video.aspect, ...(original ? [original.video.aspect] : []), ...sizes.filter((s) => s.status !== "failed").map((s) => s.aspect)]);
   const missing = ASPECTS.filter((a) => !have.has(a));
   const [unchosen, setUnchosen] = useState<AspectRatio[]>([]);
   const chosen = missing.filter((a) => !unchosen.includes(a));
@@ -40,15 +42,16 @@ export function OtherSizes({ video, canEdit }: { video: Video; canEdit: boolean 
     setNote(null);
     try {
       const { videos, failed } = await api<{ videos: Video[]; failed: Array<{ aspect: string; error: string }> }>(`/api/videos/${video.id}/resize`, { method: "POST", body: JSON.stringify({ aspects: chosen }) });
-      setData((prev) => ({ sizes: [...(prev?.sizes ?? []), ...videos.filter((v) => v.status !== "failed").map(({ id: vid, title, aspect, status }) => ({ id: vid, title, aspect, status }))] }));
+      // Listed as a reload would list them, a size that could not start included (marked failed, its shape offered again).
+      setData((prev) => ({ sizes: [...(prev?.sizes ?? []), ...videos.map(({ id: vid, title, aspect, status }) => ({ id: vid, title, aspect, status }))] }));
       const started = videos.filter((v) => v.status !== "failed");
       if (started.length) setNote(`Started ${started.map((v) => v.aspect).join(" and ")}.`);
       // The shapes still missing are offered afresh.
       setUnchosen([]);
       const problems = [...videos.filter((v) => v.status === "failed").map((v) => `${v.aspect}: ${v.error ?? "the render could not be started"}`), ...failed.map((f) => `${f.aspect}: ${f.error}`)];
       if (problems.length) setErr(problems.join("; "));
-      // Focus goes to the sizes now listed, rather than being lost with the button that just went away.
-      requestAnimationFrame(() => (listRef.current?.querySelector("a") as HTMLAnchorElement | null)?.focus());
+      // Focus goes to the size just made, rather than being lost with the button that may have gone away.
+      if (started.length) requestAnimationFrame(() => listRef.current?.querySelector<HTMLAnchorElement>(`a[href="/videos/${started[0].id}"]`)?.focus());
     } catch (e) {
       setErr(e instanceof Error ? e.message : "The other sizes could not be started");
     } finally {
@@ -92,7 +95,8 @@ export function OtherSizes({ video, canEdit }: { video: Video; canEdit: boolean 
       <p role="status" className="sr-only">
         {note ?? ""}
       </p>
-      {canMake && data && (
+      {sizesError && <p className="mt-2 text-xs text-rose-600">The other sizes could not be loaded: {sizesError}</p>}
+      {canMake && data && (!video.resizedFrom || original || originalError) && (
         missing.length === 0 ? (
           <p className="mt-2 text-xs text-slate-500">This video has every size.</p>
         ) : (

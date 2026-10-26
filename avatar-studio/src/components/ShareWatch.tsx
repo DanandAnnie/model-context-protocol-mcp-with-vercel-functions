@@ -16,13 +16,16 @@ export function ShareWatch({ body, autoplay, loop, focus = false, embed = false 
   useEffect(() => {
     if (focus) frameRef.current?.focus();
   }, [focus]);
-  // Embedded, the player is all there is: it fills the frame it was given, its shape kept inside it.
-  const frame = embed ? "h-full" : body.aspect === "9:16" ? "aspect-[9/16] max-w-[420px]" : body.aspect === "1:1" ? "aspect-square max-w-[640px]" : "aspect-video";
+  // Embedded, the player is all there is: the largest box of the video's shape that fits the frame it was given, centred
+  // in it (after the email form too), so the logo and captions sit on the picture rather than in black bars.
+  const frame = embed ? "fixed inset-0 m-auto" : body.aspect === "9:16" ? "aspect-[9/16] max-w-[420px]" : body.aspect === "1:1" ? "aspect-square max-w-[640px]" : "aspect-video";
+  const ratio = body.aspect === "9:16" ? 9 / 16 : body.aspect === "1:1" ? 1 : 16 / 9;
+  const embedBox = embed ? { width: `min(100vw, ${+(ratio * 100).toFixed(4)}vh)`, height: `min(100vh, ${+(100 / ratio).toFixed(4)}vw)` } : undefined;
   const { player, cta } = body;
   return (
     <>
       {body.status === "completed" && <ViewBeacon videoId={body.videoId} />}
-      <div ref={frameRef} tabIndex={focus ? -1 : undefined} role={focus ? "region" : undefined} aria-label={focus ? "Video" : undefined} className={`relative mx-auto w-full overflow-hidden bg-black focus:outline-none ${embed ? "" : "rounded-xl"} ${frame}`}>
+      <div ref={frameRef} tabIndex={focus ? -1 : undefined} role={focus ? "region" : undefined} aria-label={focus ? "Video" : undefined} style={embedBox} className={`${embed ? "" : "relative mx-auto w-full rounded-xl"} overflow-hidden bg-black focus:outline-none ${frame}`}>
         {body.watermark && (
           // The logo belongs to the page, not the video file, so it is not shown when the player goes fullscreen
           // or picture-in-picture; decorative (the header names the brand), and clicks pass through to the player.

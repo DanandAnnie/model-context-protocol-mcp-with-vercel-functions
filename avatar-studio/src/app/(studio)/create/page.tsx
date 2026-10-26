@@ -267,7 +267,8 @@ function CreateInner() {
     setAspect(d.aspect);
     setResolution(d.resolution ?? "1080p");
     setCaptions(d.captions);
-    setCaptionStyle(d.captionStyle ?? DEFAULT_CAPTION_STYLE);
+    // A draft is the browser's own copy, saved by whatever build ran then: keep only a look and typeface this build offers.
+    setCaptionStyle(d.captionStyle ? withoutDefaults({ ...d.captionStyle, look: CAPTION_LOOKS.includes(d.captionStyle.look as CaptionLook) ? d.captionStyle.look : undefined, font: CAPTION_FONTS.includes(d.captionStyle.font as CaptionFont) ? d.captionStyle.font : undefined }) : DEFAULT_CAPTION_STYLE);
     setSpeed(d.speed);
     setPitch(d.pitch ?? 0);
     // A draft is the browser's own copy, so a value no longer offered is dropped rather than sent.

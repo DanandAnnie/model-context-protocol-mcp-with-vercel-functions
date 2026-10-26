@@ -6,6 +6,7 @@ import { getStore } from "../store";
 import { EMPTY_WATCH, MAX_SCENES, TRASH_RETENTION_DAYS, isDefaultCaptionStyle } from "../types";
 import type { AudioClip, Avatar, CaptionCue, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
 import { buildCues } from "../captions";
+import { wellFormed } from "../text";
 import { pauseSeconds, stripPauses } from "../pauses";
 import type { AvatarProvider, RenderCast } from "../providers/types";
 import { LOCAL_OWNER } from "../owner-id";
@@ -277,7 +278,16 @@ const translateFor = (ownerId: string): Translator => (script, language) => revi
 
 /** The stored key for a language, matched without regard to case so "spanish" and "Spanish" are one track. */
 function subtitleKey(video: Video, language: string): string | undefined {
-  return Object.keys(video.subtitles ?? {}).find((k) => k.toLowerCase() === language.toLowerCase());
+  return Object.keys(video.subtitles ?? {}).find((k) => sameLanguage(k, language));
+}
+
+/**
+ * Whether two language names name the same track: case aside, and with any lone surrogate read as U+FFFD,
+ * so a name stored with half an emoji (before names were checked) is still reached by the URL-safe form
+ * the pages send for it.
+ */
+function sameLanguage(a: string, b: string): boolean {
+  return wellFormed(a).toLowerCase() === wellFormed(b).toLowerCase();
 }
 
 /**
@@ -326,7 +336,7 @@ export function removeSubtitles(id: string, language: string, ownerId: string = 
 
 /** The subtitle text for a language the video carries, matched without regard to case; undefined when it has none. */
 export function subtitlesFor(video: Pick<Video, "subtitles">, language: string): { language: string; text: string } | undefined {
-  const key = Object.keys(video.subtitles ?? {}).find((k) => k.toLowerCase() === language.toLowerCase());
+  const key = Object.keys(video.subtitles ?? {}).find((k) => sameLanguage(k, language));
   return key ? { language: key, text: video.subtitles![key] } : undefined;
 }
 

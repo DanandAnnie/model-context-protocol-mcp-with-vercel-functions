@@ -17,12 +17,16 @@ import { ApiError, api, formatDate, formatSeconds, isDarkHex, posterUrl, purgeAt
 import { socialShareLinks } from "@/lib/social";
 import { TRASH_RETENTION_DAYS, type Video } from "@/lib/types";
 
-/** Whether a drawn image is a single flat colour, judged on a coarse grid of pixels. Throws if the canvas is tainted. */
+/** Whether a drawn image is a single flat colour, judged on a 20 × 20 grid across the whole frame. Throws if the canvas is tainted. */
 function flatImage(ctx: CanvasRenderingContext2D, width: number, height: number): boolean {
   const { data } = ctx.getImageData(0, 0, width, height);
-  const step = Math.max(1, Math.floor((width * height) / 400));
-  for (let i = step * 4; i < data.length; i += step * 4) {
-    if (Math.abs(data[i] - data[0]) + Math.abs(data[i + 1] - data[1]) + Math.abs(data[i + 2] - data[2]) > 6) return false;
+  const at = (x: number, y: number) => (Math.floor(((y + 0.5) * height) / 20) * width + Math.floor(((x + 0.5) * width) / 20)) * 4;
+  const first = at(0, 0);
+  for (let y = 0; y < 20; y++) {
+    for (let x = 0; x < 20; x++) {
+      const i = at(x, y);
+      if (Math.abs(data[i] - data[first]) + Math.abs(data[i + 1] - data[first + 1]) + Math.abs(data[i + 2] - data[first + 2]) > 6) return false;
+    }
   }
   return true;
 }

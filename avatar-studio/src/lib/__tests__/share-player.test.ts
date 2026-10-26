@@ -3,7 +3,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { shareTrackId } from "../share-player";
-import { addSubtitles, createVideo, transcriptsFor, videoRequestSchema } from "../services";
+import { addSubtitles, createVideo, removeSubtitles, subtitlesFor, transcriptsFor, videoRequestSchema } from "../services";
+import { getStore } from "../store";
+import type { Video } from "../types";
 import { MemoryStore } from "../store/memory";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 
@@ -30,5 +32,16 @@ describe("share player track ids", () => {
     assert.deepEqual(sets.map((s) => s.language), [undefined, "日本語", "Русский"]);
     assert.match(sets[1].cues[0].text, /^\[日本語\]/);
     assert.ok(sets.every((s) => s.cues.length > 0 && s.cues.every((c) => c.endMs > c.startMs)));
+  });
+
+  it("reaches a track stored with half an emoji through the URL-safe name the pages send, to read and to remove", async () => {
+    globalThis.__avatarStudioStore = new MemoryStore();
+    const v = await createVideo(videoRequestSchema.parse({ title: "T", script: "Hello there.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }));
+    // Written as an older build could have: the key ends in a lone high surrogate.
+    await getStore().put<Video>("video", { ...v, subtitles: { "Klingon \uD83D": "Qapla'." } });
+    const sent = "Klingon \uFFFD";
+    assert.equal(subtitlesFor((await getStore().get<Video>("video", v.id))!, sent)?.text, "Qapla'.");
+    const after = await removeSubtitles(v.id, sent);
+    assert.deepEqual(Object.keys(after.subtitles ?? {}), []);
   });
 });

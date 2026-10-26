@@ -1,4 +1,5 @@
 "use client";
+import { wellFormed } from "@/lib/text";
 import { useState } from "react";
 import { Languages, Trash2 } from "lucide-react";
 import { Button, Card, inputClass } from "@/components/ui";
@@ -33,7 +34,7 @@ export function SubtitleLanguages({ video, onUpdated }: { video: Video; onUpdate
     setBusy(name);
     setErr(null);
     try {
-      const { video: next } = await api<{ video: Video }>(`/api/videos/${video.id}/subtitles?language=${encodeURIComponent(name)}`, { method: "DELETE" });
+      const { video: next } = await api<{ video: Video }>(`/api/videos/${video.id}/subtitles?language=${encodeURIComponent(wellFormed(name))}`, { method: "DELETE" });
       onUpdated(next);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not remove the subtitles");
@@ -54,7 +55,7 @@ export function SubtitleLanguages({ video, onUpdated }: { video: Video; onUpdate
             <li key={name} className="flex items-center justify-between gap-3 py-2 text-sm">
               <span className="font-medium text-slate-800">{name}</span>
               <span className="flex items-center gap-2">
-                <a href={`/api/videos/${video.id}/captions?lang=${encodeURIComponent(name)}`} download className="text-xs text-brand-700 hover:underline">
+                <a href={`/api/videos/${video.id}/captions?lang=${encodeURIComponent(wellFormed(name))}`} download className="text-xs text-brand-700 hover:underline">
                   Download .srt
                 </a>
                 <button type="button" onClick={() => remove(name)} disabled={!!busy} aria-label={`Remove ${name} subtitles`} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-700">

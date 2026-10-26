@@ -59,7 +59,7 @@ export class AnthropicScriptProvider implements ScriptProvider {
     const keep = [
       /\[\[P\d+\]\]/.test(input.script) ? " Tokens like [[P1]] mark pauses: keep each one, unchanged, at the matching point in the text." : "",
       /\[\[T\d+\]\]/.test(input.script)
-        ? ` Tokens like [[T1]] stand for brand terms that must not be translated: keep each one, unchanged, where the term belongs in the sentence, and make the words around it agree with it.${input.terms?.length ? ` They stand for: ${input.terms.map((t, i) => `[[T${i + 1}]] = ${JSON.stringify(t)}`).join(", ")}.` : ""}`
+        ? ` Tokens like [[T1]] stand for brand terms already in their final form for this translation: keep each one, unchanged, where the term belongs in the sentence, and make the words around it agree with it.${input.terms?.length ? ` They stand for: ${input.terms.map((t, i) => `[[T${i + 1}]] = ${JSON.stringify(t)}`).join(", ")}.` : ""}`
         : "",
     ].join("");
     return this.complete(`${instruction[input.action]}${keep}\n\nScript:\n${input.script}`);

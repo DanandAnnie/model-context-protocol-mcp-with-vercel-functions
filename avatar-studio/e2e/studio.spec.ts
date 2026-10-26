@@ -2084,20 +2084,34 @@ test("a dub can be proofread: the translated lines are corrected before the dub 
   expect((await page.request.get(`/api/translate/${made.id}/srt?token=wrong`)).status()).toBe(404);
 });
 
-test("a dub can keep the brand glossary's terms as written", async ({ page }) => {
+test("a dub can follow the brand glossary: terms kept as written and fixed translations", async ({ page }) => {
   const tag = Date.now().toString(36);
   const before = (await (await page.request.get("/api/brand")).json()).brand;
   try {
     expect((await page.request.put("/api/brand", { data: { ...(before ?? {}), name: before?.name ?? "Acme", primaryColor: before?.primaryColor ?? "#0f766e", glossary: ["Acme Cloud", "Zeno"] } })).ok()).toBe(true);
+    // The rules are written on the brand page, one per line; a line it cannot read is pointed out.
+    await page.goto("/brand");
+    const rules = page.getByLabel("Always translate as");
+    await rules.fill("free trial = prueba gratis [Spanish]\nCEO PDG");
+    await page.getByRole("button", { name: "Save brand kit" }).click();
+    await expect(page.getByText("Always translate, line 2: write it as term = translation")).toBeVisible();
+    await rules.fill("free trial = prueba gratis [Spanish]\nCEO = PDG [French]");
+    const saved = page.waitForResponse((r) => r.url().endsWith("/api/brand") && r.request().method() === "PUT");
+    await page.getByRole("button", { name: "Save brand kit" }).click();
+    expect((await saved).ok()).toBe(true);
+    await page.reload();
+    await expect(page.getByLabel("Always translate as")).toHaveValue("free trial = prueba gratis [Spanish]\nCEO = PDG [French]");
+
     await page.goto("/translate");
-    const keep = page.getByLabel(/Keep the brand glossary's 2 terms as written/);
+    const keep = page.getByLabel(/Follow the brand glossary/);
     await expect(keep).toBeChecked();
-    await expect(page.getByText("Acme Cloud, Zeno stay untranslated in the dub.")).toBeVisible();
+    await expect(page.getByText(/Acme Cloud, Zeno stay untranslated\. 2 terms are always translated one way/)).toBeVisible();
     await page.getByPlaceholder("https://…/video.mp4").fill("https://cdn.example.com/launch.mp4");
     await page.getByLabel("Title (optional)").fill(`Glossary ${tag}`);
     await page.getByRole("button", { name: "Translate video" }).click();
     const card = page.getByTestId("translation").filter({ has: page.getByText(`Glossary ${tag}`, { exact: true }) });
-    await expect(card.getByTestId("translation-meta")).toContainText("→ Spanish · keeps 2 brand terms");
+    // Only the Spanish rule is for this dub's language.
+    await expect(card.getByTestId("translation-meta")).toContainText("→ Spanish · keeps 2 brand terms · 1 fixed translation");
     // Turned off, the next dub keeps none.
     await keep.uncheck();
     await page.getByPlaceholder("https://…/video.mp4").fill("https://cdn.example.com/launch.mp4");
@@ -2106,6 +2120,7 @@ test("a dub can keep the brand glossary's terms as written", async ({ page }) =>
     const plain = page.getByTestId("translation").filter({ has: page.getByText(`Plain ${tag}`, { exact: true }) });
     await expect(plain.getByTestId("translation-meta")).toBeVisible();
     await expect(plain.getByTestId("translation-meta")).not.toContainText("brand term");
+    await expect(plain.getByTestId("translation-meta")).not.toContainText("fixed translation");
   } finally {
     const restored = before ? await page.request.put("/api/brand", { data: before }) : await page.request.delete("/api/brand");
     expect(restored.ok()).toBe(true);

@@ -1,6 +1,6 @@
 // Script writing, revision, and interactive chat. Used by API routes only.
 import { protectPauses } from "../pauses";
-import { protectTerms } from "../glossary";
+import { forcedFor, protectTerms } from "../glossary";
 import { z } from "zod";
 import { getScriptProvider } from "../providers";
 import { LOCAL_OWNER } from "../owner-id";
@@ -45,13 +45,23 @@ export const reviseSchema = z.object({
 
 /**
  * Pause markers ride through the model as tokens it leaves alone, then come back as written. A
- * translation does the same with the owner's brand glossary, so its terms come back untranslated.
+ * translation does the same with the owner's brand glossary, so its terms come back untranslated, and
+ * with the kit's forced translations for the language, which come back as their fixed translation.
  */
 export async function reviseScript(input: z.infer<typeof reviseSchema>, ownerId: string = LOCAL_OWNER): Promise<string> {
   const pauses = protectPauses(input.script);
-  const terms = input.action === "translate" ? protectTerms(pauses.text, (await getBrandKit(ownerId))?.glossary ?? []) : null;
+  let terms: ReturnType<typeof protectTerms> | null = null;
+  let replacements = new Map<string, string>();
+  if (input.action === "translate") {
+    const kit = await getBrandKit(ownerId);
+    const forced = forcedFor(kit?.forcedTranslations, input.language);
+    replacements = new Map(forced.map((r) => [r.term.normalize("NFC").trim().toLowerCase(), r.translation]));
+    terms = protectTerms(pauses.text, [...(kit?.glossary ?? []), ...forced.map((r) => r.term)], replacements);
+  }
   const sent = terms ? terms.text : pauses.text;
-  const out = await getScriptProvider().revise({ ...input, script: sent, ...(terms?.terms.length ? { terms: terms.terms } : {}) });
+  // The model is told what each token stands for in the translation: the term itself, or its fixed translation.
+  const meaning = terms?.terms.map((t) => replacements.get(t.toLowerCase()) ?? t);
+  const out = await getScriptProvider().revise({ ...input, script: sent, ...(meaning?.length ? { terms: meaning } : {}) });
   return pauses.restore(terms ? terms.restore(out) : out);
 }
 

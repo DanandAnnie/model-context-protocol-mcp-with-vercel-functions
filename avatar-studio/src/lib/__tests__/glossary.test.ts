@@ -96,3 +96,52 @@ describe("brand glossary", () => {
     assert.equal(done.subtitles?.German, "Nimbus xx xx.");
   });
 });
+
+describe("forced translations", () => {
+  it("reads rules one per line, with an optional language, and reports lines it cannot read", async () => {
+    const { parseForcedTranslations, formatForcedTranslations } = await import("../glossary");
+    const parsed = parseForcedTranslations("CEO = Geschäftsführer [German]\n\nfree trial = essai gratuit\nno equals here\nceo = PDG [german]\n = x\nCEO = Directeur [French]");
+    assert.deepEqual(parsed.rules, [
+      { term: "CEO", translation: "Geschäftsführer", language: "German" },
+      { term: "free trial", translation: "essai gratuit" },
+      { term: "CEO", translation: "Directeur", language: "French" },
+    ]);
+    assert.deepEqual(parsed.bad, [4, 6], "line numbers count blank lines");
+    assert.equal(formatForcedTranslations(parsed.rules), "CEO = Geschäftsführer [German]\nfree trial = essai gratuit\nCEO = Directeur [French]");
+    assert.deepEqual(parseForcedTranslations(formatForcedTranslations(parsed.rules)).rules, parsed.rules, "what the page shows reads back the same");
+    // The kit keeps the first of a repeated term and language and checks the lengths.
+    const kit = brandKitSchema.parse({ primaryColor: "#4f46e5", forcedTranslations: [{ term: "CEO", translation: "A", language: "German" }, { term: "ceo", translation: "B", language: "GERMAN" }, { term: "CEO", translation: "C" }] });
+    assert.deepEqual(kit.forcedTranslations?.map((r) => r.translation), ["A", "C"]);
+    assert.equal(brandKitSchema.safeParse({ primaryColor: "#4f46e5", forcedTranslations: [{ term: "C", translation: "x" }] }).success, false);
+    assert.equal(brandKitSchema.safeParse({ primaryColor: "#4f46e5", forcedTranslations: [{ term: "CEO", translation: "x".repeat(81) }] }).success, false);
+  });
+
+  it("picks the rules for a language: its own over every language's, its base language too", async () => {
+    const { forcedFor } = await import("../glossary");
+    const rules = [
+      { term: "CEO", translation: "chief" },
+      { term: "ceo", translation: "Geschäftsführer", language: "German" },
+      { term: "free trial", translation: "prueba gratis", language: "Spanish" },
+      { term: "free trial", translation: "prueba sin costo", language: "Spanish (Mexico)" },
+    ];
+    assert.deepEqual(forcedFor(rules, "German"), [{ term: "ceo", translation: "Geschäftsführer" }]);
+    assert.deepEqual(forcedFor(rules, "spanish"), [{ term: "CEO", translation: "chief" }, { term: "free trial", translation: "prueba gratis" }]);
+    assert.deepEqual(forcedFor(rules, "Spanish (Mexico)"), [{ term: "CEO", translation: "chief" }, { term: "free trial", translation: "prueba sin costo" }]);
+    assert.deepEqual(forcedFor(rules, "Spanish (Spain)"), [{ term: "CEO", translation: "chief" }, { term: "free trial", translation: "prueba gratis" }], "a regional rule is not another region's");
+    assert.deepEqual(forcedFor(rules, "French"), [{ term: "CEO", translation: "chief" }]);
+    assert.deepEqual(forcedFor(undefined, "French"), []);
+  });
+
+  it("puts each rule's translation where its term stood, and tells the model what the token stands for", async () => {
+    await saveBrandKit(brandKitSchema.parse({ primaryColor: "#4f46e5", glossary: ["Nimbus"], forcedTranslations: [{ term: "CEO", translation: "Geschäftsführer", language: "German" }, { term: "free trial", translation: "Testphase" }] }), "u-forced");
+    const script = "Our CEO says: start a free trial of Nimbus.";
+    assert.equal(await reviseScript({ script, action: "translate", language: "German" }, "u-forced"), "xx Geschäftsführer xx: xx xx Testphase xx Nimbus.");
+    assert.deepEqual(termsSeen[0], ["Geschäftsführer", "Testphase", "Nimbus"]);
+    // In another language only the rule for every language applies.
+    assert.equal(await reviseScript({ script, action: "translate", language: "French" }, "u-forced"), "xx xx xx: xx xx Testphase xx Nimbus.");
+    // Subtitle languages follow the same rules.
+    const v = await createVideo(videoRequestSchema.parse({ title: "Launch", script, avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }), "u-forced");
+    const done = await addSubtitles(v.id, "German", "u-forced");
+    assert.equal(done.subtitles?.German, "xx Geschäftsführer xx: xx xx Testphase xx Nimbus.");
+  });
+});

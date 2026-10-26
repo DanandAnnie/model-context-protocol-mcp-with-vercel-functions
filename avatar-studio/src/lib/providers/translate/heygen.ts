@@ -46,10 +46,12 @@ export class HeyGenTranslateProvider implements TranslateProvider {
    * so the same terms always find the same glossary (made once, then looked up by name) and different ones never
    * change a glossary another dub is using. `fresh` skips this instance's memory, for an id HeyGen no longer knows.
    */
-  private async glossaryFor(terms: string[] | undefined, fresh = false): Promise<string | undefined> {
-    const kept = [...new Set((terms ?? []).map((t) => t.trim()).filter(Boolean))].sort();
-    if (!kept.length) return undefined;
-    const digest = createHash("sha256").update(JSON.stringify(kept)).digest("hex").slice(0, 16);
+  private async glossaryFor(input: Pick<TranslationRequest, "glossary" | "forcedTranslations">, fresh = false): Promise<string | undefined> {
+    const kept = [...new Set((input.glossary ?? []).map((t) => t.trim()).filter(Boolean))].sort();
+    const forced = (input.forcedTranslations ?? []).map(({ term, translation }) => ({ term: term.trim(), translation: translation.trim() })).sort((a, b) => a.term.localeCompare(b.term));
+    if (!kept.length && !forced.length) return undefined;
+    // A glossary with only kept terms keeps the digest it had before forced translations existed.
+    const digest = createHash("sha256").update(JSON.stringify(forced.length ? { kept, forced } : kept)).digest("hex").slice(0, 16);
     if (fresh) glossaryIds.delete(digest);
     const known = glossaryIds.get(digest);
     if (known) return known;
@@ -57,7 +59,10 @@ export class HeyGenTranslateProvider implements TranslateProvider {
     let id: string | undefined;
     try {
       // A deleted glossary frees its name, so a fresh look makes it again under a new key.
-      const made = await this.client.createGlossary({ name, do_not_translate_terms: kept.map((term) => ({ term })) }, `avatar-studio-glossary-${digest}${fresh ? `-${Date.now()}` : ""}`);
+      const made = await this.client.createGlossary(
+        { name, do_not_translate_terms: kept.map((term) => ({ term })), ...(forced.length ? { forced_translations: forced } : {}) },
+        `avatar-studio-glossary-${digest}${fresh ? `-${Date.now()}` : ""}`,
+      );
       id = made.id ?? made.brand_glossary_id;
     } catch (err) {
       // Made before (by another instance, or before a restart): the name is taken, so it is looked up. A create still
@@ -89,12 +94,12 @@ export class HeyGenTranslateProvider implements TranslateProvider {
    * (deleted in HeyGen since), the glossary is found or made again and the request sent once more.
    */
   private async withGlossary<T>(input: TranslationRequest, send: (glossaryId?: string) => Promise<T>): Promise<T> {
-    const glossaryId = await this.glossaryFor(input.glossary);
+    const glossaryId = await this.glossaryFor(input);
     try {
       return await send(glossaryId);
     } catch (err) {
       if (!glossaryId || !/ failed: 4\d\d\b/.test(err instanceof Error ? err.message : "")) throw err;
-      const again = await this.glossaryFor(input.glossary, true);
+      const again = await this.glossaryFor(input, true);
       if (again === glossaryId) throw err;
       return send(again);
     }

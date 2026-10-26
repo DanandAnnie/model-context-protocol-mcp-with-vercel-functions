@@ -7,7 +7,7 @@ import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api, isDarkHex } from "@/lib/client";
 import { MAX_PRONUNCIATIONS, formatPronunciations, parsePronunciations } from "@/lib/pronounce";
-import { MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH, MIN_GLOSSARY_TERM_LENGTH, parseGlossary } from "@/lib/glossary";
+import { MAX_FORCED_TRANSLATIONS, MAX_FORCED_TRANSLATION_LENGTH, MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH, MIN_GLOSSARY_TERM_LENGTH, formatForcedTranslations, parseForcedTranslations, parseGlossary } from "@/lib/glossary";
 import { LOGO_TYPES, logoDataUrlValid, logoFileType } from "@/lib/logo-types";
 import type { AspectRatio, Avatar, BrandKit, Resolution, Voice, WatermarkCorner } from "@/lib/types";
 
@@ -29,6 +29,7 @@ export default function BrandPage() {
   const [bgUrl, setBgUrl] = useState("");
   const [pronunciations, setPronunciations] = useState("");
   const [glossary, setGlossary] = useState("");
+  const [forced, setForced] = useState("");
   const [logoNotice, setLogoNotice] = useState<string | null>(null);
   const [avatarId, setAvatarId] = useState("");
   const [voiceId, setVoiceId] = useState("");
@@ -61,6 +62,7 @@ export default function BrandPage() {
     setBgUrl(b.defaultBackground && b.defaultBackground.type !== "color" ? b.defaultBackground.value : "");
     setPronunciations(formatPronunciations(b.pronunciations ?? []));
     setGlossary((b.glossary ?? []).join("\n"));
+    setForced(formatForcedTranslations(b.forcedTranslations));
     setAvatarId(b.defaultAvatarId ?? "");
     setVoiceId(b.defaultVoiceId ?? "");
     setAspect(b.defaultAspect ?? "");
@@ -120,6 +122,20 @@ export default function BrandPage() {
       setErr(`"${shortTerm}": a term to keep untranslated is at least ${MIN_GLOSSARY_TERM_LENGTH} characters.`);
       return;
     }
+    const parsed = parseForcedTranslations(forced);
+    if (parsed.bad.length) {
+      setErr(`Always translate, line ${parsed.bad[0]}: write it as term = translation, with [Language] at the end for one language only.`);
+      return;
+    }
+    if (parsed.rules.length > MAX_FORCED_TRANSLATIONS) {
+      setErr(`Up to ${MAX_FORCED_TRANSLATIONS} translation rules (you have ${parsed.rules.length}).`);
+      return;
+    }
+    const badForced = parsed.rules.find((r) => r.term.length < MIN_GLOSSARY_TERM_LENGTH || r.term.length > MAX_GLOSSARY_TERM_LENGTH || r.translation.length > MAX_FORCED_TRANSLATION_LENGTH || (r.language !== undefined && (r.language.length < 2 || r.language.length > 40)));
+    if (badForced) {
+      setErr(`Always translate "${badForced.term.slice(0, 20)}": the term is ${MIN_GLOSSARY_TERM_LENGTH} to ${MAX_GLOSSARY_TERM_LENGTH} characters, the translation at most ${MAX_FORCED_TRANSLATION_LENGTH}, and a language 2 to 40.`);
+      return;
+    }
     setSaving(true);
     setErr(null);
     try {
@@ -133,6 +149,7 @@ export default function BrandPage() {
           defaultBackground: bgType && bgUrl.trim() ? { type: bgType, value: bgUrl.trim() } : undefined,
           pronunciations: rules,
           glossary: terms,
+          forcedTranslations: parsed.rules,
           defaultAvatarId: avatarId || undefined,
           defaultVoiceId: voiceId || undefined,
           defaultAspect: aspect || undefined,
@@ -167,6 +184,7 @@ export default function BrandPage() {
       setBgUrl("");
       setPronunciations("");
       setGlossary("");
+      setForced("");
       setCaptions(false);
       setWatermark("");
       setSavedAt(null);
@@ -331,8 +349,11 @@ export default function BrandPage() {
           <Field label="Pronunciation" hint="One per line, word = how to say it (for example Nair = Nye-er). Renders say it that way; scripts and captions keep the spelling. Up to 50.">
             <textarea aria-label="Pronunciation" value={pronunciations} onChange={(e) => setPronunciations(e.target.value)} rows={3} placeholder={"Nair = Nye-er\nSaaS = sass"} className={`${inputClass} font-mono text-xs`} />
           </Field>
-          <Field label="Never translate" hint="One term per line: product names, slogans, handles. Translating a script or adding a subtitle language keeps each one exactly as written (matched whole, ignoring case). Dubbing jobs go to the provider as they are. Up to 50.">
+          <Field label="Never translate" hint="One term per line: product names, slogans, handles. Translating a script, adding a subtitle language, or a dub that keeps the glossary leaves each one exactly as written (matched whole, ignoring case). Up to 50.">
             <textarea aria-label="Never translate" value={glossary} onChange={(e) => setGlossary(e.target.value)} rows={3} placeholder={"Acme Cloud\nNimbus"} className={`${inputClass} font-mono text-xs`} />
+          </Field>
+          <Field label="Always translate as" hint="One rule per line, term = translation; add [Language] at the end for a rule in that language only. Translations, subtitle languages, and dubs that keep the glossary use the translation word for word, so pick a form that reads right without inflection. Up to 50.">
+            <textarea aria-label="Always translate as" value={forced} onChange={(e) => setForced(e.target.value)} rows={3} placeholder={"CEO = Geschäftsführer [German]\nfree trial = essai gratuit [French]"} className={`${inputClass} font-mono text-xs`} />
           </Field>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
             <span className="text-xs text-slate-500">{savedAt ? `Saved ${new Date(savedAt).toLocaleString()}` : "Not saved yet"}</span>

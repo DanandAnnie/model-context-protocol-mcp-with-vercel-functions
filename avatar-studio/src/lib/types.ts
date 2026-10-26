@@ -321,6 +321,8 @@ export interface TranslationRequest {
   proofread?: boolean;
   /** Terms the dub keeps exactly as written (the brand kit's glossary when the dub was asked to keep it). */
   glossary?: string[];
+  /** Terms the dub always translates one way, from the brand kit's rules for its language. */
+  forcedTranslations?: Array<{ term: string; translation: string }>;
 }
 
 /** How a dub is made: quickly, or more slowly for a more natural result. */
@@ -359,6 +361,14 @@ export interface Translation extends TranslationRequest {
   updatedAt: string;
 }
 
+/** A term a translation always renders one way, e.g. { term: "CEO", translation: "Geschäftsführer", language: "German" }. */
+export interface ForcedTranslation {
+  term: string;
+  translation: string;
+  /** The language the rule is for; every language when absent. */
+  language?: string;
+}
+
 /** A word the renderer should say differently, e.g. { word: "Nair", sayAs: "Nye-er" }. */
 export interface Pronunciation {
   word: string;
@@ -383,6 +393,8 @@ export interface BrandKit {
   pronunciations?: Pronunciation[];
   /** Terms the AI translation (script Translate, subtitle languages) leaves exactly as written. */
   glossary?: string[];
+  /** Terms the AI translation always renders one way: in every language, or only in `language`. */
+  forcedTranslations?: ForcedTranslation[];
   defaultAvatarId?: string;
   defaultVoiceId?: string;
   defaultAspect?: AspectRatio;

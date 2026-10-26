@@ -102,7 +102,7 @@ export class HeyGenClient {
   }
 
   /** Brand glossary (v3): rules every translation that names it follows; `key` makes a retried create return the same glossary. */
-  createGlossary(body: { name: string; do_not_translate_terms: Array<{ term: string }> }, key: string) {
+  createGlossary(body: { name: string; do_not_translate_terms: Array<{ term: string }>; forced_translations?: Array<{ term: string; translation: string }> }, key: string) {
     return this.request<{ id?: string; brand_glossary_id?: string }>(`${V3}/brand-glossaries`, { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": key } });
   }
 

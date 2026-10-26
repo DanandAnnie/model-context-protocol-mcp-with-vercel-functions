@@ -9,7 +9,7 @@ import { getAvatar } from "./avatars";
 import { listVoices } from "./voices";
 import { backgroundSchema } from "./schemas";
 import { MAX_PRONUNCIATIONS } from "../pronounce";
-import { MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH, MIN_GLOSSARY_TERM_LENGTH } from "../glossary";
+import { MAX_FORCED_TRANSLATIONS, MAX_FORCED_TRANSLATION_LENGTH, MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH, MIN_GLOSSARY_TERM_LENGTH } from "../glossary";
 import { servableLogo } from "../brand-logo";
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
@@ -33,6 +33,22 @@ export const brandKitSchema = z.object({
     .array(z.string().trim().min(MIN_GLOSSARY_TERM_LENGTH, `A term to keep untranslated is at least ${MIN_GLOSSARY_TERM_LENGTH} characters`).max(MAX_GLOSSARY_TERM_LENGTH))
     .max(MAX_GLOSSARY_TERMS)
     .transform((terms) => terms.filter((t, i) => terms.findIndex((u) => u.toLowerCase() === t.toLowerCase()) === i))
+    .optional(),
+  /**
+   * Up to 50 rules a translation follows: the term (2 to 60 characters, matched whole and case-insensitively) always
+   * becomes the translation (up to 80), in every language or only in `language`; a repeat of a term and language,
+   * ignoring case, keeps the first.
+   */
+  forcedTranslations: z
+    .array(
+      z.object({
+        term: z.string().trim().min(MIN_GLOSSARY_TERM_LENGTH, `A term to translate is at least ${MIN_GLOSSARY_TERM_LENGTH} characters`).max(MAX_GLOSSARY_TERM_LENGTH),
+        translation: z.string().trim().min(1).max(MAX_FORCED_TRANSLATION_LENGTH),
+        language: z.preprocess((v) => (v === null || v === "" ? undefined : v), z.string().trim().min(2).max(40).optional()),
+      }),
+    )
+    .max(MAX_FORCED_TRANSLATIONS)
+    .transform((rules) => rules.filter((r, i) => rules.findIndex((u) => u.term.toLowerCase() === r.term.toLowerCase() && (u.language ?? "").toLowerCase() === (r.language ?? "").toLowerCase()) === i))
     .optional(),
   defaultAvatarId: z.string().trim().max(200).optional(),
   defaultVoiceId: z.string().trim().max(200).optional(),
@@ -65,6 +81,7 @@ export async function saveBrandKit(input: z.infer<typeof brandKitSchema>, ownerI
     ...(input.defaultBackground && input.defaultBackground.type !== "color" ? { defaultBackground: input.defaultBackground } : {}),
     ...(input.pronunciations?.length ? { pronunciations: input.pronunciations } : {}),
     ...(input.glossary?.length ? { glossary: input.glossary } : {}),
+    ...(input.forcedTranslations?.length ? { forcedTranslations: input.forcedTranslations.map(({ term, translation, language }) => ({ term, translation, ...(language ? { language } : {}) })) } : {}),
     defaultAvatarId: input.defaultAvatarId || undefined,
     defaultVoiceId: input.defaultVoiceId || undefined,
     defaultAspect: input.defaultAspect,

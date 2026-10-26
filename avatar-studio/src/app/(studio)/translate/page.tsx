@@ -46,6 +46,7 @@ function TranslateInner() {
   const [proofread, setProofread] = useState(false);
   const { data: brandData } = useApi<{ brand: BrandKit | null }>("/api/brand");
   const glossary = brandData?.brand?.glossary ?? [];
+  const forcedRules = brandData?.brand?.forcedTranslations ?? [];
   // On by default: the server keeps the kit's terms when it has some (even if the kit has not loaded here yet).
   const [keepGlossary, setKeepGlossary] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -136,14 +137,20 @@ function TranslateInner() {
                 </label>
               </div>
             </div>
-            {glossary.length > 0 && (
+            {(glossary.length > 0 || forcedRules.length > 0) && (
               <label className="flex items-start gap-2 text-sm text-slate-700">
                 <input type="checkbox" className="mt-0.5" checked={keepGlossary} disabled={canEdit === false} onChange={(e) => setKeepGlossary(e.target.checked)} />
                 <span>
-                  Keep the brand glossary&apos;s {glossary.length} {glossary.length === 1 ? "term" : "terms"} as written
+                  Follow the brand glossary
                   <span className="block text-xs text-slate-500">
-                    {glossary.slice(0, 4).join(", ")}
-                    {glossary.length > 4 ? `, and ${glossary.length - 4} more` : ""} stay untranslated in the dub. Edit them in the brand kit.
+                    {glossary.length > 0 && (
+                      <>
+                        {glossary.slice(0, 4).join(", ")}
+                        {glossary.length > 4 ? `, and ${glossary.length - 4} more` : ""} stay untranslated.{" "}
+                      </>
+                    )}
+                    {forcedRules.length > 0 && `${forcedRules.length} ${forcedRules.length === 1 ? "term is" : "terms are"} always translated one way (where a rule covers the language). `}
+                    Edit them in the brand kit.
                   </span>
                 </span>
               </label>
@@ -183,7 +190,8 @@ function TranslateInner() {
                         {t.removeMusic ? " · no music" : ""}
                         {t.enhanceSpeech ? " · enhanced speech" : ""}
                         {t.proofread ? " · proofread" : ""}
-                        {t.glossary?.length ? ` · keeps ${t.glossary.length} brand ${t.glossary.length === 1 ? "term" : "terms"}` : ""} · {formatDate(t.createdAt)}
+                        {t.glossary?.length ? ` · keeps ${t.glossary.length} brand ${t.glossary.length === 1 ? "term" : "terms"}` : ""}
+                        {t.forcedTranslations?.length ? ` · ${t.forcedTranslations.length} fixed ${t.forcedTranslations.length === 1 ? "translation" : "translations"}` : ""} · {formatDate(t.createdAt)}
                       </div>
                       {t.proofreadStage === "preparing" && <div className="mt-1 text-xs text-slate-500">Translating the lines for you to proofread…</div>}
                       {t.proofreadStage === "dubbing" && <div className="mt-1 text-xs text-slate-500">Starting the dub…</div>}

@@ -322,3 +322,37 @@ describe("dubs that keep the brand glossary", () => {
     }
   });
 });
+
+describe("dubs that follow the brand kit's forced translations", () => {
+  it("stores the rules for each dub's language and sends them to HeyGen as forced_translations", async () => {
+    const { saveBrandKit, brandKitSchema } = await import("../services");
+    await saveBrandKit(brandKitSchema.parse({ name: "Acme", primaryColor: "#112233", forcedTranslations: [{ term: "CEO", translation: "Geschäftsführer", language: "German" }, { term: "free trial", translation: "trial" }] }), "u-ft");
+    const made = await createTranslations(translationBatchSchema.parse({ ...base, targetLanguages: ["German", "French"], keepGlossary: true }), "u-ft");
+    assert.deepEqual(made.map((t) => [t.targetLanguage, t.forcedTranslations, "glossary" in t]), [
+      ["German", [{ term: "CEO", translation: "Geschäftsführer" }, { term: "free trial", translation: "trial" }], false],
+      ["French", [{ term: "free trial", translation: "trial" }], false],
+    ]);
+
+    const { HeyGenTranslateProvider } = await import("../providers/translate/heygen");
+    const realFetch = globalThis.fetch;
+    const calls: Array<{ url: string; body?: Record<string, unknown> }> = [];
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      return new Response(JSON.stringify({ data: String(url).endsWith("/brand-glossaries") ? { id: "bg_ft" } : { video_translation_ids: ["vt_ft"] } }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const heygen = new HeyGenTranslateProvider("key");
+      await heygen.createTranslation({ ...base, targetLanguage: "German", glossary: ["Zeno"], forcedTranslations: [{ term: "free trial", translation: "Testphase" }, { term: "CEO", translation: "Geschäftsführer" }] });
+      assert.deepEqual(calls[0].body?.do_not_translate_terms, [{ term: "Zeno" }]);
+      assert.deepEqual(calls[0].body?.forced_translations, [{ term: "CEO", translation: "Geschäftsführer" }, { term: "free trial", translation: "Testphase" }]);
+      assert.equal(calls[1].body?.brand_glossary_id, "bg_ft");
+      // Other rules for the same kept terms are another glossary, never a change to this one.
+      calls.length = 0;
+      await heygen.createTranslation({ ...base, targetLanguage: "French", glossary: ["Zeno"], forcedTranslations: [{ term: "CEO", translation: "PDG" }] });
+      assert.ok(calls[0].url.endsWith("/brand-glossaries"), "a new glossary for new rules");
+      assert.notEqual(calls[0].body?.name, undefined);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+});

@@ -14,6 +14,7 @@ import { LOCAL_OWNER } from "../owner-id";
 import { owned, stripUndefined } from "./shared";
 import { MAX_CAPTION_CUE_CHARS, MAX_CAPTION_CUES } from "./videos";
 import { getBrandKit } from "./brand";
+import { forcedFor } from "../glossary";
 
 const languageSchema = z.string().trim().min(2).max(40);
 /** How a dub is made: voice only or lip-synced, how many people speak, its quality, and its audio. */
@@ -113,17 +114,24 @@ export const translationBatchSchema = z
  */
 export async function createTranslations(input: z.infer<typeof translationBatchSchema>, ownerId: string = LOCAL_OWNER): Promise<Translation[]> {
   if (input.proofread) assertProofreadReachable(getTranslateProvider().name);
-  // The brand kit's terms as they are now; the job keeps the list it was dubbed with.
-  const glossary = input.keepGlossary ? ((await getBrandKit(ownerId))?.glossary ?? []) : [];
+  // The brand kit's terms and rules as they are now; each job keeps what it was dubbed with (the rules for its language).
+  const kit = input.keepGlossary ? await getBrandKit(ownerId) : null;
+  const glossary = kit?.glossary ?? [];
   const out: Translation[] = [];
   for (const language of input.languages) {
     const title = input.languages.length > 1 ? `${input.title} (${language})`.slice(0, 160) : input.title;
-    out.push(await createTranslation({ title, sourceVideoUrl: input.sourceVideoUrl, targetLanguage: language, ...setOptions(input), ...(glossary.length ? { glossary } : {}) }, ownerId));
+    const forcedTranslations = forcedFor(kit?.forcedTranslations, language);
+    out.push(
+      await createTranslation(
+        { title, sourceVideoUrl: input.sourceVideoUrl, targetLanguage: language, ...setOptions(input), ...(glossary.length ? { glossary } : {}), ...(forcedTranslations.length ? { forcedTranslations } : {}) },
+        ownerId,
+      ),
+    );
   }
   return out;
 }
 
-export async function createTranslation(req: z.infer<typeof translationRequestSchema> & { glossary?: string[] }, ownerId: string = LOCAL_OWNER): Promise<Translation> {
+export async function createTranslation(req: z.infer<typeof translationRequestSchema> & Pick<Translation, "glossary" | "forcedTranslations">, ownerId: string = LOCAL_OWNER): Promise<Translation> {
   const provider = getTranslateProvider();
   const base: Translation = {
     // Default options (a lip-synced dub at speed, music and speech as recorded) are stored as no field at all.
@@ -132,6 +140,7 @@ export async function createTranslation(req: z.infer<typeof translationRequestSc
     targetLanguage: req.targetLanguage,
     ...setOptions(req),
     ...(req.glossary?.length ? { glossary: req.glossary } : {}),
+    ...(req.forcedTranslations?.length ? { forcedTranslations: req.forcedTranslations } : {}),
     id: newId("tr"),
     ownerId,
     status: "queued",

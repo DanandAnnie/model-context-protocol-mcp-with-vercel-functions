@@ -38,7 +38,22 @@ describe("scenesFromText", () => {
     assert.deepEqual(scenesFromText("One.\n\n* * *\n\nTwo.\n- - -\nThree.").scenes, ["One.", "Two.", "Three."]);
     assert.deepEqual(
       scenesFromText("Read the [guide][g]. <!-- speaker note -->\n\n```js\nconsole.log(1)\n```\n\n| Plan | Price |\n|---|---:|\n| Pro | $10 |\n\nCost is 5 \\* 2, not \\*bold\\*.\n\n[g]: https://example.com/guide").scenes,
-      ["Read the guide.", "console.log(1)", "Plan, Price Pro, $10", "Cost is 5 * 2, not *bold*."],
+      ["Read the guide.", "console.log(1)", "Plan, Price. Pro, $10.", "Cost is 5 * 2, not *bold*."],
+    );
+    // Speaker labels are script, not link definitions; a real definition (a URL, maybe a title) is not spoken.
+    assert.deepEqual(scenesFromText("[NARRATOR]: Welcome to the show.\n\n[HOST]: Thanks for having me.\n[1]: First, we begin.\n[docs]: https://x.test/d \"Docs\"").scenes, [
+      "[NARRATOR]: Welcome to the show.",
+      "[HOST]: Thanks for having me. [1]: First, we begin.",
+    ]);
+    // Code in a fence is read as written: its # is no heading or title, its --- no break, its ** no emphasis.
+    assert.deepEqual(scenesFromText("```bash\n# install deps\nnpm i\n```\n\nFirst para.\n\nSecond para.\n\n~~~py\n---\ndef f(*args, **kwargs):\n    return __name__\n~~~"), {
+      scenes: ["# install deps npm i", "First para.", "Second para.", "--- def f(*args, **kwargs): return __name__"],
+      truncated: false,
+    });
+    // More Markdown: nested parentheses in a link, quoted lists, matched emphasis only, entities, strikethrough, footnotes, task boxes, escapes, bare rules.
+    assert.deepEqual(
+      scenesFromText("[Mercury](https://en.wikipedia.org/wiki/Mercury_(planet)) today.\n\n> - quoted item\n\nPass _foo and bar* together, ~~old~~ new &amp; fine&nbsp;now[^1].\n\n- [ ] Call Sam\n- [x] Book room\n\nPrice \\$5 \\& more.\n\n=====\n\nAfter the rule.").scenes,
+      ["Mercury today.\n\nquoted item\n\nPass _foo and bar* together, old new & fine now.\n\nCall Sam Book room\n\nPrice $5 & more.", "After the rule."],
     );
     assert.equal(scenesFromText("# Learn C#\n\nHi.").title, "Learn C#");
   });
@@ -102,10 +117,16 @@ describe("scenesFromText", () => {
     const section = scenesFromText(`${firstPart}\n\n${"Second part goes on and on ".repeat(120)}\n\n---\n\nEnd.`);
     assert.deepEqual(section.scenes, [firstPart]);
     assert.ok(scenesFromText(`${"He said \"stop.\" ".repeat(400)}`).scenes[0].endsWith('"stop."'));
-    // A huge paragraph is cut as quickly as a short one.
-    const started = Date.now();
-    scenesFromText(`${"c".repeat(4995)}.\n\n${"long text ".repeat(90_000)}`);
-    assert.ok(Date.now() - started < 1000, `took ${Date.now() - started} ms`);
+    // A huge document is read as quickly as a short one, unclosed emphasis and links included.
+    for (const doc of [`${"c".repeat(4995)}.\n\n${"long text ".repeat(90_000)}`, "a **b c **d e ".repeat(70_000), "__init and ".repeat(90_000), "[docs](https://x.y/a and ".repeat(40_000), "# \n".repeat(300_000), "[pause]\n\n".repeat(100_000)]) {
+      const started = Date.now();
+      const r = scenesFromText(doc);
+      assert.ok(Date.now() - started < 1500, `took ${Date.now() - started} ms for ${doc.slice(0, 30)}`);
+      if (r.scenes.length) assert.ok(renders(r.scenes));
+    }
+    // An early short sentence does not use up the cut: an unpunctuated transcript is kept to the room left.
+    const transcript = scenesFromText(`Hi. ${"word ".repeat(2000)}`).scenes;
+    assert.ok(transcript[0].length > MAX_SCRIPT_CHARS - 50, String(transcript[0].length));
     // More sections than a video has scenes: the first ones are kept.
     const sections = scenesFromText(Array.from({ length: MAX_SCENES + 3 }, (_, i) => `Section ${i + 1}.`).join("\n\n---\n\n"));
     assert.equal(sections.scenes.length, MAX_SCENES);

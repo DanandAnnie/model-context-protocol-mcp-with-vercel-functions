@@ -9,7 +9,7 @@ import { formatTimestamp } from "@/lib/text";
  * A multi-scene video's chapters, one per scene, as the share page lists them, with a copy in the form a video
  * description takes ("0:00 Welcome"), so a video posted to YouTube keeps them.
  */
-export function VideoChapters({ video }: { video: Timed }) {
+export function VideoChapters({ video }: { video: Timed & { status?: string; captionCues?: Array<{ startMs: number; text: string }> } }) {
   const [copied, setCopied] = useState(false);
   const chapters = videoChapters(video);
   if (chapters.length < 2) return null;
@@ -41,7 +41,13 @@ export function VideoChapters({ video }: { video: Timed }) {
         ))}
       </ol>
       <p className="mt-2 text-xs text-slate-500">
-        {video.durationSec ? "Times follow each scene's share of the video, as the captions do." : "Times are estimated until the video renders."}{" "}
+        {video.status !== "completed"
+          ? "Times are estimated until the video renders."
+          : !video.durationSec
+            ? "The renderer did not report the video's length, so times are estimated from the script."
+            : video.captionCues?.length
+              ? "Times follow the corrected captions."
+              : "Times follow each scene's share of the video, as the captions do."}{" "}
         {youtubeReadsChapters(chapters, totalMs)
           ? "Paste them into a YouTube description to show them as chapters there."
           : "YouTube shows chapters only when there are at least three, each 10 seconds or longer, so it would list these as plain text."}

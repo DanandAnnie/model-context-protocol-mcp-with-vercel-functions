@@ -50,11 +50,41 @@ describe("chapters", () => {
   it("is titled from the on-screen text, else the words (cut at a word), else what the scene is", () => {
     assert.deepEqual(
       videoChapters(tour).map((c) => c.title),
-      ["12 Maple Street", "The kitchen was redone last spring with quartz counters…", "Pause", "Call Dana to book a showing this weekend."],
+      ["12 Maple Street", "The kitchen was redone last spring with quartz counters, new…", "Pause", "Call Dana to book a showing this weekend."],
     );
     const clip = video([{ script: "Hello.", background: bg }, { script: " ", background: bg, audioId: "clip_1", audioSeconds: 4 }]);
     assert.equal(videoChapters(clip)[1].title, "Scene 2");
     assert.deepEqual(videoChapters(video([{ script: "Only one scene.", background: bg }])), [], "one scene has no chapters");
+  });
+
+  it("follow captions an editor corrected, in time and in words, and never share a second", () => {
+    const edited = video(
+      [
+        { script: "Hi, I'm Dana Smith.", background: bg },
+        { script: "Call me on 555 0100 today.", background: bg },
+      ],
+      { durationSec: 20, captionCues: [{ startMs: 0, endMs: 14_000, text: "Hi, I'm Dana." }, { startMs: 15_000, endMs: 20_000, text: "Call the office today." }] },
+    );
+    assert.deepEqual(videoChapters(edited), [
+      { startMs: 0, title: "Hi, I'm Dana." },
+      { startMs: 15_000, title: "Call the office today." },
+    ]);
+    // Scenes less than a second apart keep only the first.
+    const quick = video([{ script: "A.", background: bg }, { script: "B.", background: bg }, { script: "C.", background: bg }], { durationSec: 2 });
+    assert.deepEqual(videoChapters(quick).map((c) => [c.startMs, c.title]), [[0, "A."], [1333, "C."]]);
+  });
+
+  it("cuts long titles at whole characters and keeps a word that fits", () => {
+    const title = (script: string) => videoChapters(video([{ script: "Hi.", background: bg }, { script, background: bg }]))[1].title;
+    const sixty = `${"abcd ".repeat(11)}abcd`.padEnd(60, "x"); // exactly 60 characters
+    assert.equal(sixty.length, 60);
+    assert.equal(title(sixty), sixty, "a title of 60 characters is whole");
+    // Character 61 is a space, so the last word fits and is kept.
+    assert.equal(title(`${sixty} more words`), `${sixty}…`);
+    // A word running past the limit is left out whole.
+    assert.equal(title(`${"abcd ".repeat(11)}abcdefghijkl more`), `${"abcd ".repeat(10)}abcd…`);
+    const emoji = `${"a".repeat(59)}😀 and more`;
+    assert.equal(videoChapters(video([{ script: "Hi.", background: bg }, { script: emoji, background: bg }]))[1].title, `${"a".repeat(59)}😀…`);
   });
 
   it("lists them as a YouTube description does, and knows when YouTube would show them", () => {
@@ -68,6 +98,8 @@ describe("chapters", () => {
     assert.equal(youtubeReadsChapters(chapters.slice(0, 2), 3_800_000), false, "fewer than three");
     assert.equal(youtubeReadsChapters(chapters, 3_729_000), false, "the last is shorter than ten seconds");
     assert.equal(youtubeReadsChapters([{ startMs: 0, title: "A" }, { startMs: 5_000, title: "B" }, { startMs: 30_000, title: "C" }], 60_000), false);
+    // Judged on the whole seconds it copies: 0:00, 0:10, 0:20 is ten seconds apart.
+    assert.equal(youtubeReadsChapters([{ startMs: 0, title: "A" }, { startMs: 10_400, title: "B" }, { startMs: 20_300, title: "C" }], 31_000), true);
   });
 
   it("reaches the share page for a rendered video of several scenes only", () => {

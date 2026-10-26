@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { formatTimestamp } from "@/lib/text";
 import type { Chapter } from "@/lib/chapters";
 
@@ -7,8 +7,24 @@ import type { Chapter } from "@/lib/chapters";
  * The share page's chapters: one per scene, each playing the video from where its scene starts, the one playing
  * marked as the video plays.
  */
-export function ShareChapters({ playerId, chapters }: { playerId: string; chapters: Chapter[] }) {
+export function ShareChapters({ playerId, chapters: all }: { playerId: string; chapters: Chapter[] }) {
   const [active, setActive] = useState(0);
+  // The clip's own length once the player knows it: a chapter timed from an estimate past its end is left out.
+  const [clipMs, setClipMs] = useState<number | null>(null);
+  const chapters = useMemo(() => (clipMs ? all.filter((c, i) => i === 0 || c.startMs < clipMs - 500) : all), [all, clipMs]);
+
+  useEffect(() => {
+    const el = document.getElementById(playerId) as HTMLVideoElement | null;
+    if (!el) return;
+    const measure = () => setClipMs(Number.isFinite(el.duration) && el.duration > 0 ? Math.round(el.duration * 1000) : null);
+    measure();
+    el.addEventListener("loadedmetadata", measure);
+    el.addEventListener("durationchange", measure);
+    return () => {
+      el.removeEventListener("loadedmetadata", measure);
+      el.removeEventListener("durationchange", measure);
+    };
+  }, [playerId]);
 
   useEffect(() => {
     const el = document.getElementById(playerId) as HTMLVideoElement | null;
@@ -37,6 +53,8 @@ export function ShareChapters({ playerId, chapters }: { playerId: string; chapte
     el.play().catch(() => undefined);
   }
 
+  // One chapter left is no list to jump through.
+  if (chapters.length < 2) return null;
   return (
     <section className="mt-6" aria-labelledby="share-chapters-title">
       <h2 id="share-chapters-title" className="mb-2 text-sm font-semibold text-slate-200">
@@ -52,7 +70,7 @@ export function ShareChapters({ playerId, chapters }: { playerId: string; chapte
               className={`flex w-full gap-3 rounded-md border px-3 py-2 text-left text-sm ${i === active ? "border-slate-600 bg-slate-800 text-white" : "border-slate-800 text-slate-300 hover:bg-slate-800/60"}`}
             >
               <span className="w-12 shrink-0 font-mono text-xs leading-5 text-slate-400">{formatTimestamp(c.startMs / 1000)}</span>
-              <span className="min-w-0 truncate">{c.title}</span>
+              <span className="min-w-0 truncate" title={c.title}>{c.title}</span>
             </button>
           </li>
         ))}

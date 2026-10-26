@@ -57,23 +57,52 @@ export function sceneBoundsMs(video: Timed): Array<{ startMs: number; endMs: num
 /** Longest chapter title, in characters; longer ones end at a word with an ellipsis. */
 const MAX_TITLE = 60;
 
-/** A scene's chapter title: its on-screen text, else the start of what it says, else what it is. */
-function chapterTitle(scene: TimedScene, index: number): string {
-  const shown = scene.overlay?.text.replace(/\s+/g, " ").trim();
-  const said = stripPauses(scene.script).replace(/\s+/g, " ").trim();
-  const text = shown || said;
-  if (!text) return scene.audioId ? `Scene ${index + 1}` : "Pause";
-  if (text.length <= MAX_TITLE) return text;
-  const cut = text.slice(0, MAX_TITLE);
-  const word = cut.lastIndexOf(" ");
-  return `${(word > MAX_TITLE / 2 ? cut.slice(0, word) : cut).replace(/[\s,;:.!?…-]+$/, "")}…`;
+/** A title of at most MAX_TITLE characters (whole characters, so an emoji is never split), cut back to a word when it must be cut. */
+function shortTitle(text: string): string {
+  const chars = Array.from(text);
+  if (chars.length <= MAX_TITLE) return text;
+  // A space right after the limit means the words that fit end there.
+  const cut = chars.slice(0, MAX_TITLE).join("");
+  const word = chars[MAX_TITLE] === " " ? cut.length : cut.lastIndexOf(" ");
+  return `${(word > cut.length / 2 ? cut.slice(0, word) : cut).replace(/[\s,;:.!?…-]+$/, "")}…`;
 }
 
-/** One chapter per scene of a video of two scenes or more, starting where its scene does; none otherwise. */
-export function videoChapters(video: Timed): Chapter[] {
+/** A scene's chapter title: its on-screen text, else the start of what it says (`said`), else what it is. */
+function chapterTitle(scene: TimedScene, index: number, said: string): string {
+  const text = scene.overlay?.text.replace(/\s+/g, " ").trim() || said.replace(/\s+/g, " ").trim();
+  if (!text) return scene.audioId ? `Scene ${index + 1}` : "Pause";
+  return shortTitle(text);
+}
+
+/**
+ * One chapter per scene of a video of two scenes or more, starting where its scene does; none otherwise. When an
+ * editor corrected the captions, each chapter after the first starts at the corrected line nearest its scene's start
+ * and, without on-screen text, takes that line's words, so a jump lands where the transcript says and a word removed
+ * from the captions is not shown again. Scenes that would start within the same second as the chapter before are
+ * left out, so no two chapters share a time.
+ */
+export function videoChapters(video: Timed & { captionCues?: Array<{ startMs: number; text: string }> }): Chapter[] {
   const bounds = sceneBoundsMs(video);
   if (!bounds) return [];
-  return video.scenes!.map((sc, i) => ({ startMs: bounds[i].startMs, title: chapterTitle(sc, i) }));
+  const cues = video.captionCues?.length ? video.captionCues : null;
+  const chapters: Chapter[] = [];
+  video.scenes!.forEach((sc, i) => {
+    let startMs = bounds[i].startMs;
+    let said = stripPauses(sc.script);
+    if (cues) {
+      const after = chapters.at(-1)?.startMs ?? -1;
+      const nearest = cues.filter((c) => c.startMs > after).sort((a, b) => Math.abs(a.startMs - startMs) - Math.abs(b.startMs - startMs))[0];
+      if (i === 0) said = cues[0].text;
+      else if (nearest) {
+        startMs = nearest.startMs;
+        said = nearest.text;
+      }
+    }
+    const previous = chapters.at(-1);
+    if (previous && Math.floor(startMs / 1000) <= Math.floor(previous.startMs / 1000)) return;
+    chapters.push({ startMs: i === 0 ? 0 : startMs, title: chapterTitle(sc, i, said) });
+  });
+  return chapters;
 }
 
 /** Chapters as a video description lists them ("0:00 Welcome"), one a line, the form YouTube reads. */
@@ -86,6 +115,8 @@ export function chaptersText(chapters: Chapter[]): string {
  * (the last one's length taken from the running time).
  */
 export function youtubeReadsChapters(chapters: Chapter[], totalMs: number): boolean {
-  if (chapters.length < 3 || chapters[0].startMs !== 0) return false;
-  return chapters.every((c, i) => (chapters[i + 1]?.startMs ?? totalMs) - c.startMs >= 10_000);
+  // Judged on the whole seconds the copied text gives, as YouTube reads them.
+  const sec = (ms: number) => Math.floor(ms / 1000);
+  if (chapters.length < 3 || sec(chapters[0].startMs) !== 0) return false;
+  return chapters.every((c, i) => sec(chapters[i + 1]?.startMs ?? totalMs) - sec(c.startMs) >= 10);
 }

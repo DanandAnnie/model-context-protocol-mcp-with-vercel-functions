@@ -3,8 +3,8 @@ import { z } from "zod";
 import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import { getStore } from "../store";
-import { EMPTY_WATCH, MAX_SCENES, TRASH_RETENTION_DAYS, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
-import type { AudioClip, Avatar, CaptionCue, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
+import { EMPTY_WATCH, MAX_SCENES, TRASH_RETENTION_DAYS, backdropIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
+import type { AudioClip, Avatar, Backdrop, Background, CaptionCue, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
 import { buildCues } from "../captions";
 import { wellFormed } from "../text";
 import { pauseSeconds, stripPauses } from "../pauses";
@@ -15,6 +15,7 @@ import { ConflictError, ForbiddenError, LimitError, NotFoundError, ValidationErr
 import { isWorkspaceId, type User } from "../workspaces";
 import { getAvatar } from "./avatars";
 import { getClip, getClipAudio, saveClipAssetIds } from "./clips";
+import { getBackdrop, getBackdropImage, saveBackdropAssetIds } from "./backdrops";
 import { listVoices } from "./voices";
 import { PUBLIC_ACCESS, owned, scheduleNotification, stripUndefined } from "./shared";
 import { SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, clearShareLock, setShareLock, shareUnlocked } from "../share-lock";
@@ -167,6 +168,12 @@ export async function enforceRenderLimit(ownerId: string): Promise<void> {
   }
 }
 
+/** The uploaded background images a request names, on the video or on any scene. */
+function backdropIdsOf(req: { background?: Background; scenes?: Array<{ background?: Background }> }): string[] {
+  const ids = [req.background, ...(req.scenes ?? []).map((s) => s.background)].map(backdropIdOf).filter((id): id is string => !!id);
+  return Array.from(new Set(ids));
+}
+
 export interface RenderContext {
   avatar: Avatar;
   voice: Voice;
@@ -174,19 +181,29 @@ export interface RenderContext {
   cast: RenderCast;
 }
 
-export async function resolveRenderContext(req: Pick<VideoRequest, "avatarId" | "voiceId"> & { scenes?: Array<Pick<Scene, "avatarId" | "voiceId" | "audioId">> }, ownerId: string): Promise<RenderContext> {
+export async function resolveRenderContext(
+  req: Pick<VideoRequest, "avatarId" | "voiceId"> & { background?: Background; scenes?: Array<Pick<Scene, "avatarId" | "voiceId" | "audioId"> & { background?: Background }> },
+  ownerId: string,
+): Promise<RenderContext> {
   const avatarIds = Array.from(new Set([req.avatarId, ...(req.scenes ?? []).map((s) => s.avatarId).filter((id): id is string => !!id)]));
   const clipIds = Array.from(new Set((req.scenes ?? []).map((s) => s.audioId).filter((id): id is string => !!id)));
-  const [avatarList, voices, clipList] = await Promise.all([
+  const backdropIds = backdropIdsOf(req);
+  const [avatarList, voices, clipList, backdropList] = await Promise.all([
     Promise.all(avatarIds.map((id) => getAvatar(id, ownerId))),
     listVoices(ownerId),
-    // A clip from another account reads as not found, like any record the caller does not own.
+    // A clip or background image from another account reads as not found, like any record the caller does not own.
     Promise.all(clipIds.map((id) => getClip(id, ownerId))),
+    Promise.all(backdropIds.map((id) => getBackdrop(id, ownerId))),
   ]);
   const avatars = Object.fromEntries(avatarList.map((a) => [a.id, a]));
   // An audio scene speaks its clip, so its voice is neither needed nor checked.
   const voiceIds = Array.from(new Set([req.voiceId, ...(req.scenes ?? []).filter((s) => !s.audioId).map((s) => s.voiceId).filter((id): id is string => !!id)]));
-  const cast: RenderCast = { avatars, voices: {}, ...(clipList.length ? { clips: Object.fromEntries(clipList.map((c) => [c.id, c])) } : {}) };
+  const cast: RenderCast = {
+    avatars,
+    voices: {},
+    ...(clipList.length ? { clips: Object.fromEntries(clipList.map((c) => [c.id, c])) } : {}),
+    ...(backdropList.length ? { backdrops: Object.fromEntries(backdropList.map((b) => [b.id, b])) } : {}),
+  };
   for (const id of voiceIds) {
     const voice = voices.find((v) => v.id === id);
     if (!voice) throw new ValidationError(`Voice ${id} is not available with the current voice provider`);
@@ -258,6 +275,13 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
     if (cast.clips) {
       if (!provider.prepareAudio) throw new Error(`The ${provider.name} renderer cannot lip-sync to recorded audio`);
       for (const clip of Object.values(cast.clips)) cast.clips[clip.id] = await prepareClipOnce(provider, clip, ownerId);
+    }
+    // A context made for other backgrounds (a batch's, say) may lack an image this request names.
+    for (const id of backdropIdsOf(req)) {
+      if (!cast.backdrops?.[id]) cast.backdrops = { ...cast.backdrops, [id]: await getBackdrop(id, ownerId) };
+    }
+    if (cast.backdrops && provider.prepareBackdrop) {
+      for (const b of Object.values(cast.backdrops)) cast.backdrops[b.id] = await prepareBackdropOnce(provider, b, ownerId);
     }
     // The renderer speaks the brand kit's pronunciations; the stored script and its captions keep the spelling.
     const rules = (await getBrandKit(ownerId))?.pronunciations ?? [];
@@ -556,6 +580,23 @@ function prepareClipOnce(provider: AvatarProvider, clip: AudioClip, ownerId: str
     return prepared.providerAssetIds ? saveClipAssetIds(clip, prepared.providerAssetIds) : prepared;
   })().finally(() => preparingClips.delete(key));
   preparingClips.set(key, run);
+  return run;
+}
+
+/** Background image uploads in flight, so two renders naming one image share one upload. */
+const preparingBackdrops = new Map<string, Promise<Backdrop>>();
+
+/** Uploads a background image to the renderer once and remembers its asset id, so later renders reuse it. */
+function prepareBackdropOnce(provider: AvatarProvider, backdrop: Backdrop, ownerId: string): Promise<Backdrop> {
+  if (backdrop.providerAssetIds?.[provider.name]) return Promise.resolve(backdrop);
+  const key = `${provider.name}:${backdrop.id}`;
+  const running = preparingBackdrops.get(key);
+  if (running) return running;
+  const run = (async () => {
+    const prepared = await provider.prepareBackdrop!(backdrop, await getBackdropImage(backdrop.id, ownerId));
+    return prepared.providerAssetIds ? saveBackdropAssetIds(backdrop, prepared.providerAssetIds) : prepared;
+  })().finally(() => preparingBackdrops.delete(key));
+  preparingBackdrops.set(key, run);
   return run;
 }
 

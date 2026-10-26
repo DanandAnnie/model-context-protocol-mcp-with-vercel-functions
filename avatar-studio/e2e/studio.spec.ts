@@ -1026,6 +1026,45 @@ test("draft autosave survives a reload and clears after generating", async ({ pa
   expect(await page.evaluate(() => localStorage.getItem("avatar-studio:draft"))).toBeNull();
 });
 
+test("an uploaded background image fills the stage, renders, and leaves every scene when deleted", async ({ page }) => {
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
+  const tag = Date.now().toString(36);
+  await page.locator("textarea").fill("Here is our new office.");
+  await page.getByRole("button", { name: "Background", exact: true }).click();
+  await page.getByLabel("Background image file").setInputFiles({ name: `office-${tag}.png`, mimeType: "image/png", buffer: png });
+  const use = page.getByRole("button", { name: `Use office-${tag}` });
+  await expect(use).toHaveAttribute("aria-pressed", "true");
+  const { backdrops } = (await (await page.request.get("/api/backdrops")).json()) as { backdrops: Array<{ id: string; name: string; mimeType: string }> };
+  const office = backdrops.find((b) => b.name === `office-${tag}`)!;
+  expect(office.mimeType).toBe("image/png");
+  await expect(page.getByTestId("stage")).toHaveCSS("background-image", new RegExp(`/api/backdrops/${office.id}`));
+  // The image URL field stays for pictures given by address.
+  await expect(page.getByPlaceholder("https://…/background.jpg")).toHaveValue("");
+  // A picture the server would not take as it is (a GIF) is redrawn as a JPEG first.
+  const gif = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64");
+  await page.getByLabel("Background image file").setInputFiles({ name: `logo-${tag}.gif`, mimeType: "image/gif", buffer: gif });
+  await expect(page.getByRole("button", { name: `Use logo-${tag}` })).toHaveAttribute("aria-pressed", "true");
+  const after = (await (await page.request.get("/api/backdrops")).json()) as { backdrops: Array<{ id: string; name: string; mimeType: string }> };
+  const logo = after.backdrops.find((b) => b.name === `logo-${tag}`)!;
+  expect(logo.mimeType).toBe("image/jpeg");
+  await use.click();
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
+  await page.getByRole("button", { name: "Generate video" }).click();
+  expect(((await sent).postDataJSON() as { scenes: Array<{ background: unknown }> }).scenes[0].background).toEqual({ type: "image", value: `/api/backdrops/${office.id}` });
+  await page.waitForURL(/\/videos\/vid_/);
+  // Deleting the image takes it off the scene, so the next render is not refused.
+  await page.goto("/create");
+  await page.locator("textarea").fill("Back to plain.");
+  await page.getByRole("button", { name: "Background", exact: true }).click();
+  await page.getByRole("button", { name: `Use office-${tag}` }).click();
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: `Delete office-${tag}` }).click();
+  await expect(page.getByRole("button", { name: `Use office-${tag}` })).toHaveCount(0);
+  await expect(page.getByTestId("stage")).toHaveCSS("background-image", "none");
+  expect((await page.request.get(`/api/backdrops/${office.id}`)).status()).toBe(404);
+  expect((await page.request.delete(`/api/backdrops/${logo.id}`)).status()).toBe(204);
+});
+
 test("the AI script writer takes the focus and Escape closes it", async ({ page }) => {
   const write = page.getByRole("button", { name: "Write with AI" });
   await write.click();

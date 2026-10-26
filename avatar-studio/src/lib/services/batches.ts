@@ -61,9 +61,10 @@ export async function createBatch(input: z.infer<typeof batchRequestSchema>, own
 
   // Resolve avatar and voice once (they may cost provider round-trips) and reserve
   // the allowance for the whole batch before starting any row.
-  const ctx = await resolveRenderContext(input, ownerId);
   const kit = input.background ? null : await getBrandKit(ownerId);
   const background = input.background ?? kit?.defaultBackground ?? (kit ? { type: "color" as const, value: kit.primaryColor } : { type: "color" as const, value: "#f1f5f9" });
+  // The background goes in too: an uploaded image is looked up (and refused if it is gone) before any row starts.
+  const ctx = await resolveRenderContext({ ...input, background }, ownerId);
   const limit = await renderLimitFor(ownerId);
   const used = limit ? await rendersThisMonth(ownerId) : 0;
   const allowedRows = limit ? Math.max(0, Math.min(table.rows.length, limit - used)) : table.rows.length;

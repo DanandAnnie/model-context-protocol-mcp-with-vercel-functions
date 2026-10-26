@@ -6,7 +6,7 @@ import { LOCAL_OWNER } from "../owner-id";
 import { assertNoRenewingPlan } from "../billing";
 import { ConflictError } from "../errors";
 
-const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip", "videolead"] as const;
+const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip", "videolead", "backdrop"] as const;
 /**
  * Cover rows hold image bytes; the export describes each cover from its video (`cover.mimeType`, `cover.bytes`) instead
  * of loading them. Clip audio is never listed (each `clip` row names its own `clipaudio_<id>` row), so the export and
@@ -25,7 +25,7 @@ export async function exportOwnerData(ownerId: string = LOCAL_OWNER): Promise<Ow
       const copy = { ...item };
       if (kind === "apikey") delete copy.hash;
       if (kind === "notify") delete copy.secret;
-      if (kind === "clip") delete copy.providerAssetIds;
+      if (kind === "clip" || kind === "backdrop") delete copy.providerAssetIds;
       if (kind === "translation") delete copy.proofreadToken;
       if (kind === "sharelock") {
         delete copy.hash;
@@ -76,6 +76,7 @@ export async function deleteOwnerData(ownerId: string = LOCAL_OWNER, opts: { bil
         }
         // The clip's audio sits in its own row, removed by id so it is never loaded.
         if (kind === "clip") await getStore().remove("clipaudio", `clipaudio_${item.id}`);
+        if (kind === "backdrop") await getStore().remove("backdropdata", `backdropdata_${item.id}`);
         await getStore().remove(kind, item.id);
         removed.add(item.id);
       }

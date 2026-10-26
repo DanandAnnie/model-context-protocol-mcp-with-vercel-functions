@@ -1,4 +1,4 @@
-import { dimensionsFor, type AudioClip, type Avatar, framingFor, type PresenterFraming, type Scene, type VideoRequest, type Voice } from "../../types";
+import { backdropIdOf, dimensionsFor, type AudioClip, type Avatar, type Backdrop, type Background, framingFor, type PresenterFraming, type Scene, type VideoRequest, type Voice } from "../../types";
 import { withBreakTags } from "../../pauses";
 import { heygenBurnsCaptions } from "../../captions";
 import { webhookUrl } from "../../config";
@@ -52,6 +52,13 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     return { ...clip, providerAssetIds: { ...clip.providerAssetIds, [this.name]: id } };
   }
 
+  /** An uploaded background image is sent once as a HeyGen image asset; scenes then name it by asset id. */
+  async prepareBackdrop(backdrop: Backdrop, image: { bytes: Uint8Array; mimeType: string }): Promise<Backdrop> {
+    if (backdrop.providerAssetIds?.[this.name]) return backdrop;
+    const id = await this.client.uploadAsset(image.bytes, image.mimeType);
+    return { ...backdrop, providerAssetIds: { ...backdrop.providerAssetIds, [this.name]: id } };
+  }
+
   async createVideo(req: VideoRequest, avatar: Avatar, voice: Voice | null, cast?: RenderCast) {
     const scenes: Scene[] = req.scenes?.length ? req.scenes : [{ script: req.script, background: req.background }];
     const body = {
@@ -78,7 +85,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
             scene.background.type === "video"
               ? { type: "video", url: scene.background.value, play_style: "loop", fit: "cover" }
               : scene.background.type === "image"
-                ? { type: "image", url: scene.background.value }
+                ? this.imageBackground(scene.background, cast)
                 : { type: "color", value: scene.background.value },
         };
       }),
@@ -94,6 +101,15 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     return photoId
       ? { type: "talking_photo", talking_photo_id: photoId, talking_photo_style: framingFor(framing, avatar) === "circle" ? "circle" : "square" }
       : { type: "avatar", avatar_id: avatar.id, avatar_style: framing === "closeUp" ? "closeUp" : framing === "circle" ? "circle" : "normal" };
+  }
+
+  /** An image background by URL, or an uploaded one by its HeyGen asset id. */
+  private imageBackground(background: Background, cast?: RenderCast) {
+    const backdropId = backdropIdOf(background);
+    if (!backdropId) return { type: "image", url: background.value };
+    const id = cast?.backdrops?.[backdropId]?.providerAssetIds?.[this.name];
+    if (!id) throw new Error(`Background image ${backdropId} has not been uploaded to HeyGen yet.`);
+    return { type: "image", image_asset_id: id };
   }
 
   private audioAssetId(audioId: string, cast?: RenderCast): string {

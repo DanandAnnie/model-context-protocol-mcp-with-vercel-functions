@@ -148,6 +148,29 @@ export interface Scene {
   audioSeconds?: number;
 }
 
+/** An uploaded background image; the bytes are stored separately and served to the owner by `/api/backdrops/:id`. */
+export interface Backdrop {
+  id: string;
+  ownerId?: string;
+  name: string;
+  mimeType: BackdropType;
+  bytes: number;
+  /** Provider-side asset ids (HeyGen image asset), cached after the first render. Never returned by the API. */
+  providerAssetIds?: Record<string, string>;
+  createdAt: string;
+}
+
+export type BackdropType = "image/png" | "image/jpeg";
+
+/** The path an image background takes when it is an uploaded backdrop, and the editor's preview URL for it. */
+export const backdropPath = (id: string) => `/api/backdrops/${id}`;
+
+/** The backdrop an image background names, or null for a background given by URL. */
+export function backdropIdOf(background: Pick<Background, "type" | "value"> | undefined): string | null {
+  if (!background || background.type !== "image") return null;
+  return /^\/api\/backdrops\/(bd_[A-Za-z0-9]+)$/.exec(background.value)?.[1] ?? null;
+}
+
 export type AudioClipType = "audio/wav" | "audio/mpeg";
 
 /**

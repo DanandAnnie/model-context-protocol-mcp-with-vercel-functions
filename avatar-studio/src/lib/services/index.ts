@@ -17,3 +17,4 @@ export * from "./translations";
 export * from "./activity";
 export * from "./templates";
 export * from "./clips";
+export * from "./backdrops";

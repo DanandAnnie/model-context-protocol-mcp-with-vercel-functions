@@ -10,7 +10,7 @@ create table if not exists public.studio_items (
 -- Allowed kinds. Re-running this file after an upgrade refreshes the list.
 alter table public.studio_items drop constraint if exists studio_items_kind_check;
 alter table public.studio_items
-  add constraint studio_items_kind_check check (kind in ('video', 'avatar', 'translation', 'brand', 'apikey', 'notify', 'workspace', 'invite', 'membership', 'plan', 'agent', 'conversation', 'voice', 'prefs', 'template', 'sharelock', 'cover', 'comment', 'activity', 'clip', 'clipaudio', 'videolead', 'usage'));
+  add constraint studio_items_kind_check check (kind in ('video', 'avatar', 'translation', 'brand', 'apikey', 'notify', 'workspace', 'invite', 'membership', 'plan', 'agent', 'conversation', 'voice', 'prefs', 'template', 'sharelock', 'cover', 'comment', 'activity', 'clip', 'clipaudio', 'videolead', 'usage', 'backdrop', 'backdropdata'));
 
 create index if not exists studio_items_kind_created_idx
   on public.studio_items (kind, created_at desc);

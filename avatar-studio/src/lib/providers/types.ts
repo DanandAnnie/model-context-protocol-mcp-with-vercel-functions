@@ -1,4 +1,4 @@
-import type { AudioClip, Avatar, CaptionCue, Translation, TranslationRequest, Video, VideoRequest, Voice } from "../types";
+import type { AudioClip, Avatar, Backdrop, CaptionCue, Translation, TranslationRequest, Video, VideoRequest, Voice } from "../types";
 
 export interface TtsProvider {
   readonly name: string;
@@ -27,6 +27,8 @@ export interface RenderCast {
   voices: Record<string, Voice>;
   /** Audio clips the scenes name, already prepared (uploaded) for the renderer. */
   clips?: Record<string, AudioClip>;
+  /** Uploaded background images the video or its scenes name, prepared like clips. */
+  backdrops?: Record<string, Backdrop>;
 }
 
 export interface AvatarProvider {
@@ -49,6 +51,11 @@ export interface AvatarProvider {
    * `providerAssetIds[provider]` set; the caller persists it. Renderers without it cannot use audio scenes.
    */
   prepareAudio?(clip: AudioClip, audio: { bytes: Uint8Array; mimeType: string }): Promise<AudioClip>;
+  /**
+   * Make an uploaded background image usable by this renderer, e.g. by uploading it. Returns the backdrop with
+   * `providerAssetIds[provider]` set; the caller persists it. Renderers without it show no image backgrounds anyway.
+   */
+  prepareBackdrop?(backdrop: Backdrop, image: { bytes: Uint8Array; mimeType: string }): Promise<Backdrop>;
   getStatus(providerJobId: string): Promise<AvatarJobStatus>;
   /** Parse an inbound webhook body into a job update, or null if unrecognised. */
   parseWebhook?(body: unknown): { providerJobId: string; update: AvatarJobStatus } | null;

@@ -8,6 +8,7 @@ import { languageCode } from "./language";
 import { stripPauses } from "./pauses";
 import { publicLogoSrc } from "./brand-logo";
 import { transcriptsFor } from "./services/videos";
+import { videoChapters, type Chapter } from "./chapters";
 import type { AspectRatio, BrandKit, CaptionStyle, Video, WatermarkCorner } from "./types";
 
 export interface ShareBody {
@@ -30,6 +31,8 @@ export interface ShareBody {
   description?: string;
   /** The caption lines per language once rendered; until then the script is shown as text. */
   transcripts?: Array<{ language?: string; code?: string; cues: Array<{ startMs: number; endMs: number; text: string }> }>;
+  /** One per scene of a rendered video of two scenes or more, for jumping to a scene. */
+  chapters?: Chapter[];
   script?: string;
 }
 
@@ -55,6 +58,7 @@ export function shareBodyFor(video: Video, brand: BrandKit | null): ShareBody {
     ...(video.shareCta && { cta: { label: video.shareCta.label, url: video.shareCta.url, background, dark: isDarkHex(background) } }),
     ...(rendered && video.shareDownload && { download: video.videoUrl }),
     ...(video.description && { description: video.description }),
+    ...(rendered && video.scenes && video.scenes.length > 1 && { chapters: videoChapters(video) }),
     ...(rendered
       ? { transcripts: transcriptsFor(video).map((t) => ({ ...t, ...(t.language ? { code: languageCode(t.language) } : {}) })) }
       : { script: stripPauses(video.script).replace(/\n\s*\n\s*(?:\n\s*)+/g, "\n\n").trim() }),

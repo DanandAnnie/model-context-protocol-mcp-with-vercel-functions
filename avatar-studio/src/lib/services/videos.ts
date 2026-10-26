@@ -5,7 +5,8 @@ import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import { getStore } from "../store";
 import { EMPTY_WATCH, MAX_SCENES, TRASH_RETENTION_DAYS, backdropIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
 import type { AudioClip, Avatar, Backdrop, Background, CaptionCue, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
-import { buildCues, spokenWords } from "../captions";
+import { buildCues } from "../captions";
+import { captionDurationSec, sceneBoundsMs, type Timed } from "../chapters";
 import { wellFormed } from "../text";
 import { pauseSeconds, silentProblem, silentSeconds, stripPauses } from "../pauses";
 import type { AvatarProvider, RenderCast } from "../providers/types";
@@ -498,29 +499,7 @@ export const captionCuesSchema = z
     });
   });
 
-type TimedScene = Pick<Scene, "script" | "speed" | "audioSeconds">;
-type Timed = Pick<Video, "script" | "durationSec" | "speed"> & Partial<Pick<Video, "provider">> & { scenes?: TimedScene[] };
-
-/** Whether the renderer speaks at the speeds asked for; D-ID keeps the voice's natural pace. */
-const keepsPace = (video: Timed) => !video.provider || video.provider === "heygen" || video.provider === "mock";
-
-/** A scene's estimated length: its audio clip's, else its words at its own speed (the video's when unset) and its pauses. */
-function sceneSeconds(scene: TimedScene, video: Timed): number {
-  if (scene.audioSeconds) return scene.audioSeconds;
-  const speed = keepsPace(video) ? scene.speed || video.speed || 1 : 1;
-  return spokenWords(stripPauses(scene.script)) / 2.5 / speed + pauseSeconds(scene.script);
-}
-
-/**
- * The running time captions are timed to: the rendered length, or an estimate while the provider has not reported
- * one (each scene at its own speed, or its clip's length).
- */
-export function captionDurationSec(video: Timed): number {
-  if (video.durationSec) return video.durationSec;
-  const parts: TimedScene[] = video.scenes?.length ? video.scenes : [{ script: video.script }];
-  return Math.max(1, Math.round(parts.reduce((sum, sc) => sum + sceneSeconds(sc, video), 0)));
-}
-
+export { captionDurationSec };
 /**
  * Cues for `texts`, one per scene, each scene's lines within its share of the running time (shares follow each
  * scene's estimated length, so a slower scene or a long clip keeps its lines on screen longer). Without one text per
@@ -529,18 +508,11 @@ export function captionDurationSec(video: Timed): number {
 function timedCues(video: Timed, texts: string[]): CaptionCue[] {
   const totalSec = captionDurationSec(video);
   const plain = (cues: CaptionCue[]) => cues.map(({ startMs, endMs, text }) => ({ startMs, endMs, text }));
-  const scenes = video.scenes ?? [];
-  if (scenes.length < 2 || texts.length !== scenes.length) return plain(buildCues(texts.join("\n\n"), totalSec));
-  const lengths = scenes.map((sc) => Math.max(0.1, sceneSeconds(sc, video)));
-  const whole = lengths.reduce((a, b) => a + b, 0);
-  const totalMs = Math.round(totalSec * 1000);
+  const bounds = sceneBoundsMs(video);
+  if (!bounds || texts.length !== bounds.length) return plain(buildCues(texts.join("\n\n"), totalSec));
   const cues: CaptionCue[] = [];
-  let before = 0;
   texts.forEach((text, i) => {
-    // Boundaries come from the running sum, so rounding never drifts and the last scene ends with the video.
-    const startMs = Math.round((before / whole) * totalMs);
-    before += lengths[i];
-    const endMs = Math.round((before / whole) * totalMs);
+    const { startMs, endMs } = bounds[i];
     // A scene's share already counts its pauses, so they may take most of it (a short line before a long pause).
     for (const c of buildCues(text, (endMs - startMs) / 1000, 0.9)) cues.push({ startMs: startMs + c.startMs, endMs: startMs + c.endMs, text: c.text });
   });

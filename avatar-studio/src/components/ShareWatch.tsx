@@ -6,6 +6,7 @@ import { watermarkPlace } from "@/lib/watermark";
 import { ShareCta } from "./ShareCta";
 import { SharePlayer } from "./SharePlayer";
 import { ShareTranscript } from "./ShareTranscript";
+import { ShareChapters } from "./ShareChapters";
 import { ViewBeacon } from "./ViewBeacon";
 
 /** A share page's player, button, download link, description, and transcript, from what the server let this viewer see. */
@@ -75,6 +76,7 @@ export function ShareWatch({ body, autoplay, loop, focus = false }: { body: Shar
           {body.description}
         </p>
       )}
+      {body.chapters && body.chapters.length > 1 && <ShareChapters playerId={SHARE_PLAYER_ID} chapters={body.chapters} />}
       {/* Once there is a video, the script is its transcript: the caption lines (corrected ones when an editor saved them), each playing from its time. */}
       {body.transcripts ? (
         <ShareTranscript playerId={SHARE_PLAYER_ID} transcripts={body.transcripts} />

@@ -2572,6 +2572,49 @@ test("on-screen text survives a reload, a voice that is gone, and warns when it 
   await expect(page.getByText("Too long for one line")).toHaveCount(0);
 });
 
+test("a multi-scene video has chapters: the share page jumps to a scene and the video page copies them for YouTube", async ({ page, context }) => {
+  const bg = { type: "color", value: "#0f172a" };
+  const v = await createVideoViaApi(page, `Chapters ${Date.now().toString(36)}`, {
+    script: undefined,
+    scenes: [
+      { script: "Welcome to twelve Maple Street, a bright family home on a quiet road.", background: bg, overlay: { text: "12 Maple Street" } },
+      { script: "The kitchen was redone last spring with quartz counters and an island.", background: bg },
+      { script: "Call Dana to book a showing this weekend.", background: bg },
+    ],
+  });
+  // Listed on the video page before it renders, with estimated times.
+  await page.goto(`/videos/${v.id}`);
+  const list = page.getByTestId("video-chapters");
+  await expect(list.getByRole("listitem")).toHaveCount(3);
+  await expect(list.getByRole("listitem").first()).toHaveText("0:0012 Maple Street");
+  await expect(page.getByText("Times are estimated until the video renders.")).toBeVisible();
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.reload();
+  await page.getByRole("button", { name: "Copy for YouTube" }).click();
+  await expect(page.getByRole("button", { name: "Copied" })).toBeVisible();
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  expect(copied.split("\n")).toHaveLength(3);
+  expect(copied).toMatch(/^0:00 12 Maple Street\n\d+:\d\d The kitchen was redone last spring with quartz counters and…\n\d+:\d\d Call Dana to book a showing this weekend\.$/);
+
+  await page.goto(`/share/${v.id}`);
+  const chapters = page.getByTestId("share-chapters");
+  await expect(page.getByRole("heading", { name: "Chapters", exact: true })).toBeVisible();
+  await expect(chapters.getByRole("button")).toHaveCount(3);
+  await expect(chapters.getByRole("button").first()).toHaveAttribute("aria-current", "true");
+  const player = page.getByTestId("share-player");
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.readyState)).toBeGreaterThanOrEqual(1);
+  const duration = await player.evaluate((el: HTMLVideoElement) => el.duration);
+  const thirdStart = Number(/^(\d+):(\d\d)/.exec(copied.split("\n")[2])!.slice(1).reduce((m, s) => String(Number(m) * 60 + Number(s))));
+  await chapters.getByRole("button").nth(2).click();
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.currentTime)).toBeGreaterThanOrEqual(Math.min(thirdStart, duration) - 0.25);
+  await player.evaluate((el: HTMLVideoElement) => el.pause());
+  // Where the player stopped decides the chapter marked; seeking back to the start marks the first.
+  await player.evaluate((el: HTMLVideoElement) => (el.currentTime = 0));
+  await expect(chapters.getByRole("button").first()).toHaveAttribute("aria-current", "true");
+  await expect(chapters.locator('[aria-current="true"]')).toHaveCount(1);
+});
+
 test("a dub can be voice only and name its speakers", async ({ page }) => {
   const tag = Date.now().toString(36);
   await page.goto("/translate");

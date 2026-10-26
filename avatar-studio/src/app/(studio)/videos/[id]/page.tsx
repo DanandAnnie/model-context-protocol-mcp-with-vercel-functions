@@ -10,6 +10,7 @@ import { ReviewPanel } from "@/components/ReviewPanel";
 import { SubtitleLanguages } from "@/components/SubtitleLanguages";
 import { CaptionEditor } from "@/components/CaptionEditor";
 import { ViewerEmails } from "@/components/ViewerEmails";
+import { VideoChapters } from "@/components/VideoChapters";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { captionsBurnedIn } from "@/lib/captions";
 import { silentSeconds } from "@/lib/pauses";
@@ -1059,6 +1060,7 @@ export default function VideoDetailPage() {
                   </>
                 )}
               </Card>
+              <VideoChapters video={video} />
               <ReviewPanel video={video} onChange={(next) => setData({ video: next })} />
               <VideoComments videoId={video.id} player={video.status === "completed" && video.videoUrl ? player : undefined} />
             </div>

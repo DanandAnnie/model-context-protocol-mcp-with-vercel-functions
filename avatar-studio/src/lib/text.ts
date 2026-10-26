@@ -1,3 +1,11 @@
+/** Half of a surrogate pair with no other half, as a string cut mid-emoji ends with; `encodeURIComponent` throws on one. */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+/** The string with any lone surrogate replaced (by U+FFFD unless told otherwise), so it can always be URL-encoded. */
+export function wellFormed(text: string, replacement = "\uFFFD"): string {
+  return text.replace(LONE_SURROGATE, replacement);
+}
+
 /** A one-line excerpt for link previews: whitespace collapsed, cut at a word boundary, with an ellipsis. */
 export function excerpt(text: string, max = 160): string {
   const flat = text.replace(/\s+/g, " ").trim();

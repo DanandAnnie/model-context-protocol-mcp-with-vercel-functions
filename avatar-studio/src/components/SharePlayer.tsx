@@ -1,6 +1,7 @@
 "use client";
 import { useRef } from "react";
 import { SHARE_PLAYER_ID, shareTrackId } from "@/lib/share-player";
+import { wellFormed } from "@/lib/text";
 import type { CaptionLook, CaptionSize, WatchQuarter } from "@/lib/types";
 
 /**
@@ -67,7 +68,7 @@ export function SharePlayer({
       {/* `default` switches the track on without a trip to the CC menu; it stays off when the file already carries captions. */}
       {captions && <track default={trackDefault} kind="subtitles" srcLang="en" label="Captions" src={`/api/videos/${videoId}/captions?format=vtt`} />}
       {tracks.map((t) => (
-        <track key={t.language} id={shareTrackId(t.language)} kind="subtitles" srcLang={t.code ?? "und"} label={t.language} src={`/api/videos/${videoId}/captions?format=vtt&lang=${encodeURIComponent(t.language)}`} />
+        <track key={t.language} id={shareTrackId(t.language)} kind="subtitles" srcLang={t.code ?? "und"} label={t.language} src={`/api/videos/${videoId}/captions?format=vtt&lang=${encodeURIComponent(wellFormed(t.language))}`} />
       ))}
     </video>
   );

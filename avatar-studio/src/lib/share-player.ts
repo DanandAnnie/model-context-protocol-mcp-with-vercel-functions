@@ -1,3 +1,5 @@
+import { wellFormed } from "./text";
+
 /** The share player's element id, which the transcript uses to seek and follow it. A plain module, so the server page and the client components read the same string. */
 export const SHARE_PLAYER_ID = "share-player";
 
@@ -7,5 +9,6 @@ export const SHARE_PLAYER_ID = "share-player";
  * languages a video can carry never share one, whatever their script or punctuation.
  */
 export function shareTrackId(language: string): string {
-  return `share-track-${encodeURIComponent(language)}`;
+  // A language stored before names were checked could hold half an emoji, which encodeURIComponent throws on.
+  return `share-track-${encodeURIComponent(wellFormed(language))}`;
 }

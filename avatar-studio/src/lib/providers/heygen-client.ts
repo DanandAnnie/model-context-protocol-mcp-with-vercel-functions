@@ -92,7 +92,13 @@ export class HeyGenClient {
   translationStatus(id: string) {
     return this.request<{ status: string; video_url?: string; failure_message?: string; srt_caption_url?: string; vtt_caption_url?: string }>(
       `${V3}/video-translations/${encodeURIComponent(id)}`,
+      { signal: AbortSignal.timeout(10_000) },
     );
+  }
+
+  /** Jobs started through the v2 API before the move to v3. */
+  translationStatusV2(id: string) {
+    return this.request<{ status: string; url?: string; message?: string }>(`${V2}/video_translate/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(10_000) });
   }
 
   // ---- Streaming (Interactive Avatar) ----

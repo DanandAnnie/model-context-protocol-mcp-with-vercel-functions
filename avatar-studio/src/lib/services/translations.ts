@@ -100,24 +100,56 @@ export async function createTranslation(req: z.infer<typeof translationRequestSc
   return getStore().put("translation", base);
 }
 
+/** How long a provider's expiring links (presigned video and subtitle URLs) are trusted before they are read again. */
+const LINK_TTL_MS = 60 * 60 * 1000;
+/** Jobs a listing asks the provider about at once; the rest wait for the next poll. */
+const LIST_REFRESHES = 5;
+
+const running = (t: Translation) => t.status === "processing" || t.status === "queued";
+function linksExpire(t: Translation): boolean {
+  try {
+    return !!getTranslateProviderByName(t.provider).linksExpire;
+  } catch {
+    return false;
+  }
+}
+/** A job to ask the provider about: still running, or finished with links that may have expired. */
+const due = (t: Translation) => !!t.providerJobId && (running(t) || (t.status === "completed" && Date.now() - Date.parse(t.updatedAt) > LINK_TTL_MS && linksExpire(t)));
+
+/**
+ * Asks the provider for a job's status and stores what changed. The job is read again before the write, so a
+ * callback that landed meanwhile is never overwritten; a finished job only takes fresh links.
+ */
+async function refreshTranslation(item: Translation): Promise<Translation> {
+  let update: Pick<Translation, "status" | "videoUrl" | "error" | "captionUrls">;
+  try {
+    update = await getTranslateProviderByName(item.provider).getStatus(item.providerJobId!);
+  } catch (err) {
+    console.error(`translation refresh failed for ${item.id}:`, err);
+    // A finished job whose links could not be renewed waits a full period before the next try.
+    return item.status === "completed" ? getStore().put("translation", { ...item, updatedAt: nowIso() }) : item;
+  }
+  const current = (await getStore().get<Translation>("translation", item.id)) ?? item;
+  if (current.updatedAt !== item.updatedAt) return current;
+  if (current.status === "completed" && update.status !== "completed") return current;
+  if (running(current) && update.status === current.status) return current;
+  const next: Translation = { ...current, ...stripUndefined(update), updatedAt: nowIso() };
+  return getStore().put("translation", next);
+}
+
 export async function listTranslations(ownerId: string = LOCAL_OWNER): Promise<Translation[]> {
   const items = await getStore().list<Translation>("translation", ownerId);
   items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return items;
+  // The page polls this list, so it moves running jobs on (webhooks or not) and renews expiring links.
+  const stale = items.filter(due).slice(0, LIST_REFRESHES);
+  const fresh = await Promise.all(stale.map(refreshTranslation));
+  const byId = new Map(fresh.map((t) => [t.id, t]));
+  return items.map((t) => byId.get(t.id) ?? t);
 }
 
 export async function getTranslation(id: string, ownerId: string = LOCAL_OWNER): Promise<Translation> {
   const item = owned(await getStore().get<Translation>("translation", id), ownerId, `Translation ${id}`);
-  if (!item.providerJobId || (item.status !== "processing" && item.status !== "queued")) return item;
-  try {
-    const update = await getTranslateProviderByName(item.provider).getStatus(item.providerJobId);
-    const next: Translation = { ...item, ...stripUndefined(update), updatedAt: nowIso() };
-    if (next.status !== item.status) await getStore().put("translation", next);
-    return next;
-  } catch (err) {
-    console.error(`translation refresh failed for ${id}:`, err);
-    return item;
-  }
+  return due(item) ? refreshTranslation(item) : item;
 }
 
 export function supportedLanguages(): string[] {
@@ -130,6 +162,8 @@ export async function applyTranslationWebhook(providerName: string, body: unknow
   if (!parsed) return null;
   const item = await getStore().findBy<Translation>("translation", "providerJobId", parsed.providerJobId);
   if (!item) return null;
+  // A late or repeated callback never undoes a finished job.
+  if (item.status === "completed" || (item.status === "failed" && parsed.update.status === "failed")) return item;
   let update: Partial<Translation> = parsed.update;
   // A completion callback carries the video only; the job's status also has its subtitle files.
   if (update.status === "completed") {

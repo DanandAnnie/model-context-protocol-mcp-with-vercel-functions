@@ -129,4 +129,58 @@ describe("multi-language translation", () => {
       (config as { heygenApiKey?: string }).heygenApiKey = original;
     }
   });
+
+  it("moves running jobs on from the list, keeps a newer write, and renews HeyGen's expiring links", async () => {
+    const { config } = await import("../config");
+    const { getStore } = await import("../store");
+    const { applyTranslationWebhook } = await import("../services");
+    const job = (id: string, extra: Record<string, unknown>) => ({ id, ownerId: "u-r", title: id, sourceVideoUrl: base.sourceVideoUrl, targetLanguage: "French", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z", ...extra });
+    // Without webhooks, the polled list is what finishes a job.
+    await getStore().put("translation", job("tr_mock", { status: "processing", provider: "mock", providerJobId: `mock_tr_${Date.now() - 60_000}` }));
+    assert.equal((await listTranslations("u-r")).find((t) => t.id === "tr_mock")?.status, "completed");
+
+    const original = config.heygenApiKey;
+    (config as { heygenApiKey?: string }).heygenApiKey = "key";
+    const realFetch = globalThis.fetch;
+    const urls: string[] = [];
+    let respond: (url: string) => Response = () => new Response("{}");
+    globalThis.fetch = (async (url: string) => {
+      urls.push(String(url));
+      return respond(String(url));
+    }) as typeof fetch;
+    const ok = (data: unknown) => new Response(JSON.stringify({ data }), { status: 200 });
+    try {
+      // A job started through v2 before the move is asked about through v2 when v3 does not know it.
+      await getStore().put("translation", job("tr_v2", { status: "processing", provider: "heygen", providerJobId: "old_1" }));
+      respond = (url) => (url.includes("/v3/") ? new Response("not found", { status: 404 }) : ok({ status: "success", url: "https://files.heygen.ai/old.mp4" }));
+      const old = (await listTranslations("u-r")).find((t) => t.id === "tr_v2");
+      assert.deepEqual([old?.status, old?.videoUrl], ["completed", "https://files.heygen.ai/old.mp4"]);
+      assert.ok(urls.some((u) => u === "https://api.heygen.com/v2/video_translate/old_1"));
+
+      // A finished HeyGen job over an hour old has its presigned links read again; a recent one does not.
+      await getStore().put("translation", job("tr_old", { status: "completed", provider: "heygen", providerJobId: "vt_old", videoUrl: "https://files.heygen.ai/expired.mp4" }));
+      respond = () => ok({ status: "completed", video_url: "https://files.heygen.ai/fresh.mp4", vtt_caption_url: "https://files.heygen.ai/fresh.vtt" });
+      const renewed = (await listTranslations("u-r")).find((t) => t.id === "tr_old");
+      assert.deepEqual([renewed?.videoUrl, renewed?.captionUrls?.vtt], ["https://files.heygen.ai/fresh.mp4", "https://files.heygen.ai/fresh.vtt"]);
+      urls.length = 0;
+      await listTranslations("u-r");
+      assert.equal(urls.length, 0, "renewed links are trusted for an hour");
+
+      // A poll whose answer arrives after a callback wrote the job leaves the callback's result alone.
+      await getStore().put("translation", job("tr_race", { status: "processing", provider: "heygen", providerJobId: "vt_race" }));
+      respond = () => {
+        void getStore().put("translation", job("tr_race", { status: "completed", provider: "heygen", providerJobId: "vt_race", videoUrl: "https://files.heygen.ai/cb.mp4", captionUrls: { srt: "https://files.heygen.ai/cb.srt" }, updatedAt: "2026-02-01T00:00:00Z" }));
+        return ok({ status: "completed", video_url: "https://files.heygen.ai/poll.mp4" });
+      };
+      const raced = (await listTranslations("u-r")).find((t) => t.id === "tr_race");
+      assert.deepEqual(raced?.captionUrls, { srt: "https://files.heygen.ai/cb.srt" });
+
+      // A late failure callback does not undo a finished dub.
+      const late = await applyTranslationWebhook("heygen", { event_type: "video_translate.fail", event_data: { video_translation_id: "vt_race", msg: "late" } });
+      assert.equal(late?.status, "completed");
+    } finally {
+      globalThis.fetch = realFetch;
+      (config as { heygenApiKey?: string }).heygenApiKey = original;
+    }
+  });
 });

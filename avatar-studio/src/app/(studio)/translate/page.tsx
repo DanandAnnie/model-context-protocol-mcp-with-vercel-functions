@@ -108,7 +108,7 @@ function TranslateInner() {
               </Field>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Quality" hint="Precision takes longer for a more natural translation and delivery.">
+              <Field label="Quality" hint="Precision takes longer for a more natural translation and delivery; it matters most when the dub is lip-synced.">
                 <select className={inputClass} value={quality} disabled={canEdit === false} onChange={(e) => setQuality(e.target.value as TranslationQuality)}>
                   <option value="speed">Speed</option>
                   <option value="precision">Precision</option>

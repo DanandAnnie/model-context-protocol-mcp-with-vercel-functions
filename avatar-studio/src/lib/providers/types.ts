@@ -107,6 +107,8 @@ export function splitKnowledge(instructions: string): { own: string; reference: 
 export interface TranslateProvider {
   readonly name: string;
   createTranslation(input: TranslationRequest): Promise<{ providerJobId: string }>;
+  /** Whether the video and subtitle links it returns expire, so finished jobs are read again now and then. */
+  readonly linksExpire?: boolean;
   getStatus(providerJobId: string): Promise<Pick<Translation, "status" | "videoUrl" | "error" | "captionUrls">>;
   supportedLanguages(): string[];
   parseWebhook?(body: unknown): { providerJobId: string; update: Pick<Translation, "status" | "videoUrl" | "error"> } | null;

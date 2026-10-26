@@ -2768,6 +2768,34 @@ test("a rewrite follows its scene when it moves, and is refused only when that s
   await expect(page.getByRole("button", { name: "Undo the rewrite" })).toHaveCount(0);
 });
 
+test("a rewrite of one scene leaves the scene being typed in selected", async ({ page }) => {
+  const box = page.locator("textarea");
+  await box.fill("Hi there! One. Two. Three. Four.");
+  await page.getByRole("button", { name: "Add scene" }).click();
+  await page.getByRole("button", { name: /^Scene 1,/ }).click();
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/api/script", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await page.getByRole("button", { name: "Improve" }).click();
+  await page.getByRole("button", { name: "Shorten", exact: true }).click();
+  // The user moves on to the second scene and types there while the answer comes.
+  await page.getByRole("button", { name: /^Scene 2,/ }).click();
+  await box.fill("Typing in the second scene");
+  release();
+  await expect(page.getByRole("button", { name: /^Scene 1, about/ })).toBeVisible();
+  await page.waitForTimeout(300);
+  // Still on the second scene, with what was typed; the first has its rewrite.
+  await expect(page.getByRole("button", { name: /^Scene 2,/ })).toHaveAttribute("aria-current", "true");
+  await box.press("End");
+  await box.pressSequentially(" still here.");
+  await expect(box).toHaveValue("Typing in the second scene still here.");
+  await page.getByRole("button", { name: /^Scene 1,/ }).click();
+  await expect(box).toHaveValue("Hi there! One. Two.");
+});
+
 test("the AI writer fills the empty scene it was opened on, even after it moves past another empty one", async ({ page }) => {
   await page.getByRole("button", { name: "Add scene" }).click();
   await page.getByRole("button", { name: /^Scene 1,/ }).click();
@@ -2829,6 +2857,7 @@ test("a voice can be designed from a description, chosen from previews, and kept
     const box = (await del.boundingBox())!;
     expect(box.x + box.width).toBeLessThanOrEqual(390);
     expect(await page.locator("main").evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   } finally {
     // Kept or not, the voice goes, so it never counts toward the account's five in later tests.
     const voices = (await (await page.request.get("/api/voices")).json()).voices as Array<{ id: string; name: string }>;

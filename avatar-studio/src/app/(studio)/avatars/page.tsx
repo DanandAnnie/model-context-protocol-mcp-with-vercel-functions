@@ -245,7 +245,8 @@ function CreateAvatarPanel({ voices, canGenerate, demo, onClose, onCreated }: { 
 
   /** Escape inside the panel closes it, asking first when a picture or a name would be lost with it. */
   function onPanelKey(e: React.KeyboardEvent) {
-    if (e.key !== "Escape") return;
+    // An Escape a control inside used for itself (closing an open list) is not for the panel.
+    if (e.key !== "Escape" || e.defaultPrevented || (e.target as HTMLElement).tagName === "SELECT") return;
     e.stopPropagation();
     if ((imageUrl || name.trim()) && !window.confirm("Discard this photo avatar? The picture and name are not saved.")) return;
     stopCamera();

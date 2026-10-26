@@ -22,7 +22,10 @@ export function OtherSizes({ video, canEdit }: { video: Video; canEdit: boolean 
   const rendering = (data?.sizes ?? []).some((s) => s.id !== video.id && (s.status === "queued" || s.status === "processing"));
   useEffect(() => {
     if (!rendering) return;
-    const timer = setInterval(() => void refetch(), 5000);
+    // Not while the tab is hidden: nobody is reading it, and each check asks the renderer.
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void refetch();
+    }, 5000);
     return () => clearInterval(timer);
   }, [rendering, refetch]);
   // The original, when there is one: a link to a video since deleted for good would lead nowhere.
@@ -51,6 +54,8 @@ export function OtherSizes({ video, canEdit }: { video: Video; canEdit: boolean 
       const { videos, failed } = await api<{ videos: Video[]; failed: Array<{ aspect: string; error: string }> }>(`/api/videos/${video.id}/resize`, { method: "POST", body: JSON.stringify({ aspects: chosen }) });
       // Listed as a reload would list them, a size that could not start included (marked failed, its shape offered again).
       setData((prev) => ({ sizes: [...(prev?.sizes ?? []), ...videos.map(({ id: vid, title, aspect, status }) => ({ id: vid, title, aspect, status }))] }));
+      // A check that left before these sizes were made would answer without them; asking again retires it.
+      void refetch();
       const started = videos.filter((v) => v.status !== "failed");
       if (started.length) setNote(`Started ${started.map((v) => v.aspect).join(" and ")}.`);
       // The shapes still missing are offered afresh.

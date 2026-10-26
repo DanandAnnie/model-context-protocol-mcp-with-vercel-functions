@@ -16,14 +16,11 @@ import type { ProviderStatus, Voice } from "@/lib/types";
 
 const GENDERS: Array<NonNullable<Voice["gender"]>> = ["female", "male", "neutral"];
 
-/** The voices of its own an account may keep, cloned or designed (`MAX_CLONED_VOICES` on the server). */
-const MAX_OWN_VOICES = 5;
-
 const SAMPLE = "Hi, this is a quick preview of my voice. I can read your script in any tone you need.";
 
 export default function VoicesPage() {
   const canEdit = useCanEdit();
-  const { data, loading, error, refetch } = useApi<{ voices: Voice[] }>("/api/voices");
+  const { data, loading, error, refetch } = useApi<{ voices: Voice[]; own?: { count: number; limit: number } }>("/api/voices");
   const { data: status } = useApi<ProviderStatus>("/api/status");
   const [actionErr, setActionErr] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -88,7 +85,7 @@ export default function VoicesPage() {
         <div className={`mb-6 grid gap-4 ${canEdit === true && status?.voiceDesign ? "lg:grid-cols-2" : ""}`}>
           <VoiceCloner available={status?.tts !== "mock"} onCloned={() => refetch()} />
           {/* Shown once the role is known: a viewer never sees it while the workspace is still loading. */}
-          {canEdit === true && status?.voiceDesign && <VoiceDesigner available={status.tts !== "mock"} ownCount={(data?.voices ?? []).filter((v) => v.source === "custom").length} limit={MAX_OWN_VOICES} onSaved={() => refetch()} />}
+          {canEdit === true && status?.voiceDesign && <VoiceDesigner available={status.tts !== "mock"} ownCount={data?.own?.count ?? 0} limit={data?.own?.limit ?? 5} onSaved={() => refetch()} />}
         </div>
       )}
       <div className="mb-5 grid gap-3 md:grid-cols-[1fr_2fr]">

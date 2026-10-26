@@ -199,6 +199,9 @@ function CreateInner() {
   const [title, setTitle] = useState("Untitled video");
   const [scenes, setScenes] = useState<Scene[]>([newScene()]);
   const [activeIdx, setActiveIdx] = useState(0);
+  // The scene selected now, for answers that arrive after the user may have moved on.
+  const activeIdxNow = useRef(activeIdx);
+  activeIdxNow.current = activeIdx;
   const active = scenes[Math.min(activeIdx, scenes.length - 1)];
   const script = scenes.map((s) => s.script).join("\n\n");
   const background = active.background;
@@ -580,11 +583,14 @@ function CreateInner() {
     }
     const updated: Scene = { ...target, script: after };
     setScenes((prev) => prev.map((sc) => (sc === target ? updated : sc)));
-    setActiveIdx(scenesNow.current.indexOf(target));
     setRewriteErr(null);
     setRewriteUndo(target.script.trim() && target.script !== after ? { scene: updated, before: target.script, note } : null);
-    // Back to the script, rather than lost with the panel that wrote it.
-    requestAnimationFrame(() => scriptRef.current?.focus());
+    // Still the scene being worked on (moved, perhaps): it stays selected and its script takes the focus back from the
+    // panel. Another scene chosen meanwhile stays chosen, so what is being typed there keeps going where it was going.
+    if (scenesNow.current[activeIdxNow.current] === target) {
+      setActiveIdx(scenesNow.current.indexOf(target));
+      requestAnimationFrame(() => scriptRef.current?.focus());
+    }
     return true;
   }
   async function revise(action: "shorten" | "expand" | "tone" | "translate" | "polish") {

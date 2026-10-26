@@ -8,7 +8,7 @@ import type { Video, VideoTemplate } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { LimitError, NotFoundError, ValidationError } from "../errors";
 import { owned } from "./shared";
-import { PLAIN_BACKGROUND, getBackdrop } from "./backdrops";
+import { getBackdrop, plainScene } from "./backdrops";
 import { backgroundSchema, captionStyleSchema, emotionSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema } from "./videos";
 
 export const MAX_TEMPLATES = 50;
@@ -129,7 +129,7 @@ export async function createTemplate(input: TemplateInput, ownerId: string = LOC
       gone.add(id);
     }
   }
-  if (gone.size) base = { ...base, scenes: base.scenes.map((sc) => (gone.has(backdropIdOf(sc.background) ?? "") ? { ...sc, background: PLAIN_BACKGROUND } : sc)) };
+  if (gone.size) base = { ...base, scenes: base.scenes.map((sc) => (gone.has(backdropIdOf(sc.background) ?? "") ? plainScene(sc) : sc)) };
   return getStore().put("template", { ...base, id: newId("tpl"), ownerId, createdAt: nowIso(), updatedAt: nowIso() });
 }
 

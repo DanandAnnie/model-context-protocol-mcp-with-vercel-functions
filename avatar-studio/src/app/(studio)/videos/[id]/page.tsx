@@ -843,7 +843,11 @@ export default function VideoDetailPage() {
                       </>
                     )}
                   </Row>
-                  <Row label="Avatar">{video.avatarName ?? video.avatarId}</Row>
+                  <Row label="Avatar">
+                    {video.scenes?.length && video.scenes.every((sc) => sc.hidePresenter)
+                      ? "None: every scene shows its picture or video"
+                      : `${video.avatarName ?? video.avatarId}${video.scenes?.some((sc) => sc.hidePresenter) ? " (not in every scene)" : ""}`}
+                  </Row>
                   <Row label="Voice">
                     {video.scenes?.length && video.scenes.every((sc) => sc.audioId)
                       ? `Recorded audio${video.scenes.length === 1 && video.scenes[0].audioName ? ` (${video.scenes[0].audioName})` : ""}`
@@ -1056,6 +1060,9 @@ export default function VideoDetailPage() {
                   </ol>
                 ) : (
                   <>
+                    {video.scenes?.[0]?.hidePresenter && (
+                      <p className="mt-2 text-xs text-slate-500">No presenter: the {video.scenes[0].background.type === "video" ? "video" : "picture"} fills the frame</p>
+                    )}
                     {video.scenes?.[0]?.overlay && (
                       <p className="mt-2 text-xs text-slate-500">
                         On-screen text “{video.scenes[0].overlay.text}” (preview only)

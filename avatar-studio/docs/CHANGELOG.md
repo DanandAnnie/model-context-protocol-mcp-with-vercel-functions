@@ -163,4 +163,12 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
   - Copies, templates, and drafts keep it, and the video page lists it.
   - The video page also stops claiming that HeyGen applies layout, background fit, or on-screen text: since v3 they are labelled preview only.
   - New `hide-presenter.test.ts` and an e2e test, which fails when a copy drops the setting.
+  - An independent review of `8ff5f52` found the HeyGen request bodies valid against the v3 schema. Its findings are fixed, the first with an e2e test:
+    - Deleting a scene's uploaded image gave it a plain colour but kept "no presenter", leaving a bare colour on the stage and a render the server refused (`400`). The same happened to a copy, template, or draft whose image was gone, and when the brand kit's colour arrived late. Every way a scene's background becomes a colour now goes through one rule that brings the presenter back, and so do the server's template and backdrop clean-ups.
+    - A hidden scene's presenter is no longer sent or resolved. Otherwise a custom portrait would have been prepared on HeyGen, and possibly failed the render, for a scene that shows nobody.
+    - The hint says D-ID refuses such a video instead of claiming it shows the presenter.
+    - The video page marks a lone hidden scene and the Avatar row when no scene, or not every scene, shows the presenter.
+    - The checkbox's hint is no longer part of its accessible name.
+    - The batch page says templates' scenes without the presenter are not used.
+    - The docs cover the template field and the README sentence reads in order again.
 

@@ -93,11 +93,17 @@ export const videoRequestSchema = z
         ctx.addIssue({ code: "custom", path: ["scenes"], message: "The video needs some words, not only pauses: every scene is silent" });
         return z.NEVER;
       }
+      // A scene without the presenter names none: its presenter would otherwise be looked up and prepared for nothing.
+      const scenes = v.scenes.map((sc) => {
+        if (!sc.hidePresenter) return sc;
+        const { avatarId: _avatar, layout: _layout, ...rest } = sc;
+        return rest as typeof sc;
+      });
       // A lone scene's pace is the video's (the page and the editor show one speed).
-      if (v.scenes.length === 1 && v.scenes[0].speed !== undefined) {
-        return { ...v, speed: v.scenes[0].speed, scenes: [{ ...v.scenes[0], speed: undefined }], script, background: v.scenes[0].background };
+      if (scenes.length === 1 && scenes[0].speed !== undefined) {
+        return { ...v, speed: scenes[0].speed, scenes: [{ ...scenes[0], speed: undefined }], script, background: scenes[0].background };
       }
-      return { ...v, script, background: v.scenes[0].background };
+      return { ...v, scenes, script, background: scenes[0].background };
     }
     if (!v.script || !stripPauses(v.script).trim()) {
       ctx.addIssue({ code: "custom", path: ["script"], message: v.script ? "The script needs some words, not only pauses" : "Script is required" });

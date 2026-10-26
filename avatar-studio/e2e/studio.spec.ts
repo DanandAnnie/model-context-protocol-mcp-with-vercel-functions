@@ -490,6 +490,31 @@ test("a scene can leave the presenter out and let its picture fill the frame", a
   expect(JSON.stringify(await bad.json())).toMatch(/image or video background/);
 });
 
+test("a scene without the presenter gets the presenter back when its uploaded image is deleted", async ({ page }) => {
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
+  const tag = Date.now().toString(36);
+  await page.locator("textarea").fill("Just the view from the deck.");
+  await page.getByRole("button", { name: "Background", exact: true }).click();
+  await page.getByLabel("Background image file").setInputFiles({ name: `deck-${tag}.png`, mimeType: "image/png", buffer: png });
+  await expect(page.getByRole("button", { name: `Use deck-${tag}` })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("checkbox", { name: "Show the presenter" }).uncheck();
+  await expect(page.getByTestId("stage-avatar")).toHaveCount(0);
+  await page.waitForTimeout(700); // the draft autosaves
+  const { backdrops } = (await (await page.request.get("/api/backdrops")).json()) as { backdrops: Array<{ id: string; name: string }> };
+  const deck = backdrops.find((b) => b.name === `deck-${tag}`)!;
+  expect((await page.request.delete(`/api/backdrops/${deck.id}`)).status()).toBe(204);
+  await page.reload();
+  await expect(page.getByText("Restored your unsent draft")).toBeVisible();
+  // A plain colour cannot stand in for the presenter, so the presenter is back, and the video can be made.
+  await expect(page.getByRole("checkbox", { name: "Show the presenter" })).toBeChecked();
+  await expect(page.getByRole("checkbox", { name: "Show the presenter" })).toBeDisabled();
+  await expect(page.getByTestId("stage-avatar")).toBeVisible();
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
+  await page.getByRole("button", { name: "Generate video" }).click();
+  expect("hidePresenter" in ((await sent).postDataJSON() as { scenes: object[] }).scenes[0]).toBe(false);
+  await page.waitForURL(/\/videos\/vid_/);
+});
+
 test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Two scene demo");
   await page.locator("textarea").fill("Scene one says hello.");

@@ -98,6 +98,12 @@ export async function saveBackdropAssetIds(backdrop: Backdrop, ids: Record<strin
 /** What a template scene or the brand kit shows in place of an image that was deleted: the editor's plain background. */
 export const PLAIN_BACKGROUND: Background = { type: "color", value: "#f1f5f9" };
 
+/** A scene given the plain background instead of a gone image: a colour cannot stand in for the presenter, who comes back. */
+export function plainScene<T extends { background: Background; hidePresenter?: true }>(sc: T): T {
+  const { hidePresenter: _dropped, ...rest } = sc;
+  return { ...rest, background: PLAIN_BACKGROUND } as T;
+}
+
 /**
  * Deletes a backdrop and its image. Videos already rendered keep their footage; a retry or copy that names it is
  * refused. The owner's templates and brand kit stop naming it first (a plain background takes its place), so a batch
@@ -117,7 +123,7 @@ export async function deleteBackdrop(id: string, ownerId: string = LOCAL_OWNER):
   for (const tpl of await getStore().list<VideoTemplate>("template", ownerId)) {
     await rewriteIfNamed<VideoTemplate>("template", tpl, (t) => t.scenes.some((sc) => names(sc.background)), (t) => ({
       ...t,
-      scenes: t.scenes.map((sc) => (names(sc.background) ? { ...sc, background: PLAIN_BACKGROUND } : sc)),
+      scenes: t.scenes.map((sc) => (names(sc.background) ? plainScene(sc) : sc)),
     }));
   }
   // Bytes first: a failure part-way leaves the listed row, so deleting again finishes the job instead of orphaning the image.

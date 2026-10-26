@@ -101,3 +101,25 @@ describe("scenes without the presenter", () => {
     await assert.rejects(new DidAvatarProvider("key").createVideo(req, STOCK_AVATARS[0], STOCK_VOICES[0]), /D-ID shows its presenter in every scene/);
   });
 });
+
+describe("scenes without the presenter, when their picture goes", () => {
+  it("name no presenter of their own once accepted, so none is looked up or prepared", () => {
+    const req = videoRequestSchema.parse(request([{ script: "Just the view.", background: image, hidePresenter: true, avatarId: "av_portrait", layout: { scale: 1.2, x: 0, y: 0 } }, { script: "Hi.", background: image, avatarId: "stock_2" }]));
+    assert.equal("avatarId" in req.scenes![0] || "layout" in req.scenes![0], false);
+    assert.equal(req.scenes![1].avatarId, "stock_2");
+  });
+
+  it("show the presenter again in templates whose image was deleted", async () => {
+    const { plainScene } = await import("../services/backdrops");
+    assert.deepEqual(plainScene({ script: "Hi.", background: image, hidePresenter: true as const }), { script: "Hi.", background: { type: "color", value: "#f1f5f9" } });
+    const { createBackdrop, deleteBackdrop, getTemplate } = await import("../services");
+    const png = `data:image/png;base64,${Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8cfc0f01f0005000201ffa2d1c2d40000000049454e44ae426082", "hex").toString("base64")}`;
+    const b = await createBackdrop({ name: "Deck", image: png }, "owner_t");
+    const t = await createTemplate(templateInputSchema.parse({ title: "Tour", scenes: [{ script: "Just the view.", background: { type: "image", value: `/api/backdrops/${b.id}` }, hidePresenter: true }] }), "owner_t");
+    await deleteBackdrop(b.id, "owner_t");
+    const after = await getTemplate(t.id, "owner_t");
+    assert.deepEqual(after.scenes[0].background, { type: "color", value: "#f1f5f9" });
+    assert.equal("hidePresenter" in after.scenes[0], false, "a colour cannot stand in for the presenter");
+    assert.ok(templateInputSchema.safeParse({ title: "Again", scenes: after.scenes }).success, "the template is still valid");
+  });
+});

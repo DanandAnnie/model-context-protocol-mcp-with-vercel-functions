@@ -118,6 +118,18 @@ const newScene = (script = "", background: Background = DEFAULT_BG, presenter: P
   ...(presenter.speed && !presenter.audioId ? { speed: presenter.speed } : {}),
   ...(restoredOverlay(presenter.overlay) ? { overlay: restoredOverlay(presenter.overlay) } : {}),
 });
+/** A scene on a new background: a colour cannot fill the frame in the presenter's place, so the presenter comes back. */
+const withBackground = (sc: Scene, background: Background): Scene => {
+  if (background.type !== "color" || !sc.hidePresenter) return { ...sc, background };
+  const { hidePresenter: _dropped, ...rest } = sc;
+  return { ...rest, background };
+};
+/** A scene as it is sent: one without the presenter has neither a presenter of its own nor a layout for one. */
+function sentScene(sc: Scene): Scene {
+  if (!sc.hidePresenter) return sc;
+  const { avatarId: _a, layout: _l, ...rest } = sc;
+  return rest;
+}
 /** On-screen text from a draft, a copy, or a template: anything this build does not offer is dropped, and blank text is none. */
 function restoredOverlay(o: SceneText | undefined): SceneText | undefined {
   if (!o || typeof o.text !== "string" || !o.text.trim()) return undefined;
@@ -229,16 +241,12 @@ function CreateInner() {
   }
   // Another picture or video keeps the scene's fit; the Fit buttons set it.
   const setBackground = (value: Background) =>
-    updateScene(activeIdx, {
-      background: value.type !== "color" && background.type !== "color" && background.fit && !value.fit ? { ...value, fit: background.fit } : value,
-      // A colour cannot fill the frame in the presenter's place, so the presenter comes back.
-      ...(value.type === "color" ? { hidePresenter: undefined } : {}),
-    });
+    updateScene(activeIdx, { background: value.type !== "color" && background.type !== "color" && background.fit && !value.fit ? { ...value, fit: background.fit } : value });
   const layout: SceneLayout = active.layout ?? DEFAULT_LAYOUT;
   // The default layout is stored as absent, so an untouched scene renders exactly as before.
   const setLayout = (value: SceneLayout) => updateScene(activeIdx, { layout: isDefaultLayout(value) ? undefined : value });
   function updateScene(idx: number, patch: Partial<Scene>) {
-    setScenes((prev) => prev.map((sc, i) => (i === idx ? { ...sc, ...patch } : sc)));
+    setScenes((prev) => prev.map((sc, i) => (i === idx ? withBackground({ ...sc, ...patch }, patch.background ?? sc.background) : sc)));
   }
   function addScene() {
     if (scenes.length >= MAX_SCENES) return;
@@ -522,7 +530,7 @@ function CreateInner() {
         const id = backdropIdOf(sc.background);
         if (!id || known.has(id)) return sc;
         changed = true;
-        return { ...sc, background: DEFAULT_BG };
+        return withBackground(sc, DEFAULT_BG);
       });
       if (changed) setImportNote("A background image some scenes used has been deleted, so they have a plain background now.");
       return changed ? next : prev;
@@ -729,7 +737,7 @@ function CreateInner() {
     if (b.defaultResolution) setResolution(b.defaultResolution);
     if (templateId) return;
     if (b.defaultAspect) setAspect(b.defaultAspect);
-    setScenes((prev) => prev.map((sc) => (sc.script.trim() ? sc : { ...sc, background: b.defaultBackground ?? { type: "color", value: b.primaryColor } })));
+    setScenes((prev) => prev.map((sc) => (sc.script.trim() ? sc : withBackground(sc, b.defaultBackground ?? { type: "color", value: b.primaryColor }))));
   }, [brandData, fromId, templateId, draftRestored, fromAgent]);
 
   // Pre-fill from a template (?template=) or an existing video (?from=), unless its edits were kept from before.
@@ -858,7 +866,7 @@ function CreateInner() {
     try {
       const { video } = await api<{ video: Video }>("/api/videos", {
         method: "POST",
-        body: JSON.stringify({ title, scenes, avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}) }),
+        body: JSON.stringify({ title, scenes: scenes.map(sentScene), avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}) }),
       });
       if (editKey) writeDraft(editKey, null);
       router.push(`/videos/${video.id}`);
@@ -1085,26 +1093,26 @@ function CreateInner() {
                 </button>
               </p>
             )}
-            <label className="mb-3 flex items-start gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="scene-show-presenter">
-              <input
-                type="checkbox"
-                className="mt-0.5 accent-brand-600"
-                checked={!active.hidePresenter}
-                disabled={canEdit === false || (background.type === "color" && !active.hidePresenter)}
-                aria-describedby="show-presenter-hint"
-                onChange={(e) => updateScene(activeIdx, { hidePresenter: e.target.checked ? undefined : true })}
-              />
-              <span>
+            <div className="mb-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="scene-show-presenter">
+              <label className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 accent-brand-600"
+                  checked={!active.hidePresenter}
+                  disabled={canEdit === false || (background.type === "color" && !active.hidePresenter)}
+                  aria-describedby="show-presenter-hint"
+                  onChange={(e) => updateScene(activeIdx, { hidePresenter: e.target.checked ? undefined : true })}
+                />
                 <span className="font-medium text-slate-700">Show the presenter{scenes.length > 1 ? ` in scene ${activeIdx + 1}` : ""}</span>
-                <span id="show-presenter-hint" className="block text-slate-500">
-                  {background.type === "color"
-                    ? "To show only a picture or video here, give the scene an image or video background first."
-                    : active.hidePresenter
-                    ? `The ${background.type === "video" ? "video" : "picture"} fills the frame and ${active.audioId ? "the clip plays" : silentSeconds(active.script) ? "holds in silence" : "the voice narrates it"}. HeyGen renders it; D-ID always shows its presenter.`
-                    : `Turn off to let the ${background.type === "video" ? "video" : "picture"} fill the frame, with the voice over it.`}
-                </span>
-              </span>
-            </label>
+              </label>
+              <p id="show-presenter-hint" className="ml-5 text-slate-500">
+                {background.type === "color"
+                  ? "To show only a picture or video here, give the scene an image or video background first."
+                  : active.hidePresenter
+                  ? `The ${background.type === "video" ? "video" : "picture"} fills the frame and ${active.audioId ? "the clip plays" : silentSeconds(active.script) ? "holds in silence" : "the voice narrates it"}. HeyGen renders it; D-ID cannot and refuses the video.`
+                  : `Turn off to let the ${background.type === "video" ? "video" : "picture"} fill the frame, with the voice over it.`}
+              </p>
+            </div>
             {scenes.length > 1 && (
               <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="scene-presenter">
                 <span className="font-medium">Scene {activeIdx + 1} {active.hidePresenter ? "voice" : "presenter"}</span>

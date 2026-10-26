@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import { logoResponse, publicLogoSrc, servableLogo } from "../brand-logo";
-import { logoFileType } from "../logo-types";
+import { logoDataUrlValid, logoFileType } from "../logo-types";
 import { watermarkPlace } from "../watermark";
 import { agentSchema, brandKitSchema, createAgent, publicAgent, saveBrandKit } from "../services";
 import { STOCK_AVATARS } from "../stock";
@@ -54,6 +54,12 @@ describe("brand logo", () => {
     assert.equal(logoResponse({ logoUrl: `data:image/PNG;base64,${PNG}`, updatedAt: "x" }, req()).headers.get("content-type"), "image/png");
     assert.equal(servableLogo("data:image/png;base64"), false, "no comma, nothing to decode");
     assert.equal(servableLogo("data:image/tiff;base64,AAAA"), false);
+    // The browser-side check the brand page uses agrees: a logo it keeps is one the kit will accept.
+    for (const url of [`data:image/png;base64,${PNG}`, `data:image/PNG;base64,${PNG}`, "data:image/svg+xml,%3Csvg%3E%3C%2Fsvg%3E", "data:image/png;base64", "data:image/png;base64,", "data:image/png;base64,***", "data:image/tiff;base64,AAAA", "data:image/svg+xml,%E0%A4%A"]) {
+      assert.equal(logoDataUrlValid(url), servableLogo(url), url);
+    }
+    assert.equal(logoDataUrlValid("data:image/png;base64"), false);
+    assert.equal(logoDataUrlValid("data:image/png;base64,***"), false);
     assert.equal(brandKitSchema.safeParse({ primaryColor: "#4f46e5", logoUrl: "data:image/png;base64" }).success, false);
     // A picked file's type, or one read from its name when the browser reports none.
     assert.equal(logoFileType({ type: "image/png", name: "a.png" }), "image/png");

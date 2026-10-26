@@ -852,6 +852,20 @@ test("a custom cover image replaces the poster everywhere", async ({ page }) => 
   }, `/api/videos/${v.id}/cover?v=${Date.parse(frame.cover!.updatedAt)}`);
   expect(coverWidth).toBe(videoWidth);
   expect(coverWidth).toBeGreaterThan(1);
+  // The frame is the one the player is on: the start and a later moment give different covers.
+  const coverBytes = async () => {
+    const meta = (await (await page.request.get(`/api/videos/${v.id}`)).json()).video as { cover: { updatedAt: string } };
+    return Buffer.from(await (await page.request.get(`/api/videos/${v.id}/cover?v=${Date.parse(meta.cover.updatedAt)}`)).body()).toString("base64");
+  };
+  const atThree = await coverBytes();
+  await player.evaluate((el: HTMLVideoElement) => (el.currentTime = 0));
+  await page.getByRole("button", { name: "Use current frame" }).click();
+  await expect.poll(coverBytes).not.toBe(atThree);
+  const atZero = await coverBytes();
+  await player.evaluate((el: HTMLVideoElement) => (el.currentTime = 3));
+  await page.getByRole("button", { name: "Use current frame" }).click();
+  await expect.poll(coverBytes).not.toBe(atZero);
+  expect(await coverBytes()).toBe(atThree);
 });
 
 test("draft autosave survives a reload and clears after generating", async ({ page }) => {

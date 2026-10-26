@@ -2,7 +2,7 @@
 // cacheable route instead of carrying it inline, so it is sent once and cached by the browser.
 import { NotFoundError } from "./errors";
 import { decodeDataUrl } from "./providers/image";
-import { LOGO_TYPES } from "./logo-types";
+import { LOGO_TYPES, logoDataUrlValid } from "./logo-types";
 import type { BrandKit } from "./types";
 
 /**
@@ -16,6 +16,7 @@ export function publicLogoSrc(brand: Pick<BrandKit, "logoUrl" | "updatedAt"> | n
 
 /** Whether an uploaded logo decodes to a type the logo route serves: the same check the route makes, so a kit can never save a logo its pages would show broken. */
 export function servableLogo(dataUrl: string): boolean {
+  if (!logoDataUrlValid(dataUrl)) return false;
   try {
     return LOGO_TYPES.has(decodeDataUrl(dataUrl).mimeType.toLowerCase());
   } catch {

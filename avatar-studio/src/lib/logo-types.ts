@@ -16,3 +16,21 @@ export function logoFileType(file: { type: string; name: string }): string | und
   const type = file.type.toLowerCase() || LOGO_EXTENSIONS[file.name.split(".").pop()?.toLowerCase() ?? ""];
   return type && LOGO_TYPES.has(type) ? type : undefined;
 }
+
+/**
+ * Whether an uploaded logo (a data URL) is one the logo route can serve: a comma, an allowed type in any
+ * case, and a payload that decodes. Runs in the browser and on the server, so the brand page and the
+ * kit's check never disagree.
+ */
+export function logoDataUrlValid(dataUrl: string): boolean {
+  const comma = dataUrl.indexOf(",");
+  if (!dataUrl.startsWith("data:") || comma < 0) return false;
+  if (!LOGO_TYPES.has(logoDataType(dataUrl) ?? "")) return false;
+  const payload = dataUrl.slice(comma + 1);
+  if (/;base64$/i.test(dataUrl.slice(0, comma))) return payload.length > 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(payload.replace(/\s+/g, ""));
+  try {
+    return decodeURIComponent(payload).length > 0;
+  } catch {
+    return false;
+  }
+}

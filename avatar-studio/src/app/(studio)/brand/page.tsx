@@ -8,7 +8,7 @@ import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api, isDarkHex } from "@/lib/client";
 import { MAX_PRONUNCIATIONS, formatPronunciations, parsePronunciations } from "@/lib/pronounce";
 import { MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH, MIN_GLOSSARY_TERM_LENGTH, parseGlossary } from "@/lib/glossary";
-import { LOGO_TYPES, logoDataType, logoFileType } from "@/lib/logo-types";
+import { LOGO_TYPES, logoDataUrlValid, logoFileType } from "@/lib/logo-types";
 import type { AspectRatio, Avatar, BrandKit, Resolution, Voice, WatermarkCorner } from "@/lib/types";
 
 const DEFAULT_PRIMARY = "#4f46e5";
@@ -50,8 +50,7 @@ export default function BrandPage() {
     if (!b) return;
     setName(b.name);
     // A logo saved before only displayable types were accepted is left out (and said so), so the rest of the kit can still be saved.
-    const storedType = b.logoUrl ? logoDataType(b.logoUrl) : undefined;
-    if (storedType && !LOGO_TYPES.has(storedType)) {
+    if (b.logoUrl?.startsWith("data:") && !logoDataUrlValid(b.logoUrl)) {
       setLogoNotice("The saved logo is in a format the share page cannot show, so saving will remove it. Upload a PNG, JPEG, WebP, GIF, SVG, AVIF, BMP, or ICO logo to replace it.");
     } else {
       setLogoUrl(b.logoUrl ?? "");
@@ -224,6 +223,7 @@ export default function BrandPage() {
                 value={logoUrl.startsWith("data:") ? "" : logoUrl}
                 onChange={(e) => {
                   setLogoUrl(e.target.value);
+                  setLogoNotice(null);
                   // An emptied logo takes the player corner with it, as the Clear button does.
                   if (!e.target.value.trim()) setWatermark("");
                 }}

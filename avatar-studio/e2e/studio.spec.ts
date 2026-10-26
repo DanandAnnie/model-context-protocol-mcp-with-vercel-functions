@@ -2436,6 +2436,27 @@ test("a pause inserted in the script holds the presenter and leaves a gap in the
   expect(share).not.toContain("[pause");
 });
 
+test("a scene of only pauses is a silent one, held without a word", async ({ page }) => {
+  await page.locator("input[placeholder='Video title']").fill(`Silent ${Date.now().toString(36)}`);
+  const box = page.locator("textarea");
+  // A video of nothing but silence has nothing to say.
+  await box.fill("[pause 2s]");
+  await expect(page.getByText("Every scene is silent; give at least one some words")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Generate video" })).toBeDisabled();
+  await box.fill("Welcome home.");
+  await page.getByRole("button", { name: "Add scene" }).click();
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect(box).toHaveValue("[pause 1s] ");
+  await box.fill("[pause 4s]");
+  await expect(page.getByTestId("script-length")).toHaveText("Silent scene: the presenter holds for 4s · ~5s total");
+  await page.getByRole("button", { name: "Generate video" }).click();
+  await page.waitForURL(/\/videos\/vid_/);
+  const id = page.url().split("/videos/")[1].split(/[?#]/)[0];
+  const video = (await (await page.request.get(`/api/videos/${id}`)).json()).video;
+  expect(video.scenes.map((sc: { script: string }) => sc.script)).toEqual(["Welcome home.", "[pause 4s]"]);
+  await expect(page.getByText(/silent for 4s/)).toBeVisible();
+});
+
 test("a dub can be voice only and name its speakers", async ({ page }) => {
   const tag = Date.now().toString(36);
   await page.goto("/translate");

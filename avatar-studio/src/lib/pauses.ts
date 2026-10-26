@@ -42,6 +42,14 @@ export function pauseSeconds(text: string): number {
   return total;
 }
 
+/** A scene of nothing but pauses is a silent one (the presenter holds for that long), up to this many seconds. */
+export const MAX_SILENT_SEC = 60;
+
+/** How long a silent scene (one holding only pause markers) lasts, or 0 for a scene with words. */
+export function silentSeconds(script: string): number {
+  return script.trim() && !stripPauses(script).trim() ? pauseSeconds(script) : 0;
+}
+
 /** The text cut at its markers: each piece of speech and the pause that follows it (0 after the last). */
 export function splitAtPauses(text: string): Array<{ text: string; pauseSec: number }> {
   const out: Array<{ text: string; pauseSec: number }> = [];

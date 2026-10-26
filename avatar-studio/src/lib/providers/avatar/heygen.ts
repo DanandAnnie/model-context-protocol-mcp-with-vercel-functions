@@ -1,5 +1,5 @@
 import { backdropIdOf, dimensionsFor, type AudioClip, type Avatar, type Backdrop, type Background, framingFor, type PresenterFraming, type Scene, type VideoRequest, type Voice } from "../../types";
-import { withBreakTags } from "../../pauses";
+import { silentSeconds, withBreakTags } from "../../pauses";
 import { heygenBurnsCaptions } from "../../captions";
 import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
@@ -77,9 +77,12 @@ export class HeyGenAvatarProvider implements AvatarProvider {
           character: { ...this.character(sceneAvatar, scene.layout?.framing), ...(scene.layout ? { scale: scene.layout.scale, offset: { x: scene.layout.x, y: scene.layout.y } } : {}) },
           // An audio scene lip-syncs to its clip; speed, pitch, and emotion apply to synthesised speech only.
           // An emotion goes to voices that can take one: HeyGen says per voice, and one it says nothing about is sent it.
+          // A scene of only pauses holds the presenter silent for that long.
           voice: scene.audioId
             ? { type: "audio", audio_asset_id: this.audioAssetId(scene.audioId, cast) }
-            : { type: "text", input_text: withBreakTags(scene.script), voice_id: this.voiceId(sceneVoice, req.voiceId), speed: scene.speed ?? req.speed, ...(req.pitch ? { pitch: req.pitch } : {}), ...(req.emotion && sceneVoice?.emotionSupport !== false ? { emotion: req.emotion } : {}) },
+            : silentSeconds(scene.script)
+              ? { type: "silence", duration: Math.max(1, silentSeconds(scene.script)) }
+              : { type: "text", input_text: withBreakTags(scene.script), voice_id: this.voiceId(sceneVoice, req.voiceId), speed: scene.speed ?? req.speed, ...(req.pitch ? { pitch: req.pitch } : {}), ...(req.emotion && sceneVoice?.emotionSupport !== false ? { emotion: req.emotion } : {}) },
           // A video background loops for the length of the scene, filling the frame unless the scene shows all of it.
           background:
             scene.background.type === "video"

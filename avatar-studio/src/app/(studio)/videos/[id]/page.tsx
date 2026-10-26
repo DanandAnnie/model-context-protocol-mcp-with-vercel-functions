@@ -12,6 +12,7 @@ import { CaptionEditor } from "@/components/CaptionEditor";
 import { ViewerEmails } from "@/components/ViewerEmails";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { captionsBurnedIn } from "@/lib/captions";
+import { silentSeconds } from "@/lib/pauses";
 import { useApi } from "@/hooks/useApi";
 import { ApiError, api, formatDate, formatSeconds, isDarkHex, posterUrl, purgeAt, shareExpired } from "@/lib/client";
 import { socialShareLinks } from "@/lib/social";
@@ -1037,9 +1038,9 @@ export default function VideoDetailPage() {
                           {i + 1}
                         </span>
                         <div className="min-w-0">
-                          {(sc.avatarName || sc.voiceName || sc.audioId || sc.layout || sc.speed || sc.background.fit) && (
+                          {(sc.avatarName || sc.voiceName || sc.audioId || sc.layout || sc.speed || sc.background.fit || silentSeconds(sc.script) > 0) && (
                             <div className="mb-0.5 text-xs text-slate-500">
-                              {[sc.avatarName, sc.audioId ? `recorded audio${sc.audioName ? `: ${sc.audioName}` : ""}` : sc.voiceName, !sc.audioId && sc.speed ? `${sc.speed.toFixed(2)}x speed${video.provider !== "heygen" && video.provider !== "mock" ? " (not applied by this renderer)" : ""}` : undefined, sc.layout ? `presenter ${[sc.layout.framing === "closeUp" ? "close-up" : sc.layout.framing === "circle" ? "in a circle" : "", sc.layout.scale !== 1 || !sc.layout.framing ? `${Math.round(sc.layout.scale * 100)}%` : "", sc.layout.x || sc.layout.y ? "moved" : ""].filter(Boolean).join(", ")}${video.provider !== "heygen" ? " (not applied by this renderer)" : ""}` : undefined, sc.background.fit === "contain" ? `background shown whole${video.provider !== "heygen" ? " (not applied by this renderer)" : ""}` : undefined].filter(Boolean).join(" · ")}
+                              {[sc.avatarName, sc.audioId ? `recorded audio${sc.audioName ? `: ${sc.audioName}` : ""}` : silentSeconds(sc.script) ? `silent for ${silentSeconds(sc.script)}s` : sc.voiceName, !sc.audioId && sc.speed ? `${sc.speed.toFixed(2)}x speed${video.provider !== "heygen" && video.provider !== "mock" ? " (not applied by this renderer)" : ""}` : undefined, sc.layout ? `presenter ${[sc.layout.framing === "closeUp" ? "close-up" : sc.layout.framing === "circle" ? "in a circle" : "", sc.layout.scale !== 1 || !sc.layout.framing ? `${Math.round(sc.layout.scale * 100)}%` : "", sc.layout.x || sc.layout.y ? "moved" : ""].filter(Boolean).join(", ")}${video.provider !== "heygen" ? " (not applied by this renderer)" : ""}` : undefined, sc.background.fit === "contain" ? `background shown whole${video.provider !== "heygen" ? " (not applied by this renderer)" : ""}` : undefined].filter(Boolean).join(" · ")}
                             </div>
                           )}
                           <p className="whitespace-pre-wrap leading-relaxed text-slate-700">{sc.script}</p>

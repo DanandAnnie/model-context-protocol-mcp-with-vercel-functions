@@ -7,7 +7,7 @@ import { EMPTY_WATCH, MAX_SCENES, TRASH_RETENTION_DAYS, backdropIdOf, isDefaultC
 import type { AudioClip, Avatar, Backdrop, Background, CaptionCue, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
 import { buildCues, spokenWords } from "../captions";
 import { wellFormed } from "../text";
-import { pauseSeconds, stripPauses } from "../pauses";
+import { MAX_SILENT_SEC, pauseSeconds, silentSeconds, stripPauses } from "../pauses";
 import type { AvatarProvider, RenderCast } from "../providers/types";
 import { LOCAL_OWNER } from "../owner-id";
 import { renderLimitFor } from "../billing";
@@ -39,7 +39,13 @@ export const videoRequestSchema = z
     scenes: z
       .array(
         z.object({
-          script: z.string().trim().min(1).max(5000).refine((s) => stripPauses(s).trim().length > 0, "A scene needs some words, not only pauses"),
+          // A scene of only pauses is a silent one, the presenter holding without a word (HeyGen's silent voice).
+          script: z
+            .string()
+            .trim()
+            .min(1)
+            .max(5000)
+            .refine((s) => silentSeconds(s) <= MAX_SILENT_SEC, `A silent scene (only pauses) lasts at most ${MAX_SILENT_SEC} seconds`),
           background: backgroundSchema,
           /** Presenter and voice for this scene; the video's when omitted. */
           avatarId: z.string().min(1).optional(),
@@ -70,6 +76,10 @@ export const videoRequestSchema = z
       const script = v.scenes.map((s) => s.script).join("\n\n");
       if (script.length > 5000) {
         ctx.addIssue({ code: "custom", path: ["scenes"], message: "Combined scene scripts must be 5000 characters or fewer" });
+        return z.NEVER;
+      }
+      if (!v.scenes.some((s) => s.audioId || !silentSeconds(s.script))) {
+        ctx.addIssue({ code: "custom", path: ["scenes"], message: "The video needs some words, not only pauses: every scene is silent" });
         return z.NEVER;
       }
       return { ...v, script, background: v.scenes[0].background };

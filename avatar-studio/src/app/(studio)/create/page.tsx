@@ -14,7 +14,7 @@ import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib/client";
 import { languageLabel } from "@/lib/language";
-import { stripPauses } from "@/lib/pauses";
+import { MAX_SILENT_SEC, silentSeconds, stripPauses } from "@/lib/pauses";
 import { MAX_IMPORT_BYTES, MAX_SCRIPT_CHARS, decodeScript, legacyEncodingFor, scenesFromText } from "@/lib/script-import";
 import { renderPdf, slideScripts } from "@/lib/pdf-slides";
 import { readPptx, type PptxSlide } from "@/lib/pptx-notes";
@@ -751,14 +751,16 @@ function CreateInner() {
   const seconds =
     scenes.reduce((sum, sc) => sum + (sc.audioId ? sceneSeconds(sc) : 0), 0) +
     [...typedBySpeed].reduce((sum, [pace, scripts]) => sum + estimateSeconds(scripts.join("\n\n"), pace), 0);
-  const allScenesFilled = scenes.every((sc) => stripPauses(sc.script).trim().length > 0);
+  // A scene of only pauses is a silent one (the presenter holds without a word), but the video as a whole needs words.
+  const allScenesFilled = scenes.every((sc) => sc.script.trim().length > 0) && scenes.some((sc) => sc.audioId || !silentSeconds(sc.script));
+  const silentTooLong = scenes.some((sc) => !sc.audioId && silentSeconds(sc.script) > MAX_SILENT_SEC);
   // The server takes up to 5000 characters of script across all scenes (joined by a blank line).
   const scriptChars = scenes.map((sc) => sc.script.trim()).join("\n\n").length;
   const scriptTooLong = scriptChars > MAX_SCRIPT_CHARS;
   // A template's {placeholders} left in a script would be read out as they are.
   const unfilled = [...new Set(scenes.flatMap((sc) => sc.script.match(/\{[\p{L}_][\p{L}\p{N}_ -]{0,39}\}/gu) ?? []))];
   const canEdit = useCanEdit();
-  const canGenerate = canEdit !== false && !!avatar && !!voice && allScenesFilled && !scriptTooLong && title.trim().length > 0 && !submitting;
+  const canGenerate = canEdit !== false && !!avatar && !!voice && allScenesFilled && !silentTooLong && !scriptTooLong && title.trim().length > 0 && !submitting;
 
   async function generate() {
     if (!avatar || !voice) return;
@@ -1075,10 +1077,22 @@ function CreateInner() {
               </h3>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs text-slate-500" data-testid="script-length">
-                  {scenes.length > 1
+                  {!active.audioId && silentSeconds(active.script)
+                    ? `Silent scene: the presenter holds for ${formatSeconds(silentSeconds(active.script))}${scenes.length > 1 ? ` · ~${formatSeconds(seconds)} total` : ""}`
+                    : scenes.length > 1
                     ? `${wordCount(active.script)} words · ~${formatSeconds(sceneSeconds(active))} this scene · ~${formatSeconds(seconds)} total`
                     : `${words} words · ~${formatSeconds(seconds)}`}
                 </span>
+                {silentTooLong && (
+                  <span role="alert" className="text-xs font-medium text-rose-600">
+                    A silent scene lasts at most {MAX_SILENT_SEC} seconds
+                  </span>
+                )}
+                {!allScenesFilled && scenes.every((sc) => sc.script.trim()) && (
+                  <span role="alert" className="text-xs font-medium text-rose-600">
+                    Every scene is silent; give at least one some words
+                  </span>
+                )}
                 {scriptTooLong && (
                   <span role="alert" className="text-xs font-medium text-rose-600" data-testid="script-too-long">
                     {scriptChars} of {MAX_SCRIPT_CHARS} characters; shorten the script to generate
@@ -1135,7 +1149,7 @@ function CreateInner() {
                   )}
                 </div>
                 {!active.audioId && (
-                  <Button variant="secondary" className="px-3 py-1.5" onClick={insertPause} disabled={canEdit === false} title="Insert a pause at the cursor; change the number to make it longer (up to 10 seconds)">
+                  <Button variant="secondary" className="px-3 py-1.5" onClick={insertPause} disabled={canEdit === false} title="Insert a pause at the cursor; change the number to make it longer (up to 10 seconds). A scene of only pauses is a silent one, the presenter holding without a word">
                     <Pause className="h-4 w-4" /> Pause
                   </Button>
                 )}
@@ -1143,7 +1157,7 @@ function CreateInner() {
                   <Button
                     variant="secondary"
                     className="px-3 py-1.5"
-                    disabled={!active.script.trim()}
+                    disabled={!stripPauses(active.script).trim()}
                     loading={busyId === sceneVoice.id}
                     onClick={() => play(sceneVoice, active.script.slice(0, 400).replace(/\[[^\]]*$/, ""), active.speed ?? speed).catch((e) => setErr(e.message))}
                   >

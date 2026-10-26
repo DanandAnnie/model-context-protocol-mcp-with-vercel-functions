@@ -6,7 +6,7 @@ import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
-import { api, formatDate } from "@/lib/client";
+import { ApiError, api, formatDate } from "@/lib/client";
 import { MAX_TRANSLATION_SPEAKERS, type Translation, type TranslationQuality } from "@/lib/types";
 
 /** A job worth polling for: lines being translated or a dub running, but not lines waiting on someone to read them. */
@@ -212,6 +212,8 @@ function Proofread({ translation, canEdit, onChange }: { translation: Translatio
   const [busy, setBusy] = useState<"save" | "dub" | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  // The version these lines were opened at; a save or a refused dub moves it on, someone else's change does not.
+  const [basedOn, setBasedOn] = useState(translation.updatedAt);
   const changed = lines.some((l, i) => l !== cues[i]?.text);
   const blank = lines.some((l) => !l.trim());
 
@@ -220,12 +222,19 @@ function Proofread({ translation, canEdit, onChange }: { translation: Translatio
     setErr(null);
     setSaved(false);
     try {
-      const body = JSON.stringify({ lines: lines.map((l) => l.trim()) });
-      if (kind === "save") await api(`/api/translate/${translation.id}`, { method: "PATCH", body });
-      else await api(`/api/translate/${translation.id}/dub`, { method: "POST", body });
-      if (kind === "save") setSaved(true);
+      const body = JSON.stringify({ lines: lines.map((l) => l.trim()), basedOn });
+      if (kind === "save") {
+        const res = await api<{ translation: Translation }>(`/api/translate/${translation.id}`, { method: "PATCH", body });
+        setBasedOn(res.translation.updatedAt);
+        setSaved(true);
+      } else {
+        await api(`/api/translate/${translation.id}/dub`, { method: "POST", body });
+      }
       onChange();
     } catch (e) {
+      // A refused dub kept these lines; the next try builds on that version.
+      const kept = e instanceof ApiError ? (e.body as { translation?: Translation } | undefined)?.translation : undefined;
+      if (kept?.updatedAt) setBasedOn(kept.updatedAt);
       setErr(e instanceof Error ? e.message : "Something went wrong");
       onChange();
     } finally {

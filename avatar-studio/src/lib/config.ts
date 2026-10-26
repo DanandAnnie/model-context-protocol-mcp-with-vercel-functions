@@ -24,6 +24,8 @@ export const config = {
   supabaseUrl: env("SUPABASE_URL"),
   supabaseServiceRoleKey: env("SUPABASE_SERVICE_ROLE_KEY"),
   appUrl: env("APP_URL") ?? env("VERCEL_URL")?.replace(/^(?!https?:\/\/)/, "https://") ?? "http://localhost:3000",
+  /** The app's public address as configured; links an outside service must open (proofread lines) need it. */
+  publicAppUrl: env("APP_URL")?.replace(/\/$/, ""),
   webhookSecret: env("WEBHOOK_SECRET"),
   /** Live video for the interactive avatar (HeyGen Streaming) when the HeyGen key is set. */
   streamingEnabled: (env("STREAMING_AVATAR") ?? "true").toLowerCase() !== "false",

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { timingSafeEqual } from "../auth";
 import { cuesToSrt } from "../captions";
 import { config } from "../config";
-import { ConflictError, NotFoundError } from "../errors";
+import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { newId, nowIso } from "../ids";
 import { getTranslateProvider, getTranslateProviderByName } from "../providers";
 import { TRANSLATION_GONE } from "../providers/types";
@@ -36,10 +36,38 @@ const setOptions = (v: { audioOnly?: boolean; speakers?: number; quality?: strin
   ...(v.proofread ? { proofread: true } : {}),
 });
 
-/** A job as the browser sees it: the secret in its subtitle link stays on the server. */
+/** How long a dub being started holds its lines before they open again. */
+const DUB_CLAIM_MS = 2 * 60 * 1000;
+/** A dub whose start never finished (the server stopped, or the provider never answered). */
+const stuck = (t: Translation) => t.proofreadStage === "dubbing" && Date.now() - Date.parse(t.updatedAt) > DUB_CLAIM_MS;
+
+/**
+ * A job as the browser sees it: the secret in its subtitle link stays on the server, and a dub whose start never
+ * finished shows its lines again, saying so.
+ */
 function shown(t: Translation): Translation {
   const { proofreadToken: _token, ...rest } = t;
+  if (stuck(t)) return { ...rest, proofreadStage: "ready", error: "Starting the dub did not finish. Check that it is not already in your HeyGen account, then try again." };
   return rest;
+}
+
+/** A write time strictly after `prev`, so a conditional write on `updatedAt` never matches a record written in the same millisecond. */
+const after = (prev: string) => new Date(Math.max(Date.now(), Date.parse(prev) + 1)).toISOString();
+
+/** Where the provider reads a proofread's lines: the configured public address (demo mode makes do with the app's own). */
+function proofreadSrtUrl(id: string, token: string, provider: string): string {
+  const origin = config.publicAppUrl ?? (provider === "mock" ? config.appUrl.replace(/\/$/, "") : undefined);
+  if (!origin) throw new ValidationError("Proofread dubs need APP_URL set to this app's public address, so the dubbing provider can read the corrected lines");
+  return `${origin}/api/translate/${encodeURIComponent(id)}/srt?token=${token}`;
+}
+
+/** Refuses a proofread the provider could never finish: it reads the corrected lines from this app's public address. */
+function assertProofreadReachable(provider: string) {
+  const url = config.publicAppUrl;
+  if (provider === "mock") return;
+  if (!url || !/^https:\/\//i.test(url) || /^https:\/\/(localhost|127\.|\[::1\])/i.test(url)) {
+    throw new ValidationError("Proofread dubs need APP_URL set to this app's public https address, so the dubbing provider can read the corrected lines");
+  }
 }
 
 export const translationRequestSchema = z.object({
@@ -81,6 +109,7 @@ export const translationBatchSchema = z
  * and the rest still start.
  */
 export async function createTranslations(input: z.infer<typeof translationBatchSchema>, ownerId: string = LOCAL_OWNER): Promise<Translation[]> {
+  if (input.proofread) assertProofreadReachable(getTranslateProvider().name);
   const out: Translation[] = [];
   for (const language of input.languages) {
     const title = input.languages.length > 1 ? `${input.title} (${language})`.slice(0, 160) : input.title;
@@ -193,7 +222,7 @@ async function refreshTranslation(item: Translation): Promise<Translation> {
   if (current.updatedAt !== item.updatedAt) return current;
   if (current.status === "completed" && update.status !== "completed") return current;
   // A job the provider does not know yet may simply be new (or the provider briefly wrong): only an old one is gone.
-  if (update.error === TRANSLATION_GONE && Date.now() - Date.parse(current.createdAt) < GONE_AFTER_MS) return current;
+  if (update.error === TRANSLATION_GONE && Date.now() - Date.parse(current.dubStartedAt ?? current.createdAt) < GONE_AFTER_MS) return current;
   if (running(current) && update.status === current.status) return current;
   const next: Translation = { ...current, ...stripUndefined(update), updatedAt: nowIso() };
   return getStore().put("translation", next);
@@ -228,25 +257,25 @@ export async function getTranslation(id: string, ownerId: string = LOCAL_OWNER):
   return shown(due(item) ? await refreshTranslation(item) : item);
 }
 
-/** How long a dub being started holds its lines before they open again. */
-const DUB_CLAIM_MS = 2 * 60 * 1000;
-
 /** Corrected proofread lines: one text per line the provider translated, in order (the timing stays as translated). */
 export const proofreadLinesSchema = z.object({
   lines: z
     .array(z.string().trim().min(1, "Every line needs some text").max(MAX_CAPTION_CUE_CHARS))
     .min(1)
     .max(MAX_CAPTION_CUES),
+  /** The job's `updatedAt` when the lines were opened, so corrections made meanwhile by someone else are not overwritten. */
+  basedOn: z.string().max(40).optional(),
 });
 
 /** The job's lines with the corrections applied; refused once the lines are no longer open, or when the count differs. */
 function corrected(item: Translation, input?: z.infer<typeof proofreadLinesSchema>): CaptionCue[] {
   // A start that never finished (the server stopped mid-call) frees the lines again after a while.
-  const open = item.proofreadStage === "ready" || (item.proofreadStage === "dubbing" && Date.now() - Date.parse(item.updatedAt) > DUB_CLAIM_MS);
+  const open = item.proofreadStage === "ready" || stuck(item);
   if (!open || !item.proofreadCues?.length) {
     throw new ConflictError(item.proofreadStage === "dubbing" ? "This dub is already being started" : "These lines are not open for corrections");
   }
   if (!input) return item.proofreadCues;
+  if (input.basedOn && input.basedOn !== item.updatedAt) throw new ConflictError("These lines were changed since you opened them; reload to see the latest version");
   if (input.lines.length !== item.proofreadCues.length) throw new ConflictError("The lines changed since they were opened; reload and try again");
   return item.proofreadCues.map((c, i) => ({ ...c, text: input.lines[i] }));
 }
@@ -255,45 +284,41 @@ function corrected(item: Translation, input?: z.infer<typeof proofreadLinesSchem
 export async function saveProofreadLines(id: string, input: z.infer<typeof proofreadLinesSchema>, ownerId: string = LOCAL_OWNER): Promise<Translation> {
   const item = owned(await getStore().get<Translation>("translation", id), ownerId, `Translation ${id}`);
   const cues = corrected(item, input);
-  return shown(await getStore().put("translation", { ...item, proofreadCues: cues, updatedAt: nowIso() }));
+  const next: Translation = { ...item, proofreadStage: "ready", proofreadCues: cues, updatedAt: after(item.updatedAt) };
+  if (!(await getStore().putIf("translation", next, "updatedAt", item.updatedAt))) throw new ConflictError("These lines were changed meanwhile; reload to see the latest version");
+  return shown(next);
 }
-
-/** Proofreads being handed to the provider in this server instance, so a double click starts one dub. */
-const dubbing = new Set<string>();
 
 /**
  * Starts the dub of a proofread, with the corrections when given. The provider reads the lines as an SRT file
- * from this app (a link with a secret of its own), then dubs them; the job is then polled like any other. When
- * the provider refuses, the lines stay open and the job carries the error, so it can be tried again.
+ * from this app (a link with a secret of its own), then dubs them; the job is then polled like any other.
+ *
+ * The lines are claimed first with a conditional write, so of two requests (two clicks, two editors, two server
+ * instances) only one reaches the provider. When the provider refuses, the lines open again and the job carries the
+ * error, so it can be tried again; once the provider has accepted, the lines never reopen.
  */
 export async function dubProofread(id: string, input: z.infer<typeof proofreadLinesSchema> | undefined, ownerId: string = LOCAL_OWNER): Promise<Translation> {
-  if (dubbing.has(id)) throw new ConflictError("This dub is already being started");
-  dubbing.add(id);
+  const item = owned(await getStore().get<Translation>("translation", id), ownerId, `Translation ${id}`);
+  const cues = corrected(item, input);
+  const provider = getTranslateProviderByName(item.provider);
+  if (!provider.dubProofread || !item.providerProofreadId) throw new ConflictError("This dub cannot be made from proofread lines");
+  const token = item.proofreadToken ?? randomBytes(24).toString("base64url");
+  const srtUrl = proofreadSrtUrl(id, token, item.provider);
+  const claimed: Translation = { ...item, proofreadCues: cues, proofreadToken: token, proofreadStage: "dubbing", updatedAt: after(item.updatedAt) };
+  if (!(await getStore().putIf("translation", claimed, "updatedAt", item.updatedAt))) throw new ConflictError("This dub is already being started");
+
+  let providerJobId: string;
   try {
-    const item = owned(await getStore().get<Translation>("translation", id), ownerId, `Translation ${id}`);
-    const cues = corrected(item, input);
-    const provider = getTranslateProviderByName(item.provider);
-    if (!provider.dubProofread || !item.providerProofreadId) throw new ConflictError("This dub cannot be made from proofread lines");
-    const claimed = await getStore().put<Translation>("translation", {
-      ...item,
-      proofreadCues: cues,
-      proofreadToken: item.proofreadToken ?? randomBytes(24).toString("base64url"),
-      proofreadStage: "dubbing",
-      updatedAt: nowIso(),
-    });
-    const srtUrl = `${config.appUrl.replace(/\/$/, "")}/api/translate/${encodeURIComponent(id)}/srt?token=${claimed.proofreadToken}`;
-    try {
-      const { providerJobId } = await provider.dubProofread(item.providerProofreadId, srtUrl, cuesToSrt(cues));
-      const { proofreadStage: _stage, error: _error, ...rest } = claimed;
-      return shown(await getStore().put("translation", { ...rest, providerJobId, status: "processing", updatedAt: nowIso() }));
-    } catch (err) {
-      console.error(`proofread dub failed for ${id}:`, err);
-      const error = `The dub could not be started: ${err instanceof Error ? err.message : String(err)}`;
-      return shown(await getStore().put("translation", { ...claimed, proofreadStage: "ready", error, updatedAt: nowIso() }));
-    }
-  } finally {
-    dubbing.delete(id);
+    ({ providerJobId } = await provider.dubProofread(item.providerProofreadId, srtUrl, cuesToSrt(cues)));
+  } catch (err) {
+    console.error(`proofread dub failed for ${id}:`, err);
+    const error = `The dub could not be started: ${err instanceof Error ? err.message : String(err)}`;
+    return shown(await getStore().put("translation", { ...claimed, proofreadStage: "ready", error, updatedAt: nowIso() }));
   }
+  const { proofreadStage: _stage, error: _error, ...rest } = claimed;
+  const now = nowIso();
+  // The provider is dubbing now: a failure to record that is an error, but never reopens the lines for a second dub.
+  return shown(await getStore().put("translation", { ...rest, providerJobId, status: "processing", dubStartedAt: now, updatedAt: now }));
 }
 
 /** The proofread lines as an SRT file, for the provider to read; only with the job's secret. */

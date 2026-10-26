@@ -28,6 +28,13 @@ export class MemoryStore implements Store {
     return (this.bucket(kind).get(id) as T | undefined) ?? null;
   }
 
+  async putIf<T extends { id: string }>(kind: ItemKind, item: T, field: string, expected: string): Promise<boolean> {
+    const current = this.bucket(kind).get(item.id) as Record<string, unknown> | undefined;
+    if (!current || current[field] !== expected) return false;
+    this.bucket(kind).set(item.id, item);
+    return true;
+  }
+
   async put<T extends { id: string }>(kind: ItemKind, item: T): Promise<T> {
     const holder = this.kindOf.get(item.id);
     if (holder && holder !== kind) {

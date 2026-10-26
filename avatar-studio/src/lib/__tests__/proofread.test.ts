@@ -6,7 +6,7 @@ import { MemoryStore } from "../store/memory";
 import { getStore } from "../store";
 import { config } from "../config";
 import { cuesToSrt, parseSrt } from "../captions";
-import { ConflictError, NotFoundError, createTranslations, dubProofread, getTranslation, listTranslations, proofreadLinesSchema, proofreadSrt, saveProofreadLines, translationBatchSchema } from "../services";
+import { ConflictError, NotFoundError, ValidationError, createTranslations, exportOwnerData, dubProofread, getTranslation, listTranslations, proofreadLinesSchema, proofreadSrt, saveProofreadLines, translationBatchSchema } from "../services";
 import type { Translation } from "../types";
 
 beforeEach(() => {
@@ -37,8 +37,7 @@ describe("proofread dubs", () => {
     assert.deepEqual([job.status, job.proofreadStage, job.proofread, job.providerJobId], ["processing", "preparing", true, undefined]);
     assert.ok(job.providerProofreadId?.startsWith("mock_pr_"));
 
-    // The demo proofread takes a moment; once it is done the job holds its lines and waits.
-    await getStore().put("translation", { ...(await stored(job.id)), providerProofreadId: `mock_pr_${Date.now() - 5_000}` });
+    // Once the lines are translated the job holds them and waits.
     const ready = await getTranslation(job.id, "u-pr");
     assert.equal(ready.proofreadStage, "ready");
     assert.deepEqual(ready.proofreadCues?.map((c) => c.text), ["Hola y bienvenidos a Avatar Studio.", "En el próximo minuto te muestro cómo se hace un video.", "Empecemos."]);
@@ -53,6 +52,8 @@ describe("proofread dubs", () => {
     const saved = await saveProofreadLines(job.id, proofreadLinesSchema.parse({ lines: ["Hola y bienvenidos a Avatar Studio.", "En un minuto te enseño cómo se hace un video.", "¡Empecemos!"] }), "u-pr");
     assert.equal(saved.proofreadCues?.[1].text, "En un minuto te enseño cómo se hace un video.");
     assert.equal(saved.proofreadCues?.[1].startMs, ready.proofreadCues?.[1].startMs, "timing stays as translated");
+    // Someone who opened the lines before that save cannot overwrite it.
+    await assert.rejects(dubProofread(job.id, proofreadLinesSchema.parse({ lines: ["x", "y", "z"], basedOn: ready.updatedAt }), "u-pr"), /changed since you opened them/);
 
     const dubbed = await dubProofread(job.id, undefined, "u-pr");
     assert.equal(dubbed.proofreadStage, undefined);
@@ -60,6 +61,7 @@ describe("proofread dubs", () => {
     assert.ok(dubbed.providerJobId?.startsWith("mock_tr_"));
     assert.equal("proofreadToken" in dubbed, false, "the secret never reaches the browser");
     assert.equal((await listTranslations("u-pr")).some((t) => "proofreadToken" in t), false);
+    assert.equal((await exportOwnerData("u-pr")).translation.some((t) => "proofreadToken" in t), false, "nor an export");
 
     // The provider reads the corrected lines with the job's secret, and only with it.
     const token = (await stored(job.id)).proofreadToken!;
@@ -74,23 +76,45 @@ describe("proofread dubs", () => {
 
   it("starts one dub for two quick clicks, and a start that never finished opens the lines again", async () => {
     const [job] = await createTranslations(translationBatchSchema.parse({ ...base, targetLanguage: "French", proofread: true }), "u-pr2");
-    await getStore().put("translation", { ...(await stored(job.id)), providerProofreadId: `mock_pr_${Date.now() - 5_000}` });
     await getTranslation(job.id, "u-pr2");
+    // The claim is a conditional write, so it holds across server instances too: the in-memory store only lets one win.
     const results = await Promise.allSettled([dubProofread(job.id, undefined, "u-pr2"), dubProofread(job.id, undefined, "u-pr2")]);
     assert.deepEqual(results.map((r) => r.status).sort(), ["fulfilled", "rejected"]);
 
     const [stuck] = await createTranslations(translationBatchSchema.parse({ ...base, targetLanguage: "German", proofread: true }), "u-pr2");
-    await getStore().put("translation", { ...(await stored(stuck.id)), providerProofreadId: `mock_pr_${Date.now() - 5_000}` });
     await getTranslation(stuck.id, "u-pr2");
-    await getStore().put("translation", { ...(await stored(stuck.id)), proofreadStage: "dubbing" });
+    await getStore().put("translation", { ...(await stored(stuck.id)), proofreadStage: "dubbing", updatedAt: new Date().toISOString() });
     await assert.rejects(dubProofread(stuck.id, undefined, "u-pr2"), ConflictError);
+    assert.equal((await getTranslation(stuck.id, "u-pr2")).proofreadStage, "dubbing");
     await getStore().put("translation", { ...(await stored(stuck.id)), updatedAt: new Date(Date.now() - 5 * 60_000).toISOString() });
-    assert.ok((await dubProofread(stuck.id, undefined, "u-pr2")).providerJobId);
+    // The page shows the lines again, with a warning, and they can be dubbed.
+    const shownAgain = await getTranslation(stuck.id, "u-pr2");
+    assert.equal(shownAgain.proofreadStage, "ready");
+    assert.match(shownAgain.error ?? "", /did not finish/);
+    assert.ok((await dubProofread(stuck.id, proofreadLinesSchema.parse({ lines: ["a", "b", "c"], basedOn: shownAgain.updatedAt }), "u-pr2")).providerJobId);
+  });
+
+  it("needs a public https APP_URL before HeyGen is asked to proofread", async () => {
+    const original = { key: config.heygenApiKey, url: config.publicAppUrl };
+    const c = config as { heygenApiKey?: string; publicAppUrl?: string };
+    c.heygenApiKey = "key";
+    try {
+      for (const url of [undefined, "http://studio.example.com", "https://localhost:3000"]) {
+        c.publicAppUrl = url;
+        await assert.rejects(createTranslations(translationBatchSchema.parse({ ...base, targetLanguage: "Spanish", proofread: true }), "u-url"), ValidationError);
+      }
+      assert.equal((await listTranslations("u-url")).length, 0, "nothing was started");
+    } finally {
+      c.heygenApiKey = original.key;
+      c.publicAppUrl = original.url;
+    }
   });
 
   it("goes through HeyGen's proofread endpoints and keeps the lines open when the dub is refused", async () => {
     const original = config.heygenApiKey;
+    const originalUrl = config.publicAppUrl;
     (config as { heygenApiKey?: string }).heygenApiKey = "key";
+    (config as { publicAppUrl?: string }).publicAppUrl = "https://studio.example.com";
     const realFetch = globalThis.fetch;
     const calls: Array<{ method: string; url: string; body?: unknown }> = [];
     let respond: (method: string, url: string) => Response = () => new Response("{}");
@@ -139,11 +163,14 @@ describe("proofread dubs", () => {
       assert.deepEqual(
         calls.map((c) => [c.method, c.url, c.body]),
         [
-          ["PUT", "https://api.heygen.com/v3/video-translations/proofreads/pr_1/srt", { srt: { type: "url", url: `${config.appUrl.replace(/\/$/, "")}/api/translate/tr_hg/srt?token=${token}` } }],
+          ["PUT", "https://api.heygen.com/v3/video-translations/proofreads/pr_1/srt", { srt: { type: "url", url: `https://studio.example.com/api/translate/tr_hg/srt?token=${token}` } }],
           ["POST", "https://api.heygen.com/v3/video-translations/proofreads/pr_1/generate", {}],
         ],
       );
-      // From here it is an ordinary dub.
+      // From here it is an ordinary dub, and one HeyGen does not know yet is new however long the lines took to read.
+      await getStore().put("translation", { ...(await stored("tr_hg")), createdAt: new Date(Date.now() - 2 * 3600_000).toISOString() });
+      respond = () => new Response("not found", { status: 404 });
+      assert.equal((await getTranslation("tr_hg", "u-hg")).status, "processing");
       respond = () => ok({ status: "completed", video_url: "https://files.heygen.ai/pr.mp4" });
       assert.equal((await getTranslation("tr_hg", "u-hg")).videoUrl, "https://files.heygen.ai/pr.mp4");
 
@@ -152,9 +179,17 @@ describe("proofread dubs", () => {
       respond = () => ok({ status: "failed", failure_message: "No speech found" });
       const bad = await getTranslation("tr_bad", "u-hg");
       assert.deepEqual([bad.status, bad.error, bad.proofreadStage], ["failed", "No speech found", undefined]);
+      // Finished, but its lines cannot be read: a refused link fails the job, a server error is asked about again.
+      await getStore().put("translation", { ...job, id: "tr_srt5", providerProofreadId: "pr_5" });
+      respond = (_m, url) => (url.endsWith("/proofreads/pr_5") ? ok({ status: "completed" }) : url.endsWith("/srt") ? ok({ srt_url: "https://files.heygen.ai/x.srt" }) : new Response("busy", { status: 503 }));
+      assert.equal((await getTranslation("tr_srt5", "u-hg")).proofreadStage, "preparing");
+      respond = (_m, url) => (url.endsWith("/proofreads/pr_5") ? ok({ status: "completed" }) : url.endsWith("/srt") ? ok({ srt_url: "https://files.heygen.ai/x.srt" }) : new Response("expired", { status: 403 }));
+      const unreadable = await getTranslation("tr_srt5", "u-hg");
+      assert.deepEqual([unreadable.status, unreadable.error], ["failed", "HeyGen's translated lines could not be read (403)"]);
     } finally {
       globalThis.fetch = realFetch;
       (config as { heygenApiKey?: string }).heygenApiKey = original;
+      (config as { publicAppUrl?: string }).publicAppUrl = originalUrl;
     }
   });
 });

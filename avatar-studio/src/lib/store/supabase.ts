@@ -42,6 +42,20 @@ export class SupabaseStore implements Store {
     return item;
   }
 
+  async putIf<T extends { id: string }>(kind: ItemKind, item: T, field: string, expected: string): Promise<boolean> {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(field)) throw new Error(`invalid field name: ${field}`);
+    // One conditional UPDATE: Postgres applies it to the row only while the stored field still matches.
+    const { data, error } = await this.client
+      .from(TABLE)
+      .update({ data: item, updated_at: new Date().toISOString() })
+      .eq("kind", kind)
+      .eq("id", item.id)
+      .eq(`data->>${field}`, expected)
+      .select("id");
+    if (error) throw new Error(`supabase putIf failed: ${error.message}`);
+    return (data ?? []).length > 0;
+  }
+
   async remove(kind: ItemKind, id: string): Promise<void> {
     const { error } = await this.client.from(TABLE).delete().eq("kind", kind).eq("id", id);
     if (error) throw new Error(`supabase remove failed: ${error.message}`);

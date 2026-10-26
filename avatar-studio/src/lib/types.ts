@@ -348,8 +348,10 @@ export interface Translation extends TranslationRequest {
   proofreadStage?: ProofreadStage;
   /** The translated lines, as the provider made them and then as they were corrected. */
   proofreadCues?: CaptionCue[];
-  /** Secret in the link the provider reads the corrected lines from. Never sent to the browser. */
+  /** Secret in the link the provider reads the corrected lines from. Never sent to the browser or put in an export. */
   proofreadToken?: string;
+  /** When the dub of proofread lines was started; the provider may not know the job for a moment after. */
+  dubStartedAt?: string;
   error?: string;
   createdAt: string;
   updatedAt: string;

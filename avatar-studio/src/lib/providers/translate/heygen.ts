@@ -52,8 +52,10 @@ export class HeyGenTranslateProvider implements TranslateProvider {
     if (s.status === "failed") return { status: "failed" as const, error: s.failure_message ?? "The lines could not be translated" };
     if (s.status !== "completed") return { status: "preparing" as const };
     const { srt_url } = await this.client.proofreadSrt(proofreadId);
-    if (!srt_url) throw new Error("HeyGen did not return the proofread subtitles");
+    if (!srt_url) return { status: "failed" as const, error: "HeyGen did not return the translated lines" };
     const res = await fetch(srt_url, { signal: AbortSignal.timeout(10_000), cache: "no-store" });
+    // A refused link will not start working; a server error may pass, so it is asked about again.
+    if (res.status >= 400 && res.status < 500) return { status: "failed" as const, error: `HeyGen's translated lines could not be read (${res.status})` };
     if (!res.ok) throw new Error(`HeyGen proofread subtitles could not be read: ${res.status}`);
     const text = await res.text();
     if (text.length > MAX_SRT_CHARS) return { status: "failed" as const, error: "The translated lines are too long to proofread here" };

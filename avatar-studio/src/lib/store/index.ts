@@ -12,6 +12,11 @@ export interface Store {
   list<T>(kind: ItemKind, ownerId?: string): Promise<T[]>;
   get<T>(kind: ItemKind, id: string): Promise<T | null>;
   put<T extends { id: string }>(kind: ItemKind, item: T): Promise<T>;
+  /**
+   * Writes `item` only while the stored record's top-level `field` still equals `expected`, in one step (so two
+   * requests that read the same record cannot both win); false when it no longer does or the record is gone.
+   */
+  putIf<T extends { id: string }>(kind: ItemKind, item: T, field: string, expected: string): Promise<boolean>;
   remove(kind: ItemKind, id: string): Promise<void>;
   /** Find the first item whose top-level `field` equals `value` (used for webhook lookups by provider job id). */
   findBy<T>(kind: ItemKind, field: string, value: string): Promise<T | null>;

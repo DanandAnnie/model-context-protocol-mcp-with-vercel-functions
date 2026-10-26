@@ -83,7 +83,9 @@ returned asset id is cached on the avatar.
 
 Set `WEBHOOK_SECRET` and `APP_URL` to enable provider callbacks to
 `/api/webhooks/<provider>`; without a secret the callback endpoint stays
-disabled and the app relies on polling, which works either way.
+disabled and the app relies on polling, which works either way. Proofread dubs
+with HeyGen need `APP_URL` set to the app's public https address, since HeyGen
+reads the corrected lines from it.
 
 Adding a provider means implementing one interface in `src/lib/providers/types.ts`
 and registering it in `src/lib/providers/index.ts`.

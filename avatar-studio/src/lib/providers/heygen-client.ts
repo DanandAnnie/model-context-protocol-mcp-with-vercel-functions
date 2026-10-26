@@ -112,12 +112,12 @@ export class HeyGenClient {
 
   /** Replaces the proofread's subtitles with the SRT file at `url`. */
   updateProofreadSrt(id: string, url: string) {
-    return this.request<unknown>(`${V3}/video-translations/proofreads/${encodeURIComponent(id)}/srt`, { method: "PUT", body: JSON.stringify({ srt: { type: "url", url } }) });
+    return this.request<unknown>(`${V3}/video-translations/proofreads/${encodeURIComponent(id)}/srt`, { method: "PUT", body: JSON.stringify({ srt: { type: "url", url } }), signal: AbortSignal.timeout(20_000) });
   }
 
   /** Dubs the proofread lines; the returned translation is polled like any other. */
   generateProofread(id: string) {
-    return this.request<{ video_translation_id: string }>(`${V3}/video-translations/proofreads/${encodeURIComponent(id)}/generate`, { method: "POST", body: JSON.stringify({}) });
+    return this.request<{ video_translation_id: string }>(`${V3}/video-translations/proofreads/${encodeURIComponent(id)}/generate`, { method: "POST", body: JSON.stringify({}), signal: AbortSignal.timeout(20_000) });
   }
 
   /** Jobs started through the v2 API before the move to v3. */

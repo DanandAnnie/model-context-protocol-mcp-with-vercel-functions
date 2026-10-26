@@ -53,6 +53,20 @@ describe("SupabaseStore", () => {
     assert.equal("data->>ownerId" in calls[1].query, false, "no owner filter without an owner");
   });
 
+  it("writes conditionally with one filtered UPDATE, reporting whether the row still matched", async () => {
+    respond = () => [{ id: "tr_1" }];
+    assert.equal(await store.putIf("translation", { id: "tr_1", updatedAt: "b" }, "updatedAt", "a"), true);
+    const [call] = calls;
+    assert.equal(call.method, "PATCH");
+    assert.equal(call.query.kind, "eq.translation");
+    assert.equal(call.query.id, "eq.tr_1");
+    assert.equal(call.query["data->>updatedAt"], "eq.a");
+    assert.deepEqual((call.body as { data: unknown }).data, { id: "tr_1", updatedAt: "b" });
+    respond = () => [];
+    assert.equal(await store.putIf("translation", { id: "tr_1", updatedAt: "c" }, "updatedAt", "a"), false, "no row matched: someone wrote first");
+    await assert.rejects(store.putIf("translation", { id: "tr_1" }, "data); drop", "a"), /invalid field name/);
+  });
+
   it("gets one document by kind and id, and null when absent", async () => {
     respond = () => [{ data: { id: "v1", title: "Hi" } }];
     assert.deepEqual(await store.get("video", "v1"), { id: "v1", title: "Hi" });

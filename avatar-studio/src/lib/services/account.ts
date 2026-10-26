@@ -26,6 +26,7 @@ export async function exportOwnerData(ownerId: string = LOCAL_OWNER): Promise<Ow
       if (kind === "apikey") delete copy.hash;
       if (kind === "notify") delete copy.secret;
       if (kind === "clip") delete copy.providerAssetIds;
+      if (kind === "translation") delete copy.proofreadToken;
       if (kind === "sharelock") {
         delete copy.hash;
         delete copy.salt;

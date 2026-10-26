@@ -2470,6 +2470,16 @@ test("find and replace changes every scene's script, pause markers left whole", 
   await page.getByLabel("Replace with").press("Enter");
   await expect(page.getByTestId("find-status")).toHaveText("Replaced 2 matches.");
   await expect(box).toHaveValue("Call about Oak Lane today.");
+  // It can be taken back while nothing else has changed.
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(box).toHaveValue("Call about Maple Street today.");
+  await expect(page.getByTestId("find-status")).toHaveText("2 matches in 2 scenes");
+  await page.getByRole("button", { name: "Replace all" }).click();
+  await expect(box).toHaveValue("Call about Oak Lane today.");
+  // Typing in a script afterwards retires the note and the Undo.
+  await box.press("End");
+  await box.type(" Thanks.");
+  await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeHidden();
   await page.getByRole("button", { name: /^Scene 1,/ }).click();
   await expect(box).toHaveValue("Welcome to 12 Oak Lane. [pause 2s] Maple trees line it.");
   // A search never reaches into a pause marker.

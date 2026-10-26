@@ -527,7 +527,8 @@ function CreateInner() {
   const [replaceText, setReplaceText] = useState("");
   const [findCase, setFindCase] = useState(false);
   const [findWhole, setFindWhole] = useState(false);
-  const [findNote, setFindNote] = useState<string | null>(null);
+  // The last Replace all: what it said and the scripts before and after, so it can be undone while nothing else changed.
+  const [findDone, setFindDone] = useState<{ note: string; before: string[]; after: string[] } | null>(null);
   const findButton = useRef<HTMLButtonElement>(null);
   const findInput = useRef<HTMLInputElement>(null);
   const improveButton = useRef<HTMLButtonElement>(null);
@@ -1134,7 +1135,7 @@ function CreateInner() {
                   disabled={canEdit === false}
                   onClick={() => {
                     setFindOpen((v) => !v);
-                    setFindNote(null);
+                    setFindDone(null);
                     requestAnimationFrame(() => findInput.current?.focus());
                   }}
                 >
@@ -1209,24 +1210,37 @@ function CreateInner() {
             {findOpen && (
               <FindReplace
                 inputRef={findInput}
-                scripts={scenes.map((sc) => sc.script)}
+                // What a recorded clip says, and a silent scene, are left alone: changing them would not change the speech.
+                scripts={scenes.map((sc) => (sc.audioId || silentSeconds(sc.script) ? "" : sc.script))}
                 find={findText}
                 replacement={replaceText}
                 matchCase={findCase}
                 wholeWord={findWhole}
-                note={findNote}
+                // The note (and Undo) stand only while the scripts are as the replacement left them.
+                done={findDone && findDone.after.join("\u0000") === scenes.map((sc) => sc.script).join("\u0000") ? findDone.note : null}
+                busy={assistBusy}
+                onUndo={() => {
+                  if (!findDone) return;
+                  const { before } = findDone;
+                  setScenes((prev) => prev.map((sc, i) => (before[i] !== undefined && before[i] !== sc.script ? { ...sc, script: before[i] } : sc)));
+                  setFindDone(null);
+                }}
                 onChange={(patch) => {
-                  setFindNote(null);
+                  setFindDone(null);
                   if (patch.find !== undefined) setFindText(patch.find);
                   if (patch.replacement !== undefined) setReplaceText(patch.replacement);
                   if (patch.matchCase !== undefined) setFindCase(patch.matchCase);
                   if (patch.wholeWord !== undefined) setFindWhole(patch.wholeWord);
                 }}
                 onReplaceAll={() => {
-                  const { scripts, count } = replaceAll(scenes.map((sc) => sc.script), findText, replaceText, { matchCase: findCase, wholeWord: findWhole });
+                  if (assistBusy) return;
+                  const before = scenes.map((sc) => sc.script);
+                  const findable = scenes.map((sc) => !sc.audioId && !silentSeconds(sc.script));
+                  const { scripts, count } = replaceAll(before.map((t, i) => (findable[i] ? t : "")), findText, replaceText, { matchCase: findCase, wholeWord: findWhole });
                   if (!count) return;
-                  setScenes((prev) => prev.map((sc, i) => (sc.script === scripts[i] ? sc : { ...sc, script: scripts[i] })));
-                  setFindNote(`Replaced ${count} ${count === 1 ? "match" : "matches"}.`);
+                  const after = before.map((t, i) => (findable[i] ? scripts[i] : t));
+                  setScenes((prev) => prev.map((sc, i) => (after[i] === sc.script ? sc : { ...sc, script: after[i] })));
+                  setFindDone({ note: `Replaced ${count} ${count === 1 ? "match" : "matches"}.`, before, after });
                 }}
                 onClose={() => {
                   setFindOpen(false);
@@ -1586,9 +1600,11 @@ function FindReplace({
   replacement,
   matchCase,
   wholeWord,
-  note,
+  done,
+  busy,
   onChange,
   onReplaceAll,
+  onUndo,
   onClose,
 }: {
   inputRef: React.RefObject<HTMLInputElement | null>;
@@ -1597,15 +1613,19 @@ function FindReplace({
   replacement: string;
   matchCase: boolean;
   wholeWord: boolean;
-  note: string | null;
+  /** What the last Replace all did, while it can still be undone. */
+  done: string | null;
+  /** An Improve request is rewriting a scene; replacing now would be overwritten by its answer. */
+  busy: boolean;
   onChange: (patch: { find?: string; replacement?: string; matchCase?: boolean; wholeWord?: boolean }) => void;
   onReplaceAll: () => void;
+  onUndo: () => void;
   onClose: () => void;
 }) {
   const counts = countMatches(scripts, find, { matchCase, wholeWord });
   const total = counts.reduce((a, b) => a + b, 0);
   const inScenes = counts.filter(Boolean).length;
-  const status = note ?? (!find ? "" : total ? `${total} ${total === 1 ? "match" : "matches"}${scripts.length > 1 ? ` in ${inScenes} ${inScenes === 1 ? "scene" : "scenes"}` : ""}` : "No matches");
+  const status = done ?? (busy ? "Waiting for Improve to finish" : !find ? "" : total ? `${total} ${total === 1 ? "match" : "matches"}${scripts.length > 1 ? ` in ${inScenes} ${inScenes === 1 ? "scene" : "scenes"}` : ""}` : "No matches");
   return (
     <div
       id="find-replace"
@@ -1627,7 +1647,8 @@ function FindReplace({
           value={replacement}
           onChange={(e) => onChange({ replacement: e.target.value })}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.nativeEvent.isComposing && total) {
+            // Ctrl/Cmd+Enter is the editor's Generate shortcut, not Replace all.
+            if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.nativeEvent.isComposing && total && !busy) {
               e.preventDefault();
               onReplaceAll();
             }
@@ -1646,7 +1667,12 @@ function FindReplace({
         <span role="status" className="min-w-0 flex-1 text-slate-500" data-testid="find-status">
           {status}
         </span>
-        <Button variant="secondary" className="px-3 py-1.5" disabled={!total} onClick={onReplaceAll}>
+        {done && (
+          <Button variant="secondary" className="px-3 py-1.5" onClick={onUndo}>
+            Undo
+          </Button>
+        )}
+        <Button variant="secondary" className="px-3 py-1.5" disabled={!total || busy} onClick={onReplaceAll}>
           Replace all
         </Button>
         <button type="button" onClick={onClose} className="rounded-md px-2 py-1 text-slate-500 hover:bg-slate-200" aria-label="Close find and replace">

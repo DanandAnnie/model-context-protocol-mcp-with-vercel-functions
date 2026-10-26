@@ -25,4 +25,15 @@ describe("find and replace", () => {
     // Words in other scripts count as words too.
     assert.deepEqual(countMatches(["Café ÉCOLE école"], "école", { wholeWord: true }), [2]);
   });
+
+  it("steps over placeholders, matches accents however they were typed, and finds whole words in unspaced scripts", () => {
+    assert.deepEqual(replaceAll(["Hi {name}, your name is on the list."], "name", "booking").scripts, ["Hi {name}, your booking is on the list."]);
+    // "école" typed as one character finds one written as "e" plus a combining accent, as imports often are.
+    assert.deepEqual(countMatches(["Visit the e\u0301cole."], "école", { wholeWord: true }), [1]);
+    assert.deepEqual(countMatches(["東京に行く"], "東京", { wholeWord: true }), [1]);
+    // A script without a match comes back untouched, even if it was not in composed form.
+    const decomposed = "Cafe\u0301 time.";
+    assert.equal(replaceAll([decomposed], "tea", "coffee").scripts[0], decomposed);
+  });
 });
+

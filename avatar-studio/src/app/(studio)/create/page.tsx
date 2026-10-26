@@ -505,6 +505,14 @@ function CreateInner() {
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>(DEFAULT_CAPTION_STYLE);
   const isDefaultCaptionStyle = isDefaultCaptionStyleFn(captionStyle);
   const [speed, setSpeed] = useState(1);
+  // A lone scene's pace is the video's, which the slider sets: one left after a removal, or loaded from a copy or a
+  // template, hands its speed to the slider (its own picker shows only with several scenes).
+  const loneSpeed = scenes.length === 1 ? scenes[0].speed : undefined;
+  useEffect(() => {
+    if (!loneSpeed) return;
+    setSpeed(loneSpeed);
+    setScenes((prev) => (prev.length === 1 ? [{ ...prev[0], speed: undefined }] : prev));
+  }, [loneSpeed]);
   const [pitch, setPitch] = useState(0);
   const [emotion, setEmotion] = useState<VoiceEmotion | "">("");
   const [tab, setTab] = useState<Tab>("avatar");
@@ -989,9 +997,10 @@ function CreateInner() {
                 </select>
                 {!active.audioId && (
                   // HeyGen speaks each scene at its own pace, as its studio lets each scene set one.
-                  <select aria-label="Scene speed" className={`${inputClass} w-auto py-1 text-xs`} value={active.speed ?? ""} onChange={(e) => updateScene(activeIdx, { speed: e.target.value ? Number(e.target.value) : undefined })}>
+                  <select aria-label="Scene speed" title="HeyGen speaks this scene at its own pace; D-ID keeps its natural pace" className={`${inputClass} w-auto py-1 text-xs`} value={active.speed ?? ""} onChange={(e) => updateScene(activeIdx, { speed: e.target.value ? Number(e.target.value) : undefined })}>
                     <option value="">{`Video speed (${speed.toFixed(2)}x)`}</option>
-                    {[...new Set([...SCENE_SPEEDS, ...(active.speed ? [active.speed] : [])])].sort((x, y) => x - y).map((v) => (
+                    {/* The video's own speed is the first choice already; a scene's chosen pace stays listed whatever the slider says. */}
+                    {[...new Set([...SCENE_SPEEDS.filter((v) => v !== speed), ...(active.speed ? [active.speed] : [])])].sort((x, y) => x - y).map((v) => (
                       <option key={v} value={v}>{`${v.toFixed(2)}x`}</option>
                     ))}
                   </select>

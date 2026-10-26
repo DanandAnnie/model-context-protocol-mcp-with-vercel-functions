@@ -480,34 +480,72 @@ export const captionCuesSchema = z
     });
   });
 
+type TimedScene = Pick<Scene, "script" | "speed" | "audioSeconds">;
+type Timed = Pick<Video, "script" | "durationSec" | "speed"> & { scenes?: TimedScene[] };
+
+/** A scene's estimated length: its audio clip's, else its words at its own speed (the video's when unset) and its pauses. */
+function sceneSeconds(scene: TimedScene, videoSpeed: number | undefined): number {
+  if (scene.audioSeconds) return scene.audioSeconds;
+  const words = stripPauses(scene.script).trim().split(/\s+/).filter(Boolean).length;
+  return words / 2.5 / (scene.speed || videoSpeed || 1) + pauseSeconds(scene.script);
+}
+
 /**
- * The running time captions are timed to: the rendered length, or a reading-speed estimate while the provider has
- * not reported one (each scene at its own speed when scenes set one).
+ * The running time captions are timed to: the rendered length, or an estimate while the provider has not reported
+ * one (each scene at its own speed, or its clip's length).
  */
-export function captionDurationSec(video: Pick<Video, "script" | "durationSec" | "speed"> & { scenes?: Array<Pick<Scene, "script" | "speed">> }): number {
+export function captionDurationSec(video: Timed): number {
   if (video.durationSec) return video.durationSec;
-  const words = (text: string) => stripPauses(text).trim().split(/\s+/).filter(Boolean).length;
-  const parts = video.scenes?.length ? video.scenes : [{ script: video.script }];
-  const seconds = parts.reduce((sum, sc) => sum + words(sc.script) / 2.5 / (("speed" in sc && sc.speed) || video.speed || 1) + pauseSeconds(sc.script), 0);
-  return Math.max(1, Math.round(seconds));
+  const parts: TimedScene[] = video.scenes?.length ? video.scenes : [{ script: video.script }];
+  return Math.max(1, Math.round(parts.reduce((sum, sc) => sum + sceneSeconds(sc, video.speed), 0)));
+}
+
+/**
+ * Cues for `texts`, one per scene, each scene's lines within its share of the running time (shares follow each
+ * scene's estimated length, so a slower scene or a long clip keeps its lines on screen longer). Without one text per
+ * scene, the lines share the whole running time.
+ */
+function timedCues(video: Timed, texts: string[]): CaptionCue[] {
+  const totalSec = captionDurationSec(video);
+  const plain = (cues: CaptionCue[]) => cues.map(({ startMs, endMs, text }) => ({ startMs, endMs, text }));
+  const scenes = video.scenes ?? [];
+  if (scenes.length < 2 || texts.length !== scenes.length) return plain(buildCues(texts.join("\n\n"), totalSec));
+  const lengths = scenes.map((sc) => Math.max(0.1, sceneSeconds(sc, video.speed)));
+  const whole = lengths.reduce((a, b) => a + b, 0);
+  const totalMs = Math.round(totalSec * 1000);
+  const cues: CaptionCue[] = [];
+  let before = 0;
+  texts.forEach((text, i) => {
+    // Boundaries come from the running sum, so rounding never drifts and the last scene ends with the video.
+    const startMs = Math.round((before / whole) * totalMs);
+    before += lengths[i];
+    const endMs = Math.round((before / whole) * totalMs);
+    for (const c of buildCues(text, (endMs - startMs) / 1000)) cues.push({ startMs: startMs + c.startMs, endMs: startMs + c.endMs, text: c.text });
+  });
+  return cues;
+}
+
+/** A translated subtitle track's cues: a paragraph per scene keeps each scene's timing, else even over the running time. */
+export function subtitleCues(video: Timed, text: string): CaptionCue[] {
+  const paragraphs = text.split(/\n\s*\n/).map((t) => t.trim()).filter(Boolean);
+  return timedCues(video, paragraphs.length === video.scenes?.length ? paragraphs : [text]);
 }
 
 /**
  * What the share page's transcript can show: the script's captions first (no language), then one set per
  * translated subtitle track, timed like that track is in the player.
  */
-export function transcriptsFor(video: Pick<Video, "script" | "durationSec" | "speed" | "captionCues" | "subtitles">): Array<{ language?: string; cues: Array<{ startMs: number; endMs: number; text: string }> }> {
-  const plain = (cues: Array<{ startMs: number; endMs: number; text: string }>) => cues.map(({ startMs, endMs, text }) => ({ startMs, endMs, text }));
+export function transcriptsFor(video: Timed & Pick<Video, "captionCues" | "subtitles">): Array<{ language?: string; cues: CaptionCue[] }> {
   return [
-    { cues: plain(captionCuesFor(video).cues) },
-    ...Object.entries(video.subtitles ?? {}).map(([language, text]) => ({ language, cues: plain(buildCues(text, captionDurationSec(video))) })),
+    { cues: captionCuesFor(video).cues.map(({ startMs, endMs, text }) => ({ startMs, endMs, text })) },
+    ...Object.entries(video.subtitles ?? {}).map(([language, text]) => ({ language, cues: subtitleCues(video, text) })),
   ];
 }
 
 /** The captions in the script's language: the editor's corrections when there are some, else lines timed from the script. */
-export function captionCuesFor(video: Pick<Video, "script" | "durationSec" | "speed" | "captionCues">): { cues: CaptionCue[]; edited: boolean } {
+export function captionCuesFor(video: Timed & Pick<Video, "captionCues">): { cues: CaptionCue[]; edited: boolean } {
   if (video.captionCues?.length) return { cues: video.captionCues, edited: true };
-  return { cues: buildCues(video.script, captionDurationSec(video)).map(({ startMs, endMs, text }) => ({ startMs, endMs, text })), edited: false };
+  return { cues: timedCues(video, video.scenes && video.scenes.length > 1 ? video.scenes.map((sc) => sc.script) : [video.script]), edited: false };
 }
 
 /**

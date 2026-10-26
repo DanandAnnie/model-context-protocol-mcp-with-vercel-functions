@@ -1,9 +1,9 @@
 import { cookies } from "next/headers";
 import { errorResponse, json, readJson } from "@/lib/api-utils";
-import { buildCues, cuesToSrt, cuesToVtt } from "@/lib/captions";
+import { cuesToSrt, cuesToVtt } from "@/lib/captions";
 import { LOCAL_OWNER, optionalOwner, requireEditor } from "@/lib/owner";
 import { shareCookieName, shareGateCookieName, shareGatePassed, shareUnlocked } from "@/lib/share-lock";
-import { NotFoundError, PUBLIC_ACCESS, captionCuesFor, captionCuesSchema, captionDurationSec, getVideo, resetCaptionCues, saveCaptionCues, subtitlesFor } from "@/lib/services";
+import { NotFoundError, PUBLIC_ACCESS, captionCuesFor, captionCuesSchema, getVideo, resetCaptionCues, saveCaptionCues, subtitleCues, subtitlesFor } from "@/lib/services";
 import type { Video } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -45,10 +45,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
         return json({ error: "Enter your email on the share page to get the captions" }, { status: 401 });
       }
     }
-    // A translated track, when asked for; the timing still follows the original script's length.
+    // A translated track, when asked for; the timing still follows the original script's length and scenes.
     const track = lang ? subtitlesFor(video, lang) : undefined;
     if (lang && !track) throw new NotFoundError(`No ${lang} subtitles on this video`);
-    const { cues, edited } = track ? { cues: buildCues(track.text, captionDurationSec(video)), edited: false } : captionCuesFor(video);
+    const { cues, edited } = track ? { cues: subtitleCues(video, track.text), edited: false } : captionCuesFor(video);
     if (format === "json") return json({ cues: cues.map(({ startMs, endMs, text }) => ({ startMs, endMs, text })), edited }, { headers: { "Cache-Control": "no-store" } });
     const body = vtt ? cuesToVtt(cues, video.captionStyle?.position) : cuesToSrt(cues);
     const suffix = track ? `.${track.language.replace(/[^\w-]+/g, "_").toLowerCase()}` : "";

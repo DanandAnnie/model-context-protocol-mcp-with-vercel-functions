@@ -506,6 +506,12 @@ test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page 
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByLabel("Voice emotion")).toHaveValue("Friendly");
   await expect(page.getByText(/Voice pitch · \+10/)).toBeVisible();
+  // With the other scene removed, the one left hands its pace to the video's speed slider.
+  await expect(page.getByText("Speaking speed · 1.00x")).toBeVisible();
+  await page.getByRole("button", { name: /^Scene 1,/ }).click();
+  await page.getByRole("button", { name: "Remove scene", exact: true }).click();
+  await expect(page.getByText(/1 scene\b/)).toBeVisible();
+  await expect(page.getByText("Speaking speed · 0.75x")).toBeVisible();
   // A scene whose presenter was deleted since falls back to the video's and still renders.
   const custom = await page.request.post("/api/avatars", { data: { name: "Gone soon", imageUrl: "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%2F%3E" } });
   expect(custom.status()).toBe(201);

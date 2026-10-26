@@ -176,7 +176,7 @@ export default function BatchPage() {
         <div className="space-y-5">
           <Card className="space-y-4 p-4">
             {!!templateData?.templates.length && (
-              <Field label="Start from a saved template" hint="Fills in its script and settings; scenes become paragraphs of one script, spoken by the first scene's presenter and voice over its background; scene layouts are not used.">
+              <Field label="Start from a saved template" hint="Fills in its script and settings; scenes become paragraphs of one script, spoken by the first scene's presenter and voice over its background at the template's speed; scene layouts and scene speeds are not used.">
                 <select className={inputClass} value={startedFrom} onChange={(e) => startFrom(e.target.value)} aria-label="Start from a saved template">
                   <option value="">None</option>
                   {templateData.templates.map((t) => (

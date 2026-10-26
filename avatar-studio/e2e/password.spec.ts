@@ -15,6 +15,11 @@ test("pages redirect, API rejects, public paths stay open", async ({ request }) 
   expect(media.status()).toBe(200);
   expect(media.headers()["content-type"]).toContain("video/webm");
   expect((await request.get("/demo/poster.svg")).status()).toBe(200);
+  // The dubbing provider reads proofread lines without a session; the job's secret guards them instead.
+  expect((await request.get("/api/translate/tr_none/srt?token=nope")).status()).toBe(404);
+  expect((await request.get("/api/translate/tr_none")).status()).toBe(401);
+  expect((await request.patch("/api/translate/tr_none", { data: { lines: ["x"] } })).status()).toBe(401);
+  expect((await request.post("/api/translate/tr_none/dub")).status()).toBe(401);
 });
 
 test("wrong password is rejected, right password signs in, sign out works", async ({ page }) => {

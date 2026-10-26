@@ -317,11 +317,15 @@ export interface TranslationRequest {
   removeMusic?: boolean;
   /** Clean up the speech audio (noise, room echo). */
   enhanceSpeech?: boolean;
+  /** Stop once the lines are translated so someone can correct them before the dub is made. */
+  proofread?: boolean;
 }
 
 /** How a dub is made: quickly, or more slowly for a more natural result. */
 export const TRANSLATION_QUALITIES = ["speed", "precision"] as const;
 export type TranslationQuality = (typeof TRANSLATION_QUALITIES)[number];
+
+export type ProofreadStage = "preparing" | "ready" | "dubbing";
 
 /** The most speakers a dub can tell apart. */
 export const MAX_TRANSLATION_SPEAKERS = 10;
@@ -335,6 +339,17 @@ export interface Translation extends TranslationRequest {
   videoUrl?: string;
   /** Subtitle files of the dub in its language, where the provider makes them. */
   captionUrls?: { srt?: string; vtt?: string };
+  /** The provider's proofread session for a dub that is proofread first. */
+  providerProofreadId?: string;
+  /**
+   * Where a proofread dub is: its lines being translated, ready to correct, or sent to be dubbed. Absent
+   * once the dub itself has started (its `providerJobId` is then set) and for a dub made straight away.
+   */
+  proofreadStage?: ProofreadStage;
+  /** The translated lines, as the provider made them and then as they were corrected. */
+  proofreadCues?: CaptionCue[];
+  /** Secret in the link the provider reads the corrected lines from. Never sent to the browser. */
+  proofreadToken?: string;
   error?: string;
   createdAt: string;
   updatedAt: string;

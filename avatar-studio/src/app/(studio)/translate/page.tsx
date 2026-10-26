@@ -1,13 +1,19 @@
 "use client";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
-import { Languages } from "lucide-react";
+import { Check, Languages } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api, formatDate } from "@/lib/client";
 import { MAX_TRANSLATION_SPEAKERS, type Translation, type TranslationQuality } from "@/lib/types";
+
+/** A job worth polling for: lines being translated or a dub running, but not lines waiting on someone to read them. */
+const moving = (t: Translation) => (t.status === "processing" || t.status === "queued") && t.proofreadStage !== "ready";
+
+/** A line's start as m:ss. */
+const at = (ms: number) => `${Math.floor(ms / 60_000)}:${String(Math.floor((ms % 60_000) / 1000)).padStart(2, "0")}`;
 
 /** Matches the server's limit per request. */
 const MAX_LANGUAGES = 5;
@@ -25,7 +31,7 @@ function TranslateInner() {
   const params = useSearchParams();
   const { data, error, refetch } = useApi<{ translations: Translation[]; languages: string[] }>("/api/translate", {
     pollMs: 6000,
-    pollWhile: (d) => d.translations.some((t) => t.status === "processing" || t.status === "queued"),
+    pollWhile: (d) => d.translations.some(moving),
   });
   const [title, setTitle] = useState(params.get("title") ?? "");
   const [sourceVideoUrl, setSource] = useState(params.get("source") ?? "");
@@ -37,6 +43,7 @@ function TranslateInner() {
   const [quality, setQuality] = useState<TranslationQuality>("speed");
   const [removeMusic, setRemoveMusic] = useState(false);
   const [enhanceSpeech, setEnhanceSpeech] = useState(false);
+  const [proofread, setProofread] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -45,7 +52,7 @@ function TranslateInner() {
     setErr(null);
     try {
       const fallback = languages.length === 1 ? `Translation to ${languages[0]}` : "Translation";
-      await api("/api/translate", { method: "POST", body: JSON.stringify({ title: title || fallback, sourceVideoUrl, targetLanguages: languages, ...(lipSync ? {} : { audioOnly: true }), ...(speakers ? { speakers } : {}), ...(quality === "precision" ? { quality } : {}), ...(removeMusic ? { removeMusic } : {}), ...(enhanceSpeech ? { enhanceSpeech } : {}) }) });
+      await api("/api/translate", { method: "POST", body: JSON.stringify({ title: title || fallback, sourceVideoUrl, targetLanguages: languages, ...(lipSync ? {} : { audioOnly: true }), ...(speakers ? { speakers } : {}), ...(quality === "precision" ? { quality } : {}), ...(removeMusic ? { removeMusic } : {}), ...(enhanceSpeech ? { enhanceSpeech } : {}), ...(proofread ? { proofread } : {}) }) });
       setSource("");
       setTitle("");
       // The next video may have a different cast; the lip-sync choice is a preference and stays.
@@ -125,6 +132,13 @@ function TranslateInner() {
                 </label>
               </div>
             </div>
+            <label className="flex items-start gap-2 text-sm text-slate-700">
+              <input type="checkbox" className="mt-0.5" checked={proofread} disabled={canEdit === false} onChange={(e) => setProofread(e.target.checked)} />
+              <span>
+                Proofread the lines first
+                <span className="block text-xs text-slate-500">The translated lines wait for you to correct names, terms, and tone; the dub is made once you approve them.</span>
+              </span>
+            </label>
             <Field label="Title (optional)">
               <input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} placeholder={languages.length > 1 ? "Product walkthrough (each dub adds its language)" : "Product walkthrough – Spanish"} />
             </Field>
@@ -141,7 +155,7 @@ function TranslateInner() {
           ) : (
             <div className="space-y-3">
               {items.map((t) => (
-                <Card key={t.id} className="p-4">
+                <Card key={t.id} className="p-4" data-testid="translation">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium text-slate-900">{t.title}</div>
@@ -151,12 +165,20 @@ function TranslateInner() {
                         {t.speakers ? ` · ${t.speakers} ${t.speakers === 1 ? "speaker" : "speakers"}` : ""}
                         {t.quality === "precision" ? " · precision" : ""}
                         {t.removeMusic ? " · no music" : ""}
-                        {t.enhanceSpeech ? " · enhanced speech" : ""} · {formatDate(t.createdAt)}
+                        {t.enhanceSpeech ? " · enhanced speech" : ""}
+                        {t.proofread ? " · proofread" : ""} · {formatDate(t.createdAt)}
                       </div>
+                      {t.proofreadStage === "preparing" && <div className="mt-1 text-xs text-slate-500">Translating the lines for you to proofread…</div>}
+                      {t.proofreadStage === "dubbing" && <div className="mt-1 text-xs text-slate-500">Starting the dub…</div>}
                       {t.error && <div className="mt-1 text-xs text-rose-600">{t.error}</div>}
                     </div>
-                    <StatusBadge status={t.status} />
+                    {t.proofreadStage === "ready" ? (
+                      <span className="inline-flex shrink-0 items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">Ready to proofread</span>
+                    ) : (
+                      <StatusBadge status={t.status} />
+                    )}
                   </div>
+                  {t.proofreadStage === "ready" && t.proofreadCues && <Proofread key={t.id} translation={t} canEdit={canEdit !== false} onChange={refetch} />}
                   {t.status === "completed" && t.videoUrl && <video src={t.videoUrl} controls className="mt-3 w-full rounded-lg bg-black" />}
                   {t.status === "completed" && (t.captionUrls?.srt || t.captionUrls?.vtt) && (
                     <div className="mt-2 flex flex-wrap gap-3 text-xs" data-testid="translation-captions">
@@ -180,5 +202,71 @@ function TranslateInner() {
         </div>
       </div>
     </>
+  );
+}
+
+/** The translated lines of a proofread dub, to correct and then dub. Each line keeps its timing; only the words change. */
+function Proofread({ translation, canEdit, onChange }: { translation: Translation; canEdit: boolean; onChange: () => void }) {
+  const cues = translation.proofreadCues ?? [];
+  const [lines, setLines] = useState(() => cues.map((c) => c.text));
+  const [busy, setBusy] = useState<"save" | "dub" | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const changed = lines.some((l, i) => l !== cues[i]?.text);
+  const blank = lines.some((l) => !l.trim());
+
+  async function send(kind: "save" | "dub") {
+    setBusy(kind);
+    setErr(null);
+    setSaved(false);
+    try {
+      const body = JSON.stringify({ lines: lines.map((l) => l.trim()) });
+      if (kind === "save") await api(`/api/translate/${translation.id}`, { method: "PATCH", body });
+      else await api(`/api/translate/${translation.id}/dub`, { method: "POST", body });
+      if (kind === "save") setSaved(true);
+      onChange();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Something went wrong");
+      onChange();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="mt-3 space-y-2 border-t border-slate-100 pt-3" data-testid="proofread">
+      <p className="text-xs text-slate-500">
+        Read the {cues.length} translated {cues.length === 1 ? "line" : "lines"} and fix anything the dub should say differently. Nothing is dubbed until you approve them.
+      </p>
+      <ol className="max-h-96 space-y-2 overflow-y-auto pr-1">
+        {cues.map((c, i) => (
+          <li key={i} className="flex items-start gap-2">
+            <span className="w-10 shrink-0 pt-2 text-right text-xs tabular-nums text-slate-400">{at(c.startMs)}</span>
+            <textarea
+              aria-label={`Line ${i + 1}`}
+              className={`${inputClass} min-h-[2.5rem] flex-1 resize-y`}
+              rows={1}
+              value={lines[i]}
+              maxLength={300}
+              disabled={!canEdit || !!busy}
+              onChange={(e) => setLines((prev) => prev.map((l, j) => (j === i ? e.target.value : l)))}
+            />
+          </li>
+        ))}
+      </ol>
+      {err && <div className="text-xs text-rose-600">{err}</div>}
+      {canEdit && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button onClick={() => send("dub")} loading={busy === "dub"} disabled={!!busy || blank}>
+            <Check className="h-4 w-4" /> Approve and dub
+          </Button>
+          <Button variant="secondary" onClick={() => send("save")} loading={busy === "save"} disabled={!!busy || blank || !changed}>
+            Save corrections
+          </Button>
+          {saved && !changed && <span className="text-xs text-slate-500">Saved</span>}
+          {blank && <span className="text-xs text-rose-600">Every line needs some text.</span>}
+        </div>
+      )}
+    </div>
   );
 }

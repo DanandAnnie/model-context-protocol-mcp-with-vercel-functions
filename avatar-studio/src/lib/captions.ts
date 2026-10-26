@@ -215,3 +215,28 @@ export function buildVtt(script: string, durationSec: number, position: "bottom"
 export function buildSrt(script: string, durationSec: number): string {
   return cuesToSrt(buildCues(script, durationSec));
 }
+
+const SRT_TIME = /(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})/;
+const srtMs = (m: RegExpExecArray) => ((Number(m[1]) * 60 + Number(m[2])) * 60 + Number(m[3])) * 1000 + Number(m[4].padEnd(3, "0"));
+
+/**
+ * Cues from an SRT file: each block's timing line and the text lines under it (a numbered line before the
+ * timing is optional). Blocks without a readable timing, or without text, are skipped.
+ */
+export function parseSrt(srt: string): Array<{ startMs: number; endMs: number; text: string }> {
+  const out: Array<{ startMs: number; endMs: number; text: string }> = [];
+  const blocks = srt.replace(/^﻿/, "").replace(/\r\n?/g, "\n").split(/\n[ \t]*\n/);
+  for (const block of blocks) {
+    const lines = block.split("\n");
+    const at = lines.findIndex((l) => l.includes("-->"));
+    if (at < 0) continue;
+    const [from, to] = lines[at].split("-->");
+    const start = SRT_TIME.exec(from);
+    const end = SRT_TIME.exec(to ?? "");
+    if (!start || !end) continue;
+    const text = lines.slice(at + 1).map((l) => l.trim()).filter(Boolean).join("\n");
+    if (!text) continue;
+    out.push({ startMs: srtMs(start), endMs: Math.max(srtMs(end), srtMs(start) + 1), text });
+  }
+  return out;
+}

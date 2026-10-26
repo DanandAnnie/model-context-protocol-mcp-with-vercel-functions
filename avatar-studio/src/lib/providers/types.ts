@@ -1,4 +1,4 @@
-import type { AudioClip, Avatar, Translation, TranslationRequest, Video, VideoRequest, Voice } from "../types";
+import type { AudioClip, Avatar, CaptionCue, Translation, TranslationRequest, Video, VideoRequest, Voice } from "../types";
 
 export interface TtsProvider {
   readonly name: string;
@@ -115,6 +115,12 @@ export interface TranslateProvider {
   getStatus(providerJobId: string): Promise<Pick<Translation, "status" | "videoUrl" | "error" | "captionUrls">>;
   supportedLanguages(): string[];
   parseWebhook?(body: unknown): { providerJobId: string; update: Pick<Translation, "status" | "videoUrl" | "error"> } | null;
+  /** Translates the lines without dubbing them yet, so they can be corrected first. */
+  createProofread?(input: TranslationRequest): Promise<{ proofreadId: string }>;
+  /** The proofread session: still translating, its lines once they are ready, or why it failed. */
+  getProofread?(proofreadId: string, input: TranslationRequest): Promise<{ status: "preparing" } | { status: "ready"; cues: CaptionCue[] } | { status: "failed"; error: string }>;
+  /** Hands over the corrected lines (an SRT file at `srtUrl`, whose text is `srt`) and starts the dub; its job is then polled like any other. */
+  dubProofread?(proofreadId: string, srtUrl: string, srt: string): Promise<{ providerJobId: string }>;
 }
 
 /** Live video for the interactive avatar. The mock reports "unavailable" and pages fall back to the portrait. */

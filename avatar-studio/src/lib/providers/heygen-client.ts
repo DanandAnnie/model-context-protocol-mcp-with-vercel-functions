@@ -96,6 +96,30 @@ export class HeyGenClient {
     );
   }
 
+  /** Proofread (v3): the lines are translated first and dubbed once they are approved; one id per output language. */
+  createProofread(body: Record<string, unknown>) {
+    return this.request<{ proofread_ids: string[] }>(`${V3}/video-translations/proofreads`, { method: "POST", body: JSON.stringify(body) });
+  }
+
+  proofreadStatus(id: string) {
+    return this.request<{ status: string; failure_message?: string }>(`${V3}/video-translations/proofreads/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(10_000) });
+  }
+
+  /** A presigned link to the proofread's translated subtitles. */
+  proofreadSrt(id: string) {
+    return this.request<{ srt_url: string }>(`${V3}/video-translations/proofreads/${encodeURIComponent(id)}/srt`, { signal: AbortSignal.timeout(10_000) });
+  }
+
+  /** Replaces the proofread's subtitles with the SRT file at `url`. */
+  updateProofreadSrt(id: string, url: string) {
+    return this.request<unknown>(`${V3}/video-translations/proofreads/${encodeURIComponent(id)}/srt`, { method: "PUT", body: JSON.stringify({ srt: { type: "url", url } }) });
+  }
+
+  /** Dubs the proofread lines; the returned translation is polled like any other. */
+  generateProofread(id: string) {
+    return this.request<{ video_translation_id: string }>(`${V3}/video-translations/proofreads/${encodeURIComponent(id)}/generate`, { method: "POST", body: JSON.stringify({}) });
+  }
+
   /** Jobs started through the v2 API before the move to v3. */
   translationStatusV2(id: string) {
     return this.request<{ status: string; url?: string; message?: string }>(`${V2}/video_translate/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(10_000) });

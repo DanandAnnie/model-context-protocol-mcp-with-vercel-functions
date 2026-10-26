@@ -2045,6 +2045,45 @@ test("a dub can be made at precision, without the music, and with cleaner speech
   expect((await page.request.post("/api/translate", { data: { title: "Bad", sourceVideoUrl: "https://cdn.example.com/v.mp4", targetLanguage: "French", quality: "best" } })).status()).toBe(400);
 });
 
+test("a dub can be proofread: the translated lines are corrected before the dub is made", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const title = `Proofread ${tag}`;
+  await page.goto("/translate");
+  await page.getByPlaceholder("https://…/video.mp4").fill("https://cdn.example.com/launch.mp4");
+  await page.getByLabel("Proofread the lines first").check();
+  await page.getByLabel("Title (optional)").fill(title);
+  await page.getByRole("button", { name: "Translate video" }).click();
+  const card = page.getByTestId("translation").filter({ has: page.getByText(title, { exact: true }) });
+  await expect(card.getByTestId("translation-meta")).toContainText("→ Spanish · proofread");
+  // The page polls until the lines are translated.
+  await expect(card.getByText("Ready to proofread")).toBeVisible({ timeout: 20_000 });
+  const editor = card.getByTestId("proofread");
+  await expect(editor.getByLabel("Line 1")).toHaveValue("Hola y bienvenidos a Avatar Studio.");
+  await editor.getByLabel("Line 2").fill("En un minuto te enseño cómo se hace un video.");
+  await editor.getByRole("button", { name: "Save corrections" }).click();
+  await expect(editor.getByText("Saved")).toBeVisible();
+  await page.reload();
+  await expect(card.getByTestId("proofread").getByLabel("Line 2")).toHaveValue("En un minuto te enseño cómo se hace un video.");
+  // A blank line cannot be dubbed.
+  await card.getByTestId("proofread").getByLabel("Line 3").fill(" ");
+  await expect(card.getByRole("button", { name: "Approve and dub" })).toBeDisabled();
+  await card.getByTestId("proofread").getByLabel("Line 3").fill("¡Empecemos!");
+  await card.getByRole("button", { name: "Approve and dub" }).click();
+  await expect(card.getByTestId("proofread")).toHaveCount(0);
+  await expect(card.getByText("Processing")).toBeVisible();
+
+  const list = (await (await page.request.get("/api/translate")).json()).translations as Array<Record<string, unknown> & { id: string; title: string }>;
+  const made = list.find((t) => t.title === title)!;
+  expect(made.providerJobId).toBeTruthy();
+  expect(made.proofreadStage).toBeUndefined();
+  expect((made.proofreadCues as Array<{ text: string }>).map((c) => c.text)).toEqual(["Hola y bienvenidos a Avatar Studio.", "En un minuto te enseño cómo se hace un video.", "¡Empecemos!"]);
+  expect(list.some((t) => "proofreadToken" in t)).toBe(false);
+  // The lines are closed once the dub has started, and the SRT link needs the job's secret.
+  expect((await page.request.post(`/api/translate/${made.id}/dub`)).status()).toBe(409);
+  expect((await page.request.patch(`/api/translate/${made.id}`, { data: { lines: ["a", "b", "c"] } })).status()).toBe(409);
+  expect((await page.request.get(`/api/translate/${made.id}/srt?token=wrong`)).status()).toBe(404);
+});
+
 test("a share page can ask for an email before playing, and the owner sees who watched", async ({ page, browser }) => {
   const v = await createVideoViaApi(page, `Gated ${Date.now().toString(36)}`);
   await page.goto(`/videos/${v.id}`);

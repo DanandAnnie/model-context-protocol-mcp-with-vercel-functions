@@ -1052,17 +1052,33 @@ test("an uploaded background image fills the stage, renders, and leaves every sc
   await page.getByRole("button", { name: "Generate video" }).click();
   expect(((await sent).postDataJSON() as { scenes: Array<{ background: unknown }> }).scenes[0].background).toEqual({ type: "image", value: `/api/backdrops/${office.id}` });
   await page.waitForURL(/\/videos\/vid_/);
-  // Deleting the image takes it off the scene, so the next render is not refused.
+  // An image deleted elsewhere (another tab) leaves a restored draft that named it with a plain background and a note.
   await page.goto("/create");
   await page.locator("textarea").fill("Back to plain.");
   await page.getByRole("button", { name: "Background", exact: true }).click();
   await page.getByRole("button", { name: `Use office-${tag}` }).click();
-  page.once("dialog", (d) => d.accept());
-  await page.getByRole("button", { name: `Delete office-${tag}` }).click();
-  await expect(page.getByRole("button", { name: `Use office-${tag}` })).toHaveCount(0);
+  await page.waitForTimeout(700); // the draft autosaves
+  expect((await page.request.delete(`/api/backdrops/${office.id}`)).status()).toBe(204);
+  await page.reload();
+  await expect(page.getByText("Restored your unsent draft")).toBeVisible();
+  await page.getByRole("button", { name: "Background", exact: true }).click();
+  await expect(page.getByTestId("missing-backdrop")).toBeVisible();
   await expect(page.getByTestId("stage")).toHaveCSS("background-image", "none");
+  await expect(page.getByRole("button", { name: `Use office-${tag}` })).toHaveCount(0);
   expect((await page.request.get(`/api/backdrops/${office.id}`)).status()).toBe(404);
-  expect((await page.request.delete(`/api/backdrops/${logo.id}`)).status()).toBe(204);
+  // Deleting from the picker takes the image off the scene too.
+  await page.getByRole("button", { name: `Use logo-${tag}` }).click();
+  await expect(page.getByTestId("stage")).toHaveCSS("background-image", new RegExp(`/api/backdrops/${logo.id}`));
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: `Delete logo-${tag}` }).click();
+  await expect(page.getByRole("button", { name: `Use logo-${tag}` })).toHaveCount(0);
+  await expect(page.getByTestId("stage")).toHaveCSS("background-image", "none");
+  expect((await page.request.get(`/api/backdrops/${logo.id}`)).status()).toBe(404);
+  // An image background is a public address or an uploaded image, nothing in between.
+  const bad = await page.request.post("/api/videos", {
+    data: { title: "Bad", script: "Hi", avatarId: "stock_1", voiceId: "stock_voice_1", background: { type: "image", value: `/api/backdrops/${logo.id}/` } },
+  });
+  expect(bad.status()).toBe(400);
 });
 
 test("the AI script writer takes the focus and Escape closes it", async ({ page }) => {

@@ -57,9 +57,15 @@ export async function createBackdrop(input: z.infer<typeof backdropUploadSchema>
     throw new ConflictError(`At most ${MAX_BACKDROPS} background images per account; delete one you no longer use`);
   }
   const backdrop: Backdrop = { id: newId("bd"), ownerId, name: input.name, mimeType, bytes: decoded.bytes.byteLength, createdAt: nowIso() };
-  // Bytes first: a backdrop row that is listed always has its image.
+  // Bytes first: a backdrop row that is listed always has its image. If the listed row cannot be written, the bytes
+  // are taken back out, since account deletion finds bytes only through their backdrop row.
   await getStore().put<BackdropData>("backdropdata", { id: dataRowId(backdrop.id), backdropId: backdrop.id, ownerId, mimeType, data: Buffer.from(decoded.bytes).toString("base64") });
-  return view(await getStore().put("backdrop", backdrop));
+  try {
+    return view(await getStore().put("backdrop", backdrop));
+  } catch (err) {
+    await getStore().remove("backdropdata", dataRowId(backdrop.id)).catch(() => undefined);
+    throw err;
+  }
 }
 
 /** The stored backdrop with provider asset ids, for rendering. */
@@ -74,16 +80,23 @@ export async function getBackdropImage(id: string, ownerId: string = LOCAL_OWNER
   return { mimeType: row.mimeType, bytes: new Uint8Array(Buffer.from(row.data, "base64")) };
 }
 
-/** Records the provider's asset id so later renders (retries, copies, other scenes) skip the upload. Keeps a backdrop deleted meanwhile deleted. */
+/**
+ * Records the provider's asset id so later renders (retries, copies, other scenes) skip the upload. The write is
+ * conditional on the row still being there, so a backdrop deleted meanwhile is not brought back without its image.
+ */
 export async function saveBackdropAssetIds(backdrop: Backdrop, ids: Record<string, string>): Promise<Backdrop> {
+  const merged = (b: Backdrop): Backdrop => ({ ...b, providerAssetIds: { ...b.providerAssetIds, ...ids } });
   const current = await getStore().get<Backdrop>("backdrop", backdrop.id);
-  if (!current) return { ...backdrop, providerAssetIds: { ...backdrop.providerAssetIds, ...ids } };
-  return getStore().put("backdrop", { ...current, providerAssetIds: { ...current.providerAssetIds, ...ids } });
+  if (!current) return merged(backdrop);
+  const next = merged(current);
+  await getStore().putIf("backdrop", next, "createdAt", current.createdAt);
+  return next;
 }
 
 /** Deletes a backdrop and its image. Videos already rendered keep their footage; a retry, copy, or template that names it is refused. */
 export async function deleteBackdrop(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
   await getBackdrop(id, ownerId);
-  await getStore().remove("backdrop", id);
+  // Bytes first: a failure part-way leaves the listed row, so deleting again finishes the job instead of orphaning the image.
   await getStore().remove("backdropdata", dataRowId(id));
+  await getStore().remove("backdrop", id);
 }

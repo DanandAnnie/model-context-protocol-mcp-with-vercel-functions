@@ -19,7 +19,7 @@ import { MAX_IMPORT_BYTES, MAX_SCRIPT_CHARS, decodeScript, legacyEncodingFor, sc
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
 import { takeAgentDraft, type AgentDraft } from "@/lib/agent-draft";
-import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, PRESENTER_FRAMINGS, RESOLUTIONS, isDefaultCaptionStyle as isDefaultCaptionStyleFn, backdropIdOf, framingFor, isDefaultLayout, isPhotoAvatar, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS } from "@/lib/types";
+import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, PRESENTER_FRAMINGS, RESOLUTIONS, isDefaultCaptionStyle as isDefaultCaptionStyleFn, backdropIdOf, framingFor, isDefaultLayout, isPhotoAvatar, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -131,6 +131,9 @@ function CreateInner() {
   const { data: brandData } = useApi<{ brand: BrandKit | null }>("/api/brand");
   const { data: clipData, error: clipsError, setData: setClipData } = useApi<{ clips: AudioClip[] }>("/api/clips");
   const clips = clipData?.clips ?? [];
+  // Uploaded background images; the picker adds and removes them here, so the list is always the editor's.
+  const { data: backdropData, error: backdropError, setData: setBackdropData } = useApi<{ backdrops: Backdrop[] }>("/api/backdrops");
+  const [missingBackdrop, setMissingBackdrop] = useState(false);
   const { play, playingId, busyId } = useVoicePreview();
 
   const [title, setTitle] = useState("Untitled video");
@@ -254,6 +257,24 @@ function CreateInner() {
       return changed ? next : prev;
     });
   }, [avatarData, voiceData, clipData, clipsError, scenes]);
+  // Likewise an uploaded background image that is gone (deleted here or in another tab, or never this account's: a
+  // draft from another workspace, a template, a copied video, the Video Agent): the scene gets a plain background,
+  // with a note, instead of a blank stage and a render that would be refused. A list that failed to load decides nothing.
+  useEffect(() => {
+    if (!backdropData) return;
+    const known = new Set(backdropData.backdrops.map((b) => b.id));
+    setScenes((prev) => {
+      let changed = false;
+      const next = prev.map((sc) => {
+        const id = backdropIdOf(sc.background);
+        if (!id || known.has(id)) return sc;
+        changed = true;
+        return { ...sc, background: DEFAULT_BG };
+      });
+      if (changed) setMissingBackdrop(true);
+      return changed ? next : prev;
+    });
+  }, [backdropData, scenes]);
   const [aspect, setAspect] = useState<AspectRatio>("16:9");
   const [resolution, setResolution] = useState<Resolution>("1080p");
   const [captions, setCaptions] = useState(false);
@@ -965,11 +986,18 @@ function CreateInner() {
                     />
                   </div>
                 </div>
+                {missingBackdrop && (
+                  <p role="status" data-testid="missing-backdrop" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    A background image this video used has been deleted, so those scenes use a plain background now.
+                  </p>
+                )}
                 <BackdropPicker
                   value={background}
                   onChange={setBackground}
+                  backdrops={backdropData?.backdrops ?? []}
+                  setBackdrops={(update) => setBackdropData((d) => ({ backdrops: update(d?.backdrops ?? []) }))}
+                  loadError={backdropError}
                   canEdit={canEdit !== false}
-                  onDeleted={(id) => setScenes((prev) => prev.map((sc) => (backdropIdOf(sc.background) === id ? { ...sc, background: DEFAULT_BG } : sc)))}
                 />
                 <Field label="Image URL" hint="A public image URL. Shown behind the avatar.">
                   <div className="flex gap-2">

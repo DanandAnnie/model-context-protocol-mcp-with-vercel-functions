@@ -2,7 +2,6 @@
 import { useRef, useState } from "react";
 import { ImagePlus, Trash2 } from "lucide-react";
 import { ErrorBanner } from "@/components/ui";
-import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/client";
 import { backdropIdOf, backdropPath, type Backdrop, type Background } from "@/lib/types";
 
@@ -29,31 +28,54 @@ async function toUploadable(file: File): Promise<string> {
   const bitmap = await createImageBitmap(file).catch(() => {
     throw new Error("That file is not an image the browser can read");
   });
-  let scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height));
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-    canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    const url = canvas.toDataURL("image/jpeg", 0.88);
-    // Base64 is 4/3 of the bytes.
-    if ((url.length - url.indexOf(",") - 1) * 0.75 <= MAX_UPLOAD_BYTES) return url;
-    scale *= 0.7;
+  try {
+    let scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("This browser cannot convert the image; upload a PNG or JPEG under 3 MB");
+      // JPEG has no transparency: see-through parts of a PNG or GIF become white, not black.
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      const url = canvas.toDataURL("image/jpeg", 0.88);
+      // A canvas too large for the browser gives back an empty "data:," instead of an image.
+      if (!url.startsWith("data:image/jpeg")) throw new Error("The image is too large for this browser to convert; try a smaller one");
+      // Base64 is 4/3 of the bytes.
+      if ((url.length - url.indexOf(",") - 1) * 0.75 <= MAX_UPLOAD_BYTES) return url;
+      scale *= 0.7;
+    }
+    throw new Error("The image is too large even when shrunk");
+  } finally {
+    bitmap.close();
   }
-  throw new Error("The image is too large even when shrunk");
 }
 
 /**
- * The scene's uploaded background images: upload one from the computer, pick one, or delete one. A deleted image
- * is taken off every scene that used it (`onDeleted`), since a render that names it would be refused.
+ * The scene's uploaded background images: upload one from the computer, pick one, or delete one. The editor owns
+ * the list (`backdrops`, `setBackdrops`), so it can take an image that is gone off every scene that names it.
  */
-export function BackdropPicker({ value, onChange, onDeleted, canEdit }: { value: Background; onChange: (bg: Background) => void; onDeleted: (id: string) => void; canEdit: boolean }) {
-  const { data, error, setData } = useApi<{ backdrops: Backdrop[] }>("/api/backdrops");
+export function BackdropPicker({
+  value,
+  onChange,
+  backdrops,
+  setBackdrops,
+  loadError,
+  canEdit,
+}: {
+  value: Background;
+  onChange: (bg: Background) => void;
+  backdrops: Backdrop[];
+  setBackdrops: (update: (list: Backdrop[]) => Backdrop[]) => void;
+  loadError: string | null;
+  canEdit: boolean;
+}) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const selected = backdropIdOf(value);
-  const backdrops = data?.backdrops ?? [];
 
   async function upload(file: File) {
     setBusy(true);
@@ -62,7 +84,7 @@ export function BackdropPicker({ value, onChange, onDeleted, canEdit }: { value:
       const image = await toUploadable(file);
       const name = file.name.replace(/\.[^.]+$/, "").slice(0, 80) || "Background";
       const { backdrop } = await api<{ backdrop: Backdrop }>("/api/backdrops", { method: "POST", body: JSON.stringify({ name, image }) });
-      setData((d) => ({ backdrops: [backdrop, ...(d?.backdrops ?? [])] }));
+      setBackdrops((list) => [backdrop, ...list]);
       onChange({ type: "image", value: backdropPath(backdrop.id) });
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not upload the image");
@@ -77,8 +99,7 @@ export function BackdropPicker({ value, onChange, onDeleted, canEdit }: { value:
     setErr(null);
     try {
       await api(`/api/backdrops/${b.id}`, { method: "DELETE" });
-      setData((d) => ({ backdrops: (d?.backdrops ?? []).filter((x) => x.id !== b.id) }));
-      onDeleted(b.id);
+      setBackdrops((list) => list.filter((x) => x.id !== b.id));
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not delete the image");
     }
@@ -108,7 +129,7 @@ export function BackdropPicker({ value, onChange, onDeleted, canEdit }: { value:
           }}
         />
       </div>
-      <ErrorBanner message={error ?? err} />
+      <ErrorBanner message={loadError ?? err} />
       {backdrops.length === 0 ? (
         <p className="text-xs text-slate-500">Upload a PNG, JPEG, or WebP picture (a slide, a photo of the office, a product shot) to show it behind the avatar. Large pictures are shrunk to fit.</p>
       ) : (

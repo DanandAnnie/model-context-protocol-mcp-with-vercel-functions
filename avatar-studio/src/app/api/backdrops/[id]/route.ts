@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-/** The image, for the editor's preview. Owner only; never cached by shared caches. */
+/** The image, for the editor's preview. Owner only; never cached by shared caches, and checked again on every use so a deleted image goes at once. */
 export async function GET(_req: Request, ctx: Ctx) {
   try {
     const { id } = await ctx.params;
@@ -15,7 +15,7 @@ export async function GET(_req: Request, ctx: Ctx) {
       headers: {
         "Content-Type": image.mimeType,
         "Content-Length": String(image.bytes.byteLength),
-        "Cache-Control": "private, max-age=3600",
+        "Cache-Control": "private, no-cache",
         "X-Content-Type-Options": "nosniff",
       },
     });

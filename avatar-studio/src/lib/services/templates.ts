@@ -2,11 +2,12 @@
 import { z } from "zod";
 import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
-import { MAX_SCENES } from "../types";
+import { MAX_SCENES, backdropIdOf } from "../types";
 import type { Video, VideoTemplate } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { LimitError, NotFoundError, ValidationError } from "../errors";
 import { owned } from "./shared";
+import { getBackdrop } from "./backdrops";
 import { backgroundSchema, captionStyleSchema, emotionSchema, pitchSchema, sceneLayoutSchema } from "./videos";
 
 export const MAX_TEMPLATES = 50;
@@ -95,6 +96,8 @@ export async function createTemplate(input: TemplateInput, ownerId: string = LOC
       ...(input.emotion ? { emotion: input.emotion } : {}),
     };
   }
+  // An uploaded background image must be the owner's and still there, as a render would check.
+  for (const id of new Set(base.scenes.map((sc) => backdropIdOf(sc.background)).filter((id): id is string => !!id))) await getBackdrop(id, ownerId);
   return getStore().put("template", { ...base, id: newId("tpl"), ownerId, createdAt: nowIso(), updatedAt: nowIso() });
 }
 

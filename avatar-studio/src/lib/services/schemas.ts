@@ -1,11 +1,13 @@
 // Field schemas shared by the video, template, batch, and brand kit services. A leaf module: it
 // imports no service, so any service may import it without creating a cycle.
 import { z } from "zod";
-import { CAPTION_FONTS, CAPTION_POSITIONS, CAPTION_LOOKS, CAPTION_SIZES, PRESENTER_FRAMINGS, VOICE_EMOTIONS } from "../types";
+import { CAPTION_FONTS, CAPTION_POSITIONS, CAPTION_LOOKS, CAPTION_SIZES, PRESENTER_FRAMINGS, VOICE_EMOTIONS, backdropIdOf } from "../types";
 
 export const backgroundSchema = z
   .object({ type: z.enum(["color", "image", "video"]), value: z.string().min(1).max(2000, "A background must be a colour or a URL of at most 2000 characters") })
-  .refine((b) => b.type !== "video" || /^https?:\/\//.test(b.value), "A video background must be a public http(s) URL");
+  .refine((b) => b.type !== "video" || /^https?:\/\//.test(b.value), "A video background must be a public http(s) URL")
+  // An image is a public address or an uploaded image exactly as the app names it, so nothing in between reaches a renderer as a URL.
+  .refine((b) => b.type !== "image" || /^https?:\/\//.test(b.value) || backdropIdOf(b) !== null, "An image background must be a public http(s) URL or an uploaded image (/api/backdrops/<id>)");
 /** How captions look on the share page; see `CaptionStyle`. */
 export const captionStyleSchema = z
   .object({ position: z.enum(CAPTION_POSITIONS), size: z.enum(CAPTION_SIZES), look: z.enum(CAPTION_LOOKS).optional(), font: z.enum(CAPTION_FONTS).optional() })

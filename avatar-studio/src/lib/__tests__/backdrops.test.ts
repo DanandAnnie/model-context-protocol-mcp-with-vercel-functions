@@ -120,6 +120,66 @@ describe("background images", () => {
   });
 });
 
+describe("background images kept with a template, the brand kit, and the store", () => {
+  it("an image background is a public URL or an uploaded image exactly, nothing in between", () => {
+    const parse = (value: string) => videoRequestSchema.safeParse({ title: "t", script: "Hi", avatarId: "a", voiceId: "v", background: { type: "image", value } }).success;
+    assert.equal(parse("https://cdn.example/bg.jpg"), true);
+    assert.equal(parse(backdropPath("bd_abc123")), true);
+    for (const value of [`${backdropPath("bd_abc123")}/`, `${backdropPath("bd_abc123")}?v=1`, "/api/clips/clip_1", "bg.jpg", "data:image/png;base64,AAAA"]) assert.equal(parse(value), false, value);
+  });
+
+  it("a template or the brand kit naming an image that is missing or another account's is refused when saved", async () => {
+    const { brandKitSchema, createTemplate, saveBrandKit, templateInputSchema } = await import("../services");
+    const theirs = await createBackdrop({ name: "Theirs", image: dataUrl(PNG) }, "user_other");
+    const mine = await createBackdrop({ name: "Mine", image: dataUrl(PNG) });
+    const template = (id: string) => templateInputSchema.parse({ title: "Deck", scenes: [{ script: "Hi", background: { type: "image", value: backdropPath(id) } }], avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id });
+    await assert.rejects(createTemplate(template(theirs.id)), /Background image .* not found/);
+    assert.equal((await createTemplate(template(mine.id))).scenes[0].background.value, backdropPath(mine.id));
+    const kit = (id: string) => brandKitSchema.parse({ name: "Acme", primaryColor: "#4f46e5", defaultBackground: { type: "image", value: backdropPath(id) } });
+    await assert.rejects(saveBrandKit(kit(theirs.id)), /Background image .* not found/);
+    assert.equal((await saveBrandKit(kit(mine.id))).defaultBackground?.value, backdropPath(mine.id));
+  });
+
+  it("an upload whose listed row cannot be written takes its bytes back out", async () => {
+    const store = getStore();
+    const put = store.put.bind(store);
+    store.put = (async (kind: Parameters<typeof put>[0], item: { id: string }) => {
+      if (kind === "backdrop") throw new Error("store down");
+      return put(kind, item);
+    }) as typeof store.put;
+    try {
+      await assert.rejects(createBackdrop({ name: "Lost", image: dataUrl(PNG) }), /store down/);
+    } finally {
+      store.put = put;
+    }
+    assert.deepEqual(await store.list("backdropdata"), [], "no image is left without a listed row");
+  });
+
+  it("recording an asset id for an image deleted meanwhile does not bring it back", async () => {
+    const { saveBackdropAssetIds } = await import("../services");
+    const b = await createBackdrop({ name: "Gone soon", image: dataUrl(PNG) });
+    const store = getStore();
+    const get = store.get.bind(store);
+    // The delete lands between the read and the write (once: the delete reads the row too).
+    let deleted = false;
+    store.get = (async (kind: Parameters<typeof get>[0], id: string) => {
+      const found = await get(kind, id);
+      if (kind === "backdrop" && !deleted) {
+        deleted = true;
+        await deleteBackdrop(b.id);
+      }
+      return found;
+    }) as typeof store.get;
+    try {
+      await saveBackdropAssetIds(b, { heygen: "img_late" });
+    } finally {
+      store.get = get;
+    }
+    assert.equal(await store.get("backdrop", b.id), null);
+    assert.deepEqual(await listBackdrops(), []);
+  });
+});
+
 describe("background images at the renderer", () => {
   it("HeyGen names an uploaded image by its asset id and an image URL as before", async () => {
     const { HeyGenAvatarProvider } = await import("../providers/avatar/heygen");

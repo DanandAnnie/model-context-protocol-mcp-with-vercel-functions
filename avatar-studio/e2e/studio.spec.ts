@@ -2645,6 +2645,36 @@ test("a multi-scene video has chapters: the share page jumps to a scene and the 
   await expect(chapters.locator('[aria-current="true"]')).toHaveCount(1);
 });
 
+test("a video can be made in other sizes, each a new video with the same scenes", async ({ page }) => {
+  const bg = { type: "color", value: "#0f172a" };
+  const v = await createVideoViaApi(page, `Sizes ${Date.now().toString(36)}`, {
+    script: undefined,
+    aspect: "16:9",
+    scenes: [
+      { script: "Welcome to twelve Maple Street.", background: bg, overlay: { text: "Dana Lee, Listing agent at Maple Realty", size: "large" } },
+      { script: "Call Dana to book a showing.", background: bg },
+    ],
+  });
+  await page.goto(`/videos/${v.id}`);
+  await expect(page.getByRole("heading", { name: "Other sizes" })).toBeVisible();
+  // The text that would run off a portrait frame is named before anything renders.
+  await expect(page.getByText("On-screen text in scene 1 may not fit one line at 9:16.")).toBeVisible();
+  await page.getByLabel("1:1 square").uncheck();
+  await page.getByRole("button", { name: "Make 1 size" }).click();
+  const made = page.getByTestId("other-sizes").getByRole("link");
+  await expect(made).toHaveText(/ \(9:16\)$/);
+  await made.click();
+  await page.waitForURL((url) => /\/videos\/vid_/.test(url.pathname) && !url.pathname.endsWith(v.id));
+  await expect(page.getByText("Made from")).toBeVisible();
+  const id = page.url().split("/videos/")[1].split(/[?#]/)[0];
+  const copy = (await (await page.request.get(`/api/videos/${id}`)).json()).video;
+  expect(copy.aspect).toBe("9:16");
+  expect(copy.resizedFrom).toBe(v.id);
+  expect(copy.scenes.map((sc: { script: string }) => sc.script)).toEqual(["Welcome to twelve Maple Street.", "Call Dana to book a showing."]);
+  await page.getByRole("link", { name: "another size of this video" }).click();
+  await page.waitForURL(new RegExp(`/videos/${v.id}`));
+});
+
 test("a dub can be voice only and name its speakers", async ({ page }) => {
   const tag = Date.now().toString(36);
   await page.goto("/translate");

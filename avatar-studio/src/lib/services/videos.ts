@@ -237,7 +237,7 @@ export async function resolveRenderContext(
  * best-effort under concurrent requests; batches reserve their rows up front.
  */
 /** Library fields a caller may set on a new video alongside the render request (batch row, folder, retry link). */
-export type VideoExtras = Partial<Pick<Video, "folder" | "description" | "batchId" | "rowLabel" | "retryOf">>;
+export type VideoExtras = Partial<Pick<Video, "folder" | "description" | "batchId" | "rowLabel" | "retryOf" | "resizedFrom">>;
 
 export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWNER, ctx?: RenderContext, skipLimit = false, extras: VideoExtras = {}): Promise<Video> {
   if (!skipLimit) await enforceRenderLimit(ownerId);
@@ -1118,23 +1118,65 @@ export async function retryVideo(id: string, ownerId: string = LOCAL_OWNER): Pro
   if (purgeDue(failed, Date.now())) throw new NotFoundError(`Video ${id} not found`);
   if (failed.status !== "failed") throw new ConflictError("Only failed renders can be retried");
   if (failed.deletedAt) throw new ConflictError("Restore the video from the trash before retrying it");
-  const req: VideoRequest = {
-    title: failed.title,
-    script: failed.script,
-    scenes: failed.scenes,
-    avatarId: failed.avatarId,
-    voiceId: failed.voiceId,
-    aspect: failed.aspect,
-    resolution: failed.resolution,
-    background: failed.background,
-    captions: failed.captions,
-    ...(failed.captionStyle ? { captionStyle: failed.captionStyle } : {}),
-    speed: failed.speed,
-    ...(failed.pitch ? { pitch: failed.pitch } : {}),
-    ...(failed.emotion ? { emotion: failed.emotion } : {}),
-  };
+  const req = requestOf(failed);
   // One write: the provider's webhook can land as soon as the job exists, so nothing may overwrite the stored video afterwards.
   return createVideo(req, ownerId, undefined, false, { folder: failed.folder, description: failed.description, batchId: failed.batchId, rowLabel: failed.rowLabel, retryOf: failed.id });
+}
+
+/** The request a stored video was rendered from, to render it again (a retry, another size). */
+function requestOf(video: Video): VideoRequest {
+  return {
+    title: video.title,
+    script: video.script,
+    scenes: video.scenes,
+    avatarId: video.avatarId,
+    voiceId: video.voiceId,
+    aspect: video.aspect,
+    resolution: video.resolution,
+    background: video.background,
+    captions: video.captions,
+    ...(video.captionStyle ? { captionStyle: video.captionStyle } : {}),
+    speed: video.speed,
+    ...(video.pitch ? { pitch: video.pitch } : {}),
+    ...(video.emotion ? { emotion: video.emotion } : {}),
+  };
+}
+
+export const resizeSchema = z.object({
+  aspects: z
+    .array(z.enum(["16:9", "9:16", "1:1"]))
+    .min(1, "Choose at least one size")
+    .max(3)
+    .transform((a) => Array.from(new Set(a))),
+});
+
+/**
+ * "Make other sizes": renders the video again in each of `aspects` (the other frame shapes), with the same scenes,
+ * presenter, voice, look, and settings, each a new video titled with its shape, in the same folder, recording which
+ * video it was made from. The allowance must cover all of them before any starts, so a request never makes some sizes
+ * and refuses the rest.
+ */
+export async function resizeVideo(id: string, input: z.infer<typeof resizeSchema>, ownerId: string = LOCAL_OWNER): Promise<Video[]> {
+  const source = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
+  if (purgeDue(source, Date.now())) throw new NotFoundError(`Video ${id} not found`);
+  if (source.deletedAt) throw new ConflictError("Restore the video from the trash before making other sizes");
+  const aspects = input.aspects.filter((a) => a !== source.aspect);
+  if (!aspects.length) throw new ValidationError(`The video is already ${source.aspect}; choose another size`);
+  const limit = await renderLimitFor(ownerId);
+  if (limit) {
+    const used = await rendersThisMonth(ownerId);
+    if (used + aspects.length > limit) {
+      throw new LimitError(`Not enough renders left this month for ${aspects.length} ${aspects.length === 1 ? "size" : "sizes"} (${used} of ${limit} used). The allowance resets on the 1st.`);
+    }
+  }
+  const made: Video[] = [];
+  for (const aspect of aspects) {
+    // The shape names the copy; the title keeps within its 120 characters.
+    const suffix = ` (${aspect})`;
+    const title = `${source.title.slice(0, 120 - suffix.length)}${suffix}`;
+    made.push(await createVideo({ ...requestOf(source), title, aspect }, ownerId, undefined, false, { folder: source.folder, description: source.description, resizedFrom: source.id }));
+  }
+  return made;
 }
 
 /**

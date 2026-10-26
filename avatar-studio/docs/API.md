@@ -119,6 +119,10 @@ Review and approval for a workspace video (a video in a personal space answers `
 
 Submits a **failed** render again as a new video with the same scenes, presenter, look, and quality; the new video keeps the original's folder, description, and batch row and carries `retryOf` with the original id. Returns `201 { video }` (or `502` when the provider refuses the start again). `409` when the video is not failed, `404` when it is not yours.
 
+### `POST /api/videos/:id/resize` — make other sizes
+
+`{ "aspects": ["9:16", "1:1"] }` (one to three of `16:9`, `9:16`, `1:1`; the video's own is ignored, and choosing only it is a `400`) renders the video again in each shape as a new video with the same scenes, presenter, voice, look, quality, captions, speed, pitch, and emotion, titled with its shape (`Tour (9:16)`, kept within 120 characters), in the same folder with the same description, carrying `resizedFrom` with the original id. The month's allowance must cover every size before any starts (`429` otherwise); a trashed video is a `409`; viewers get `403`. Returns `201 { videos }` (a size the provider refused to start is in the list as `failed`, with its `error`).
+
 ### `GET /api/videos/:id/cover` — the custom poster image (public under the share page's rules: `404` while the link is offline, for a password-protected link without the unlock cookie, and when no cover is set; `?v=` responses are immutable, and `public` only for a link that is neither offline nor password-protected, with a lifetime capped at the link's expiry)
 ### `GET /api/videos/:id/captions` — SRT; add `?format=vtt` for WebVTT, whose cues carry the video's caption position (public; while the share link is offline only the owner's own request gets them, and a password-protected link needs the unlock cookie or the owner)
 ### `POST /api/videos/:id/lead`, `GET /api/videos/:id/leads` — the email gate

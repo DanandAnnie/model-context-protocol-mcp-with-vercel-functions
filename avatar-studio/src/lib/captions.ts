@@ -84,6 +84,12 @@ function weight(text: string): number {
   return text.split(/\s+/).reduce((n, token) => n + (UNSPACED.test(token) ? Math.max(1, Array.from(token).length / 2) : 1), 0);
 }
 
+/** How many words a script (its pause markers already taken out) takes to say, counted as caption timing counts them. */
+export function spokenWords(text: string): number {
+  const t = text.trim();
+  return t ? weight(t) : 0;
+}
+
 /** HeyGen writes captions into the file itself unless a caption style asks for the share page's track alone. */
 export function heygenBurnsCaptions(req: { captions?: boolean; captionStyle?: unknown }): boolean {
   return !!req.captions && !req.captionStyle;
@@ -129,10 +135,10 @@ function splitSentences(script: string): string[] {
 
 /**
  * Cues for a script timed to a running time: sentences share the spoken time by their weight, and a
- * pause marker between them leaves a gap as long as the pause (pauses never take more than half the
- * running time, so a short render still shows every line). Markers never appear in the cue text.
+ * pause marker between them leaves a gap as long as the pause (pauses never take more than `maxPauseShare` of
+ * the running time, half unless the caller already counted them in it, so a short render still shows every line). Markers never appear in the cue text.
  */
-export function buildCues(script: string, durationSec: number): Cue[] {
+export function buildCues(script: string, durationSec: number, maxPauseShare = 0.5): Cue[] {
   const parts = splitAtPauses(script).map((p) => ({ sentences: splitSentences(p.text), pauseSec: p.pauseSec }));
   const totalWords = parts.reduce((n, p) => n + p.sentences.reduce((m, s) => m + weight(s), 0), 0);
   if (totalWords === 0 || durationSec <= 0) return [];
@@ -144,7 +150,7 @@ export function buildCues(script: string, durationSec: number): Cue[] {
   const leadMs = parts.slice(0, firstPart).reduce((n, p) => n + p.pauseSec * 1000, 0);
   const tailMs = parts.slice(lastPart).reduce((n, p) => n + p.pauseSec * 1000, 0);
   const pausesMs = gapMs.reduce((n, g) => n + g, 0) + leadMs + tailMs;
-  const scale = pausesMs > totalMs / 2 ? totalMs / 2 / pausesMs : 1;
+  const scale = pausesMs > totalMs * maxPauseShare ? (totalMs * maxPauseShare) / pausesMs : 1;
   const speechMs = totalMs - Math.round(pausesMs * scale);
   const cues: Cue[] = [];
   let cursor = Math.round(leadMs * scale);

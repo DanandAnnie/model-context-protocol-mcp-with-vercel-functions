@@ -1,3 +1,4 @@
+import { spokenWords } from "../../captions";
 import { pauseSeconds, stripPauses } from "../../pauses";
 import { SAMPLE_PREVIEW_VIDEO, STOCK_AVATARS } from "../../stock";
 import { demoAssetUrl } from "../../config";
@@ -23,7 +24,8 @@ export class MockAvatarProvider implements AvatarProvider {
   }
 
   async createVideo(req: VideoRequest): Promise<{ providerJobId: string }> {
-    const words = (text: string) => stripPauses(text).trim().split(/\s+/).filter(Boolean).length;
+    // Words counted as captions count them, so a script written without spaces is not one long word.
+    const words = (text: string) => spokenWords(stripPauses(text));
     // An audio scene lasts as long as its clip; a typed one as long as its words take at its speed (the scene's, else the video's), plus its pauses.
     const scenes = req.scenes?.length ? req.scenes : [{ script: req.script }];
     const seconds = scenes.reduce((sum, sc) => sum + ("audioSeconds" in sc && sc.audioSeconds ? sc.audioSeconds : words(sc.script) / 2.5 / (("speed" in sc && sc.speed) || req.speed) + pauseSeconds(sc.script)), 0);

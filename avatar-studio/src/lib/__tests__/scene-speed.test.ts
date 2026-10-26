@@ -62,4 +62,25 @@ describe("per-scene speed", () => {
     assert.deepEqual(subtitleCues(video, "Uno. Dos.").map((c) => c.startMs), [0, 9000]);
     assert.deepEqual(transcriptsFor({ ...video, subtitles: { Spanish: "Uno.\n\nDos.\n\nTres." } })[1].cues.map((c) => c.endMs), [8000, 12000, 18000]);
   });
+
+  it("weighs scenes written without spaces by their length, and times D-ID, blank lines, and pauses as spoken", () => {
+    const join = (scenes: Array<{ script: string }>) => scenes.map((sc) => sc.script).join("\n\n");
+    // 144 Chinese characters say about 72 words' worth, the closing thanks about 2.5: the thanks gets the last second or so.
+    const zh = [{ script: "我们的新产品今天正式发布。".repeat(12).slice(0, 144) }, { script: "谢谢大家。" }];
+    const zhCues = captionCuesFor({ script: join(zh), speed: 1, durationSec: 40, scenes: zh }).cues;
+    assert.ok(zhCues[zhCues.length - 1].startMs > 38_000, `the closing thanks starts at ${zhCues[zhCues.length - 1].startMs} ms`);
+    // D-ID speaks at the voice's natural pace whatever the scenes ask, so its scenes share the time by their words.
+    const paced = [{ script: ten, speed: 0.5 }, { script: ten }];
+    assert.deepEqual(captionCuesFor({ script: join(paced), speed: 1, durationSec: 8, scenes: paced, provider: "did" }).cues.map((c) => c.startMs), [0, 4000]);
+    assert.deepEqual(captionCuesFor({ script: join(paced), speed: 1, durationSec: 12, scenes: paced, provider: "heygen" }).cues.map((c) => c.startMs), [0, 8000]);
+    // A scene holding a blank line still lines up with its translation, paragraph for paragraph.
+    const twoParts = [{ script: "Part one.\n\nPart two.", speed: 0.5 }, { script: "The end." }];
+    const video = { script: join(twoParts), speed: 1, durationSec: 12, scenes: twoParts };
+    assert.deepEqual(subtitleCues(video, "Uno.\n\nDos.\n\nFin.").map((c) => c.startMs), captionCuesFor(video).cues.map((c) => c.startMs));
+    // A short line before a long pause leaves the screen when it has been said, not halfway through the pause.
+    const pausing = [{ script: "Welcome. [pause 2s]" }, { script: ten }];
+    const [welcome, next] = captionCuesFor({ script: join(pausing), speed: 1, scenes: pausing }).cues;
+    assert.ok(welcome.endMs <= 300, `"Welcome." ends at ${welcome.endMs} ms`);
+    assert.equal(next.startMs, 2250);
+  });
 });

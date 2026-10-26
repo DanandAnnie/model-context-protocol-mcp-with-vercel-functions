@@ -5,7 +5,7 @@ import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import { getStore } from "../store";
 import { EMPTY_WATCH, MAX_SCENES, TRASH_RETENTION_DAYS, backdropIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
 import type { AudioClip, Avatar, Backdrop, Background, CaptionCue, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
-import { buildCues } from "../captions";
+import { buildCues, spokenWords } from "../captions";
 import { wellFormed } from "../text";
 import { pauseSeconds, stripPauses } from "../pauses";
 import type { AvatarProvider, RenderCast } from "../providers/types";
@@ -481,13 +481,16 @@ export const captionCuesSchema = z
   });
 
 type TimedScene = Pick<Scene, "script" | "speed" | "audioSeconds">;
-type Timed = Pick<Video, "script" | "durationSec" | "speed"> & { scenes?: TimedScene[] };
+type Timed = Pick<Video, "script" | "durationSec" | "speed"> & Partial<Pick<Video, "provider">> & { scenes?: TimedScene[] };
+
+/** Whether the renderer speaks at the speeds asked for; D-ID keeps the voice's natural pace. */
+const keepsPace = (video: Timed) => !video.provider || video.provider === "heygen" || video.provider === "mock";
 
 /** A scene's estimated length: its audio clip's, else its words at its own speed (the video's when unset) and its pauses. */
-function sceneSeconds(scene: TimedScene, videoSpeed: number | undefined): number {
+function sceneSeconds(scene: TimedScene, video: Timed): number {
   if (scene.audioSeconds) return scene.audioSeconds;
-  const words = stripPauses(scene.script).trim().split(/\s+/).filter(Boolean).length;
-  return words / 2.5 / (scene.speed || videoSpeed || 1) + pauseSeconds(scene.script);
+  const speed = keepsPace(video) ? scene.speed || video.speed || 1 : 1;
+  return spokenWords(stripPauses(scene.script)) / 2.5 / speed + pauseSeconds(scene.script);
 }
 
 /**
@@ -497,7 +500,7 @@ function sceneSeconds(scene: TimedScene, videoSpeed: number | undefined): number
 export function captionDurationSec(video: Timed): number {
   if (video.durationSec) return video.durationSec;
   const parts: TimedScene[] = video.scenes?.length ? video.scenes : [{ script: video.script }];
-  return Math.max(1, Math.round(parts.reduce((sum, sc) => sum + sceneSeconds(sc, video.speed), 0)));
+  return Math.max(1, Math.round(parts.reduce((sum, sc) => sum + sceneSeconds(sc, video), 0)));
 }
 
 /**
@@ -510,7 +513,7 @@ function timedCues(video: Timed, texts: string[]): CaptionCue[] {
   const plain = (cues: CaptionCue[]) => cues.map(({ startMs, endMs, text }) => ({ startMs, endMs, text }));
   const scenes = video.scenes ?? [];
   if (scenes.length < 2 || texts.length !== scenes.length) return plain(buildCues(texts.join("\n\n"), totalSec));
-  const lengths = scenes.map((sc) => Math.max(0.1, sceneSeconds(sc, video.speed)));
+  const lengths = scenes.map((sc) => Math.max(0.1, sceneSeconds(sc, video)));
   const whole = lengths.reduce((a, b) => a + b, 0);
   const totalMs = Math.round(totalSec * 1000);
   const cues: CaptionCue[] = [];
@@ -520,15 +523,24 @@ function timedCues(video: Timed, texts: string[]): CaptionCue[] {
     const startMs = Math.round((before / whole) * totalMs);
     before += lengths[i];
     const endMs = Math.round((before / whole) * totalMs);
-    for (const c of buildCues(text, (endMs - startMs) / 1000)) cues.push({ startMs: startMs + c.startMs, endMs: startMs + c.endMs, text: c.text });
+    // A scene's share already counts its pauses, so they may take most of it (a short line before a long pause).
+    for (const c of buildCues(text, (endMs - startMs) / 1000, 0.9)) cues.push({ startMs: startMs + c.startMs, endMs: startMs + c.endMs, text: c.text });
   });
   return cues;
 }
 
-/** A translated subtitle track's cues: a paragraph per scene keeps each scene's timing, else even over the running time. */
+const paragraphsOf = (text: string) => text.split(/\n\s*\n/).map((t) => t.trim()).filter(Boolean);
+
+/**
+ * A translated subtitle track's cues. A translation keeps the script's paragraphs, so with as many paragraphs as the
+ * scenes hold in all, each scene's are timed within its share; any other shape is timed evenly over the running time.
+ */
 export function subtitleCues(video: Timed, text: string): CaptionCue[] {
-  const paragraphs = text.split(/\n\s*\n/).map((t) => t.trim()).filter(Boolean);
-  return timedCues(video, paragraphs.length === video.scenes?.length ? paragraphs : [text]);
+  const paragraphs = paragraphsOf(text);
+  const counts = (video.scenes ?? []).map((sc) => Math.max(1, paragraphsOf(sc.script).length));
+  if (counts.length < 2 || paragraphs.length !== counts.reduce((a, b) => a + b, 0)) return timedCues(video, [text]);
+  let at = 0;
+  return timedCues(video, counts.map((n) => paragraphs.slice(at, (at += n)).join("\n\n")));
 }
 
 /**

@@ -2,6 +2,7 @@
 // Each one rides through the translator as a token it cannot change, then comes back as it stood in
 // the source, so the spelling does not depend on the model following an instruction.
 import { PAUSE_MARKER } from "./pauses";
+import { languageTag } from "./language";
 
 export const MAX_GLOSSARY_TERMS = 50;
 export const MIN_GLOSSARY_TERM_LENGTH = 2;
@@ -30,14 +31,18 @@ const TOKEN_LIKE = String.raw`\[{1,2}\s*T\s*\d+\s*\]{1,2}`;
  * spelled it, accepting the token in any case, with spaces, or with single brackets; a token the
  * translator dropped is simply gone. `terms` lists what each token stands for, in token order.
  */
+/** How two spellings of a term are compared: compatibility forms and case folded together ("ſtart", "START", "start"). */
+export const foldTerm = (s: string) => s.normalize("NFKC").toLowerCase().normalize("NFC");
+
 export function protectTerms(
   text: string,
   terms: string[],
-  /** Terms (lowercase, NFC) that come back as a fixed translation instead of their source spelling. */
-  replacements: Map<string, string> = new Map(),
-): { text: string; terms: string[]; restore: (out: string) => string } {
+  /** Terms that come back as a fixed translation instead of their source spelling. */
+  replacements: Array<{ term: string; translation: string }> = [],
+): { text: string; terms: string[]; restore: (out: string) => string; meanings: string[] } {
+  const replace = new Map(replacements.map((r) => [foldTerm(r.term.trim()), r.translation]));
   const unique = [...new Set(terms.map((t) => t.normalize("NFC").trim()).filter(Boolean).map((t) => t.toLowerCase()))];
-  if (!unique.length) return { text, terms: [], restore: (out) => out };
+  if (!unique.length) return { text, terms: [], restore: (out) => out, meanings: [] };
   const alternatives = unique.sort((a, b) => b.length - a.length).map(escapeRegExp).join("|");
   const re = new RegExp(`(${PAUSE_MARKER}|\\[\\[P\\d+\\]\\])|(${TOKEN_LIKE})|(?<!${WORD_CHAR})(?:${alternatives})(?!${WORD_CHAR})`, "giu");
   const found: string[] = [];
@@ -46,14 +51,13 @@ export function protectTerms(
     found.push(m);
     return `[[T${found.length}]]`;
   });
+  // What each token comes back as: its fixed translation, or the term as the source spelled it.
+  const meanings = found.map((term) => replace.get(foldTerm(term)) ?? term);
   return {
     text: guarded,
     terms: found,
-    restore: (out) =>
-      out.replace(new RegExp(TOKEN_LIKE.replace(String.raw`\d+`, String.raw`(\d+)`), "gi"), (_m, n: string) => {
-        const term = found[Number(n) - 1];
-        return term === undefined ? "" : (replacements.get(term.toLowerCase()) ?? term);
-      }),
+    meanings,
+    restore: (out) => out.replace(new RegExp(TOKEN_LIKE.replace(String.raw`\d+`, String.raw`(\d+)`), "gi"), (_m, n: string) => meanings[Number(n) - 1] ?? ""),
   };
 }
 
@@ -72,16 +76,19 @@ function baseLanguage(language: string): string {
 }
 
 /**
- * The rules that apply to a translation into `language`, one per term (ignoring case): a rule written for that
- * language (or for its base, so a "Spanish" rule covers "Spanish (Mexico)") beats one for every language.
+ * The rules that apply to a translation into `language`, one per term (ignoring case). A rule written for exactly
+ * that language beats one for its base language ("Spanish" covers "Spanish (Mexico)", never the other way round),
+ * which beats one for every language; between equals the first listed wins.
  */
 export function forcedFor(rules: Array<{ term: string; translation: string; language?: string }> | undefined, language: string | undefined): Array<{ term: string; translation: string }> {
   const target = language ? language.trim().toLowerCase() : "";
   const byTerm = new Map<string, { term: string; translation: string; rank: number }>();
   for (const r of rules ?? []) {
-    const rank = !r.language ? 1 : r.language.trim().toLowerCase() === target ? 3 : target && baseLanguage(r.language) === baseLanguage(target) ? 2 : 0;
+    const own = r.language?.trim().toLowerCase();
+    const forBase = !!own && own === baseLanguage(own) && !!target && own === baseLanguage(target);
+    const rank = !own ? 1 : own === target ? 3 : forBase ? 2 : 0;
     if (!rank) continue;
-    const key = r.term.normalize("NFC").trim().toLowerCase();
+    const key = foldTerm(r.term.trim());
     const held = byTerm.get(key);
     if (!held || rank > held.rank) byTerm.set(key, { term: r.term, translation: r.translation, rank });
   }
@@ -89,13 +96,15 @@ export function forcedFor(rules: Array<{ term: string; translation: string; lang
 }
 
 /**
- * One rule per line, `term = translation`, with an optional `[Language]` at the end for a rule that holds in
- * that language only. Lines without " = " are reported by number; a repeat (same term and language, ignoring
- * case) keeps the first. The caller checks the count and lengths.
+ * One rule per line, `term = translation` (split at the first `=`), with an optional `[Language]` at the end for a
+ * rule that holds in that language only. A line without a term or a translation, or whose bracket does not name a
+ * language, is reported by number; a repeat (same term and language, ignoring case) keeps the first. The caller
+ * checks the count and lengths.
  */
-export function parseForcedTranslations(text: string): { rules: Array<{ term: string; translation: string; language?: string }>; bad: number[] } {
+export function parseForcedTranslations(text: string): { rules: Array<{ term: string; translation: string; language?: string }>; bad: number[]; badLanguage: Array<{ line: number; language: string }> } {
   const rules: Array<{ term: string; translation: string; language?: string }> = [];
   const bad: number[] = [];
+  const badLanguage: Array<{ line: number; language: string }> = [];
   const seen = new Set<string>();
   text.split("\n").forEach((raw, i) => {
     const line = raw.trim();
@@ -109,6 +118,8 @@ export function parseForcedTranslations(text: string): { rules: Array<{ term: st
     if (tag) {
       language = tag[1].trim() || undefined;
       translation = translation.slice(0, tag.index).trim();
+      // A bracket that names no language would never apply; it is pointed out rather than kept quietly.
+      if (language && !languageTag(language)) return void badLanguage.push({ line: i + 1, language });
     }
     if (!term || !translation) return void bad.push(i + 1);
     const key = `${term.toLowerCase()}\u0000${(language ?? "").toLowerCase()}`;
@@ -116,7 +127,7 @@ export function parseForcedTranslations(text: string): { rules: Array<{ term: st
     seen.add(key);
     rules.push({ term, translation, ...(language ? { language } : {}) });
   });
-  return { rules, bad };
+  return { rules, bad, badLanguage };
 }
 
 /** The rules as the brand page shows them, one per line. */

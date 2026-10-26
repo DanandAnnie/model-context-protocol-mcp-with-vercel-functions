@@ -327,6 +327,15 @@ describe("dubs that follow the brand kit's forced translations", () => {
   it("stores the rules for each dub's language and sends them to HeyGen as forced_translations", async () => {
     const { saveBrandKit, brandKitSchema } = await import("../services");
     await saveBrandKit(brandKitSchema.parse({ name: "Acme", primaryColor: "#112233", forcedTranslations: [{ term: "CEO", translation: "Geschäftsführer", language: "German" }, { term: "free trial", translation: "trial" }] }), "u-ft");
+    // A kept term with a fixed translation in a dub's language is translated there, and kept elsewhere.
+    const both = await (async () => {
+      await saveBrandKit(brandKitSchema.parse({ name: "Acme", primaryColor: "#112233", glossary: ["CEO", "Zeno"], forcedTranslations: [{ term: "ceo", translation: "Geschäftsführer", language: "German" }] }), "u-ft2");
+      return createTranslations(translationBatchSchema.parse({ ...base, targetLanguages: ["German", "French"], keepGlossary: true }), "u-ft2");
+    })();
+    assert.deepEqual(both.map((t) => [t.targetLanguage, t.glossary, t.forcedTranslations?.length ?? 0]), [
+      ["German", ["Zeno"], 1],
+      ["French", ["CEO", "Zeno"], 0],
+    ]);
     const made = await createTranslations(translationBatchSchema.parse({ ...base, targetLanguages: ["German", "French"], keepGlossary: true }), "u-ft");
     assert.deepEqual(made.map((t) => [t.targetLanguage, t.forcedTranslations, "glossary" in t]), [
       ["German", [{ term: "CEO", translation: "Geschäftsführer" }, { term: "free trial", translation: "trial" }], false],
@@ -347,10 +356,18 @@ describe("dubs that follow the brand kit's forced translations", () => {
       assert.deepEqual(calls[0].body?.forced_translations, [{ term: "CEO", translation: "Geschäftsführer" }, { term: "free trial", translation: "Testphase" }]);
       assert.equal(calls[1].body?.brand_glossary_id, "bg_ft");
       // Other rules for the same kept terms are another glossary, never a change to this one.
+      const firstName = calls[0].body?.name;
       calls.length = 0;
       await heygen.createTranslation({ ...base, targetLanguage: "French", glossary: ["Zeno"], forcedTranslations: [{ term: "CEO", translation: "PDG" }] });
       assert.ok(calls[0].url.endsWith("/brand-glossaries"), "a new glossary for new rules");
-      assert.notEqual(calls[0].body?.name, undefined);
+      assert.notEqual(calls[0].body?.name, firstName);
+      assert.deepEqual(calls[0].body?.forced_translations, [{ term: "CEO", translation: "PDG" }]);
+      // A glossary of kept terms only is named as it was before rules existed: a digest of the sorted terms.
+      calls.length = 0;
+      await heygen.createTranslation({ ...base, targetLanguage: "French", glossary: ["Zulu", "Yak"] });
+      const { createHash } = await import("node:crypto");
+      assert.equal(calls[0].body?.name, `Avatar Studio terms ${createHash("sha256").update(JSON.stringify(["Yak", "Zulu"])).digest("hex").slice(0, 16)}`);
+      assert.equal("forced_translations" in (calls[0].body ?? {}), false);
     } finally {
       globalThis.fetch = realFetch;
     }

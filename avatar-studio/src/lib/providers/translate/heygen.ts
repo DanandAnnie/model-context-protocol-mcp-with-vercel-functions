@@ -48,7 +48,7 @@ export class HeyGenTranslateProvider implements TranslateProvider {
    */
   private async glossaryFor(input: Pick<TranslationRequest, "glossary" | "forcedTranslations">, fresh = false): Promise<string | undefined> {
     const kept = [...new Set((input.glossary ?? []).map((t) => t.trim()).filter(Boolean))].sort();
-    const forced = (input.forcedTranslations ?? []).map(({ term, translation }) => ({ term: term.trim(), translation: translation.trim() })).sort((a, b) => a.term.localeCompare(b.term));
+    const forced = (input.forcedTranslations ?? []).map(({ term, translation }) => ({ term: term.trim(), translation: translation.trim() })).sort((a, b) => (a.term < b.term ? -1 : a.term > b.term ? 1 : 0));
     if (!kept.length && !forced.length) return undefined;
     // A glossary with only kept terms keeps the digest it had before forced translations existed.
     const digest = createHash("sha256").update(JSON.stringify(forced.length ? { kept, forced } : kept)).digest("hex").slice(0, 16);

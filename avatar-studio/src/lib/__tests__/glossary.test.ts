@@ -107,6 +107,9 @@ describe("forced translations", () => {
       { term: "CEO", translation: "Directeur", language: "French" },
     ]);
     assert.deepEqual(parsed.bad, [4, 6], "line numbers count blank lines");
+    // A bracket that names no language is pointed out, not kept as a rule that never applies.
+    assert.deepEqual(parseForcedTranslations("Nimbus = Nimbus [beta]\nCEO = Jefe [Spanish (Mexico)]").badLanguage, [{ line: 1, language: "beta" }]);
+    assert.equal(brandKitSchema.safeParse({ primaryColor: "#4f46e5", forcedTranslations: [{ term: "Acme", translation: "Acme [EU]" }] }).success, false, "a translation that would read back as a language is refused");
     assert.equal(formatForcedTranslations(parsed.rules), "CEO = Geschäftsführer [German]\nfree trial = essai gratuit\nCEO = Directeur [French]");
     assert.deepEqual(parseForcedTranslations(formatForcedTranslations(parsed.rules)).rules, parsed.rules, "what the page shows reads back the same");
     // The kit keeps the first of a repeated term and language and checks the lengths.
@@ -128,6 +131,12 @@ describe("forced translations", () => {
     assert.deepEqual(forcedFor(rules, "spanish"), [{ term: "CEO", translation: "chief" }, { term: "free trial", translation: "prueba gratis" }]);
     assert.deepEqual(forcedFor(rules, "Spanish (Mexico)"), [{ term: "CEO", translation: "chief" }, { term: "free trial", translation: "prueba sin costo" }]);
     assert.deepEqual(forcedFor(rules, "Spanish (Spain)"), [{ term: "CEO", translation: "chief" }, { term: "free trial", translation: "prueba gratis" }], "a regional rule is not another region's");
+    // Whatever the order: a region's rule never reaches the base language or another region.
+    const reversed = [rules[3], rules[2]];
+    assert.deepEqual(forcedFor(reversed, "Spanish (Spain)"), [{ term: "free trial", translation: "prueba gratis" }]);
+    assert.deepEqual(forcedFor(reversed, "Spanish"), [{ term: "free trial", translation: "prueba gratis" }]);
+    assert.deepEqual(forcedFor([rules[3]], "Spanish"), []);
+    assert.deepEqual(forcedFor([rules[3]], "spanish (mexico)"), [{ term: "free trial", translation: "prueba sin costo" }]);
     assert.deepEqual(forcedFor(rules, "French"), [{ term: "CEO", translation: "chief" }]);
     assert.deepEqual(forcedFor(undefined, "French"), []);
   });
@@ -139,6 +148,11 @@ describe("forced translations", () => {
     assert.deepEqual(termsSeen[0], ["Geschäftsführer", "Testphase", "Nimbus"]);
     // In another language only the rule for every language applies.
     assert.equal(await reviseScript({ script, action: "translate", language: "French" }, "u-forced"), "xx xx xx: xx xx Testphase xx Nimbus.");
+    // A translation that names no language goes into English, and English rules apply to it.
+    await saveBrandKit(brandKitSchema.parse({ primaryColor: "#4f46e5", forcedTranslations: [{ term: "Kunde", translation: "customer", language: "English" }] }), "u-en");
+    assert.equal(await reviseScript({ script: "Der Kunde.", action: "translate" }, "u-en"), "xx customer.");
+    // A term matched in another case form still comes back as its translation.
+    assert.equal(await reviseScript({ script: "Our ceo says.", action: "translate", language: "German" }, "u-forced"), "xx Geschäftsführer xx.");
     // Subtitle languages follow the same rules.
     const v = await createVideo(videoRequestSchema.parse({ title: "Launch", script, avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }), "u-forced");
     const done = await addSubtitles(v.id, "German", "u-forced");

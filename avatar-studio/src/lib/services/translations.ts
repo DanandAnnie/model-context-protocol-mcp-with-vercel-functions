@@ -14,7 +14,7 @@ import { LOCAL_OWNER } from "../owner-id";
 import { owned, stripUndefined } from "./shared";
 import { MAX_CAPTION_CUE_CHARS, MAX_CAPTION_CUES } from "./videos";
 import { getBrandKit } from "./brand";
-import { forcedFor } from "../glossary";
+import { foldTerm, forcedFor } from "../glossary";
 
 const languageSchema = z.string().trim().min(2).max(40);
 /** How a dub is made: voice only or lip-synced, how many people speak, its quality, and its audio. */
@@ -121,9 +121,12 @@ export async function createTranslations(input: z.infer<typeof translationBatchS
   for (const language of input.languages) {
     const title = input.languages.length > 1 ? `${input.title} (${language})`.slice(0, 160) : input.title;
     const forcedTranslations = forcedFor(kit?.forcedTranslations, language);
+    // A term with a fixed translation in this language is translated, as script translation does, not also kept.
+    const forcedTerms = new Set(forcedTranslations.map((r) => foldTerm(r.term.trim())));
+    const kept = glossary.filter((t) => !forcedTerms.has(foldTerm(t.trim())));
     out.push(
       await createTranslation(
-        { title, sourceVideoUrl: input.sourceVideoUrl, targetLanguage: language, ...setOptions(input), ...(glossary.length ? { glossary } : {}), ...(forcedTranslations.length ? { forcedTranslations } : {}) },
+        { title, sourceVideoUrl: input.sourceVideoUrl, targetLanguage: language, ...setOptions(input), ...(kept.length ? { glossary: kept } : {}), ...(forcedTranslations.length ? { forcedTranslations } : {}) },
         ownerId,
       ),
     );

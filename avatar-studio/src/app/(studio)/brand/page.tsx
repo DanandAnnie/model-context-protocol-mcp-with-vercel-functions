@@ -127,6 +127,10 @@ export default function BrandPage() {
       setErr(`Always translate, line ${parsed.bad[0]}: write it as term = translation, with [Language] at the end for one language only.`);
       return;
     }
+    if (parsed.badLanguage.length) {
+      setErr(`Always translate, line ${parsed.badLanguage[0].line}: "${parsed.badLanguage[0].language.slice(0, 30)}" is not a language name (for example [German] or [Spanish (Mexico)]).`);
+      return;
+    }
     if (parsed.rules.length > MAX_FORCED_TRANSLATIONS) {
       setErr(`Up to ${MAX_FORCED_TRANSLATIONS} translation rules (you have ${parsed.rules.length}).`);
       return;

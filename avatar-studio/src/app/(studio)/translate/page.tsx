@@ -47,6 +47,8 @@ function TranslateInner() {
   const { data: brandData } = useApi<{ brand: BrandKit | null }>("/api/brand");
   const glossary = brandData?.brand?.glossary ?? [];
   const forcedRules = brandData?.brand?.forcedTranslations ?? [];
+  // Rules for several languages can share a term; the page counts terms.
+  const forcedTerms = new Set(forcedRules.map((r) => r.term.trim().toLowerCase())).size;
   // On by default: the server keeps the kit's terms when it has some (even if the kit has not loaded here yet).
   const [keepGlossary, setKeepGlossary] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -149,7 +151,7 @@ function TranslateInner() {
                         {glossary.length > 4 ? `, and ${glossary.length - 4} more` : ""} stay untranslated.{" "}
                       </>
                     )}
-                    {forcedRules.length > 0 && `${forcedRules.length} ${forcedRules.length === 1 ? "term is" : "terms are"} always translated one way (where a rule covers the language). `}
+                    {forcedTerms > 0 && `${forcedTerms} ${forcedTerms === 1 ? "term is" : "terms are"} always translated one way (where a rule covers the language). `}
                     Edit them in the brand kit.
                   </span>
                 </span>

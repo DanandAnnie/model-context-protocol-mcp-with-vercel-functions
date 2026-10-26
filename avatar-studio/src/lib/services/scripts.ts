@@ -51,17 +51,15 @@ export const reviseSchema = z.object({
 export async function reviseScript(input: z.infer<typeof reviseSchema>, ownerId: string = LOCAL_OWNER): Promise<string> {
   const pauses = protectPauses(input.script);
   let terms: ReturnType<typeof protectTerms> | null = null;
-  let replacements = new Map<string, string>();
   if (input.action === "translate") {
     const kit = await getBrandKit(ownerId);
-    const forced = forcedFor(kit?.forcedTranslations, input.language);
-    replacements = new Map(forced.map((r) => [r.term.normalize("NFC").trim().toLowerCase(), r.translation]));
-    terms = protectTerms(pauses.text, [...(kit?.glossary ?? []), ...forced.map((r) => r.term)], replacements);
+    // A translation with no language named goes into English, as the script writer does.
+    const forced = forcedFor(kit?.forcedTranslations, input.language ?? "English");
+    terms = protectTerms(pauses.text, [...(kit?.glossary ?? []), ...forced.map((r) => r.term)], forced);
   }
   const sent = terms ? terms.text : pauses.text;
   // The model is told what each token stands for in the translation: the term itself, or its fixed translation.
-  const meaning = terms?.terms.map((t) => replacements.get(t.toLowerCase()) ?? t);
-  const out = await getScriptProvider().revise({ ...input, script: sent, ...(meaning?.length ? { terms: meaning } : {}) });
+  const out = await getScriptProvider().revise({ ...input, script: sent, ...(terms?.meanings.length ? { terms: terms.meanings } : {}) });
   return pauses.restore(terms ? terms.restore(out) : out);
 }
 

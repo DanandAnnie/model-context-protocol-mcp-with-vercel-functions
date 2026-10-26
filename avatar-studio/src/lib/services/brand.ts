@@ -43,7 +43,8 @@ export const brandKitSchema = z.object({
     .array(
       z.object({
         term: z.string().trim().min(MIN_GLOSSARY_TERM_LENGTH, `A term to translate is at least ${MIN_GLOSSARY_TERM_LENGTH} characters`).max(MAX_GLOSSARY_TERM_LENGTH),
-        translation: z.string().trim().min(1).max(MAX_FORCED_TRANSLATION_LENGTH),
+        // A closing bracket at the end would read back on the brand page as a language.
+        translation: z.string().trim().min(1).max(MAX_FORCED_TRANSLATION_LENGTH).refine((t) => !t.endsWith("]"), "A translation cannot end with ]"),
         language: z.preprocess((v) => (v === null || v === "" ? undefined : v), z.string().trim().min(2).max(40).optional()),
       }),
     )

@@ -2,6 +2,7 @@
 import { z } from "zod";
 import { newId, nowIso } from "../ids";
 import { getTranslateProvider, getTranslateProviderByName } from "../providers";
+import { TRANSLATION_GONE } from "../providers/types";
 import { getStore } from "../store";
 import { MAX_TRANSLATION_SPEAKERS, TRANSLATION_QUALITIES, type Translation } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
@@ -106,6 +107,8 @@ const LINK_TTL_MS = 60 * 60 * 1000;
 const LIST_REFRESHES = 5;
 /** The least time between two status reads of one job from listings, however many tabs poll. */
 const MIN_CHECK_GAP_MS = 15_000;
+/** How old a job must be before the provider having no record of it marks it failed. */
+const GONE_AFTER_MS = 30 * 60 * 1000;
 /** When each job was last asked about from a listing, in this server instance. */
 const lastChecked = new Map<string, number>();
 
@@ -139,6 +142,8 @@ async function refreshTranslation(item: Translation): Promise<Translation> {
   const current = (await getStore().get<Translation>("translation", item.id)) ?? item;
   if (current.updatedAt !== item.updatedAt) return current;
   if (current.status === "completed" && update.status !== "completed") return current;
+  // A job the provider does not know yet may simply be new (or the provider briefly wrong): only an old one is gone.
+  if (update.error === TRANSLATION_GONE && Date.now() - Date.parse(current.createdAt) < GONE_AFTER_MS) return current;
   if (running(current) && update.status === current.status) return current;
   const next: Translation = { ...current, ...stripUndefined(update), updatedAt: nowIso() };
   return getStore().put("translation", next);

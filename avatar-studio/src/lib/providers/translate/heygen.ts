@@ -2,7 +2,7 @@ import { LANGUAGES } from "../../stock";
 import { webhookUrl } from "../../config";
 import { HeyGenClient } from "../heygen-client";
 import type { TranslationRequest } from "../../types";
-import type { TranslateProvider } from "../types";
+import { TRANSLATION_GONE, type TranslateProvider } from "../types";
 
 export class HeyGenTranslateProvider implements TranslateProvider {
   readonly name = "heygen";
@@ -42,7 +42,7 @@ export class HeyGenTranslateProvider implements TranslateProvider {
         v2 = await this.client.translationStatusV2(providerJobId);
       } catch (old) {
         // Unknown to both: the job is gone, so it stops being asked about.
-        if (/ failed: 404\b/.test(old instanceof Error ? old.message : "")) return { status: "failed" as const, error: "HeyGen has no record of this translation" };
+        if (/ failed: 404\b/.test(old instanceof Error ? old.message : "")) return { status: "failed" as const, error: TRANSLATION_GONE };
         throw old;
       }
       if (v2.status === "success") return { status: "completed" as const, videoUrl: v2.url };

@@ -104,6 +104,9 @@ export function splitKnowledge(instructions: string): { own: string; reference: 
   return { own: instructions.slice(0, at), reference: nl < 0 ? "" : rest.slice(nl + 1) };
 }
 
+/** The error a provider reports for a job it has no record of; a new job is given time before it is believed. */
+export const TRANSLATION_GONE = "The provider has no record of this translation";
+
 export interface TranslateProvider {
   readonly name: string;
   createTranslation(input: TranslationRequest): Promise<{ providerJobId: string }>;

@@ -209,6 +209,12 @@ describe("multi-language translation", () => {
       await getStore().put("translation", job("tr_gone", { status: "processing", provider: "heygen", providerJobId: "gone_1" }));
       respond = () => new Response("not found", { status: 404 });
       assert.deepEqual((await listTranslations("u-r")).find((t) => t.id === "tr_gone")?.status, "failed");
+      // A new job HeyGen does not know yet (it has only just been created) stays running and finishes later.
+      await getStore().put("translation", job("tr_new", { status: "processing", provider: "heygen", providerJobId: "vt_new", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }));
+      assert.equal((await listTranslations("u-r")).find((t) => t.id === "tr_new")?.status, "processing");
+      respond = () => ok({ status: "completed", video_url: "https://files.heygen.ai/new.mp4" });
+      const { getTranslation } = await import("../services");
+      assert.equal((await getTranslation("tr_new", "u-r")).status, "completed");
 
       // A late failure callback does not undo a finished dub.
       const late = await applyTranslationWebhook("heygen", { event_type: "video_translate.fail", event_data: { video_translation_id: "vt_race", msg: "late" } });

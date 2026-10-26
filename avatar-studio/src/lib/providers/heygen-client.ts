@@ -96,6 +96,16 @@ export class HeyGenClient {
     );
   }
 
+  /** Brand glossary (v3): rules every translation that names it follows; `key` makes a retried create return the same glossary. */
+  createGlossary(body: { name: string; do_not_translate_terms: Array<{ term: string }> }, key: string) {
+    return this.request<{ id?: string; brand_glossary_id?: string }>(`${V3}/brand-glossaries`, { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": key } });
+  }
+
+  /** The workspace's glossaries (the first 100), with their names and ids. */
+  listGlossaries() {
+    return this.request<Array<{ id?: string; brand_glossary_id?: string; name?: string }> | { items?: Array<{ id?: string; brand_glossary_id?: string; name?: string }> }>(`${V3}/brand-glossaries?limit=100`);
+  }
+
   /** Proofread (v3): the lines are translated first and dubbed once they are approved; one id per output language. */
   createProofread(body: Record<string, unknown>) {
     return this.request<{ proofread_ids: string[] }>(`${V3}/video-translations/proofreads`, { method: "POST", body: JSON.stringify(body) });

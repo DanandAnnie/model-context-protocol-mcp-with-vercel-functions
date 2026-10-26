@@ -7,7 +7,7 @@ import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { ApiError, api, formatDate } from "@/lib/client";
-import { MAX_TRANSLATION_SPEAKERS, type Translation, type TranslationQuality } from "@/lib/types";
+import { MAX_TRANSLATION_SPEAKERS, type BrandKit, type Translation, type TranslationQuality } from "@/lib/types";
 
 /** A job worth polling for: lines being translated or a dub running, but not lines waiting on someone to read them. */
 const moving = (t: Translation) => (t.status === "processing" || t.status === "queued") && t.proofreadStage !== "ready";
@@ -44,6 +44,10 @@ function TranslateInner() {
   const [removeMusic, setRemoveMusic] = useState(false);
   const [enhanceSpeech, setEnhanceSpeech] = useState(false);
   const [proofread, setProofread] = useState(false);
+  const { data: brandData } = useApi<{ brand: BrandKit | null }>("/api/brand");
+  const glossary = brandData?.brand?.glossary ?? [];
+  // On by default whenever the brand kit has terms to keep.
+  const [keepGlossary, setKeepGlossary] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -52,7 +56,7 @@ function TranslateInner() {
     setErr(null);
     try {
       const fallback = languages.length === 1 ? `Translation to ${languages[0]}` : "Translation";
-      await api("/api/translate", { method: "POST", body: JSON.stringify({ title: title || fallback, sourceVideoUrl, targetLanguages: languages, ...(lipSync ? {} : { audioOnly: true }), ...(speakers ? { speakers } : {}), ...(quality === "precision" ? { quality } : {}), ...(removeMusic ? { removeMusic } : {}), ...(enhanceSpeech ? { enhanceSpeech } : {}), ...(proofread ? { proofread } : {}) }) });
+      await api("/api/translate", { method: "POST", body: JSON.stringify({ title: title || fallback, sourceVideoUrl, targetLanguages: languages, ...(lipSync ? {} : { audioOnly: true }), ...(speakers ? { speakers } : {}), ...(quality === "precision" ? { quality } : {}), ...(removeMusic ? { removeMusic } : {}), ...(enhanceSpeech ? { enhanceSpeech } : {}), ...(proofread ? { proofread } : {}), ...(keepGlossary && glossary.length ? { keepGlossary: true } : {}) }) });
       setSource("");
       setTitle("");
       // The next video may have a different cast; the lip-sync choice is a preference and stays.
@@ -132,6 +136,18 @@ function TranslateInner() {
                 </label>
               </div>
             </div>
+            {glossary.length > 0 && (
+              <label className="flex items-start gap-2 text-sm text-slate-700">
+                <input type="checkbox" className="mt-0.5" checked={keepGlossary} disabled={canEdit === false} onChange={(e) => setKeepGlossary(e.target.checked)} />
+                <span>
+                  Keep the brand glossary&apos;s {glossary.length} {glossary.length === 1 ? "term" : "terms"} as written
+                  <span className="block text-xs text-slate-500">
+                    {glossary.slice(0, 4).join(", ")}
+                    {glossary.length > 4 ? `, and ${glossary.length - 4} more` : ""} stay untranslated in the dub. Edit them in the brand kit.
+                  </span>
+                </span>
+              </label>
+            )}
             <label className="flex items-start gap-2 text-sm text-slate-700">
               <input type="checkbox" className="mt-0.5" checked={proofread} disabled={canEdit === false} onChange={(e) => setProofread(e.target.checked)} />
               <span>
@@ -166,7 +182,8 @@ function TranslateInner() {
                         {t.quality === "precision" ? " · precision" : ""}
                         {t.removeMusic ? " · no music" : ""}
                         {t.enhanceSpeech ? " · enhanced speech" : ""}
-                        {t.proofread ? " · proofread" : ""} · {formatDate(t.createdAt)}
+                        {t.proofread ? " · proofread" : ""}
+                        {t.glossary?.length ? ` · keeps ${t.glossary.length} brand ${t.glossary.length === 1 ? "term" : "terms"}` : ""} · {formatDate(t.createdAt)}
                       </div>
                       {t.proofreadStage === "preparing" && <div className="mt-1 text-xs text-slate-500">Translating the lines for you to proofread…</div>}
                       {t.proofreadStage === "dubbing" && <div className="mt-1 text-xs text-slate-500">Starting the dub…</div>}

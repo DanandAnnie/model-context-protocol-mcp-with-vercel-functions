@@ -319,6 +319,8 @@ export interface TranslationRequest {
   enhanceSpeech?: boolean;
   /** Stop once the lines are translated so someone can correct them before the dub is made. */
   proofread?: boolean;
+  /** Terms the dub keeps exactly as written (the brand kit's glossary when the dub was asked to keep it). */
+  glossary?: string[];
 }
 
 /** How a dub is made: quickly, or more slowly for a more natural result. */

@@ -13,6 +13,7 @@ import { MAX_TRANSLATION_SPEAKERS, TRANSLATION_QUALITIES, type CaptionCue, type 
 import { LOCAL_OWNER } from "../owner-id";
 import { owned, stripUndefined } from "./shared";
 import { MAX_CAPTION_CUE_CHARS, MAX_CAPTION_CUES } from "./videos";
+import { getBrandKit } from "./brand";
 
 const languageSchema = z.string().trim().min(2).max(40);
 /** How a dub is made: voice only or lip-synced, how many people speak, its quality, and its audio. */
@@ -25,6 +26,8 @@ const dubOptions = {
   removeMusic: z.preprocess(unsetIfNull, z.boolean().optional()),
   enhanceSpeech: z.preprocess(unsetIfNull, z.boolean().optional()),
   proofread: z.preprocess(unsetIfNull, z.boolean().optional()),
+  /** Keep the brand kit's glossary terms exactly as written in the dub. */
+  keepGlossary: z.preprocess(unsetIfNull, z.boolean().optional()),
 };
 /** The options as stored: the defaults (lip-synced, detected speakers, speed, music kept, speech as recorded) as no field at all. */
 const setOptions = (v: { audioOnly?: boolean; speakers?: number; quality?: string; removeMusic?: boolean; enhanceSpeech?: boolean; proofread?: boolean }) => ({
@@ -100,7 +103,7 @@ export const translationBatchSchema = z
       ctx.addIssue({ code: "custom", path: ["targetLanguages"], message: "Pick at least one language" });
       return z.NEVER;
     }
-    return { title: v.title, sourceVideoUrl: v.sourceVideoUrl, languages, ...setOptions(v) };
+    return { title: v.title, sourceVideoUrl: v.sourceVideoUrl, languages, ...setOptions(v), ...(v.keepGlossary ? { keepGlossary: true } : {}) };
   });
 
 /**
@@ -110,15 +113,17 @@ export const translationBatchSchema = z
  */
 export async function createTranslations(input: z.infer<typeof translationBatchSchema>, ownerId: string = LOCAL_OWNER): Promise<Translation[]> {
   if (input.proofread) assertProofreadReachable(getTranslateProvider().name);
+  // The brand kit's terms as they are now; the job keeps the list it was dubbed with.
+  const glossary = input.keepGlossary ? ((await getBrandKit(ownerId))?.glossary ?? []) : [];
   const out: Translation[] = [];
   for (const language of input.languages) {
     const title = input.languages.length > 1 ? `${input.title} (${language})`.slice(0, 160) : input.title;
-    out.push(await createTranslation({ title, sourceVideoUrl: input.sourceVideoUrl, targetLanguage: language, ...setOptions(input) }, ownerId));
+    out.push(await createTranslation({ title, sourceVideoUrl: input.sourceVideoUrl, targetLanguage: language, ...setOptions(input), ...(glossary.length ? { glossary } : {}) }, ownerId));
   }
   return out;
 }
 
-export async function createTranslation(req: z.infer<typeof translationRequestSchema>, ownerId: string = LOCAL_OWNER): Promise<Translation> {
+export async function createTranslation(req: z.infer<typeof translationRequestSchema> & { glossary?: string[] }, ownerId: string = LOCAL_OWNER): Promise<Translation> {
   const provider = getTranslateProvider();
   const base: Translation = {
     // Default options (a lip-synced dub at speed, music and speech as recorded) are stored as no field at all.
@@ -126,6 +131,7 @@ export async function createTranslation(req: z.infer<typeof translationRequestSc
     sourceVideoUrl: req.sourceVideoUrl,
     targetLanguage: req.targetLanguage,
     ...setOptions(req),
+    ...(req.glossary?.length ? { glossary: req.glossary } : {}),
     id: newId("tr"),
     ownerId,
     status: "queued",

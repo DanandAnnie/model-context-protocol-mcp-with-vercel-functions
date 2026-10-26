@@ -225,3 +225,66 @@ describe("multi-language translation", () => {
     }
   });
 });
+
+describe("dubs that keep the brand glossary", () => {
+  it("stores the kit's terms on each dub only when asked and the kit has some", async () => {
+    const { saveBrandKit, brandKitSchema } = await import("../services");
+    const [none] = await createTranslations(translationBatchSchema.parse({ ...base, targetLanguage: "Spanish", keepGlossary: true }), "u-gl");
+    assert.equal("glossary" in none, false, "no kit, nothing to keep");
+    await saveBrandKit(brandKitSchema.parse({ name: "Acme", primaryColor: "#112233", glossary: ["Acme Cloud", "Zeno"] }), "u-gl");
+    const made = await createTranslations(translationBatchSchema.parse({ ...base, targetLanguages: ["French", "German"], keepGlossary: true }), "u-gl");
+    assert.deepEqual(made.map((t) => t.glossary), [["Acme Cloud", "Zeno"], ["Acme Cloud", "Zeno"]]);
+    const [off] = await createTranslations(translationBatchSchema.parse({ ...base, targetLanguage: "Spanish", keepGlossary: false }), "u-gl");
+    assert.equal("glossary" in off, false);
+    assert.equal("keepGlossary" in off, false, "the request flag is not stored; the terms are");
+  });
+
+  it("gives HeyGen one glossary per set of terms, found again by name when it already exists", async () => {
+    const { HeyGenTranslateProvider } = await import("../providers/translate/heygen");
+    const realFetch = globalThis.fetch;
+    const calls: Array<{ method: string; url: string; body?: Record<string, unknown>; key?: string }> = [];
+    let respond: (method: string, url: string) => Response = () => new Response("{}");
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      calls.push({ method, url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined, key: (init?.headers as Record<string, string> | undefined)?.["Idempotency-Key"] });
+      return respond(method, String(url));
+    }) as typeof fetch;
+    const ok = (data: unknown) => new Response(JSON.stringify({ data }), { status: 200 });
+    try {
+      const heygen = new HeyGenTranslateProvider("key");
+      respond = (_m, url) => (url.endsWith("/brand-glossaries") ? ok({ id: "bg_1", name: "x" }) : ok({ video_translation_ids: ["vt_g"] }));
+      await heygen.createTranslation({ ...base, targetLanguage: "French", glossary: ["Zeno", "Acme Cloud"] });
+      const [create, dub] = calls;
+      assert.equal(create.url, "https://api.heygen.com/v3/brand-glossaries");
+      assert.deepEqual(create.body?.do_not_translate_terms, [{ term: "Acme Cloud" }, { term: "Zeno" }]);
+      assert.match(String(create.body?.name), /^Avatar Studio terms [0-9a-f]{16}$/);
+      assert.match(create.key ?? "", /^avatar-studio-glossary-[0-9a-f]{16}$/, "a retried create returns the same glossary");
+      assert.equal(dub.body?.brand_glossary_id, "bg_1");
+
+      // The same terms in any order reuse it; a dub without terms names none.
+      calls.length = 0;
+      await heygen.createTranslation({ ...base, targetLanguage: "German", glossary: ["Acme Cloud", "Zeno"] });
+      await heygen.createTranslation({ ...base, targetLanguage: "German" });
+      assert.deepEqual(calls.map((c) => [c.url.endsWith("/brand-glossaries"), c.body?.brand_glossary_id]), [[false, "bg_1"], [false, undefined]]);
+
+      // A glossary made before (its name taken) is found by name, and proofreads use it too.
+      calls.length = 0;
+      respond = (m, url) => {
+        if (url.endsWith("/brand-glossaries") && m === "POST") return new Response("name taken", { status: 409 });
+        if (url.includes("/brand-glossaries?")) {
+          const name = String(calls.find((c) => c.method === "POST" && c.url.endsWith("/brand-glossaries"))?.body?.name);
+          return ok([{ id: "bg_other", name: "Someone else's" }, { id: "bg_2", name }]);
+        }
+        return ok({ proofread_ids: ["pr_g"] });
+      };
+      await heygen.createProofread({ ...base, targetLanguage: "Spanish", glossary: ["Nimbus"] });
+      assert.equal(calls.at(-1)?.body?.brand_glossary_id, "bg_2");
+
+      // Any other failure fails the dub rather than dubbing without the terms.
+      respond = () => new Response("down", { status: 500 });
+      await assert.rejects(heygen.createTranslation({ ...base, targetLanguage: "Spanish", glossary: ["Orbit"] }), /500/);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+});

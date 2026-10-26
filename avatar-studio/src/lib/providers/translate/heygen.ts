@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { LANGUAGES } from "../../stock";
 import { webhookUrl } from "../../config";
 import { HeyGenClient } from "../heygen-client";
@@ -8,8 +9,11 @@ import { TRANSLATION_GONE, type TranslateProvider } from "../types";
 /** The largest subtitle file read back from a proofread. */
 const MAX_SRT_CHARS = 1_000_000;
 
+/** HeyGen glossaries made in this server instance, by the terms they keep. */
+const glossaryIds = new Map<string, string>();
+
 /** The source, language, and options of a dub, as both a translation and a proofread take them. */
-function dubBody(input: TranslationRequest) {
+function dubBody(input: TranslationRequest, glossaryId?: string) {
   return {
     video: { type: "url", url: input.sourceVideoUrl },
     output_languages: [input.targetLanguage],
@@ -21,6 +25,7 @@ function dubBody(input: TranslationRequest) {
     ...(input.speakers ? { speaker_num: input.speakers } : {}),
     ...(input.removeMusic ? { disable_music_track: true } : {}),
     ...(input.enhanceSpeech ? { enable_speech_enhancement: true } : {}),
+    ...(glossaryId ? { brand_glossary_id: glossaryId } : {}),
   };
 }
 
@@ -32,9 +37,37 @@ export class HeyGenTranslateProvider implements TranslateProvider {
   constructor(apiKey: string) {
     this.client = new HeyGenClient(apiKey);
   }
+  /**
+   * The id of a HeyGen glossary that keeps exactly these terms untranslated. Its name carries a digest of the terms,
+   * so the same terms always find the same glossary (made once, then looked up by name) and different ones never
+   * change a glossary another dub is using.
+   */
+  private async glossaryFor(terms: string[] | undefined): Promise<string | undefined> {
+    const kept = [...new Set((terms ?? []).map((t) => t.trim()).filter(Boolean))].sort();
+    if (!kept.length) return undefined;
+    const digest = createHash("sha256").update(JSON.stringify(kept)).digest("hex").slice(0, 16);
+    const known = glossaryIds.get(digest);
+    if (known) return known;
+    const name = `Avatar Studio terms ${digest}`;
+    let id: string | undefined;
+    try {
+      const made = await this.client.createGlossary({ name, do_not_translate_terms: kept.map((term) => ({ term })) }, `avatar-studio-glossary-${digest}`);
+      id = made.id ?? made.brand_glossary_id;
+    } catch (err) {
+      // Made before (by another instance, or before a restart): the name is taken, so it is looked up.
+      if (!/ failed: 409\b/.test(err instanceof Error ? err.message : "")) throw err;
+      const listed = await this.client.listGlossaries();
+      const all = Array.isArray(listed) ? listed : listed.items ?? [];
+      const found = all.find((g) => g.name === name);
+      id = found?.id ?? found?.brand_glossary_id;
+    }
+    if (!id) throw new Error("HeyGen did not return the brand glossary for the terms to keep");
+    glossaryIds.set(digest, id);
+    return id;
+  }
   async createTranslation(input: TranslationRequest) {
     const data = await this.client.createTranslation({
-      ...dubBody(input),
+      ...dubBody(input, await this.glossaryFor(input.glossary)),
       ...(webhookUrl("heygen-translate") ? { callback_url: webhookUrl("heygen-translate") } : {}),
     });
     const [id] = data.video_translation_ids ?? [];
@@ -42,7 +75,7 @@ export class HeyGenTranslateProvider implements TranslateProvider {
     return { providerJobId: id };
   }
   async createProofread(input: TranslationRequest) {
-    const data = await this.client.createProofread(dubBody(input));
+    const data = await this.client.createProofread(dubBody(input, await this.glossaryFor(input.glossary)));
     const [id] = data.proofread_ids ?? [];
     if (!id) throw new Error("HeyGen did not return a proofread id");
     return { proofreadId: id };

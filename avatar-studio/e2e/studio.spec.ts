@@ -2084,6 +2084,34 @@ test("a dub can be proofread: the translated lines are corrected before the dub 
   expect((await page.request.get(`/api/translate/${made.id}/srt?token=wrong`)).status()).toBe(404);
 });
 
+test("a dub can keep the brand glossary's terms as written", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const before = (await (await page.request.get("/api/brand")).json()).brand;
+  try {
+    expect((await page.request.put("/api/brand", { data: { ...(before ?? {}), name: before?.name ?? "Acme", primaryColor: before?.primaryColor ?? "#0f766e", glossary: ["Acme Cloud", "Zeno"] } })).ok()).toBe(true);
+    await page.goto("/translate");
+    const keep = page.getByLabel(/Keep the brand glossary's 2 terms as written/);
+    await expect(keep).toBeChecked();
+    await expect(page.getByText("Acme Cloud, Zeno stay untranslated in the dub.")).toBeVisible();
+    await page.getByPlaceholder("https://…/video.mp4").fill("https://cdn.example.com/launch.mp4");
+    await page.getByLabel("Title (optional)").fill(`Glossary ${tag}`);
+    await page.getByRole("button", { name: "Translate video" }).click();
+    const card = page.getByTestId("translation").filter({ has: page.getByText(`Glossary ${tag}`, { exact: true }) });
+    await expect(card.getByTestId("translation-meta")).toContainText("→ Spanish · keeps 2 brand terms");
+    // Turned off, the next dub keeps none.
+    await keep.uncheck();
+    await page.getByPlaceholder("https://…/video.mp4").fill("https://cdn.example.com/launch.mp4");
+    await page.getByLabel("Title (optional)").fill(`Plain ${tag}`);
+    await page.getByRole("button", { name: "Translate video" }).click();
+    const plain = page.getByTestId("translation").filter({ has: page.getByText(`Plain ${tag}`, { exact: true }) });
+    await expect(plain.getByTestId("translation-meta")).toBeVisible();
+    await expect(plain.getByTestId("translation-meta")).not.toContainText("brand term");
+  } finally {
+    if (before) await page.request.put("/api/brand", { data: before });
+    else await page.request.delete("/api/brand");
+  }
+});
+
 test("a share page can ask for an email before playing, and the owner sees who watched", async ({ page, browser }) => {
   const v = await createVideoViaApi(page, `Gated ${Date.now().toString(36)}`);
   await page.goto(`/videos/${v.id}`);

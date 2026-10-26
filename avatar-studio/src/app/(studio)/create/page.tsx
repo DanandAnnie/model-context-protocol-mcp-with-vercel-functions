@@ -557,16 +557,19 @@ function CreateInner() {
   const spacesKnown = !!spaces || !!spacesError;
   const templateId = params.get("template");
   const fromId = params.get("from");
+  // A copy of a video or a template keeps its own draft, so editing one never overwrites the unsent draft of a plain
+  // visit, and a reload brings back the edits rather than the original.
+  const draftSource = fromId ? `from:${fromId}` : templateId ? `template:${templateId}` : "";
+  const editKey = draftKey && (draftSource ? `${draftKey}:${draftSource}` : draftKey);
   // A Video Agent plan to review (?plan=agent), read once: a refresh comes back to the autosaved draft of it.
   const agentPlan = useRef<AgentDraft | null | undefined>(undefined);
   const [fromAgent, setFromAgent] = useState(false);
 
-  // Restore an unsent draft on a plain visit (not when a template or copy is requested).
+  // Restore an unsent draft: a plain visit's, or the edits of the copy or template requested.
   useEffect(() => {
     if (hydrated.current || !spacesKnown) return;
     hydrated.current = true;
-    if (templateId || fromId) return;
-    if (params.get("plan") === "agent") {
+    if (!draftSource && params.get("plan") === "agent") {
       if (agentPlan.current === undefined) agentPlan.current = takeAgentDraft();
       const p = agentPlan.current;
       if (p) {
@@ -582,8 +585,8 @@ function CreateInner() {
       }
     }
     // Nothing to restore without the space's key, or over words typed while the space was being looked up.
-    if (!draftKey || scenesNow.current.some((sc) => sc.script.trim())) return;
-    const d = readDraft(draftKey);
+    if (!editKey || scenesNow.current.some((sc) => sc.script.trim())) return;
+    const d = readDraft(editKey);
     if (!d) return;
     setTitle(d.title);
     setScenes(d.scenes.map((sc) => newScene(sc.script, sc.background, { ...sc, layout: restoredLayout(sc.layout) })));
@@ -599,20 +602,25 @@ function CreateInner() {
     setEmotion(asEmotion(d.emotion));
     setPrefill({ avatarId: d.avatarId, voiceId: d.voiceId });
     setDraftRestored(d.savedAt);
-  }, [templateId, fromId, params, draftKey, spacesKnown]);
+  }, [draftSource, params, editKey, spacesKnown]);
 
   // Autosave the editor state (debounced) so a refresh never loses work.
   useEffect(() => {
-    if (!hydrated.current || !draftKey) return;
+    if (!hydrated.current || !editKey) return;
     const empty = scenes.every((sc) => !sc.script.trim()) && title === "Untitled video";
     const t = setTimeout(() => {
-      writeDraft(draftKey, empty ? null : { title, scenes, aspect, resolution, captions, ...(isDefaultCaptionStyle ? {} : { captionStyle }), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
+      writeDraft(editKey, empty ? null : { title, scenes, aspect, resolution, captions, ...(isDefaultCaptionStyle ? {} : { captionStyle }), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
     }, 400);
     return () => clearTimeout(t);
-  }, [title, scenes, aspect, resolution, captions, captionStyle, isDefaultCaptionStyle, speed, pitch, emotion, avatar, voice, draftKey]);
+  }, [title, scenes, aspect, resolution, captions, captionStyle, isDefaultCaptionStyle, speed, pitch, emotion, avatar, voice, editKey]);
 
   function discardDraft() {
-    if (draftKey) writeDraft(draftKey, null);
+    if (editKey) writeDraft(editKey, null);
+    // A copy or template starts again from its original.
+    if (draftSource) {
+      window.location.reload();
+      return;
+    }
     setTitle("Untitled video");
     setScenes([newScene()]);
     setActiveIdx(0);
@@ -650,8 +658,10 @@ function CreateInner() {
     setScenes((prev) => prev.map((sc) => (sc.script.trim() ? sc : { ...sc, background: b.defaultBackground ?? { type: "color", value: b.primaryColor } })));
   }, [brandData, fromId, templateId, draftRestored, fromAgent]);
 
-  // Pre-fill from a template (?template=) or an existing video (?from=).
+  // Pre-fill from a template (?template=) or an existing video (?from=), unless its edits were kept from before.
+  const keptEdits = () => !!editKey && !!draftSource && !!readDraft(editKey);
   useEffect(() => {
+    if (!spacesKnown || keptEdits()) return;
     const t = findTemplate(templateId);
     if (t) {
       setTitle(t.title);
@@ -682,9 +692,10 @@ function CreateInner() {
     return () => {
       cancelled = true;
     };
-  }, [templateId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once the space (and so the draft key) is known
+  }, [templateId, spacesKnown]);
   useEffect(() => {
-    if (!fromId) return;
+    if (!fromId || !spacesKnown || keptEdits()) return;
     api<{ video: Video }>(`/api/videos/${fromId}`)
       .then(({ video }) => {
         setTitle(`${video.title} (copy)`);
@@ -700,7 +711,8 @@ function CreateInner() {
         setPrefill({ avatarId: video.avatarId, voiceId: video.voiceId });
       })
       .catch((e) => setErr(e instanceof Error ? e.message : "Could not load the original video"));
-  }, [fromId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once the space (and so the draft key) is known
+  }, [fromId, spacesKnown]);
 
   // Default selections once data arrives: the first avatar, and its default voice if it has one
   // (a draft, template, copy, or brand kit applied below overrides both).
@@ -773,7 +785,7 @@ function CreateInner() {
         method: "POST",
         body: JSON.stringify({ title, scenes, avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}) }),
       });
-      if (draftKey) writeDraft(draftKey, null);
+      if (editKey) writeDraft(editKey, null);
       router.push(`/videos/${video.id}`);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not start the render");
@@ -1004,8 +1016,8 @@ function CreateInner() {
                   // HeyGen speaks each scene at its own pace, as its studio lets each scene set one.
                   <select aria-label="Scene speed" title="HeyGen speaks this scene at its own pace; D-ID keeps its natural pace" className={`${inputClass} w-auto py-1 text-xs`} value={active.speed ?? ""} onChange={(e) => updateScene(activeIdx, { speed: e.target.value ? Number(e.target.value) : undefined })}>
                     <option value="">{`Video speed (${speed.toFixed(2)}x)`}</option>
-                    {/* The video's own speed is the first choice already; a scene's chosen pace stays listed whatever the slider says. */}
-                    {[...new Set([...SCENE_SPEEDS.filter((v) => v !== speed), ...(active.speed ? [active.speed] : [])])].sort((x, y) => x - y).map((v) => (
+                    {/* "Video speed" follows the slider; a pace picked here, the slider's own included, stays whatever the slider says later. */}
+                    {[...new Set([...SCENE_SPEEDS, ...(active.speed ? [active.speed] : [])])].sort((x, y) => x - y).map((v) => (
                       <option key={v} value={v}>{`${v.toFixed(2)}x`}</option>
                     ))}
                   </select>

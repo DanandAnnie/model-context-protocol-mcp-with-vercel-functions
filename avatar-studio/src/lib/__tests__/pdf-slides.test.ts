@@ -19,6 +19,11 @@ describe("slideAspect", () => {
 });
 
 describe("slideScripts", () => {
+  it("ends a line with a full stop only where speech is left open, never after a pause or a closing quote", () => {
+    // A slide of only a pause stays a silent scene; a pause or quote at the end is not followed by a spoken stop.
+    assert.deepEqual(slideScripts(["[pause 3s]", "Thanks for watching [pause 2s]", 'She said "go."', "Next steps (see below.)", "Our plan"]).scripts, ["[pause 3s]", "Thanks for watching [pause 2s]", 'She said "go."', "Next steps (see below.)", "Our plan."]);
+  });
+
   it("counts the blank line between scenes, so a full deck joins to no more than the budget", () => {
     // 20 pages of 249 characters fit the raw budget (4980) but not once joined (4980 + 19 * 2 = 5018).
     const texts = Array.from({ length: 20 }, () => `${"a".repeat(248)}.`);

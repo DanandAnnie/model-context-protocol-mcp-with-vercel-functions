@@ -1,6 +1,7 @@
 // Turning a slide deck saved as PDF into scenes, like HeyGen's PDF import: each page becomes a picture (uploaded
 // as a background image by the editor) and its text a first draft of what the presenter says. The rendering runs in
 // the browser with pdf.js, loaded only when a deck is imported; the text handling is plain and runs anywhere.
+import { PAUSE_MARKER } from "./pauses";
 import { MAX_SCRIPT_CHARS } from "./script-import";
 import { MAX_SCENES } from "./types";
 
@@ -33,6 +34,11 @@ export function pageText(runs: TextRun[]): string {
     .join("\n");
 }
 
+/** A line that already ends a sentence: closing punctuation, maybe followed by a closing quote or bracket. */
+const ENDED = /[.!?:;…][\s"'”’»)\]]*$/;
+/** A line ending in a pause marker (or made of one): a full stop after it would be read as a word. */
+const ENDS_IN_PAUSE = new RegExp(`${PAUSE_MARKER}\\s*$`, "i");
+
 /**
  * The scripts for a deck's pages: each page's lines joined into sentences, ending in a full stop where a line has
  * no closing punctuation (a slide title or bullet), and the whole kept within a video's script budget by giving each
@@ -45,7 +51,7 @@ export function slideScripts(texts: string[], budget = MAX_SCRIPT_CHARS): { scri
       .split("\n")
       .map((line) => line.replace(/^[-•▪●◦*–]\s*/, "").trim())
       .filter(Boolean)
-      .map((line) => (/[.!?:;…]$/.test(line) ? line : `${line}.`))
+      .map((line) => (ENDED.test(line) || ENDS_IN_PAUSE.test(line) ? line : `${line}.`))
       .join(" "),
   );
   const total = spoken.reduce((n, s) => n + s.length, 0);

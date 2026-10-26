@@ -55,6 +55,7 @@ describe("silent scenes", () => {
     const video = await createVideo(paced, "holder");
     assert.equal(video.scenes?.[1].speed, undefined, "a silent scene has no pace to keep");
     assert.match(issues(templateInputSchema.safeParse({ title: "T", scenes: [{ script: "Hi.", background: bg }, { script: "[pause 10s] ".repeat(7), background: bg }] })), /at most 60 seconds/);
+    assert.match(issues(templateInputSchema.safeParse({ title: "T", scenes: [{ script: "[pause 3s]", background: bg }] })), /every scene is silent/);
   });
 
   it("keep their share in a translated track whether or not the translation kept the pause", () => {

@@ -2436,6 +2436,27 @@ test("a pause inserted in the script holds the presenter and leaves a gap in the
   expect(share).not.toContain("[pause");
 });
 
+test("a copy keeps its own unsent draft, apart from the editor's", async ({ page }) => {
+  const made = await page.request.post("/api/videos", { data: { title: "Original tour", script: "The original words.", avatarId: "stock_1", voiceId: "stock_voice_1" } });
+  const id = ((await made.json()) as { video: { id: string } }).video.id;
+  // An unsent draft in the editor.
+  await page.locator("input[placeholder='Video title']").fill("My own draft");
+  await page.locator("textarea").fill("Words I was writing.");
+  await page.waitForTimeout(600);
+  // Edit a copy, then reload: the copy's edits come back, not the original.
+  await page.goto(`/create?from=${id}`);
+  await expect(page.locator("textarea")).toHaveValue("The original words.");
+  await page.locator("textarea").fill("The copy, edited.");
+  await page.waitForTimeout(600);
+  await page.reload();
+  await expect(page.locator("textarea")).toHaveValue("The copy, edited.");
+  await expect(page.getByText(/Restored your unsent draft/)).toBeVisible();
+  // The editor's own draft is untouched.
+  await page.goto("/create");
+  await expect(page.locator("input[placeholder='Video title']")).toHaveValue("My own draft");
+  await expect(page.locator("textarea")).toHaveValue("Words I was writing.");
+});
+
 test("a scene of only pauses is a silent one, held without a word", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill(`Silent ${Date.now().toString(36)}`);
   const box = page.locator("textarea");

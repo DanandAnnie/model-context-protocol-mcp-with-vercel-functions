@@ -3,7 +3,7 @@ import { z } from "zod";
 import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
 import { MAX_SCENES, backdropIdOf } from "../types";
-import { silentProblem } from "../pauses";
+import { silentProblem, silentSeconds } from "../pauses";
 import type { Video, VideoTemplate } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { LimitError, NotFoundError, ValidationError } from "../errors";
@@ -36,7 +36,12 @@ export const templateInputSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),
   description: z.string().trim().max(200).optional(),
   fromVideoId: z.string().min(1).optional(),
-  scenes: z.array(sceneSchema).min(1).max(MAX_SCENES).optional(),
+  scenes: z
+    .array(sceneSchema)
+    .min(1)
+    .max(MAX_SCENES)
+    .refine((scenes) => scenes.some((sc) => !silentSeconds(sc.script)), "A template needs some words, not only pauses: every scene is silent")
+    .optional(),
   avatarId: z.string().min(1).optional(),
   voiceId: z.string().min(1).optional(),
   aspect: z.enum(["16:9", "9:16", "1:1"]).optional(),

@@ -27,7 +27,11 @@ describe("per-scene speed", () => {
       ],
     });
     const video = await createVideo(req, "pacer");
-    assert.deepEqual(video.scenes?.map((sc) => sc.speed), [0.5, undefined, undefined], "a speed equal to the video's says nothing of its own");
+    assert.deepEqual(video.scenes?.map((sc) => sc.speed), [0.5, 1, undefined], "a scene's chosen speed is kept, even one equal to the video's");
+    // A lone scene's speed is the video's.
+    const lone = videoRequestSchema.parse({ ...req, speed: 1, scenes: [{ script: ten, background: bg, speed: 0.8 }] });
+    assert.equal(lone.speed, 0.8);
+    assert.equal(lone.scenes?.[0].speed, undefined);
     // The demo render runs as long as each scene takes at its pace: 10 words at 2.5 a second, halved, then twice at full speed.
     assert.equal(video.durationSec ?? Number(video.providerJobId?.split("_")[2]), 16);
     assert.equal(captionDurationSec({ script: video.script, speed: 1, scenes: video.scenes }), 16, "captions are timed the same way until the render reports its length");

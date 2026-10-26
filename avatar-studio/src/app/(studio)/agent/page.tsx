@@ -42,15 +42,16 @@ export default function VideoAgentPage() {
   const [doc, setDoc] = useState<{ name: string; text: string; truncated: boolean } | null>(null);
   const [reading, setReading] = useState(false);
   const [docErr, setDocErr] = useState<string | null>(null);
-  // The focus follows the control that replaces the one pressed: Remove once a file is attached, the file field once removed.
+  // The focus follows the control that replaces the one pressed: Remove once a file is attached, the file field once
+  // removed or refused (it is disabled while a file is read, which drops the focus, so this waits for the read to end).
   const fileInput = useRef<HTMLInputElement>(null);
   const removeButton = useRef<HTMLButtonElement>(null);
   const moveFocus = useRef(false);
   useEffect(() => {
-    if (!moveFocus.current) return;
+    if (!moveFocus.current || reading) return;
     moveFocus.current = false;
     (doc ? removeButton.current : fileInput.current)?.focus();
-  }, [doc]);
+  }, [doc, reading]);
   async function attach(file: File | undefined) {
     if (!file) return;
     setReading(true);
@@ -60,6 +61,7 @@ export default function VideoAgentPage() {
       moveFocus.current = true;
       setDoc({ name: file.name.slice(0, 200), ...read });
     } catch (e) {
+      moveFocus.current = true;
       setDoc(null);
       setDocErr(e instanceof Error ? e.message : `${file.name} could not be read`);
     } finally {

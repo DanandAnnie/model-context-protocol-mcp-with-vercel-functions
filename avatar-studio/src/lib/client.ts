@@ -27,7 +27,13 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     cache: "no-store",
   });
   const text = await res.text();
-  const body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+  let body: Record<string, unknown> = {};
+  try {
+    body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+  } catch {
+    // An HTML error page (a proxy, a timeout) is not an answer to show as it is.
+    throw new ApiError(res.ok ? "The server sent an answer the page could not read; try again" : `The server could not answer (${res.status}); try again`, res.status, undefined, {});
+  }
   if (!res.ok) {
     throw new ApiError(errorMessage(body, res.status), res.status, body.issues, body);
   }

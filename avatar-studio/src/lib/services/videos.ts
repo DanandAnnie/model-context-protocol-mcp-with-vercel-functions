@@ -83,6 +83,10 @@ export const videoRequestSchema = z
         ctx.addIssue({ code: "custom", path: ["scenes"], message: "The video needs some words, not only pauses: every scene is silent" });
         return z.NEVER;
       }
+      // A lone scene's pace is the video's (the page and the editor show one speed).
+      if (v.scenes.length === 1 && v.scenes[0].speed !== undefined) {
+        return { ...v, speed: v.scenes[0].speed, scenes: [{ ...v.scenes[0], speed: undefined }], script, background: v.scenes[0].background };
+      }
       return { ...v, script, background: v.scenes[0].background };
     }
     if (!v.script || !stripPauses(v.script).trim()) {
@@ -255,8 +259,9 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
       avatarName: sc.avatarId ? cast.avatars[sc.avatarId]?.name : undefined,
       // An audio scene has no voice of its own: the clip speaks.
       voiceId: clip ? undefined : sc.voiceId,
-      // A clip has its own pace; a scene's speed equal to the video's says nothing of its own.
-      speed: clip || silentSeconds(sc.script) || sc.speed === undefined || sc.speed === req.speed ? undefined : sc.speed,
+      // A clip has its own pace and a silent scene none; a scene's chosen speed is kept, even one equal to the video's,
+      // so it still holds when the video's speed changes in a copy.
+      speed: clip || silentSeconds(sc.script) ? undefined : sc.speed,
       voiceName: !clip && sc.voiceId ? cast.voices[sc.voiceId]?.name : undefined,
       audioName: clip?.name,
       audioSeconds: clip?.durationSec,

@@ -8,6 +8,7 @@ import { api } from "@/lib/client";
 import { refocusIfLost } from "@/lib/focus";
 import { SCRIPT_TEMPLATES, type ScriptTemplate } from "@/lib/templates";
 import type { VideoTemplate } from "@/lib/types";
+import { stripPauses } from "@/lib/pauses";
 
 const CATEGORIES = ["All", ...Array.from(new Set(SCRIPT_TEMPLATES.map((t) => t.category)))];
 
@@ -57,7 +58,7 @@ export default function TemplatesPage() {
                 </div>
                 <h3 className="mt-3 text-sm font-semibold text-slate-900">{t.title}</h3>
                 {t.description && <p className="mt-1 text-xs text-slate-500">{t.description}</p>}
-                <p className="mt-3 line-clamp-4 flex-1 text-xs leading-relaxed text-slate-600">{t.scenes[0]?.script}</p>
+                <p className="mt-3 line-clamp-4 flex-1 text-xs leading-relaxed text-slate-600">{stripPauses(t.scenes.find((sc) => stripPauses(sc.script).trim())?.script ?? "").trim()}</p>
                 <div className="mt-4 flex items-center gap-2">
                   <Link href={`/create?template=${t.id}`} className="inline-flex flex-1 items-center justify-center rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700">
                     Use template

@@ -74,12 +74,14 @@ describe("scenesFromText", () => {
     assert.deepEqual(scenesFromText("Use snake_case names. [pause 2s] Then go on.").scenes, ["Use snake_case names. [pause 2s] Then go on."]);
   });
 
-  it("keeps a pause-only paragraph with its neighbour, so every scene has words", () => {
+  it("keeps a pause-only paragraph with its neighbour, and a pause-only section as a silent scene", () => {
     assert.deepEqual(scenesFromText("Hello there.\n\n[pause 2s]\n\nWelcome back.").scenes, ["Hello there. [pause 2s]", "Welcome back."]);
     assert.deepEqual(scenesFromText("[pause]\n\nHello.").scenes, ["[pause] Hello."]);
     assert.deepEqual(scenesFromText("[pause 2s]"), { scenes: [], truncated: false });
-    // Also a section of only a pause, between breaks.
-    assert.deepEqual(scenesFromText("Hello.\n\n---\n\n[pause 3s]\n\n---\n\nBye.").scenes, ["Hello. [pause 3s]", "Bye."]);
+    // A section of only pauses, set apart by breaks, is a silent scene of its own when it lasts one to sixty seconds.
+    assert.deepEqual(scenesFromText("Hello.\n\n---\n\n[pause 3s]\n\n---\n\nBye.").scenes, ["Hello.", "[pause 3s]", "Bye."]);
+    assert.deepEqual(scenesFromText("Hello.\n\n---\n\n[pause 0.5s]\n\n---\n\nBye.").scenes, ["Hello. [pause 0.5s]", "Bye."], "too short for a silent scene");
+    assert.deepEqual(scenesFromText("[pause 3s]\n\n---\n\n[pause 2s]").scenes, [], "nothing but silence");
     assert.deepEqual(scenesFromText("\n# Title only\n---\n\n"), { scenes: [], title: "Title only", truncated: false });
   });
 

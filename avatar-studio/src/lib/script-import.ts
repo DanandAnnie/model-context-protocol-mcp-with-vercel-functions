@@ -1,5 +1,5 @@
 // Turning a text or Markdown document into scenes for the editor. Pure, so the editor and the tests share it.
-import { PAUSE_MARKER, stripPauses } from "./pauses";
+import { PAUSE_MARKER, silentProblem, stripPauses } from "./pauses";
 import { MAX_SCENES } from "./types";
 
 /** The most a video's script may hold, all scenes together, as the video schema checks it (scenes joined by a blank line). */
@@ -410,12 +410,19 @@ function withoutDataImages(text: string): string {
   return out + text.slice(at);
 }
 
-/** Blocks with only pauses join their neighbour (the one before, or else the one after), so no scene is a pause alone. */
-function joinPauseOnly(blocks: string[]): string[] {
+/**
+ * Blocks with only pauses join their neighbour (the one before, or else the one after), so no scene is a pause alone;
+ * with `keepSilent`, a section of only pauses set apart by headings or `---` is kept as a silent scene when its length
+ * fits one (a document of nothing but pauses still gives no scenes).
+ */
+function joinPauseOnly(blocks: string[], keepSilent = false): string[] {
   const out: string[] = [];
   const pending: string[] = [];
+  const anyWords = blocks.some(hasWords);
   for (const block of blocks) {
-    if (hasWords(block)) {
+    if (keepSilent && anyWords && !hasWords(block) && !silentProblem(block)) {
+      out.push(block);
+    } else if (hasWords(block)) {
       out.push(pending.length ? `${pending.join(" ")} ${block}` : block);
       pending.length = 0;
     } else if (out.length) out[out.length - 1] = `${out[out.length - 1]} ${block}`;
@@ -558,7 +565,7 @@ export function scenesFromText(text: string, { markdown = true }: { markdown?: b
       if (line.trim()) seen = true;
     }
   }
-  const blocks = joinPauseOnly(explicit ? sections.map((s) => paragraphs(s, markdown).join(SEPARATOR)).filter(Boolean) : paragraphs(sections.flat(), markdown));
+  const blocks = explicit ? joinPauseOnly(sections.map((s) => paragraphs(s, markdown).join(SEPARATOR)).filter(Boolean), true) : joinPauseOnly(paragraphs(sections.flat(), markdown));
 
   // Keep what a video holds, in order: blocks while the whole script fits, the next one cut to the room left.
   const kept: string[] = [];

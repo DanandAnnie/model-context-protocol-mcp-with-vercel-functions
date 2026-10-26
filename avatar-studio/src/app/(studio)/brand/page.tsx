@@ -114,6 +114,10 @@ export default function BrandPage() {
     reader.readAsDataURL(file);
   }
 
+  // The form as it stands now, read when the website's answer arrives (the person may have typed meanwhile).
+  const formNow = useRef({ name, logoUrl, primary, accent });
+  formNow.current = { name, logoUrl, primary, accent };
+
   async function importSite() {
     if (!site.trim() || importing) return;
     setImporting(true);
@@ -123,6 +127,7 @@ export default function BrandPage() {
     try {
       const { suggestion: s } = await api<{ suggestion: BrandSuggestion }>("/api/brand/import", { method: "POST", body: JSON.stringify({ url: site.trim() }) });
       const host = new URL(s.sourceUrl).host;
+      const { name, logoUrl, primary, accent } = formNow.current;
       // What is already filled in (typed, uploaded, or saved) is replaced only when the person agrees.
       const colours = !!s.primaryColor && (primary.toLowerCase() !== DEFAULT_PRIMARY || !!accent) && (primary.toLowerCase() !== s.primaryColor || (accent || undefined) !== s.accentColor);
       const clashes = [s.name && name.trim() && name.trim() !== s.name ? "name" : "", s.logoUrl && logoUrl && logoUrl !== s.logoUrl ? "logo" : "", colours ? "colours" : ""].filter(Boolean);

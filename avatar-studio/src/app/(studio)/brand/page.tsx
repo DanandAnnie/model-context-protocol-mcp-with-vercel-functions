@@ -410,7 +410,7 @@ export default function BrandPage() {
           {bgType && (
             <label className="flex items-center gap-2 text-sm text-slate-700">
               <input type="checkbox" checked={bgWhole} onChange={(e) => setBgWhole(e.target.checked)} className="accent-brand-600" />
-              Show all of it instead of cropping it to fill the frame (in the editor preview; renders fill the frame)
+              Show all of it instead of cropping it to fill the frame (in the editor preview; HeyGen renders fill the frame)
             </label>
           )}
           {bgType === "image" && (

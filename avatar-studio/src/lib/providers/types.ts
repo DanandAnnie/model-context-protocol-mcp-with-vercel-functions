@@ -50,6 +50,8 @@ export interface RenderCast {
 
 export interface AvatarProvider {
   readonly name: string;
+  /** Where this renderer keeps the ids of the clips and background images it was given (`providerAssetIds`); its name when absent. */
+  readonly assetKey?: string;
   listAvatars(): Promise<Avatar[]>;
   /**
    * Make a custom (uploaded) avatar usable by this provider, e.g. by uploading

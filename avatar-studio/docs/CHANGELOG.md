@@ -128,4 +128,16 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
   - The v3 studio has no presenter layout or framing, on-screen text element, background fit, or voice emotion. The editor, the batch page, and the brand kit now say so where those settings are made. They are still previewed and kept with videos, copies, and templates, but not sent. Voices no longer carry `emotionSupport`.
   - Interactive avatars still use HeyGen's v1 streaming API, documented as needing a move to LiveAvatar.
   - All of this follows HeyGen's API reference. It is checked against stubbed requests (new `heygen-v3.test.ts`, the request-shape tests rewritten for the studio body), not against the live API.
+  - An independent review of `b7c6edf` and `b048dca` found the focus hook sound. It found three blocking defects in the migration, each fixed with a test that fails without it:
+    - v3 lists only public voices unless asked, so voices cloned in the HeyGen account vanished and videos naming them failed. The account's own voices and looks are now listed first.
+    - Clips and background images uploaded through v1 kept their ids under `heygen` and would never be uploaded again. v3 asset ids now live under `heygen:asset`, so old ones are uploaded once more.
+    - A photo avatar still being prepared was waited for on every render, one presenter after another, which could take a batch or a multi-presenter video past the 60-second function limit. A known pending look is now asked about once without waiting, and presenters are prepared side by side.
+  - Fixes for its optional findings in this change's own code:
+    - Errors while asking about a look are no longer read as "still preparing", and a lost or failed look is made again.
+    - The docs now give the true status for a pending render (a stored failed video, `502`).
+    - The account's own looks are listed without the page cap.
+    - `#rgb` colours are spelled out, and other colours are refused plainly.
+    - No silence is uploaded for a render refused anyway.
+    - A portrait's look is not listed beside it.
+    - The brand page names HeyGen as the renderer that fills the frame.
 

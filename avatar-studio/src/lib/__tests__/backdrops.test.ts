@@ -279,7 +279,7 @@ describe("background images at the renderer", () => {
     };
     const ava = { ...STOCK_AVATARS[0], id: "ava_hg", provider: "heygen", source: "provider" as const };
     const emma = { ...STOCK_VOICES[0], id: "emma_hg", provider: "heygen" };
-    const office: Backdrop = { id: "bd_office", name: "Office", mimeType: "image/png", bytes: 12, createdAt: "", providerAssetIds: { heygen: "img_1" } };
+    const office: Backdrop = { id: "bd_office", name: "Office", mimeType: "image/png", bytes: 12, createdAt: "", providerAssetIds: { "heygen:asset": "img_1" } };
     const req = request([sceneWith(backdropPath(office.id)), sceneWith("https://cdn.example/bg.jpg")]);
     await heygen.createVideo(req, ava, emma, { avatars: { [ava.id]: ava }, voices: { [emma.id]: emma }, backdrops: { [office.id]: office } });
     assert.deepEqual(sent!.scenes.map((sc) => sc.input.background), [
@@ -288,8 +288,12 @@ describe("background images at the renderer", () => {
     ]);
     await assert.rejects(heygen.createVideo(req, ava, emma, { avatars: {}, voices: {}, backdrops: {} }), /not been uploaded to HeyGen/);
     const fresh = await heygen.prepareBackdrop({ ...office, providerAssetIds: {} }, { bytes: PNG, mimeType: "image/png" });
-    assert.equal(fresh.providerAssetIds?.heygen, "img_new");
+    assert.equal(fresh.providerAssetIds?.["heygen:asset"], "img_new");
     await heygen.prepareBackdrop(office, { bytes: PNG, mimeType: "image/png" });
     assert.deepEqual(uploads, ["image/png"], "an image already uploaded is not sent again");
+    const legacy = await heygen.prepareBackdrop({ ...office, providerAssetIds: { heygen: "v1_img" } }, { bytes: PNG, mimeType: "image/png" });
+    assert.equal(legacy.providerAssetIds?.["heygen:asset"], "img_new", "a v1 upload id is uploaded again as a v3 asset");
+    // The service's shortcut asks under the renderer's own key, so a v1 id does not skip the upload there either.
+    assert.equal(heygen.assetKey, "heygen:asset");
   });
 });

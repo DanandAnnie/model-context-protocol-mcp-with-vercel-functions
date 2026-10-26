@@ -21,7 +21,9 @@ export function providerAvatars(): Promise<Avatar[]> {
 export async function listAvatars(ownerId: string = LOCAL_OWNER): Promise<Avatar[]> {
   const [provider, custom] = await Promise.all([providerAvatars(), getStore().list<Avatar>("avatar", ownerId)]);
   custom.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
-  return [...custom, ...provider];
+  // A renderer may list what it made from a custom portrait (HeyGen's photo avatar looks); the portrait stands for it.
+  const made = new Set(custom.flatMap((a) => Object.values(a.providerAssetIds ?? {})).filter(Boolean));
+  return [...custom, ...provider.filter((a) => !made.has(a.id))];
 }
 
 export async function getAvatar(id: string, ownerId: string = LOCAL_OWNER): Promise<Avatar> {

@@ -290,9 +290,14 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
 
   try {
     if (provider.prepareAvatar) {
-      for (const a of Object.values(cast.avatars)) {
-        if (a.source === "custom") cast.avatars[a.id] = await prepareOnce(provider, a);
-      }
+      // Side by side, so several presenters waiting on the renderer wait once, not one after another.
+      await Promise.all(
+        Object.values(cast.avatars)
+          .filter((a) => a.source === "custom")
+          .map(async (a) => {
+            cast.avatars[a.id] = await prepareOnce(provider, a);
+          }),
+      );
       avatar = cast.avatars[avatar.id] ?? avatar;
     }
     if (cast.clips) {
@@ -625,7 +630,7 @@ const preparingClips = new Map<string, Promise<AudioClip>>();
 
 /** Uploads a clip to the renderer once and remembers its asset id, so retries and copies reuse it. */
 function prepareClipOnce(provider: AvatarProvider, clip: AudioClip, ownerId: string): Promise<AudioClip> {
-  if (clip.providerAssetIds?.[provider.name]) return Promise.resolve(clip);
+  if (clip.providerAssetIds?.[provider.assetKey ?? provider.name]) return Promise.resolve(clip);
   const key = `${provider.name}:${clip.id}`;
   const running = preparingClips.get(key);
   if (running) return running;
@@ -642,7 +647,7 @@ const preparingBackdrops = new Map<string, Promise<Backdrop>>();
 
 /** Uploads a background image to the renderer once and remembers its asset id, so later renders reuse it. */
 function prepareBackdropOnce(provider: AvatarProvider, backdrop: Backdrop, ownerId: string): Promise<Backdrop> {
-  if (backdrop.providerAssetIds?.[provider.name]) return Promise.resolve(backdrop);
+  if (backdrop.providerAssetIds?.[provider.assetKey ?? provider.name]) return Promise.resolve(backdrop);
   const key = `${provider.name}:${backdrop.id}`;
   const running = preparingBackdrops.get(key);
   if (running) return running;

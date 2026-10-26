@@ -49,9 +49,12 @@ export class HeyGenClient {
     return items;
   }
 
-  /** Avatar looks (v3): stock and studio avatars, digital twins, and photo avatars alike, each usable as `avatar_id`. */
-  listAvatarLooks() {
-    return this.listAll<{
+  /**
+   * Avatar looks (v3): stock and studio avatars, digital twins, and photo avatars alike, each usable as `avatar_id`. The
+   * account's own come first and in full; HeyGen's preset library after them, up to the page limit.
+   */
+  async listAvatarLooks() {
+    type Look = {
       id: string;
       name: string;
       avatar_type?: "studio_avatar" | "digital_twin" | "photo_avatar" | string;
@@ -60,11 +63,16 @@ export class HeyGenClient {
       gender?: string;
       tags?: string[];
       status?: string;
-    }>("/avatars/looks", 50);
+    };
+    const [own, preset] = await Promise.all([this.listAll<Look>("/avatars/looks?ownership=private", 50, 100), this.listAll<Look>("/avatars/looks?ownership=public", 50)]);
+    return unique([...own, ...preset], (l) => l.id);
   }
 
-  listVoices() {
-    return this.listAll<{ voice_id: string; name: string; language?: string; gender?: string; preview_audio_url?: string }>("/voices", 100);
+  /** Voices (v3): the account's own (cloned in HeyGen) first, then the shared library; v3 lists only one kind per call. */
+  async listVoices() {
+    type V = { voice_id: string; name: string; language?: string; gender?: string; preview_audio_url?: string };
+    const [own, shared] = await Promise.all([this.listAll<V>("/voices?type=private", 100, 100), this.listAll<V>("/voices?type=public", 100)]);
+    return unique([...own, ...shared], (v) => v.voice_id);
   }
 
   /**
@@ -217,4 +225,10 @@ export class HeyGenClient {
   streamingStop(sessionId: string) {
     return this.request<unknown>(`${V1}/streaming.stop`, { method: "POST", body: JSON.stringify({ session_id: sessionId }) });
   }
+}
+
+/** The items in order, each id once (the first kept). */
+function unique<T>(items: T[], id: (item: T) => string): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => !seen.has(id(item)) && !!seen.add(id(item)));
 }

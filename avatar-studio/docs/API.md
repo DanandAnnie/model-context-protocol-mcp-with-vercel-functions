@@ -304,9 +304,11 @@ Deliveries are attempted once, after the response that completed the render, wit
 ## HeyGen API version
 
 HeyGen retires its v1 and v2 APIs on October 31, 2026, and rendering uses v3:
-- the avatar list is `GET /v3/avatars/looks` and the voice list `GET /v3/voices`, every page followed (up to 20) by `next_token`;
-- uploads are `POST /v3/assets` (multipart);
-- a custom portrait becomes a photo avatar (`POST /v3/avatars`, `type: "photo"`). Its look is waited for for up to about 20 seconds before the first render (`GET /v3/avatars/looks/:id`). A render that finds the look still being prepared fails with a `400` asking to generate again, and later renders ask about the same look. Portraits uploaded as v1 talking photos are made again once as v3 looks;
+- the avatar list is `GET /v3/avatars/looks`, the account's own looks (`ownership=private`) in full and then HeyGen's preset library up to 20 pages, each look once. The voice list is `GET /v3/voices`, the voices cloned in the HeyGen account (`type=private`) and then the shared library, paged the same way;
+- the avatar list leaves out any look that a custom portrait was made into, so the portrait is not listed twice;
+- uploads are `POST /v3/assets` (multipart). Clips and background images keep their v3 asset id under `heygen:asset`, so one uploaded through v1 (its id under `heygen`) is uploaded again once;
+- a custom portrait becomes a photo avatar (`POST /v3/avatars`, `type: "photo"`, kept under `heygen:look`). Its look is waited for for about ten seconds before the first render (`GET /v3/avatars/looks/:id`); several presenters in one video are waited for side by side. A render that finds the look still being prepared is stored as failed with "HeyGen is still preparing the photo avatar … Generate again in a minute" (`POST /api/videos` then answers `502` with that error, and a batch row fails). Later renders ask about the same look once, without waiting, so a batch's later rows fail fast instead of each waiting. A look HeyGen lost (`404`) or could not prepare is made again from the portrait, and other errors while asking (a key, a rate limit) are reported as they are. Portraits uploaded as v1 talking photos are made again once as v3 looks;
+- a background colour is sent as `#rrggbb` (a `#rgb` is spelled out; any other colour fails the render with a message saying so);
 - videos are `POST /v3/videos` with `type: "studio"`, and their status is `GET /v3/videos/:id`.
 
 The v3 studio has no presenter layout or framing, on-screen text, background fit, or voice emotion. Those settings are kept with videos, copies, and templates, and the editor previews them, but they are not sent. A translation started on v2 is still asked about on v2 until v2 answers `404` or `410`. Interactive avatars still use HeyGen's v1 streaming API, which HeyGen replaces with LiveAvatar; see the README.

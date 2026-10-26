@@ -165,7 +165,7 @@ describe("audio clips", () => {
 describe("audio scenes at the renderer", () => {
   const ava = { ...STOCK_AVATARS[0], id: "ava_hg", provider: "heygen", source: "provider" as const };
   const emma = { ...STOCK_VOICES[0], id: "emma_hg", provider: "heygen" };
-  const clip: AudioClip = { id: "clip_1", name: "Take", mimeType: "audio/wav", bytes: 10, durationSec: 3, createdAt: "", providerAssetIds: { heygen: "asset_1", did: "https://d-id.example/audio.wav" } };
+  const clip: AudioClip = { id: "clip_1", name: "Take", mimeType: "audio/wav", bytes: 10, durationSec: 3, createdAt: "", providerAssetIds: { "heygen:asset": "asset_1", did: "https://d-id.example/audio.wav" } };
 
   it("HeyGen lip-syncs an audio scene to its uploaded asset and speaks typed scenes as before", async () => {
     const { HeyGenAvatarProvider } = await import("../providers/avatar/heygen");
@@ -197,9 +197,13 @@ describe("audio scenes at the renderer", () => {
     await assert.rejects(heygen.createVideo(req, ava, emma, { avatars: {}, voices: {}, clips: {} }), /not been uploaded to HeyGen/);
     // Preparing uploads once and keeps the id; an already prepared clip is not uploaded again.
     const fresh = await heygen.prepareAudio({ ...clip, providerAssetIds: {} }, { bytes: new Uint8Array([1]), mimeType: "audio/wav" });
-    assert.equal(fresh.providerAssetIds?.heygen, "asset_new");
+    assert.equal(fresh.providerAssetIds?.["heygen:asset"], "asset_new");
     await heygen.prepareAudio(clip, { bytes: new Uint8Array([1]), mimeType: "audio/wav" });
     assert.deepEqual(uploads, ["audio/wav"]);
+    // An id from the v1 upload endpoint is not trusted as a v3 asset: the clip is uploaded again once, the old id kept.
+    const legacy = await heygen.prepareAudio({ ...clip, providerAssetIds: { heygen: "v1_asset" } }, { bytes: new Uint8Array([1]), mimeType: "audio/wav" });
+    assert.deepEqual(legacy.providerAssetIds, { heygen: "v1_asset", "heygen:asset": "asset_new" });
+    assert.equal(uploads.length, 2);
   });
 
   it("D-ID speaks a single-scene clip from its hosted URL and refuses audio in a multi-scene video", async () => {

@@ -18,6 +18,7 @@ import { stripPauses } from "@/lib/pauses";
 import { MAX_IMPORT_BYTES, MAX_SCRIPT_CHARS, decodeScript, legacyEncodingFor, scenesFromText } from "@/lib/script-import";
 import { renderPdf, slideScripts } from "@/lib/pdf-slides";
 import { readPptx, type PptxSlide } from "@/lib/pptx-notes";
+import { readDocx } from "@/lib/docx-text";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
 import { takeAgentDraft, type AgentDraft } from "@/lib/agent-draft";
@@ -78,6 +79,9 @@ const MAX_PDF_BYTES = 50_000_000;
 /** A PowerPoint file larger than this is refused before it is unpacked (its pictures and video count, though only its text is read). */
 const MAX_PPTX_BYTES = 100_000_000;
 const PPTX_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+/** A Word file larger than this is refused before it is unpacked (its pictures count, though only its text is read). */
+const MAX_DOCX_BYTES = 50_000_000;
 
 /** Whether the scenes hold anything worth asking about before they are replaced: a script, a clip, a presenter, a layout, or more than one scene. */
 const setUpScenes = (list: Scene[]) => list.length > 1 || list.some((sc) => sc.script.trim() || sc.audioId || sc.avatarId || sc.voiceId || sc.layout);
@@ -225,13 +229,26 @@ function CreateInner() {
   }
   const importInput = useRef<HTMLInputElement>(null);
   const [importNote, setImportNote] = useState<string | null>(null);
-  /** Replaces the scenes with a text or Markdown document's, one per paragraph or section, on the first scene's background. */
+  /** Replaces the scenes with a text, Markdown, or Word document's, one per paragraph or section, on the first scene's background. */
   async function importScript(file: File | undefined) {
     if (!file) return;
-    if (file.size > MAX_IMPORT_BYTES) return setImportNote(`${file.name} is larger than ${MAX_IMPORT_BYTES / 1_000_000} MB; import a plain-text or Markdown script.`);
-    // Markdown is read as Markdown (list markers, emphasis, and links are not spoken); any other text as written.
-    // A file not in UTF-8 is read in the code page Windows uses for the browser's language.
-    const doc = scenesFromText(decodeScript(new Uint8Array(await file.arrayBuffer()), legacyEncodingFor(navigator.language)), { markdown: /\.(md|markdown)$/i.test(file.name) || file.type === "text/markdown" });
+    const word = /\.docx$/i.test(file.name) || file.type === DOCX_TYPE;
+    if (file.size > (word ? MAX_DOCX_BYTES : MAX_IMPORT_BYTES)) return setImportNote(`${file.name} is larger than ${(word ? MAX_DOCX_BYTES : MAX_IMPORT_BYTES) / 1_000_000} MB; import a plain-text, Markdown, or Word script.`);
+    let doc: ReturnType<typeof scenesFromText>;
+    if (word) {
+      // A Word document's headings start scenes (as a Markdown file's do) and its title names the video; its words are taken as written.
+      try {
+        const read = readDocx(new Uint8Array(await file.arrayBuffer()), file.name);
+        doc = scenesFromText(read.text, { markdown: false });
+        if (read.title) doc = { ...doc, title: read.title };
+      } catch (e) {
+        return setImportNote(`${(e instanceof Error ? e.message : `${file.name} could not be read`).replace(/\.$/, "")}.`);
+      }
+    } else {
+      // Markdown is read as Markdown (list markers, emphasis, and links are not spoken); any other text as written.
+      // A file not in UTF-8 is read in the code page Windows uses for the browser's language.
+      doc = scenesFromText(decodeScript(new Uint8Array(await file.arrayBuffer()), legacyEncodingFor(navigator.language)), { markdown: /\.(md|markdown)$/i.test(file.name) || file.type === "text/markdown" });
+    }
     if (!doc.scenes.length) return setImportNote(`No script found in ${file.name}.`);
     // Anything already set up (a script, a clip, a presenter, a layout, more than one scene) is only replaced once confirmed.
     if (setUpScenes(scenes) && !window.confirm(`Replace the ${scenes.length === 1 ? "current scene" : `current ${scenes.length} scenes`} with ${doc.scenes.length === 1 ? "1 scene" : `${doc.scenes.length} scenes`} from ${file.name}?`)) return;
@@ -876,7 +893,7 @@ function CreateInner() {
                 type="button"
                 onClick={() => importInput.current?.click()}
                 disabled={!!slidesProgress}
-                title="Each paragraph, or each part between headings or --- lines, becomes a scene"
+                title="A plain-text, Markdown, or Word file: each paragraph, or each part between headings or --- lines, becomes a scene"
                 className="inline-flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:border-brand-400 hover:text-brand-700 disabled:opacity-50"
               >
                 <Upload className="h-3.5 w-3.5" /> Import script
@@ -905,7 +922,7 @@ function CreateInner() {
               <input
                 ref={importInput}
                 type="file"
-                accept=".txt,.md,.markdown,text/plain,text/markdown"
+                accept={`.txt,.md,.markdown,.docx,text/plain,text/markdown,${DOCX_TYPE}`}
                 aria-label="Import a script file"
                 className="hidden"
                 onChange={(e) => {

@@ -420,6 +420,23 @@ test("importing a script file makes one scene per section", async ({ page }) => 
   await expect(page.locator("textarea")).toHaveValue(/^Plain text keeps \*\*stars\*\* as typed\./);
   await expect(page.getByTestId("script-too-long")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Generate video" })).toBeEnabled();
+  // A Word document: its title names the video, each heading starts a scene, and its words are taken as written.
+  const w = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+  const wp = (text: string, style?: string) => `<w:p>${style ? `<w:pPr><w:pStyle w:val="${style}"/></w:pPr>` : ""}<w:r><w:t xml:space="preserve">${text}</w:t></w:r></w:p>`;
+  const word = zipSync({
+    "word/document.xml": strToU8(`<w:document ${w}><w:body>${wp("Open house tour", "Title")}${wp("Welcome to *12 Elm*.")}${wp("Upstairs", "Heading1")}${wp("Three bedrooms.")}</w:body></w:document>`),
+  });
+  page.once("dialog", (d) => d.accept());
+  await page.locator("input[placeholder='Video title']").fill("");
+  await page.getByLabel("Import a script file").setInputFiles({ name: "tour.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", buffer: Buffer.from(word) });
+  await expect(page.getByTestId("import-note")).toHaveText("Imported 2 scenes from tour.docx.");
+  await expect(page.locator("input[placeholder='Video title']")).toHaveValue("Open house tour");
+  await expect(page.locator("textarea")).toHaveValue("Welcome to *12 Elm*.");
+  await page.getByRole("button", { name: /^Scene 2,/ }).click();
+  await expect(page.locator("textarea")).toHaveValue("Three bedrooms.");
+  // An old .doc says how to save it rather than importing nothing.
+  await page.getByLabel("Import a script file").setInputFiles({ name: "old.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", buffer: Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]) });
+  await expect(page.getByTestId("import-note")).toContainText("old.docx is password-protected or a Word 97–2003 file");
 });
 
 test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page }) => {

@@ -2,6 +2,7 @@
 // as the presenter's script, and the slide's own text as a fallback. Only the deck's XML parts are unpacked (never
 // its pictures or media), and it runs the same in the browser and in tests.
 import { strFromU8, unzipSync } from "fflate";
+import { unescapeXml } from "./xml-text";
 
 export interface PptxSlide {
   /** The speaker notes, one line per paragraph; empty when the slide has none. */
@@ -10,23 +11,6 @@ export interface PptxSlide {
   text: string;
   /** Hidden in the slide show; PowerPoint leaves these out when it saves the deck as PDF. */
   hidden: boolean;
-}
-
-/** A numeric character reference's character; one out of Unicode's range is dropped rather than failing the import. */
-function codePoint(n: number): string {
-  return n <= 0x10ffff ? String.fromCodePoint(n) : "";
-}
-
-/** The characters XML escapes, and numeric references (curly quotes and dashes arrive as those too). */
-function unescapeXml(s: string): string {
-  return s
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => codePoint(parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_, dec: string) => codePoint(Number(dec)))
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, "&");
 }
 
 /** The paragraphs of a run of DrawingML, each the joined text of its runs; line breaks inside one become spaces. */

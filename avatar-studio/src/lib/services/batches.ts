@@ -26,7 +26,8 @@ export function rowScriptProblems(scriptTemplate: string, rows: Array<Record<str
   if (!stripPauses(scriptTemplate).trim()) return { empty, tooLong, blankTemplate: true };
   rows.forEach((row, i) => {
     const script = fillTemplate(scriptTemplate, row).trim();
-    if (!stripPauses(script).trim()) empty.push(i + 1);
+    // Invisible characters a spreadsheet can leave in a cell (zero-width spaces, a byte-order mark) say nothing either.
+    if (!stripPauses(script).replace(/[\u200b-\u200d\u2060\ufeff]/g, "").trim()) empty.push(i + 1);
     else if (script.length > MAX_ROW_SCRIPT) tooLong.push(i + 1);
   });
   return { empty, tooLong, blankTemplate: false };

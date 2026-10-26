@@ -835,7 +835,7 @@ test("a custom cover image replaces the poster everywhere", async ({ page }) => 
   await page.getByRole("button", { name: "Remove cover" }).click();
   await expect(page.getByRole("button", { name: "Remove cover" })).toHaveCount(0);
   await expect.poll(async () => (await page.request.get(`/api/videos/${v.id}/cover`)).status()).toBe(404);
-  // A paused frame of the video itself can be the cover, at the video's own size (capped at 1280px wide).
+  // A paused frame of the video itself can be the cover, at the video's own size (fitted in a 1280px box).
   const player = page.getByTestId("video-player");
   await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.readyState)).toBeGreaterThanOrEqual(1);
   await player.evaluate((el: HTMLVideoElement) => (el.currentTime = 3));
@@ -848,7 +848,7 @@ test("a custom cover image replaces the poster everywhere", async ({ page }) => 
     const img = new Image();
     img.src = src;
     await img.decode();
-    return [Math.min(1280, el.videoWidth), img.naturalWidth];
+    return [Math.round(el.videoWidth * Math.min(1, 1280 / el.videoWidth, 1280 / el.videoHeight)), img.naturalWidth];
   }, `/api/videos/${v.id}/cover?v=${Date.parse(frame.cover!.updatedAt)}`);
   expect(coverWidth).toBe(videoWidth);
   expect(coverWidth).toBeGreaterThan(1);
@@ -858,6 +858,7 @@ test("a custom cover image replaces the poster everywhere", async ({ page }) => 
     return Buffer.from(await (await page.request.get(`/api/videos/${v.id}/cover?v=${Date.parse(meta.cover.updatedAt)}`)).body()).toString("base64");
   };
   const atThree = await coverBytes();
+  // At 0 the capture takes the frame 0.04s in (a seek to where it already is may load nothing); still the start.
   await player.evaluate((el: HTMLVideoElement) => (el.currentTime = 0));
   await page.getByRole("button", { name: "Use current frame" }).click();
   await expect.poll(coverBytes).not.toBe(atThree);

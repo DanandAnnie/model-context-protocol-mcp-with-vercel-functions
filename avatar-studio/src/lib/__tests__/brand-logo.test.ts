@@ -49,7 +49,7 @@ describe("brand logo", () => {
     }
   });
 
-  it("judges a logo exactly as the route serves it: type in any case, and a data URL that decodes", () => {
+  it("judges a logo exactly as the route serves it: type in any case, and a data URL that decodes", async () => {
     assert.equal(servableLogo(`data:image/PNG;base64,${PNG}`), true);
     assert.equal(logoResponse({ logoUrl: `data:image/PNG;base64,${PNG}`, updatedAt: "x" }, req()).headers.get("content-type"), "image/png");
     assert.equal(servableLogo("data:image/png;base64"), false, "no comma, nothing to decode");
@@ -60,6 +60,17 @@ describe("brand logo", () => {
     }
     assert.equal(logoDataUrlValid("data:image/png;base64"), false);
     assert.equal(logoDataUrlValid("data:image/png;base64,***"), false);
+    // Base64 in the URL-safe alphabet, or with percent-escapes, is accepted and served as the same bytes.
+    const b64 = "+/+/AAA+/w==";
+    for (const payload of [b64.replace(/\+/g, "-").replace(/\//g, "_"), encodeURIComponent(b64)]) {
+      const url = `data:image/png;base64,${payload}`;
+      assert.equal(logoDataUrlValid(url), true, url);
+      assert.equal(servableLogo(url), true, url);
+      const served = logoResponse({ logoUrl: url, updatedAt: "x" }, req());
+      assert.deepEqual(Buffer.from(await served.arrayBuffer()), Buffer.from(b64, "base64"), url);
+    }
+    assert.equal(logoDataUrlValid("data:image/png;base64,AAAA%"), false, "a broken escape");
+    assert.equal(servableLogo("data:image/png;base64,AAAA%"), false);
     assert.equal(brandKitSchema.safeParse({ primaryColor: "#4f46e5", logoUrl: "data:image/png;base64" }).success, false);
     // A picked file's type, or one read from its name when the browser reports none.
     assert.equal(logoFileType({ type: "image/png", name: "a.png" }), "image/png");

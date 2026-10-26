@@ -206,7 +206,7 @@ export default function VideoDetailPage() {
     if (await patchShare({ shareExpiresAt: at.toISOString() })) setExpiryDraft("");
   }
 
-  // Cover image: downscaled in the browser to at most 1280px wide, sent as a JPEG data URL.
+  // Cover image: downscaled in the browser to fit a 1280px box, sent as a JPEG data URL.
   const [coverBusy, setCoverBusy] = useState<"save" | "frame" | "remove" | null>(null);
   const [coverErr, setCoverErr] = useState<string | null>(null);
   async function fileToCover(file: File): Promise<string> {
@@ -218,7 +218,8 @@ export default function VideoDetailPage() {
         el.onerror = () => reject(new Error("That file is not an image"));
         el.src = url;
       });
-      const scale = Math.min(1, 1280 / img.naturalWidth);
+      // Fit in a 1280px box, so a tall portrait image stays well under the 2 MB cover limit.
+      const scale = Math.min(1, 1280 / img.naturalWidth, 1280 / img.naturalHeight);
       const canvas = document.createElement("canvas");
       canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
       canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
@@ -251,12 +252,17 @@ export default function VideoDetailPage() {
           clearTimeout(timer);
           resolve();
         };
+        // Safari can report the seek before the frame there is decoded; wait for it so the cover is never blank.
+        const frameReady = () => {
+          if (el.readyState >= 2) return done();
+          el.onloadeddata = el.oncanplay = () => el.readyState >= 2 && done();
+        };
         el.onloadedmetadata = () => {
           const end = Number.isFinite(el.duration) ? Math.max(0, el.duration - 0.05) : time;
           let target = Math.max(0, Math.min(Number.isFinite(time) ? time : 0, end));
           // A seek to where the element already is (0 at first) may not load a frame; one frame later always does.
           if (Math.abs(target - el.currentTime) < 0.01) target = Math.min(end, target + 0.04);
-          el.onseeked = done;
+          el.onseeked = frameReady;
           el.currentTime = target;
         };
         el.onerror = () => {
@@ -785,7 +791,7 @@ export default function VideoDetailPage() {
               </Card>
               <Card className="p-4" data-testid="cover-card">
                 <h3 className="text-sm font-semibold text-slate-900">Cover image</h3>
-                <p className="mt-1 text-xs text-slate-500">The poster shown on the share page, in link previews, and in your library: upload an image, or pause the player on a frame and use it. Up to 1280px wide; 2 MB.</p>
+                <p className="mt-1 text-xs text-slate-500">The poster shown on the share page, in link previews, and in your library: upload an image, or pause the player on a frame and use it. Fitted in 1280 × 1280 pixels; 2 MB.</p>
                 <div className="mt-3 flex flex-wrap items-center gap-3">
                   {posterUrl(video) && (
                     // eslint-disable-next-line @next/next/no-img-element

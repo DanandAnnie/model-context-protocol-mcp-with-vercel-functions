@@ -51,7 +51,7 @@ export default function BrandPage() {
     setName(b.name);
     // A logo saved before only displayable types were accepted is left out (and said so), so the rest of the kit can still be saved.
     if (b.logoUrl?.startsWith("data:") && !logoDataUrlValid(b.logoUrl)) {
-      setLogoNotice("The saved logo is in a format the share page cannot show, so saving will remove it. Upload a PNG, JPEG, WebP, GIF, SVG, AVIF, BMP, or ICO logo to replace it.");
+      setLogoNotice("The saved logo is in a format or encoding the share page cannot show, so saving will remove it. Upload a PNG, JPEG, WebP, GIF, SVG, AVIF, BMP, or ICO logo to replace it.");
     } else {
       setLogoUrl(b.logoUrl ?? "");
     }
@@ -223,7 +223,8 @@ export default function BrandPage() {
                 value={logoUrl.startsWith("data:") ? "" : logoUrl}
                 onChange={(e) => {
                   setLogoUrl(e.target.value);
-                  setLogoNotice(null);
+                  // The stored logo is only replaced once there is a new one; an emptied field still removes it.
+                  if (e.target.value.trim()) setLogoNotice(null);
                   // An emptied logo takes the player corner with it, as the Clear button does.
                   if (!e.target.value.trim()) setWatermark("");
                 }}

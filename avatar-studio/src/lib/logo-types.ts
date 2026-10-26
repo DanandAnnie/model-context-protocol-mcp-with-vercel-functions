@@ -26,11 +26,14 @@ export function logoDataUrlValid(dataUrl: string): boolean {
   const comma = dataUrl.indexOf(",");
   if (!dataUrl.startsWith("data:") || comma < 0) return false;
   if (!LOGO_TYPES.has(logoDataType(dataUrl) ?? "")) return false;
-  const payload = dataUrl.slice(comma + 1);
-  if (/;base64$/i.test(dataUrl.slice(0, comma))) return payload.length > 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(payload.replace(/\s+/g, ""));
+  let payload: string;
   try {
-    return decodeURIComponent(payload).length > 0;
+    // Percent-escapes are undone first, as browsers do, so "%2B" counts as "+".
+    payload = decodeURIComponent(dataUrl.slice(comma + 1));
   } catch {
     return false;
   }
+  // Base64 in either alphabet: standard (+/) or URL-safe (-_).
+  if (/;base64$/i.test(dataUrl.slice(0, comma))) return /^[A-Za-z0-9+/_-]+={0,2}$/.test(payload.replace(/\s+/g, ""));
+  return payload.length > 0;
 }

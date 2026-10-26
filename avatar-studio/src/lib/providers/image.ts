@@ -28,7 +28,14 @@ export function decodeDataUrl(url: string): { bytes: Uint8Array; mimeType: strin
   const meta = url.slice(5, comma);
   const payload = url.slice(comma + 1);
   const mimeType = meta.split(";")[0] || "application/octet-stream";
-  const bytes = /;base64/i.test(meta) ? new Uint8Array(Buffer.from(payload, "base64")) : new TextEncoder().encode(decodeURIComponent(payload));
+  // Percent-escapes are undone before base64 decoding, as browsers do ("%2B" is "+"); Node reads either base64 alphabet.
+  let text: string;
+  try {
+    text = payload.includes("%") ? decodeURIComponent(payload) : payload;
+  } catch {
+    throw new Error("Malformed data URL");
+  }
+  const bytes = /;base64/i.test(meta) ? new Uint8Array(Buffer.from(text, "base64")) : new TextEncoder().encode(text);
   if (bytes.byteLength > MAX_IMAGE_BYTES) throw new Error("Avatar image is too large (10 MB max)");
   return { bytes, mimeType };
 }

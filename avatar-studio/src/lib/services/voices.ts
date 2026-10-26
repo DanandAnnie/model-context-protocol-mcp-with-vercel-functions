@@ -40,7 +40,7 @@ export async function cloneVoice(input: z.infer<typeof cloneVoiceSchema>, ownerI
   const provider = getTtsProvider();
   if (!provider.cloneVoice) throw new ValidationError(`Voice cloning is not available with the ${provider.name} voice provider`);
   const mine = (await getStore().list<Voice>("voice", ownerId)).filter((v) => v.provider === provider.name);
-  if (mine.length >= MAX_CLONED_VOICES) throw new ValidationError(`At most ${MAX_CLONED_VOICES} cloned voices per account`);
+  if (mine.length >= MAX_CLONED_VOICES) throw new ValidationError(`At most ${MAX_CLONED_VOICES} voices of your own (cloned or designed) per account`);
   let total = 0;
   const samples = input.samples.map((dataUrl, i) => {
     if (!dataUrl.startsWith("data:audio/")) throw new ValidationError("Samples must be audio recordings or files");
@@ -52,6 +52,61 @@ export async function cloneVoice(input: z.infer<typeof cloneVoiceSchema>, ownerI
   });
   const { voiceId } = await provider.cloneVoice({ name: input.name, samples });
   const voice: Voice = { id: voiceId, name: input.name, provider: provider.name, language: input.language, source: "custom", ownerId, tags: ["your voice"], createdAt: nowIso() };
+  return getStore().put("voice", voice);
+}
+
+export const designVoiceSchema = z.object({
+  description: z.string().trim().min(20, "Describe the voice in at least 20 characters").max(1000),
+  /** What the previews read: 100 to 1000 characters, or none for a sample written for the description. */
+  text: z
+    .string()
+    .trim()
+    .max(1000)
+    .optional()
+    .transform((t) => t || undefined)
+    .refine((t) => !t || t.length >= 100, "The sample text needs at least 100 characters, or leave it empty for one written for you"),
+});
+
+export const saveDesignedVoiceSchema = z.object({
+  name: z.string().trim().min(1).max(60),
+  description: z.string().trim().min(20).max(1000),
+  previewId: z.string().regex(/^[A-Za-z0-9_-]{1,100}$/, "Choose one of the previews"),
+  language: z.string().trim().max(40).optional(),
+});
+
+/** The voices an account keeps of its own (cloned or designed) with the provider in use. */
+async function ownVoices(ownerId: string): Promise<Voice[]> {
+  const provider = getTtsProvider();
+  return (await getStore().list<Voice>("voice", ownerId)).filter((v) => v.provider === provider.name);
+}
+
+/**
+ * Designs voices from a description with the TTS provider: previews of a sample to choose from, none kept yet. Refused
+ * up front when the account already keeps as many voices as it may, so no previews are paid for that cannot be saved.
+ */
+export async function designVoice(input: z.infer<typeof designVoiceSchema>, ownerId: string = LOCAL_OWNER): Promise<{ text: string; previews: Array<{ previewId: string; audioUrl?: string; durationSec?: number }> }> {
+  const provider = getTtsProvider();
+  if (!provider.designVoice) throw new ValidationError(`Voice design is not available with the ${provider.name} voice provider`);
+  if ((await ownVoices(ownerId)).length >= MAX_CLONED_VOICES) throw new ValidationError(`At most ${MAX_CLONED_VOICES} voices of your own per account; delete one to design another`);
+  const { text, previews } = await provider.designVoice({ description: input.description, text: input.text });
+  if (!previews.length) throw new Error("The voice provider made no previews for that description; try describing it differently");
+  return {
+    text,
+    previews: previews.map(({ previewId, audio, durationSec }) => ({
+      previewId,
+      ...(audio ? { audioUrl: `data:${audio.mimeType};base64,${audio.base64}` } : {}),
+      ...(durationSec !== undefined ? { durationSec } : {}),
+    })),
+  };
+}
+
+/** Keeps the chosen preview as a custom voice of the owner, listed with the cloned ones. */
+export async function saveDesignedVoice(input: z.infer<typeof saveDesignedVoiceSchema>, ownerId: string = LOCAL_OWNER): Promise<Voice> {
+  const provider = getTtsProvider();
+  if (!provider.saveDesignedVoice) throw new ValidationError(`Voice design is not available with the ${provider.name} voice provider`);
+  if ((await ownVoices(ownerId)).length >= MAX_CLONED_VOICES) throw new ValidationError(`At most ${MAX_CLONED_VOICES} voices of your own per account; delete one to save another`);
+  const { voiceId } = await provider.saveDesignedVoice({ name: input.name, description: input.description, previewId: input.previewId });
+  const voice: Voice = { id: voiceId, name: input.name, provider: provider.name, language: input.language, source: "custom", ownerId, tags: ["designed voice"], createdAt: nowIso() };
   return getStore().put("voice", voice);
 }
 

@@ -11,6 +11,23 @@ export interface TtsProvider {
   /** Clone a voice from audio samples; returns the provider's voice id. Absent when the provider cannot clone. */
   cloneVoice?(input: { name: string; samples: Array<{ bytes: Uint8Array; mimeType: string; filename: string }> }): Promise<{ voiceId: string }>;
   deleteVoice?(voiceId: string): Promise<void>;
+  /**
+   * Design voices from a written description (ElevenLabs text-to-voice): a few previews of the sample `text` (written
+   * for the description when none is given), each with its audio when the provider makes it server-side. Absent when the
+   * provider cannot design voices.
+   */
+  designVoice?(input: { description: string; text?: string }): Promise<{ text: string; previews: DesignedPreview[] }>;
+  /** Keeps a designed preview as a voice of the account's provider; returns its voice id. */
+  saveDesignedVoice?(input: { name: string; description: string; previewId: string }): Promise<{ voiceId: string }>;
+}
+
+/** One voice a description produced, before it is kept. */
+export interface DesignedPreview {
+  /** The provider's id for the preview (ElevenLabs' `generated_voice_id`), kept by saving it. */
+  previewId: string;
+  /** The sample read in this voice; absent in demo mode, where the browser reads it. */
+  audio?: { base64: string; mimeType: string };
+  durationSec?: number;
 }
 
 export interface AvatarJobStatus {

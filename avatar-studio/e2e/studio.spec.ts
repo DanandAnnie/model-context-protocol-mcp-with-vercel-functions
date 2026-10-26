@@ -1985,7 +1985,7 @@ test("a workspace viewer sees view-only notices instead of create controls", asy
     ["/batch", "start batches"],
     ["/translate", "start translations"],
     ["/avatars", "add or change avatars"],
-    ["/voices", "clone or change voices"],
+    ["/voices", "clone, design, or change voices"],
     ["/brand", "change the brand kit"],
     ["/interactive", "save or change agents"],
   ];
@@ -2001,6 +2001,7 @@ test("a workspace viewer sees view-only notices instead of create controls", asy
   await expect(page.getByRole("button", { name: "New photo avatar" })).toBeDisabled();
   await page.goto("/voices");
   await expect(page.getByTestId("voice-cloner")).toHaveCount(0);
+  await expect(page.getByTestId("voice-designer")).toHaveCount(0);
   // Starred avatars and voices are the workspace's, so a viewer gets no stars to click. The view-only notice
   // shows once the role is known, so the star checks below cannot pass merely because it is still loading.
   await expect(page.getByTestId("view-only")).toBeVisible();
@@ -2751,6 +2752,40 @@ test("a rewrite that comes back after its scene moved is not written over anothe
   await expect(page.getByRole("button", { name: "Undo the rewrite" })).toHaveCount(0);
   await page.getByRole("button", { name: /^Scene 1,/ }).click();
   await expect(box).toHaveValue("The second scene's own words.");
+});
+
+test("a voice can be designed from a description, chosen from previews, and kept", async ({ page }) => {
+  await page.goto("/voices");
+  const designer = page.getByTestId("voice-designer");
+  const design = designer.getByRole("button", { name: "Design previews" });
+  await designer.getByLabel("Describe the voice").fill("Warm voice");
+  await expect(design).toBeDisabled();
+  await designer.getByRole("button", { name: "Documentary voice" }).click();
+  await expect(designer.getByLabel("Describe the voice")).toHaveValue(/documentary narrator/);
+  // A sample of the account's own must be long enough for the previews to read.
+  await designer.getByLabel("Sample text (optional)").fill("Too short.");
+  await expect(designer.getByText(/at least 100 characters to read \(10 so far\)/)).toBeVisible();
+  await expect(design).toBeDisabled();
+  await designer.getByLabel("Sample text (optional)").fill("");
+  await design.click();
+  const previews = designer.getByTestId("voice-previews");
+  await expect(previews.getByRole("radio")).toHaveCount(3);
+  await expect(previews.getByRole("radio").first()).toBeFocused();
+  await expect(previews.getByRole("button", { name: "Play preview 2" })).toBeVisible();
+  const save = designer.getByRole("button", { name: "Save voice" });
+  await expect(save).toBeDisabled();
+  await previews.getByRole("radio", { name: "Preview 2" }).check();
+  const name = `Narrator ${Date.now().toString(36)}`;
+  await designer.getByLabel("Name for the voice").fill(name);
+  await save.click();
+  await expect(designer.getByRole("status")).toContainText(`Saved "${name}"`);
+  await expect(previews).toHaveCount(0);
+  // Listed with the account's own voices, ready for any video.
+  await expect(page.getByText(name, { exact: true })).toBeVisible();
+  const voices = (await (await page.request.get("/api/voices")).json()).voices as Array<{ id: string; name: string; tags?: string[] }>;
+  const kept = voices.find((v) => v.name === name)!;
+  expect(kept.tags).toEqual(["designed voice"]);
+  expect((await page.request.delete(`/api/voices/${kept.id}`)).ok()).toBe(true);
 });
 
 test("a dub can be voice only and name its speakers", async ({ page }) => {

@@ -17,4 +17,14 @@ export class MockTtsProvider implements TtsProvider {
     return { voiceId: `clone_${Math.random().toString(36).slice(2, 12)}` };
   }
   async deleteVoice() {}
+
+  /** Demo design: three previews of the sample, read by the browser; nothing leaves the app. */
+  async designVoice({ text }: { description: string; text?: string }) {
+    const sample = text ?? "Hello, and thanks for listening. This is a preview of the voice you described, reading a few sentences so you can hear its tone and pace.";
+    const previews = [1, 2, 3].map(() => ({ previewId: `design_${Math.random().toString(36).slice(2, 12)}` }));
+    return { text: sample, previews };
+  }
+  async saveDesignedVoice() {
+    return { voiceId: `designed_${Math.random().toString(36).slice(2, 12)}` };
+  }
 }

@@ -2,6 +2,7 @@
 import { useMemo, useState } from "react";
 import { Mic2, Pencil, Trash2 } from "lucide-react";
 import { VoiceCloner } from "@/components/VoiceCloner";
+import { VoiceDesigner } from "@/components/VoiceDesigner";
 import { api } from "@/lib/client";
 import { VoiceRow } from "@/components/VoicePicker";
 import { EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -74,12 +75,15 @@ export default function VoicesPage() {
 
   return (
     <>
-      <SectionTitle title="Voices" subtitle="Preview any voice with your own sample text, or clone your own." />
-      {canEdit === false && <ViewOnlyNotice what="clone or change voices" />}
+      <SectionTitle title="Voices" subtitle="Preview any voice with your own sample text, clone your own, or design one from a description." />
+      {canEdit === false && <ViewOnlyNotice what="clone, design, or change voices" />}
       <ErrorBanner message={error ?? previewErr ?? actionErr} />
-      <div className="mb-6">
-        {canEdit !== false && <VoiceCloner available={status?.tts !== "mock"} onCloned={() => refetch()} />}
-      </div>
+      {canEdit !== false && (
+        <div className="mb-6 grid gap-4 lg:grid-cols-2">
+          <VoiceCloner available={status?.tts !== "mock"} onCloned={() => refetch()} />
+          {status?.voiceDesign && <VoiceDesigner available={status.tts !== "mock"} onSaved={() => refetch()} />}
+        </div>
+      )}
       <div className="mb-5 grid gap-3 md:grid-cols-[1fr_2fr]">
         <input className={inputClass} placeholder="Search by name, language, or style" value={q} onChange={(e) => setQ(e.target.value)} />
         <input className={inputClass} value={sample} onChange={(e) => setSample(e.target.value)} placeholder="Sample text to speak" />

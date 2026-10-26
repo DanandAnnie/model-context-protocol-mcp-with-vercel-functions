@@ -1,5 +1,5 @@
 import type { Voice } from "../../types";
-import type { TtsProvider } from "../types";
+import type { DesignedPreview, TtsProvider } from "../types";
 
 const BASE = "https://api.elevenlabs.io/v1";
 
@@ -55,6 +55,37 @@ export class ElevenLabsTtsProvider implements TtsProvider {
     for (const s of samples) form.append("files", new Blob([s.bytes as BlobPart], { type: s.mimeType }), s.filename);
     const res = await fetch(`${BASE}/voices/add`, { method: "POST", headers: this.headers(), body: form });
     if (!res.ok) throw new Error(`ElevenLabs voice clone failed: ${res.status} ${await res.text()}`);
+    const json = (await res.json()) as { voice_id: string };
+    return { voiceId: json.voice_id };
+  }
+
+  /** Voice design from a description (ElevenLabs /v1/text-to-voice/design): previews with their MP3 samples. */
+  async designVoice({ description, text }: { description: string; text?: string }): Promise<{ text: string; previews: DesignedPreview[] }> {
+    const res = await fetch(`${BASE}/text-to-voice/design?output_format=mp3_44100_64`, {
+      method: "POST",
+      headers: this.headers({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ voice_description: description, model_id: "eleven_multilingual_ttv_v2", ...(text ? { text } : { auto_generate_text: true }) }),
+    });
+    if (!res.ok) throw new Error(`ElevenLabs voice design failed: ${res.status} ${await res.text()}`);
+    const json = (await res.json()) as { text?: string; previews?: Array<{ generated_voice_id: string; audio_base_64?: string; media_type?: string; duration_secs?: number }> };
+    return {
+      text: json.text ?? text ?? "",
+      previews: (json.previews ?? []).map((p) => ({
+        previewId: p.generated_voice_id,
+        ...(p.audio_base_64 ? { audio: { base64: p.audio_base_64, mimeType: p.media_type || "audio/mpeg" } } : {}),
+        ...(typeof p.duration_secs === "number" ? { durationSec: p.duration_secs } : {}),
+      })),
+    };
+  }
+
+  /** Keeps a designed preview as a voice (ElevenLabs /v1/text-to-voice). */
+  async saveDesignedVoice({ name, description, previewId }: { name: string; description: string; previewId: string }) {
+    const res = await fetch(`${BASE}/text-to-voice`, {
+      method: "POST",
+      headers: this.headers({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ voice_name: name, voice_description: description, generated_voice_id: previewId }),
+    });
+    if (!res.ok) throw new Error(`ElevenLabs could not save the designed voice: ${res.status} ${await res.text()}`);
     const json = (await res.json()) as { voice_id: string };
     return { voiceId: json.voice_id };
   }

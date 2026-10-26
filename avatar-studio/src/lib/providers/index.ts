@@ -87,6 +87,7 @@ export function providerStatus(): ProviderStatus {
     billing: getBillingProvider().name,
     streaming: getStreamingProvider().name,
     voiceCloning: typeof getTtsProvider().cloneVoice === "function",
+    voiceDesign: typeof getTtsProvider().designVoice === "function",
     authEnabled: authEnabled(),
     authMode: authMode(),
     renderLimitPerMonth: config.renderLimitPerMonth ?? null,

@@ -726,6 +726,8 @@ export interface ProviderStatus {
   streaming: string;
   /** Whether the voice provider can clone a voice from samples. */
   voiceCloning: boolean;
+  /** Whether the TTS provider can design a voice from a description. */
+  voiceDesign: boolean;
   /** Present when the request carried an owner (signed in, or open/password mode). */
   usage?: { rendersThisMonth: number; plan: PlanId; proRendersPerMonth: number | null; proPriceLabel: string; subscriptionStatus?: string; endsAt?: string; billingAccount?: boolean };
 }

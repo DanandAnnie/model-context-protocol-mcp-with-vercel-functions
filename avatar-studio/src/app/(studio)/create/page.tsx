@@ -14,7 +14,7 @@ import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib/client";
 import { languageLabel } from "@/lib/language";
 import { stripPauses } from "@/lib/pauses";
-import { MAX_IMPORT_BYTES, scenesFromText } from "@/lib/script-import";
+import { MAX_IMPORT_BYTES, MAX_SCRIPT_CHARS, scenesFromText } from "@/lib/script-import";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
 import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, PRESENTER_FRAMINGS, RESOLUTIONS, isDefaultCaptionStyle as isDefaultCaptionStyleFn, framingFor, isDefaultLayout, isPhotoAvatar, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS } from "@/lib/types";
@@ -191,15 +191,17 @@ function CreateInner() {
   async function importScript(file: File | undefined) {
     if (!file) return;
     if (file.size > MAX_IMPORT_BYTES) return setImportNote(`${file.name} is larger than ${MAX_IMPORT_BYTES / 1_000_000} MB; import a plain-text or Markdown script.`);
-    const doc = scenesFromText(await file.text());
+    // Markdown is read as Markdown (list markers, emphasis, and links are not spoken); any other text as written.
+    const doc = scenesFromText(await file.text(), { markdown: /\.(md|markdown)$/i.test(file.name) || file.type === "text/markdown" });
     if (!doc.scenes.length) return setImportNote(`No script found in ${file.name}.`);
-    const written = scenes.filter((sc) => sc.script.trim()).length;
-    if (written && !window.confirm(`Replace the ${scenes.length === 1 ? "current scene" : `current ${scenes.length} scenes`} with ${doc.scenes.length === 1 ? "1 scene" : `${doc.scenes.length} scenes`} from ${file.name}?`)) return;
+    // Anything already set up (a script, a clip, a presenter, a layout, more than one scene) is only replaced once confirmed.
+    const setUp = scenes.length > 1 || scenes.some((sc) => sc.script.trim() || sc.audioId || sc.avatarId || sc.voiceId || sc.layout);
+    if (setUp && !window.confirm(`Replace the ${scenes.length === 1 ? "current scene" : `current ${scenes.length} scenes`} with ${doc.scenes.length === 1 ? "1 scene" : `${doc.scenes.length} scenes`} from ${file.name}?`)) return;
     const background = scenes[0].background;
     setScenes(doc.scenes.map((script) => newScene(script, background)));
     setActiveIdx(0);
     if (doc.title && (!title.trim() || title === "Untitled video")) setTitle(doc.title);
-    setImportNote(`Imported ${doc.scenes.length === 1 ? "1 scene" : `${doc.scenes.length} scenes`} from ${file.name}${doc.truncated ? `; the rest did not fit in ${MAX_SCENES} scenes` : ""}.`);
+    setImportNote(`Imported ${doc.scenes.length === 1 ? "1 scene" : `${doc.scenes.length} scenes`} from ${file.name}${doc.truncated ? `; the rest did not fit (a video holds up to ${MAX_SCENES} scenes and ${MAX_SCRIPT_CHARS} characters of script)` : ""}.`);
   }
   /** Inserts a copy right after the scene (script, background, and presenter included) and selects it. */
   function duplicateScene(idx: number) {
@@ -220,6 +222,8 @@ function CreateInner() {
   // What the scene's presenter will get: a photo avatar has no close-up, so it is previewed and listed in full.
   const framing: PresenterFraming = framingFor(layout.framing, sceneAvatar ?? undefined);
   const photoPresenter = !!sceneAvatar && isPhotoAvatar(sceneAvatar);
+  // The layout as it renders, for the panel's summary and its Reset button.
+  const shownLayout: SceneLayout = { ...layout, framing };
   const sceneVoice = (active.voiceId && voiceData?.voices.find((v) => v.id === active.voiceId)) || voice;
   // Voices the video speaks with (its own and each spoken scene's), and those HeyGen says take no emotion.
   const spokenVoices = [...new Set(scenes.filter((sc) => !sc.audioId).map((sc) => (sc.voiceId && voiceData?.voices.find((v) => v.id === sc.voiceId)) || voice))].filter((v): v is Voice => !!v);
@@ -460,8 +464,11 @@ function CreateInner() {
     scenes.reduce((sum, sc) => sum + (sc.audioId ? sceneSeconds(sc) : 0), 0) +
     estimateSeconds(scenes.filter((sc) => !sc.audioId).map((sc) => sc.script).join("\n\n"), speed);
   const allScenesFilled = scenes.every((sc) => stripPauses(sc.script).trim().length > 0);
+  // The server takes up to 5000 characters of script across all scenes (joined by a blank line).
+  const scriptChars = scenes.map((sc) => sc.script.trim()).join("\n\n").length;
+  const scriptTooLong = scriptChars > MAX_SCRIPT_CHARS;
   const canEdit = useCanEdit();
-  const canGenerate = canEdit !== false && !!avatar && !!voice && allScenesFilled && title.trim().length > 0 && !submitting;
+  const canGenerate = canEdit !== false && !!avatar && !!voice && allScenesFilled && !scriptTooLong && title.trim().length > 0 && !submitting;
 
   async function generate() {
     if (!avatar || !voice) return;
@@ -675,7 +682,7 @@ function CreateInner() {
             )}
             <details className="mb-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="scene-layout">
               <summary className="cursor-pointer select-none font-medium text-slate-700">
-                Presenter layout{isDefaultLayout(layout) ? "" : ` · ${[framing !== "full" ? FRAMING_LABELS[framing].toLowerCase() : "", layout.scale !== 1 ? `${Math.round(layout.scale * 100)}%` : "", layout.x || layout.y ? "moved" : ""].filter(Boolean).join(", ")}`}
+                Presenter layout{isDefaultLayout(shownLayout) ? "" : ` · ${[framing !== "full" ? FRAMING_LABELS[framing].toLowerCase() : "", layout.scale !== 1 ? `${Math.round(layout.scale * 100)}%` : "", layout.x || layout.y ? "moved" : ""].filter(Boolean).join(", ")}`}
               </summary>
               <div className="mt-2 flex flex-wrap items-center gap-2" role="group" aria-label="Presenter framing">
                 <span className="mr-1">Framing</span>
@@ -709,7 +716,7 @@ function CreateInner() {
               </div>
               <div className="mt-2 flex items-center justify-between gap-2">
                 <span className="text-slate-500">Applies to this scene. HeyGen renders the framing, size, and position (a photo avatar has no close-up); other renderers use their default.</span>
-                {!isDefaultLayout(layout) && (
+                {!isDefaultLayout(shownLayout) && (
                   <button type="button" onClick={() => setLayout(DEFAULT_LAYOUT)} className="text-brand-700 hover:underline">
                     Reset
                   </button>
@@ -736,6 +743,11 @@ function CreateInner() {
                     ? `${wordCount(active.script)} words · ~${formatSeconds(sceneSeconds(active))} this scene · ~${formatSeconds(seconds)} total`
                     : `${words} words · ~${formatSeconds(seconds)}`}
                 </span>
+                {scriptTooLong && (
+                  <span role="alert" className="text-xs font-medium text-rose-600" data-testid="script-too-long">
+                    {scriptChars} of {MAX_SCRIPT_CHARS} characters; shorten the script to generate
+                  </span>
+                )}
                 <Button variant="secondary" className="px-3 py-1.5" onClick={() => setWriterOpen((v) => !v)}>
                   <Wand2 className="h-4 w-4" /> Write with AI
                 </Button>

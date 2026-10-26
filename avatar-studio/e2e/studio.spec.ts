@@ -374,6 +374,14 @@ test("importing a script file makes one scene per section", async ({ page }) => 
   await page.getByLabel("Import a script file").setInputFiles({ name: "empty.txt", mimeType: "text/plain", buffer: Buffer.from("\n---\n") });
   await expect(page.getByTestId("import-note")).toHaveText("No script found in empty.txt.");
   await expect(page.getByRole("button", { name: /^Scene 3,/ })).toBeVisible();
+  // A plain-text file is read as written, and a document longer than a video holds keeps what fits and says so.
+  const para = "Plain text keeps **stars** as typed. ".repeat(80).trim();
+  page.once("dialog", (d) => d.accept());
+  await page.getByLabel("Import a script file").setInputFiles({ name: "long.txt", mimeType: "text/plain", buffer: Buffer.from(`${para}\n\n${para}`) });
+  await expect(page.getByTestId("import-note")).toContainText("the rest did not fit");
+  await expect(page.locator("textarea")).toHaveValue(/^Plain text keeps \*\*stars\*\* as typed\./);
+  await expect(page.getByTestId("script-too-long")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Generate video" })).toBeEnabled();
 });
 
 test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page }) => {

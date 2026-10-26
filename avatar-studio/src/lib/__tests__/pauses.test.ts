@@ -98,13 +98,13 @@ describe("pause markers", () => {
     const emma = { ...STOCK_VOICES[0], id: "emma_hg", provider: "heygen" };
     const req = videoRequestSchema.parse({ title: "Tour", script: "Hi & welcome. [pause 2s] Come in.", avatarId: ava.id, voiceId: emma.id });
     const heygen = new HeyGenAvatarProvider("key");
-    let sent: { video_inputs: Array<{ voice: { input_text?: string } }> } | null = null;
+    let sent: { scenes: Array<{ input: { script?: string } }> } | null = null;
     (heygen as unknown as { client: { generateVideo: (b: unknown) => Promise<unknown> } }).client.generateVideo = async (b) => {
       sent = b as typeof sent;
       return { video_id: "hg_1" };
     };
     await heygen.createVideo(req, ava, emma, { avatars: { [ava.id]: ava }, voices: { [emma.id]: emma }, clips: {} });
-    assert.equal(sent!.video_inputs[0].voice.input_text, `Hi & welcome. <break time="2s"/> Come in.`);
+    assert.equal(sent!.scenes[0].input.script, `Hi & welcome. <break time="2s"/> Come in.`);
 
     const did = new DidAvatarProvider("key");
     const bodies: Array<{ script: Record<string, unknown> }> = [];

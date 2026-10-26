@@ -28,14 +28,29 @@ describe("silent scenes", () => {
     const req = videoRequestSchema.parse(request("Hello there.", "[pause 3s]", "Goodbye now."));
     const { HeyGenAvatarProvider } = await import("../providers/avatar/heygen");
     const heygen = new HeyGenAvatarProvider("key");
-    let sent: { video_inputs: Array<{ voice: Record<string, unknown> }> } | null = null;
-    (heygen as unknown as { client: Record<string, (...a: unknown[]) => Promise<unknown>> }).client.generateVideo = async (b) => {
+    let sent: { scenes: Array<{ input: Record<string, unknown> }> } | null = null;
+    const client = (heygen as unknown as { client: Record<string, (...a: unknown[]) => Promise<unknown>> }).client;
+    client.generateVideo = async (b) => {
       sent = b as typeof sent;
       return { video_id: "hg_1" };
     };
-    await heygen.createVideo(req, { ...STOCK_AVATARS[0], provider: "heygen", source: "provider" as const }, { ...STOCK_VOICES[0], provider: "heygen" });
-    assert.deepEqual(sent!.video_inputs[1].voice, { type: "silence", duration: 3 });
-    assert.equal(sent!.video_inputs[0].voice.type, "text");
+    const uploads: Array<{ bytes: Uint8Array; mime: string }> = [];
+    client.uploadAsset = async (bytes, mime) => {
+      uploads.push({ bytes: bytes as Uint8Array, mime: mime as string });
+      return `silence_${uploads.length}`;
+    };
+    // The same silence twice is uploaded once; HeyGen's v3 has no silence input, so it lip-syncs to a clip of it.
+    const twice = videoRequestSchema.parse(request("Hello there.", "[pause 3s]", "Goodbye now.", "[pause 3s]"));
+    await heygen.createVideo(twice, { ...STOCK_AVATARS[0], provider: "heygen", source: "provider" as const }, { ...STOCK_VOICES[0], provider: "heygen" });
+    assert.deepEqual(sent!.scenes.map((sc) => sc.input.audio_asset_id), [undefined, "silence_1", undefined, "silence_1"]);
+    assert.equal("script" in sent!.scenes[1].input, false, "a silent scene sends no script");
+    assert.equal(sent!.scenes[0].input.script, "Hello there.");
+    assert.equal(uploads.length, 1);
+    const wav = uploads[0].bytes;
+    assert.equal(uploads[0].mime, "audio/wav");
+    assert.equal(new TextDecoder().decode(wav.slice(0, 4)), "RIFF");
+    assert.equal(new DataView(wav.buffer, wav.byteOffset).getUint32(40, true), 3 * 8000, "three seconds at 8 kHz");
+    assert.ok(wav.slice(44).every((b) => b === 128), "every sample is silence");
 
     // Two words, three seconds of silence, two words: 0.8 + 3 + 0.8 seconds, rounded to 5 by the estimate.
     const video = await createVideo(req, "holder");

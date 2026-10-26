@@ -479,9 +479,6 @@ function CreateInner() {
   // The layout as it renders, for the panel's summary and its Reset button.
   const shownLayout: SceneLayout = { ...layout, framing };
   const sceneVoice = (active.voiceId && voiceData?.voices.find((v) => v.id === active.voiceId)) || voice;
-  // Voices the video speaks with (its own and each spoken scene's), and those HeyGen says take no emotion.
-  const spokenVoices = [...new Set(scenes.filter((sc) => !sc.audioId).map((sc) => (sc.voiceId && voiceData?.voices.find((v) => v.id === sc.voiceId)) || voice))].filter((v): v is Voice => !!v);
-  const flatVoices = spokenVoices.filter((v) => v.emotionSupport === false).map((v) => v.name);
   // A scene's presenter or voice may have been deleted since the draft or the original video was
   // saved; once the lists are known, drop ids they no longer contain so the scene really does use
   // the video's choice (which is what the selects would otherwise claim) instead of failing to render.
@@ -1150,7 +1147,7 @@ function CreateInner() {
                 </label>
               </div>
               <div className="mt-2 flex items-center justify-between gap-2">
-                <span className="text-slate-500">Applies to this scene. HeyGen renders the framing, size, and position (a photo avatar has no close-up); other renderers use their default.</span>
+                <span className="text-slate-500">Applies to this scene in the preview and is kept with it. HeyGen and D-ID place the presenter themselves, so the rendered video uses their framing.</span>
                 {!isDefaultLayout(shownLayout) && (
                   <button type="button" onClick={() => setLayout(DEFAULT_LAYOUT)} className="text-brand-700 hover:underline">
                     Reset
@@ -1492,7 +1489,7 @@ function CreateInner() {
                   canEdit={canEdit !== false}
                 />
                 {background.type !== "color" && (
-                  // HeyGen crops a picture or video to fill the frame unless told to show all of it, as a slide often needs.
+                  // The preview can show a picture whole; HeyGen's current API always fills the frame, so renders crop it.
                   <div role="group" aria-label="Background fit">
                     <div className="mb-2 text-sm font-medium text-slate-700">Fit</div>
                     <div className="grid grid-cols-2 gap-2">
@@ -1505,7 +1502,7 @@ function CreateInner() {
                           className={`rounded-lg border px-3 py-2 text-left text-sm font-medium ${(background.fit ?? "cover") === f ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}
                         >
                           {f === "cover" ? "Fill the frame" : "Show all of it"}
-                          <div className="text-[11px] font-normal text-slate-500">{f === "cover" ? "Cropped to the frame's shape" : "Whole, with plain bars; HeyGen only"}</div>
+                          <div className="text-[11px] font-normal text-slate-500">{f === "cover" ? "Cropped to the frame's shape" : "Whole, with plain bars, in the preview; renders fill the frame"}</div>
                         </button>
                       ))}
                     </div>
@@ -1578,13 +1575,7 @@ function CreateInner() {
                 </Field>
                 <Field
                   label="Voice emotion"
-                  hint={
-                    flatVoices.length && flatVoices.length === spokenVoices.length
-                      ? `${flatVoices.join(", ")} always ${flatVoices.length === 1 ? "speaks" : "speak"} naturally, so the emotion does not apply to this video.`
-                      : flatVoices.length
-                      ? `${flatVoices.join(", ")} always ${flatVoices.length === 1 ? "speaks" : "speak"} naturally; the emotion applies to scenes whose voice supports one.`
-                      : "HeyGen voices that support it speak in this style; other renderers keep the voice's natural delivery."
-                  }
+                  hint="Kept with the video and its templates. HeyGen's current API takes no emotion, so every renderer speaks with the voice's natural delivery."
                 >
                   <select value={emotion} onChange={(e) => setEmotion(asEmotion(e.target.value))} aria-label="Voice emotion" className={inputClass}>
                     <option value="">Natural</option>
@@ -1893,6 +1884,7 @@ function SceneTextFields({ overlay, aspect, captionsAt, scene, disabled, onChang
       {shown && (
         <div id={`${id}-notes`} className="space-y-1 text-xs">
           <p className="text-slate-400">{graphemes(shown).length}/{MAX_SCENE_TEXT} characters, shown on one line</p>
+          <p className="text-slate-500">Shown in the preview and kept with the scene. HeyGen&apos;s current API has no text element, so the rendered video does not carry it yet.</p>
           {!sceneTextFits({ ...overlay, text: shown }, aspect) && (
             <p role="alert" className="font-medium text-amber-700">Too long for one line across a {aspect} frame at this size: shorten it or choose a smaller size, or it runs off the edges.</p>
           )}

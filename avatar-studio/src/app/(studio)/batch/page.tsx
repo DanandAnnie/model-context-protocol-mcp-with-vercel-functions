@@ -245,7 +245,7 @@ export default function BatchPage() {
             <Field label={`Voice pitch · ${pitch > 0 ? `+${pitch}` : pitch === 0 ? "natural" : pitch}`} hint="HeyGen shifts the voice; other renderers keep its natural pitch.">
               <input type="range" min={-50} max={50} step={5} value={pitch} onChange={(e) => setPitch(Number(e.target.value))} aria-label="Voice pitch" className="w-full accent-brand-600" />
             </Field>
-            <Field label="Voice emotion" hint="HeyGen voices that support it speak in this style.">
+            <Field label="Voice emotion" hint="Kept with each video. HeyGen's current API takes no emotion, so voices speak naturally.">
               <select className={inputClass} value={emotion} onChange={(e) => setEmotion((VOICE_EMOTIONS as readonly string[]).includes(e.target.value) ? (e.target.value as VoiceEmotion) : "")} aria-label="Voice emotion">
                 <option value="">Natural</option>
                 {VOICE_EMOTIONS.map((e) => (

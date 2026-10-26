@@ -1,4 +1,4 @@
-import { SCENE_TEXT_SCALE, SCENE_TEXT_Y, backdropIdOf, dimensionsFor, type AudioClip, type Avatar, type Backdrop, type Background, framingFor, type PresenterFraming, type Scene, type SceneText, type VideoRequest, type Voice } from "../../types";
+import { backdropIdOf, type AudioClip, type Avatar, type Backdrop, type Background, type Scene, type VideoRequest, type Voice } from "../../types";
 import { silentSeconds, withBreakTags } from "../../pauses";
 import { heygenBurnsCaptions } from "../../captions";
 import { webhookUrl } from "../../config";
@@ -6,6 +6,17 @@ import { loadImage } from "../image";
 import { HeyGenClient } from "../heygen-client";
 import { ValidationError } from "../../errors";
 import type { AvatarJobStatus, AvatarProvider, RenderCast } from "../types";
+
+/**
+ * Where a custom portrait's v3 photo avatar look is kept (`providerAssetIds`). Portraits uploaded as v1 talking photos
+ * kept theirs under "heygen"; those are made again once as v3 looks rather than trusted to work as look ids.
+ */
+const LOOK = "heygen:look";
+/** Marks a photo avatar HeyGen was still preparing when last asked, so it is asked again. */
+const PENDING = "heygen:pending";
+/** How often, and how long, a new photo avatar is waited for before a render: up to about twenty seconds. */
+const PHOTO_CHECKS = 5;
+const PHOTO_CHECK_MS = 4000;
 
 export class HeyGenAvatarProvider implements AvatarProvider {
   readonly name = "heygen";
@@ -15,84 +26,100 @@ export class HeyGenAvatarProvider implements AvatarProvider {
   }
 
   async listAvatars(): Promise<Avatar[]> {
-    const data = await this.client.listAvatars();
-    const avatars: Avatar[] = data.avatars.map((a) => ({
-      id: a.avatar_id,
-      name: a.avatar_name,
-      imageUrl: a.preview_image_url ?? "",
-      previewVideoUrl: a.preview_video_url,
-      source: "provider",
-      provider: this.name,
-      gender: (a.gender?.toLowerCase() as Avatar["gender"]) ?? undefined,
-    }));
-    for (const p of data.talking_photos ?? []) {
-      avatars.push({
-        id: p.talking_photo_id,
-        name: p.talking_photo_name,
-        imageUrl: p.preview_image_url ?? "",
-        source: "provider",
+    const looks = await this.client.listAvatarLooks();
+    return looks
+      // A photo avatar HeyGen is still preparing, or could not prepare, cannot render yet.
+      .filter((l) => (!l.status || l.status === "completed") && l.preview_image_url)
+      .map((l) => ({
+        id: l.id,
+        name: l.name,
+        imageUrl: l.preview_image_url ?? "",
+        ...(l.preview_video_url ? { previewVideoUrl: l.preview_video_url } : {}),
+        source: "provider" as const,
         provider: this.name,
-        tags: ["photo avatar"],
-      });
-    }
-    return avatars.filter((a) => a.imageUrl);
+        gender: (l.gender?.toLowerCase() as Avatar["gender"]) ?? undefined,
+        ...(l.avatar_type === "photo_avatar" ? { tags: ["photo avatar"] } : l.tags?.length ? { tags: l.tags.slice(0, 4) } : {}),
+      }));
   }
 
-  /** Custom portraits must be uploaded once as a HeyGen talking photo. */
+  /**
+   * A custom portrait becomes a HeyGen photo avatar once (v3): the image is uploaded as an asset and a photo avatar look
+   * made from it. HeyGen prepares the look before it can render, so it is waited for briefly; one still being prepared
+   * is kept, marked pending, so the next render asks about the same look rather than making another.
+   */
   async prepareAvatar(avatar: Avatar): Promise<Avatar> {
-    if (avatar.source !== "custom" || avatar.providerAssetIds?.[this.name]) return avatar;
-    const { bytes, mimeType } = await loadImage(avatar.imageUrl);
-    const id = await this.client.uploadTalkingPhoto(bytes, mimeType);
-    return { ...avatar, providerAssetIds: { ...avatar.providerAssetIds, [this.name]: id } };
+    if (avatar.source !== "custom") return avatar;
+    let id = avatar.providerAssetIds?.[LOOK];
+    if (id && !avatar.providerAssetIds?.[PENDING]) return avatar;
+    if (!id) {
+      const { bytes, mimeType } = await loadImage(avatar.imageUrl);
+      const assetId = await this.client.uploadAsset(bytes, mimeType, `portrait.${mimeType.split("/")[1] ?? "jpg"}`);
+      id = (await this.client.createPhotoAvatar(avatar.name.slice(0, 80), assetId)).id;
+    }
+    for (let i = 0; i < PHOTO_CHECKS; i++) {
+      const look = await this.client.getLook(id).catch(() => null);
+      if (look?.status === "completed") return { ...avatar, providerAssetIds: { ...avatar.providerAssetIds, [LOOK]: id, [PENDING]: "" } };
+      if (look?.status === "failed") throw new ValidationError(`HeyGen could not prepare the photo avatar "${avatar.name}"${look.error?.message ? `: ${look.error.message}` : ""}. Try another photo.`);
+      if (i < PHOTO_CHECKS - 1) await this.sleep(PHOTO_CHECK_MS);
+    }
+    return { ...avatar, providerAssetIds: { ...avatar.providerAssetIds, [LOOK]: id, [PENDING]: "1" } };
   }
 
   /** A clip is uploaded once as a HeyGen audio asset; scenes then name it by asset id. */
   async prepareAudio(clip: AudioClip, audio: { bytes: Uint8Array; mimeType: string }): Promise<AudioClip> {
     if (clip.providerAssetIds?.[this.name]) return clip;
-    const id = await this.client.uploadAsset(audio.bytes, audio.mimeType);
+    const id = await this.client.uploadAsset(audio.bytes, audio.mimeType, `clip.${audio.mimeType.includes("wav") ? "wav" : "mp3"}`);
     return { ...clip, providerAssetIds: { ...clip.providerAssetIds, [this.name]: id } };
   }
 
   /** An uploaded background image is sent once as a HeyGen image asset; scenes then name it by asset id. */
   async prepareBackdrop(backdrop: Backdrop, image: { bytes: Uint8Array; mimeType: string }): Promise<Backdrop> {
     if (backdrop.providerAssetIds?.[this.name]) return backdrop;
-    const id = await this.client.uploadAsset(image.bytes, image.mimeType);
+    const id = await this.client.uploadAsset(image.bytes, image.mimeType, `background.${image.mimeType.split("/")[1] ?? "png"}`);
     return { ...backdrop, providerAssetIds: { ...backdrop.providerAssetIds, [this.name]: id } };
   }
 
+  /**
+   * One studio video (v3 `POST /v3/videos`, `type: "studio"`): a scene per scene of the request, each with its own
+   * presenter, voice or clip, speed, and background, composed by HeyGen on one canvas of the video's shape and quality.
+   * HeyGen's v3 API places every presenter itself and has no on-screen text element, framing, background fit, or
+   * emotion, so those settings are kept with the video but not sent.
+   */
   async createVideo(req: VideoRequest, avatar: Avatar, voice: Voice | null, cast?: RenderCast) {
     const scenes: Scene[] = req.scenes?.length ? req.scenes : [{ script: req.script, background: req.background }];
+    // HeyGen's v3 studio has no silence input: a scene of only pauses lip-syncs to an uploaded clip of silence that long.
+    const silences = new Map<number, string>();
+    for (const sec of new Set(scenes.filter((sc) => !sc.audioId).map((sc) => silentSeconds(sc.script)).filter(Boolean))) {
+      silences.set(sec, await this.client.uploadAsset(silentWav(sec), "audio/wav", `silence-${sec}s.wav`));
+    }
     const body = {
+      type: "studio",
       title: req.title,
+      aspect_ratio: req.aspect,
+      resolution: req.resolution,
       // HeyGen burns captions in at its own position and size; a video with a caption style of its
       // own is captioned by the share page's subtitle track instead, so the chosen look is the only one.
-      caption: heygenBurnsCaptions(req),
+      ...(heygenBurnsCaptions(req) ? { caption: { file_format: "srt", style: "default" } } : {}),
       ...(webhookUrl("heygen") ? { callback_url: webhookUrl("heygen") } : {}),
-      dimension: dimensionsFor(req.aspect, req.resolution),
-      // One input per scene, each with its own presenter and voice when the scene names them.
-      video_inputs: scenes.map((scene) => {
+      scenes: scenes.map((scene) => {
         const sceneAvatar = (scene.avatarId && cast?.avatars[scene.avatarId]) || avatar;
         const sceneVoice = (scene.voiceId && cast?.voices[scene.voiceId]) || voice;
+        const silence = scene.audioId ? undefined : silences.get(silentSeconds(scene.script));
         return {
-          // HeyGen places the presenter with a scale (1 = default) and an x/y offset of the frame.
-          character: { ...this.character(sceneAvatar, scene.layout?.framing), ...(scene.layout ? { scale: scene.layout.scale, offset: { x: scene.layout.x, y: scene.layout.y } } : {}) },
-          // An audio scene lip-syncs to its clip; speed, pitch, and emotion apply to synthesised speech only.
-          // An emotion goes to voices that can take one: HeyGen says per voice, and one it says nothing about is sent it.
-          // A scene of only pauses holds the presenter silent for that long.
-          voice: scene.audioId
-            ? { type: "audio", audio_asset_id: this.audioAssetId(scene.audioId, cast) }
-            : silentSeconds(scene.script)
-              ? { type: "silence", duration: Math.max(1, silentSeconds(scene.script)) }
-              : { type: "text", input_text: withBreakTags(scene.script), voice_id: this.voiceId(sceneVoice, req.voiceId), speed: scene.speed ?? req.speed, ...(req.pitch ? { pitch: req.pitch } : {}), ...(req.emotion && sceneVoice?.emotionSupport !== false ? { emotion: req.emotion } : {}) },
-          // On-screen text sits over the scene for its whole length.
-          ...(scene.overlay ? { text: sceneText(scene.overlay, dimensionsFor(req.aspect, req.resolution)) } : {}),
-          // A video background loops for the length of the scene, filling the frame unless the scene shows all of it.
-          background:
-            scene.background.type === "video"
-              ? { type: "video", url: scene.background.value, play_style: "loop", fit: scene.background.fit ?? "cover" }
-              : scene.background.type === "image"
-                ? this.imageBackground(scene.background, cast)
-                : { type: "color", value: scene.background.value },
+          type: "avatar_video",
+          input: {
+            type: "avatar",
+            avatar_id: this.lookId(sceneAvatar),
+            // An audio scene lip-syncs to its clip, a silent one to its silence; speed and pitch apply to speech only.
+            ...(scene.audioId || silence
+              ? { audio_asset_id: silence ?? this.audioAssetId(scene.audioId!, cast) }
+              : {
+                  script: withBreakTags(scene.script),
+                  voice_id: this.voiceId(sceneVoice, req.voiceId),
+                  voice_settings: { speed: scene.speed ?? req.speed ?? 1, ...(req.pitch ? { pitch: req.pitch } : {}) },
+                }),
+            background: this.background(scene.background, cast),
+          },
         };
       }),
     };
@@ -100,24 +127,28 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     return { providerJobId: data.video_id };
   }
 
-  /** HeyGen's character for a presenter, in the scene's framing; a talking photo has a square or a circle only, so a close-up keeps its square. */
-  private character(avatar: Avatar, framing?: PresenterFraming) {
-    const photoId = avatar.source === "custom" ? avatar.providerAssetIds?.[this.name] : avatar.tags?.includes("photo avatar") ? avatar.id : undefined;
-    if (avatar.source === "custom" && !photoId) throw new Error(`Custom avatar "${avatar.name}" has not been uploaded to HeyGen yet.`);
-    return photoId
-      ? { type: "talking_photo", talking_photo_id: photoId, talking_photo_style: framingFor(framing, avatar) === "circle" ? "circle" : "square" }
-      : { type: "avatar", avatar_id: avatar.id, avatar_style: framing === "closeUp" ? "closeUp" : framing === "circle" ? "circle" : "normal" };
+  private sleep(ms: number) {
+    return new Promise((r) => setTimeout(r, ms));
   }
 
-  /** An image background by URL, or an uploaded one by its HeyGen asset id. */
-  private imageBackground(background: Background, cast?: RenderCast) {
+  /** The look a presenter renders as: a provider avatar's own id, or the photo avatar made from a custom portrait. */
+  private lookId(avatar: Avatar): string {
+    if (avatar.source !== "custom") return avatar.id;
+    const id = avatar.providerAssetIds?.[LOOK];
+    if (!id) throw new Error(`Custom avatar "${avatar.name}" has not been uploaded to HeyGen yet.`);
+    if (avatar.providerAssetIds?.[PENDING]) throw new ValidationError(`HeyGen is still preparing the photo avatar "${avatar.name}". Generate again in a minute.`);
+    return id;
+  }
+
+  /** A scene's background as HeyGen composes it behind the presenter; pictures and videos always fill the frame. */
+  private background(background: Background, cast?: RenderCast) {
+    if (background.type === "color") return { type: "color", color: background.value };
+    if (background.type === "video") return { type: "video", source: { type: "url", url: background.value } };
     const backdropId = backdropIdOf(background);
-    // Sent either way, so the render matches the stage preview whatever HeyGen's own default is.
-    const fit = { fit: background.fit ?? "cover" };
-    if (!backdropId) return { type: "image", url: background.value, ...fit };
+    if (!backdropId) return { type: "image", source: { type: "url", url: background.value } };
     const id = cast?.backdrops?.[backdropId]?.providerAssetIds?.[this.name];
     if (!id) throw new Error(`Background image ${backdropId} has not been uploaded to HeyGen yet.`);
-    return { type: "image", image_asset_id: id, ...fit };
+    return { type: "image", source: { type: "asset_id", asset_id: id } };
   }
 
   private audioAssetId(audioId: string, cast?: RenderCast): string {
@@ -135,7 +166,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
 
   /**
    * A presenter drawn from a description (v3 prompt to avatar), 4:5 like an uploaded portrait. The look stays in the
-   * HeyGen account; the studio keeps its picture as a photo avatar, rendered as a talking photo like any upload.
+   * HeyGen account; the studio keeps its picture as a custom portrait, made into a photo avatar like any upload.
    */
   async generatePortrait({ name, prompt }: { name: string; prompt: string }) {
     try {
@@ -169,11 +200,8 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     if (s.status === "completed") {
       return { status: "completed", videoUrl: s.video_url, thumbnailUrl: s.thumbnail_url, durationSec: s.duration };
     }
-    if (s.status === "failed") {
-      const msg = typeof s.error === "string" ? s.error : s.error?.message;
-      return { status: "failed", error: msg ?? "Render failed" };
-    }
-    return { status: s.status === "waiting" || s.status === "pending" ? "queued" : "processing" };
+    if (s.status === "failed") return { status: "failed", error: s.failure_message ?? "Render failed" };
+    return { status: s.status === "pending" || s.status === "waiting" ? "queued" : "processing" };
   }
 
   parseWebhook(body: unknown) {
@@ -184,21 +212,6 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     if (b.event_type === "avatar_video.fail") return { providerJobId: id, update: { status: "failed" as const, error: b.event_data?.msg ?? "Render failed" } };
     return null;
   }
-}
-
-/** HeyGen's text element for a scene's on-screen text: bold, centred across the frame, in pixels of the output. */
-export function sceneText(overlay: SceneText, frame: { width: number; height: number }) {
-  return {
-    type: "text",
-    text: overlay.text,
-    font_family: "Arial",
-    font_size: Math.round(Math.min(frame.width, frame.height) * SCENE_TEXT_SCALE[overlay.size ?? "medium"]),
-    font_weight: "bold",
-    color: overlay.color ?? "#ffffff",
-    position: { x: Math.round(frame.width / 2), y: Math.round(frame.height * SCENE_TEXT_Y[overlay.position ?? "top"]) },
-    text_align: "center",
-    line_height: 1.2,
-  };
 }
 
 /** The reason in a HeyGen error ("…failed: 400 {"error":{"message":"…"}}" or "HeyGen error: …"), kept short. */
@@ -215,4 +228,27 @@ function heygenReason(message: string): string {
   }
   if (message.startsWith("HeyGen error:")) return message.slice("HeyGen error:".length).trim().slice(0, 300);
   return "try describing them differently";
+}
+
+/** A WAV clip of silence (8 kHz, 8-bit mono, about 8 KB a second), for a scene that holds the presenter quiet. */
+export function silentWav(seconds: number): Uint8Array {
+  const samples = Math.round(seconds * 8000);
+  const wav = new Uint8Array(44 + samples);
+  const view = new DataView(wav.buffer);
+  const ascii = (at: number, text: string) => [...text].forEach((c, i) => view.setUint8(at + i, c.charCodeAt(0)));
+  ascii(0, "RIFF");
+  view.setUint32(4, 36 + samples, true);
+  ascii(8, "WAVE");
+  ascii(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, 8000, true);
+  view.setUint32(28, 8000, true); // bytes a second
+  view.setUint16(32, 1, true);
+  view.setUint16(34, 8, true);
+  ascii(36, "data");
+  view.setUint32(40, samples, true);
+  wav.fill(128, 44); // 8-bit PCM is unsigned: 128 is silence
+  return wav;
 }

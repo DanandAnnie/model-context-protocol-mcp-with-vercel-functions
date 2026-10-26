@@ -267,7 +267,7 @@ describe("background images at the renderer", () => {
     const { HeyGenAvatarProvider } = await import("../providers/avatar/heygen");
     const heygen = new HeyGenAvatarProvider("key");
     const client = (heygen as unknown as { client: Record<string, (...a: unknown[]) => Promise<unknown>> }).client;
-    let sent: { video_inputs: Array<{ background: Record<string, unknown> }> } | null = null;
+    let sent: { scenes: Array<{ input: { background: Record<string, unknown> } }> } | null = null;
     client.generateVideo = async (body) => {
       sent = body as typeof sent;
       return { video_id: "hg_1" };
@@ -282,9 +282,9 @@ describe("background images at the renderer", () => {
     const office: Backdrop = { id: "bd_office", name: "Office", mimeType: "image/png", bytes: 12, createdAt: "", providerAssetIds: { heygen: "img_1" } };
     const req = request([sceneWith(backdropPath(office.id)), sceneWith("https://cdn.example/bg.jpg")]);
     await heygen.createVideo(req, ava, emma, { avatars: { [ava.id]: ava }, voices: { [emma.id]: emma }, backdrops: { [office.id]: office } });
-    assert.deepEqual(sent!.video_inputs.map((i) => i.background), [
-      { type: "image", image_asset_id: "img_1", fit: "cover" },
-      { type: "image", url: "https://cdn.example/bg.jpg", fit: "cover" },
+    assert.deepEqual(sent!.scenes.map((sc) => sc.input.background), [
+      { type: "image", source: { type: "asset_id", asset_id: "img_1" } },
+      { type: "image", source: { type: "url", url: "https://cdn.example/bg.jpg" } },
     ]);
     await assert.rejects(heygen.createVideo(req, ava, emma, { avatars: {}, voices: {}, backdrops: {} }), /not been uploaded to HeyGen/);
     const fresh = await heygen.prepareBackdrop({ ...office, providerAssetIds: {} }, { bytes: PNG, mimeType: "image/png" });

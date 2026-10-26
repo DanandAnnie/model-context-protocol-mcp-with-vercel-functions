@@ -647,15 +647,18 @@ describe("scenes", () => {
     await assert.rejects(resolveRenderContext({ ...req, scenes: [{ ...req.scenes![1], avatarId: "ghost" }] }, LOCAL_OWNER), /not found/);
   });
 
-  it("HeyGen renders one input per scene with that scene's presenter; D-ID refuses a second presenter", async () => {
+  it("HeyGen renders one studio scene per scene with that scene's presenter; D-ID refuses a second presenter", async () => {
     const { HeyGenAvatarProvider } = await import("../providers/avatar/heygen");
     const { DidAvatarProvider } = await import("../providers/avatar/did");
     const heygen = new HeyGenAvatarProvider("key");
-    let sent: { video_inputs: Array<{ character: { avatar_id?: string }; voice: { voice_id: string } }> } | null = null;
+    type Input = { avatar_id: string; voice_id?: string; voice_settings?: { speed: number; pitch?: number }; background: unknown } & Record<string, unknown>;
+    type Body = { type: string; aspect_ratio: string; resolution: string; caption?: unknown; scenes: Array<{ type: string; input: Input }> };
+    let sent: Body | null = null;
     (heygen as unknown as { client: { generateVideo: (b: unknown) => Promise<{ video_id: string }> } }).client.generateVideo = async (b) => {
-      sent = b as typeof sent;
+      sent = b as Body;
       return { video_id: "hg_1" };
     };
+    const inputs = () => sent!.scenes.map((sc) => sc.input);
     const ava = { ...STOCK_AVATARS[0], id: "ava_hg", provider: "heygen", source: "provider" as const };
     const marcus = { ...STOCK_AVATARS[1], id: "marcus_hg", provider: "heygen", source: "provider" as const };
     const emma = { ...STOCK_VOICES[0], id: "emma_hg", provider: "heygen" };
@@ -664,6 +667,8 @@ describe("scenes", () => {
       title: "Two presenters",
       avatarId: ava.id,
       voiceId: emma.id,
+      aspect: "9:16",
+      resolution: "1080p",
       scenes: [
         { script: "Ava opens.", background: { type: "color", value: "#000000" } },
         { script: "Marcus closes.", background: { type: "color", value: "#ffffff" }, avatarId: marcus.id, voiceId: james.id },
@@ -671,59 +676,52 @@ describe("scenes", () => {
     });
     const cast = { avatars: { [ava.id]: ava, [marcus.id]: marcus }, voices: { [emma.id]: emma, [james.id]: james } };
     assert.equal((await heygen.createVideo(req, ava, emma, cast)).providerJobId, "hg_1");
-    assert.deepEqual(sent!.video_inputs.map((i) => [i.character.avatar_id, i.voice.voice_id]), [[ava.id, emma.id], [marcus.id, james.id]]);
+    assert.deepEqual([sent!.type, sent!.aspect_ratio, sent!.resolution], ["studio", "9:16", "1080p"]);
+    assert.deepEqual(sent!.scenes.map((sc) => sc.type), ["avatar_video", "avatar_video"]);
+    assert.deepEqual(inputs().map((i) => [i.type, i.avatar_id, i.voice_id, i.script]), [["avatar", ava.id, emma.id, "Ava opens."], ["avatar", marcus.id, james.id, "Marcus closes."]]);
+    assert.deepEqual(inputs().map((i) => i.background), [{ type: "color", color: "#000000" }, { type: "color", color: "#ffffff" }]);
     // Burned-in captions only when the video has no caption style of its own; the styled look comes from the subtitle track.
-    const bodyOf = () => sent as unknown as { caption: boolean };
     await heygen.createVideo({ ...req, captions: true }, ava, emma, cast);
-    assert.equal(bodyOf().caption, true);
+    assert.deepEqual(sent!.caption, { file_format: "srt", style: "default" });
     await heygen.createVideo({ ...req, captions: true, captionStyle: { position: "top", size: "large" } }, ava, emma, cast);
-    assert.equal(bodyOf().caption, false, "a styled caption is not burned in");
+    assert.equal("caption" in sent!, false, "a styled caption is not burned in");
     // A pitch shift reaches the voice settings; none means the field is left out.
     await heygen.createVideo({ ...req, pitch: 20 }, ava, emma, cast);
-    assert.equal((sent as unknown as { video_inputs: Array<{ voice: { pitch?: number } }> }).video_inputs[0].voice.pitch, 20);
+    assert.deepEqual(inputs()[0].voice_settings, { speed: 1, pitch: 20 });
     await heygen.createVideo(req, ava, emma, cast);
-    assert.equal("pitch" in (sent as unknown as { video_inputs: Array<{ voice: object }> }).video_inputs[0].voice, false);
+    assert.deepEqual(inputs()[0].voice_settings, { speed: 1 });
     assert.equal(videoRequestSchema.safeParse({ ...req, pitch: 51 }).success, false);
     assert.equal(videoRequestSchema.safeParse({ ...req, pitch: 2.5 }).success, false);
-    // An emotion reaches every scene whose voice can take one; a voice HeyGen says cannot is sent none.
-    type Voiced = { video_inputs: Array<{ voice: { emotion?: string } }> };
-    await heygen.createVideo({ ...req, emotion: "Soothing" }, ava, emma, cast);
-    assert.deepEqual((sent as unknown as Voiced).video_inputs.map((i) => i.voice.emotion), ["Soothing", "Soothing"]);
-    await heygen.createVideo({ ...req, emotion: "Soothing" }, ava, emma, { ...cast, voices: { ...cast.voices, [james.id]: { ...james, emotionSupport: false } } });
-    assert.deepEqual((sent as unknown as Voiced).video_inputs.map((i) => i.voice.emotion), ["Soothing", undefined]);
-    await heygen.createVideo(req, ava, emma, cast);
-    assert.equal("emotion" in (sent as unknown as Voiced).video_inputs[0].voice, false);
-    // The voice list carries HeyGen's per-voice flag, and leaves it out when HeyGen does not say.
+    // HeyGen's v3 studio takes no emotion, layout, or framing (its schema refuses unknown fields), so none is sent.
+    const framed = videoRequestSchema.parse({ ...req, emotion: "Soothing", scenes: [{ ...req.scenes![0], layout: { scale: 1.2, x: 0.25, y: -0.1, framing: "circle" } }, req.scenes![1]] });
+    await heygen.createVideo(framed, ava, emma, cast);
+    const allowed = ["type", "avatar_id", "script", "voice_id", "voice_settings", "audio_asset_id", "background"];
+    for (const i of inputs()) assert.deepEqual(Object.keys(i).filter((k) => !allowed.includes(k)), [], "only fields the v3 studio input takes");
+    assert.deepEqual(Object.keys(sent!).filter((k) => !["type", "title", "aspect_ratio", "resolution", "caption", "callback_url", "scenes"].includes(k)), []);
+    // The voice list is HeyGen's, with its sample clip as the preview.
     const { HeyGenTtsProvider } = await import("../providers/tts/heygen");
     const tts = new HeyGenTtsProvider("key");
-    (tts as unknown as { client: { listVoices: () => Promise<unknown> } }).client.listVoices = async () => ({
-      voices: [{ voice_id: "a", name: "A", emotion_support: true }, { voice_id: "b", name: "B", emotion_support: false }, { voice_id: "c", name: "C" }],
-    });
-    assert.deepEqual((await tts.listVoices()).map((v) => v.emotionSupport), [true, false, undefined]);
-    // A video background loops and fills the frame; an image is passed by URL; a colour as a value.
-    const withVideo = videoRequestSchema.parse({ ...req, scenes: [{ ...req.scenes![0], background: { type: "video", value: "https://cdn.example.com/loop.mp4" } }, { ...req.scenes![1], background: { type: "image", value: "https://cdn.example.com/bg.jpg" } }] });
+    (tts as unknown as { client: { listVoices: () => Promise<unknown> } }).client.listVoices = async () => [
+      { voice_id: "a", name: "A", language: "English", gender: "Female", preview_audio_url: "https://cdn.example.com/a.mp3" },
+      { voice_id: "b", name: "B" },
+    ];
+    assert.deepEqual(await tts.listVoices(), [
+      { id: "a", name: "A", provider: "heygen", language: "English", gender: "female", previewUrl: "https://cdn.example.com/a.mp3" },
+      { id: "b", name: "B", provider: "heygen", language: undefined, gender: undefined, previewUrl: undefined },
+    ]);
+    // A video background loops behind the presenter; an image is passed by URL; both fill the frame.
+    const withVideo = videoRequestSchema.parse({ ...req, scenes: [{ ...req.scenes![0], background: { type: "video", value: "https://cdn.example.com/loop.mp4" } }, { ...req.scenes![1], background: { type: "image", value: "https://cdn.example.com/bg.jpg", fit: "contain" } }] });
     await heygen.createVideo(withVideo, ava, emma, cast);
-    const backgrounds = (sent as unknown as { video_inputs: Array<{ background: unknown }> }).video_inputs.map((i) => i.background);
-    assert.deepEqual(backgrounds, [{ type: "video", url: "https://cdn.example.com/loop.mp4", play_style: "loop", fit: "cover" }, { type: "image", url: "https://cdn.example.com/bg.jpg", fit: "cover" }]);
+    assert.deepEqual(inputs().map((i) => i.background), [
+      { type: "video", source: { type: "url", url: "https://cdn.example.com/loop.mp4" } },
+      { type: "image", source: { type: "url", url: "https://cdn.example.com/bg.jpg" } },
+    ]);
     assert.equal(videoRequestSchema.safeParse({ ...req, scenes: [{ ...req.scenes![0], background: { type: "video", value: "loop.mp4" } }] }).success, false, "a video background must be a URL");
-    // A scene layout becomes the character's scale and offset; a scene without one sends neither.
-    const placed = videoRequestSchema.parse({ ...req, scenes: [{ ...req.scenes![0], layout: { scale: 1.2, x: 0.25, y: -0.1 } }, req.scenes![1]] });
-    await heygen.createVideo(placed, ava, emma, cast);
-    const chars = sent!.video_inputs.map((i) => i.character as { scale?: number; offset?: { x: number; y: number } });
-    assert.deepEqual([chars[0].scale, chars[0].offset], [1.2, { x: 0.25, y: -0.1 }]);
-    assert.equal("scale" in chars[1], false);
+    // The layout is still kept with the video for the editor, bounded, and an explicit default is stored as absent.
     assert.throws(() => videoRequestSchema.parse({ ...req, scenes: [{ ...req.scenes![0], layout: { scale: 2, x: 0, y: 0 } }] }), "the scale is bounded");
     const plain = await createVideo(videoRequestSchema.parse({ title: "Plain", avatarId: "stock_1", voiceId: "stock_voice_1", scenes: [{ script: "Hi.", background: { type: "color", value: "#fff" }, layout: { scale: 1, x: 0, y: 0 } }] }));
     assert.equal("layout" in plain.scenes![0], false, "an explicit default layout is stored as absent");
-    // A framing becomes HeyGen's avatar style; the full frame is the default, sent as "normal" and stored as absent.
-    const framed = videoRequestSchema.parse({ ...req, scenes: [{ ...req.scenes![0], layout: { scale: 1, x: 0, y: 0, framing: "circle" } }, { ...req.scenes![1], layout: { scale: 1, x: 0, y: 0, framing: "closeUp" } }] });
-    await heygen.createVideo(framed, ava, emma, cast);
-    assert.deepEqual(sent!.video_inputs.map((i) => (i.character as { avatar_style?: string }).avatar_style), ["circle", "closeUp"]);
-    // A photo avatar has a square or a circle only: a close-up keeps its square.
     const photo = { ...ava, source: "custom" as const, providerAssetIds: { heygen: "tp_1" } };
-    const photoStyle = (f?: "closeUp" | "circle") => (heygen as unknown as { character: (a: typeof photo, f?: string) => { talking_photo_style?: string } }).character(photo, f).talking_photo_style;
-    assert.deepEqual([photoStyle(), photoStyle("closeUp"), photoStyle("circle")], ["square", "square", "circle"]);
-    // The editor and the stored video use the framing the presenter gets, so a photo's close-up is listed as its full frame.
     assert.deepEqual([framingFor("closeUp", photo), framingFor("circle", photo), framingFor("closeUp", ava), framingFor(undefined, ava)], ["full", "circle", "closeUp", "full"]);
     assert.equal(isPhotoAvatar({ tags: ["photo avatar"] }), true);
     assert.equal((await createVideo(videoRequestSchema.parse({ title: "Full", avatarId: "stock_1", voiceId: "stock_voice_1", scenes: [{ script: "Hi.", background: { type: "color", value: "#fff" }, layout: { scale: 1, x: 0, y: 0, framing: "full" } }] }))).scenes![0].layout, undefined);

@@ -11,15 +11,13 @@ export class HeyGenTtsProvider implements TtsProvider {
   }
 
   async listVoices(): Promise<Voice[]> {
-    const data = await this.client.listVoices();
-    return data.voices.map((v) => ({
+    return (await this.client.listVoices()).map((v) => ({
       id: v.voice_id,
       name: v.name,
       provider: this.name,
       language: v.language,
       gender: (v.gender?.toLowerCase() as Voice["gender"]) ?? undefined,
-      previewUrl: v.preview_audio,
-      ...(typeof v.emotion_support === "boolean" ? { emotionSupport: v.emotion_support } : {}),
+      previewUrl: v.preview_audio_url,
     }));
   }
 

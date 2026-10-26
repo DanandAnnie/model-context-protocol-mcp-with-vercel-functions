@@ -149,14 +149,14 @@ export class HeyGenTranslateProvider implements TranslateProvider {
     try {
       s = await this.client.translationStatus(providerJobId);
     } catch (err) {
-      // A job started through v2 before the move may be unknown to v3: ask v2 instead.
-      if (!/ failed: 404\b/.test(err instanceof Error ? err.message : "")) throw err;
+      // A job started through v2 before the move may be unknown to v3: ask v2 instead (gone, 410, once v2 is retired).
+      if (!/ failed: (404|410)\b/.test(err instanceof Error ? err.message : "")) throw err;
       let v2;
       try {
         v2 = await this.client.translationStatusV2(providerJobId);
       } catch (old) {
         // Unknown to both: the job is gone, so it stops being asked about.
-        if (/ failed: 404\b/.test(old instanceof Error ? old.message : "")) return { status: "failed" as const, error: TRANSLATION_GONE };
+        if (/ failed: (404|410)\b/.test(old instanceof Error ? old.message : "")) return { status: "failed" as const, error: TRANSLATION_GONE };
         throw old;
       }
       if (v2.status === "success") return { status: "completed" as const, videoUrl: v2.url };

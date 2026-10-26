@@ -72,8 +72,6 @@ export interface Voice {
   gender?: "male" | "female" | "neutral";
   previewUrl?: string;
   tags?: string[];
-  /** Whether the voice can take an emotion (HeyGen reports it per voice); absent when the provider does not say. */
-  emotionSupport?: boolean;
   /** "custom" for a cloned voice owned by an account; absent for provider voices. */
   source?: "provider" | "custom";
   ownerId?: string;

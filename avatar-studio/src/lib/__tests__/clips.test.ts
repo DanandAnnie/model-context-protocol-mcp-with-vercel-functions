@@ -171,7 +171,7 @@ describe("audio scenes at the renderer", () => {
     const { HeyGenAvatarProvider } = await import("../providers/avatar/heygen");
     const heygen = new HeyGenAvatarProvider("key");
     const client = (heygen as unknown as { client: Record<string, (...a: unknown[]) => Promise<unknown>> }).client;
-    let sent: { video_inputs: Array<{ voice: Record<string, unknown> }> } | null = null;
+    let sent: { scenes: Array<{ input: Record<string, unknown> }> } | null = null;
     client.generateVideo = async (b) => {
       sent = b as typeof sent;
       return { video_id: "hg_1" };
@@ -191,8 +191,9 @@ describe("audio scenes at the renderer", () => {
       ],
     });
     await heygen.createVideo(req, ava, emma, { avatars: { [ava.id]: ava }, voices: { [emma.id]: emma }, clips: { [clip.id]: clip } });
-    assert.deepEqual(sent!.video_inputs[0].voice, { type: "audio", audio_asset_id: "asset_1" });
-    assert.equal(sent!.video_inputs[1].voice.type, "text");
+    assert.equal(sent!.scenes[0].input.audio_asset_id, "asset_1");
+    assert.equal("script" in sent!.scenes[0].input || "voice_settings" in sent!.scenes[0].input, false, "a clip is not also spoken");
+    assert.equal(sent!.scenes[1].input.script, "Typed.");
     await assert.rejects(heygen.createVideo(req, ava, emma, { avatars: {}, voices: {}, clips: {} }), /not been uploaded to HeyGen/);
     // Preparing uploads once and keeps the id; an already prepared clip is not uploaded again.
     const fresh = await heygen.prepareAudio({ ...clip, providerAssetIds: {} }, { bytes: new Uint8Array([1]), mimeType: "audio/wav" });

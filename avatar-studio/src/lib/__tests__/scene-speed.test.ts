@@ -40,7 +40,7 @@ describe("per-scene speed", () => {
 
     const { HeyGenAvatarProvider } = await import("../providers/avatar/heygen");
     const heygen = new HeyGenAvatarProvider("key");
-    let sent: { video_inputs: Array<{ voice: { speed?: number } }> } | null = null;
+    let sent: { scenes: Array<{ input: { voice_settings: { speed: number } } }> } | null = null;
     (heygen as unknown as { client: Record<string, (...a: unknown[]) => Promise<unknown>> }).client.generateVideo = async (b) => {
       sent = b as typeof sent;
       return { video_id: "hg_1" };
@@ -48,7 +48,7 @@ describe("per-scene speed", () => {
     const ava = { ...STOCK_AVATARS[0], provider: "heygen", source: "provider" as const };
     const voice = { ...STOCK_VOICES[0], provider: "heygen" };
     await heygen.createVideo(req, ava, voice);
-    assert.deepEqual(sent!.video_inputs.map((i) => i.voice.speed), [0.5, 1, 1]);
+    assert.deepEqual(sent!.scenes.map((sc) => sc.input.voice_settings.speed), [0.5, 1, 1]);
     assert.throws(() => videoRequestSchema.parse({ ...req, scenes: [{ script: "Hi.", background: bg, speed: 2 }] }));
   });
 

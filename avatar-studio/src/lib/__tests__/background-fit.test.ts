@@ -1,4 +1,5 @@
-// A picture or video background either fills the frame (cropped) or is shown whole: what is stored, and what HeyGen receives.
+// A picture or video background either fills the frame (cropped) or is shown whole: what is stored, and what HeyGen
+// receives. HeyGen's v3 studio always fills the frame, so the fit is kept for the editor and not sent.
 // Run with: npm test
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
@@ -19,7 +20,7 @@ describe("background fit", () => {
     assert.throws(() => backgroundSchema.parse({ type: "image", value: "https://example.com/a.png", fit: "stretch" }));
   });
 
-  it("is stored on each scene, kept by a template, and sent to HeyGen", async () => {
+  it("is stored on each scene and kept by a template; HeyGen fills the frame either way", async () => {
     const req = videoRequestSchema.parse({
       title: "Slides",
       avatarId: STOCK_AVATARS[0].id,
@@ -37,18 +38,18 @@ describe("background fit", () => {
 
     const { HeyGenAvatarProvider } = await import("../providers/avatar/heygen");
     const heygen = new HeyGenAvatarProvider("key");
-    let sent: { video_inputs: Array<{ background: Record<string, unknown> }> } | null = null;
+    let sent: { scenes: Array<{ input: { background: Record<string, unknown> } }> } | null = null;
     (heygen as unknown as { client: Record<string, (...a: unknown[]) => Promise<unknown>> }).client.generateVideo = async (b) => {
       sent = b as typeof sent;
       return { video_id: "hg_1" };
     };
     await heygen.createVideo(req, { ...STOCK_AVATARS[0], provider: "heygen", source: "provider" as const }, { ...STOCK_VOICES[0], provider: "heygen" });
     assert.deepEqual(
-      sent!.video_inputs.map((i) => i.background),
+      sent!.scenes.map((sc) => sc.input.background),
       [
-        { type: "image", url: "https://example.com/slide.png", fit: "contain" },
-        { type: "image", url: "https://example.com/photo.jpg", fit: "cover" },
-        { type: "video", url: "https://example.com/loop.mp4", play_style: "loop", fit: "contain" },
+        { type: "image", source: { type: "url", url: "https://example.com/slide.png" } },
+        { type: "image", source: { type: "url", url: "https://example.com/photo.jpg" } },
+        { type: "video", source: { type: "url", url: "https://example.com/loop.mp4" } },
       ],
     );
   });

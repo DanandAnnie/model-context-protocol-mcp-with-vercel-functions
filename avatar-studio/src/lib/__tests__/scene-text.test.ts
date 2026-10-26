@@ -1,11 +1,11 @@
-// On-screen text for a scene (a title, a lower third): what is stored, what a template keeps, and what HeyGen receives.
+// On-screen text for a scene (a title, a lower third): what is stored and what a template keeps. HeyGen's v3 studio has
+// no text element, so the text stays with the video for the editor and is not sent.
 // Run with: npm test
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import { createTemplate, createVideo, templateInputSchema, videoRequestSchema } from "../services";
 import { sceneTextSchema } from "../services/schemas";
-import { sceneText } from "../providers/avatar/heygen";
 import { sceneTextFits } from "../types";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 
@@ -35,7 +35,7 @@ describe("scene text", () => {
     assert.equal(sceneTextFits({ text: "x".repeat(120), size: "small" }, "16:9"), false);
   });
 
-  it("is stored on its scene, kept by a template, and sent to HeyGen placed in the frame", async () => {
+  it("is stored on its scene, kept by a template, and left out of a HeyGen render", async () => {
     const req = videoRequestSchema.parse({
       title: "Open house",
       avatarId: STOCK_AVATARS[0].id,
@@ -56,18 +56,15 @@ describe("scene text", () => {
 
     const { HeyGenAvatarProvider } = await import("../providers/avatar/heygen");
     const heygen = new HeyGenAvatarProvider("key");
-    let sent: { video_inputs: Array<{ text?: Record<string, unknown> }> } | null = null;
+    let sent: { scenes: Array<{ input: Record<string, unknown> }> } | null = null;
     (heygen as unknown as { client: Record<string, (...a: unknown[]) => Promise<unknown>> }).client.generateVideo = async (b) => {
       sent = b as typeof sent;
       return { video_id: "hg_1" };
     };
     await heygen.createVideo(video, { ...STOCK_AVATARS[0], provider: "heygen", source: "provider" as const }, { ...STOCK_VOICES[0], provider: "heygen" });
-    // A 720p portrait frame is 720 x 1280: text is centred across it, sized from its shorter side.
-    assert.deepEqual(sent!.video_inputs[0].text, { type: "text", text: "12 Maple Street", font_family: "Arial", font_size: 47, font_weight: "bold", color: "#ffffff", position: { x: 360, y: 154 }, text_align: "center", line_height: 1.2 });
-    assert.deepEqual(sent!.video_inputs[1].text, sceneText({ text: "$450,000", position: "bottom", size: "large", color: "#facc15" }, { width: 720, height: 1280 }));
-    assert.equal(sent!.video_inputs[1].text!.font_size, 65);
-    assert.deepEqual(sent!.video_inputs[1].text!.position, { x: 360, y: 1050 });
-    assert.equal("text" in sent!.video_inputs[2], false, "a scene without text sends none");
+    assert.equal(sent!.scenes.length, 3);
+    assert.equal(JSON.stringify(sent).includes("12 Maple Street"), false, "the text is not sent");
+    assert.deepEqual(sent!.scenes.map((sc) => sc.input.script), ["Welcome in.", "Priced to sell.", "See you there."]);
   });
 });
 

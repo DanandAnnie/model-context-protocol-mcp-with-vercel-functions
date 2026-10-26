@@ -32,17 +32,39 @@ export class HeyGenClient {
     return json;
   }
 
-  listAvatars() {
-    return this.request<{
-      avatars: Array<{ avatar_id: string; avatar_name: string; gender?: string; preview_image_url?: string; preview_video_url?: string }>;
-      talking_photos?: Array<{ talking_photo_id: string; talking_photo_name: string; preview_image_url?: string }>;
-    }>(`${V2}/avatars`);
+  /**
+   * Every page of a v3 list (`{ data: [...], has_more, next_token }`, cursor `token`), up to `maxPages` pages so a huge
+   * account cannot hold a request open.
+   */
+  private async listAll<T>(path: string, limit: number, maxPages = 20): Promise<T[]> {
+    const items: T[] = [];
+    let token: string | undefined;
+    for (let page = 0; page < maxPages; page++) {
+      const sep = path.includes("?") ? "&" : "?";
+      const json = await this.envelope<T[]>(`${V3}${path}${sep}limit=${limit}${token ? `&token=${encodeURIComponent(token)}` : ""}`);
+      items.push(...(Array.isArray(json.data) ? json.data : []));
+      token = typeof json.next_token === "string" && json.next_token ? json.next_token : undefined;
+      if (!json.has_more || !token) break;
+    }
+    return items;
+  }
+
+  /** Avatar looks (v3): stock and studio avatars, digital twins, and photo avatars alike, each usable as `avatar_id`. */
+  listAvatarLooks() {
+    return this.listAll<{
+      id: string;
+      name: string;
+      avatar_type?: "studio_avatar" | "digital_twin" | "photo_avatar" | string;
+      preview_image_url?: string;
+      preview_video_url?: string;
+      gender?: string;
+      tags?: string[];
+      status?: string;
+    }>("/avatars/looks", 50);
   }
 
   listVoices() {
-    return this.request<{
-      voices: Array<{ voice_id: string; name: string; language?: string; gender?: string; preview_audio?: string; emotion_support?: boolean }>;
-    }>(`${V2}/voices`);
+    return this.listAll<{ voice_id: string; name: string; language?: string; gender?: string; preview_audio_url?: string }>("/voices", 100);
   }
 
   /**
@@ -54,7 +76,11 @@ export class HeyGenClient {
       method: "POST",
       body: JSON.stringify({ type: "prompt", name, prompt, aspect_ratio: "4:5" }),
     });
-    return (out.data ?? out) as { look_id: string; status?: string };
+    // The look's id is `avatar_item.id` in the v3 schema; `look_id` is read too, as some answers carry it.
+    const data = (out.data ?? out) as { look_id?: string; status?: string; avatar_item?: { id?: string; status?: string } };
+    const id = data.avatar_item?.id ?? data.look_id;
+    if (!id) throw new Error("HeyGen returned no look id for the drawn presenter");
+    return { look_id: id, status: data.avatar_item?.status ?? data.status };
   }
 
   async getLook(lookId: string): Promise<{ status?: string; preview_image_url?: string; error?: { code?: string; message?: string } | null }> {
@@ -62,48 +88,47 @@ export class HeyGenClient {
     return (out.data ?? out) as { status?: string; preview_image_url?: string; error?: { code?: string; message?: string } | null };
   }
 
-  /** Upload a portrait as a talking photo; returns HeyGen's talking_photo_id. */
-  async uploadTalkingPhoto(bytes: Uint8Array, mimeType: string): Promise<string> {
-    const res = await fetch("https://upload.heygen.com/v1/talking_photo", {
-      method: "POST",
-      headers: { "X-Api-Key": this.apiKey, "Content-Type": mimeType },
-      body: bytes as BodyInit,
-    });
-    const text = await res.text();
-    if (!res.ok) throw new Error(`HeyGen talking photo upload failed: ${res.status} ${text}`);
-    const json = JSON.parse(text) as { data?: { talking_photo_id?: string }; error?: unknown };
-    const id = json.data?.talking_photo_id;
-    if (!id) throw new Error(`HeyGen talking photo upload returned no id: ${text}`);
-    return id;
-  }
-
-  /** Upload an audio file as an asset; returns HeyGen's asset id for `voice.audio_asset_id`. */
-  async uploadAsset(bytes: Uint8Array, mimeType: string): Promise<string> {
-    const res = await fetch("https://upload.heygen.com/v1/asset", {
-      method: "POST",
-      headers: { "X-Api-Key": this.apiKey, "Content-Type": mimeType },
-      body: bytes as BodyInit,
-    });
+  /**
+   * Upload a file as an asset (v3, multipart with a `file` field); returns its `asset_id`, used for photo avatars,
+   * scene backgrounds, and audio. Asset ids do not expire.
+   */
+  async uploadAsset(bytes: Uint8Array, mimeType: string, filename = "upload"): Promise<string> {
+    const form = new FormData();
+    form.append("file", new Blob([bytes as BlobPart], { type: mimeType }), filename);
+    const res = await fetch(`${V3}/assets`, { method: "POST", headers: { "X-Api-Key": this.apiKey }, body: form, cache: "no-store" });
     const text = await res.text();
     if (!res.ok) throw new Error(`HeyGen asset upload failed: ${res.status} ${text}`);
-    const json = JSON.parse(text) as { data?: { id?: string }; error?: unknown };
-    const id = json.data?.id;
+    const json = JSON.parse(text) as { data?: { asset_id?: string } };
+    const id = json.data?.asset_id;
     if (!id) throw new Error(`HeyGen asset upload returned no id: ${text}`);
     return id;
   }
 
+  /** A photo avatar (v3) from an uploaded image asset; returns its look id. HeyGen prepares it before it can render. */
+  async createPhotoAvatar(name: string, assetId: string): Promise<{ id: string; status?: string }> {
+    const out = await this.request<{ avatar_item?: { id?: string; status?: string } }>(`${V3}/avatars`, {
+      method: "POST",
+      body: JSON.stringify({ type: "photo", name, file: { type: "asset_id", asset_id: assetId } }),
+    });
+    const id = out?.avatar_item?.id;
+    if (!id) throw new Error("HeyGen returned no look id for the photo avatar");
+    return { id, status: out.avatar_item?.status };
+  }
+
+  /** A video (v3, `POST /v3/videos`); a studio request composes its scenes into one render. */
   generateVideo(body: Record<string, unknown>) {
-    return this.request<{ video_id: string }>(`${V2}/video/generate`, { method: "POST", body: JSON.stringify(body) });
+    return this.request<{ video_id: string; status?: string }>(`${V3}/videos`, { method: "POST", body: JSON.stringify(body) });
   }
 
   videoStatus(videoId: string) {
     return this.request<{
-      status: "pending" | "processing" | "completed" | "failed" | "waiting";
+      status: "pending" | "processing" | "completed" | "failed" | string;
       video_url?: string;
       thumbnail_url?: string;
       duration?: number;
-      error?: { message?: string } | string | null;
-    }>(`${V1}/video_status.get?video_id=${encodeURIComponent(videoId)}`);
+      failure_code?: string;
+      failure_message?: string;
+    }>(`${V3}/videos/${encodeURIComponent(videoId)}`);
   }
 
   /** Video Translate (v3): one id per output language. */

@@ -11,7 +11,7 @@ import { MAX_SCENES, type AspectRatio, type Avatar, type Background, type Resolu
 import { getAvatar, listAvatars } from "./avatars";
 import { getBrandKit } from "./brand";
 import { listVoices } from "./voices";
-import { createVideo, videoRequestSchema } from "./videos";
+import { createVideo, enforceRenderLimit, videoRequestSchema } from "./videos";
 
 /** What a video holds: its scenes' scripts together, joined as the editor joins them. */
 const MAX_SCRIPT = 5000;
@@ -53,7 +53,8 @@ function cut(text: string, max: number): string {
   const head = text.slice(0, max);
   const end = Math.max(...[". ", "! ", "? "].map((p) => head.lastIndexOf(p)));
   if (end > max / 2) return head.slice(0, end + 1);
-  return head.replace(/\s+\S*$/, "");
+  // Between words, and never inside a pause marker the cut would leave half of.
+  return head.replace(/\s+\S*$/, "").replace(/\s*\[[^\]]*$/, "").trim();
 }
 
 /**
@@ -69,7 +70,8 @@ export function fitPlan(plan: VideoPlan): VideoPlan["scenes"] {
     if (out.length >= Math.min(MAX_PLANNED_SCENES, MAX_SCENES)) break;
     const room = MAX_SCRIPT - used - (out.length ? 2 : 0);
     if (script.length > room) {
-      if (!out.length) out.push({ ...scene, script: cut(script, room) });
+      const kept = out.length ? "" : cut(script, room);
+      if (stripPauses(kept).trim()) out.push({ ...scene, script: kept });
       break;
     }
     out.push({ ...scene, script });
@@ -108,8 +110,8 @@ export async function planVideo(input: VideoAgentInput, ownerId: string = LOCAL_
   const voices = await listVoices(ownerId);
   // A voice asked for must exist; otherwise the presenter's own (when it was chosen), the kit's, or the first.
   if (input.voiceId && !voices.some((v) => v.id === input.voiceId)) throw new ValidationError(`Voice ${input.voiceId} is not available`);
-  const preferred = input.voiceId ?? (input.avatarId ? (avatar.defaultVoiceId ?? kit?.defaultVoiceId) : (kit?.defaultVoiceId ?? avatar.defaultVoiceId));
-  const voice = voices.find((v) => v.id === preferred) ?? voices.find((v) => v.id === avatar.defaultVoiceId) ?? voices[0];
+  const candidates = [input.voiceId, ...(input.avatarId ? [avatar.defaultVoiceId] : []), kit?.defaultVoiceId, avatar.defaultVoiceId];
+  const voice = candidates.map((id) => id && voices.find((v) => v.id === id)).find(Boolean) || voices[0];
   if (!voice) throw new ValidationError("No voice is available to narrate the video");
 
   const plan = await getScriptProvider().plan({ prompt: input.prompt, lengthSec: input.lengthSec, language: input.language, ...(source ? { source } : {}) });
@@ -130,6 +132,8 @@ export async function planVideo(input: VideoAgentInput, ownerId: string = LOCAL_
 
 /** Plans and renders in one step, like HeyGen's one-shot "generate" mode. */
 export async function generateAgentVideo(input: VideoAgentInput, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<{ video: Video; draft: VideoAgentDraft }> {
+  // Before the page fetch and the planner call, so an owner at the monthly limit is not charged for a plan.
+  await enforceRenderLimit(ownerId);
   const draft = await planVideo(input, ownerId, fetchImpl);
   const video = await createVideo(videoRequestSchema.parse(draft), ownerId);
   return { video, draft };

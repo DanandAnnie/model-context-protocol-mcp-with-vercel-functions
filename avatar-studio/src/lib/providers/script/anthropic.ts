@@ -101,19 +101,29 @@ ${persona.instructions || "(none provided: be a friendly, helpful presenter)"}`;
     ]
       .filter(Boolean)
       .join("\n");
-    const response = await this.client.beta.messages.parse({
+    // create rather than parse: parse reads the JSON before the stop reason can be checked, so a refused or
+    // cut-off plan would surface as a parse error.
+    const response = await this.client.beta.messages.create({
       model: "claude-opus-5-5",
       max_tokens: 16000,
       system: PLAN_SYSTEM,
       output_config: { effort: "low", format: betaZodOutputFormat(PLAN_FORMAT) },
-      betas: ["server-side-fallback-2026-07-01"],
+      betas: ["server-side-fallback-2026-07-01", "structured-outputs-2025-12-15"],
       fallbacks: "default",
       messages: [{ role: "user", content: prompt }],
     });
     if (response.stop_reason === "refusal") throw new Error("The video agent declined this request. Try rephrasing the prompt.");
     if (response.stop_reason === "max_tokens") throw new Error("The video agent ran out of room. Try a shorter video.");
-    const plan = response.parsed_output;
-    if (!plan) throw new Error("The video agent returned no plan.");
+    const text = response.content
+      .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text")
+      .map((b) => b.text)
+      .join("");
+    let plan: z.infer<typeof PLAN_FORMAT>;
+    try {
+      plan = PLAN_FORMAT.parse(JSON.parse(text));
+    } catch {
+      throw new Error("The video agent returned a plan it could not read. Try again.");
+    }
     return {
       title: plan.title,
       orientation: /portrait|vertical/i.test(plan.orientation) ? "portrait" : "landscape",

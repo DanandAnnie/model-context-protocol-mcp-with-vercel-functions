@@ -3,9 +3,12 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
+import { getStore } from "../store";
+import { config } from "../config";
+import { AnthropicScriptProvider } from "../providers/script/anthropic";
 import { setScriptProvider } from "../providers";
 import type { ScriptProvider, VideoPlan } from "../providers/types";
-import { NotFoundError, ValidationError, brandKitSchema, fitPlan, generateAgentVideo, getVideo, planVideo, saveBrandKit, videoAgentSchema, videoRequestSchema } from "../services";
+import { LimitError, NotFoundError, ValidationError, brandKitSchema, fitPlan, generateAgentVideo, getVideo, planVideo, saveBrandKit, videoAgentSchema, videoRequestSchema } from "../services";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 
 /** A planner that hands back whatever plan the test sets, and records what it was asked. */
@@ -73,6 +76,55 @@ describe("video agent", () => {
     assert.throws(() => videoAgentSchema.parse({ prompt: "hi" }), /a few words/);
   });
 
+  it("skips a presenter's default voice that is gone for the brand kit's", async () => {
+    await getStore().put("avatar", { id: "custom_1", name: "Me", imageUrl: "data:image/png;base64,AA==", source: "custom", ownerId: "local", defaultVoiceId: "gone-clone" });
+    await saveBrandKit(brandKitSchema.parse({ name: "Acme", primaryColor: "#1e3a8a", defaultVoiceId: STOCK_VOICES[3].id }), "local");
+    const draft = await planVideo(videoAgentSchema.parse({ prompt: "Welcome new customers", avatarId: "custom_1" }), "local");
+    assert.equal(draft.avatarId, "custom_1");
+    assert.equal(draft.voiceId, STOCK_VOICES[3].id);
+  });
+
+  it("checks the render allowance before planning", async () => {
+    setScriptProvider(scripted);
+    nextPlan = { title: "T", orientation: "landscape", scenes: [{ script: "Hello there.", framing: "full" }] };
+    const original = config.renderLimitPerMonth;
+    (config as { renderLimitPerMonth?: number }).renderLimitPerMonth = 1;
+    try {
+      await generateAgentVideo(videoAgentSchema.parse({ prompt: "Hello there" }), "agent-quota");
+      await assert.rejects(generateAgentVideo(videoAgentSchema.parse({ prompt: "Hello again" }), "agent-quota"), LimitError);
+      assert.equal(asked.length, 1, "the refused request never reached the planner");
+    } finally {
+      (config as { renderLimitPerMonth?: number }).renderLimitPerMonth = original;
+    }
+  });
+
+  it("turns the Claude planner's refusals, cut-off plans, and malformed plans into clear errors", async () => {
+    const realFetch = globalThis.fetch;
+    let reply: unknown;
+    let sent: { output_config?: { format?: { type?: string } }; fallbacks?: unknown } = {};
+    globalThis.fetch = (async (_url: unknown, init: RequestInit) => {
+      sent = JSON.parse(String(init.body));
+      return new Response(JSON.stringify(reply), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const message = (text: string, stop: string) => ({ id: "m", type: "message", role: "assistant", model: "claude-opus-5-5", content: [{ type: "text", text }], stop_reason: stop, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } });
+    try {
+      const writer = new AnthropicScriptProvider("sk-test");
+      const ask = () => writer.plan({ prompt: "A video", lengthSec: 60, language: "English" });
+      reply = message(JSON.stringify({ title: "T", orientation: "Portrait", scenes: [{ script: "Hi there.", framing: "close-up" }] }), "end_turn");
+      assert.deepEqual(await ask(), { title: "T", orientation: "portrait", scenes: [{ script: "Hi there.", framing: "closeUp" }] });
+      assert.equal(sent.output_config?.format?.type, "json_schema");
+      assert.equal(sent.fallbacks, "default");
+      reply = message('{"title":"T","scenes":[{"script":"Hel', "max_tokens");
+      await assert.rejects(ask(), /ran out of room/);
+      reply = message('{"title":"T","sce', "refusal");
+      await assert.rejects(ask(), /declined this request/);
+      reply = message(JSON.stringify({ title: "T", scenes: [] }), "end_turn");
+      await assert.rejects(ask(), /could not read/);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
   it("keeps the plan within what a video holds", () => {
     const sentence = "This sentence is here to fill a scene with words. ";
     // Pause-only scenes are dropped, at most ten scenes are kept, and the scripts together fit in 5000 characters.
@@ -86,6 +138,11 @@ describe("video agent", () => {
     const huge = fitPlan({ title: "t", orientation: "landscape", scenes: [{ script: sentence.repeat(200), framing: "full" }] });
     assert.equal(huge.length, 1);
     assert.ok(huge[0].script.length <= 5000 && huge[0].script.endsWith("."));
+    // A cut never leaves half a pause marker, nor a scene of pauses alone.
+    const marker = fitPlan({ title: "t", orientation: "landscape", scenes: [{ script: `${"a".repeat(4990)} [pause 2s] and more words`, framing: "full" }] });
+    assert.equal(marker[0].script, "a".repeat(4990));
+    const pauses = fitPlan({ title: "t", orientation: "landscape", scenes: [{ script: `${"[pause 1s] ".repeat(600)}Hello there.`, framing: "full" }] });
+    assert.deepEqual(pauses, []);
   });
 
   it("writes from a web page and renders the plan as one video", async () => {

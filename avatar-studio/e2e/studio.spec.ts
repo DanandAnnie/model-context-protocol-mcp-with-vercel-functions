@@ -2647,7 +2647,8 @@ test("a multi-scene video has chapters: the share page jumps to a scene and the 
 
 test("a video can be made in other sizes, each a new video with the same scenes", async ({ page }) => {
   const bg = { type: "color", value: "#0f172a" };
-  const v = await createVideoViaApi(page, `Sizes ${Date.now().toString(36)}`, {
+  const sizesTitle = `Sizes ${Date.now().toString(36)}`;
+  const v = await createVideoViaApi(page, sizesTitle, {
     script: undefined,
     aspect: "16:9",
     scenes: [
@@ -2663,6 +2664,9 @@ test("a video can be made in other sizes, each a new video with the same scenes"
   await page.getByRole("button", { name: "Make 1 size" }).click();
   const made = page.getByTestId("other-sizes").getByRole("link");
   await expect(made).toHaveText(/ \(9:16\)$/);
+  // A size that started is not offered again.
+  await expect(page.getByLabel("9:16 portrait")).toBeDisabled();
+  await expect(page.getByRole("button", { name: /^Make/ })).toBeDisabled();
   await made.click();
   await page.waitForURL((url) => /\/videos\/vid_/.test(url.pathname) && !url.pathname.endsWith(v.id));
   await expect(page.getByText("Made from")).toBeVisible();
@@ -2671,7 +2675,7 @@ test("a video can be made in other sizes, each a new video with the same scenes"
   expect(copy.aspect).toBe("9:16");
   expect(copy.resizedFrom).toBe(v.id);
   expect(copy.scenes.map((sc: { script: string }) => sc.script)).toEqual(["Welcome to twelve Maple Street.", "Call Dana to book a showing."]);
-  await page.getByRole("link", { name: "another size of this video" }).click();
+  await page.getByRole("link", { name: sizesTitle, exact: true }).click();
   await page.waitForURL(new RegExp(`/videos/${v.id}`));
 });
 

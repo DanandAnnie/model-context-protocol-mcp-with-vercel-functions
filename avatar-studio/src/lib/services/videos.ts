@@ -7,7 +7,7 @@ import { EMPTY_WATCH, MAX_SCENES, TRASH_RETENTION_DAYS, backdropIdOf, isDefaultC
 import type { AudioClip, Avatar, Backdrop, Background, CaptionCue, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
 import { buildCues } from "../captions";
 import { captionDurationSec, sceneBoundsMs, type Timed } from "../chapters";
-import { wellFormed } from "../text";
+import { graphemes, wellFormed } from "../text";
 import { pauseSeconds, silentProblem, silentSeconds, stripPauses } from "../pauses";
 import type { AvatarProvider, RenderCast } from "../providers/types";
 import { LOCAL_OWNER } from "../owner-id";
@@ -237,7 +237,7 @@ export async function resolveRenderContext(
  * best-effort under concurrent requests; batches reserve their rows up front.
  */
 /** Library fields a caller may set on a new video alongside the render request (batch row, folder, retry link). */
-export type VideoExtras = Partial<Pick<Video, "folder" | "description" | "batchId" | "rowLabel" | "retryOf" | "resizedFrom">>;
+export type VideoExtras = Partial<Pick<Video, "folder" | "description" | "batchId" | "rowLabel" | "retryOf" | "resizedFrom" | "captionCues" | "subtitles">>;
 
 export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWNER, ctx?: RenderContext, skipLimit = false, extras: VideoExtras = {}): Promise<Video> {
   if (!skipLimit) await enforceRenderLimit(ownerId);
@@ -1120,7 +1120,7 @@ export async function retryVideo(id: string, ownerId: string = LOCAL_OWNER): Pro
   if (failed.deletedAt) throw new ConflictError("Restore the video from the trash before retrying it");
   const req = requestOf(failed);
   // One write: the provider's webhook can land as soon as the job exists, so nothing may overwrite the stored video afterwards.
-  return createVideo(req, ownerId, undefined, false, { folder: failed.folder, description: failed.description, batchId: failed.batchId, rowLabel: failed.rowLabel, retryOf: failed.id });
+  return createVideo(req, ownerId, undefined, false, { folder: failed.folder, description: failed.description, batchId: failed.batchId, rowLabel: failed.rowLabel, retryOf: failed.id, resizedFrom: failed.resizedFrom });
 }
 
 /** The request a stored video was rendered from, to render it again (a retry, another size). */
@@ -1150,13 +1150,17 @@ export const resizeSchema = z.object({
     .transform((a) => Array.from(new Set(a))),
 });
 
+/** The shapes a title of another size ends with, so a size made from a size is titled from the original. */
+const SIZE_SUFFIX = / \((?:16:9|9:16|1:1)\)$/;
+
 /**
  * "Make other sizes": renders the video again in each of `aspects` (the other frame shapes), with the same scenes,
- * presenter, voice, look, and settings, each a new video titled with its shape, in the same folder, recording which
- * video it was made from. The allowance must cover all of them before any starts, so a request never makes some sizes
- * and refuses the rest.
+ * presenter, voice, look, settings, corrected captions, and subtitle languages, each a new video titled with its shape,
+ * in the same folder, recording the original it was made from (a size made from a size points at the same original).
+ * The allowance is checked for all of them before any starts, as a batch's is; a size that cannot be started is
+ * returned as failed rather than losing the sizes already started.
  */
-export async function resizeVideo(id: string, input: z.infer<typeof resizeSchema>, ownerId: string = LOCAL_OWNER): Promise<Video[]> {
+export async function resizeVideo(id: string, input: z.infer<typeof resizeSchema>, ownerId: string = LOCAL_OWNER): Promise<{ videos: Video[]; failed: Array<{ aspect: string; error: string }> }> {
   const source = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
   if (purgeDue(source, Date.now())) throw new NotFoundError(`Video ${id} not found`);
   if (source.deletedAt) throw new ConflictError("Restore the video from the trash before making other sizes");
@@ -1169,14 +1173,31 @@ export async function resizeVideo(id: string, input: z.infer<typeof resizeSchema
       throw new LimitError(`Not enough renders left this month for ${aspects.length} ${aspects.length === 1 ? "size" : "sizes"} (${used} of ${limit} used). The allowance resets on the 1st.`);
     }
   }
-  const made: Video[] = [];
+  const req = requestOf(source);
+  // Resolved once for every size, as a batch resolves its presenter once (an uploaded portrait is prepared once).
+  const ctx = await resolveRenderContext(req, ownerId);
+  const base = source.resizedFrom ? source.title.replace(SIZE_SUFFIX, "") : source.title;
+  const extras: VideoExtras = {
+    folder: source.folder,
+    description: source.description,
+    resizedFrom: source.resizedFrom ?? source.id,
+    // The same scripts in the same voice: the corrections and translations hold for every shape.
+    captionCues: source.captionCues,
+    subtitles: source.subtitles,
+  };
+  const videos: Video[] = [];
+  const failed: Array<{ aspect: string; error: string }> = [];
   for (const aspect of aspects) {
-    // The shape names the copy; the title keeps within its 120 characters.
+    // The shape names the copy; the title keeps within its 120 characters, cut at whole characters.
     const suffix = ` (${aspect})`;
-    const title = `${source.title.slice(0, 120 - suffix.length)}${suffix}`;
-    made.push(await createVideo({ ...requestOf(source), title, aspect }, ownerId, undefined, false, { folder: source.folder, description: source.description, resizedFrom: source.id }));
+    const title = `${graphemes(base).slice(0, 120 - suffix.length).join("").trimEnd()}${suffix}`;
+    try {
+      videos.push(await createVideo({ ...req, title, aspect }, ownerId, ctx, true, extras));
+    } catch (err) {
+      failed.push({ aspect, error: err instanceof Error ? err.message : "The render could not be started" });
+    }
   }
-  return made;
+  return { videos, failed };
 }
 
 /**

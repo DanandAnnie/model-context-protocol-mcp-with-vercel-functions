@@ -7,6 +7,7 @@ import { MemoryStore } from "../store/memory";
 import { createVideo, deleteVideo, getVideo, rendersThisMonth, resizeSchema, resizeVideo, updateVideo, videoRequestSchema } from "../services";
 import { ConflictError, LimitError, ValidationError } from "../errors";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
+import { getStore } from "../store";
 
 beforeEach(() => {
   globalThis.__avatarStudioStore = new MemoryStore();
@@ -33,7 +34,8 @@ describe("other sizes", () => {
   it("makes each chosen shape as a new video with everything else the same", async () => {
     const original = await createVideo(source(), "agent");
     await updateVideo(original.id, { folder: "Listings" }, "agent");
-    const made = await resizeVideo(original.id, resizeSchema.parse({ aspects: ["9:16", "1:1", "9:16"] }), "agent");
+    const { videos: made, failed } = await resizeVideo(original.id, resizeSchema.parse({ aspects: ["9:16", "1:1", "9:16"] }), "agent");
+    assert.deepEqual(failed, []);
     assert.deepEqual(made.map((v) => [v.aspect, v.title]), [["9:16", "Open house tour (9:16)"], ["1:1", "Open house tour (1:1)"]]);
     for (const v of made) {
       const stored = await getVideo(v.id, "agent");
@@ -44,9 +46,36 @@ describe("other sizes", () => {
     }
     // A long title keeps its shape within the 120 characters a title holds.
     const long = await createVideo({ ...source(), title: "T".repeat(120) }, "agent");
-    const [square] = await resizeVideo(long.id, { aspects: ["1:1"] }, "agent");
+    const [square] = (await resizeVideo(long.id, { aspects: ["1:1"] }, "agent")).videos;
     assert.equal(square.title.length, 120);
     assert.ok(square.title.endsWith(" (1:1)"));
+    // An emoji where the title is cut is kept whole or left out, never split.
+    const emoji = await createVideo({ ...source(), title: `${"A".repeat(112)}😀 tail` }, "agent");
+    const [cut] = (await resizeVideo(emoji.id, { aspects: ["1:1"] }, "agent")).videos;
+    assert.equal(cut.title, `${"A".repeat(112)}😀 (1:1)`);
+    assert.equal(cut.title.isWellFormed(), true);
+    // A size made from a size is titled and linked from the original.
+    const [portrait] = made;
+    const [fromPortrait] = (await resizeVideo(portrait.id, { aspects: ["1:1"] }, "agent")).videos;
+    assert.equal(fromPortrait.title, "Open house tour (1:1)");
+    assert.equal(fromPortrait.resizedFrom, original.id);
+  });
+
+  it("keeps the corrected captions and subtitle languages, and a retried size keeps its link", async () => {
+    const original = await createVideo(source(), "agent");
+    const { saveCaptionCues, addSubtitles, retryVideo } = await import("../services");
+    await saveCaptionCues(original.id, { cues: [{ startMs: 0, endMs: 3000, text: "Welcome to 12 Maple Street." }, { startMs: 3000, endMs: 6000, text: "Call Dana to book a showing." }] }, "agent");
+    await addSubtitles(original.id, "Spanish", "agent");
+    const withExtras = await getVideo(original.id, "agent");
+    assert.ok(withExtras.subtitles?.Spanish && withExtras.captionCues?.length);
+    const [copy] = (await resizeVideo(original.id, { aspects: ["9:16"] }, "agent")).videos;
+    const stored = await getVideo(copy.id, "agent");
+    assert.deepEqual(stored.captionCues, withExtras.captionCues);
+    assert.deepEqual(stored.subtitles, withExtras.subtitles);
+    // A size that failed to start, retried, still points at the original.
+    await getStore().put("video", { ...stored, status: "failed", error: "provider down" });
+    const retried = await retryVideo(copy.id, "agent");
+    assert.equal(retried.resizedFrom, original.id);
   });
 
   it("refuses its own shape, a trashed video, someone else's, and more sizes than the allowance has left", async () => {
@@ -63,7 +92,7 @@ describe("other sizes", () => {
       // One render used, one left: two sizes are refused before either starts.
       await assert.rejects(resizeVideo(original.id, { aspects: ["9:16", "1:1"] }, "agent"), (e: unknown) => e instanceof LimitError && /2 sizes \(1 of 2 used\)/.test((e as Error).message));
       assert.equal(await rendersThisMonth("agent"), 1);
-      assert.equal((await resizeVideo(original.id, { aspects: ["1:1"] }, "agent")).length, 1);
+      assert.equal((await resizeVideo(original.id, { aspects: ["1:1"] }, "agent")).videos.length, 1);
     } finally {
       (config as { renderLimitPerMonth?: number }).renderLimitPerMonth = limit;
     }

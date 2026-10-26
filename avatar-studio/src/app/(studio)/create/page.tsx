@@ -14,7 +14,7 @@ import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib/client";
 import { languageLabel } from "@/lib/language";
 import { stripPauses } from "@/lib/pauses";
-import { MAX_IMPORT_BYTES, MAX_SCRIPT_CHARS, scenesFromText } from "@/lib/script-import";
+import { MAX_IMPORT_BYTES, MAX_SCRIPT_CHARS, decodeScript, scenesFromText } from "@/lib/script-import";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
 import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, PRESENTER_FRAMINGS, RESOLUTIONS, isDefaultCaptionStyle as isDefaultCaptionStyleFn, framingFor, isDefaultLayout, isPhotoAvatar, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS } from "@/lib/types";
@@ -192,7 +192,7 @@ function CreateInner() {
     if (!file) return;
     if (file.size > MAX_IMPORT_BYTES) return setImportNote(`${file.name} is larger than ${MAX_IMPORT_BYTES / 1_000_000} MB; import a plain-text or Markdown script.`);
     // Markdown is read as Markdown (list markers, emphasis, and links are not spoken); any other text as written.
-    const doc = scenesFromText(await file.text(), { markdown: /\.(md|markdown)$/i.test(file.name) || file.type === "text/markdown" });
+    const doc = scenesFromText(decodeScript(new Uint8Array(await file.arrayBuffer())), { markdown: /\.(md|markdown)$/i.test(file.name) || file.type === "text/markdown" });
     if (!doc.scenes.length) return setImportNote(`No script found in ${file.name}.`);
     // Anything already set up (a script, a clip, a presenter, a layout, more than one scene) is only replaced once confirmed.
     const setUp = scenes.length > 1 || scenes.some((sc) => sc.script.trim() || sc.audioId || sc.avatarId || sc.voiceId || sc.layout);

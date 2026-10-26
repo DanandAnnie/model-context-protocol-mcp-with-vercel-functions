@@ -10,8 +10,9 @@ const SEPARATOR = "\n\n";
 /** The shortest piece worth keeping when a cut has to fall between words rather than after a sentence. */
 const MIN_PIECE = 40;
 /**
- * How much of the document is read: a video keeps 5000 characters, and Markdown seldom takes more than a few
- * times that to write, so reading further only costs time (the editor runs this on the page's own thread).
+ * How much script is read: a video keeps 5000 characters, and Markdown seldom takes more than a few times that
+ * to write, so reading further only costs time (the editor runs this on the page's own thread). Lines that are
+ * never spoken (definitions, front matter, fences' own lines) do not count.
  */
 const READ_CHARS = MAX_SCRIPT_CHARS * 8;
 const MAX_LINE_CHARS = MAX_SCRIPT_CHARS * 2;
@@ -32,9 +33,12 @@ const SETEXT = /^\s{0,3}=+\s*$/;
 const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/;
 const BULLET = /^\s*[-*+]\s+(?:\[[ xX]\]\s+)?/;
 const ORDERED = /^\s*(\d{1,3})[.)]\s+/;
-const FENCE = /^\s{0,3}(```|~~~)/;
-// A link reference definition names a destination (a URL or path) and at most a quoted title; "[NARRATOR]: Welcome." is a line of script.
-const LINK_DEFINITION = /^\s{0,3}\[[^\]]+\]:\s*(?:<[^<>]*>|[^\s<>]*[/.#:][^\s<>]*)(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*$/;
+const FENCE = /^\s{0,3}(```|~~~)\s*([^\s`]*)/;
+// What a link reference definition points at: <…>, a URL with a scheme, a path, an anchor, or a domain.
+// "[GUEST]: Thanks." and "[HOST]: 10:30am" are lines of script.
+const LINK_TARGET = String.raw`(?:<[^<>]*>|[a-z][a-z0-9+.-]*:\S+|\.{0,2}\/\S*|#\S+|www\.\S+|[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}(?:[/?#]\S*)?)`;
+const LINK_DEFINITION = new RegExp(String.raw`^\s{0,3}\[[^\]^][^\]]*\]:\s*` + LINK_TARGET + String.raw`(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*$`, "i");
+const FOOTNOTE_DEFINITION = /^\s{0,3}\[\^[^\]]+\]:/;
 // A table's header rule has a pipe; a bare --- is a scene break.
 const TABLE_RULE = /^(?=[^|]*\|)\s*\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?\s*$/;
 const PAUSE = new RegExp(PAUSE_MARKER, "gi");
@@ -42,10 +46,34 @@ const PAUSE = new RegExp(PAUSE_MARKER, "gi");
 const TAG = /<\/?(?:a|abbr|b|big|blockquote|br|center|cite|code|del|div|em|font|h[1-6]|hr|i|img|ins|kbd|li|mark|ol|p|pre|q|s|small|span|strike|strong|sub|sup|table|tbody|td|th|thead|tr|tt|u|ul)(?:\s+[a-z-]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+))*\s*\/?>/gi;
 // A link destination: no spaces, one level of parentheses ("…/Mercury_(planet)"), and an optional quoted title.
 const DESTINATION = String.raw`\((?:[^()\s]|\([^()\s]*\))*(?:\s+"[^"]*")?\)`;
-const SENTENCE_END = /[.!?…]["'”’)\]]*(?=\s|$)/g;
+// Sentence ends: Latin punctuation before a space, and CJK, Arabic, and Devanagari full stops anywhere.
+const SENTENCE_END = /[.!?…]["'”’)\]]*(?=\s|$)|[。！？؟।]["'”’」』)\]]*/g;
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", mdash: "—", ndash: "–", hellip: "…", rsquo: "’", lsquo: "‘", rdquo: "”", ldquo: "“" };
 /** Marks a line inside a code fence, to be read as written. */
 const VERBATIM = "\u0001";
+/** Fence info strings that mean "this is the document itself", as a chat assistant wraps a script. */
+const DOCUMENT_FENCE = new Set(["", "markdown", "md", "text", "txt", "plaintext"]);
+
+/**
+ * A file's text, whatever a word processor saved it as: UTF-16 by its byte-order mark, UTF-8 when it is valid
+ * UTF-8, and otherwise Windows-1252 (what Word's "Plain Text" export writes by default on Windows).
+ */
+export function decodeScript(bytes: Uint8Array): string {
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder("utf-16le").decode(bytes.subarray(2));
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder("utf-16be").decode(bytes.subarray(2));
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    // Mapped here rather than by TextDecoder, which some runtimes read as Latin-1 (losing dashes and curly quotes).
+    let out = "";
+    for (let i = 0; i < bytes.length; i += 8192) {
+      out += String.fromCharCode(...Array.from(bytes.subarray(i, i + 8192), (b) => (b >= 0x80 && b < 0xa0 ? CP1252_C1.charCodeAt(b - 0x80) : b)));
+    }
+    return out;
+  }
+}
+/** Windows-1252's characters for bytes 0x80–0x9F (the rest of the code page is Latin-1). */
+const CP1252_C1 = "\u20ac\u0081\u201a\u0192\u201e\u2026\u2020\u2021\u02c6\u2030\u0160\u2039\u0152\u008d\u017d\u008f\u0090\u2018\u2019\u201c\u201d\u2022\u2013\u2014\u02dc\u2122\u0161\u203a\u0153\u009d\u017e\u0178";
 
 const hasWords = (text: string) => stripPauses(text).trim().length > 0;
 // A backslash-escaped character (any ASCII punctuation, as Markdown allows) is held in the private-use area while
@@ -55,31 +83,40 @@ const unhide = (text: string) => text.replace(/[-]/g, (c) => String.fromCh
 
 /** Markdown outside code spans as it would be read aloud: images and links by their text, autolinks by their address, emphasis, tags, and footnote marks dropped. */
 function spokenMarkdown(text: string): string {
-  return text
-    .replace(new RegExp(String.raw`!\[([^\]]*)\]` + DESTINATION, "g"), "$1")
-    .replace(new RegExp(String.raw`\[([^\]]+)\]` + DESTINATION, "g"), "$1")
-    .replace(/\[\^[^\]\s]+\]/g, "")
-    .replace(/\[([^\]]+)\]\[[^\]]*\]/g, "$1")
-    .replace(/<((?:https?:\/\/|mailto:)[^<>\s]+|[^<>\s@]+@[^<>\s@]+)>/gi, "$1")
-    .replace(TAG, "")
-    .replace(/&(#\d{1,5}|[a-z]{2,6});/gi, (m, name: string) => (name[0] === "#" ? String.fromCharCode(Number(name.slice(1))) : (ENTITIES[name.toLowerCase()] ?? m)))
-    // Emphasis within a line, each marker closed by its own kind, so an unclosed one costs no more than a scan.
-    .replace(/\*\*(?=\S)([^*\n]+?)(?<=\S)\*\*|__(?=\S)([^_\n]+?)(?<=\S)__|~~(?=\S)([^~\n]+?)(?<=\S)~~/g, (_, a, b, c) => a ?? b ?? c)
-    .replace(/(^|[\s(])([*_])(?=[^*_\s])([^*_\n]+?)(?<=\S)\2(?=[\s).,;:!?]|$)/g, "$1$3");
+  return (
+    text
+      .replace(new RegExp(String.raw`!\[([^\]]*)\]` + DESTINATION, "g"), "$1")
+      .replace(/!\[([^\]]*)\]\[[^\]]*\]/g, "$1")
+      .replace(new RegExp(String.raw`\[([^\]]+)\]` + DESTINATION, "g"), "$1")
+      .replace(/\[\^[^\]\s]+\]/g, "")
+      .replace(/\[([^\]]+)\]\[[^\]]*\]/g, "$1")
+      .replace(/<((?:https?:\/\/|mailto:)[^<>\s]+|[^<>\s@]+@[^<>\s@]+)>/gi, "$1")
+      .replace(TAG, "")
+      .replace(/&(#\d{1,5}|[a-z]{2,6});/gi, (m, name: string) => (name[0] === "#" ? String.fromCharCode(Number(name.slice(1))) : (ENTITIES[name.toLowerCase()] ?? m)))
+      // Emphasis within a paragraph, each marker closed by its own kind (a bold may hold a single *), and no
+      // further than the paragraph, so an unclosed one costs no more than a scan.
+      .replace(/\*\*(?=\S)((?:[^*\n]|\*(?!\*))+?)(?<=\S)\*\*|__(?=\S)((?:[^_\n]|_(?!_))+?)(?<=\S)__|~~(?=\S)([^~\n]+?)(?<=\S)~~/g, (_, a, b, c) => a ?? b ?? c)
+      .replace(/(^|[\s(])([*_])(?=[^*_\s])([^*_\n]+?)(?<=\S)\2(?=[\s).,;:!?]|$)/g, "$1$3")
+  );
 }
 
-/** A Markdown line as it would be read aloud; code spans keep their text as written, a table row is read cell by cell. */
-function spokenLine(line: string, listItem: boolean): string {
+/** Text as it would be read aloud: code spans keep their text as written, the rest is read as Markdown. */
+function spokenInline(text: string): string {
+  const parts = text.split("`");
+  // An unmatched backtick is just a character.
+  if (parts.length % 2 === 0) parts.splice(parts.length - 2, 2, `${parts[parts.length - 2]}\`${parts[parts.length - 1]}`);
+  return unhide(parts.map((p, i) => (i % 2 ? p : spokenMarkdown(p))).join("")).trim();
+}
+
+/** A line's own Markdown taken off (quote and list markers, table pipes), escapes held, ready to join its paragraph. */
+function lineText(line: string, listItem: boolean): string {
   let text = hide(line);
   if (listItem) text = text.replace(BULLET, "").replace(ORDERED, "");
   if (/^\s*\|/.test(text)) {
     text = text.replace(/^\s*\||\|\s*$/g, "").split("|").map((c) => c.trim()).filter(Boolean).join(", ");
     if (text && !/[.!?;:]$/.test(text)) text += ".";
   }
-  const parts = text.split("`");
-  // An unmatched backtick is just a character.
-  if (parts.length % 2 === 0) parts.splice(parts.length - 2, 2, `${parts[parts.length - 2]}\`${parts[parts.length - 1]}`);
-  return unhide(parts.map((p, i) => (i % 2 ? p : spokenMarkdown(p))).join("")).trim();
+  return text.trim();
 }
 
 /** Paragraphs of a block: runs of non-empty lines, each joined into one line. A paragraph with only pauses joins the one before it (or after it). */
@@ -91,19 +128,27 @@ function paragraphs(lines: string[], markdown: boolean): string[] {
     // A bullet is always a list item; a number only at the start of a paragraph, after another item, or as "1.",
     // so a wrapped "We sold\n100. That…" keeps its number while "Steps:\n1. Open" reads as a list.
     let inList = false;
-    const words = run
-      .map((raw, i) => {
-        if (raw.startsWith(VERBATIM)) return raw.slice(1).trim();
-        if (!markdown) return raw.trim();
+    // Consecutive Markdown lines are read together, so emphasis may wrap; fenced code is kept as written.
+    const pieces: string[] = [];
+    let prose: string[] = [];
+    const endProse = () => {
+      if (prose.length) pieces.push(spokenInline(prose.join(" ")));
+      prose = [];
+    };
+    run.forEach((raw, i) => {
+      if (raw.startsWith(VERBATIM)) {
+        endProse();
+        pieces.push(raw.slice(1).trim());
+      } else if (!markdown) pieces.push(raw.trim());
+      else {
         const line = raw.replace(/^\s*(?:>\s?)+/, "");
         const ordered = ORDERED.exec(line);
         inList = BULLET.test(line) || (!!ordered && (i === 0 || inList || ordered[1] === "1"));
-        return spokenLine(line, inList);
-      })
-      .filter(Boolean)
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim();
+        prose.push(lineText(line, inList));
+      }
+    });
+    endProse();
+    const words = pieces.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
     run = [];
     if (!words) return;
     if (!hasWords(words)) {
@@ -135,9 +180,10 @@ function insidePause(text: string, at: number): boolean {
 }
 
 /**
- * The longest start of `text` within `max` characters that ends a sentence or a paragraph, or between words
- * (outside a pause marker) when no such end comes in the second half of the room; undefined when there is none.
- * Only the first `max` characters are looked at, so a huge paragraph costs no more than a short one.
+ * The longest start of `text` within `max` characters that ends a sentence or a paragraph; between words when
+ * there is no such end, or when it keeps under a quarter of a large room; as a last resort (text without spaces,
+ * as Chinese or Japanese is written) at `max`, between whole characters. Never inside a pause marker; undefined
+ * when nothing fits. Only the first `max` characters are looked at, so a huge paragraph costs no more than a short one.
  */
 function head(text: string, max: number): string | undefined {
   if (text.length <= max) return text;
@@ -152,8 +198,16 @@ function head(text: string, max: number): string | undefined {
       break;
     }
   }
-  // A sentence end wins unless it would keep less than half the room and a cut between words keeps more.
-  const cut = sentence > 0 && (sentence >= max / 2 || word <= sentence) ? sentence : word;
+  let cut: number;
+  if (sentence > 0 && !(sentence < max / 4 && max > 1000 && word > sentence)) cut = sentence;
+  else if (word > 0) cut = word;
+  else {
+    cut = max;
+    // Not between the halves of a surrogate pair, nor inside a marker, and never a fragment.
+    if (/[\udc00-\udfff]/.test(text[cut] ?? "")) cut--;
+    while (cut > 0 && insidePause(text, cut)) cut--;
+    if (cut < MIN_PIECE) cut = -1;
+  }
   const piece = cut > 0 ? text.slice(0, cut).trim() : "";
   return piece && hasWords(piece) ? piece : undefined;
 }
@@ -188,6 +242,35 @@ function withoutFrontMatter(lines: string[]): string[] {
   return body.some((l) => /^[a-z_][\w-]*\s*:/.test(l)) && body.every((l) => !l.trim() || /^[a-z_][\w-]*\s*:/.test(l) || /^\s+\S/.test(l)) ? lines.slice(end + 1) : lines;
 }
 
+/** A whole document wrapped in one ```markdown (or plain) fence, as a chat assistant hands over a script, unwrapped. */
+function withoutDocumentFence(lines: string[]): string[] {
+  const first = lines.findIndex((l) => l.trim());
+  let last = lines.length - 1;
+  while (last > first && !lines[last].trim()) last--;
+  const open = first >= 0 ? FENCE.exec(lines[first]) : null;
+  if (!open || last <= first || !DOCUMENT_FENCE.has(open[2].toLowerCase())) return lines;
+  const close = FENCE.exec(lines[last]);
+  if (!close || close[1] !== open[1] || close[2]) return lines;
+  const inner = lines.slice(first + 1, last);
+  // Only when no other fence of the same kind sits inside (which would make the outer pair two code blocks).
+  return inner.some((l) => FENCE.exec(l)?.[1] === open[1]) ? lines : inner;
+}
+
+/** HTML comments removed; one that never closes is left as text, and the search stops there. */
+function withoutComments(text: string): string {
+  let out = "";
+  let at = 0;
+  for (;;) {
+    const open = text.indexOf("<!--", at);
+    if (open < 0) break;
+    const close = text.indexOf("-->", open + 4);
+    if (close < 0) break;
+    out += text.slice(at, open);
+    at = close + 3;
+  }
+  return out + text.slice(at);
+}
+
 /** Blocks with only pauses join their neighbour (the one before, or else the one after), so no scene is a pause alone. */
 function joinPauseOnly(blocks: string[]): string[] {
   const out: string[] = [];
@@ -206,15 +289,28 @@ function joinPauseOnly(blocks: string[]): string[] {
  * Scenes from a plain-text or Markdown document. A heading or a line of `---` (or `***`, `___`) starts a new
  * scene, and the paragraphs between are that scene's script; a document with neither (a title heading aside)
  * gets one scene per paragraph, packed together when there are more paragraphs than a video has scenes. With
- * `markdown`, list markers, emphasis, links, tags, comments, link definitions, and footnote marks are left out of
- * what is spoken, and code inside fences is read as written; plain text is taken as written. A video holds
- * `MAX_SCRIPT_CHARS` of script in all, so a longer document is cut at a sentence end and the rest left out.
+ * `markdown`, list markers, emphasis, links, tags, comments, link and footnote definitions, and footnote marks
+ * are left out of what is spoken, and code inside fences is read as written (a fence around the whole document
+ * is taken off); plain text is taken as written. A video holds `MAX_SCRIPT_CHARS` of script in all, so a longer
+ * document is cut at a sentence end and the rest left out.
  */
 export function scenesFromText(text: string, { markdown = true }: { markdown?: boolean } = {}): ImportedScript {
   let source = text.replace(/^﻿/, "").replace(/\r\n?/g, "\n");
-  if (markdown) source = source.replace(/<!--[\s\S]*?-->/g, "");
+  // Embedded images (data: URLs, as document exports inline them) can be far longer than a line is read; they
+  // leave their alt text, like any other image.
+  if (markdown) source = withoutComments(source).replace(/!\[([^\]\n]*)\]\(<?data:[^)\s]*>?\)/g, "$1");
   let lines = source.split("\n");
-  if (markdown) lines = withoutFrontMatter(lines);
+  if (markdown) lines = withoutDocumentFence(withoutFrontMatter(lines));
+  // Where each fence kind next appears, so an opening fence with no close is read as an ordinary line.
+  const fenceAt: Record<string, number[]> = { "```": [], "~~~": [] };
+  if (markdown) lines.forEach((l, i) => { const f = FENCE.exec(l); if (f) fenceAt[f[1]].push(i); });
+  // Lines are read in order, so each kind keeps a pointer past the fences already behind.
+  const fencePtr: Record<string, number> = { "```": 0, "~~~": 0 };
+  const nextFence = (kind: string, after: number) => {
+    const at = fenceAt[kind];
+    while (fencePtr[kind] < at.length && at[fencePtr[kind]] <= after) fencePtr[kind]++;
+    return at[fencePtr[kind]] ?? -1;
+  };
   let title: string | undefined;
   const sections: string[][] = [[]];
   let explicit = false;
@@ -222,39 +318,46 @@ export function scenesFromText(text: string, { markdown = true }: { markdown?: b
   let read = 0;
   let cutShort = false;
   let fence: string | undefined;
+  let footnote = false;
   for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    if (markdown) {
+      const opens = FENCE.exec(line);
+      if (fence) {
+        if (opens && opens[1] === fence && !opens[2]) fence = undefined;
+        else {
+          sections[sections.length - 1].push(VERBATIM + line.slice(0, MAX_LINE_CHARS));
+          if (line.trim()) seen = true;
+          read += Math.min(line.length, MAX_LINE_CHARS) + 1;
+        }
+        continue;
+      }
+      // A backtick fence's info has no backtick (```npm i``` is inline code). A fence that never closes fences
+      // nothing: its own line is markup, and what follows is read as Markdown.
+      if (opens && !(opens[1] === "```" && line.slice(line.indexOf("```") + 3).includes("`"))) {
+        if (nextFence(opens[1], i) > i) fence = opens[1];
+        continue;
+      }
+      // Definitions and table rules are never spoken; a footnote's indented continuation lines go with it.
+      if (footnote && /^(?: {4}|\t)/.test(line)) continue;
+      footnote = FOOTNOTE_DEFINITION.test(line);
+      if (footnote || LINK_DEFINITION.test(line) || TABLE_RULE.test(line)) continue;
+    }
     // Reading stops well past what a video keeps; the rest could only be left out.
     if (read > READ_CHARS) {
       cutShort = true;
       break;
     }
-    let line = lines[i];
     if (line.length > MAX_LINE_CHARS) {
       line = line.slice(0, MAX_LINE_CHARS);
       cutShort = true;
     }
     read += line.length + 1;
-    if (markdown) {
-      const opens = FENCE.exec(line);
-      if (fence) {
-        if (opens && opens[1] === fence) fence = undefined;
-        else {
-          sections[sections.length - 1].push(VERBATIM + line);
-          if (line.trim()) seen = true;
-        }
-        continue;
-      }
-      if (opens) {
-        fence = opens[1];
-        continue;
-      }
-      if (LINK_DEFINITION.test(line) || TABLE_RULE.test(line)) continue;
-    }
     const atx = markdown ? HEADING.exec(line) : null;
     // A text line underlined with === is a heading too (Markdown's other spelling); a list item, quote, or table row is not.
     const setext = markdown && !atx && !!line.trim() && SETEXT.test(lines[i + 1] ?? "") && !(lines[i - 1] ?? "").trim() && !/^\s*(?:[-*+>|]|\d{1,3}[.)]\s)/.test(line);
     if (atx || setext) {
-      const name = spokenLine(atx ? atx[2] : line, false);
+      const name = spokenInline(lineText(atx ? atx[2] : line, false));
       const top = atx ? atx[1] === "#" : true;
       if (setext) i++;
       // A title before any script names the video; it does not divide the document into scenes.

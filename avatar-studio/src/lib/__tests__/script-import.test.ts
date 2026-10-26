@@ -2,7 +2,7 @@
 // Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { MAX_SCRIPT_CHARS, scenesFromText } from "../script-import";
+import { MAX_SCRIPT_CHARS, decodeScript, scenesFromText } from "../script-import";
 import { videoRequestSchema } from "../services";
 import { MAX_SCENES } from "../types";
 
@@ -146,5 +146,52 @@ describe("scenesFromText", () => {
       if (r.scenes.length) assert.ok(renders(r.scenes), doc.slice(0, 200));
       assert.ok(r.scenes.length <= MAX_SCENES && r.scenes.join("\n\n").length <= MAX_SCRIPT_CHARS);
     }
+  });
+
+  it("reads scripts as people write them: speaker replies, chat-wrapped Markdown, footnotes, CJK, Docs exports", () => {
+    // Every line of a two-voice script, one-word replies included.
+    assert.deepEqual(scenesFromText("# Episode 4\n\n[HOST]: Welcome back to the show.\n[GUEST]: Thanks.\n[HOST]: So, ready?\n[GUEST]: Absolutely.\n[HOST]: 10:30am, e.g. now.").scenes, [
+      "[HOST]: Welcome back to the show. [GUEST]: Thanks. [HOST]: So, ready? [GUEST]: Absolutely. [HOST]: 10:30am, e.g. now.",
+    ]);
+    assert.deepEqual(scenesFromText("[HOST]: Great.\n\n[GUEST]: Agreed.").scenes, ["[HOST]: Great.", "[GUEST]: Agreed."]);
+    assert.deepEqual(scenesFromText("Hi.\n\n[ref]: www.example.com\n[a]: ./notes.md\n[b]: /docs\n[c]: #top\n[d]: example.org/x \"T\"").scenes, ["Hi."]);
+    // A script a chat assistant wrapped in a ```markdown fence is read as Markdown.
+    assert.deepEqual(scenesFromText("```markdown\n# Scene 1\nHello **world**.\n\n# Scene 2\nBye.\n```"), { title: "Scene 1", scenes: ["Hello world.", "Bye."], truncated: false });
+    // Inline code at the start of a line is no fence, nor is a fence that never closes.
+    assert.deepEqual(scenesFromText("```npm i``` and go.\n\n## Next\nThen **this**.").scenes, ["npm i and go.", "Then this."]);
+    assert.deepEqual(scenesFromText("```\n# Title\nHello *there*."), { title: "Title", scenes: ["Hello there."], truncated: false });
+    // Footnote definitions (with their continuation) are not spoken.
+    assert.deepEqual(scenesFromText("Sales grew 20%.[^1]\n\n[^1]: Source: annual report 2024.\n    More detail.\n\nThe end.").scenes, ["Sales grew 20%.", "The end."]);
+    // Bold that holds an asterisk, and emphasis wrapped across lines.
+    assert.deepEqual(scenesFromText("**Step 1: open *Settings***\n\n**5 * 3 = 15** is math.\n\nThis is **very\nimportant** now.").scenes, ["Step 1: open Settings", "5 * 3 = 15 is math.", "This is very important now."]);
+    // Chinese and Japanese without spaces are cut at a full stop (or between characters), never dropped.
+    for (const sentence of ["这是一个很长的句子，我们在这里讨论视频脚本的导入功能。", "これは動画の台本を読み込む機能についての長い文章です。"]) {
+      const r = scenesFromText(sentence.repeat(220));
+      assert.equal(r.truncated, true);
+      assert.ok(r.scenes[0].length > MAX_SCRIPT_CHARS / 2 && r.scenes[0].endsWith(sentence.at(-1)!));
+      assert.ok(renders(r.scenes));
+    }
+    assert.ok(scenesFromText("字".repeat(9000)).scenes[0].length > MAX_SCRIPT_CHARS - 10);
+    // Google Docs image placeholders and their (huge) definitions are not spoken and do not use up the reading.
+    const docs = `Hello there.\n\n![][image1]\n\n![](data:image/png;base64,${"A".repeat(24_000)})\n\nBye now.\n\n[image1]: <data:image/png;base64,${"B".repeat(30_000)}>`;
+    assert.deepEqual(scenesFromText(docs), { scenes: ["Hello there.", "Bye now."], truncated: false });
+    // A short sentence keeps its place when only a little room is left.
+    const nearly = `${"Plenty of prose here. ".repeat(220).trim()}\n\nShort one. this sentence keeps going ${"and on ".repeat(60)}without ending`;
+    assert.ok(scenesFromText(nearly).scenes.at(-1)!.endsWith("Short one."));
+    // Many unclosed comments are read quickly.
+    const started = Date.now();
+    scenesFromText("<!-- ".repeat(200_000));
+    assert.ok(Date.now() - started < 1500);
+  });
+
+  it("decodes a file as a word processor saved it: UTF-8, UTF-16 with its mark, or Windows-1252", () => {
+    const text = "Café – “quoted” ✓";
+    assert.equal(decodeScript(new TextEncoder().encode(text)), text);
+    const le = new Uint8Array([0xff, 0xfe, ...Array.from(text).flatMap((c) => { const n = c.charCodeAt(0); return [n & 0xff, n >> 8]; })]);
+    assert.equal(decodeScript(le), text);
+    const be = new Uint8Array([0xfe, 0xff, ...Array.from(text).flatMap((c) => { const n = c.charCodeAt(0); return [n >> 8, n & 0xff]; })]);
+    assert.equal(decodeScript(be), text);
+    // "Café – “quoted”" in Windows-1252, which is not valid UTF-8.
+    assert.equal(decodeScript(new Uint8Array([0x43, 0x61, 0x66, 0xe9, 0x20, 0x96, 0x20, 0x93, 0x71, 0x75, 0x6f, 0x74, 0x65, 0x64, 0x94])), "Café – “quoted”");
   });
 });

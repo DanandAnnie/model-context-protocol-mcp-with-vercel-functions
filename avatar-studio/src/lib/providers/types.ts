@@ -74,6 +74,13 @@ export interface AvatarProvider {
    */
   prepareBackdrop?(backdrop: Backdrop, image: { bytes: Uint8Array; mimeType: string }): Promise<Backdrop>;
   getStatus(providerJobId: string): Promise<AvatarJobStatus>;
+  /**
+   * Starts a portrait of a presenter who does not exist, drawn from a written description (HeyGen's prompt-to-avatar).
+   * Returns a job id to follow with `portraitStatus`. Absent when the provider cannot generate presenters.
+   */
+  generatePortrait?(input: { name: string; prompt: string }): Promise<{ jobId: string }>;
+  /** Where a portrait job stands; a finished one gives the image's URL (https, or a data URL in demo mode). */
+  portraitStatus?(jobId: string): Promise<{ status: "processing" | "completed" | "failed"; imageUrl?: string; error?: string }>;
   /** Parse an inbound webhook body into a job update, or null if unrecognised. */
   parseWebhook?(body: unknown): { providerJobId: string; update: AvatarJobStatus } | null;
 }

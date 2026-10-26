@@ -8,9 +8,10 @@ import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, Skeleton, i
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
+import { PortraitGenerator } from "@/components/PortraitGenerator";
 import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { api } from "@/lib/client";
-import type { Avatar, Voice } from "@/lib/types";
+import type { Avatar, ProviderStatus, Voice } from "@/lib/types";
 
 export default function AvatarsPage() {
   return (
@@ -25,6 +26,7 @@ function AvatarsInner() {
   const params = useSearchParams();
   const { data, loading, error, refetch } = useApi<{ avatars: Avatar[] }>("/api/avatars");
   const { data: voiceData } = useApi<{ voices: Voice[] }>("/api/voices");
+  const { data: status } = useApi<ProviderStatus>("/api/status");
   const voices = voiceData?.voices ?? [];
   const [open, setOpen] = useState(params.get("new") === "1");
   const [filter, setFilter] = useState<"all" | "custom" | "library">("all");
@@ -114,7 +116,7 @@ function AvatarsInner() {
         {data && <span className="text-xs text-slate-500">{avatars.length} of {data.avatars.length}</span>}
       </div>
 
-      {open && <CreateAvatarPanel voices={voices} onClose={() => setOpen(false)} onCreated={() => { setOpen(false); refetch(); }} />}
+      {open && <CreateAvatarPanel voices={voices} canGenerate={!!status?.portraitGeneration} demo={status?.avatar === "mock"} onClose={() => setOpen(false)} onCreated={() => { setOpen(false); refetch(); }} />}
 
       {loading ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
@@ -175,7 +177,7 @@ function AvatarsInner() {
   );
 }
 
-function CreateAvatarPanel({ voices, onClose, onCreated }: { voices: Voice[]; onClose: () => void; onCreated: () => void }) {
+function CreateAvatarPanel({ voices, canGenerate, demo, onClose, onCreated }: { voices: Voice[]; canGenerate: boolean; demo: boolean; onClose: () => void; onCreated: () => void }) {
   const [name, setName] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [gender, setGender] = useState<"" | "male" | "female" | "neutral">("");
@@ -311,6 +313,7 @@ function CreateAvatarPanel({ voices, onClose, onCreated }: { voices: Voice[]; on
           <Field label="Or paste an image URL" hint="Must be publicly reachable if your rendering provider fetches it.">
             <input className={inputClass} value={imageUrl.startsWith("data:") ? "" : imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://…/portrait.jpg" />
           </Field>
+          {canGenerate && <PortraitGenerator name={name} demo={demo} onPortrait={setImageUrl} />}
           <Field label="Voice preference (optional)">
             <select className={inputClass} value={gender} onChange={(e) => setGender(e.target.value as typeof gender)}>
               <option value="">Not specified</option>

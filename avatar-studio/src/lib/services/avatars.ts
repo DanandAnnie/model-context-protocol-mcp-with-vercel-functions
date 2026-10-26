@@ -9,6 +9,8 @@ import { memo } from "../cache";
 import { LIST_TTL_MS, owned } from "./shared";
 import { listVoices } from "./voices";
 import { NotFoundError, ValidationError } from "../errors";
+import { loadImage } from "../providers/image";
+import type { FetchLike } from "../safe-fetch";
 
 /** Provider avatar list, memoised per provider for a few minutes. */
 export function providerAvatars(): Promise<Avatar[]> {
@@ -41,6 +43,45 @@ export const createAvatarSchema = z.object({
   /** A voice from `GET /api/voices` (the owner's clones included) the editor picks with this avatar. */
   defaultVoiceId: z.string().trim().min(1).max(200).optional(),
 });
+
+export const generatePortraitSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  prompt: z.string().trim().min(20, "Describe the presenter in at least 20 characters").max(1000),
+});
+
+/** Portrait job ids as the providers issue them (HeyGen look ids, demo ids). */
+export const portraitJobIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,200}$/, "Unknown portrait");
+
+/** The largest portrait kept, as a photo avatar's upload may be (`createAvatarSchema`'s 8 MB of data URL). */
+const MAX_PORTRAIT_BYTES = 6 * 1024 * 1024;
+
+export function portraitGenerationAvailable(): boolean {
+  return typeof getAvatarProvider().generatePortrait === "function";
+}
+
+/**
+ * Starts a portrait of a presenter who does not exist, drawn by the renderer from a description (HeyGen's prompt to
+ * avatar). Nothing is kept: the finished portrait becomes a photo avatar only when it is saved like an upload.
+ */
+export async function startPortrait(input: z.infer<typeof generatePortraitSchema>): Promise<{ jobId: string }> {
+  const provider = getAvatarProvider();
+  if (!provider.generatePortrait) throw new ValidationError(`Generating a presenter is not available with the ${provider.name} renderer`);
+  return provider.generatePortrait({ name: input.name, prompt: input.prompt });
+}
+
+/**
+ * Where a portrait job stands. A finished one is returned as a data URL, read once through the public-address guard,
+ * so the photo avatar made from it keeps its picture after the provider's link expires.
+ */
+export async function portraitStatus(jobId: string, fetchImpl?: FetchLike): Promise<{ status: "processing" | "completed" | "failed"; imageUrl?: string; error?: string }> {
+  const provider = getAvatarProvider();
+  if (!provider.portraitStatus) throw new ValidationError(`Generating a presenter is not available with the ${provider.name} renderer`);
+  const out = await provider.portraitStatus(portraitJobIdSchema.parse(jobId));
+  if (out.status !== "completed" || !out.imageUrl || out.imageUrl.startsWith("data:")) return out;
+  const { bytes, mimeType } = await loadImage(out.imageUrl, fetchImpl);
+  if (bytes.byteLength > MAX_PORTRAIT_BYTES) return { status: "failed", error: "The portrait came back larger than a photo avatar may be" };
+  return { status: "completed", imageUrl: `data:${mimeType};base64,${Buffer.from(bytes).toString("base64")}` };
+}
 
 /** A default voice must be one the owner can render with, like the brand kit's. */
 async function assertVoiceAvailable(voiceId: string, ownerId: string): Promise<void> {

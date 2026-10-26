@@ -726,6 +726,8 @@ export interface ProviderStatus {
   streaming: string;
   /** Whether the voice provider can clone a voice from samples. */
   voiceCloning: boolean;
+  /** Whether the renderer can draw a presenter from a description. */
+  portraitGeneration: boolean;
   /** Whether the TTS provider can design a voice from a description. */
   voiceDesign: boolean;
   /** Present when the request carried an owner (signed in, or open/password mode). */

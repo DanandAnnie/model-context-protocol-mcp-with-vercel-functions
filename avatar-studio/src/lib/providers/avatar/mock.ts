@@ -1,6 +1,6 @@
 import { spokenWords } from "../../captions";
 import { pauseSeconds, stripPauses } from "../../pauses";
-import { SAMPLE_PREVIEW_VIDEO, STOCK_AVATARS } from "../../stock";
+import { SAMPLE_PREVIEW_VIDEO, STOCK_AVATARS, portraitSvg } from "../../stock";
 import { demoAssetUrl } from "../../config";
 import type { AudioClip, Avatar, VideoRequest } from "../../types";
 import type { AvatarJobStatus, AvatarProvider } from "../types";
@@ -32,6 +32,19 @@ export class MockAvatarProvider implements AvatarProvider {
     const durationSec = Math.max(3, Math.round(seconds));
     // Encode submission time + duration in the job id so status needs no state.
     return { providerJobId: `mock_${Date.now()}_${durationSec}` };
+  }
+
+  /** Demo presenter from a description: an illustrated portrait whose colours follow the description; nothing is generated. */
+  async generatePortrait({ name, prompt }: { name: string; prompt: string }) {
+    let hash = 0;
+    for (const ch of prompt) hash = (hash * 31 + ch.codePointAt(0)!) >>> 0;
+    return { jobId: `mockportrait_${hash % 1000}_${Buffer.from(name.slice(0, 40)).toString("base64url")}` };
+  }
+
+  async portraitStatus(jobId: string) {
+    const m = /^mockportrait_(\d+)_([A-Za-z0-9_-]*)$/.exec(jobId);
+    if (!m) return { status: "failed" as const, error: "No such portrait" };
+    return { status: "completed" as const, imageUrl: portraitSvg(Buffer.from(m[2], "base64url").toString() || "AI", Number(m[1])) };
   }
 
   async getStatus(providerJobId: string): Promise<AvatarJobStatus> {

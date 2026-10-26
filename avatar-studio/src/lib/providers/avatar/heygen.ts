@@ -4,6 +4,7 @@ import { heygenBurnsCaptions } from "../../captions";
 import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
 import { HeyGenClient } from "../heygen-client";
+import { ValidationError } from "../../errors";
 import type { AvatarJobStatus, AvatarProvider, RenderCast } from "../types";
 
 export class HeyGenAvatarProvider implements AvatarProvider {
@@ -132,6 +133,34 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     return voice?.id ?? fallback;
   }
 
+  /** A presenter drawn from a description (v3 prompt to avatar), square so it frames like an uploaded portrait. */
+  async generatePortrait({ name, prompt }: { name: string; prompt: string }) {
+    try {
+      const { look_id } = await this.client.createPromptAvatar(name, prompt);
+      return { jobId: look_id };
+    } catch (err) {
+      // A description HeyGen will not draw (refused by moderation, or not usable) is the account's to change.
+      const message = err instanceof Error ? err.message : "";
+      if (/ failed: (400|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not draw that presenter: ${heygenReason(message)}`);
+      throw err;
+    }
+  }
+
+  async portraitStatus(jobId: string): Promise<{ status: "processing" | "completed" | "failed"; imageUrl?: string; error?: string }> {
+    let look;
+    try {
+      look = await this.client.getLook(jobId);
+    } catch (err) {
+      // A failed look answers with its error (moderation, or a training failure): that is the job's outcome.
+      const message = err instanceof Error ? err.message : "";
+      if (message.startsWith("HeyGen error:")) return { status: "failed", error: message.slice("HeyGen error:".length).trim() || "HeyGen could not draw that presenter" };
+      throw err;
+    }
+    if (look.status === "completed" && look.preview_image_url) return { status: "completed", imageUrl: look.preview_image_url };
+    if (look.status === "failed") return { status: "failed", error: look.error?.message ?? "HeyGen could not draw that presenter" };
+    return { status: "processing" };
+  }
+
   async getStatus(providerJobId: string): Promise<AvatarJobStatus> {
     const s = await this.client.videoStatus(providerJobId);
     if (s.status === "completed") {
@@ -167,4 +196,20 @@ export function sceneText(overlay: SceneText, frame: { width: number; height: nu
     text_align: "center",
     line_height: 1.2,
   };
+}
+
+/** The reason in a HeyGen error ("…failed: 400 {"error":{"message":"…"}}" or "HeyGen error: …"), kept short. */
+function heygenReason(message: string): string {
+  const body = message.match(/ failed: \d+ (.*)$/s)?.[1];
+  if (body) {
+    try {
+      const json = JSON.parse(body) as { error?: { message?: string } | string; message?: string };
+      const reason = typeof json.error === "string" ? json.error : json.error?.message ?? json.message;
+      if (reason) return reason.slice(0, 300);
+    } catch {
+      // Not JSON: fall through to the generic reason.
+    }
+  }
+  if (message.startsWith("HeyGen error:")) return message.slice("HeyGen error:".length).trim().slice(0, 300);
+  return "try describing them differently";
 }

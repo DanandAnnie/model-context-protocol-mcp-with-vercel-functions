@@ -2795,6 +2795,30 @@ test("a voice can be designed from a description, chosen from previews, and kept
   }
 });
 
+test("a presenter can be drawn from a description and kept as a photo avatar", async ({ page }) => {
+  await page.goto("/avatars");
+  await page.getByRole("button", { name: "New photo avatar" }).click();
+  const name = `Drawn ${Date.now().toString(36)}`;
+  await page.getByLabel("Avatar name").fill(name);
+  const generator = page.getByTestId("portrait-generator");
+  const draw = generator.getByRole("button", { name: "Draw presenter" });
+  await generator.getByLabel("Or describe a presenter").fill("A woman");
+  await expect(draw).toBeDisabled();
+  await generator.getByRole("button", { name: "Use an example" }).click();
+  await draw.click();
+  await expect(generator.getByRole("status")).toContainText("The portrait is in the preview");
+  await expect(page.getByRole("img", { name: "Portrait preview" })).toHaveAttribute("src", /^data:image\/svg\+xml/);
+  await page.getByRole("button", { name: "Create avatar" }).click();
+  try {
+    await expect(page.getByRole("img", { name, exact: true })).toBeVisible();
+    // The API refuses a description too short to draw from.
+    expect((await page.request.post("/api/avatars/generate", { data: { name, prompt: "Short" } })).status()).toBe(400);
+  } finally {
+    const avatars = (await (await page.request.get("/api/avatars")).json()).avatars as Array<{ id: string; name: string }>;
+    for (const a of avatars.filter((x) => x.name === name)) await page.request.delete(`/api/avatars/${a.id}`);
+  }
+});
+
 test("a dub can be voice only and name its speakers", async ({ page }) => {
   const tag = Date.now().toString(36);
   await page.goto("/translate");

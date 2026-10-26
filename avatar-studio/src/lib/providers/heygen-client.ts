@@ -45,6 +45,23 @@ export class HeyGenClient {
     }>(`${V2}/voices`);
   }
 
+  /**
+   * Prompt to avatar (v3): a synthetic presenter drawn from a description, as a look to follow with `getLook`. Read
+   * from `data` when the answer is wrapped as the other v3 calls are, else from the answer itself.
+   */
+  async createPromptAvatar(name: string, prompt: string): Promise<{ look_id: string; status?: string }> {
+    const out = await this.envelope<{ look_id: string; status?: string }>(`${V3}/avatars`, {
+      method: "POST",
+      body: JSON.stringify({ type: "prompt", name, prompt, aspect_ratio: "1:1" }),
+    });
+    return (out.data ?? out) as { look_id: string; status?: string };
+  }
+
+  async getLook(lookId: string): Promise<{ status?: string; preview_image_url?: string; error?: { code?: string; message?: string } | null }> {
+    const out = await this.envelope<{ status?: string; preview_image_url?: string; error?: { code?: string; message?: string } | null }>(`${V3}/avatars/looks/${encodeURIComponent(lookId)}`);
+    return (out.data ?? out) as { status?: string; preview_image_url?: string; error?: { code?: string; message?: string } | null };
+  }
+
   /** Upload a portrait as a talking photo; returns HeyGen's talking_photo_id. */
   async uploadTalkingPhoto(bytes: Uint8Array, mimeType: string): Promise<string> {
     const res = await fetch("https://upload.heygen.com/v1/talking_photo", {

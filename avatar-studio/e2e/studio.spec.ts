@@ -877,6 +877,20 @@ test("a custom cover image replaces the poster everywhere", async ({ page }) => 
   expect(await coverBytes()).toBe(atThree);
 });
 
+test("discarding a restored draft resets its voice settings", async ({ page }) => {
+  await page.goto("/create");
+  await page.locator("textarea").fill("A draft with a mood.");
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByLabel("Voice emotion").selectOption("Excited");
+  await page.waitForTimeout(700);
+  await page.reload();
+  await expect(page.getByText("Restored your unsent draft")).toBeVisible();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByLabel("Voice emotion")).toHaveValue("Excited");
+  await page.getByRole("button", { name: "Discard draft" }).click();
+  await expect(page.getByLabel("Voice emotion")).toHaveValue("");
+});
+
 test("draft autosave survives a reload and clears after generating", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Draft title");
   await page.locator("textarea").fill("Draft script survives reload.");

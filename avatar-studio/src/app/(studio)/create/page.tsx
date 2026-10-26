@@ -177,6 +177,16 @@ function CreateInner() {
   // A scene may name its own presenter and voice; otherwise it uses the video's.
   const sceneAvatar = (active.avatarId && avatarData?.avatars.find((a) => a.id === active.avatarId)) || avatar;
   const sceneVoice = (active.voiceId && voiceData?.voices.find((v) => v.id === active.voiceId)) || voice;
+  // Voices the video speaks with (its own and each spoken scene's) that HeyGen says take no emotion.
+  const flatVoices = [
+    ...new Set(
+      scenes
+        .filter((sc) => !sc.audioId)
+        .map((sc) => (sc.voiceId && voiceData?.voices.find((v) => v.id === sc.voiceId)) || voice)
+        .filter((v): v is Voice => v?.emotionSupport === false)
+        .map((v) => v.name),
+    ),
+  ];
   // A scene's presenter or voice may have been deleted since the draft or the original video was
   // saved; once the lists are known, drop ids they no longer contain so the scene really does use
   // the video's choice (which is what the selects would otherwise claim) instead of failing to render.
@@ -284,6 +294,8 @@ function CreateInner() {
     setCaptions(false);
     setSpeed(1);
     setPitch(0);
+    setEmotion("");
+    setCaptionStyle(DEFAULT_CAPTION_STYLE);
     setDraftRestored(null);
   }
 
@@ -854,8 +866,8 @@ function CreateInner() {
                 <Field
                   label="Voice emotion"
                   hint={
-                    voice?.emotionSupport === false
-                      ? "This voice always speaks in its natural style; the emotion applies to scenes whose voice supports one."
+                    flatVoices.length
+                      ? `${flatVoices.join(", ")} always ${flatVoices.length === 1 ? "speaks" : "speak"} naturally; the emotion applies to scenes whose voice supports one.`
                       : "HeyGen voices that support it speak in this style; other renderers keep the voice's natural delivery."
                   }
                 >

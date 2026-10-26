@@ -2457,6 +2457,30 @@ test("a copy keeps its own unsent draft, apart from the editor's", async ({ page
   await expect(page.locator("textarea")).toHaveValue("Words I was writing.");
 });
 
+test("find and replace changes every scene's script, pause markers left whole", async ({ page }) => {
+  const box = page.locator("textarea");
+  await box.fill("Welcome to 12 Maple Street. [pause 2s] Maple trees line it.");
+  await page.getByRole("button", { name: "Add scene" }).click();
+  await box.fill("Call about Maple Street today.");
+  await page.getByRole("button", { name: "Find", exact: true }).click();
+  await expect(page.getByLabel("Find", { exact: true })).toBeFocused();
+  await page.getByLabel("Find", { exact: true }).fill("maple street");
+  await expect(page.getByTestId("find-status")).toHaveText("2 matches in 2 scenes");
+  await page.getByLabel("Replace with").fill("Oak Lane");
+  await page.getByLabel("Replace with").press("Enter");
+  await expect(page.getByTestId("find-status")).toHaveText("Replaced 2 matches.");
+  await expect(box).toHaveValue("Call about Oak Lane today.");
+  await page.getByRole("button", { name: /^Scene 1,/ }).click();
+  await expect(box).toHaveValue("Welcome to 12 Oak Lane. [pause 2s] Maple trees line it.");
+  // A search never reaches into a pause marker.
+  await page.getByLabel("Find", { exact: true }).fill("pause");
+  await expect(page.getByTestId("find-status")).toHaveText("No matches");
+  await expect(page.getByRole("button", { name: "Replace all" })).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("group", { name: "Find and replace" })).toBeHidden();
+  await expect(page.getByRole("button", { name: "Find", exact: true })).toBeFocused();
+});
+
 test("a scene of only pauses is a silent one, held without a word", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill(`Silent ${Date.now().toString(36)}`);
   const box = page.locator("textarea");

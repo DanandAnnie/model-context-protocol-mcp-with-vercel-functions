@@ -1,7 +1,7 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Captions, ChevronLeft, ChevronRight, Clapperboard, Copy, Image as ImageIcon, Layers, Mic2, Palette, Pause, Play, Plus, Sparkles, Square, Trash2, Upload, Users, Wand2, X } from "lucide-react";
+import { Captions, ChevronLeft, ChevronRight, Clapperboard, Copy, Image as ImageIcon, Layers, Mic2, Palette, Pause, Play, Plus, Replace, Sparkles, Square, Trash2, Upload, Users, Wand2, X } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { VoiceRow } from "@/components/VoicePicker";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -15,6 +15,7 @@ import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib/client";
 import { languageLabel } from "@/lib/language";
 import { silentProblem, silentSeconds, stripPauses } from "@/lib/pauses";
+import { countMatches, replaceAll } from "@/lib/find-replace";
 import { MAX_IMPORT_BYTES, MAX_SCRIPT_CHARS, decodeScript, legacyEncodingFor, scenesFromText } from "@/lib/script-import";
 import { renderPdf, slideScripts } from "@/lib/pdf-slides";
 import { readPptx, type PptxSlide } from "@/lib/pptx-notes";
@@ -520,6 +521,15 @@ function CreateInner() {
   const [writerOpen, setWriterOpen] = useState(params.get("writer") === "1");
   const [assistOpen, setAssistOpen] = useState(false);
   const writerButton = useRef<HTMLButtonElement>(null);
+  // Find and replace across every scene's script.
+  const [findOpen, setFindOpen] = useState(false);
+  const [findText, setFindText] = useState("");
+  const [replaceText, setReplaceText] = useState("");
+  const [findCase, setFindCase] = useState(false);
+  const [findWhole, setFindWhole] = useState(false);
+  const [findNote, setFindNote] = useState<string | null>(null);
+  const findButton = useRef<HTMLButtonElement>(null);
+  const findInput = useRef<HTMLInputElement>(null);
   const improveButton = useRef<HTMLButtonElement>(null);
   const [assistBusy, setAssistBusy] = useState(false);
   const [assistTone, setAssistTone] = useState<(typeof TONES)[number]>("professional");
@@ -1115,6 +1125,21 @@ function CreateInner() {
                 <Button ref={writerButton} variant="secondary" className="px-3 py-1.5" aria-expanded={writerOpen} onClick={() => setWriterOpen((v) => !v)}>
                   <Wand2 className="h-4 w-4" /> Write with AI
                 </Button>
+                <Button
+                  ref={findButton}
+                  variant="secondary"
+                  className="px-3 py-1.5"
+                  aria-expanded={findOpen}
+                  aria-controls="find-replace"
+                  disabled={canEdit === false}
+                  onClick={() => {
+                    setFindOpen((v) => !v);
+                    setFindNote(null);
+                    requestAnimationFrame(() => findInput.current?.focus());
+                  }}
+                >
+                  <Replace className="h-4 w-4" /> Find
+                </Button>
                 <div
                   className="relative"
                   onKeyDown={(e) => {
@@ -1181,6 +1206,34 @@ function CreateInner() {
                 )}
               </div>
             </div>
+            {findOpen && (
+              <FindReplace
+                inputRef={findInput}
+                scripts={scenes.map((sc) => sc.script)}
+                find={findText}
+                replacement={replaceText}
+                matchCase={findCase}
+                wholeWord={findWhole}
+                note={findNote}
+                onChange={(patch) => {
+                  setFindNote(null);
+                  if (patch.find !== undefined) setFindText(patch.find);
+                  if (patch.replacement !== undefined) setReplaceText(patch.replacement);
+                  if (patch.matchCase !== undefined) setFindCase(patch.matchCase);
+                  if (patch.wholeWord !== undefined) setFindWhole(patch.wholeWord);
+                }}
+                onReplaceAll={() => {
+                  const { scripts, count } = replaceAll(scenes.map((sc) => sc.script), findText, replaceText, { matchCase: findCase, wholeWord: findWhole });
+                  if (!count) return;
+                  setScenes((prev) => prev.map((sc, i) => (sc.script === scripts[i] ? sc : { ...sc, script: scripts[i] })));
+                  setFindNote(`Replaced ${count} ${count === 1 ? "match" : "matches"}.`);
+                }}
+                onClose={() => {
+                  setFindOpen(false);
+                  findButton.current?.focus();
+                }}
+              />
+            )}
             {writerOpen && (
               <ScriptWriter
                 onClose={() => {
@@ -1525,3 +1578,81 @@ function ScriptWriter({ onScript, onClose }: { onScript: (s: string) => void; on
   );
 }
 
+/** The find-and-replace panel: what to look for across every scene, what to put instead, and how many it finds. */
+function FindReplace({
+  inputRef,
+  scripts,
+  find,
+  replacement,
+  matchCase,
+  wholeWord,
+  note,
+  onChange,
+  onReplaceAll,
+  onClose,
+}: {
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  scripts: string[];
+  find: string;
+  replacement: string;
+  matchCase: boolean;
+  wholeWord: boolean;
+  note: string | null;
+  onChange: (patch: { find?: string; replacement?: string; matchCase?: boolean; wholeWord?: boolean }) => void;
+  onReplaceAll: () => void;
+  onClose: () => void;
+}) {
+  const counts = countMatches(scripts, find, { matchCase, wholeWord });
+  const total = counts.reduce((a, b) => a + b, 0);
+  const inScenes = counts.filter(Boolean).length;
+  const status = note ?? (!find ? "" : total ? `${total} ${total === 1 ? "match" : "matches"}${scripts.length > 1 ? ` in ${inScenes} ${inScenes === 1 ? "scene" : "scenes"}` : ""}` : "No matches");
+  return (
+    <div
+      id="find-replace"
+      role="group"
+      aria-label="Find and replace"
+      className="mb-3 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          onClose();
+        }
+      }}
+    >
+      <div className="grid gap-2 sm:grid-cols-2">
+        <input ref={inputRef} aria-label="Find" placeholder="Find in every scene" value={find} onChange={(e) => onChange({ find: e.target.value })} className={inputClass} maxLength={200} />
+        <input
+          aria-label="Replace with"
+          placeholder="Replace with"
+          value={replacement}
+          onChange={(e) => onChange({ replacement: e.target.value })}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.nativeEvent.isComposing && total) {
+              e.preventDefault();
+              onReplaceAll();
+            }
+          }}
+          className={inputClass}
+          maxLength={500}
+        />
+      </div>
+      <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
+        <label className="inline-flex items-center gap-1.5">
+          <input type="checkbox" checked={matchCase} onChange={(e) => onChange({ matchCase: e.target.checked })} className="accent-brand-600" /> Match case
+        </label>
+        <label className="inline-flex items-center gap-1.5">
+          <input type="checkbox" checked={wholeWord} onChange={(e) => onChange({ wholeWord: e.target.checked })} className="accent-brand-600" /> Whole words
+        </label>
+        <span role="status" className="min-w-0 flex-1 text-slate-500" data-testid="find-status">
+          {status}
+        </span>
+        <Button variant="secondary" className="px-3 py-1.5" disabled={!total} onClick={onReplaceAll}>
+          Replace all
+        </Button>
+        <button type="button" onClick={onClose} className="rounded-md px-2 py-1 text-slate-500 hover:bg-slate-200" aria-label="Close find and replace">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}

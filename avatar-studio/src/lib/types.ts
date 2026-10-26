@@ -164,6 +164,8 @@ export type BackdropType = "image/png" | "image/jpeg";
 
 /** Uploaded background images an account keeps. */
 export const MAX_BACKDROPS = 100;
+/** How much of an attached document the Video Agent reads (its text, after it is read in the browser). */
+export const MAX_DOCUMENT_CHARS = 12_000;
 
 /** The path an image background takes when it is an uploaded backdrop, and the editor's preview URL for it. */
 export const backdropPath = (id: string) => `/api/backdrops/${id}`;

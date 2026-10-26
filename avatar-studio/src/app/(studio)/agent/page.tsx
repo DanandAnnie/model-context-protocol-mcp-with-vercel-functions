@@ -1,13 +1,14 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { PencilLine, Sparkles } from "lucide-react";
+import { FileText, PencilLine, Sparkles, X } from "lucide-react";
 import { Button, Card, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { api } from "@/lib/client";
 import { AGENT_DRAFT_KEY } from "@/lib/agent-draft";
+import { documentText } from "@/lib/document-text";
 import type { Avatar, Video, Voice } from "@/lib/types";
 
 const LENGTHS = [
@@ -37,6 +38,23 @@ export default function VideoAgentPage() {
   const { data: voiceData } = useApi<{ voices: Voice[] }>("/api/voices");
   const [prompt, setPrompt] = useState("");
   const [url, setUrl] = useState("");
+  // An attached document, read to its words in the browser; only those are sent.
+  const [doc, setDoc] = useState<{ name: string; text: string; truncated: boolean } | null>(null);
+  const [reading, setReading] = useState(false);
+  const [docErr, setDocErr] = useState<string | null>(null);
+  async function attach(file: File | undefined) {
+    if (!file) return;
+    setReading(true);
+    setDocErr(null);
+    try {
+      setDoc({ name: file.name.slice(0, 200), ...(await documentText(file, navigator.language)) });
+    } catch (e) {
+      setDoc(null);
+      setDocErr(e instanceof Error ? e.message : `${file.name} could not be read`);
+    } finally {
+      setReading(false);
+    }
+  }
   const [avatarId, setAvatarId] = useState("");
   const [voiceId, setVoiceId] = useState("");
   const [orientation, setOrientation] = useState<(typeof ORIENTATIONS)[number]["value"]>("auto");
@@ -46,12 +64,12 @@ export default function VideoAgentPage() {
   const [err, setErr] = useState<string | null>(null);
 
   const urlOk = !url.trim() || /^https?:\/\/\S+$/.test(url.trim());
-  const ready = prompt.trim().length >= 3 && urlOk && canEdit !== false && !busy;
+  const ready = prompt.trim().length >= 3 && urlOk && canEdit !== false && !busy && !reading;
 
   async function run(mode: "generate" | "plan") {
     setBusy(mode);
     setErr(null);
-    const body = { prompt, mode, orientation, lengthSec, language, ...(url.trim() ? { url: url.trim() } : {}), ...(avatarId ? { avatarId } : {}), ...(voiceId ? { voiceId } : {}) };
+    const body = { prompt, mode, orientation, lengthSec, language, ...(url.trim() ? { url: url.trim() } : {}), ...(doc ? { document: { name: doc.name, text: doc.text } } : {}), ...(avatarId ? { avatarId } : {}), ...(voiceId ? { voiceId } : {}) };
     try {
       if (mode === "plan") {
         const { draft } = await api<{ draft: unknown }>("/api/video-agent", { method: "POST", body: JSON.stringify(body) });
@@ -100,6 +118,33 @@ export default function VideoAgentPage() {
               <input className={inputClass} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" inputMode="url" />
             </Field>
             {!urlOk && <p className="text-xs text-red-600">Enter a full address starting with http:// or https://</p>}
+            <Field label="Document (optional)" hint="A PDF, Word, PowerPoint, or text file the agent writes from, using only its facts. It is read in your browser; only its words are sent.">
+              {doc ? (
+                <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm" data-testid="agent-document">
+                  <FileText className="h-4 w-4 shrink-0 text-slate-400" />
+                  <span className="min-w-0 flex-1 truncate">
+                    {doc.name} · {doc.text.length.toLocaleString()} characters{doc.truncated ? " (the start of it; the rest was left out)" : ""}
+                  </span>
+                  <button type="button" onClick={() => setDoc(null)} aria-label={`Remove ${doc.name}`} className="rounded p-1 text-slate-500 hover:bg-slate-200">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : (
+                <input
+                  type="file"
+                  aria-label="Attach a document"
+                  accept=".pdf,.docx,.pptx,.txt,.md,.markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain,text/markdown"
+                  disabled={reading || canEdit === false}
+                  onChange={(e) => {
+                    void attach(e.target.files?.[0]);
+                    e.target.value = "";
+                  }}
+                  className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-slate-200"
+                />
+              )}
+            </Field>
+            {reading && <p className="text-xs text-slate-500" role="status">Reading the document…</p>}
+            {docErr && <p className="text-xs text-red-600" role="alert">{docErr}</p>}
             <div className="flex flex-col gap-2 sm:flex-row">
               <Button onClick={() => run("generate")} loading={busy === "generate"} disabled={!ready} className="flex-1">
                 <Sparkles className="h-4 w-4" /> Generate video

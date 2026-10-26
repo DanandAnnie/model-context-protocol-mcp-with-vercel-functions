@@ -1262,6 +1262,25 @@ test("a PowerPoint deck's speaker notes become the scripts, alone or with the de
   await expect(page.getByTestId("import-note")).toContainText("old.pptx could not be read as a PowerPoint (.pptx) file");
 });
 
+test("the video agent writes from an attached document, read in the browser", async ({ page }) => {
+  await page.goto("/agent");
+  await page.getByLabel("What should the video be?").fill("A video about our open house");
+  // A PDF with no words (a scan, say) is refused with a reason; nothing is attached.
+  await page.getByLabel("Attach a document").setInputFiles({ name: "scan.pdf", mimeType: "application/pdf", buffer: slidesPdf([[]]) });
+  await expect(page.getByText(/^No text found in scan\.pdf/)).toBeVisible({ timeout: 30_000 });
+  await page.getByLabel("Attach a document").setInputFiles({ name: "flyer.pdf", mimeType: "application/pdf", buffer: slidesPdf([["Open house is Saturday at noon."], ["Parking is behind the building."]]) });
+  await expect(page.getByTestId("agent-document")).toContainText("flyer.pdf", { timeout: 30_000 });
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/video-agent") && r.method() === "POST");
+  await page.getByRole("button", { name: "Review in editor first" }).click();
+  // Only the words travel, never the file.
+  const body = JSON.parse((await sent).postData() ?? "{}") as { document?: { name: string; text: string } };
+  expect(body.document).toEqual({ name: "flyer.pdf", text: "Open house is Saturday at noon.\n\nParking is behind the building." });
+  await expect(page).toHaveURL(/\/create\?plan=agent$/);
+  await page.getByRole("button", { name: /^Scene 2,/ }).click();
+  await expect(page.locator("textarea")).toHaveValue("Open house is Saturday at noon.");
+  await page.evaluate(() => localStorage.removeItem("avatar-studio:draft"));
+});
+
 test("each space keeps its own draft, so a workspace never shows or spoils the personal one", async ({ page }) => {
   const tag = Date.now().toString(36);
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");

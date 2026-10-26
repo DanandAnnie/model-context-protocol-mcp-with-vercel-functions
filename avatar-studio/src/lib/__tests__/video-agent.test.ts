@@ -32,6 +32,20 @@ beforeEach(() => {
 afterEach(() => setScriptProvider(undefined));
 
 describe("video agent", () => {
+  it("writes from an attached document, alone or with a reference page", async () => {
+    // The demo planner speaks the source's sentences, so the scenes show what it was given.
+    const notes = "Our refund window is thirty days from delivery. Refunds go back to the original card within five days.";
+    const alone = await planVideo(videoAgentSchema.parse({ prompt: "Explain our refund policy", document: { name: "policy.docx", text: notes } }));
+    assert.deepEqual(alone.scenes.slice(1, 3).map((sc) => sc.script), ["Our refund window is thirty days from delivery.", "Refunds go back to the original card within five days."], "a document on its own is the source as written");
+    const page = async () => new Response(`<html><body><p>Exchanges are free for sixty days at any of our stores.</p><p>${"Bring the receipt and the item in its box, and a member of staff will help you choose a replacement. ".repeat(4)}</p></body></html>`, { headers: { "content-type": "text/html" } });
+    const both = await planVideo(videoAgentSchema.parse({ prompt: "Explain our refund policy", lengthSec: 90, url: "https://203.0.113.5/returns", document: { name: "policy.docx", text: notes } }), undefined, page as never);
+    const spoken = both.scenes.map((sc) => sc.script).join(" ");
+    assert.match(spoken, /From the attached document "policy\.docx": Our refund window is thirty days/, "with a page too, each source is named, the document first");
+    assert.match(spoken, /From the web page https:\/\/203\.0\.113\.5\/returns: Exchanges are free for sixty days/);
+    assert.throws(() => videoAgentSchema.parse({ prompt: "Explain it", document: { name: "big.pdf", text: "x".repeat(12_001) } }), /read up to 12000 characters/);
+    assert.throws(() => videoAgentSchema.parse({ prompt: "Explain it", document: { name: "blank.pdf", text: "   " } }), /has no text/);
+  });
+
   it("plans a renderable video from a prompt alone, portrait for a social format, with captions on", async () => {
     const draft = await planVideo(videoAgentSchema.parse({ prompt: "Make a TikTok about our new coffee app", lengthSec: 60 }));
     assert.equal(draft.aspect, "9:16");

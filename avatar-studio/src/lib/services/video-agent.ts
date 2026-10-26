@@ -7,7 +7,7 @@ import { NotFoundError, ValidationError } from "../errors";
 import { stripPauses } from "../pauses";
 import { fetchPageText } from "../webpage";
 import type { FetchLike } from "../safe-fetch";
-import { MAX_SCENES, type AspectRatio, type Avatar, type Background, type Resolution, type SceneLayout, type Video } from "../types";
+import { MAX_DOCUMENT_CHARS, MAX_SCENES, type AspectRatio, type Avatar, type Background, type Resolution, type SceneLayout, type Video } from "../types";
 import { getAvatar, listAvatars } from "./avatars";
 import { getBrandKit } from "./brand";
 import { listVoices } from "./voices";
@@ -22,6 +22,13 @@ export const videoAgentSchema = z.object({
   prompt: z.string().trim().min(3, "Describe the video in a few words").max(10_000),
   /** A public web page the agent writes from, as HeyGen's agent reads attached files. */
   url: z.string().trim().url().max(2000).optional(),
+  /** An attached document's words (read in the browser), which the agent writes from as it does from a page. */
+  document: z
+    .object({
+      name: z.string().trim().min(1).max(200),
+      text: z.string().trim().min(1, "The attached document has no text").max(MAX_DOCUMENT_CHARS, `An attached document is read up to ${MAX_DOCUMENT_CHARS} characters`),
+    })
+    .optional(),
   /** Presenter and voice; the brand kit's defaults (then the first ones) when omitted. */
   avatarId: z.string().min(1).optional(),
   voiceId: z.string().min(1).optional(),
@@ -100,14 +107,18 @@ async function presenter(avatarId: string | undefined, kitAvatarId: string | und
 
 /** Plans a video from a prompt and makes it ready to render, with the owner's brand kit applied. */
 export async function planVideo(input: VideoAgentInput, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<VideoAgentDraft> {
-  let source: string | undefined;
+  let page: string | undefined;
   if (input.url) {
     try {
-      source = (await fetchPageText(input.url, fetchImpl)).text;
+      page = (await fetchPageText(input.url, fetchImpl)).text;
     } catch (err) {
       throw new ValidationError(err instanceof Error ? err.message : "The page could not be read");
     }
   }
+  // The attached document first (the user chose it for this video), then the page; named when there are both, so the
+  // planner can tell them apart.
+  const doc = input.document?.text;
+  const source = doc && page ? `From the attached document "${input.document!.name}":\n${doc}\n\nFrom the web page ${input.url}:\n${page}` : doc || page;
   const kit = await getBrandKit(ownerId);
   const avatar = await presenter(input.avatarId, kit?.defaultAvatarId, ownerId);
   const voices = await listVoices(ownerId);

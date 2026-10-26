@@ -112,20 +112,10 @@ function encode(canvas: HTMLCanvasElement): string {
 }
 
 /**
- * Draws up to `MAX_SCENES` pages of a PDF in the browser, one at a time, each centred in the frame of the format the
- * first page's shape calls for (so a 4:3 slide is letterboxed in white rather than cropped by the stage), and hands
- * each to `onPage` (which uploads it) before drawing the next, so only one page's picture is held at a time.
- * `onStart` hears how many pages will be drawn before any is, and may throw to stop (for instance when the account
- * has no room for that many images). Throws a readable error for a file pdf.js cannot open (not a PDF,
- * password-protected) or a worker that fails to load.
+ * A PDF opened with pdf.js in the browser (the worker loaded on first use). Throws a readable error for a file pdf.js
+ * cannot open (not a PDF, password-protected) or a worker that fails to load. The caller destroys the task.
  */
-export async function renderPdf(
-  file: File,
-  handlers: {
-    onStart?: (info: { count: number; total: number; aspect: SlideAspect }) => void | Promise<void>;
-    onPage: (page: SlidePage, index: number, count: number) => Promise<void>;
-  },
-): Promise<{ count: number; total: number; aspect: SlideAspect }> {
+async function openPdf(file: File) {
   // The legacy build: the modern one calls very new JavaScript (Map.prototype.getOrInsertComputed, for one) that
   // current Chrome and Safari releases do not all have yet; the legacy build carries polyfills for it.
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -146,6 +136,50 @@ export async function renderPdf(
     if (name === "TimeoutException") throw new Error("The PDF reader did not start; reload the page and try again");
     throw new Error(`${file.name} could not be read as a PDF`);
   }
+  return { doc, task };
+}
+
+/**
+ * A PDF's text, page by page (as on a slide deck's pages), until `maxChars` are read; `truncated` when pages were
+ * left. Nothing is drawn, so even a long document reads quickly.
+ */
+export async function pdfText(file: File, maxChars: number): Promise<{ text: string; truncated: boolean }> {
+  const { doc, task } = await openPdf(file);
+  try {
+    const pages: string[] = [];
+    let length = 0;
+    for (let n = 1; n <= doc.numPages; n++) {
+      if (length >= maxChars) return { text: pages.join("\n\n"), truncated: true };
+      const page = await doc.getPage(n);
+      const text = pageText((await page.getTextContent()).items as TextRun[]);
+      page.cleanup();
+      if (text) {
+        pages.push(text);
+        length += text.length + 2;
+      }
+    }
+    return { text: pages.join("\n\n"), truncated: false };
+  } finally {
+    await task.destroy();
+  }
+}
+
+/**
+ * Draws up to `MAX_SCENES` pages of a PDF in the browser, one at a time, each centred in the frame of the format the
+ * first page's shape calls for (so a 4:3 slide is letterboxed in white rather than cropped by the stage), and hands
+ * each to `onPage` (which uploads it) before drawing the next, so only one page's picture is held at a time.
+ * `onStart` hears how many pages will be drawn before any is, and may throw to stop (for instance when the account
+ * has no room for that many images). Throws a readable error for a file pdf.js cannot open (not a PDF,
+ * password-protected) or a worker that fails to load.
+ */
+export async function renderPdf(
+  file: File,
+  handlers: {
+    onStart?: (info: { count: number; total: number; aspect: SlideAspect }) => void | Promise<void>;
+    onPage: (page: SlidePage, index: number, count: number) => Promise<void>;
+  },
+): Promise<{ count: number; total: number; aspect: SlideAspect }> {
+  const { doc, task } = await openPdf(file);
   try {
     const count = Math.min(doc.numPages, MAX_SCENES);
     const first = (await doc.getPage(1)).getViewport({ scale: 1 });

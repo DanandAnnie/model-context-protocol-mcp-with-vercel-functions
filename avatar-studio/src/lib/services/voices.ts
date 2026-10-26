@@ -11,14 +11,34 @@ import { memo } from "../cache";
 import { ValidationError } from "../errors";
 import { LIST_TTL_MS, owned } from "./shared";
 
-/** Provider voices (memoised) plus the owner's cloned voices, which are listed first. */
+/** Provider voices (memoised) plus the owner's own voices (cloned or designed), which are listed first. */
 export async function listVoices(ownerId?: string): Promise<Voice[]> {
   const p = getTtsProvider();
   const provider = await memo(`voices:${p.name}`, LIST_TTL_MS, () => p.listVoices());
   if (!ownerId) return provider;
   const custom = (await getStore().list<Voice>("voice", ownerId)).filter((v) => v.provider === p.name);
   custom.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
-  return [...custom, ...provider];
+  // Listed once, as the owner's: a provider that also lists it (an account voice it does not keep private) never doubles it.
+  const mine = new Set(custom.map((v) => v.id));
+  return [...custom, ...provider.filter((v) => !mine.has(v.id))];
+}
+
+// ---------------------------------------------------------------------------
+// The owner's own voices are counted and then made with the provider (a paid voice slot there) before they are stored,
+// so cloning and saving a designed voice run one after another per owner within this instance; otherwise two requests
+// at once would both pass the count. Other instances can still race, as with the render allowance.
+
+const voiceQueue = new Map<string, Promise<unknown>>();
+
+function withVoiceLock<T>(ownerId: string, fn: () => Promise<T>): Promise<T> {
+  const previous = voiceQueue.get(ownerId) ?? Promise.resolve();
+  const run = previous.then(fn, fn);
+  const tail = run.catch(() => undefined);
+  voiceQueue.set(ownerId, tail);
+  void tail.then(() => {
+    if (voiceQueue.get(ownerId) === tail) voiceQueue.delete(ownerId);
+  });
+  return run;
 }
 
 export const MAX_VOICE_SAMPLE_BYTES = 10 * 1024 * 1024;
@@ -39,8 +59,6 @@ export function voiceCloningAvailable(): boolean {
 export async function cloneVoice(input: z.infer<typeof cloneVoiceSchema>, ownerId: string = LOCAL_OWNER): Promise<Voice> {
   const provider = getTtsProvider();
   if (!provider.cloneVoice) throw new ValidationError(`Voice cloning is not available with the ${provider.name} voice provider`);
-  const mine = (await getStore().list<Voice>("voice", ownerId)).filter((v) => v.provider === provider.name);
-  if (mine.length >= MAX_CLONED_VOICES) throw new ValidationError(`At most ${MAX_CLONED_VOICES} voices of your own (cloned or designed) per account`);
   let total = 0;
   const samples = input.samples.map((dataUrl, i) => {
     if (!dataUrl.startsWith("data:audio/")) throw new ValidationError("Samples must be audio recordings or files");
@@ -50,9 +68,12 @@ export async function cloneVoice(input: z.infer<typeof cloneVoiceSchema>, ownerI
     const ext = mimeType.includes("webm") ? "webm" : mimeType.includes("wav") ? "wav" : mimeType.includes("ogg") ? "ogg" : mimeType.includes("mp4") || mimeType.includes("m4a") ? "m4a" : "mp3";
     return { bytes, mimeType, filename: `sample-${i + 1}.${ext}` };
   });
-  const { voiceId } = await provider.cloneVoice({ name: input.name, samples });
-  const voice: Voice = { id: voiceId, name: input.name, provider: provider.name, language: input.language, source: "custom", ownerId, tags: ["your voice"], createdAt: nowIso() };
-  return getStore().put("voice", voice);
+  return withVoiceLock(ownerId, async () => {
+    await assertVoiceRoom(ownerId, "clone another");
+    const { voiceId } = await provider.cloneVoice!({ name: input.name, samples });
+    const voice: Voice = { id: voiceId, name: input.name, provider: provider.name, language: input.language, source: "custom", ownerId, tags: ["your voice"], createdAt: nowIso() };
+    return getStore().put("voice", voice);
+  });
 }
 
 export const designVoiceSchema = z.object({
@@ -74,10 +95,11 @@ export const saveDesignedVoiceSchema = z.object({
   language: z.string().trim().max(40).optional(),
 });
 
-/** The voices an account keeps of its own (cloned or designed) with the provider in use. */
-async function ownVoices(ownerId: string): Promise<Voice[]> {
+/** Refuses, naming what to do, when the owner already keeps as many voices of its own (cloned or designed) as it may. */
+export async function assertVoiceRoom(ownerId: string, action = "design another"): Promise<void> {
   const provider = getTtsProvider();
-  return (await getStore().list<Voice>("voice", ownerId)).filter((v) => v.provider === provider.name);
+  const mine = (await getStore().list<Voice>("voice", ownerId)).filter((v) => v.provider === provider.name);
+  if (mine.length >= MAX_CLONED_VOICES) throw new ValidationError(`At most ${MAX_CLONED_VOICES} voices of your own (cloned or designed) per account; delete one to ${action}`);
 }
 
 /**
@@ -87,7 +109,7 @@ async function ownVoices(ownerId: string): Promise<Voice[]> {
 export async function designVoice(input: z.infer<typeof designVoiceSchema>, ownerId: string = LOCAL_OWNER): Promise<{ text: string; previews: Array<{ previewId: string; audioUrl?: string; durationSec?: number }> }> {
   const provider = getTtsProvider();
   if (!provider.designVoice) throw new ValidationError(`Voice design is not available with the ${provider.name} voice provider`);
-  if ((await ownVoices(ownerId)).length >= MAX_CLONED_VOICES) throw new ValidationError(`At most ${MAX_CLONED_VOICES} voices of your own per account; delete one to design another`);
+  await assertVoiceRoom(ownerId);
   const { text, previews } = await provider.designVoice({ description: input.description, text: input.text });
   if (!previews.length) throw new Error("The voice provider made no previews for that description; try describing it differently");
   return {
@@ -104,10 +126,12 @@ export async function designVoice(input: z.infer<typeof designVoiceSchema>, owne
 export async function saveDesignedVoice(input: z.infer<typeof saveDesignedVoiceSchema>, ownerId: string = LOCAL_OWNER): Promise<Voice> {
   const provider = getTtsProvider();
   if (!provider.saveDesignedVoice) throw new ValidationError(`Voice design is not available with the ${provider.name} voice provider`);
-  if ((await ownVoices(ownerId)).length >= MAX_CLONED_VOICES) throw new ValidationError(`At most ${MAX_CLONED_VOICES} voices of your own per account; delete one to save another`);
-  const { voiceId } = await provider.saveDesignedVoice({ name: input.name, description: input.description, previewId: input.previewId });
-  const voice: Voice = { id: voiceId, name: input.name, provider: provider.name, language: input.language, source: "custom", ownerId, tags: ["designed voice"], createdAt: nowIso() };
-  return getStore().put("voice", voice);
+  return withVoiceLock(ownerId, async () => {
+    await assertVoiceRoom(ownerId, "save another");
+    const { voiceId } = await provider.saveDesignedVoice!({ name: input.name, description: input.description, previewId: input.previewId });
+    const voice: Voice = { id: voiceId, name: input.name, provider: provider.name, language: input.language, source: "custom", ownerId, tags: ["designed voice"], createdAt: nowIso() };
+    return getStore().put("voice", voice);
+  });
 }
 
 export const updateVoiceSchema = z.object({ name: z.string().trim().min(1).max(60) });

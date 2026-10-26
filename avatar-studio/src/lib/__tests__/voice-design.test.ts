@@ -4,7 +4,8 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
-import { designVoice, designVoiceSchema, listVoices, saveDesignedVoice, saveDesignedVoiceSchema, MAX_CLONED_VOICES } from "../services";
+import { cloneVoice, cloneVoiceSchema, designVoice, designVoiceSchema, listVoices, saveDesignedVoice, saveDesignedVoiceSchema, MAX_CLONED_VOICES } from "../services";
+import { MockTtsProvider } from "../providers/tts/mock";
 import { ValidationError } from "../errors";
 import { providerStatus } from "../providers";
 
@@ -35,10 +36,55 @@ describe("voice design", () => {
     const listed = await listVoices("u1");
     assert.equal(listed[0].id, voice.id, "listed first, with the account's own voices");
     assert.equal((await listVoices("u2")).some((v) => v.id === voice.id), false, "private to the account");
-    // Designed and cloned voices share the limit; a full account is refused before any previews are paid for.
+    // Designed and cloned voices share the limit; a full account is refused before any previews are asked for.
     for (let i = 1; i < MAX_CLONED_VOICES; i++) await saveDesignedVoice({ name: `V${i}`, description: DESCRIPTION, previewId: `design_${i}` }, "u1");
-    await assert.rejects(designVoice(designVoiceSchema.parse({ description: DESCRIPTION }), "u1"), (e: unknown) => e instanceof ValidationError && /delete one to design another/.test((e as Error).message));
+    const realDesign = MockTtsProvider.prototype.designVoice;
+    let asked = 0;
+    MockTtsProvider.prototype.designVoice = async function (input) {
+      asked++;
+      return realDesign.call(this, input);
+    };
+    try {
+      await assert.rejects(designVoice(designVoiceSchema.parse({ description: DESCRIPTION }), "u1"), (e: unknown) => e instanceof ValidationError && /delete one to design another/.test((e as Error).message));
+      assert.equal(asked, 0, "the provider is never asked for previews that could not be saved");
+    } finally {
+      MockTtsProvider.prototype.designVoice = realDesign;
+    }
     await assert.rejects(saveDesignedVoice({ name: "One more", description: DESCRIPTION, previewId: "design_x" }, "u1"), ValidationError);
+    const sample = `data:audio/webm;base64,${Buffer.from("voice sample").toString("base64")}`;
+    await assert.rejects(cloneVoice(cloneVoiceSchema.parse({ name: "My voice", samples: [sample] }), "u1"), /delete one to clone another/);
+  });
+
+  it("keeps to the limit when saves arrive together", async () => {
+    const saves = await Promise.allSettled(
+      Array.from({ length: 8 }, (_, i) => saveDesignedVoice({ name: `Voice ${i}`, description: DESCRIPTION, previewId: `design_${i}` }, "u-race")),
+    );
+    assert.equal(saves.filter((s) => s.status === "fulfilled").length, MAX_CLONED_VOICES);
+    assert.equal((await listVoices("u-race")).filter((v) => v.source === "custom").length, MAX_CLONED_VOICES);
+  });
+
+  it("never lists one account's cloned or designed voices to another, and says why ElevenLabs refused a description", async () => {
+    const { ElevenLabsTtsProvider } = await import("../providers/tts/elevenlabs");
+    const realFetch = globalThis.fetch;
+    const answers = [
+      Response.json({
+        voices: [
+          { voice_id: "premade_1", name: "Rachel", category: "premade" },
+          { voice_id: "pro_1", name: "Studio narrator", category: "professional" },
+          { voice_id: "clone_a", name: "Dana (my voice)", category: "cloned" },
+          { voice_id: "gen_a", name: "Irish narrator", category: "generated" },
+        ],
+      }),
+      Response.json({ detail: { status: "invalid_voice_description", message: "The description could not be used." } }, { status: 422 }),
+    ];
+    globalThis.fetch = (async () => answers.shift()!) as typeof fetch;
+    try {
+      const el = new ElevenLabsTtsProvider("key");
+      assert.deepEqual((await el.listVoices()).map((v) => v.id), ["premade_1", "pro_1"], "each account sees its own from its records");
+      await assert.rejects(el.designVoice({ description: DESCRIPTION }), (e: unknown) => e instanceof ValidationError && /could not design that voice: The description could not be used\./.test((e as Error).message));
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 
   it("asks ElevenLabs for previews of the description and saves the chosen one", async () => {

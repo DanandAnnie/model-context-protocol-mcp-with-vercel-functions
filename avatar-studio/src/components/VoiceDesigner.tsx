@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useId, useRef, useState } from "react";
 import { Pause, Play, Wand2 } from "lucide-react";
-import { Button, Card, ErrorBanner, Field, inputClass } from "@/components/ui";
+import { Button, Card, Field, inputClass } from "@/components/ui";
 import { api } from "@/lib/client";
 import type { Voice } from "@/lib/types";
 
@@ -39,6 +39,9 @@ export function VoiceDesigner({ available, onSaved }: { available: boolean; onSa
   const [playing, setPlaying] = useState<string | null>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
   const firstPreview = useRef<HTMLInputElement>(null);
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  /** Ends only the preview it started: a stopped one reports its end late, after the next has begun. */
+  const ended = (previewId: string) => setPlaying((now) => (now === previewId ? null : now));
 
   function stop() {
     audio.current?.pause();
@@ -74,10 +77,10 @@ export function VoiceDesigner({ available, onSaved }: { available: boolean; onSa
     setPlaying(p.previewId);
     if (p.audioUrl) {
       const a = new Audio(p.audioUrl);
-      a.onended = () => setPlaying(null);
+      a.onended = () => ended(p.previewId);
       audio.current = a;
       a.play().catch(() => {
-        setPlaying(null);
+        ended(p.previewId);
         setErr("The preview could not be played");
       });
       return;
@@ -89,8 +92,8 @@ export function VoiceDesigner({ available, onSaved }: { available: boolean; onSa
     }
     const utter = new SpeechSynthesisUtterance(sample);
     utter.pitch = DEMO_PITCH[i % DEMO_PITCH.length];
-    utter.onend = () => setPlaying(null);
-    utter.onerror = () => setPlaying(null);
+    utter.onend = () => ended(p.previewId);
+    utter.onerror = () => ended(p.previewId);
     window.speechSynthesis.speak(utter);
   }
 
@@ -106,6 +109,8 @@ export function VoiceDesigner({ available, onSaved }: { available: boolean; onSa
       setChosen(null);
       setName("");
       onSaved(voice);
+      // The previews have gone with the Save button; the focus goes back to the start rather than being lost.
+      requestAnimationFrame(() => descriptionRef.current?.focus());
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not save the voice");
     } finally {
@@ -122,12 +127,17 @@ export function VoiceDesigner({ available, onSaved }: { available: boolean; onSa
       </h3>
       <p className="mt-1 text-xs text-slate-500">
         Describe the voice you want (age, accent, tone, pace) and choose from the previews. The voice you keep is private to your account and usable in every video.
-        {!available && " Voice design needs TTS_PROVIDER=elevenlabs; in demo mode the voice is saved and previews use the browser voice."}
+        {!available && " Voice design needs ElevenLabs as the voice provider; in demo mode the voice is saved, and the previews and the saved voice use the browser's voice."}
       </p>
-      <ErrorBanner message={err} />
+      {err && (
+        <p role="alert" className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+          {err}
+        </p>
+      )}
       <div className="mt-3 space-y-3">
         <Field label="Describe the voice">
           <textarea
+            ref={descriptionRef}
             aria-describedby={`${id}-hint`}
             value={description}
             onChange={(e) => setDescription(e.target.value)}

@@ -2001,10 +2001,11 @@ test("a workspace viewer sees view-only notices instead of create controls", asy
   await expect(page.getByRole("button", { name: "New photo avatar" })).toBeDisabled();
   await page.goto("/voices");
   await expect(page.getByTestId("voice-cloner")).toHaveCount(0);
-  await expect(page.getByTestId("voice-designer")).toHaveCount(0);
   // Starred avatars and voices are the workspace's, so a viewer gets no stars to click. The view-only notice
   // shows once the role is known, so the star checks below cannot pass merely because it is still loading.
   await expect(page.getByTestId("view-only")).toBeVisible();
+  // With the role known to be a viewer's, the designer stays hidden too (it never shows before the role is known).
+  await expect(page.getByTestId("voice-designer")).toHaveCount(0);
   await expect(page.getByText("Emma", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /to favourites$/ })).toHaveCount(0);
   await page.goto("/avatars");
@@ -2777,15 +2778,21 @@ test("a voice can be designed from a description, chosen from previews, and kept
   await previews.getByRole("radio", { name: "Preview 2" }).check();
   const name = `Narrator ${Date.now().toString(36)}`;
   await designer.getByLabel("Name for the voice").fill(name);
-  await save.click();
-  await expect(designer.getByRole("status")).toContainText(`Saved "${name}"`);
-  await expect(previews).toHaveCount(0);
-  // Listed with the account's own voices, ready for any video.
-  await expect(page.getByText(name, { exact: true })).toBeVisible();
-  const voices = (await (await page.request.get("/api/voices")).json()).voices as Array<{ id: string; name: string; tags?: string[] }>;
-  const kept = voices.find((v) => v.name === name)!;
-  expect(kept.tags).toEqual(["designed voice"]);
-  expect((await page.request.delete(`/api/voices/${kept.id}`)).ok()).toBe(true);
+  try {
+    await save.click();
+    await expect(designer.getByRole("status")).toContainText(`Saved "${name}"`);
+    await expect(previews).toHaveCount(0);
+    // The focus goes back to the description rather than being lost with the Save button.
+    await expect(designer.getByLabel("Describe the voice")).toBeFocused();
+    // Listed with the account's own voices, ready for any video.
+    await expect(page.getByText(name, { exact: true })).toBeVisible();
+    const voices = (await (await page.request.get("/api/voices")).json()).voices as Array<{ id: string; name: string; tags?: string[] }>;
+    expect(voices.find((v) => v.name === name)?.tags).toEqual(["designed voice"]);
+  } finally {
+    // Kept or not, the voice goes, so it never counts toward the account's five in later tests.
+    const voices = (await (await page.request.get("/api/voices")).json()).voices as Array<{ id: string; name: string }>;
+    for (const v of voices.filter((x) => x.name === name)) await page.request.delete(`/api/voices/${v.id}`);
+  }
 });
 
 test("a dub can be voice only and name its speakers", async ({ page }) => {

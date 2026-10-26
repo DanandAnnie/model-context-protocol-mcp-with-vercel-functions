@@ -79,9 +79,10 @@ export default function VoicesPage() {
       {canEdit === false && <ViewOnlyNotice what="clone, design, or change voices" />}
       <ErrorBanner message={error ?? previewErr ?? actionErr} />
       {canEdit !== false && (
-        <div className="mb-6 grid gap-4 lg:grid-cols-2">
+        <div className={`mb-6 grid gap-4 ${canEdit === true && status?.voiceDesign ? "lg:grid-cols-2" : ""}`}>
           <VoiceCloner available={status?.tts !== "mock"} onCloned={() => refetch()} />
-          {status?.voiceDesign && <VoiceDesigner available={status.tts !== "mock"} onSaved={() => refetch()} />}
+          {/* Shown once the role is known: a viewer never sees it while the workspace is still loading. */}
+          {canEdit === true && status?.voiceDesign && <VoiceDesigner available={status.tts !== "mock"} onSaved={() => refetch()} />}
         </div>
       )}
       <div className="mb-5 grid gap-3 md:grid-cols-[1fr_2fr]">
@@ -135,7 +136,7 @@ export default function VoicesPage() {
                     type="button"
                     onClick={() => renameVoice(v)}
                     aria-label={`Rename ${v.name}`}
-                    title="Rename this cloned voice; videos already rendered keep the old name"
+                    title="Rename this voice of your own; videos already rendered keep the old name"
                     className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand-700"
                   >
                     <Pencil className="h-4 w-4" />
@@ -144,7 +145,7 @@ export default function VoicesPage() {
                     type="button"
                     onClick={() => removeVoice(v)}
                     aria-label={`Delete ${v.name}`}
-                    title="Delete this cloned voice"
+                    title="Delete this voice of your own"
                     className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-700"
                   >
                     <Trash2 className="h-4 w-4" />

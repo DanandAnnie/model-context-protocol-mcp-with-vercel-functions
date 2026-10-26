@@ -1,4 +1,5 @@
 import type { Voice } from "../../types";
+import { ValidationError } from "../../errors";
 import type { DesignedPreview, TtsProvider } from "../types";
 
 const BASE = "https://api.elevenlabs.io/v1";
@@ -8,7 +9,15 @@ interface ElVoice {
   name: string;
   preview_url?: string;
   labels?: Record<string, string>;
+  /** "premade", "professional", "cloned", "generated", …: how the voice came to be in the account. */
+  category?: string;
 }
+
+/**
+ * Voices the studio's accounts make (instant clones and designed voices) live in the one ElevenLabs account the app
+ * uses, so they are left out of the shared list: each studio account sees its own from its records, never another's.
+ */
+const PRIVATE_CATEGORIES = new Set(["cloned", "generated"]);
 
 export class ElevenLabsTtsProvider implements TtsProvider {
   readonly name = "elevenlabs";
@@ -22,7 +31,7 @@ export class ElevenLabsTtsProvider implements TtsProvider {
     const res = await fetch(`${BASE}/voices`, { headers: this.headers(), cache: "no-store" });
     if (!res.ok) throw new Error(`ElevenLabs voices failed: ${res.status} ${await res.text()}`);
     const json = (await res.json()) as { voices: ElVoice[] };
-    return json.voices.map((v) => ({
+    return json.voices.filter((v) => !PRIVATE_CATEGORIES.has(v.category ?? "")).map((v) => ({
       id: v.voice_id,
       name: v.name,
       provider: this.name,
@@ -66,7 +75,12 @@ export class ElevenLabsTtsProvider implements TtsProvider {
       headers: this.headers({ "Content-Type": "application/json" }),
       body: JSON.stringify({ voice_description: description, model_id: "eleven_multilingual_ttv_v2", ...(text ? { text } : { auto_generate_text: true }) }),
     });
-    if (!res.ok) throw new Error(`ElevenLabs voice design failed: ${res.status} ${await res.text()}`);
+    if (!res.ok) {
+      const body = await res.text();
+      // A description it will not voice (too vague, or refused by moderation) is the account's to change, not a fault.
+      if (res.status === 400 || res.status === 422) throw new ValidationError(`ElevenLabs could not design that voice: ${detailMessage(body) ?? "try describing it differently"}`);
+      throw new Error(`ElevenLabs voice design failed: ${res.status} ${body}`);
+    }
     const json = (await res.json()) as { text?: string; previews?: Array<{ generated_voice_id: string; audio_base_64?: string; media_type?: string; duration_secs?: number }> };
     return {
       text: json.text ?? text ?? "",
@@ -97,6 +111,17 @@ export class ElevenLabsTtsProvider implements TtsProvider {
     // Some ElevenLabs endpoints answer a voice they no longer have with 400 and a "voice_not_found" status.
     if (res.status === 400 && voiceMissing(body)) return;
     throw Object.assign(new Error(`ElevenLabs voice delete failed: ${res.status} ${body}`), { status: res.status });
+  }
+}
+
+/** The human-readable message of an ElevenLabs error body (`detail.message`, or a string `detail`), when it has one. */
+function detailMessage(body: string): string | undefined {
+  try {
+    const detail = (JSON.parse(body) as { detail?: unknown }).detail;
+    const message = typeof detail === "string" ? detail : (detail as { message?: unknown } | undefined)?.message;
+    return typeof message === "string" && message.trim() ? message.trim().slice(0, 300) : undefined;
+  } catch {
+    return undefined;
   }
 }
 

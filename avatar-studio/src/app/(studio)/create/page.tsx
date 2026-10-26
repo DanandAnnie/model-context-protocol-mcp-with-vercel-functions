@@ -114,11 +114,19 @@ const newScene = (script = "", background: Background = DEFAULT_BG, presenter: P
   ...(presenter.speed && !presenter.audioId ? { speed: presenter.speed } : {}),
   ...(restoredOverlay(presenter.overlay) ? { overlay: restoredOverlay(presenter.overlay) } : {}),
 });
+/**
+ * On-screen text within its limit, counted as stored: whole characters (an emoji is one) once the spaces are collapsed.
+ * Text past the limit is cut there; text within it is kept as typed.
+ */
+function capSceneText(raw: string): string {
+  const collapsed = Array.from(raw.replace(/\s+/g, " ").trim());
+  return collapsed.length <= MAX_SCENE_TEXT ? raw : collapsed.slice(0, MAX_SCENE_TEXT).join("");
+}
 /** On-screen text from a draft, a copy, or a template: anything this build does not offer is dropped, and blank text is none. */
 function restoredOverlay(o: SceneText | undefined): SceneText | undefined {
   if (!o || typeof o.text !== "string" || !o.text.trim()) return undefined;
   return {
-    text: o.text.slice(0, MAX_SCENE_TEXT),
+    text: capSceneText(o.text),
     ...(o.position && o.position !== "top" && SCENE_TEXT_POSITIONS.includes(o.position) ? { position: o.position } : {}),
     ...(o.size && o.size !== "medium" && SCENE_TEXT_SIZES.includes(o.size) ? { size: o.size } : {}),
     ...(typeof o.color === "string" && /^#[0-9a-f]{6}$/i.test(o.color) && o.color.toLowerCase() !== "#ffffff" ? { color: o.color.toLowerCase() } : {}),
@@ -545,6 +553,8 @@ function CreateInner() {
   const [findWhole, setFindWhole] = useState(false);
   // The last Replace all: what it said and the scripts before and after, so it can be undone while nothing else changed.
   const [findDone, setFindDone] = useState<{ note: string; before: string[]; after: string[] } | null>(null);
+  /** Why the last Replace all changed nothing (the result would not fit), until the search changes. */
+  const [findIssue, setFindIssue] = useState<string | null>(null);
   const findButton = useRef<HTMLButtonElement>(null);
   const findInput = useRef<HTMLInputElement>(null);
   const improveButton = useRef<HTMLButtonElement>(null);
@@ -1246,7 +1256,11 @@ function CreateInner() {
                 matchCase={findCase}
                 wholeWord={findWhole}
                 // The note (and Undo) stand only while the scripts are as the replacement left them.
-                done={findDone && findDone.after.join("\u0000") === scenes.map((sc) => sc.script).join("\u0000") ? findDone.note : null}
+                done={findDone && findDone.after.join("\u0000") === scenes.map((sc) => sc.script).join("\u0000") ? findDone.note : findIssue}
+                skipped={[
+                  scenes.some((sc) => sc.audioId) ? "what recorded clips say" : "",
+                  scenes.some((sc) => sc.overlay?.text.trim()) ? "on-screen text" : "",
+                ].filter(Boolean)}
                 busy={assistBusy}
                 onUndo={() => {
                   if (!findDone) return;
@@ -1256,6 +1270,7 @@ function CreateInner() {
                 }}
                 onChange={(patch) => {
                   setFindDone(null);
+                  setFindIssue(null);
                   if (patch.find !== undefined) setFindText(patch.find);
                   if (patch.replacement !== undefined) setReplaceText(patch.replacement);
                   if (patch.matchCase !== undefined) setFindCase(patch.matchCase);
@@ -1268,7 +1283,14 @@ function CreateInner() {
                   const { scripts, count } = replaceAll(before.map((t, i) => (findable[i] ? t : "")), findText, replaceText, { matchCase: findCase, wholeWord: findWhole });
                   if (!count) return;
                   const after = before.map((t, i) => (findable[i] ? scripts[i] : t));
+                  // Refused rather than made: a video holds MAX_SCRIPT_CHARS across its scenes, and Generate would then be blocked.
+                  const length = after.map((t) => t.trim()).join("\n\n").length;
+                  if (length > MAX_SCRIPT_CHARS) {
+                    setFindIssue(`Not replaced: the script would be ${length} of ${MAX_SCRIPT_CHARS} characters`);
+                    return;
+                  }
                   setScenes((prev) => prev.map((sc, i) => (after[i] === sc.script ? sc : { ...sc, script: after[i] })));
+                  setFindIssue(null);
                   setFindDone({ note: `Replaced ${count} ${count === 1 ? "match" : "matches"}.`, before, after });
                 }}
                 onClose={() => {
@@ -1639,6 +1661,7 @@ function FindReplace({
   matchCase,
   wholeWord,
   done,
+  skipped,
   busy,
   onChange,
   onReplaceAll,
@@ -1653,6 +1676,8 @@ function FindReplace({
   wholeWord: boolean;
   /** What the last Replace all did, while it can still be undone. */
   done: string | null;
+  /** What the editor holds that is not searched, named for the note under the fields. */
+  skipped: string[];
   /** An Improve request is rewriting a scene; replacing now would be overwritten by its answer. */
   busy: boolean;
   onChange: (patch: { find?: string; replacement?: string; matchCase?: boolean; wholeWord?: boolean }) => void;
@@ -1678,7 +1703,22 @@ function FindReplace({
       }}
     >
       <div className="grid gap-2 sm:grid-cols-2">
-        <input ref={inputRef} aria-label="Find" placeholder="Find in every scene's script" value={find} onChange={(e) => onChange({ find: e.target.value })} className={inputClass} maxLength={200} />
+        <input
+          ref={inputRef}
+          aria-label="Find"
+          placeholder="Find in every scene's script"
+          value={find}
+          onChange={(e) => onChange({ find: e.target.value })}
+          onKeyDown={(e) => {
+            // Enter moves on to the replacement, where Enter replaces.
+            if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              (e.currentTarget.parentElement?.querySelector('input[aria-label="Replace with"]') as HTMLInputElement | null)?.focus();
+            }
+          }}
+          className={inputClass}
+          maxLength={200}
+        />
         <input
           aria-label="Replace with"
           placeholder="Replace with"
@@ -1717,6 +1757,7 @@ function FindReplace({
           <X className="h-4 w-4" />
         </button>
       </div>
+      {skipped.length > 0 && <p className="text-xs text-slate-500">Searches what the presenter says; {skipped.join(" and ")} {skipped.length > 1 ? "are" : "is"} left as typed.</p>}
     </div>
   );
 }
@@ -1741,10 +1782,12 @@ function SceneTextFields({ overlay, aspect, captionsAt, scene, disabled, onChang
         aria-describedby={shown ? `${id}-notes` : undefined}
         className={inputClass}
         value={text}
-        maxLength={MAX_SCENE_TEXT}
         disabled={disabled}
         placeholder="Shown over the scene for its whole length"
-        onChange={(e) => set({ text: e.target.value })}
+        onChange={(e) => {
+          // Pasted text past the limit is cut there rather than refused.
+          set({ text: capSceneText(e.target.value) });
+        }}
       />
       {text.trim() && (
         <div className="flex flex-wrap items-center gap-2">

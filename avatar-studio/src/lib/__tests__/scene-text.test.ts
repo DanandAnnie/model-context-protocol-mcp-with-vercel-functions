@@ -19,6 +19,9 @@ describe("scene text", () => {
     assert.deepEqual(sceneTextSchema.parse({ text: "$450,000", position: "bottom", size: "large", color: "#FACC15" }), { text: "$450,000", position: "bottom", size: "large", color: "#facc15" });
     assert.equal(sceneTextSchema.parse({ text: "   ", position: "center" }), undefined);
     assert.throws(() => sceneTextSchema.parse({ text: "x".repeat(121) }), /120 characters/);
+    // Whole characters count, as the editor counts them: an emoji is one.
+    assert.deepEqual(sceneTextSchema.parse({ text: "🏡".repeat(120) }), { text: "🏡".repeat(120) });
+    assert.throws(() => sceneTextSchema.parse({ text: "🏡".repeat(121) }), /120 characters/);
     // The length is the text's once its spaces are collapsed, as stored.
     assert.deepEqual(sceneTextSchema.parse({ text: `a${" ".repeat(300)}b` }), { text: "a b" });
     assert.throws(() => sceneTextSchema.parse({ text: "Hi", color: "red" }), /hex colour/);

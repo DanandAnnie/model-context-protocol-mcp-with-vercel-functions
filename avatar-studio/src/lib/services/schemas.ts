@@ -32,7 +32,8 @@ export const sceneTextSchema = z
       .string()
       .max(5000)
       .transform((t) => t.replace(/\s+/g, " ").trim())
-      .pipe(z.string().max(MAX_SCENE_TEXT, `On-screen text must be ${MAX_SCENE_TEXT} characters or fewer`)),
+      // Whole characters, as the editor counts them, so an emoji is one.
+      .refine((t) => Array.from(t).length <= MAX_SCENE_TEXT, `On-screen text must be ${MAX_SCENE_TEXT} characters or fewer`),
     position: z.enum(SCENE_TEXT_POSITIONS).optional(),
     size: z.enum(SCENE_TEXT_SIZES).optional(),
     color: z.string().regex(/^#[0-9a-fA-F]{6}$/, "A text colour must be a hex colour such as #ffffff").optional(),

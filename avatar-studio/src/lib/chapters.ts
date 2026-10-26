@@ -70,16 +70,24 @@ function shortTitle(text: string): string {
 /** A scene's chapter title: its on-screen text, else the start of what it says (`said`), else what it is. */
 function chapterTitle(scene: TimedScene, index: number, said: string): string {
   const text = scene.overlay?.text.replace(/\s+/g, " ").trim() || said.replace(/\s+/g, " ").trim();
-  if (!text) return scene.audioId ? `Scene ${index + 1}` : "Pause";
-  return shortTitle(text);
+  if (!text) return scene.audioId ? `Scene ${index + 1}` : "Opening";
+  // A caption line can end mid-sentence on a comma; a title does not.
+  return shortTitle(text.replace(/[\s,;:–-]+$/, "") || text);
 }
 
+/** How far before its estimated start a scene's first corrected caption line may sit and still count as the scene's. */
+const EARLY_MS = 1500;
+
 /**
- * One chapter per scene of a video of two scenes or more, starting where its scene does; none otherwise. When an
- * editor corrected the captions, each chapter after the first starts at the corrected line nearest its scene's start
- * and, without on-screen text, takes that line's words, so a jump lands where the transcript says and a word removed
- * from the captions is not shown again. Scenes that would start within the same second as the chapter before are
- * left out, so no two chapters share a time.
+ * One chapter per scene of a video of two scenes or more, starting where its scene does; none otherwise.
+ *
+ * - When an editor corrected the captions, a scene's chapter starts at its first corrected line (one starting within
+ *   the scene's share of the running time, or just before it) and, without on-screen text, takes its lines' words, so a
+ *   jump lands where the transcript says and a word removed from the captions is not shown again. A scene with no
+ *   corrected line of its own keeps its estimated start and its script's words.
+ * - A silent scene with no on-screen text is no chapter of its own (it would say only "Pause"), unless it opens the
+ *   video, whose first chapter is always at 0:00.
+ * - Scenes that would start within the same second as the chapter before are left out, so no two chapters share a time.
  */
 export function videoChapters(video: Timed & { captionCues?: Array<{ startMs: number; text: string }> }): Chapter[] {
   const bounds = sceneBoundsMs(video);
@@ -87,20 +95,23 @@ export function videoChapters(video: Timed & { captionCues?: Array<{ startMs: nu
   const cues = video.captionCues?.length ? video.captionCues : null;
   const chapters: Chapter[] = [];
   video.scenes!.forEach((sc, i) => {
-    let startMs = bounds[i].startMs;
+    const silent = !sc.audioId && !stripPauses(sc.script).trim();
+    const shown = sc.overlay?.text.trim();
+    if (i > 0 && silent && !shown) return;
+    let startMs = i === 0 ? 0 : bounds[i].startMs;
     let said = stripPauses(sc.script);
-    if (cues) {
+    if (cues && !silent) {
       const after = chapters.at(-1)?.startMs ?? -1;
-      const nearest = cues.filter((c) => c.startMs > after).sort((a, b) => Math.abs(a.startMs - startMs) - Math.abs(b.startMs - startMs))[0];
-      if (i === 0) said = cues[0].text;
-      else if (nearest) {
-        startMs = nearest.startMs;
-        said = nearest.text;
+      const lo = i === 0 ? 0 : bounds[i].startMs - EARLY_MS;
+      const own = cues.filter((c) => c.startMs >= lo && c.startMs < bounds[i].endMs && c.startMs > after);
+      if (own.length) {
+        if (i > 0) startMs = own[0].startMs;
+        said = own.map((c) => c.text).join(" ");
       }
     }
     const previous = chapters.at(-1);
     if (previous && Math.floor(startMs / 1000) <= Math.floor(previous.startMs / 1000)) return;
-    chapters.push({ startMs: i === 0 ? 0 : startMs, title: chapterTitle(sc, i, said) });
+    chapters.push({ startMs, title: chapterTitle(sc, i, said) });
   });
   return chapters;
 }

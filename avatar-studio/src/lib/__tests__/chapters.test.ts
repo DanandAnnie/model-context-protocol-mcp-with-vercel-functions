@@ -43,14 +43,16 @@ describe("chapters", () => {
     const bounds = sceneBoundsMs(tour)!;
     assert.equal(bounds.at(-1)!.endMs, 60_000, "the last scene ends with the video");
     const cues = captionCuesFor(tour).cues;
-    // Each spoken scene's first caption line begins at its chapter.
-    for (const i of [0, 1, 3]) assert.ok(cues.some((c) => c.startMs === chapters[i].startMs), `scene ${i + 1}`);
+    // Each spoken scene's first caption line begins at its chapter; the silent scene without on-screen text has none.
+    assert.equal(chapters.length, 3);
+    chapters.forEach((c, i) => assert.ok(cues.some((cue) => cue.startMs === c.startMs), `chapter ${i + 1}`));
+    assert.equal(chapters[2].startMs, bounds[3].startMs);
   });
 
   it("is titled from the on-screen text, else the words (cut at a word), else what the scene is", () => {
     assert.deepEqual(
       videoChapters(tour).map((c) => c.title),
-      ["12 Maple Street", "The kitchen was redone last spring with quartz counters, new…", "Pause", "Call Dana to book a showing this weekend."],
+      ["12 Maple Street", "The kitchen was redone last spring with quartz counters, new…", "Call Dana to book a showing this weekend."],
     );
     const clip = video([{ script: "Hello.", background: bg }, { script: " ", background: bg, audioId: "clip_1", audioSeconds: 4 }]);
     assert.equal(videoChapters(clip)[1].title, "Scene 2");
@@ -69,6 +71,27 @@ describe("chapters", () => {
       { startMs: 0, title: "Hi, I'm Dana." },
       { startMs: 15_000, title: "Call the office today." },
     ]);
+    // A silent scene keeps its own start and title when the captions are corrected, and the scene after it keeps its
+    // own; a scene whose lines were all removed keeps its estimate rather than borrowing a neighbour's line.
+    const withPause = video(
+      [
+        { script: "Welcome to twelve Maple Street.", background: bg, overlay: { text: "12 Maple Street" } },
+        { script: "The kitchen was redone last spring.", background: bg },
+        { script: "[pause 2s]", background: bg, overlay: { text: "Take a look" } },
+        { script: "Call Dana today to book a showing.", background: bg },
+      ],
+      { durationSec: 8 },
+    );
+    const plain = videoChapters(withPause);
+    const auto = captionCuesFor(withPause).cues.map((c, i) => (i === 1 ? { ...c, text: c.text.replace("redone", "remodeled") } : c));
+    const fixed = videoChapters({ ...withPause, captionCues: auto });
+    assert.deepEqual(fixed.map((c) => c.startMs), plain.map((c) => c.startMs));
+    assert.deepEqual(fixed.map((c) => c.title), ["12 Maple Street", "The kitchen was remodeled last spring.", "Take a look", "Call Dana today to book a showing."]);
+    const removed = videoChapters({ ...withPause, captionCues: auto.filter((_, i) => i !== 1) });
+    assert.deepEqual(removed.map((c) => [c.startMs, c.title]), plain.map((c, i) => [c.startMs, i === 1 ? "The kitchen was redone last spring." : c.title]));
+    // A silent scene without on-screen text is no chapter, unless it opens the video.
+    const opens = video([{ script: "[pause 2s]", background: bg }, { script: "Hello there, and welcome.", background: bg }], { durationSec: 6 });
+    assert.deepEqual(videoChapters(opens).map((c) => c.title), ["Opening", "Hello there, and welcome."]);
     // Scenes less than a second apart keep only the first.
     const quick = video([{ script: "A.", background: bg }, { script: "B.", background: bg }, { script: "C.", background: bg }], { durationSec: 2 });
     assert.deepEqual(videoChapters(quick).map((c) => [c.startMs, c.title]), [[0, "A."], [1333, "C."]]);
@@ -103,7 +126,7 @@ describe("chapters", () => {
   });
 
   it("reaches the share page for a rendered video of several scenes only", () => {
-    assert.equal(shareBodyFor(tour, null).chapters?.length, 4);
+    assert.equal(shareBodyFor(tour, null).chapters?.length, 3);
     assert.equal(shareBodyFor({ ...tour, status: "processing", videoUrl: undefined }, null).chapters, undefined, "not before it renders");
     assert.equal(shareBodyFor(video([{ script: "Just one.", background: bg }]), null).chapters, undefined);
   });

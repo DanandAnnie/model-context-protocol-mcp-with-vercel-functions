@@ -2486,6 +2486,22 @@ test("find and replace changes every scene's script, pause markers left whole", 
   await page.getByLabel("Find", { exact: true }).fill("pause");
   await expect(page.getByTestId("find-status")).toHaveText("No matches");
   await expect(page.getByRole("button", { name: "Replace all" })).toBeDisabled();
+  // Enter in the search moves on to the replacement.
+  await page.getByLabel("Find", { exact: true }).fill("Oak");
+  await page.getByLabel("Find", { exact: true }).press("Enter");
+  await expect(page.getByLabel("Replace with")).toBeFocused();
+  // A replacement that would take the video past its 5000 characters is refused, and nothing changes.
+  const long = Array(400).fill("Oak").join(" ");
+  await box.fill(long);
+  await page.getByLabel("Replace with").fill("Oakwood Heights");
+  await page.getByRole("button", { name: "Replace all" }).click();
+  await expect(page.getByTestId("find-status")).toHaveText(/^Not replaced: the script would be \d+ of 5000 characters$/);
+  await expect(box).toHaveValue(long);
+  // On-screen text is not searched, and the panel says so.
+  await expect(page.getByText("left as typed")).toHaveCount(0);
+  await page.getByLabel("On-screen text for scene 1").fill("Oak Lane open house");
+  await expect(page.getByText("Searches what the presenter says; on-screen text is left as typed.")).toBeVisible();
+  await page.getByLabel("Find", { exact: true }).focus();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("group", { name: "Find and replace" })).toBeHidden();
   await expect(page.getByRole("button", { name: "Find", exact: true })).toBeFocused();

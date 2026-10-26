@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { Camera, Clapperboard, Languages, Layers3, LayoutTemplate, MessageSquare, Wand2 } from "lucide-react";
+import { Camera, Clapperboard, Languages, Layers3, LayoutTemplate, MessageSquare, Sparkles, Wand2 } from "lucide-react";
 import { Insights } from "@/components/Insights";
 import { VideoCard } from "@/components/VideoCard";
 import { EmptyState, SectionTitle, Skeleton } from "@/components/ui";
@@ -9,6 +9,7 @@ import type { Video } from "@/lib/types";
 
 const QUICK = [
   { href: "/create", icon: Clapperboard, title: "Avatar video", body: "Script + avatar + voice. The core workflow.", accent: "bg-brand-600" },
+  { href: "/agent", icon: Sparkles, title: "Video Agent", body: "Describe a video in a sentence; the agent plans the scenes and makes it.", accent: "bg-indigo-600" },
   { href: "/create?writer=1", icon: Wand2, title: "Write with AI", body: "Generate a script from a topic, then render it.", accent: "bg-violet-600" },
   { href: "/templates", icon: LayoutTemplate, title: "Start from a template", body: "Listing walkthroughs, welcomes, tips, and more.", accent: "bg-amber-500" },
   { href: "/batch", icon: Layers3, title: "Personalize at scale", body: "One script, a CSV of recipients, one video each.", accent: "bg-rose-600" },

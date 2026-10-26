@@ -1,0 +1,174 @@
+"use client";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { PencilLine, Sparkles } from "lucide-react";
+import { Button, Card, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
+import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
+import { useApi } from "@/hooks/useApi";
+import { useCanEdit } from "@/hooks/useCanEdit";
+import { api } from "@/lib/client";
+import { AGENT_DRAFT_KEY } from "@/lib/agent-draft";
+import type { Avatar, Video, Voice } from "@/lib/types";
+
+const LENGTHS = [
+  { sec: 30, label: "About 30 seconds" },
+  { sec: 60, label: "About 1 minute" },
+  { sec: 90, label: "About 90 seconds" },
+  { sec: 120, label: "About 2 minutes" },
+  { sec: 180, label: "About 3 minutes" },
+];
+const LANGUAGES = ["English", "Spanish", "French", "German", "Portuguese", "Italian", "Dutch", "Japanese", "Chinese", "Korean", "Hindi", "Arabic"];
+const ORIENTATIONS = [
+  { value: "auto", label: "Let the agent choose" },
+  { value: "landscape", label: "Landscape (16:9)" },
+  { value: "portrait", label: "Portrait (9:16)" },
+  { value: "square", label: "Square (1:1)" },
+] as const;
+const EXAMPLES = [
+  "A 45-second welcome video for new customers of our dental clinic: what to expect at the first visit, and how to book.",
+  "A TikTok explaining three quick tips for staging a home before a showing, upbeat and friendly.",
+  "A one-minute product update for our team: the new dashboard ships Monday, what changes, and where to send feedback.",
+];
+
+export default function VideoAgentPage() {
+  const router = useRouter();
+  const canEdit = useCanEdit();
+  const { data: avatarData } = useApi<{ avatars: Avatar[] }>("/api/avatars");
+  const { data: voiceData } = useApi<{ voices: Voice[] }>("/api/voices");
+  const [prompt, setPrompt] = useState("");
+  const [url, setUrl] = useState("");
+  const [avatarId, setAvatarId] = useState("");
+  const [voiceId, setVoiceId] = useState("");
+  const [orientation, setOrientation] = useState<(typeof ORIENTATIONS)[number]["value"]>("auto");
+  const [lengthSec, setLengthSec] = useState(60);
+  const [language, setLanguage] = useState("English");
+  const [busy, setBusy] = useState<"generate" | "plan" | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const urlOk = !url.trim() || /^https?:\/\/\S+$/.test(url.trim());
+  const ready = prompt.trim().length >= 3 && urlOk && canEdit !== false && !busy;
+
+  async function run(mode: "generate" | "plan") {
+    setBusy(mode);
+    setErr(null);
+    const body = { prompt, mode, orientation, lengthSec, language, ...(url.trim() ? { url: url.trim() } : {}), ...(avatarId ? { avatarId } : {}), ...(voiceId ? { voiceId } : {}) };
+    try {
+      if (mode === "plan") {
+        const { draft } = await api<{ draft: unknown }>("/api/video-agent", { method: "POST", body: JSON.stringify(body) });
+        // The editor picks the plan up once, like a template; the browser's own unsent draft is left alone until then.
+        try {
+          window.sessionStorage.setItem(AGENT_DRAFT_KEY, JSON.stringify(draft));
+        } catch {
+          throw new Error("This browser blocks page storage, so the plan cannot be opened in the editor. Use Generate video instead.");
+        }
+        router.push("/create?plan=agent");
+        return;
+      }
+      const { video } = await api<{ video: Video }>("/api/video-agent", { method: "POST", body: JSON.stringify(body) });
+      router.push(`/videos/${video.id}`);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "The video agent could not make that video");
+      setBusy(null);
+    }
+  }
+
+  return (
+    <>
+      <SectionTitle title="Video Agent" subtitle="Describe the video you want. The agent writes the script, splits it into scenes, frames them, and picks a format, with your brand kit applied." />
+      {canEdit === false && <ViewOnlyNotice what="make videos" />}
+      <ErrorBanner message={err} />
+      <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
+        <Card className="p-5">
+          <div className="space-y-4">
+            <Field label="What should the video be?" hint="The topic, who it is for, the tone, and anything it must say. Up to 10,000 characters.">
+              <textarea
+                className={`${inputClass} min-h-40`}
+                value={prompt}
+                maxLength={10_000}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder="A one-minute explainer for first-time buyers on how our pre-approval works…"
+              />
+            </Field>
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Example prompts">
+              {EXAMPLES.map((ex, i) => (
+                <button key={i} type="button" className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-left text-xs text-slate-600 hover:bg-slate-50" onClick={() => setPrompt(ex)}>
+                  {ex.length > 64 ? `${ex.slice(0, 63)}…` : ex}
+                </button>
+              ))}
+            </div>
+            <Field label="Reference page (optional)" hint="A public web page the agent reads and writes from, using only its facts.">
+              <input className={inputClass} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" inputMode="url" />
+            </Field>
+            {!urlOk && <p className="text-xs text-red-600">Enter a full address starting with http:// or https://</p>}
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button onClick={() => run("generate")} loading={busy === "generate"} disabled={!ready} className="flex-1">
+                <Sparkles className="h-4 w-4" /> Generate video
+              </Button>
+              <Button variant="secondary" onClick={() => run("plan")} loading={busy === "plan"} disabled={!ready} className="flex-1">
+                <PencilLine className="h-4 w-4" /> Review in editor first
+              </Button>
+            </div>
+            {busy && (
+              <p className="text-sm text-slate-500" role="status">
+                {busy === "plan" ? "Planning the scenes…" : "Planning the scenes and starting the render…"}
+              </p>
+            )}
+          </div>
+        </Card>
+
+        <Card className="p-5">
+          <h2 className="mb-3 text-sm font-semibold text-slate-900">Options</h2>
+          <div className="space-y-4">
+            <Field label="Presenter">
+              <select className={inputClass} value={avatarId} onChange={(e) => setAvatarId(e.target.value)}>
+                <option value="">Brand kit default</option>
+                {avatarData?.avatars.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Voice">
+              <select className={inputClass} value={voiceId} onChange={(e) => setVoiceId(e.target.value)}>
+                <option value="">The presenter&apos;s or brand kit&apos;s voice</option>
+                {voiceData?.voices.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Format">
+              <select className={inputClass} value={orientation} onChange={(e) => setOrientation(e.target.value as typeof orientation)}>
+                {ORIENTATIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+              <Field label="Length">
+                <select className={inputClass} value={lengthSec} onChange={(e) => setLengthSec(Number(e.target.value))}>
+                  {LENGTHS.map((l) => (
+                    <option key={l.sec} value={l.sec}>
+                      {l.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Language">
+                <select className={inputClass} value={language} onChange={(e) => setLanguage(e.target.value)}>
+                  {LANGUAGES.map((l) => (
+                    <option key={l}>{l}</option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+          </div>
+        </Card>
+      </div>
+    </>
+  );
+}

@@ -17,6 +17,7 @@ import { stripPauses } from "@/lib/pauses";
 import { MAX_IMPORT_BYTES, MAX_SCRIPT_CHARS, decodeScript, legacyEncodingFor, scenesFromText } from "@/lib/script-import";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
+import { takeAgentDraft, type AgentDraft } from "@/lib/agent-draft";
 import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, PRESENTER_FRAMINGS, RESOLUTIONS, isDefaultCaptionStyle as isDefaultCaptionStyleFn, framingFor, isDefaultLayout, isPhotoAvatar, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
@@ -293,12 +294,30 @@ function CreateInner() {
   const hydrated = useRef(false);
   const templateId = params.get("template");
   const fromId = params.get("from");
+  // A Video Agent plan to review (?plan=agent), read once: a refresh comes back to the autosaved draft of it.
+  const agentPlan = useRef<AgentDraft | null | undefined>(undefined);
+  const [fromAgent, setFromAgent] = useState(false);
 
   // Restore an unsent draft on a plain visit (not when a template or copy is requested).
   useEffect(() => {
     if (hydrated.current) return;
     hydrated.current = true;
     if (templateId || fromId) return;
+    if (params.get("plan") === "agent") {
+      if (agentPlan.current === undefined) agentPlan.current = takeAgentDraft();
+      const p = agentPlan.current;
+      if (p) {
+        setTitle(p.title);
+        setScenes(p.scenes.map((sc) => newScene(sc.script, sc.background, { layout: restoredLayout(sc.layout) })));
+        setActiveIdx(0);
+        setAspect(p.aspect);
+        setResolution(p.resolution);
+        setCaptions(p.captions);
+        setPrefill({ avatarId: p.avatarId, voiceId: p.voiceId });
+        setFromAgent(true);
+        return;
+      }
+    }
     const d = readDraft();
     if (!d) return;
     setTitle(d.title);
@@ -315,7 +334,7 @@ function CreateInner() {
     setEmotion(asEmotion(d.emotion));
     setPrefill({ avatarId: d.avatarId, voiceId: d.voiceId });
     setDraftRestored(d.savedAt);
-  }, [templateId, fromId]);
+  }, [templateId, fromId, params]);
 
   // Autosave the editor state (debounced) so a refresh never loses work.
   useEffect(() => {
@@ -356,14 +375,15 @@ function CreateInner() {
     if (brandApplied.current || !brandData) return;
     brandApplied.current = true;
     const b = brandData.brand;
-    if (!b || fromId || draftRestored || templateId?.startsWith("tpl_")) return;
+    // A Video Agent plan already carries the kit's presenter, voice, background, captions, and quality.
+    if (!b || fromId || draftRestored || fromAgent || templateId?.startsWith("tpl_")) return;
     if (b.captionsByDefault != null) setCaptions(b.captionsByDefault);
     if (b.defaultAvatarId || b.defaultVoiceId) setPrefill({ avatarId: b.defaultAvatarId, voiceId: b.defaultVoiceId });
     if (b.defaultResolution) setResolution(b.defaultResolution);
     if (templateId) return;
     if (b.defaultAspect) setAspect(b.defaultAspect);
     setScenes((prev) => prev.map((sc) => (sc.script.trim() ? sc : { ...sc, background: b.defaultBackground ?? { type: "color", value: b.primaryColor } })));
-  }, [brandData, fromId, templateId, draftRestored]);
+  }, [brandData, fromId, templateId, draftRestored, fromAgent]);
 
   // Pre-fill from a template (?template=) or an existing video (?from=).
   useEffect(() => {
@@ -517,6 +537,11 @@ function CreateInner() {
       />
       {canEdit === false && <ViewOnlyNotice what="generate videos" />}
       <ErrorBanner message={err ?? avatarsError ?? voicesError} />
+      {fromAgent && (
+        <div role="status" data-testid="agent-plan" className="mb-4 rounded-lg border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm text-brand-900">
+          The Video Agent planned {scenes.length === 1 ? "this scene" : `these ${scenes.length} scenes`}. Review and edit them, then generate.
+        </div>
+      )}
       {draftRestored && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
           <span>Restored your unsent draft from {new Date(draftRestored).toLocaleString()}.</span>

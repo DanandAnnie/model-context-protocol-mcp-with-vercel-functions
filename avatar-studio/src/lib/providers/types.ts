@@ -67,6 +67,16 @@ export interface ScriptProvider {
   revise(input: { script: string; action: ScriptAction; tone?: string; language?: string; terms?: string[] }): Promise<string>;
   /** One conversational turn for the interactive avatar: the presenter answers in character, briefly, for speech. */
   chat(input: { persona: ChatPersona; messages: ChatMessage[] }): Promise<string>;
+  /** A whole video from one prompt (the Video Agent): a title, a frame orientation, and the scenes in order. */
+  plan(input: { prompt: string; lengthSec: number; language: string; source?: string }): Promise<VideoPlan>;
+}
+
+/** What the Video Agent's planner hands back; the caller trims it to what a video holds. */
+export interface VideoPlan {
+  title: string;
+  orientation: "landscape" | "portrait";
+  /** One idea per scene; a close-up suits a hook or a call to action. */
+  scenes: { script: string; framing: "full" | "closeUp" }[];
 }
 
 export interface ChatMessage {

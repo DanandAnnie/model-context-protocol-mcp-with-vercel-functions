@@ -356,6 +356,41 @@ test("templates pre-fill the editor and edit-a-copy restores settings", async ({
   await expect(page.getByRole("button", { name: /^720p/ })).toHaveAttribute("aria-pressed", "true");
 });
 
+test("the video agent plans a video from a prompt, to review in the editor or to render", async ({ page }) => {
+  await page.goto("/agent");
+  await expect(page.getByRole("button", { name: "Generate video" })).toBeDisabled();
+  await page.getByLabel("What should the video be?").fill("Make a TikTok about our spring open house");
+  await page.getByRole("button", { name: "Review in editor first" }).click();
+  // The plan opens in the editor like a template: title, scenes, and a note saying where they came from.
+  await expect(page).toHaveURL(/\/create\?plan=agent$/);
+  await expect(page.getByTestId("agent-plan")).toContainText("planned these 4 scenes");
+  await expect(page.locator("input[placeholder='Video title']")).toHaveValue("Our spring open house");
+  await expect(page.locator("textarea")).toHaveValue("Hi there! Let's talk about our spring open house.");
+  await expect(page.getByRole("button", { name: /^Scene 4,/ })).toBeVisible();
+  // It is read once: a refresh comes back to the autosaved draft of it, not to the plan.
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("avatar-studio:draft") ?? "{}").title)).toBe("Our spring open house");
+  await page.reload();
+  await expect(page.getByTestId("agent-plan")).toHaveCount(0);
+  await expect(page.locator("input[placeholder='Video title']")).toHaveValue("Our spring open house");
+  await page.evaluate(() => localStorage.removeItem("avatar-studio:draft"));
+
+  // Generate renders straight away, in the format asked for, with captions on.
+  await page.goto("/agent");
+  await page.getByLabel("What should the video be?").fill("A short video about our refund policy");
+  await page.getByLabel("Format").selectOption("square");
+  await page.getByRole("button", { name: "Generate video" }).click();
+  await expect(page).toHaveURL(/\/videos\/vid_/);
+  const id = page.url().split("/videos/")[1];
+  const video = (await (await page.request.get(`/api/videos/${id}`)).json()).video as { title: string; aspect: string; captions: boolean; scenes: Array<{ script: string; layout?: { framing?: string } }> };
+  expect(video.title).toBe("Our refund policy");
+  expect(video.aspect).toBe("1:1");
+  expect(video.captions).toBe(true);
+  expect(video.scenes).toHaveLength(4);
+  expect(video.scenes[0].layout?.framing).toBe("closeUp");
+  expect((await page.request.post("/api/video-agent", { data: { prompt: "hi" } })).status()).toBe(400);
+  await page.request.delete(`/api/videos/${id}?permanent=true`);
+});
+
 test("importing a script file makes one scene per section", async ({ page }) => {
   await page.locator("textarea").fill("A first draft.");
   const doc = ["# Welcome aboard", "", "Hi, I'm **Ava**.", "", "Glad you're here.", "---", "- Read the [handbook](https://example.com/h).", "## Wrap up", "See you Monday!"].join("\n");
@@ -1013,7 +1048,7 @@ test("no page scrolls sideways at phone width", async ({ browser }) => {
     const v = await createVideoViaApi(page, "Phone width check");
     // A shared presenter makes the Interactive page render its widest row (six actions per presenter).
     agentId = ((await (await page.request.post("/api/agents", { data: { name: "Phone width presenter", avatarId: "stock_1" } })).json()).agent as { id: string }).id;
-    const pages = ["/home", "/create", "/videos", `/videos/${v.id}`, "/templates", "/avatars", "/voices", "/batch", "/brand", "/interactive", "/workspace", "/settings", "/translate", `/share/${v.id}`];
+    const pages = ["/home", "/create", "/agent", "/videos", `/videos/${v.id}`, "/templates", "/avatars", "/voices", "/batch", "/brand", "/interactive", "/workspace", "/settings", "/translate", `/share/${v.id}`];
     for (const path of pages) {
       await page.goto(path);
       await expect(page.locator("h1").first()).toBeVisible();
@@ -1431,7 +1466,7 @@ test("webhook settings reject private hosts and show the signing secret", async 
 test("pages have no WCAG 2.1 AA violations", async ({ page }) => {
   const v = await createVideoViaApi(page, "Accessible video");
   const agent = (await (await page.request.post("/api/agents", { data: { name: "Axe agent", avatarId: "stock_1" } })).json()).agent as { id: string };
-  const paths = ["/", "/login", "/home", "/create", "/videos", `/videos/${v.id}`, "/templates", "/batch", "/avatars", "/voices", "/translate", "/interactive", "/brand", "/settings", `/share/${v.id}`, `/talk/${agent.id}`];
+  const paths = ["/", "/login", "/home", "/create", "/agent", "/videos", `/videos/${v.id}`, "/templates", "/batch", "/avatars", "/voices", "/translate", "/interactive", "/brand", "/settings", `/share/${v.id}`, `/talk/${agent.id}`];
   const report: string[] = [];
   for (const path of paths) {
     await page.goto(path);
@@ -1519,6 +1554,7 @@ test("a workspace viewer sees view-only notices instead of create controls", asy
   );
   const pages: Array<[string, string]> = [
     ["/create", "generate videos"],
+    ["/agent", "make videos"],
     ["/batch", "start batches"],
     ["/translate", "start translations"],
     ["/avatars", "add or change avatars"],

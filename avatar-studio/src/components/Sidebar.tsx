@@ -12,6 +12,7 @@ import type { ProviderStatus } from "@/lib/types";
 const NAV = [
   { href: "/home", label: "Home", icon: Home },
   { href: "/create", label: "Create video", icon: Clapperboard },
+  { href: "/agent", label: "Video Agent", icon: Sparkles },
   { href: "/videos", label: "My videos", icon: Video },
   { href: "/templates", label: "Templates", icon: LayoutTemplate },
   { href: "/batch", label: "Personalize", icon: Layers3 },

@@ -168,6 +168,19 @@ Or write from a public web page (`url`; the topic defaults to the page title; pr
 
 Actions: `shorten`, `expand`, `tone`, `translate`, `polish`. Returns `{ "script": "…" }`. A `translate` keeps the terms in the brand kit's `glossary` exactly as written.
 
+### `POST /api/video-agent` — a whole video from one prompt
+
+```json
+{ "prompt": "A TikTok explaining three tips for staging a home", "lengthSec": 60, "language": "English", "orientation": "auto", "mode": "generate" }
+```
+
+The script writer plans the video: a title, one scene per idea (a hook and a call to action framed as close-ups), and a frame orientation (portrait for social formats, landscape otherwise). `prompt` is 3–10,000 characters; `url` (optional) is a public web page the plan uses as its only source of facts, under the same rules as the script writer's; `avatarId` and `voiceId` (optional) choose the presenter and voice, else the brand kit's defaults, else the first ones listed (a chosen presenter brings its own default voice); `orientation` is `auto`, `landscape`, `portrait`, or `square`; `lengthSec` is 15–300 (default 60); `mode` is `generate` (default) or `plan`. Every scene gets the brand kit's background, captions are on unless the kit turns them off, and the kit's quality applies; the plan keeps to ten scenes and the 5000 characters a video holds.
+
+- `mode: "generate"` renders straight away and answers `201 { "video", "draft" }`, counted against the render allowance like `POST /api/videos` (`502` with the failed video if the render could not start).
+- `mode: "plan"` answers `{ "draft" }` without rendering: `{ title, scenes: [{ script, background, layout? }], avatarId, voiceId, aspect, resolution, captions }`, a body `POST /api/videos` takes as is. The Video Agent page opens it in the editor for review.
+
+An unknown presenter answers `404`, an unknown voice, an unreadable page, or a prompt with nothing to plan `400`, and viewers `403`.
+
 ## Interactive avatar
 
 `POST /api/chat` returns one spoken-style reply in character. Keep the last 20 messages; the last one must be from the visitor. Rate limited to 60 turns per 10 minutes per client.

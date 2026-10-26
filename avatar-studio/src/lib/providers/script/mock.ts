@@ -1,4 +1,4 @@
-import { splitKnowledge, type ChatMessage, type ChatPersona, type ScriptAction, type ScriptProvider } from "../types";
+import { splitKnowledge, type ChatMessage, type ChatPersona, type ScriptAction, type ScriptProvider, type VideoPlan } from "../types";
 
 /** Template-based script writer used when no LLM key is configured. */
 export class MockScriptProvider implements ScriptProvider {
@@ -42,6 +42,37 @@ export class MockScriptProvider implements ScriptProvider {
       default:
         return sentences.map((s) => s[0].toUpperCase() + s.slice(1)).join(" ");
     }
+  }
+
+  /**
+   * A demo plan from the prompt alone: a hook, a scene per point (from the page when one was read), and a call to
+   * action, about 15 seconds each; portrait when the prompt names a social format.
+   */
+  async plan({ prompt, lengthSec, source }: { prompt: string; lengthSec: number; language: string; source?: string }): Promise<VideoPlan> {
+    const first = prompt.replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s|\n/)[0].replace(/[.!?]+$/, "");
+    // "Make a 30-second video about our new app" is about "our new app".
+    const about = /\b(?:about|on|explaining|for|introducing)\s+(.+)$/i.exec(first)?.[1] ?? first;
+    const topic = about.length > 60 ? `${about.slice(0, 60).replace(/\s+\S*$/, "")}…` : about;
+    const title = topic.charAt(0).toUpperCase() + topic.slice(1);
+    const count = Math.max(3, Math.min(6, Math.round(lengthSec / 15)));
+    const points = source
+      ? source.replace(/\s+/g, " ").split(/(?<=[.!?])\s+/).filter((s) => s.length > 20)
+      : [
+          `Here's why ${topic} matters: it changes how you get results day to day.`,
+          "First, understand the problem you're solving. Then pick one clear action and measure what happens.",
+          "Start small, stay consistent, and the results add up faster than you'd expect.",
+          "And you don't have to do it alone. The right tools make every step easier.",
+        ];
+    const body = points.slice(0, count - 2).map((script) => ({ script, framing: "full" as const }));
+    return {
+      title,
+      orientation: /\b(tiktok|reels?|shorts?|stories|story|vertical|portrait|instagram)\b/i.test(prompt) ? "portrait" : "landscape",
+      scenes: [
+        { script: `Hi there! Let's talk about ${topic}.`, framing: "closeUp" },
+        ...body,
+        { script: "Thanks for watching. If this was useful, share it with someone who needs it.", framing: "closeUp" },
+      ],
+    };
   }
 
   /** Canned but context-aware replies so the interactive demo feels alive without an LLM key. */

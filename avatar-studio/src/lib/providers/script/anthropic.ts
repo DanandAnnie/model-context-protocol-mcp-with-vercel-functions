@@ -1,11 +1,28 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { ChatMessage, ChatPersona, ScriptAction, ScriptProvider } from "../types";
+import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
+import { z } from "zod";
+import type { ChatMessage, ChatPersona, ScriptAction, ScriptProvider, VideoPlan } from "../types";
 
 const SYSTEM = `You write spoken scripts for short AI avatar videos. Rules:
 - Output only the words the presenter says. No headings, stage directions, markdown, or quotes.
 - Write for the ear: short sentences, contractions, one idea per sentence.
 - Open with a hook in the first sentence; close with one clear call to action.
 - Match the requested tone, language, audience, and target length (about 2.5 words per second).`;
+
+const PLAN_SYSTEM = `You plan short AI avatar videos from one prompt: a presenter speaks every word, scene by scene. Rules:
+- Each scene is one idea, written only as the words the presenter says: no headings, stage directions, markdown, or quotes.
+- Write for the ear: short sentences, contractions. Open with a hook; close with one clear call to action.
+- Use as many scenes as the content needs, usually three to six. Frame a hook or a call to action as a close-up, the rest in full.
+- Choose portrait for social formats (shorts, reels, stories, TikTok) and landscape otherwise, unless the prompt says.
+- Give the video a short title, in the language of the script.
+- Match the requested language and target length (about 2.5 words per second).`;
+
+// The SDK sends enums as described strings, so the two choices are read loosely below rather than refused.
+const PLAN_FORMAT = z.object({
+  title: z.string(),
+  orientation: z.string().describe('"landscape" or "portrait"'),
+  scenes: z.array(z.object({ script: z.string(), framing: z.string().describe('"full" or "closeUp"') })),
+});
 
 /**
  * The Messages API wants the first turn from the user and one turn per side in sequence. A transcript
@@ -72,6 +89,36 @@ Background and instructions from the owner, followed by any reference page they 
 ${persona.instructions || "(none provided: be a friendly, helpful presenter)"}`;
     // A reply cut off at the token cap is still a usable spoken answer; the writer paths keep throwing.
     return this.complete(messages, system, 400, true);
+  }
+
+  async plan(input: { prompt: string; lengthSec: number; language: string; source?: string }): Promise<VideoPlan> {
+    const words = Math.round(input.lengthSec * 2.5);
+    const prompt = [
+      `What the video should be:\n"""\n${input.prompt}\n"""`,
+      `Language: ${input.language}`,
+      `Target length: about ${words} words in all (${input.lengthSec} seconds spoken).`,
+      input.source ? `\nSource material (use only facts from it; do not invent details):\n"""\n${input.source}\n"""` : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    const response = await this.client.beta.messages.parse({
+      model: "claude-opus-5-5",
+      max_tokens: 16000,
+      system: PLAN_SYSTEM,
+      output_config: { effort: "low", format: betaZodOutputFormat(PLAN_FORMAT) },
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      messages: [{ role: "user", content: prompt }],
+    });
+    if (response.stop_reason === "refusal") throw new Error("The video agent declined this request. Try rephrasing the prompt.");
+    if (response.stop_reason === "max_tokens") throw new Error("The video agent ran out of room. Try a shorter video.");
+    const plan = response.parsed_output;
+    if (!plan) throw new Error("The video agent returned no plan.");
+    return {
+      title: plan.title,
+      orientation: /portrait|vertical/i.test(plan.orientation) ? "portrait" : "landscape",
+      scenes: plan.scenes.map((sc) => ({ script: sc.script, framing: /close/i.test(sc.framing) ? "closeUp" : "full" })),
+    };
   }
 
   private async complete(prompt: string | ChatMessage[], system: string = SYSTEM, maxTokens = 16000, allowTruncation = false): Promise<string> {

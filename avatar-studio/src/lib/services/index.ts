@@ -9,6 +9,7 @@ export * from "./comments";
 export * from "./leads";
 export * from "./scripts";
 export * from "./agents";
+export * from "./video-agent";
 export * from "./account";
 export * from "./videos";
 export * from "./batches";

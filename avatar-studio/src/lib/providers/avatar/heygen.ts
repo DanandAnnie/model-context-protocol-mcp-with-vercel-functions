@@ -80,10 +80,10 @@ export class HeyGenAvatarProvider implements AvatarProvider {
           voice: scene.audioId
             ? { type: "audio", audio_asset_id: this.audioAssetId(scene.audioId, cast) }
             : { type: "text", input_text: withBreakTags(scene.script), voice_id: this.voiceId(sceneVoice, req.voiceId), speed: scene.speed ?? req.speed, ...(req.pitch ? { pitch: req.pitch } : {}), ...(req.emotion && sceneVoice?.emotionSupport !== false ? { emotion: req.emotion } : {}) },
-          // A video background loops for the length of the scene and fills the frame.
+          // A video background loops for the length of the scene, filling the frame unless the scene shows all of it.
           background:
             scene.background.type === "video"
-              ? { type: "video", url: scene.background.value, play_style: "loop", fit: "cover" }
+              ? { type: "video", url: scene.background.value, play_style: "loop", fit: scene.background.fit ?? "cover" }
               : scene.background.type === "image"
                 ? this.imageBackground(scene.background, cast)
                 : { type: "color", value: scene.background.value },
@@ -106,10 +106,11 @@ export class HeyGenAvatarProvider implements AvatarProvider {
   /** An image background by URL, or an uploaded one by its HeyGen asset id. */
   private imageBackground(background: Background, cast?: RenderCast) {
     const backdropId = backdropIdOf(background);
-    if (!backdropId) return { type: "image", url: background.value };
+    const fit = background.fit ? { fit: background.fit } : {};
+    if (!backdropId) return { type: "image", url: background.value, ...fit };
     const id = cast?.backdrops?.[backdropId]?.providerAssetIds?.[this.name];
     if (!id) throw new Error(`Background image ${backdropId} has not been uploaded to HeyGen yet.`);
-    return { type: "image", image_asset_id: id };
+    return { type: "image", image_asset_id: id, ...fit };
   }
 
   private audioAssetId(audioId: string, cast?: RenderCast): string {

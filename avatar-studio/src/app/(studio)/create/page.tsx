@@ -204,7 +204,8 @@ function CreateInner() {
       el?.setSelectionRange(at, at);
     });
   }
-  const setBackground = (value: Background) => updateScene(activeIdx, { background: value });
+  // Another picture or video keeps the scene's fit; the Fit buttons set it.
+  const setBackground = (value: Background) => updateScene(activeIdx, { background: value.type !== "color" && background.type !== "color" && background.fit && !value.fit ? { ...value, fit: background.fit } : value });
   const layout: SceneLayout = active.layout ?? DEFAULT_LAYOUT;
   // The default layout is stored as absent, so an untouched scene renders exactly as before.
   const setLayout = (value: SceneLayout) => updateScene(activeIdx, { layout: isDefaultLayout(value) ? undefined : value });
@@ -834,10 +835,10 @@ function CreateInner() {
 
           <Card className="overflow-hidden">
             {/* A portrait stage is sized by its height and takes its width from the ratio, so it really is 9:16 (a width-first box capped in height came out near square and cropped portrait slides); the height is also capped by the screen's width, so a narrow phone keeps the shape. */}
-            <div data-testid="stage" className={`relative mx-auto ${aspect === "9:16" ? "h-[min(520px,70vh,calc((100vw_-_5rem)*16/9))] max-w-full" : "w-full"} ${stageAspect} flex items-end justify-center overflow-hidden`} style={background.type === "color" ? { background: background.value } : background.type === "image" ? { backgroundImage: `url(${background.value})`, backgroundSize: "cover", backgroundPosition: "center" } : { background: "#0f172a" }}>
+            <div data-testid="stage" className={`relative mx-auto ${aspect === "9:16" ? "h-[min(520px,70vh,calc((100vw_-_5rem)*16/9))] max-w-full" : "w-full"} ${stageAspect} flex items-end justify-center overflow-hidden`} style={background.type === "color" ? { background: background.value } : background.type === "image" ? { backgroundImage: `url(${background.value})`, backgroundSize: background.fit ?? "cover", backgroundPosition: "center", backgroundRepeat: "no-repeat", backgroundColor: "#000" } : { background: background.fit ? "#000" : "#0f172a" }} data-fit={background.type === "color" ? undefined : (background.fit ?? "cover")}>
               {/* Only a complete URL is previewed, so a half-typed one is not requested keystroke by keystroke. */}
               {background.type === "video" && /^https?:\/\/\S+\.\S+/.test(background.value) && (
-                <video key={background.value} src={background.value} muted loop autoPlay playsInline aria-hidden="true" data-testid="stage-video" className="absolute inset-0 h-full w-full object-cover" />
+                <video key={background.value} src={background.value} muted loop autoPlay playsInline aria-hidden="true" data-testid="stage-video" className={`absolute inset-0 h-full w-full ${background.fit === "contain" ? "object-contain" : "object-cover"}`} />
               )}
               {sceneAvatar ? (
                 // The offset moves a frame-sized layer so one unit is half the frame on either axis; the scale stays on the portrait.
@@ -1269,6 +1270,26 @@ function CreateInner() {
                   loadError={backdropError}
                   canEdit={canEdit !== false}
                 />
+                {background.type !== "color" && (
+                  // HeyGen crops a picture or video to fill the frame unless told to show all of it, as a slide often needs.
+                  <div role="group" aria-label="Background fit">
+                    <div className="mb-2 text-sm font-medium text-slate-700">Fit</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(["cover", "contain"] as const).map((f) => (
+                        <button
+                          key={f}
+                          type="button"
+                          aria-pressed={(background.fit ?? "cover") === f}
+                          onClick={() => updateScene(activeIdx, { background: f === "contain" ? { ...background, fit: f } : { type: background.type, value: background.value } })}
+                          className={`rounded-lg border px-3 py-2 text-left text-sm font-medium ${(background.fit ?? "cover") === f ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}
+                        >
+                          {f === "cover" ? "Fill the frame" : "Show all of it"}
+                          <div className="text-[11px] font-normal text-slate-500">{f === "cover" ? "Cropped to the frame's shape" : "Whole, with plain bars; HeyGen only"}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <Field label="Image URL" hint="A public image URL. Shown behind the avatar.">
                   <div className="flex gap-2">
                     <input

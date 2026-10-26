@@ -452,6 +452,10 @@ test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page 
   // A looping video can sit behind the presenter; the stage previews it and the scene stores it.
   await page.getByLabel("Video URL").fill("https://example.com/loop.mp4");
   await expect(page.getByTestId("stage-video")).toHaveAttribute("src", "https://example.com/loop.mp4");
+  // Shown whole rather than cropped to the frame, which the stage previews.
+  await page.getByRole("group", { name: "Background fit" }).getByRole("button", { name: /Show all of it/ }).click();
+  await expect(page.getByTestId("stage")).toHaveAttribute("data-fit", "contain");
+  await expect(page.getByTestId("stage-video")).toHaveClass(/object-contain/);
   await expect(page.getByText(/2 scenes/)).toBeVisible();
   // The second scene gets its own presenter and voice; the stage preview follows the choice.
   await page.getByLabel("Scene avatar").selectOption({ label: "Marcus Hill" });
@@ -491,7 +495,7 @@ test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page 
   expect(video.scenes).toHaveLength(2);
   expect(video.script).toBe("Scene one says hello.\n\nScene two says goodbye.");
   expect(video.scenes[0].avatarName).toBeUndefined();
-  expect(video.scenes[1]).toMatchObject({ avatarId: "stock_2", avatarName: "Marcus Hill", voiceId: "stock_voice_3", voiceName: "Olivia", layout: { scale: 1.2, x: 0.5, y: 0, framing: "circle" }, background: { type: "video", value: "https://example.com/loop.mp4" } });
+  expect(video.scenes[1]).toMatchObject({ avatarId: "stock_2", avatarName: "Marcus Hill", voiceId: "stock_voice_3", voiceName: "Olivia", layout: { scale: 1.2, x: 0.5, y: 0, framing: "circle" }, background: { type: "video", value: "https://example.com/loop.mp4", fit: "contain" } });
   expect((await page.request.post("/api/videos", { data: { title: "Bad", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9", background: { type: "video", value: "loop.mp4" } } })).status()).toBe(400);
   expect(video.scenes[0].layout).toBeUndefined();
   await expect(page.getByText("Script · 2 scenes")).toBeVisible();
@@ -502,6 +506,7 @@ test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page 
   await page.getByRole("button", { name: /^Scene 2,/ }).click();
   await expect(page.getByLabel("Scene voice")).toHaveValue("stock_voice_3");
   await expect(page.getByLabel("Scene speed")).toHaveValue("0.75");
+  await expect(page.getByTestId("stage")).toHaveAttribute("data-fit", "contain");
   // And the copy keeps the voice settings.
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByLabel("Voice emotion")).toHaveValue("Friendly");

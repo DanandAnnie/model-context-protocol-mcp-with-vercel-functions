@@ -96,7 +96,15 @@ export interface VideoTemplate {
 export interface Background {
   type: "color" | "image" | "video";
   value: string;
+  /**
+   * How an image or video fills the frame: `cover` crops it to fill the frame (the default, stored as absent) and
+   * `contain` shows all of it, leaving the rest of the frame plain. HeyGen applies it; other renderers fill the frame.
+   */
+  fit?: BackgroundFit;
 }
+
+export const BACKGROUND_FITS = ["cover", "contain"] as const;
+export type BackgroundFit = (typeof BACKGROUND_FITS)[number];
 
 /**
  * How the presenter is framed: the whole presenter, a close-up of the head and shoulders, or a circle

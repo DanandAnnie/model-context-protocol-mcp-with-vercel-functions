@@ -1,6 +1,6 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { getPrefs, prefsSchema, savePrefs } from "@/lib/notifications";
-import { currentUser, requireOwner } from "@/lib/owner";
+import { currentUser, requireEditor, requireOwner } from "@/lib/owner";
 import { getEmailProvider } from "@/lib/providers/email";
 
 export const dynamic = "force-dynamic";
@@ -16,9 +16,10 @@ export async function GET() {
   }
 }
 
+/** Preferences are the workspace's (the render email, starred avatars and voices): viewers cannot change them. */
 export async function PUT(req: Request) {
   try {
-    const owner = await requireOwner();
+    const owner = await requireEditor();
     return json({ prefs: await savePrefs(prefsSchema.parse(await readJson(req)), owner) });
   } catch (err) {
     return errorResponse(err);

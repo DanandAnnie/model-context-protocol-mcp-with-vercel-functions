@@ -34,7 +34,7 @@ D-ID, ElevenLabs, or in a fully offline **demo mode** with no keys at all.
 | Email on completion | One email per video when it completes or fails, through the email provider; `/api/health` for uptime monitors |
 | Your data | Export everything for the account or workspace as JSON (secrets redacted) or delete all of it with a typed confirmation; both need a signed-in session |
 | Settings | Usage summary (videos, completed, processing, failed, seconds rendered, this month vs allowance), which provider backs each capability, access mode, and how to configure it |
-| Allowance | Optional `RENDER_LIMIT_PER_MONTH` caps renders per account per calendar month; exceeding it returns 429 with a clear message |
+| Allowance | Optional `RENDER_LIMIT_PER_MONTH` caps renders per account per calendar month; exceeding it returns 429 with a clear message. A render counts when it starts, deleting it does not give it back, and one the provider fails is returned |
 | Accounts | Per-user accounts with Supabase Auth (email + password sign up / sign in, email confirmation); each user sees only their own videos, avatars, and translations. Falls back to a shared `STUDIO_PASSWORD` gate, then open mode. Landing, login, share pages, and provider webhooks stay public |
 | API | REST routes under `/api/*`, provider webhooks under `/api/webhooks/:provider` |
 

@@ -129,7 +129,9 @@ function AvatarsInner() {
           {avatars.map((a) => (
             <div key={a.id} className="relative">
               <AvatarTile avatar={a} />
-              <FavoriteStar name={a.name} on={favorites.avatarIds.has(a.id)} onToggle={() => favorites.toggle("avatar", a.id)} className="absolute left-2 top-2" />
+              {favorites.canToggle && (
+                <FavoriteStar name={a.name} on={favorites.avatarIds.has(a.id)} onToggle={() => favorites.toggle("avatar", a.id)} className="absolute left-2 top-2" />
+              )}
               {a.source === "custom" && (
                 <span className="absolute right-2 top-2 flex gap-1">
                   <button

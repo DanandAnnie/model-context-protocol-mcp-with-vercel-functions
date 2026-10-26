@@ -1123,6 +1123,43 @@ describe("render allowance", () => {
       (config as { renderLimitPerMonth?: number }).renderLimitPerMonth = original;
     }
   });
+
+  it("deleting renders, the trash, or all data does not give the allowance back", async () => {
+    const { rendersThisMonth } = await import("../services");
+    const req = () => videoRequestSchema.parse({ title: "r", script: "hi there", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id });
+    const a = await createVideo(req(), "keeper");
+    await createVideo(req(), "keeper");
+    await deleteVideo(a.id, "keeper");
+    await deleteVideo(a.id, "keeper", true);
+    assert.equal(await rendersThisMonth("keeper"), 2, "a video deleted for good still counts");
+    await deleteOwnerData("keeper");
+    assert.equal((await listVideos("keeper", false)).length, 0);
+    assert.equal(await rendersThisMonth("keeper"), 2, "deleting all data keeps the month's count");
+  });
+
+  it("counts renders started together, and gives one back once when the provider fails it", async () => {
+    const { applyAvatarWebhook, rendersThisMonth } = await import("../services/videos");
+    const req = () => videoRequestSchema.parse({ title: "r", script: "hi there", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id });
+    const started = await Promise.all(Array.from({ length: 5 }, () => createVideo(req(), "burst")));
+    // The usage record itself, since the five stored videos would also make the total five.
+    const usage = async () => (await globalThis.__avatarStudioStore!.list<{ count: number }>("usage", "burst")).map((u) => u.count);
+    assert.deepEqual(await usage(), [5], "concurrent first renders of the month each count");
+    assert.equal(await rendersThisMonth("burst"), 5);
+    // The demo provider takes no webhooks; give it one that reports the job failed.
+    const proto = MockAvatarProvider.prototype as unknown as { parseWebhook?: (body: unknown) => unknown };
+    proto.parseWebhook = (body) => ({ providerJobId: (body as { id: string }).id, update: { status: "failed", error: "provider error" } });
+    try {
+      await applyAvatarWebhook("mock", { id: started[0].providerJobId });
+      await applyAvatarWebhook("mock", { id: started[0].providerJobId }); // a repeated delivery refunds nothing more
+    } finally {
+      delete proto.parseWebhook;
+    }
+    assert.equal((await getVideo(started[0].id, "burst", false)).status, "failed");
+    assert.deepEqual(await usage(), [4]);
+    assert.equal(await rendersThisMonth("burst"), 4);
+    await deleteVideo(started[0].id, "burst");
+    assert.equal(await rendersThisMonth("burst"), 4, "deleting the failed render changes nothing");
+  });
 });
 
 describe("personalized batches", () => {

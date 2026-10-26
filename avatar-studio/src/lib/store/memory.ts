@@ -35,6 +35,12 @@ export class MemoryStore implements Store {
     return true;
   }
 
+  async insert<T extends { id: string }>(kind: ItemKind, item: T): Promise<boolean> {
+    if (this.kindOf.has(item.id)) return false;
+    await this.put(kind, item);
+    return true;
+  }
+
   async put<T extends { id: string }>(kind: ItemKind, item: T): Promise<T> {
     const holder = this.kindOf.get(item.id);
     if (holder && holder !== kind) {

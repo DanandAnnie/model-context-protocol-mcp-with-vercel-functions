@@ -1,14 +1,19 @@
 "use client";
 import { useCallback, useMemo, useRef } from "react";
 import { useApi } from "@/hooks/useApi";
+import { useCanEdit } from "@/hooks/useCanEdit";
 import { api } from "@/lib/client";
 import type { Prefs } from "@/lib/types";
 
 export type FavoriteKind = "avatar" | "voice";
 
-/** Starred avatars and voices, with an optimistic toggle that reverts if the save fails. */
+/**
+ * Starred avatars and voices, with an optimistic toggle that reverts if the save fails. Stars are
+ * the workspace's, so `canToggle` is false for a viewer (the server answers 403 for them too).
+ */
 export function useFavorites() {
   const { data, setData } = useApi<{ prefs: Prefs | null }>("/api/prefs");
+  const canToggle = useCanEdit() === true;
   const avatarIds = useMemo(() => new Set(data?.prefs?.favoriteAvatarIds ?? []), [data]);
   const voiceIds = useMemo(() => new Set(data?.prefs?.favoriteVoiceIds ?? []), [data]);
   // Saves run one after another: the server rewrites the whole preferences record, so two
@@ -36,7 +41,7 @@ export function useFavorites() {
     [data, setData],
   );
 
-  return { avatarIds, voiceIds, toggle, loaded: data !== null };
+  return { avatarIds, voiceIds, toggle, canToggle, loaded: data !== null };
 }
 
 /** The items whose id is starred, in their own order, ahead of the rest. */

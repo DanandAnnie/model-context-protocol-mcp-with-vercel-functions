@@ -1,13 +1,24 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
-import { ValidationError } from "@/lib/errors";
+import { ForbiddenError, ValidationError } from "@/lib/errors";
 import { deleteNotifySettings, getNotifySettings, notifySchema, saveNotifySettings } from "@/lib/notifications";
 import { requireEditor, requireOwner } from "@/lib/owner";
 
 export const dynamic = "force-dynamic";
 
+/** The workspace's webhook; a viewer sees where it goes but not the signing secret, which would let them forge deliveries. */
 export async function GET() {
   try {
-    return json({ webhook: await getNotifySettings(await requireOwner()) });
+    const owner = await requireOwner();
+    const editor = await requireEditor().then(
+      () => true,
+      (e) => (e instanceof ForbiddenError ? false : Promise.reject(e)),
+    );
+    const webhook = await getNotifySettings(owner);
+    if (webhook && !editor) {
+      const { secret: _secret, ...shown } = webhook;
+      return json({ webhook: shown });
+    }
+    return json({ webhook });
   } catch (err) {
     return errorResponse(err);
   }

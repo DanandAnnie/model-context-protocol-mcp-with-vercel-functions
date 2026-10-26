@@ -1,5 +1,5 @@
 "use client";
-import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode, Ref } from "react";
 import { Loader2 } from "lucide-react";
 import type { VideoStatus } from "@/lib/types";
 
@@ -18,7 +18,7 @@ export function Button({
   children,
   className = "",
   ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; loading?: boolean }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; loading?: boolean; ref?: Ref<HTMLButtonElement> }) {
   return (
     <button
       {...rest}

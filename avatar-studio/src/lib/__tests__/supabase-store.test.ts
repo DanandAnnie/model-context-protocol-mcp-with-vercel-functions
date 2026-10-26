@@ -70,6 +70,20 @@ describe("SupabaseStore", () => {
     await assert.rejects(store.putIf("translation", { id: "tr_1" }, "data); drop", "a"), /invalid field name/);
   });
 
+  it("inserts only when the id is free, with ON CONFLICT DO NOTHING, reporting whether the row went in", async () => {
+    respond = () => [{ id: "usage_u1_2026-10" }];
+    assert.equal(await store.insert("usage", { id: "usage_u1_2026-10", count: 1 }), true);
+    const [call] = calls;
+    assert.equal(call.method, "POST");
+    assert.equal(call.query.on_conflict, "id");
+    assert.match(call.headers.prefer, /resolution=ignore-duplicates/);
+    assert.match(call.headers.prefer, /return=representation/);
+    const row = call.body as { id: string; kind: string; data: unknown };
+    assert.deepEqual([row.id, row.kind, row.data], ["usage_u1_2026-10", "usage", { id: "usage_u1_2026-10", count: 1 }]);
+    respond = () => [];
+    assert.equal(await store.insert("usage", { id: "usage_u1_2026-10", count: 1 }), false, "the id was taken: nothing written");
+  });
+
   it("gets one document by kind and id, and null when absent", async () => {
     respond = () => [{ data: { id: "v1", title: "Hi" } }];
     assert.deepEqual(await store.get("video", "v1"), { id: "v1", title: "Hi" });

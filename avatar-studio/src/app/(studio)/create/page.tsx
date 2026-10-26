@@ -264,6 +264,8 @@ function CreateInner() {
   const [tab, setTab] = useState<Tab>("avatar");
   const [writerOpen, setWriterOpen] = useState(params.get("writer") === "1");
   const [assistOpen, setAssistOpen] = useState(false);
+  const writerButton = useRef<HTMLButtonElement>(null);
+  const improveButton = useRef<HTMLButtonElement>(null);
   const [assistBusy, setAssistBusy] = useState(false);
   const [assistTone, setAssistTone] = useState<(typeof TONES)[number]>("professional");
   const [assistLanguage, setAssistLanguage] = useState("Spanish");
@@ -784,15 +786,32 @@ function CreateInner() {
                     {scriptChars} of {MAX_SCRIPT_CHARS} characters; shorten the script to generate
                   </span>
                 )}
-                <Button variant="secondary" className="px-3 py-1.5" onClick={() => setWriterOpen((v) => !v)}>
+                <Button ref={writerButton} variant="secondary" className="px-3 py-1.5" aria-expanded={writerOpen} onClick={() => setWriterOpen((v) => !v)}>
                   <Wand2 className="h-4 w-4" /> Write with AI
                 </Button>
-                <div className="relative">
-                  <Button variant="secondary" className="px-3 py-1.5" disabled={!active.script.trim()} loading={assistBusy} onClick={() => setAssistOpen((v) => !v)}>
+                <div
+                  className="relative"
+                  onKeyDown={(e) => {
+                    if (e.key !== "Escape" || !assistOpen) return;
+                    e.stopPropagation();
+                    setAssistOpen(false);
+                    improveButton.current?.focus();
+                  }}
+                >
+                  <Button
+                    ref={improveButton}
+                    variant="secondary"
+                    className="px-3 py-1.5"
+                    disabled={!active.script.trim()}
+                    loading={assistBusy}
+                    aria-expanded={assistOpen}
+                    aria-controls="improve-options"
+                    onClick={() => setAssistOpen((v) => !v)}
+                  >
                     <Sparkles className="h-4 w-4" /> Improve
                   </Button>
                   {assistOpen && (
-                    <div className="absolute right-0 z-20 mt-1 w-64 rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+                    <div id="improve-options" className="absolute right-0 z-20 mt-1 w-64 rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
                       {(
                         [
                           ["polish", "Polish for speech"],
@@ -805,13 +824,13 @@ function CreateInner() {
                         </button>
                       ))}
                       <div className="mt-1 flex items-center gap-1 border-t border-slate-100 px-1 pt-2">
-                        <select className={`${inputClass} py-1.5 text-xs`} value={assistTone} onChange={(e) => setAssistTone(e.target.value as typeof assistTone)}>
+                        <select aria-label="New tone" className={`${inputClass} py-1.5 text-xs`} value={assistTone} onChange={(e) => setAssistTone(e.target.value as typeof assistTone)}>
                           {TONES.map((t) => <option key={t} value={t}>{t[0].toUpperCase() + t.slice(1)}</option>)}
                         </select>
                         <button type="button" onClick={() => revise("tone")} className="shrink-0 rounded-md px-2 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50">Change tone</button>
                       </div>
                       <div className="mt-1 flex items-center gap-1 px-1">
-                        <input className={`${inputClass} py-1.5 text-xs`} value={assistLanguage} onChange={(e) => setAssistLanguage(e.target.value)} placeholder="Language" />
+                        <input aria-label="Translate to" className={`${inputClass} py-1.5 text-xs`} value={assistLanguage} onChange={(e) => setAssistLanguage(e.target.value)} placeholder="Language" />
                         <button type="button" onClick={() => revise("translate")} className="shrink-0 rounded-md px-2 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50">Translate</button>
                       </div>
                     </div>
@@ -836,7 +855,15 @@ function CreateInner() {
                 )}
               </div>
             </div>
-            {writerOpen && <ScriptWriter onClose={() => setWriterOpen(false)} onScript={(s) => { setScript(s); setWriterOpen(false); }} />}
+            {writerOpen && (
+              <ScriptWriter
+                onClose={() => {
+                  setWriterOpen(false);
+                  writerButton.current?.focus();
+                }}
+                onScript={(s) => { setScript(s); setWriterOpen(false); }}
+              />
+            )}
             <textarea
               ref={scriptRef}
               aria-label={scenes.length > 1 ? `Scene ${activeIdx + 1} script` : "Script"}
@@ -878,7 +905,7 @@ function CreateInner() {
                   {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="aspect-[4/5]" />)}
                 </div>
               ) : (
-                <AvatarGrid avatars={avatarsSorted} selectedId={avatar?.id} onSelect={pickAvatar} compact favoriteIds={favorites.avatarIds} onToggleFavorite={(a) => favorites.toggle("avatar", a.id)} />
+                <AvatarGrid avatars={avatarsSorted} selectedId={avatar?.id} onSelect={pickAvatar} compact favoriteIds={favorites.avatarIds} onToggleFavorite={favorites.canToggle ? (a) => favorites.toggle("avatar", a.id) : undefined} />
               )
             )}
 
@@ -907,7 +934,7 @@ function CreateInner() {
                         busy={busyId === v.id}
                         onPreview={() => play(v, script.trim().slice(0, 200) || "Hi, this is a preview of my voice.", speed).catch((e) => setErr(e.message))}
                         favorite={favorites.voiceIds.has(v.id)}
-                        onToggleFavorite={() => favorites.toggle("voice", v.id)}
+                        onToggleFavorite={favorites.canToggle ? () => favorites.toggle("voice", v.id) : undefined}
                       />
                     ))}
               </div>
@@ -1110,24 +1137,31 @@ function ScriptWriter({ onScript, onClose }: { onScript: (s: string) => void; on
   }
 
   return (
-    <div className="mb-3 rounded-lg border border-brand-200 bg-brand-50/60 p-4">
+    <div
+      className="mb-3 rounded-lg border border-brand-200 bg-brand-50/60 p-4"
+      onKeyDown={(e) => {
+        if (e.key !== "Escape") return;
+        e.stopPropagation();
+        onClose();
+      }}
+    >
       <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm font-semibold text-brand-800"><Wand2 className="h-4 w-4" /> AI script writer</div>
-        <button onClick={onClose} aria-label="Close" className="text-slate-500 hover:text-slate-900"><X className="h-4 w-4" /></button>
+        <button type="button" onClick={onClose} aria-label="Close the script writer" className="text-slate-500 hover:text-slate-900"><X className="h-4 w-4" /></button>
       </div>
       <div className="space-y-3">
-        <input className={inputClass} placeholder="What is the video about? e.g. Welcome new tenants to our property portal" value={topic} onChange={(e) => setTopic(e.target.value)} />
+        <input className={inputClass} aria-label="Topic" autoFocus placeholder="What is the video about? e.g. Welcome new tenants to our property portal" value={topic} onChange={(e) => setTopic(e.target.value)} />
         <input className={inputClass} type="url" aria-label="Page URL" placeholder="Or paste a public web page to write from (a listing, a blog post, a product page)" value={url} onChange={(e) => setUrl(e.target.value)} />
         <div className="grid gap-3 sm:grid-cols-3">
-          <select className={inputClass} value={tone} onChange={(e) => setTone(e.target.value as typeof tone)}>
+          <select aria-label="Tone" className={inputClass} value={tone} onChange={(e) => setTone(e.target.value as typeof tone)}>
             {TONES.map((t) => <option key={t} value={t}>{t[0].toUpperCase() + t.slice(1)}</option>)}
           </select>
-          <select className={inputClass} value={lengthSec} onChange={(e) => setLength(Number(e.target.value))}>
+          <select aria-label="Length" className={inputClass} value={lengthSec} onChange={(e) => setLength(Number(e.target.value))}>
             {[15, 30, 45, 60, 90, 120].map((s) => <option key={s} value={s}>{s} seconds</option>)}
           </select>
-          <input className={inputClass} value={language} onChange={(e) => setLanguage(e.target.value)} placeholder="Language" />
+          <input aria-label="Script language" className={inputClass} value={language} onChange={(e) => setLanguage(e.target.value)} placeholder="Language" />
         </div>
-        <input className={inputClass} placeholder="Audience (optional), e.g. first-time landlords" value={audience} onChange={(e) => setAudience(e.target.value)} />
+        <input className={inputClass} aria-label="Audience" placeholder="Audience (optional), e.g. first-time landlords" value={audience} onChange={(e) => setAudience(e.target.value)} />
         <ErrorBanner message={err} />
         <div className="flex justify-end">
           <Button onClick={run} loading={busy} disabled={topic.trim().length < 3 && !url.trim()}>Write script</Button>

@@ -42,6 +42,16 @@ export class SupabaseStore implements Store {
     return item;
   }
 
+  async insert<T extends { id: string }>(kind: ItemKind, item: T): Promise<boolean> {
+    // ON CONFLICT DO NOTHING: only a row actually inserted comes back.
+    const { data, error } = await this.client
+      .from(TABLE)
+      .upsert({ id: item.id, kind, data: item, updated_at: new Date().toISOString() }, { onConflict: "id", ignoreDuplicates: true })
+      .select("id");
+    if (error) throw new Error(`supabase insert failed: ${error.message}`);
+    return (data ?? []).length > 0;
+  }
+
   async putIf<T extends { id: string }>(kind: ItemKind, item: T, field: string, expected: string): Promise<boolean> {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(field)) throw new Error(`invalid field name: ${field}`);
     // One conditional UPDATE: Postgres applies it to the row only while the stored field still matches.

@@ -78,14 +78,67 @@ export const videoRequestSchema = z
     return { ...v, script: v.script };
   });
 
-/** Renders started by this owner since the start of the current UTC month, excluding ones that failed to start. */
+/** Renders an owner started in a calendar month (UTC), kept apart from the videos so deleting them gives nothing back. */
+interface RenderUsage {
+  id: string;
+  ownerId: string;
+  month: string;
+  count: number;
+  updatedAt: string;
+}
+const usageMonth = (at = new Date()) => at.toISOString().slice(0, 7);
+const usageId = (ownerId: string, month: string) => `usage_${ownerId}_${month}`;
+
+/**
+ * Moves the owner's count for a month by `delta` (never below zero). Conditional writes, so concurrent
+ * renders each count. A refund for a month with no record (a render from before the record existed) does nothing.
+ */
+async function adjustRenderUsage(ownerId: string, month: string, delta: 1 | -1): Promise<void> {
+  const id = usageId(ownerId, month);
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const current = await getStore().get<RenderUsage>("usage", id);
+    const updatedAt = new Date(Math.max(Date.now(), current ? Date.parse(current.updatedAt) + 1 : 0)).toISOString();
+    if (!current) {
+      if (delta < 0) return;
+      // The month's first render; when a concurrent first render inserted already, go round again and add to it.
+      if (await getStore().insert<RenderUsage>("usage", { id, ownerId, month, count: 1, updatedAt })) return;
+      continue;
+    }
+    const count = Math.max(0, current.count + delta);
+    if (await getStore().putIf("usage", { ...current, count, updatedAt }, "updatedAt", current.updatedAt)) return;
+  }
+  console.error(`render usage for ${ownerId} could not be updated after repeated conflicts`);
+}
+
+/** Counts one render started now against the owner's month. */
+export function recordRender(ownerId: string): Promise<void> {
+  return adjustRenderUsage(ownerId, usageMonth(), 1);
+}
+
+/**
+ * Announces a render's transition and, when the provider reports it failed, gives the render back to the month it
+ * was started in. Callers pass only transitions they recorded themselves under the video's lock, so each counts once.
+ */
+async function afterTransition(before: Video, next: Video): Promise<void> {
+  if (next.status === "failed" && before.status !== "failed") {
+    await adjustRenderUsage(next.ownerId ?? LOCAL_OWNER, usageMonth(new Date(next.createdAt)), -1);
+  }
+  await scheduleNotification(before, next);
+}
+
+/**
+ * Renders started by this owner since the start of the current UTC month, excluding ones that failed: the month's
+ * usage record, which deleting videos (or the trash, or all data) does not lower; while a month began before the
+ * record existed, the videos still stored count instead when they are more.
+ */
 export async function rendersThisMonth(ownerId: string): Promise<number> {
   const monthStart = new Date();
   monthStart.setUTCDate(1);
   monthStart.setUTCHours(0, 0, 0, 0);
   const since = monthStart.toISOString();
-  const videos = await getStore().list<Video>("video", ownerId);
-  return videos.filter((v) => v.createdAt >= since && v.status !== "failed").length;
+  const [videos, usage] = await Promise.all([getStore().list<Video>("video", ownerId), getStore().get<RenderUsage>("usage", usageId(ownerId, usageMonth()))]);
+  const stored = videos.filter((v) => v.createdAt >= since && v.status !== "failed").length;
+  return Math.max(stored, usage?.count ?? 0);
 }
 
 export async function enforceRenderLimit(ownerId: string): Promise<void> {
@@ -198,7 +251,10 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
     base.status = "failed";
     base.error = err instanceof Error ? err.message : String(err);
   }
-  return getStore().put("video", base);
+  const stored = await getStore().put("video", base);
+  // A render the provider started counts against the month, even once deleted; a failed start does not.
+  if (stored.status !== "failed") await recordRender(ownerId);
+  return stored;
 }
 
 export const reviewActionSchema = z
@@ -301,7 +357,8 @@ function sameLanguage(a: string, b: string): boolean {
 /**
  * Translates the script into a language with the script provider and keeps it as a subtitle track
  * (the share page offers it, `GET /api/videos/:id/captions?lang=` serves it). Asking again for a
- * language the video already has translates it afresh.
+ * language the video already has translates it afresh. An approval is cleared, since the new track
+ * has not been reviewed.
  */
 export async function addSubtitles(id: string, language: string, ownerId: string = LOCAL_OWNER, translate: Translator = translateFor(ownerId)): Promise<Video> {
   // Refuse early, before a provider call, what the write below would refuse anyway.
@@ -325,7 +382,10 @@ export async function addSubtitles(id: string, language: string, ownerId: string
     if (existing) delete subtitles[existing];
     else if (Object.keys(subtitles).length >= MAX_SUBTITLE_LANGUAGES) throw new ValidationError(`At most ${MAX_SUBTITLE_LANGUAGES} subtitle languages per video`);
     subtitles[language] = text;
-    return { ...current, subtitles, updatedAt: nowIso() };
+    // A new track is text viewers of the share page see that nobody approved, as with edited captions.
+    const next: Video = { ...current, subtitles, updatedAt: nowIso() };
+    if (next.review?.status === "approved") delete next.review;
+    return next;
   });
 }
 
@@ -607,7 +667,7 @@ async function refreshNow(video: Video): Promise<Video> {
     await getStore().put("video", next);
     return { next, before: current };
   });
-  if (result.before) await scheduleNotification(result.before, result.next);
+  if (result.before) await afterTransition(result.before, result.next);
   return result.next;
 }
 
@@ -1015,7 +1075,7 @@ export async function applyAvatarWebhook(providerName: string, body: unknown): P
     await getStore().put("video", next);
     return { next, before: current };
   });
-  if (result.before) await scheduleNotification(result.before, result.next);
+  if (result.before) await afterTransition(result.before, result.next);
   return result.next;
 }
 

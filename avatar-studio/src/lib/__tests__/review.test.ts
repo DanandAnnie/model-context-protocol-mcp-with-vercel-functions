@@ -104,6 +104,19 @@ describe("video review", () => {
     assert.equal((await updateVideo(video.id, videoPatchSchema.parse({ description: "New words" }), ws.id)).review?.status, "pending");
   });
 
+  it("a new subtitle track clears an approval, since nobody reviewed its text", async () => {
+    const { addSubtitles } = await import("../services");
+    const { ws, video } = await teamVideo();
+    await reviewVideo(video.id, ws.id, bob, false, act("request"));
+    await reviewVideo(video.id, ws.id, alice, true, act("approve"));
+    const subtitled = await addSubtitles(video.id, "French", ws.id, async (text) => `FR ${text}`);
+    assert.equal(subtitled.subtitles?.French, "FR Hello team.");
+    assert.equal(subtitled.review, undefined);
+    // A pending review stays pending: the owner reviews whatever is there when they look.
+    await reviewVideo(video.id, ws.id, bob, false, act("request"));
+    assert.equal((await addSubtitles(video.id, "German", ws.id, async (text) => `DE ${text}`)).review?.status, "pending");
+  });
+
   it("an owner edit in flight keeps a review that landed meanwhile", async () => {
     const { updateVideo, videoPatchSchema } = await import("../services");
     const { ws, video } = await teamVideo();

@@ -3,7 +3,7 @@ import { config } from "../config";
 import { MemoryStore } from "./memory";
 import { SupabaseStore } from "./supabase";
 
-export type ItemKind = "video" | "avatar" | "translation" | "brand" | "apikey" | "notify" | "workspace" | "invite" | "membership" | "plan" | "agent" | "conversation" | "voice" | "prefs" | "template" | "sharelock" | "cover" | "comment" | "activity" | "clip" | "clipaudio" | "videolead";
+export type ItemKind = "video" | "avatar" | "translation" | "brand" | "apikey" | "notify" | "workspace" | "invite" | "membership" | "plan" | "agent" | "conversation" | "voice" | "prefs" | "template" | "sharelock" | "cover" | "comment" | "activity" | "clip" | "clipaudio" | "videolead" | "usage";
 
 export interface Store {
   /** True when every instance of the app reads the same data (a missing record is then really gone). */
@@ -17,6 +17,8 @@ export interface Store {
    * requests that read the same record cannot both win); false when it no longer does or the record is gone.
    */
   putIf<T extends { id: string }>(kind: ItemKind, item: T, field: string, expected: string): Promise<boolean>;
+  /** Writes `item` only when no record has its id yet, in one step; false when one already does. */
+  insert<T extends { id: string }>(kind: ItemKind, item: T): Promise<boolean>;
   remove(kind: ItemKind, id: string): Promise<void>;
   /** Find the first item whose top-level `field` equals `value` (used for webhook lookups by provider job id). */
   findBy<T>(kind: ItemKind, field: string, value: string): Promise<T | null>;

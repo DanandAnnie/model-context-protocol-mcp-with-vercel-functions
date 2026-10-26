@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useMobileNav } from "@/components/MobileNav";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
 import { Clapperboard, Home, Languages, Layers3, LayoutTemplate, LogOut, MessageSquare, Mic2, Palette, Settings, Users, Video, Sparkles, X } from "lucide-react";
@@ -40,15 +40,35 @@ export function Sidebar() {
   // Close the drawer on navigation.
   useEffect(() => setOpen(false), [pathname, setOpen]);
 
+  // While the drawer is open on a small screen it takes the focus, Escape closes it, and the focus
+  // goes back to whatever opened it (the menu button).
+  const closeButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeButton.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      if (opener?.isConnected) opener.focus();
+    };
+  }, [open, setOpen]);
+
   return (
     <>
       {open && <div className="fixed inset-0 z-40 bg-slate-900/40 lg:hidden" onClick={() => setOpen(false)} />}
     <aside
-      className={`fixed inset-y-0 left-0 z-50 flex h-full w-64 shrink-0 flex-col border-r border-slate-200 bg-white transition-transform lg:static lg:translate-x-0 ${
-        open ? "translate-x-0" : "-translate-x-full"
+      // Closed, the drawer is off screen and also invisible, so Tab cannot reach its links below lg. Visibility
+      // animates only on the way out (it stays visible while sliding away); opening shows it at once, so it can take the focus.
+      className={`fixed inset-y-0 left-0 z-50 flex h-full w-64 shrink-0 flex-col border-r border-slate-200 bg-white lg:static lg:visible lg:translate-x-0 ${
+        open ? "visible translate-x-0 transition-transform" : "invisible -translate-x-full transition-[transform,visibility]"
       }`}
+      data-testid="sidebar"
     >
-      <button type="button" aria-label="Close menu" onClick={() => setOpen(false)} className="absolute right-3 top-4 rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 lg:hidden">
+      <button ref={closeButton} type="button" aria-label="Close menu" onClick={() => setOpen(false)} className="absolute right-3 top-4 rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 lg:hidden">
         <X className="h-5 w-5" />
       </button>
       <Link href="/home" className="flex items-center gap-2 px-5 py-5">

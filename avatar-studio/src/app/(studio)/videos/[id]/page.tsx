@@ -40,6 +40,14 @@ export default function VideoDetailPage() {
   const [embedAutoplay, setEmbedAutoplay] = useState(false);
   const [embedLoop, setEmbedLoop] = useState(false);
   const [editing, setEditing] = useState(false);
+  // Enter or Escape in the title field hands the focus back to the title, not to the page body.
+  const titleButton = useRef<HTMLButtonElement>(null);
+  const refocusTitle = useRef(false);
+  useEffect(() => {
+    if (editing || !refocusTitle.current) return;
+    refocusTitle.current = false;
+    titleButton.current?.focus();
+  }, [editing]);
   const [draftTitle, setDraftTitle] = useState("");
   const [renameErr, setRenameErr] = useState<string | null>(null);
   const [savedTemplate, setSavedTemplate] = useState<string | null>(null);
@@ -513,14 +521,21 @@ export default function VideoDetailPage() {
                   onChange={(e) => setDraftTitle(e.target.value)}
                   onBlur={saveTitle}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") saveTitle();
-                    if (e.key === "Escape") setEditing(false);
+                    if (e.key === "Enter") {
+                      refocusTitle.current = true;
+                      saveTitle();
+                    }
+                    if (e.key === "Escape") {
+                      refocusTitle.current = true;
+                      setEditing(false);
+                    }
                   }}
                   aria-label="Video title"
                   className="w-full max-w-xl rounded-lg border border-brand-300 px-2 py-1 text-2xl font-semibold tracking-tight text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-100"
                 />
               ) : (
                 <button
+                  ref={titleButton}
                   type="button"
                   onClick={() => {
                     setDraftTitle(video.title);

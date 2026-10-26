@@ -520,6 +520,8 @@ test("captions, share page, rename, and library filters", async ({ page }) => {
   await page.keyboard.press("Enter");
   await expect(page.getByText("Renamed video")).toBeVisible();
   expect((await (await page.request.get(`/api/videos/${a.id}`)).json()).video.title).toBe("Renamed video");
+  // The keyboard user is back on the title, not at the top of the page.
+  await expect(page.locator("button[title='Rename']")).toBeFocused();
 });
 
 test("library sorts by date, title, and views", async ({ page }) => {
@@ -1024,9 +1026,32 @@ test("draft autosave survives a reload and clears after generating", async ({ pa
   expect(await page.evaluate(() => localStorage.getItem("avatar-studio:draft"))).toBeNull();
 });
 
+test("the AI script writer takes the focus and Escape closes it", async ({ page }) => {
+  const write = page.getByRole("button", { name: "Write with AI" });
+  await write.click();
+  await expect(page.getByLabel("Topic")).toBeFocused();
+  await expect(page.getByLabel("Tone", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Length", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Script language")).toHaveValue("English");
+  await page.keyboard.press("Escape");
+  await expect(page.getByLabel("Topic")).toHaveCount(0);
+  await expect(write).toBeFocused();
+});
+
 test("Improve menu revises the active scene", async ({ page }) => {
   await page.locator("textarea").fill("Hi there! One. Two. Three. Four.");
-  await page.getByRole("button", { name: "Improve" }).click();
+  const improve = page.getByRole("button", { name: "Improve" });
+  await improve.click();
+  await expect(improve).toHaveAttribute("aria-expanded", "true");
+  // Escape closes it and leaves the focus on the button.
+  await page.getByRole("button", { name: "Expand", exact: true }).focus();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "Shorten", exact: true })).toHaveCount(0);
+  await expect(improve).toBeFocused();
+  await expect(improve).toHaveAttribute("aria-expanded", "false");
+  await improve.click();
+  await expect(page.getByLabel("New tone")).toBeVisible();
+  await expect(page.getByLabel("Translate to")).toBeVisible();
   await page.getByRole("button", { name: "Shorten", exact: true }).click();
   await expect(page.locator("textarea")).toHaveValue("Hi there! One. Two.");
 });
@@ -1035,7 +1060,15 @@ test("mobile drawer opens, navigates, and closes", async ({ browser }) => {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, baseURL: "http://localhost:3100" });
   const page = await ctx.newPage();
   await page.goto("/home");
-  await page.getByRole("button", { name: "Open menu" }).click();
+  // Closed, its links are out of the tab order (hidden, not only off screen).
+  await expect(page.getByTestId("sidebar")).toBeHidden();
+  const openMenu = page.getByRole("button", { name: "Open menu" });
+  await openMenu.click();
+  await expect(page.getByRole("button", { name: "Close menu" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("sidebar")).toBeHidden();
+  await expect(openMenu).toBeFocused();
+  await openMenu.click();
   await page.getByRole("link", { name: "Templates" }).click();
   await page.waitForURL(/\/templates/);
   await expect(page.locator("aside")).not.toBeInViewport();
@@ -1576,6 +1609,17 @@ test("a workspace viewer sees view-only notices instead of create controls", asy
   await expect(page.getByRole("button", { name: "New photo avatar" })).toBeDisabled();
   await page.goto("/voices");
   await expect(page.getByTestId("voice-cloner")).toHaveCount(0);
+  // Starred avatars and voices are the workspace's, so a viewer gets no stars to click.
+  await expect(page.getByText("Emma", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /to favourites$/ })).toHaveCount(0);
+  await page.goto("/avatars");
+  await expect(page.getByTestId("avatar-library")).toBeVisible();
+  await expect(page.getByRole("button", { name: /to favourites$/ })).toHaveCount(0);
+  // The workspace's settings show, but only owners and editors can change them.
+  await page.goto("/settings");
+  await expect(page.getByTestId("settings-read-only")).toHaveCount(2);
+  await expect(page.getByLabel("Webhook URL")).toBeDisabled();
+  await expect(page.getByLabel("Notification email")).toBeDisabled();
 });
 
 test("workspace videos go through review: ask, request changes, ask again, approve", async ({ page }) => {

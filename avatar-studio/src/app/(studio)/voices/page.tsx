@@ -123,7 +123,7 @@ export default function VoicesPage() {
                 busy={busyId === v.id}
                 onPreview={() => play(v, sample || SAMPLE).catch((e) => setPreviewErr(e.message))}
                 favorite={favorites.voiceIds.has(v.id)}
-                onToggleFavorite={() => favorites.toggle("voice", v.id)}
+                onToggleFavorite={favorites.canToggle ? () => favorites.toggle("voice", v.id) : undefined}
               />
               {v.source === "custom" && (
                 <span className="absolute right-12 top-1/2 flex -translate-y-1/2 gap-1">

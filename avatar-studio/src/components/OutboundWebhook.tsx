@@ -3,12 +3,14 @@ import { useEffect, useState } from "react";
 import { Send, Trash2, Webhook } from "lucide-react";
 import { Button, Card, ErrorBanner, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
+import { useCanEdit } from "@/hooks/useCanEdit";
 import { api, formatDate } from "@/lib/client";
 import type { NotifySettings } from "@/lib/types";
 
 /** Settings section: one signed outbound webhook per account, fired when a render completes or fails. */
 export function OutboundWebhook() {
   const { data, error, refetch } = useApi<{ webhook: NotifySettings | null }>("/api/notifications");
+  const readOnly = useCanEdit() === false; // the workspace's setting: a viewer sees it, the server refuses their changes
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState<"save" | "test" | "remove" | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -75,6 +77,7 @@ export function OutboundWebhook() {
       </p>
       <ErrorBanner message={error ?? err} />
       {note && <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">{note}</div>}
+      {readOnly && <p className="mt-3 text-xs text-slate-500" data-testid="settings-read-only">Only owners and editors can change this.</p>}
       <form
         className="mt-4 flex flex-wrap items-center gap-2"
         onSubmit={(e) => {
@@ -82,6 +85,7 @@ export function OutboundWebhook() {
           save();
         }}
       >
+        <fieldset disabled={readOnly} className="contents">
         <input aria-label="Webhook URL" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/hooks/avatar-studio" className={`${inputClass} min-w-[280px] flex-1`} />
         <Button type="submit" loading={busy === "save"} disabled={!url.trim() || !!busy}>
           Save webhook
@@ -96,15 +100,19 @@ export function OutboundWebhook() {
             </Button>
           </>
         )}
+        </fieldset>
       </form>
       {saved && (
         <dl className="mt-4 space-y-1.5 text-xs text-slate-600">
-          <div className="flex flex-wrap gap-2">
-            <dt className="w-28 text-slate-500">Signing secret</dt>
-            <dd>
-              <code className="break-all rounded bg-slate-100 px-1 py-0.5 font-mono" data-testid="webhook-secret">{saved.secret}</code>
-            </dd>
-          </div>
+          {/* Viewers are not sent the secret. */}
+          {saved.secret && (
+            <div className="flex flex-wrap gap-2">
+              <dt className="w-28 text-slate-500">Signing secret</dt>
+              <dd>
+                <code className="break-all rounded bg-slate-100 px-1 py-0.5 font-mono" data-testid="webhook-secret">{saved.secret}</code>
+              </dd>
+            </div>
+          )}
           <div className="flex flex-wrap gap-2">
             <dt className="w-28 text-slate-500">Last delivery</dt>
             <dd>

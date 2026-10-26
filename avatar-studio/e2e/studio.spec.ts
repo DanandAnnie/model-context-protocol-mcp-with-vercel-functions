@@ -500,6 +500,8 @@ test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page 
   expect(video.scenes[0].layout).toBeUndefined();
   await expect(page.getByText("Script · 2 scenes")).toBeVisible();
   await expect(page.getByText("Marcus Hill · Olivia · 0.75x speed · presenter in a circle, 120%, moved")).toBeVisible();
+  // The demo renderer neither places the presenter nor fits the background, and the line says so.
+  await expect(page.getByText(/· background shown whole \(not applied by this renderer\)$/)).toBeVisible();
   // Edit a copy keeps the scene's presenter.
   await page.goto(`/create?from=${id}`);
   await expect(page.getByText(/2 scenes/)).toBeVisible();
@@ -1599,6 +1601,7 @@ test("brand kit pre-fills the editor and brands the share page", async ({ page }
     await page.getByLabel("Default background").selectOption("image");
     await expect(page.getByRole("button", { name: "Save brand kit" })).toBeDisabled();
     await page.getByLabel("Default background URL").fill("https://example.com/brand-bg.jpg");
+    await page.getByLabel(/Show all of it instead of cropping/).check();
     await page.getByLabel("Pronunciation", { exact: true }).fill("Nair = Nye-er\nSaaS = sass");
     // Terms to keep untranslated: one per line, repeats (ignoring case) dropped.
     await page.getByLabel("Never translate").fill("Acme Cloud\n\nacme cloud\nNimbus");
@@ -1609,7 +1612,7 @@ test("brand kit pre-fills the editor and brands the share page", async ({ page }
     await page.getByRole("button", { name: "Save brand kit" }).click();
     await expect(page.getByText(/^Saved /)).toBeVisible();
     const kit = (await (await page.request.get("/api/brand")).json()).brand;
-    expect(kit.defaultBackground).toEqual({ type: "image", value: "https://example.com/brand-bg.jpg" });
+    expect(kit.defaultBackground).toEqual({ type: "image", value: "https://example.com/brand-bg.jpg", fit: "contain" });
     expect(kit.pronunciations).toEqual([{ word: "Nair", sayAs: "Nye-er" }, { word: "SaaS", sayAs: "sass" }]);
     expect(kit.glossary).toEqual(["Acme Cloud", "Nimbus"]);
     expect(kit.watermark).toBe("bottom-right");
@@ -1618,6 +1621,7 @@ test("brand kit pre-fills the editor and brands the share page", async ({ page }
     await expect(page.getByLabel("Pronunciation", { exact: true })).toHaveValue("Nair = Nye-er\nSaaS = sass");
     await expect(page.getByLabel("Never translate")).toHaveValue("Acme Cloud\nNimbus");
     await expect(page.getByLabel("Logo on the player")).toHaveValue("bottom-right");
+    await expect(page.getByLabel(/Show all of it instead of cropping/)).toBeChecked();
     // Clearing the logo turns the corner off with it (not saved here: the reload below discards it).
     await page.getByRole("button", { name: "Clear", exact: true }).click();
     await expect(page.getByLabel("Logo on the player")).toBeDisabled();

@@ -98,7 +98,8 @@ export interface Background {
   value: string;
   /**
    * How an image or video fills the frame: `cover` crops it to fill the frame (the default, stored as absent) and
-   * `contain` shows all of it, leaving the rest of the frame plain. HeyGen applies it; other renderers fill the frame.
+   * `contain` shows all of it, leaving the rest of the frame plain. HeyGen applies it; other renderers show their
+   * default background, so it does nothing there.
    */
   fit?: BackgroundFit;
 }

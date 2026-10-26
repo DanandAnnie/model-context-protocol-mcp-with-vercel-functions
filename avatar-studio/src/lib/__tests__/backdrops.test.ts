@@ -283,8 +283,8 @@ describe("background images at the renderer", () => {
     const req = request([sceneWith(backdropPath(office.id)), sceneWith("https://cdn.example/bg.jpg")]);
     await heygen.createVideo(req, ava, emma, { avatars: { [ava.id]: ava }, voices: { [emma.id]: emma }, backdrops: { [office.id]: office } });
     assert.deepEqual(sent!.video_inputs.map((i) => i.background), [
-      { type: "image", image_asset_id: "img_1" },
-      { type: "image", url: "https://cdn.example/bg.jpg" },
+      { type: "image", image_asset_id: "img_1", fit: "cover" },
+      { type: "image", url: "https://cdn.example/bg.jpg", fit: "cover" },
     ]);
     await assert.rejects(heygen.createVideo(req, ava, emma, { avatars: {}, voices: {}, backdrops: {} }), /not been uploaded to HeyGen/);
     const fresh = await heygen.prepareBackdrop({ ...office, providerAssetIds: {} }, { bytes: PNG, mimeType: "image/png" });

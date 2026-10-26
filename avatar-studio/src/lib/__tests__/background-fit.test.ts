@@ -47,7 +47,7 @@ describe("background fit", () => {
       sent!.video_inputs.map((i) => i.background),
       [
         { type: "image", url: "https://example.com/slide.png", fit: "contain" },
-        { type: "image", url: "https://example.com/photo.jpg" },
+        { type: "image", url: "https://example.com/photo.jpg", fit: "cover" },
         { type: "video", url: "https://example.com/loop.mp4", play_style: "loop", fit: "contain" },
       ],
     );

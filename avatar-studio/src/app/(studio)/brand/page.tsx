@@ -28,6 +28,7 @@ export default function BrandPage() {
   const [accent, setAccent] = useState("");
   const [bgType, setBgType] = useState<"" | "image" | "video">("");
   const [bgUrl, setBgUrl] = useState("");
+  const [bgWhole, setBgWhole] = useState(false);
   // Uploaded images, so the kit's default background can be one of them like any scene's.
   const { data: backdropData, error: backdropError, setData: setBackdropData } = useApi<{ backdrops: Backdrop[] }>("/api/backdrops");
   // An uploaded image that is gone (deleted here, or elsewhere and so taken off the saved kit) is not offered for saving.
@@ -74,6 +75,7 @@ export default function BrandPage() {
     setAccent(b.accentColor ?? "");
     setBgType(b.defaultBackground && b.defaultBackground.type !== "color" ? b.defaultBackground.type : "");
     setBgUrl(b.defaultBackground && b.defaultBackground.type !== "color" ? b.defaultBackground.value : "");
+    setBgWhole(b.defaultBackground?.fit === "contain");
     setPronunciations(formatPronunciations(b.pronunciations ?? []));
     setGlossary((b.glossary ?? []).join("\n"));
     setForced(formatForcedTranslations(b.forcedTranslations));
@@ -164,7 +166,7 @@ export default function BrandPage() {
           logoUrl,
           primaryColor: primary,
           accentColor: accent || undefined,
-          defaultBackground: bgType && bgUrl.trim() ? { type: bgType, value: bgUrl.trim() } : undefined,
+          defaultBackground: bgType && bgUrl.trim() ? { type: bgType, value: bgUrl.trim(), ...(bgWhole ? { fit: "contain" } : {}) } : undefined,
           pronunciations: rules,
           glossary: terms,
           forcedTranslations: parsed.rules,
@@ -200,6 +202,7 @@ export default function BrandPage() {
       setResolution("");
       setBgType("");
       setBgUrl("");
+      setBgWhole(false);
       setPronunciations("");
       setGlossary("");
       setForced("");
@@ -344,6 +347,12 @@ export default function BrandPage() {
               </Field>
             )}
           </div>
+          {bgType && (
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" checked={bgWhole} onChange={(e) => setBgWhole(e.target.checked)} className="accent-brand-600" />
+              Show all of it instead of cropping it to fill the frame (HeyGen only)
+            </label>
+          )}
           {bgType === "image" && (
             <BackdropPicker
               value={{ type: "image", value: bgUrl }}

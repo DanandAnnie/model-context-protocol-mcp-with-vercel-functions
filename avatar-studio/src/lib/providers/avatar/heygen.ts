@@ -106,7 +106,8 @@ export class HeyGenAvatarProvider implements AvatarProvider {
   /** An image background by URL, or an uploaded one by its HeyGen asset id. */
   private imageBackground(background: Background, cast?: RenderCast) {
     const backdropId = backdropIdOf(background);
-    const fit = background.fit ? { fit: background.fit } : {};
+    // Sent either way, so the render matches the stage preview whatever HeyGen's own default is.
+    const fit = { fit: background.fit ?? "cover" };
     if (!backdropId) return { type: "image", url: background.value, ...fit };
     const id = cast?.backdrops?.[backdropId]?.providerAssetIds?.[this.name];
     if (!id) throw new Error(`Background image ${backdropId} has not been uploaded to HeyGen yet.`);

@@ -704,7 +704,7 @@ describe("scenes", () => {
     const withVideo = videoRequestSchema.parse({ ...req, scenes: [{ ...req.scenes![0], background: { type: "video", value: "https://cdn.example.com/loop.mp4" } }, { ...req.scenes![1], background: { type: "image", value: "https://cdn.example.com/bg.jpg" } }] });
     await heygen.createVideo(withVideo, ava, emma, cast);
     const backgrounds = (sent as unknown as { video_inputs: Array<{ background: unknown }> }).video_inputs.map((i) => i.background);
-    assert.deepEqual(backgrounds, [{ type: "video", url: "https://cdn.example.com/loop.mp4", play_style: "loop", fit: "cover" }, { type: "image", url: "https://cdn.example.com/bg.jpg" }]);
+    assert.deepEqual(backgrounds, [{ type: "video", url: "https://cdn.example.com/loop.mp4", play_style: "loop", fit: "cover" }, { type: "image", url: "https://cdn.example.com/bg.jpg", fit: "cover" }]);
     assert.equal(videoRequestSchema.safeParse({ ...req, scenes: [{ ...req.scenes![0], background: { type: "video", value: "loop.mp4" } }] }).success, false, "a video background must be a URL");
     // A scene layout becomes the character's scale and offset; a scene without one sends neither.
     const placed = videoRequestSchema.parse({ ...req, scenes: [{ ...req.scenes![0], layout: { scale: 1.2, x: 0.25, y: -0.1 } }, req.scenes![1]] });

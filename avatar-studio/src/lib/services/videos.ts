@@ -93,35 +93,52 @@ const usageId = (ownerId: string, month: string) => `usage_${ownerId}_${month}`;
  * Moves the owner's count for a month by `delta` (never below zero). Conditional writes, so concurrent
  * renders each count. A refund for a month with no record (a render from before the record existed) does nothing.
  */
-async function adjustRenderUsage(ownerId: string, month: string, delta: 1 | -1): Promise<void> {
+async function adjustRenderUsage(ownerId: string, month: string, delta: 1 | -1): Promise<boolean> {
   const id = usageId(ownerId, month);
   for (let attempt = 0; attempt < 8; attempt++) {
     const current = await getStore().get<RenderUsage>("usage", id);
     const updatedAt = new Date(Math.max(Date.now(), current ? Date.parse(current.updatedAt) + 1 : 0)).toISOString();
     if (!current) {
-      if (delta < 0) return;
+      if (delta < 0) return true;
       // The month's first render; when a concurrent first render inserted already, go round again and add to it.
-      if (await getStore().insert<RenderUsage>("usage", { id, ownerId, month, count: 1, updatedAt })) return;
+      if (await getStore().insert<RenderUsage>("usage", { id, ownerId, month, count: 1, updatedAt })) return true;
       continue;
     }
     const count = Math.max(0, current.count + delta);
-    if (await getStore().putIf("usage", { ...current, count, updatedAt }, "updatedAt", current.updatedAt)) return;
+    if (await getStore().putIf("usage", { ...current, count, updatedAt }, "updatedAt", current.updatedAt)) return true;
   }
   console.error(`render usage for ${ownerId} could not be updated after repeated conflicts`);
-}
-
-/** Counts one render started now against the owner's month. */
-export function recordRender(ownerId: string): Promise<void> {
-  return adjustRenderUsage(ownerId, usageMonth(), 1);
+  return false;
 }
 
 /**
- * Announces a render's transition and, when the provider reports it failed, gives the render back to the month it
- * was started in. Callers pass only transitions they recorded themselves under the video's lock, so each counts once.
+ * Counts a render the provider accepted against the month it was created in and stamps that month on it
+ * (`countedIn`). Never throws: the render is already running, so a usage write that fails is logged and the
+ * render goes uncounted rather than answering an error that would invite a second render.
+ */
+async function countRender(video: Video, ownerId: string): Promise<void> {
+  const month = usageMonth(new Date(video.createdAt));
+  try {
+    if (await adjustRenderUsage(ownerId, month, 1)) video.countedIn = month;
+  } catch (err) {
+    console.error(`render usage for ${ownerId} could not be recorded:`, err);
+  }
+}
+
+/**
+ * Announces a render's transition and, when the provider reports a counted render failed, gives it back to the
+ * month that counted it. The lock around a transition is per instance, so two instances can both record the same
+ * failure; a marker record that only one of them can insert makes the refund happen once.
  */
 async function afterTransition(before: Video, next: Video): Promise<void> {
-  if (next.status === "failed" && before.status !== "failed") {
-    await adjustRenderUsage(next.ownerId ?? LOCAL_OWNER, usageMonth(new Date(next.createdAt)), -1);
+  if (next.status === "failed" && before.status !== "failed" && next.countedIn) {
+    const ownerId = next.ownerId ?? LOCAL_OWNER;
+    try {
+      const marker = { id: `refund_${next.id}`, ownerId, month: next.countedIn, refundedAt: nowIso() };
+      if (await getStore().insert("usage", marker)) await adjustRenderUsage(ownerId, next.countedIn, -1);
+    } catch (err) {
+      console.error(`render usage refund for ${next.id} failed:`, err);
+    }
   }
   await scheduleNotification(before, next);
 }
@@ -251,10 +268,10 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
     base.status = "failed";
     base.error = err instanceof Error ? err.message : String(err);
   }
-  const stored = await getStore().put("video", base);
-  // A render the provider started counts against the month, even once deleted; a failed start does not.
-  if (stored.status !== "failed") await recordRender(ownerId);
-  return stored;
+  // A render the provider started counts against its month, even once deleted; a failed start does not. Counted
+  // before the video is stored, so a failure webhook that finds the video finds it already counted.
+  if (base.status !== "failed") await countRender(base, ownerId);
+  return getStore().put("video", base);
 }
 
 export const reviewActionSchema = z

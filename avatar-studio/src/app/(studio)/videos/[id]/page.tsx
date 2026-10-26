@@ -158,6 +158,8 @@ export default function VideoDetailPage() {
       setRenameErr(null);
       setEditing(false);
     } catch (e) {
+      // The field stays open with the error; a later save (a click elsewhere) must not pull the focus back.
+      refocusTitle.current = false;
       setRenameErr(e instanceof Error ? e.message : "Could not rename");
     } finally {
       savingTitle.current = false;

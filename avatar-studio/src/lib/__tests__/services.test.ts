@@ -1141,16 +1141,22 @@ describe("render allowance", () => {
     const { applyAvatarWebhook, rendersThisMonth } = await import("../services/videos");
     const req = () => videoRequestSchema.parse({ title: "r", script: "hi there", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id });
     const started = await Promise.all(Array.from({ length: 5 }, () => createVideo(req(), "burst")));
+    // Demo job ids are made from the clock, so renders started together can share one; give the failing one its own.
+    await globalThis.__avatarStudioStore!.put("video", { ...started[0], providerJobId: "mock_job_burst_0" });
     // The usage record itself, since the five stored videos would also make the total five.
-    const usage = async () => (await globalThis.__avatarStudioStore!.list<{ count: number }>("usage", "burst")).map((u) => u.count);
+    const usage = async () => (await globalThis.__avatarStudioStore!.list<{ count?: number }>("usage", "burst")).filter((u) => u.count !== undefined).map((u) => u.count);
     assert.deepEqual(await usage(), [5], "concurrent first renders of the month each count");
     assert.equal(await rendersThisMonth("burst"), 5);
     // The demo provider takes no webhooks; give it one that reports the job failed.
     const proto = MockAvatarProvider.prototype as unknown as { parseWebhook?: (body: unknown) => unknown };
     proto.parseWebhook = (body) => ({ providerJobId: (body as { id: string }).id, update: { status: "failed", error: "provider error" } });
     try {
-      await applyAvatarWebhook("mock", { id: started[0].providerJobId });
-      await applyAvatarWebhook("mock", { id: started[0].providerJobId }); // a repeated delivery refunds nothing more
+      await applyAvatarWebhook("mock", { id: "mock_job_burst_0" });
+      await applyAvatarWebhook("mock", { id: "mock_job_burst_0" }); // a repeated delivery refunds nothing more
+      // A second instance that read the render while it was still processing records the failure again; it refunds nothing.
+      const failed = await getVideo(started[0].id, "burst", false);
+      await globalThis.__avatarStudioStore!.put("video", { ...failed, status: "processing" as const });
+      await applyAvatarWebhook("mock", { id: "mock_job_burst_0" });
     } finally {
       delete proto.parseWebhook;
     }
@@ -1159,6 +1165,40 @@ describe("render allowance", () => {
     assert.equal(await rendersThisMonth("burst"), 4);
     await deleteVideo(started[0].id, "burst");
     assert.equal(await rendersThisMonth("burst"), 4, "deleting the failed render changes nothing");
+  });
+
+  it("stamps the month that counted a render, and a failing usage write never fails a render that started", async () => {
+    const { applyAvatarWebhook } = await import("../services/videos");
+    const req = () => videoRequestSchema.parse({ title: "r", script: "hi there", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id });
+    const counted = await createVideo(req(), "stamp");
+    assert.equal(counted.countedIn, counted.createdAt.slice(0, 7));
+    const store = globalThis.__avatarStudioStore!;
+    const insert = store.insert.bind(store);
+    store.insert = async () => {
+      throw new Error("usage store unavailable");
+    };
+    let uncounted: Video;
+    try {
+      uncounted = await createVideo(req(), "stamp-down");
+    } finally {
+      store.insert = insert;
+    }
+    assert.equal(uncounted.status, "processing", "the render runs and the request succeeds");
+    assert.equal(uncounted.countedIn, undefined);
+    assert.equal((await getVideo(uncounted.id, "stamp-down", false)).status, "processing");
+    // A render that was never counted (failed usage write, or one from before counting) gives nothing back.
+    await store.put("video", { ...uncounted, providerJobId: "mock_job_uncounted" }); // its own id; demo ids come from the clock
+    await createVideo(req(), "stamp-down");
+    const proto = MockAvatarProvider.prototype as unknown as { parseWebhook?: (body: unknown) => unknown };
+    proto.parseWebhook = (body) => ({ providerJobId: (body as { id: string }).id, update: { status: "failed", error: "provider error" } });
+    try {
+      await applyAvatarWebhook("mock", { id: "mock_job_uncounted" });
+    } finally {
+      delete proto.parseWebhook;
+    }
+    assert.equal((await getVideo(uncounted.id, "stamp-down", false)).status, "failed");
+    const usage = await store.list<{ count?: number }>("usage", "stamp-down");
+    assert.deepEqual(usage.filter((u) => u.count !== undefined).map((u) => u.count), [1]);
   });
 });
 

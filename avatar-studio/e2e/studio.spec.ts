@@ -1609,10 +1609,13 @@ test("a workspace viewer sees view-only notices instead of create controls", asy
   await expect(page.getByRole("button", { name: "New photo avatar" })).toBeDisabled();
   await page.goto("/voices");
   await expect(page.getByTestId("voice-cloner")).toHaveCount(0);
-  // Starred avatars and voices are the workspace's, so a viewer gets no stars to click.
+  // Starred avatars and voices are the workspace's, so a viewer gets no stars to click. The view-only notice
+  // shows once the role is known, so the star checks below cannot pass merely because it is still loading.
+  await expect(page.getByTestId("view-only")).toBeVisible();
   await expect(page.getByText("Emma", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /to favourites$/ })).toHaveCount(0);
   await page.goto("/avatars");
+  await expect(page.getByTestId("view-only")).toBeVisible();
   await expect(page.getByTestId("avatar-library")).toBeVisible();
   await expect(page.getByRole("button", { name: /to favourites$/ })).toHaveCount(0);
   // The workspace's settings show, but only owners and editors can change them.

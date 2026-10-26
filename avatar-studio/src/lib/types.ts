@@ -265,6 +265,8 @@ export interface Video extends VideoRequest {
   folder?: string;
   /** Id of the failed render this one was retried from. */
   retryOf?: string;
+  /** The UTC month (`YYYY-MM`) whose render allowance counted this render; absent when it failed to start or predates counting. */
+  countedIn?: string;
   /** Set while the video sits in the trash; it is deleted for good `TRASH_RETENTION_DAYS` later unless restored. */
   deletedAt?: string;
   /** Share page offers a download link when true (off by default). */

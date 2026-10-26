@@ -21,7 +21,7 @@ Public routes need no key: `/api/videos/:id/captions`, `/api/videos/:id/cover`, 
 ## Conventions
 
 - Request and response bodies are JSON. Timestamps are ISO 8601 in UTC.
-- Validation errors return `400` with `{ "error": "...", "issues": [...] }`. Missing or foreign items return `404`. Exceeding the monthly render allowance returns `429` with the usage and reset date. A render counts once it starts and keeps counting when the video is deleted, the trash is emptied, or the account's data is deleted (the month's count is kept in its own record); a render that fails to start, or that the provider later reports failed, is given back. A new workspace starts with its own allowance. Provider failures on submission return `502` with the provider's message.
+- Validation errors return `400` with `{ "error": "...", "issues": [...] }`. Missing or foreign items return `404`. Exceeding the monthly render allowance returns `429` with the usage and reset date. A render counts once it starts and keeps counting when the video is deleted, the trash is emptied, or the account's data is deleted (the month's count is kept in its own record); a render that fails to start, or that the provider later reports failed, is given back (once, to the month that counted it, which the video records as `countedIn`). A new workspace starts with its own allowance. Provider failures on submission return `502` with the provider's message.
 - Ids are prefixed: `vid_`, `av_`, `tr_`, `key_`, `ws_`.
 
 ## Videos

@@ -1,7 +1,7 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Captions, ChevronLeft, ChevronRight, Clapperboard, Copy, Image as ImageIcon, Layers, Mic2, Palette, Pause, Play, Plus, Sparkles, Square, Trash2, Users, Wand2, X } from "lucide-react";
+import { Captions, ChevronLeft, ChevronRight, Clapperboard, Copy, Image as ImageIcon, Layers, Mic2, Palette, Pause, Play, Plus, Sparkles, Square, Trash2, Upload, Users, Wand2, X } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { VoiceRow } from "@/components/VoicePicker";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -14,6 +14,7 @@ import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib/client";
 import { languageLabel } from "@/lib/language";
 import { stripPauses } from "@/lib/pauses";
+import { MAX_IMPORT_BYTES, scenesFromText } from "@/lib/script-import";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
 import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, PRESENTER_FRAMINGS, RESOLUTIONS, isDefaultCaptionStyle as isDefaultCaptionStyleFn, framingFor, isDefaultLayout, isPhotoAvatar, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS } from "@/lib/types";
@@ -183,6 +184,22 @@ function CreateInner() {
       return next;
     });
     setActiveIdx(j);
+  }
+  const importInput = useRef<HTMLInputElement>(null);
+  const [importNote, setImportNote] = useState<string | null>(null);
+  /** Replaces the scenes with a text or Markdown document's, one per paragraph or section, on the first scene's background. */
+  async function importScript(file: File | undefined) {
+    if (!file) return;
+    if (file.size > MAX_IMPORT_BYTES) return setImportNote(`${file.name} is larger than ${MAX_IMPORT_BYTES / 1_000_000} MB; import a plain-text or Markdown script.`);
+    const doc = scenesFromText(await file.text());
+    if (!doc.scenes.length) return setImportNote(`No script found in ${file.name}.`);
+    const written = scenes.filter((sc) => sc.script.trim()).length;
+    if (written && !window.confirm(`Replace the ${scenes.length === 1 ? "current scene" : `current ${scenes.length} scenes`} with ${doc.scenes.length === 1 ? "1 scene" : `${doc.scenes.length} scenes`} from ${file.name}?`)) return;
+    const background = scenes[0].background;
+    setScenes(doc.scenes.map((script) => newScene(script, background)));
+    setActiveIdx(0);
+    if (doc.title && (!title.trim() || title === "Untitled video")) setTitle(doc.title);
+    setImportNote(`Imported ${doc.scenes.length === 1 ? "1 scene" : `${doc.scenes.length} scenes`} from ${file.name}${doc.truncated ? `; the rest did not fit in ${MAX_SCENES} scenes` : ""}.`);
   }
   /** Inserts a copy right after the scene (script, background, and presenter included) and selects it. */
   function duplicateScene(idx: number) {
@@ -583,6 +600,26 @@ function CreateInner() {
               >
                 <Plus className="h-3.5 w-3.5" /> Add scene
               </button>
+              <button
+                type="button"
+                onClick={() => importInput.current?.click()}
+                title="Each paragraph, or each part between headings or --- lines, becomes a scene"
+                className="inline-flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:border-brand-400 hover:text-brand-700"
+              >
+                <Upload className="h-3.5 w-3.5" /> Import script
+              </button>
+              <input
+                ref={importInput}
+                type="file"
+                accept=".txt,.md,.markdown,text/plain,text/markdown"
+                aria-label="Import a script file"
+                className="hidden"
+                onChange={(e) => {
+                  void importScript(e.target.files?.[0]);
+                  // The same file can be imported again after editing it.
+                  e.target.value = "";
+                }}
+              />
               <span className="ml-auto flex items-center gap-1">
                 {scenes.length > 1 && (
                   <>
@@ -604,6 +641,14 @@ function CreateInner() {
                 )}
               </span>
             </div>
+            {importNote && (
+              <p role="status" className="-mt-1 mb-3 flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="import-note">
+                <span>{importNote}</span>
+                <button type="button" onClick={() => setImportNote(null)} aria-label="Dismiss" className="rounded p-0.5 text-slate-400 hover:text-slate-600">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </p>
+            )}
             {scenes.length > 1 && (
               <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="scene-presenter">
                 <span className="font-medium">Scene {activeIdx + 1} presenter</span>

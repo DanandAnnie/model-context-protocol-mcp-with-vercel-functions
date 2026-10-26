@@ -356,6 +356,26 @@ test("templates pre-fill the editor and edit-a-copy restores settings", async ({
   await expect(page.getByRole("button", { name: /^720p/ })).toHaveAttribute("aria-pressed", "true");
 });
 
+test("importing a script file makes one scene per section", async ({ page }) => {
+  await page.locator("textarea").fill("A first draft.");
+  const doc = ["# Welcome aboard", "", "Hi, I'm **Ava**.", "", "Glad you're here.", "---", "- Read the [handbook](https://example.com/h).", "## Wrap up", "See you Monday!"].join("\n");
+  // Written scenes are only replaced once confirmed.
+  page.once("dialog", (d) => d.dismiss());
+  await page.getByLabel("Import a script file").setInputFiles({ name: "welcome.md", mimeType: "text/markdown", buffer: Buffer.from(doc) });
+  await expect(page.locator("textarea")).toHaveValue("A first draft.");
+  page.once("dialog", (d) => d.accept());
+  await page.getByLabel("Import a script file").setInputFiles({ name: "welcome.md", mimeType: "text/markdown", buffer: Buffer.from(doc) });
+  await expect(page.getByTestId("import-note")).toContainText("Imported 3 scenes from welcome.md.");
+  await expect(page.locator("input[placeholder='Video title']")).toHaveValue("Welcome aboard");
+  await expect(page.locator("textarea")).toHaveValue("Hi, I'm Ava.\n\nGlad you're here.");
+  await page.getByRole("button", { name: /^Scene 3,/ }).click();
+  await expect(page.locator("textarea")).toHaveValue("See you Monday!");
+  // A file with no words changes nothing.
+  await page.getByLabel("Import a script file").setInputFiles({ name: "empty.txt", mimeType: "text/plain", buffer: Buffer.from("\n---\n") });
+  await expect(page.getByTestId("import-note")).toHaveText("No script found in empty.txt.");
+  await expect(page.getByRole("button", { name: /^Scene 3,/ })).toBeVisible();
+});
+
 test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Two scene demo");
   await page.locator("textarea").fill("Scene one says hello.");

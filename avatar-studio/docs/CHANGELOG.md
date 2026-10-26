@@ -146,4 +146,15 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
   - A custom portrait without a configured LiveAvatar avatar keeps the animated portrait. A session that cannot start is stopped.
   - HeyGen's v1 streaming adapter and its client calls are removed.
   - The shapes follow LiveAvatar's published web SDK (`@heygen/liveavatar-web-sdk`) and two open-source clients (LiveKit's and Pipecat's LiveAvatar plugins). The docs site and API are not reachable from this build environment, so the adapter has not been run against the live API. New `liveavatar.test.ts` covers it.
+  - An independent review of `f03a4e7` found the token kept server-side and the scoping unchanged. Its findings were fixed, each with a test:
+    - Replies could vanish: the page marked a session live as soon as it joined the room, and LiveKit drops data sent before LiveAvatar's avatar and agent arrive, so a quick first reply went nowhere and was not said by the browser either. The page now waits for both, as LiveAvatar's SDK does (the e2e test fails without the wait), and the browser speaks until then.
+    - The keep-alive came only after a reply, so a quiet visitor's session could end unnoticed. The page now sends one every minute (`{ keepAlive: true }`), and treats `session.stopped`, a departing avatar or agent, or a dropped room as the end, closing the session and speaking with the browser again.
+    - Sessions the registry forgot were never stopped. They are now stopped when they expire and when the tab closes, and LiveAvatar is asked to end any session after 15 minutes.
+    - Only the avatar's tracks are shown.
+    - A studio presenter's id is no longer sent as a LiveAvatar avatar (it never was one): without `LIVEAVATAR_AVATAR_ID`, presenters keep their portrait.
+    - LiveAvatar's refusals are logged instead of being shown to anonymous visitors.
+    - Command ids fall back like the SDK's on pages without `crypto.randomUUID`.
+    - The speak call reports `spoken: false` when the browser said the reply.
+    - The demo-lock test now proves streaming is locked.
+    - The README states what a visitor's room token allows.
 

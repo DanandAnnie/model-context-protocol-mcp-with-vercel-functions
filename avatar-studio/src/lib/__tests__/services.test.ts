@@ -59,7 +59,7 @@ import { LOCAL_OWNER } from "../owner-id";
 import { MockEmailProvider, inviteEmail, setEmailProvider } from "../providers/email";
 import { forgetMemo, memo } from "../cache";
 import { extractReadableText, fetchPageText } from "../webpage";
-import { MAX_SESSIONS_PER_SCOPE, SESSION_TTL_MS, closeLiveSession, openLiveSession, resetLiveSessions, setStreamingProvider, speakLive } from "../streaming";
+import { MAX_SESSIONS_PER_SCOPE, SESSION_TTL_MS, closeLiveSession, keepLiveSession, liveSessionCall, openLiveSession, resetLiveSessions, setStreamingProvider, speakLive } from "../streaming";
 import type { StreamingProvider } from "../providers/types";
 import { generateScript } from "../services";
 import { MockBillingProvider, applyStripeEvent, getPlan, renderLimitFor, setBillingProvider, setPlan, verifyStripeSignature } from "../billing";
@@ -2595,7 +2595,11 @@ describe("live avatar sessions", () => {
       async stop(session) {
         stopped.push(session.id);
       },
+      async keepAlive(session) {
+        kept.push(session.id);
+      },
     };
+    const kept: string[] = [];
     setStreamingProvider(fake);
     try {
       const t0 = 1_000_000;
@@ -2603,8 +2607,14 @@ describe("live avatar sessions", () => {
       assert.ok(s && s.sessionId.startsWith("live_") && s.url === "wss://live.example");
       assert.equal(JSON.stringify(s).includes("secret1"), false, "the provider's session secret stays on the server");
       assert.equal("speakInRoom" in s!, false);
-      await speakLive(s!.sessionId, "agent_1", "Hello", t0 + 1000);
+      assert.deepEqual(await speakLive(s!.sessionId, "agent_1", "Hello", t0 + 1000), { spoken: true });
       assert.deepEqual(spoken, ["p1:Hello"]);
+      await keepLiveSession(s!.sessionId, "agent_1", t0 + 1000);
+      assert.deepEqual(kept, ["p1"]);
+      await assert.rejects(keepLiveSession(s!.sessionId, "agent_2", t0 + 1000), /not found/, "another presenter cannot keep it either");
+      assert.deepEqual(liveSessionCall.parse({ keepAlive: true }), { keepAlive: true });
+      assert.deepEqual(liveSessionCall.parse({ text: " Hi " }), { text: "Hi" });
+      assert.equal(liveSessionCall.safeParse({ keepAlive: false }).success, false);
       await assert.rejects(speakLive(s!.sessionId, "agent_2", "Hi", t0 + 1000), /not found/, "another presenter cannot drive the session");
       await assert.rejects(speakLive("live_nope", "agent_1", "Hi", t0 + 1000), /not found/);
 
@@ -2617,11 +2627,29 @@ describe("live avatar sessions", () => {
       await assert.rejects(speakLive(s!.sessionId, "agent_1", "Hi", t0 + 2000), /not found/, "closed sessions are gone");
 
       const late = await openLiveSession({ avatarId: "stock_1", scope: "agent_9", clientKey: "c9" }, t0);
+      // A provider that cannot open a session leaves the page on the portrait, its reason kept from the visitor.
+      const failing: StreamingProvider = { ...fake, async createSession() { throw new Error("LiveAvatar /token failed: 402 Out of credits"); } };
+      setStreamingProvider(failing);
+      const quiet = console.error;
+      console.error = () => {};
+      try {
+        assert.equal(await openLiveSession({ avatarId: "stock_1", scope: "agent_7", clientKey: "c7" }, t0), null);
+      } finally {
+        console.error = quiet;
+      }
+      // A provider whose browser says replies in the room only hears that one was said.
+      setStreamingProvider({ ...fake, speaksInRoom: true });
+      const inRoom = await openLiveSession({ avatarId: "stock_1", scope: "agent_6", clientKey: "c6" }, t0);
+      assert.equal(inRoom?.speakInRoom, true);
+      assert.deepEqual(await speakLive(inRoom!.sessionId, "agent_6", "Hi", t0), { spoken: false });
+      setStreamingProvider(fake);
       // The provider is told when the presenter is one of the app's own portraits.
       const portrait = await createAvatar({ name: "Dana", imageUrl: `data:image/png;base64,${Buffer.from("png").toString("base64")}` }, "live_owner");
       await openLiveSession({ avatarId: portrait.id, scope: "agent_8", clientKey: "c8" }, t0);
       assert.deepEqual([asked[0], asked.at(-1)], [false, true]);
+      const stoppedBefore = stopped.length;
       await assert.rejects(speakLive(late!.sessionId, "agent_9", "Hi", t0 + SESSION_TTL_MS + 1), /not found/, "idle sessions expire");
+      assert.ok(stopped.length > stoppedBefore, "expired sessions are stopped at the provider, not just forgotten");
     } finally {
       setStreamingProvider(undefined);
       resetLiveSessions();

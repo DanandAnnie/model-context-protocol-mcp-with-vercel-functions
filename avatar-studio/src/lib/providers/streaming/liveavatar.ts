@@ -4,14 +4,21 @@ import type { ProviderLiveSession, StreamingProvider } from "../types";
 const API = "https://api.liveavatar.com/v1/sessions";
 /** LiveAvatar's success code inside its `{ code, data, message }` envelope. */
 const OK = 1000;
+/**
+ * The longest a session may run, in seconds, so one LiveAvatar session never outlives the studio's own idle limit
+ * by much: a visitor holds a room token and could keep a session busy, so LiveAvatar ends it anyway.
+ */
+const MAX_SESSION_SECONDS = 15 * 60;
 
 /**
  * HeyGen's LiveAvatar, which replaces HeyGen's v1 streaming API (retired October 31, 2026). The server creates a
- * session token with the account's key (`POST /v1/sessions/token`, FULL mode, so LiveAvatar voices what it is told)
+ * session token with the account's key (`POST /v1/sessions/token`, FULL mode, so LiveAvatar voices what it is told,
+ * as its SDK's `repeat` does)
  * and starts it (`POST /v1/sessions/start`, the token as bearer); the browser joins the LiveKit room and speaks each
  * reply as an `avatar.speak_text` command on the room's `agent-control` data channel. The session token stays on the
- * server, for keep-alive and stop. Shapes follow LiveAvatar's published web SDK and two open-source clients; not yet
- * run against the live API.
+ * server, for keep-alive and stop. Shapes follow LiveAvatar's published web SDK (FULL mode, the commands, waiting for
+ * the participants) and two open-source clients (the token, start, and stop calls, in LITE mode); not yet run against
+ * the live API.
  */
 export class LiveAvatarStreamingProvider implements StreamingProvider {
   readonly name = "liveavatar";
@@ -22,30 +29,39 @@ export class LiveAvatarStreamingProvider implements StreamingProvider {
     private options: { avatarId?: string; voiceId?: string } = {},
   ) {}
 
-  async createSession({ avatarId, custom }: { avatarId: string; voiceId?: string; custom: boolean }) {
-    // LiveAvatar's avatars are its own: a configured one, or a library presenter whose id it may know. A custom
-    // portrait has no LiveAvatar counterpart, so it stays an animated portrait.
-    const avatar = this.options.avatarId ?? (custom ? undefined : avatarId);
+  /**
+   * LiveAvatar's avatars are its own, not the studio's presenters, so a session shows the one avatar configured for
+   * the deployment (`LIVEAVATAR_AVATAR_ID`), whichever presenter it was opened for; without one, the page keeps the
+   * presenter's animated portrait.
+   */
+  async createSession() {
+    const avatar = this.options.avatarId;
     if (!avatar) return null;
     const token = await this.call<{ session_id: string; session_token: string }>("/token", { "X-API-KEY": this.apiKey }, {
       mode: "FULL",
       avatar_id: avatar,
+      max_session_duration: MAX_SESSION_SECONDS,
       ...(this.options.voiceId ? { avatar_persona: { voice_id: this.options.voiceId } } : {}),
     });
     const session: ProviderLiveSession = { id: token.session_id, secret: token.session_token };
     try {
       const started = await this.call<{ livekit_url?: string; livekit_client_token?: string }>("/start", this.bearer(session), { session_id: session.id });
       if (!started.livekit_url || !started.livekit_client_token) throw new Error("LiveAvatar started the session without a room");
-      return { session, url: started.livekit_url, accessToken: started.livekit_client_token };
+      // The browser waits for the avatar and LiveAvatar's agent to join before it says anything, as LiveAvatar's SDK does.
+      return { session, url: started.livekit_url, accessToken: started.livekit_client_token, waitFor: ["heygen", `liveavatar-agent-${session.id}`] };
     } catch (err) {
       await this.stop(session);
       throw err;
     }
   }
 
-  /** The browser said the reply in the room; the session is kept alive so LiveAvatar does not end it as idle. */
+  /** The browser said the reply in the room; the session is kept alive, as the page also does every minute. */
   async speak(session: ProviderLiveSession) {
-    // Already said: a failed keep-alive must not make the page say the reply a second time.
+    await this.keepAlive(session);
+  }
+
+  /** Keeps the session from ending as idle. A failure is logged, never thrown: a reply already said is not said again. */
+  async keepAlive(session: ProviderLiveSession) {
     await this.call("/keep-alive", this.bearer(session), { session_id: session.id }).catch((err) => console.error("LiveAvatar keep-alive failed:", err));
   }
 
@@ -77,8 +93,8 @@ export class LiveAvatarStreamingProvider implements StreamingProvider {
   }
 }
 
-/** The configured LiveAvatar provider, or null when live video is off or has no key. */
+/** The configured LiveAvatar provider, or null when live video is off or has no key or avatar to show. */
 export function liveAvatarFromConfig(): LiveAvatarStreamingProvider | null {
-  if (!config.streamingEnabled || !config.liveAvatarApiKey) return null;
+  if (!config.streamingEnabled || !config.liveAvatarApiKey || !config.liveAvatarAvatarId) return null;
   return new LiveAvatarStreamingProvider(config.liveAvatarApiKey, { avatarId: config.liveAvatarAvatarId, voiceId: config.liveAvatarVoiceId });
 }

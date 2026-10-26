@@ -2233,9 +2233,14 @@ test("interactive avatar answers a visitor in character", async ({ page }) => {
   expect((await page.request.post("/api/chat", { data: { avatarId: "stock_1", messages: [] } })).status()).toBe(400);
 });
 
-test("a LiveAvatar session speaks each reply in the room and only tells the server it did", async ({ page }) => {
-  // LiveAvatar is not reachable from tests: its status, session, and LiveKit's browser SDK are stood in for, and the
-  // stand-in room records what the page sends on its data channel.
+test("a LiveAvatar session speaks each reply in the room once its avatar and agent have joined, and falls back when it ends", async ({ page }) => {
+  // LiveAvatar is not reachable from tests: its status, session, and LiveKit's browser SDK are stood in for. The
+  // stand-in room records what the page sends on its data channel, and the test decides who joins and when.
+  await page.addInitScript(() => {
+    const w = window as unknown as { __spoken: string[] };
+    w.__spoken = [];
+    if ("speechSynthesis" in window) window.speechSynthesis.speak = (u: SpeechSynthesisUtterance) => void w.__spoken.push(u.text);
+  });
   await page.route("**/api/status", async (route) => {
     const res = await route.fetch();
     await route.fulfill({ response: res, json: { ...(await res.json()), streaming: "liveavatar" } });
@@ -2243,38 +2248,75 @@ test("a LiveAvatar session speaks each reply in the room and only tells the serv
   await page.route("https://cdn.jsdelivr.net/npm/livekit-client@*/dist/livekit-client.umd.js", (route) =>
     route.fulfill({
       contentType: "text/javascript",
-      body: `window.__published = [];
+      body: `window.__published = []; window.__attached = [];
         window.LivekitClient = { Room: class {
-          constructor() { this.localParticipant = { publishData: async (data, opts) => { window.__published.push({ text: new TextDecoder().decode(data), topic: opts.topic, reliable: opts.reliable }); } }; }
-          on() { return this; }
+          constructor() {
+            this.handlers = {}; this.remoteParticipants = new Map();
+            this.localParticipant = { publishData: async (data, opts) => { window.__published.push({ text: new TextDecoder().decode(data), topic: opts.topic, reliable: opts.reliable }); } };
+            window.__room = this;
+          }
+          on(event, cb) { (this.handlers[event] ||= []).push(cb); return this; }
+          emit(event, ...args) { for (const cb of this.handlers[event] || []) cb(...args); }
+          join(identity) { const p = { identity }; this.remoteParticipants.set(identity, p); this.emit("participantConnected", p); }
+          track(identity) { this.emit("trackSubscribed", { kind: "video", attach: () => window.__attached.push(identity) }, {}, { identity }); }
           async connect(url, token) { window.__joined = [url, token]; }
-          async disconnect() {}
+          async disconnect() { this.emit("disconnected"); }
         } };`,
     }),
   );
-  const told: string[] = [];
-  await page.route("**/api/live", (route) => route.fulfill({ json: { available: true, sessionId: "live_test", url: "wss://room.example", accessToken: "lk_token", expiresAt: new Date(Date.now() + 600_000).toISOString(), speakInRoom: true } }));
+  const told: unknown[] = [];
+  let closed = 0;
+  await page.route("**/api/live", (route) =>
+    route.fulfill({ json: { available: true, sessionId: "live_test", url: "wss://room.example", accessToken: "lk_token", expiresAt: new Date(Date.now() + 600_000).toISOString(), speakInRoom: true, waitFor: ["heygen", "liveavatar-agent-s1"] } }),
+  );
   await page.route("**/api/live/live_test", async (route) => {
-    if (route.request().method() === "POST") told.push((route.request().postDataJSON() as { text: string }).text);
-    await route.fulfill({ status: route.request().method() === "DELETE" ? 204 : 200, json: route.request().method() === "DELETE" ? undefined : { ok: true } });
+    if (route.request().method() === "DELETE") {
+      closed++;
+      return route.fulfill({ status: 204 });
+    }
+    told.push(route.request().postDataJSON());
+    await route.fulfill({ json: { ok: true, spoken: false } });
   });
+  type W = { __published: Array<{ text: string; topic: string; reliable: boolean }>; __spoken: string[]; __attached: string[]; __joined: string[]; __room: { join(id: string): void; track(id: string): void; emit(e: string, ...a: unknown[]): void } };
+  const win = <T,>(fn: (w: W) => T) => page.evaluate((src) => new Function("w", `return (${src})(w)`)(window), fn.toString()) as Promise<T>;
   await page.goto("/interactive");
-  await expect(page.getByText("Live", { exact: true })).toBeVisible();
-  expect(await page.evaluate(() => (window as unknown as { __joined: string[] }).__joined)).toEqual(["wss://room.example", "lk_token"]);
+  await expect.poll(() => win((w) => w.__joined)).toEqual(["wss://room.example", "lk_token"]);
+  await expect(page.getByText("connecting…")).toBeVisible();
+  // Before the avatar and its agent are in the room, a reply is the browser's to say: nothing goes into the room.
   await page.getByLabel("Your message").fill("Hi there");
   await page.getByRole("button", { name: "Send" }).click();
-  const reply = page.locator("[data-testid=chat-log] [data-role=assistant]").first();
-  await expect(reply).toContainText(/^Hi, I'm /);
-  await expect.poll(() => page.evaluate(() => (window as unknown as { __published: unknown[] }).__published.length)).toBe(1);
-  const [sent] = await page.evaluate(() => (window as unknown as { __published: Array<{ text: string; topic: string; reliable: boolean }> }).__published);
-  expect(sent.topic).toBe("agent-control");
-  expect(sent.reliable).toBe(true);
+  await expect(page.locator("[data-testid=chat-log] [data-role=assistant]")).toHaveCount(1);
+  await expect.poll(() => win((w) => w.__spoken.length)).toBe(1);
+  expect(await win((w) => w.__published.length)).toBe(0);
+  await win((w) => w.__room.join("heygen"));
+  await expect(page.getByText("Live", { exact: true })).toBeHidden();
+  await win((w) => w.__room.join("liveavatar-agent-s1"));
+  await expect(page.getByText("Live", { exact: true })).toBeVisible();
+  // Only the avatar's own tracks are shown.
+  await win((w) => (w.__room.track("liveavatar-agent-s1"), w.__room.track("heygen")));
+  expect(await win((w) => w.__attached)).toEqual(["heygen"]);
+  await page.getByLabel("Your message").fill("How much does it cost?");
+  await page.keyboard.press("Enter");
+  const reply = page.locator("[data-testid=chat-log] [data-role=assistant]").nth(1);
+  await expect(reply).toContainText(/pricing/i);
+  await expect.poll(() => win((w) => w.__published.length)).toBe(1);
+  const [sent] = await win((w) => w.__published);
+  expect([sent.topic, sent.reliable]).toEqual(["agent-control", true]);
   const command = JSON.parse(sent.text) as { event_id: string; event_type: string; text: string };
   expect(command.event_type).toBe("avatar.speak_text");
   expect(command.event_id).toMatch(/^[0-9a-f-]{36}$/);
   expect(command.text).toBe((await reply.textContent())?.trim());
-  await expect.poll(() => told.length).toBe(1);
-  expect(told[0]).toBe(command.text);
+  await expect.poll(() => told).toEqual([{ text: command.text }]);
+  expect(await win((w) => w.__spoken.length), "said in the room, not also by the browser").toBe(1);
+  // LiveAvatar ends the session: the page stops showing it as live, closes it, and the browser speaks again.
+  await win((w) => w.__room.emit("dataReceived", new TextEncoder().encode(JSON.stringify({ event_type: "session.stopped", stop_reason: "IDLE" })), undefined, undefined, "agent-response"));
+  await expect(page.getByText("Live", { exact: true })).toBeHidden();
+  await expect.poll(() => closed).toBe(1);
+  await page.getByLabel("Your message").fill("Hi again");
+  await page.keyboard.press("Enter");
+  await expect(page.locator("[data-testid=chat-log] [data-role=assistant]")).toHaveCount(3);
+  await expect.poll(() => win((w) => w.__spoken.length)).toBe(2);
+  expect(await win((w) => w.__published.length)).toBe(1);
 });
 
 test("interactive avatar takes a spoken question when the browser can transcribe", async ({ page }) => {

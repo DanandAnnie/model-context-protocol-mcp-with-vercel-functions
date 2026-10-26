@@ -175,8 +175,16 @@ export interface StreamingProvider {
    * Opens a session; the browser joins the room with the returned URL and token. Null when this presenter cannot be
    * shown live, so the page keeps the portrait.
    */
-  createSession(input: { avatarId: string; voiceId?: string; custom: boolean }): Promise<{ session: ProviderLiveSession; url: string; accessToken: string } | null>;
+  createSession(input: { avatarId: string; voiceId?: string; custom: boolean }): Promise<{
+    session: ProviderLiveSession;
+    url: string;
+    accessToken: string;
+    /** Room participants the browser waits for before the session counts as live. */
+    waitFor?: string[];
+  } | null>;
   /** A reply was said; a provider whose browser speaks keeps the session alive here instead. */
   speak(session: ProviderLiveSession, text: string): Promise<void>;
+  /** Keeps a session from ending as idle while the page shows it. */
+  keepAlive?(session: ProviderLiveSession): Promise<void>;
   stop(session: ProviderLiveSession): Promise<void>;
 }

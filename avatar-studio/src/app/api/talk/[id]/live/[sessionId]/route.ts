@@ -1,6 +1,5 @@
-import { z } from "zod";
 import { errorResponse, json, readJson } from "@/lib/api-utils";
-import { closeLiveSession, speakLive } from "@/lib/streaming";
+import { closeLiveSession, keepLiveSession, liveSessionCall, speakLive } from "@/lib/streaming";
 
 export const dynamic = "force-dynamic";
 type Ctx = { params: Promise<{ id: string; sessionId: string }> };
@@ -9,9 +8,12 @@ type Ctx = { params: Promise<{ id: string; sessionId: string }> };
 export async function POST(req: Request, ctx: Ctx) {
   try {
     const { id, sessionId } = await ctx.params;
-    const { text } = z.object({ text: z.string().trim().min(1).max(1500) }).parse(await readJson(req));
-    await speakLive(sessionId, id, text);
-    return json({ ok: true });
+    const body = liveSessionCall.parse(await readJson(req));
+    if ("keepAlive" in body) {
+      await keepLiveSession(sessionId, id);
+      return json({ ok: true });
+    }
+    return json({ ok: true, ...(await speakLive(sessionId, id, body.text)) });
   } catch (err) {
     return errorResponse(err);
   }

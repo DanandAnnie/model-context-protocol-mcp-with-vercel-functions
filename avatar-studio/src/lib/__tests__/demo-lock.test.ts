@@ -13,6 +13,7 @@ function status(locked: boolean) {
     HEYGEN_API_KEY: "test-placeholder", ELEVENLABS_API_KEY: "test-placeholder",
     ANTHROPIC_API_KEY: "test-placeholder", STRIPE_SECRET_KEY: "test-placeholder",
     STRIPE_PRICE_PRO: "price_test", RESEND_API_KEY: "test-placeholder",
+    LIVEAVATAR_API_KEY: "test-placeholder", LIVEAVATAR_AVATAR_ID: "test-avatar",
     SUPABASE_URL: "", SUPABASE_SERVICE_ROLE_KEY: "",
   } });
   return JSON.parse(output.trim());
@@ -33,5 +34,6 @@ describe("launch demo lock", () => {
     assert.equal(s.translate, "heygen");
     assert.equal(s.billing, "stripe");
     assert.equal(s.email, "resend");
+    assert.equal(s.streaming, "liveavatar");
   });
 });

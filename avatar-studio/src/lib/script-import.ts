@@ -38,9 +38,11 @@ const FENCE = /^\s{0,3}(`{3,}|~{3,})\s*([^\s`]*)/;
 const MARKDOWN_FENCE = new Set(["markdown", "md"]);
 // What a link reference definition points at: <…>, a URL with a scheme, a path, an anchor, or a domain.
 // "[GUEST]: Thanks." and "[HOST]: 10:30am" are lines of script.
-const LINK_TARGET = String.raw`(?:<[^<>]*>|[a-z][a-z0-9+.-]*:\S+|\.{0,2}\/\S*|#[a-z][\w-]*|www\.\S+|[\w-]+(?:\.[\w-]+)+\/\S*)`;
+const LINK_TARGET = String.raw`(?:<[^<>]*>|[a-z][a-z0-9+.-]*:\S+|\.{0,2}\/\S*|#[\w-]*[a-z][\w-]*|www\.\S+|[\w-]+(?:\.[\w-]+)+\/\S*|[\w-]+\.(?:png|jpe?g|gif|svg|webp|pdf|html?|md|txt|docx?)(?:[?#]\S*)?)`;
 const LINK_DEFINITION = new RegExp(String.raw`^\s{0,3}\[[^\]^][^\]]*\]:\s*` + LINK_TARGET + String.raw`(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*$`, "i");
 const FOOTNOTE_DEFINITION = /^\s{0,3}\[\^[^\]]+\]:/;
+/** Any reference definition's shape: dropped when the document refers to its label. */
+const REFERENCE_DEFINITION = /^\s{0,3}\[([^\]^][^\]]*)\]:\s*\S+(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*$/;
 // A table's header rule has a pipe; a bare --- is a scene break.
 const TABLE_RULE = /^(?=[^|]*\|)\s*\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?\s*$/;
 const PAUSE = new RegExp(PAUSE_MARKER, "gi");
@@ -69,16 +71,20 @@ export function decodeScript(bytes: Uint8Array, legacy = "windows-1252"): string
   if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder("utf-16le").decode(bytes.subarray(2));
   if (bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder("utf-16be").decode(bytes.subarray(2));
   const utf8 = new TextDecoder("utf-8").decode(bytes);
-  // UTF-8 with a stray byte or two keeps its text (each bad byte becomes one �); a file in which most
-  // non-ASCII bytes are not UTF-8 was saved in the system's legacy code page.
-  const bad = utf8.match(/\ufffd/g)?.length ?? 0;
-  const nonAscii = utf8.match(/[^\x00-\x7f]/g)?.length ?? 0;
-  if (!bad || bad / nonAscii < 0.3) return utf8;
+  // A � the file already held (bytes EF BF BD) is text, not a decoding failure.
+  let held = 0;
+  for (let i = bytes.indexOf(0xef); i >= 0 && i + 2 < bytes.length; i = bytes.indexOf(0xef, i + 1)) if (bytes[i + 1] === 0xbf && bytes[i + 2] === 0xbd) held++;
+  const bad = (utf8.match(/\ufffd/g)?.length ?? 0) - held;
+  // Valid multi-byte sequences almost never arise by chance in a legacy file, so UTF-8 with a stray byte or two
+  // keeps its text (each bad byte becomes one �) while a file of mostly invalid sequences is a legacy one.
+  const valid = (utf8.match(/[^\x00-\x7f]/g)?.length ?? 0) - bad - held;
+  if (bad <= 0 || valid >= bad) return utf8;
   if (legacy !== "windows-1252") {
     try {
-      return new TextDecoder(legacy).decode(bytes);
+      // Strictly: a Western file read on a Japanese, Chinese, or Korean system is not valid in that code page.
+      return new TextDecoder(legacy, { fatal: true }).decode(bytes);
     } catch {
-      // An encoding this runtime does not know: Windows-1252 below.
+      // Not that code page (or one this runtime does not know): Windows-1252 below.
     }
   }
   // Mapped here rather than by TextDecoder, which some runtimes read as Latin-1 (losing dashes and curly quotes).
@@ -94,6 +100,8 @@ export function legacyEncodingFor(language: string): string {
   const lang = language.toLowerCase();
   if (/^zh-(tw|hk|mo)|^zh-hant/.test(lang)) return "big5";
   const base = lang.split("-")[0];
+  // Serbian and Bosnian in Latin letters use the Central European page.
+  if (/^(sr|bs)-latn|^bs\b|^hr\b/.test(lang)) return "windows-1250";
   const pages: Record<string, string> = {
     ru: "windows-1251", uk: "windows-1251", bg: "windows-1251", sr: "windows-1251", be: "windows-1251", mk: "windows-1251",
     zh: "gbk", ja: "shift_jis", ko: "euc-kr", el: "windows-1253", tr: "windows-1254", he: "windows-1255", ar: "windows-1256", fa: "windows-1256",
@@ -115,11 +123,12 @@ const unhide = (text: string) => text.replace(/[-]/g, (c) => String.fromCh
 function spokenMarkdown(text: string): string {
   return (
     text
-      .replace(new RegExp(String.raw`!\[([^\]]*)\]` + DESTINATION, "g"), "$1")
-      .replace(/!\[([^\]]*)\]\[[^\]]*\]/g, "$1")
-      .replace(new RegExp(String.raw`\[([^\]]+)\]` + DESTINATION, "g"), "$1")
+      // Link text holds no brackets and is bounded, so a line of stray [ costs no more than a scan.
+      .replace(new RegExp(String.raw`!\[([^\][]{0,1000})\]` + DESTINATION, "g"), "$1")
+      .replace(/!\[([^\][]{0,1000})\]\[[^\][]{0,200}\]/g, "$1")
+      .replace(new RegExp(String.raw`\[([^\][]{1,1000})\]` + DESTINATION, "g"), "$1")
       .replace(/\[\^[^\]\s]+\]/g, "")
-      .replace(/\[([^\]]+)\]\[[^\]]*\]/g, "$1")
+      .replace(/\[([^\][]{1,1000})\]\[[^\][]{0,200}\]/g, "$1")
       .replace(/<((?:https?:\/\/|mailto:)[^<>\s]+|[^<>\s@]+@[^<>\s@]+)>/gi, "$1")
       .replace(TAG, "")
       .replace(/&(#x[\da-f]{1,6}|#\d{1,7}|[a-z]{2,8});/gi, (m, name: string) => {
@@ -296,6 +305,24 @@ function withoutDocumentFence(lines: string[]): string[] {
   return inner.some((l) => FENCE.exec(l)?.[1] === open[1]) ? lines : inner;
 }
 
+/**
+ * Where a ```markdown (or md) fence opens, and the last fence of the same marker without a label after it, which
+ * closes it even when code blocks sit inside (a chat answer often holds a ```bash block inside the script).
+ */
+function markdownFenceSpan(lines: string[]): { open: number; close: number } | undefined {
+  const open = lines.findIndex((l) => {
+    const f = FENCE.exec(l);
+    return !!f && MARKDOWN_FENCE.has(f[2].toLowerCase());
+  });
+  if (open < 0) return undefined;
+  const marker = FENCE.exec(lines[open])![1];
+  for (let i = lines.length - 1; i > open; i--) {
+    const f = FENCE.exec(lines[i]);
+    if (f && f[1] === marker && !f[2]) return { open, close: i };
+  }
+  return undefined;
+}
+
 /** HTML comments removed; one that never closes is left as text, and the search stops there. */
 function withoutComments(text: string): string {
   let out = "";
@@ -318,20 +345,33 @@ function withoutComments(text: string): string {
 function withoutDataImages(text: string): string {
   let out = "";
   let at = 0;
+  let from = 0;
   for (;;) {
-    const mid = text.indexOf("](data:", at);
+    const mid = text.indexOf("](", from);
     if (mid < 0) break;
-    const close = text.indexOf(")", mid);
-    if (close < 0) break;
+    const angle = text[mid + 2] === "<";
+    const start = mid + 2 + (angle ? 1 : 0);
+    if (!text.startsWith("data:", start)) {
+      from = mid + 2;
+      continue;
+    }
+    // A data URL has no spaces: it ends at the first ) (or >), and one cut short by a space is no image.
+    let end = start;
+    while (end < text.length && text[end] !== ")" && text[end] !== ">" && !/\s/.test(text[end])) end++;
+    if (text[end] === ">") end++;
+    if (end >= text.length) break;
+    if (text[end] !== ")") {
+      from = end;
+      continue;
+    }
     const open = text.lastIndexOf("![", mid);
     const alt = open >= at && mid - open <= 1000 ? text.slice(open + 2, mid) : undefined;
     if (alt === undefined || alt.includes("]") || alt.includes("\n")) {
-      out += text.slice(at, mid + 7);
-      at = mid + 7;
+      from = end;
       continue;
     }
     out += text.slice(at, open) + alt;
-    at = close + 1;
+    at = from = end + 1;
   }
   return out + text.slice(at);
 }
@@ -366,9 +406,27 @@ export function scenesFromText(text: string, { markdown = true }: { markdown?: b
   if (markdown) source = withoutDataImages(withoutComments(source));
   let lines = source.split("\n");
   if (markdown) lines = withoutFrontMatter(withoutDocumentFence(withoutFrontMatter(lines)));
+  // A chat answer: a short lead-in, the script in a ```markdown fence (perhaps holding code blocks of its own),
+  // a short sign-off. The fence's content is the script; with little around it, only the content is read.
+  let skip = new Set<number>();
+  const span = markdown ? markdownFenceSpan(lines) : undefined;
+  if (span) {
+    const outside = [...lines.slice(0, span.open), ...lines.slice(span.close + 1)].filter((l) => l.trim());
+    if (outside.length <= 4 && outside.every((l) => l.length <= 300)) lines = withoutFrontMatter(lines.slice(span.open + 1, span.close));
+    else skip = new Set([span.open, span.close]);
+  }
+  // Labels the document refers to ([text][label], [label][]): a definition of one is never spoken, whatever it points at.
+  const referenced = new Set<string>();
+  if (markdown) for (const m of source.matchAll(/\]\[([^\][\n]{1,200})\]|\[([^\][\n]{1,200})\]\[\]/g)) referenced.add((m[1] ?? m[2]).trim().toLowerCase());
   // Where each fence marker next appears, so an opening fence with no close is read as an ordinary line.
   const fenceAt = new Map<string, number[]>();
-  if (markdown) lines.forEach((l, i) => { const f = FENCE.exec(l); if (f) fenceAt.set(f[1], [...(fenceAt.get(f[1]) ?? []), i]); });
+  if (markdown) lines.forEach((l, i) => {
+    const f = FENCE.exec(l);
+    if (!f) return;
+    let at = fenceAt.get(f[1]);
+    if (!at) fenceAt.set(f[1], (at = []));
+    at.push(i);
+  });
   // Lines are read in order, so each marker keeps a pointer past the fences already behind.
   const fencePtr = new Map<string, number>();
   const nextFence = (kind: string, after: number) => {
@@ -385,17 +443,16 @@ export function scenesFromText(text: string, { markdown = true }: { markdown?: b
   let read = 0;
   let cutShort = false;
   let fence: string | undefined;
-  // A ```markdown fence inside the document (a chat answer's lead-in, then the script): its closing line is skipped.
-  let markdownFence: string | undefined;
   let footnote = false;
   for (let i = 0; i < lines.length; i++) {
     let line = lines[i];
     if (markdown) {
-      const opens = FENCE.exec(line);
-      if (markdownFence && opens && opens[1] === markdownFence && !opens[2]) {
-        markdownFence = undefined;
+      // The ```markdown fence's own lines; its close also ends any code block left open inside it.
+      if (skip.has(i)) {
+        fence = undefined;
         continue;
       }
+      const opens = FENCE.exec(line);
       if (fence) {
         if (opens && opens[1] === fence && !opens[2]) fence = undefined;
         else {
@@ -408,16 +465,15 @@ export function scenesFromText(text: string, { markdown = true }: { markdown?: b
       // A backtick fence's info has no backtick (```npm i``` is inline code). A fence that never closes fences
       // nothing: its own line is markup, and what follows is read as Markdown.
       if (opens && !(opens[1][0] === "`" && line.slice(line.indexOf(opens[1]) + opens[1].length).includes("`"))) {
-        if (nextFence(opens[1], i) > i) {
-          if (MARKDOWN_FENCE.has(opens[2].toLowerCase()) && !markdownFence) markdownFence = opens[1];
-          else fence = opens[1];
-        }
+        if (nextFence(opens[1], i) > i) fence = opens[1];
         continue;
       }
       // Definitions and table rules are never spoken; a footnote's indented continuation lines go with it.
       if (footnote && /^(?: {4}|\t)/.test(line)) continue;
       footnote = FOOTNOTE_DEFINITION.test(line);
       if (footnote || LINK_DEFINITION.test(line) || TABLE_RULE.test(line)) continue;
+      const definition = REFERENCE_DEFINITION.exec(line);
+      if (definition && referenced.has(definition[1].trim().toLowerCase())) continue;
     }
     // Reading stops well past what a video keeps; the rest could only be left out.
     if (read > READ_CHARS) {

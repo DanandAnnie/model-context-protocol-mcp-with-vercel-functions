@@ -196,11 +196,16 @@ describe("scenesFromText", () => {
   });
 
   it("keeps pause markers, chat lead-ins, callouts, entities, and one-word calls to action", () => {
-    // A chat answer: a lead-in, the script in a ```markdown fence, a sign-off.
+    // A chat answer: a lead-in, the script in a ```markdown fence, a sign-off. Only the script is read, its heading the title.
     assert.deepEqual(
-      scenesFromText("Here's your script:\n\n```markdown\n# Product Launch\n\n## Scene 1\n**HOST:** Welcome to *our* launch.\n\n## Scene 2\n- First point\n```\n\nLet me know if you want changes.").scenes,
-      ["Here's your script:", "HOST: Welcome to our launch.", "First point\n\nLet me know if you want changes."],
+      scenesFromText("Here's your script:\n\n```markdown\n# Product Launch\n\n## Scene 1\n**HOST:** Welcome to *our* launch.\n\n## Scene 2\n- First point\n```\n\nLet me know if you want changes."),
+      { title: "Product Launch", scenes: ["HOST: Welcome to our launch.", "First point"], truncated: false },
     );
+    // A code block inside the script's fence, and a long text around it (which is then kept).
+    const tutorial = "## Scene 1\n**HOST:** Run:\n```bash\nnpm install\n```\n## Scene 2\n**HOST:** Now *start* the server.\n## Scene 3\n- Open the browser";
+    assert.deepEqual(scenesFromText(`Here's your script:\n\`\`\`markdown\n${tutorial}\n\`\`\`\n`).scenes, ["HOST: Run: npm install", "HOST: Now start the server.", "Open the browser"]);
+    const lead = Array.from({ length: 5 }, (_, i) => `Lead line ${i + 1}.`).join("\n\n");
+    assert.deepEqual(scenesFromText(`${lead}\n\n\`\`\`md\n${tutorial}\n\`\`\``).scenes.slice(-3), ["HOST: Run: npm install", "HOST: Now start the server.", "Open the browser"]);
     assert.deepEqual(scenesFromText("````markdown\n# Launch\nHello **there**.\n````").scenes, ["Hello there."]);
     // Front matter inside a whole-document fence.
     assert.deepEqual(scenesFromText("```markdown\n---\ntitle: Launch\nduration: 60s\n---\n\n# Launch\n\nHello there.\n```"), { title: "Launch", scenes: ["Hello there."], truncated: false });
@@ -210,8 +215,13 @@ describe("scenesFromText", () => {
     assert.deepEqual(scenesFromText("<aside>💡 Tip here.</aside>\n\n> [!NOTE]\n> Remember this.\n\nWe&#x27;re at the caf&eacute; &copy; 2026 &euro;5 &#128512;").scenes, ["💡 Tip here.", "Remember this.", "We're at the café © 2026 €5 😀"]);
     // A reply that is only a domain or a name is script; a definition with a path or scheme is not.
     assert.deepEqual(scenesFromText("[HOST]: acme.com\n\n[GUEST]: Mr.Smith\n\n[HOST]: #1 (drumroll)\n\n[x]: https://acme.com\n[y]: acme.com/docs").scenes, ["[HOST]: acme.com", "[GUEST]: Mr.Smith", "[HOST]: #1 (drumroll)"]);
+    // Definitions of files, of anchors, and of any label the document refers to are not spoken.
+    assert.deepEqual(scenesFromText("![Logo][logo] Hello.\n\nSee the [site][site].\n\n[logo]: logo.png\n[r]: report.pdf \"Annual report\"\n[site]: example.com\n[p1]: #1-intro").scenes, ["Logo Hello.", "See the site."]);
+    // Images embedded in angle brackets, and one cut short, which must not swallow the prose after it.
+    assert.deepEqual(scenesFromText(`Intro text.\n\n![Chart](<data:image/png;base64,${"A".repeat(20_000)}>)\n\nOutro.`).scenes, ["Intro text.", "Chart", "Outro."]);
+    assert.deepEqual(scenesFromText("Start.\n\n![Chart](data:image/png;base64,AAAA\n\nOur sales (in dollars) rose.").scenes.at(-1), "Our sales (in dollars) rose.");
     // Quadratic inputs stay fast.
-    for (const doc of ["![".repeat(60_000), "![a](data:".repeat(12_000)]) {
+    for (const doc of ["![".repeat(60_000), "![a](data:".repeat(12_000), "![a](data:x ".repeat(12_000), "```\n".repeat(60_000), "~~~js\n".repeat(60_000)]) {
       const started = Date.now();
       scenesFromText(doc);
       assert.ok(Date.now() - started < 1500, `took ${Date.now() - started} ms`);
@@ -224,6 +234,14 @@ describe("scenesFromText", () => {
     assert.equal(decodeScript(stray), "大家好 Café “quoted” we’re� more");
     // "Привет" in Windows-1251.
     assert.equal(decodeScript(new Uint8Array([0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2]), legacyEncodingFor("ru-RU")), "Привет");
-    assert.deepEqual(["ru-RU", "zh-CN", "zh-TW", "ja", "en-US", "pl"].map(legacyEncodingFor), ["windows-1251", "gbk", "big5", "shift_jis", "windows-1252", "windows-1250"]);
+    assert.deepEqual(["ru-RU", "zh-CN", "zh-TW", "ja", "en-US", "pl", "sr-Latn-RS"].map(legacyEncodingFor), ["windows-1251", "gbk", "big5", "shift_jis", "windows-1252", "windows-1250", "windows-1250"]);
+    // A UTF-8 file that already holds � characters is UTF-8, and so is a short English one with a stray byte.
+    const held = "Today we\ufffdre talking budgets — and it\ufffds fun 😀.";
+    assert.equal(decodeScript(new TextEncoder().encode(held)), held);
+    const short = new Uint8Array([...new TextEncoder().encode("Say “go”"), 0x92, 0x21]);
+    assert.equal(decodeScript(short), "Say “go”\ufffd!");
+    // A Western file read on a Japanese system falls back to Windows-1252: "We’re live — “today”."
+    const western = new Uint8Array([0x57, 0x65, 0x92, 0x72, 0x65, 0x20, 0x6c, 0x69, 0x76, 0x65, 0x20, 0x97, 0x20, 0x93, 0x74, 0x6f, 0x64, 0x61, 0x79, 0x94, 0x2e]);
+    assert.equal(decodeScript(western, "shift_jis"), "We’re live — “today”.");
   });
 });

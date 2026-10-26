@@ -20,6 +20,17 @@ export const SHARE_PASSWORD_MIN = 4;
 export const SHARE_PASSWORD_MAX = 64;
 /** The cookie that marks a viewer who passed a video's email gate. It is a courtesy, not a lock: the gate collects emails, it does not protect the video. */
 export const shareGateCookieName = (videoId: string) => `as_gate_${videoId.replace(/[^A-Za-z0-9_-]/g, "")}`;
+/**
+ * The gate cookie's value: derived from the video's id and creation time (neither shown to a gated visitor), so a
+ * hand-made cookie does not skip the form and the lead record with it.
+ */
+export function shareGateValue(video: Pick<Video, "id" | "createdAt">): string {
+  return createHash("sha256").update(`avatar-studio:gate:${video.id}:${video.createdAt}`).digest("hex");
+}
+/** True when the video asks for no email, or `cookie` is the value its gate hands out. */
+export function shareGatePassed(video: Pick<Video, "id" | "createdAt" | "shareGate">, cookie: string | undefined): boolean {
+  return !video.shareGate || (!!cookie && timingSafeEqual(cookie, shareGateValue(video)));
+}
 /** How long an unlocked visitor stays unlocked. */
 export const SHARE_COOKIE_MAX_AGE = 60 * 60 * 24 * 30;
 

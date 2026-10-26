@@ -5,6 +5,7 @@ import { Button, Card, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
 import { formatTimestamp } from "@/lib/text";
+import { refocusIfLost } from "@/lib/focus";
 import type { VideoComment, WorkspaceRole } from "@/lib/types";
 
 interface WorkspaceSummary {
@@ -72,7 +73,7 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
       setDraft("");
       setPinAt(null);
       await refetch();
-      box.current?.focus();
+      refocusIfLost(box.current);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not post the comment");
     } finally {
@@ -85,7 +86,7 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
     try {
       await api(`/api/videos/${videoId}/comments/${c.id}`, { method: "DELETE" });
       await refetch();
-      box.current?.focus();
+      refocusIfLost(box.current);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not remove the comment");
     }

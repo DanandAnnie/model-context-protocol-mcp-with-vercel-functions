@@ -5,6 +5,7 @@ import { LayoutTemplate, Trash2 } from "lucide-react";
 import { Card, ErrorBanner, SectionTitle } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/client";
+import { refocusIfLost } from "@/lib/focus";
 import { SCRIPT_TEMPLATES, type ScriptTemplate } from "@/lib/templates";
 import type { VideoTemplate } from "@/lib/types";
 
@@ -27,7 +28,7 @@ export default function TemplatesPage() {
     try {
       await api(`/api/templates/${t.id}`, { method: "DELETE" });
       await refetch();
-      mineHeading.current?.focus();
+      refocusIfLost(mineHeading.current);
     } catch (e) {
       setRemoveErr(e instanceof Error ? e.message : "Could not delete the template");
     }

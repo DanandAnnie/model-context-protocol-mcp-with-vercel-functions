@@ -20,7 +20,7 @@ export function ShareWatch({ body, autoplay, loop, focus = false }: { body: Shar
   return (
     <>
       {body.status === "completed" && <ViewBeacon videoId={body.videoId} />}
-      <div ref={frameRef} tabIndex={focus ? -1 : undefined} className={`relative mx-auto w-full overflow-hidden rounded-xl bg-black focus:outline-none ${frame}`}>
+      <div ref={frameRef} tabIndex={focus ? -1 : undefined} role={focus ? "region" : undefined} aria-label={focus ? "Video" : undefined} className={`relative mx-auto w-full overflow-hidden rounded-xl bg-black focus:outline-none ${frame}`}>
         {body.watermark && (
           // The logo belongs to the page, not the video file, so it is not shown when the player goes fullscreen
           // or picture-in-picture; decorative (the header names the brand), and clicks pass through to the player.

@@ -196,7 +196,7 @@ export default function BatchPage() {
             <Field label="Recipients (CSV)" hint="First row is the header. Up to 100 rows per batch.">
               <textarea className={`${inputClass} min-h-[140px] resize-y font-mono text-xs`} value={csv} onChange={(e) => setCsv(e.target.value)} />
               {/* Visually hidden rather than display:none, so the upload can be reached and opened from the keyboard. */}
-              <label className="mt-2 inline-flex cursor-pointer items-center gap-2 rounded text-xs font-medium text-brand-600 hover:underline focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-brand-500">
+              <label className="mt-2 inline-flex cursor-pointer items-center gap-2 rounded text-xs font-medium text-brand-600 hover:underline has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-brand-500">
                 <Upload className="h-3.5 w-3.5" /> Upload a .csv file
                 <input
                   type="file"

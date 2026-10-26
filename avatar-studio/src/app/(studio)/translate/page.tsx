@@ -2,6 +2,7 @@
 import { useSearchParams } from "next/navigation";
 import { Suspense, useRef, useState } from "react";
 import { Check, Languages } from "lucide-react";
+import { refocusIfLost } from "@/lib/focus";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
@@ -67,7 +68,7 @@ function TranslateInner() {
       // The next video may have a different cast; the lip-sync choice is a preference and stays.
       setSpeakers(0);
       refetch();
-      sourceInput.current?.focus();
+      refocusIfLost(sourceInput.current);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Translation failed");
       refetch();

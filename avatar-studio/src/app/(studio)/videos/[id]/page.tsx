@@ -538,6 +538,8 @@ export default function VideoDetailPage() {
                   onChange={(e) => setDraftTitle(e.target.value)}
                   onBlur={saveTitle}
                   onKeyDown={(e) => {
+                    // An Enter that confirms an input method's candidate (Japanese, Chinese) is not the end of the title.
+                    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                     if (e.key === "Enter") {
                       // Without this, an unchanged title closes the field at once, the title button takes the focus,
                       // and the same Enter then presses it and opens the field again.
@@ -813,6 +815,7 @@ export default function VideoDetailPage() {
                           onChange={(e) => setFolderDraft(e.target.value)}
                           onBlur={saveFolder}
                           onKeyDown={(e) => {
+                            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                             if (e.key === "Enter") {
                               e.preventDefault();
                               refocusFolder.current = true;

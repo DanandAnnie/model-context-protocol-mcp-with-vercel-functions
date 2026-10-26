@@ -1276,6 +1276,18 @@ describe("personalized batches", () => {
     assert.equal(previewBatch("{msg} {city}", empty).problem, null);
     assert.equal(previewBatch("{msg}", "name,msg\nAlice,Hi").problem, null);
     assert.equal(previewBatch("{msg}", "name,msg\nAlice,\nBob,Hi").problem, "Row 1 leaves the script empty; fill in its cells.");
+    // A template with nothing to say is named as the problem, not every row's cells.
+    for (const blank of ["   ", "[pause 2s]"]) assert.equal(previewBatch(blank, empty).problem, "The script is empty; write what the presenter says, with {column} placeholders for each row.");
+  });
+
+  it("lets a visitor through an email gate only with the cookie the gate handed out", async () => {
+    const { shareGatePassed, shareGateValue } = await import("../share-lock");
+    const video = { id: "vid_gate", createdAt: "2026-10-26T10:00:00.000Z", shareGate: true };
+    assert.equal(shareGatePassed(video, undefined), false);
+    assert.equal(shareGatePassed(video, "1"), false, "a hand-made cookie is not a pass");
+    assert.equal(shareGatePassed(video, shareGateValue(video)), true);
+    assert.equal(shareGatePassed({ ...video, id: "vid_other" }, shareGateValue(video)), false, "one video's pass does not open another");
+    assert.equal(shareGatePassed({ ...video, shareGate: false }, undefined), true, "a link that asks for nothing is open");
   });
 
   it("puts the brand kit's background behind batch rows unless the batch names one", async () => {

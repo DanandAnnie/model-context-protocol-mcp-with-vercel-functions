@@ -19,19 +19,22 @@ const MAX_ROW_SCRIPT = 5000;
  * Rows whose filled-in script could not render: nothing to say (the placeholders' cells are empty) or more than
  * a video holds. Row numbers count data rows from 1, as the preview and the results do.
  */
-export function rowScriptProblems(scriptTemplate: string, rows: Array<Record<string, string>>): { empty: number[]; tooLong: number[] } {
+export function rowScriptProblems(scriptTemplate: string, rows: Array<Record<string, string>>): { empty: number[]; tooLong: number[]; blankTemplate: boolean } {
   const empty: number[] = [];
   const tooLong: number[] = [];
+  // A template with nothing to say (no words, only pauses) is the problem itself, not its rows' cells.
+  if (!stripPauses(scriptTemplate).trim()) return { empty, tooLong, blankTemplate: true };
   rows.forEach((row, i) => {
     const script = fillTemplate(scriptTemplate, row).trim();
     if (!stripPauses(script).trim()) empty.push(i + 1);
     else if (script.length > MAX_ROW_SCRIPT) tooLong.push(i + 1);
   });
-  return { empty, tooLong };
+  return { empty, tooLong, blankTemplate: false };
 }
 
 /** The problems above in words, or null when every row is fine. */
-export function rowScriptMessage({ empty, tooLong }: { empty: number[]; tooLong: number[] }): string | null {
+export function rowScriptMessage({ empty, tooLong, blankTemplate }: { empty: number[]; tooLong: number[]; blankTemplate?: boolean }): string | null {
+  if (blankTemplate) return "The script is empty; write what the presenter says, with {column} placeholders for each row.";
   const list = (rows: number[]) => (rows.length > 5 ? `${rows.slice(0, 5).join(", ")} and ${rows.length - 5} more` : rows.join(", "));
   const parts = [
     empty.length ? `${empty.length === 1 ? `row ${list(empty)} leaves the script empty; fill in its cells` : `rows ${list(empty)} leave the script empty; fill in their cells`}` : "",

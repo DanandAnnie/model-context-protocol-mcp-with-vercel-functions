@@ -17,7 +17,7 @@ import { publicLogoSrc } from "@/lib/brand-logo";
 import { stripPauses } from "@/lib/pauses";
 import { dimensionsFor } from "@/lib/types";
 import { ShareUnlock } from "@/components/ShareUnlock";
-import { shareCookieName, shareGateCookieName, shareUnlocked } from "@/lib/share-lock";
+import { shareCookieName, shareGateCookieName, shareGatePassed, shareUnlocked } from "@/lib/share-lock";
 import { ShareLeadGate } from "@/components/ShareLeadGate";
 import { ShareWatch } from "@/components/ShareWatch";
 import { shareBodyFor } from "@/lib/share-body";
@@ -62,9 +62,9 @@ export async function generateMetadata({
       twitter: { card: "summary", title: video.title, description },
     };
   }
-  // A gated link previews without the video or the script, which would let the preview stand in for the form.
+  // A gated link previews with its title and cover only: the video, description, and script would let the preview stand in for the form.
   const gate = !!video.shareGate;
-  const description = excerpt(video.description ?? "") || (gate ? "" : excerpt(stripPauses(video.script))) || `A video from ${siteName}`;
+  const description = (gate ? "" : excerpt(video.description ?? "") || excerpt(stripPauses(video.script))) || `A video from ${siteName}`;
   const ready = video.status === "completed" && !!video.videoUrl && !gate;
   const poster = posterUrl(video, base);
   const images = poster
@@ -120,7 +120,7 @@ export default async function SharePage({
   const jar = await cookies();
   const unlocked = await shareUnlocked(video, jar.get(shareCookieName(video.id))?.value);
   // The email gate comes after the password: a viewer who has not given an email yet sees the form, not the player.
-  const gated = unlocked && !!video.shareGate && !jar.get(shareGateCookieName(video.id));
+  const gated = unlocked && !shareGatePassed(video, jar.get(shareGateCookieName(video.id))?.value);
 
   // An uploaded logo (a data URL of up to a few megabytes) is served by its own cacheable route, so the
   // header and the player watermark share one short URL instead of carrying the image in the page.

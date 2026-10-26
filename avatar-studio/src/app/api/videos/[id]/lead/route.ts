@@ -5,7 +5,7 @@ import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { PUBLIC_ACCESS, captureVideoLead, getBrandKit, getVideo, videoLeadSchema } from "@/lib/services";
 import { LOCAL_OWNER } from "@/lib/owner";
 import { shareBodyFor } from "@/lib/share-body";
-import { SHARE_COOKIE_MAX_AGE, shareCookieName, shareGateCookieName, shareUnlocked } from "@/lib/share-lock";
+import { SHARE_COOKIE_MAX_AGE, shareCookieName, shareGateCookieName, shareGateValue, shareUnlocked } from "@/lib/share-lock";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +35,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     const res = NextResponse.json({ ok: true, body: shareBodyFor(video, await getBrandKit(video.ownerId ?? LOCAL_OWNER)) });
     // Same cookie rules as the password unlock, partitioned so an embedding site's browser keeps it where third-party cookies are blocked.
     const production = process.env.NODE_ENV === "production";
-    res.cookies.set(shareGateCookieName(id), "1", { httpOnly: true, sameSite: production ? "none" : "lax", secure: production, partitioned: production, path: "/", maxAge: SHARE_COOKIE_MAX_AGE });
+    res.cookies.set(shareGateCookieName(id), shareGateValue(video), { httpOnly: true, sameSite: production ? "none" : "lax", secure: production, partitioned: production, path: "/", maxAge: SHARE_COOKIE_MAX_AGE });
     return res;
   } catch (err) {
     return errorResponse(err);

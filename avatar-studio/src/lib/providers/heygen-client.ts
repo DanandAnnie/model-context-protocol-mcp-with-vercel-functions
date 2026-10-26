@@ -7,6 +7,11 @@ export class HeyGenClient {
   constructor(private apiKey: string) {}
 
   private async request<T>(url: string, init: RequestInit = {}): Promise<T> {
+    return (await this.envelope<T>(url, init)).data as T;
+  }
+
+  /** The whole answer, for the few calls whose paging cursor sits next to `data`. */
+  private async envelope<T>(url: string, init: RequestInit = {}): Promise<{ data?: T } & Record<string, unknown>> {
     const res = await fetch(url, {
       ...init,
       headers: {
@@ -19,12 +24,12 @@ export class HeyGenClient {
     });
     const text = await res.text();
     if (!res.ok) throw new Error(`HeyGen ${init.method ?? "GET"} ${url} failed: ${res.status} ${text}`);
-    const json = JSON.parse(text) as { error?: { message?: string } | string | null; data?: T };
+    const json = JSON.parse(text) as { error?: { message?: string } | string | null; data?: T } & Record<string, unknown>;
     if (json.error) {
       const msg = typeof json.error === "string" ? json.error : json.error.message ?? "unknown error";
       throw new Error(`HeyGen error: ${msg}`);
     }
-    return json.data as T;
+    return json;
   }
 
   listAvatars() {
@@ -101,9 +106,18 @@ export class HeyGenClient {
     return this.request<{ id?: string; brand_glossary_id?: string }>(`${V3}/brand-glossaries`, { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": key } });
   }
 
-  /** The workspace's glossaries (the first 100), with their names and ids. */
-  listGlossaries() {
-    return this.request<Array<{ id?: string; brand_glossary_id?: string; name?: string }> | { items?: Array<{ id?: string; brand_glossary_id?: string; name?: string }> }>(`${V3}/brand-glossaries?limit=100`);
+  /** One page of the workspace's glossaries (names and ids), and the cursor of the next page when there is one. */
+  async listGlossaries(token?: string): Promise<{ glossaries: Array<{ id?: string; brand_glossary_id?: string; name?: string }>; next?: string }> {
+    type Item = { id?: string; brand_glossary_id?: string; name?: string };
+    const json = await this.envelope<Item[] | { items?: Item[]; next_token?: string; token?: string }>(`${V3}/brand-glossaries?limit=100${token ? `&token=${encodeURIComponent(token)}` : ""}`);
+    const data = json.data;
+    const glossaries = Array.isArray(data) ? data : data?.items ?? [];
+    // The cursor's place is not documented; it is read from the envelope or from inside `data`.
+    const pick = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+    const inner = Array.isArray(data) ? undefined : data;
+    const pagination = json.pagination as { next_token?: string; token?: string } | undefined;
+    const next = pick(json.next_token) ?? pick(json.token) ?? pick(pagination?.next_token) ?? pick(pagination?.token) ?? pick(inner?.next_token) ?? pick(inner?.token);
+    return { glossaries, next };
   }
 
   /** Proofread (v3): the lines are translated first and dubbed once they are approved; one id per output language. */

@@ -280,6 +280,40 @@ describe("dubs that keep the brand glossary", () => {
       await heygen.createProofread({ ...base, targetLanguage: "Spanish", glossary: ["Nimbus"] });
       assert.equal(calls.at(-1)?.body?.brand_glossary_id, "bg_2");
 
+      // A glossary deleted in HeyGen since: the dub naming it is refused, so it is made again and the dub sent once more.
+      calls.length = 0;
+      let made = 0;
+      respond = (m, url) => {
+        if (url.endsWith("/brand-glossaries") && m === "POST") return ok({ id: `bg_new${++made}` });
+        const body = calls.at(-1)?.body;
+        return body?.brand_glossary_id === "bg_2" ? new Response("glossary not found", { status: 404 }) : ok({ video_translation_ids: ["vt_again"] });
+      };
+      assert.deepEqual(await heygen.createTranslation({ ...base, targetLanguage: "Spanish", glossary: ["Nimbus"] }), { providerJobId: "vt_again" });
+      assert.deepEqual(calls.map((c) => c.body?.brand_glossary_id ?? (c.url.endsWith("/brand-glossaries") ? "create" : "?")), ["bg_2", "create", "bg_new1"]);
+      // A refusal for another reason (the glossary is fine) is not retried with a copy of it.
+      calls.length = 0;
+      respond = (m, url) => (url.endsWith("/brand-glossaries") && m === "POST" ? new Response("name taken", { status: 409 }) : url.includes("/brand-glossaries?") ? ok([{ id: "bg_new1", name: String(calls.find((c) => c.method === "POST" && c.url.endsWith("/brand-glossaries"))?.body?.name) }]) : new Response("bad video", { status: 400 }));
+      await assert.rejects(heygen.createTranslation({ ...base, targetLanguage: "Spanish", glossary: ["Nimbus"] }), /400 bad video/);
+      assert.equal(calls.filter((c) => !c.url.includes("brand-glossaries")).length, 1, "the glossary was still there, so the dub was not sent again");
+
+      // The name is looked up through every page, and a create still in flight elsewhere is waited for.
+      calls.length = 0;
+      let lists = 0;
+      respond = (m, url) => {
+        if (url.endsWith("/brand-glossaries") && m === "POST") return new Response("key in use", { status: 409 });
+        if (url.includes("/brand-glossaries?")) {
+          lists++;
+          const name = String(calls.find((c) => c.method === "POST" && c.url.endsWith("/brand-glossaries"))?.body?.name);
+          if (lists === 1) return ok([{ id: "bg_a", name: "Other" }]); // first look: not made yet, no further page
+          if (!url.includes("token=")) return new Response(JSON.stringify({ data: [{ id: "bg_b", name: "Other 2" }], next_token: "p2" }), { status: 200 });
+          return ok([{ id: "bg_paged", name }]);
+        }
+        return ok({ video_translation_ids: ["vt_paged"] });
+      };
+      await heygen.createTranslation({ ...base, targetLanguage: "Spanish", glossary: ["Orbit 2"] });
+      assert.equal(calls.at(-1)?.body?.brand_glossary_id, "bg_paged");
+      assert.ok(calls.some((c) => c.url.includes("token=p2")), "the second page was read");
+
       // Any other failure fails the dub rather than dubbing without the terms.
       respond = () => new Response("down", { status: 500 });
       await assert.rejects(heygen.createTranslation({ ...base, targetLanguage: "Spanish", glossary: ["Orbit"] }), /500/);

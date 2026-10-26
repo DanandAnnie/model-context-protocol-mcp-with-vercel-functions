@@ -2107,8 +2107,8 @@ test("a dub can keep the brand glossary's terms as written", async ({ page }) =>
     await expect(plain.getByTestId("translation-meta")).toBeVisible();
     await expect(plain.getByTestId("translation-meta")).not.toContainText("brand term");
   } finally {
-    if (before) await page.request.put("/api/brand", { data: before });
-    else await page.request.delete("/api/brand");
+    const restored = before ? await page.request.put("/api/brand", { data: before }) : await page.request.delete("/api/brand");
+    expect(restored.ok()).toBe(true);
   }
 });
 

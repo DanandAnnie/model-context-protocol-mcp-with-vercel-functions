@@ -46,7 +46,7 @@ function TranslateInner() {
   const [proofread, setProofread] = useState(false);
   const { data: brandData } = useApi<{ brand: BrandKit | null }>("/api/brand");
   const glossary = brandData?.brand?.glossary ?? [];
-  // On by default whenever the brand kit has terms to keep.
+  // On by default: the server keeps the kit's terms when it has some (even if the kit has not loaded here yet).
   const [keepGlossary, setKeepGlossary] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -56,7 +56,7 @@ function TranslateInner() {
     setErr(null);
     try {
       const fallback = languages.length === 1 ? `Translation to ${languages[0]}` : "Translation";
-      await api("/api/translate", { method: "POST", body: JSON.stringify({ title: title || fallback, sourceVideoUrl, targetLanguages: languages, ...(lipSync ? {} : { audioOnly: true }), ...(speakers ? { speakers } : {}), ...(quality === "precision" ? { quality } : {}), ...(removeMusic ? { removeMusic } : {}), ...(enhanceSpeech ? { enhanceSpeech } : {}), ...(proofread ? { proofread } : {}), ...(keepGlossary && glossary.length ? { keepGlossary: true } : {}) }) });
+      await api("/api/translate", { method: "POST", body: JSON.stringify({ title: title || fallback, sourceVideoUrl, targetLanguages: languages, ...(lipSync ? {} : { audioOnly: true }), ...(speakers ? { speakers } : {}), ...(quality === "precision" ? { quality } : {}), ...(removeMusic ? { removeMusic } : {}), ...(enhanceSpeech ? { enhanceSpeech } : {}), ...(proofread ? { proofread } : {}), ...(keepGlossary ? { keepGlossary: true } : {}) }) });
       setSource("");
       setTitle("");
       // The next video may have a different cast; the lip-sync choice is a preference and stays.

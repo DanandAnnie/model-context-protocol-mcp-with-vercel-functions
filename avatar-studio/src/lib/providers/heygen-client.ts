@@ -52,7 +52,7 @@ export class HeyGenClient {
   async createPromptAvatar(name: string, prompt: string): Promise<{ look_id: string; status?: string }> {
     const out = await this.envelope<{ look_id: string; status?: string }>(`${V3}/avatars`, {
       method: "POST",
-      body: JSON.stringify({ type: "prompt", name, prompt, aspect_ratio: "1:1" }),
+      body: JSON.stringify({ type: "prompt", name, prompt, aspect_ratio: "4:5" }),
     });
     return (out.data ?? out) as { look_id: string; status?: string };
   }

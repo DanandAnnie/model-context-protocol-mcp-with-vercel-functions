@@ -133,7 +133,10 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     return voice?.id ?? fallback;
   }
 
-  /** A presenter drawn from a description (v3 prompt to avatar), square so it frames like an uploaded portrait. */
+  /**
+   * A presenter drawn from a description (v3 prompt to avatar), 4:5 like an uploaded portrait. The look stays in the
+   * HeyGen account; the studio keeps its picture as a photo avatar, rendered as a talking photo like any upload.
+   */
   async generatePortrait({ name, prompt }: { name: string; prompt: string }) {
     try {
       const { look_id } = await this.client.createPromptAvatar(name, prompt);
@@ -141,7 +144,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     } catch (err) {
       // A description HeyGen will not draw (refused by moderation, or not usable) is the account's to change.
       const message = err instanceof Error ? err.message : "";
-      if (/ failed: (400|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not draw that presenter: ${heygenReason(message)}`);
+      if (/ failed: (400|402|403|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not draw that presenter: ${heygenReason(message)}`);
       throw err;
     }
   }
@@ -156,7 +159,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       if (message.startsWith("HeyGen error:")) return { status: "failed", error: message.slice("HeyGen error:".length).trim() || "HeyGen could not draw that presenter" };
       throw err;
     }
-    if (look.status === "completed" && look.preview_image_url) return { status: "completed", imageUrl: look.preview_image_url };
+    if (look.status === "completed") return look.preview_image_url ? { status: "completed", imageUrl: look.preview_image_url } : { status: "failed", error: "HeyGen finished the presenter without a picture" };
     if (look.status === "failed") return { status: "failed", error: look.error?.message ?? "HeyGen could not draw that presenter" };
     return { status: "processing" };
   }

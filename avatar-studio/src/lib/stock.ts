@@ -17,12 +17,18 @@ const PALETTE: Array<[string, string]> = [
 
 export function portraitSvg(name: string, index: number): string {
   const [a, b] = PALETTE[index % PALETTE.length];
-  const initials = name
-    .split(/\s+/)
-    .map((p) => p[0])
-    .join("")
+  // The first whole character of each of the first two words (an emoji is two code units, and half of one is not a
+  // character), escaped for the SVG it is written into.
+  const initials = Array.from(
+    name
+      .split(/\s+/)
+      .map((p) => Array.from(p)[0] ?? "")
+      .join(""),
+  )
     .slice(0, 2)
-    .toUpperCase();
+    .join("")
+    .toUpperCase()
+    .replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`);
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 400">
   <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs>
   <rect width="320" height="400" fill="url(#g)"/>

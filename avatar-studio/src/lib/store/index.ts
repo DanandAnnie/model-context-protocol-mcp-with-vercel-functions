@@ -3,7 +3,7 @@ import { config } from "../config";
 import { MemoryStore } from "./memory";
 import { SupabaseStore } from "./supabase";
 
-export type ItemKind = "video" | "avatar" | "translation" | "brand" | "apikey" | "notify" | "workspace" | "invite" | "membership" | "plan" | "agent" | "conversation" | "voice" | "prefs" | "template" | "sharelock" | "cover" | "comment" | "activity" | "clip" | "clipaudio" | "videolead" | "usage" | "backdrop" | "backdropdata";
+export type ItemKind = "video" | "avatar" | "translation" | "brand" | "apikey" | "notify" | "workspace" | "invite" | "membership" | "plan" | "agent" | "conversation" | "voice" | "prefs" | "template" | "sharelock" | "cover" | "comment" | "activity" | "clip" | "clipaudio" | "videolead" | "usage" | "backdrop" | "backdropdata" | "portrait";
 
 export interface Store {
   /** True when every instance of the app reads the same data (a missing record is then really gone). */

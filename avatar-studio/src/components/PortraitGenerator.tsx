@@ -14,7 +14,7 @@ const EXAMPLE = "A friendly real estate agent in her forties, shoulder-length da
  * Draws a presenter who does not exist from a description (HeyGen's prompt to avatar): starts the portrait, follows it
  * until it is ready, and hands it to the photo avatar form, where it is named and saved like an upload.
  */
-export function PortraitGenerator({ name, demo, onPortrait }: { name: string; demo: boolean; onPortrait: (imageUrl: string) => void }) {
+export function PortraitGenerator({ name, demo, current, onPortrait }: { name: string; demo: boolean; current: string; onPortrait: (imageUrl: string) => void }) {
   const id = useId();
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
@@ -23,9 +23,15 @@ export function PortraitGenerator({ name, demo, onPortrait }: { name: string; de
   // The run in progress; a newer run, or leaving the panel, makes an older one stop quietly.
   const run = useRef(0);
   useEffect(() => () => void (run.current += 1), []);
+  // The picture in the form now, so a portrait that finishes after another was chosen does not replace it unasked.
+  const currentNow = useRef(current);
+  currentNow.current = current;
+  const [held, setHeld] = useState<string | null>(null);
 
   async function generate() {
     const mine = ++run.current;
+    const pictureAtStart = currentNow.current;
+    setHeld(null);
     setBusy(true);
     setErr(null);
     setNote("Drawing the presenter…");
@@ -37,6 +43,11 @@ export function PortraitGenerator({ name, demo, onPortrait }: { name: string; de
         const out = await api<{ status: string; imageUrl?: string; error?: string }>(`/api/avatars/generate/${encodeURIComponent(jobId)}`);
         if (run.current !== mine) return;
         if (out.status === "completed" && out.imageUrl) {
+          if (currentNow.current !== pictureAtStart) {
+            setHeld(out.imageUrl);
+            setNote("The presenter is drawn, but you chose another picture meanwhile, so the preview keeps yours.");
+            return;
+          }
           onPortrait(out.imageUrl);
           setNote("The portrait is in the preview. Name the presenter and create the avatar, or describe them again for another.");
           return;
@@ -85,6 +96,19 @@ export function PortraitGenerator({ name, demo, onPortrait }: { name: string; de
       <p role="status" className={note ? "mt-2 text-xs text-slate-600" : "sr-only"}>
         {note ?? ""}
       </p>
+      {held && (
+        <button
+          type="button"
+          className="mt-1 text-xs font-medium text-brand-700 underline"
+          onClick={() => {
+            onPortrait(held);
+            setHeld(null);
+            setNote("The drawn portrait is in the preview.");
+          }}
+        >
+          Use the drawn portrait
+        </button>
+      )}
       {err && (
         <p role="alert" className="mt-2 text-xs text-rose-600">
           {err}

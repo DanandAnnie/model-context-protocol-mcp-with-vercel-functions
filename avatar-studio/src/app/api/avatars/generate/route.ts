@@ -20,7 +20,7 @@ export async function POST(req: Request) {
     const input = generatePortraitSchema.parse(await readJson(req));
     const limit = rateLimitPair(`portrait:${owner}`, PER_OWNER, "portrait:*", PER_INSTANCE, WINDOW_MS);
     if (!limit.allowed) return json({ error: "Too many presenters drawn for now; try again later" }, { status: 429, headers: { "Retry-After": String(limit.retryAfterSec) } });
-    return json(await startPortrait(input), { status: 202 });
+    return json(await startPortrait(input, owner), { status: 202 });
   } catch (err) {
     return errorResponse(err);
   }

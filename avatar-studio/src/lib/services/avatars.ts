@@ -3,7 +3,7 @@ import { z } from "zod";
 import { newId, nowIso } from "../ids";
 import { getAvatarProvider } from "../providers";
 import { getStore } from "../store";
-import type { Agent, Avatar } from "../types";
+import type { Agent, Avatar, PortraitJob } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { memo } from "../cache";
 import { LIST_TTL_MS, owned } from "./shared";
@@ -49,11 +49,17 @@ export const generatePortraitSchema = z.object({
   prompt: z.string().trim().min(20, "Describe the presenter in at least 20 characters").max(1000),
 });
 
-/** Portrait job ids as the providers issue them (HeyGen look ids, demo ids). */
-export const portraitJobIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,200}$/, "Unknown portrait");
+/** The studio's own portrait job ids: HeyGen's look ids never leave the server. */
+export const portraitJobIdSchema = z.string().regex(/^pt_[A-Za-z0-9_-]{1,64}$/, "Unknown portrait");
 
-/** The largest portrait kept, as a photo avatar's upload may be (`createAvatarSchema`'s 8 MB of data URL). */
-const MAX_PORTRAIT_BYTES = 6 * 1024 * 1024;
+/**
+ * The largest portrait kept: its data URL must fit both the reply that carries it (Vercel answers at most 4.5 MB) and
+ * the photo avatar upload it is saved with (`createAvatarSchema`, also one request).
+ */
+export const MAX_PORTRAIT_BYTES = 3 * 1024 * 1024;
+
+/** How long a portrait job is kept to be followed; older ones are cleared when the account starts another. */
+const PORTRAIT_JOB_TTL_MS = 24 * 60 * 60 * 1000;
 
 export function portraitGenerationAvailable(): boolean {
   return typeof getAvatarProvider().generatePortrait === "function";
@@ -61,26 +67,54 @@ export function portraitGenerationAvailable(): boolean {
 
 /**
  * Starts a portrait of a presenter who does not exist, drawn by the renderer from a description (HeyGen's prompt to
- * avatar). Nothing is kept: the finished portrait becomes a photo avatar only when it is saved like an upload.
+ * avatar). Only a job is kept, under the account that asked: the finished portrait becomes a photo avatar only when
+ * it is saved like an upload.
  */
-export async function startPortrait(input: z.infer<typeof generatePortraitSchema>): Promise<{ jobId: string }> {
+export async function startPortrait(input: z.infer<typeof generatePortraitSchema>, ownerId: string = LOCAL_OWNER): Promise<{ jobId: string }> {
   const provider = getAvatarProvider();
   if (!provider.generatePortrait) throw new ValidationError(`Generating a presenter is not available with the ${provider.name} renderer`);
-  return provider.generatePortrait({ name: input.name, prompt: input.prompt });
+  const now = Date.now();
+  for (const old of await getStore().list<PortraitJob>("portrait", ownerId)) {
+    if (now - Date.parse(old.createdAt) > PORTRAIT_JOB_TTL_MS) await getStore().remove("portrait", old.id);
+  }
+  const { jobId } = await provider.generatePortrait({ name: input.name, prompt: input.prompt });
+  const job: PortraitJob = { id: newId("pt"), ownerId, provider: provider.name, providerJobId: jobId, status: "processing", createdAt: nowIso() };
+  await getStore().put("portrait", job);
+  return { jobId: job.id };
 }
 
 /**
- * Where a portrait job stands. A finished one is returned as a data URL, read once through the public-address guard,
- * so the photo avatar made from it keeps its picture after the provider's link expires.
+ * Where one of the account's portrait jobs stands. A finished one is returned as a data URL, read once through the
+ * public-address guard and kept on the job, so the photo avatar made from it keeps its picture after the provider's
+ * link expires and following it again asks the provider for nothing.
  */
-export async function portraitStatus(jobId: string, fetchImpl?: FetchLike): Promise<{ status: "processing" | "completed" | "failed"; imageUrl?: string; error?: string }> {
+export async function portraitStatus(jobId: string, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<{ status: "processing" | "completed" | "failed"; imageUrl?: string; error?: string }> {
+  const job = owned(await getStore().get<PortraitJob>("portrait", portraitJobIdSchema.parse(jobId)), ownerId, "Portrait");
+  if (job.status !== "processing") return { status: job.status, ...(job.imageUrl ? { imageUrl: job.imageUrl } : {}), ...(job.error ? { error: job.error } : {}) };
   const provider = getAvatarProvider();
-  if (!provider.portraitStatus) throw new ValidationError(`Generating a presenter is not available with the ${provider.name} renderer`);
-  const out = await provider.portraitStatus(portraitJobIdSchema.parse(jobId));
-  if (out.status !== "completed" || !out.imageUrl || out.imageUrl.startsWith("data:")) return out;
-  const { bytes, mimeType } = await loadImage(out.imageUrl, fetchImpl);
-  if (bytes.byteLength > MAX_PORTRAIT_BYTES) return { status: "failed", error: "The portrait came back larger than a photo avatar may be" };
-  return { status: "completed", imageUrl: `data:${mimeType};base64,${Buffer.from(bytes).toString("base64")}` };
+  if (provider.name !== job.provider || !provider.portraitStatus) throw new ValidationError("That portrait was started with another renderer");
+  const out = await provider.portraitStatus(job.providerJobId);
+  if (out.status === "processing") return { status: "processing" };
+  let done: PortraitJob;
+  if (out.status === "failed" || !out.imageUrl) {
+    done = { ...job, status: "failed", error: out.error ?? "The presenter could not be drawn" };
+  } else if (out.imageUrl.startsWith("data:")) {
+    done = { ...job, status: "completed", imageUrl: out.imageUrl };
+  } else {
+    try {
+      const { bytes, mimeType } = await loadImage(out.imageUrl, fetchImpl);
+      done =
+        bytes.byteLength > MAX_PORTRAIT_BYTES
+          ? { ...job, status: "failed", error: "The portrait came back larger than a photo avatar may be" }
+          : { ...job, status: "completed", imageUrl: `data:${mimeType};base64,${Buffer.from(bytes).toString("base64")}` };
+    } catch (err) {
+      // The picture is drawn but could not be fetched (expired, moved, not an image): the job ends there.
+      console.error(err);
+      done = { ...job, status: "failed", error: "The portrait was drawn but could not be downloaded; draw it again" };
+    }
+  }
+  await getStore().put("portrait", done);
+  return { status: done.status, ...(done.imageUrl ? { imageUrl: done.imageUrl } : {}), ...(done.error ? { error: done.error } : {}) };
 }
 
 /** A default voice must be one the owner can render with, like the brand kit's. */

@@ -50,6 +50,20 @@ export interface Avatar {
   createdAt?: string;
 }
 
+/** A presenter being drawn from a description, kept so only the account that asked can follow it. */
+export interface PortraitJob {
+  id: string;
+  ownerId: string;
+  /** Renderer drawing it, and its job id there (HeyGen's look id), never shown to the account. */
+  provider: string;
+  providerJobId: string;
+  status: "processing" | "completed" | "failed";
+  /** The finished portrait as a data URL, kept so following it again downloads nothing. */
+  imageUrl?: string;
+  error?: string;
+  createdAt: string;
+}
+
 export interface Voice {
   id: string;
   name: string;

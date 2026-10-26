@@ -38,7 +38,8 @@ export class MockAvatarProvider implements AvatarProvider {
   async generatePortrait({ name, prompt }: { name: string; prompt: string }) {
     let hash = 0;
     for (const ch of prompt) hash = (hash * 31 + ch.codePointAt(0)!) >>> 0;
-    return { jobId: `mockportrait_${hash % 1000}_${Buffer.from(name.slice(0, 40)).toString("base64url")}` };
+    // Cut by whole characters, so an emoji at the cut is never split.
+    return { jobId: `mockportrait_${hash % 1000}_${Buffer.from(Array.from(name).slice(0, 40).join("")).toString("base64url")}` };
   }
 
   async portraitStatus(jobId: string) {

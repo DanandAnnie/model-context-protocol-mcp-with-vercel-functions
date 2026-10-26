@@ -313,7 +313,7 @@ function CreateAvatarPanel({ voices, canGenerate, demo, onClose, onCreated }: { 
           <Field label="Or paste an image URL" hint="Must be publicly reachable if your rendering provider fetches it.">
             <input className={inputClass} value={imageUrl.startsWith("data:") ? "" : imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://…/portrait.jpg" />
           </Field>
-          {canGenerate && <PortraitGenerator name={name} demo={demo} onPortrait={setImageUrl} />}
+          {canGenerate && <PortraitGenerator name={name} demo={demo} current={imageUrl} onPortrait={setImageUrl} />}
           <Field label="Voice preference (optional)">
             <select className={inputClass} value={gender} onChange={(e) => setGender(e.target.value as typeof gender)}>
               <option value="">Not specified</option>

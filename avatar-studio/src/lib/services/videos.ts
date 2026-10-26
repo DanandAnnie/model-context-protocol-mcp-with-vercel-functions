@@ -364,6 +364,18 @@ export function captionDurationSec(video: Pick<Video, "script" | "durationSec" |
   return Math.max(1, Math.round(words / 2.5 / (video.speed || 1) + pauseSeconds(video.script)));
 }
 
+/**
+ * What the share page's transcript can show: the script's captions first (no language), then one set per
+ * translated subtitle track, timed like that track is in the player.
+ */
+export function transcriptsFor(video: Pick<Video, "script" | "durationSec" | "speed" | "captionCues" | "subtitles">): Array<{ language?: string; cues: Array<{ startMs: number; endMs: number; text: string }> }> {
+  const plain = (cues: Array<{ startMs: number; endMs: number; text: string }>) => cues.map(({ startMs, endMs, text }) => ({ startMs, endMs, text }));
+  return [
+    { cues: plain(captionCuesFor(video).cues) },
+    ...Object.entries(video.subtitles ?? {}).map(([language, text]) => ({ language, cues: plain(buildCues(text, captionDurationSec(video))) })),
+  ];
+}
+
 /** The captions in the script's language: the editor's corrections when there are some, else lines timed from the script. */
 export function captionCuesFor(video: Pick<Video, "script" | "durationSec" | "speed" | "captionCues">): { cues: CaptionCue[]; edited: boolean } {
   if (video.captionCues?.length) return { cues: video.captionCues, edited: true };

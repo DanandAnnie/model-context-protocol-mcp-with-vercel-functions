@@ -6,9 +6,9 @@ import { Sparkles } from "lucide-react";
 import {
   NotFoundError,
   PUBLIC_ACCESS,
-  captionCuesFor,
   getBrandKit,
   getVideo,
+  transcriptsFor,
 } from "@/lib/services";
 import { LOCAL_OWNER } from "@/lib/owner";
 import { config } from "@/lib/config";
@@ -243,7 +243,7 @@ export default async function SharePage({
             )}
             {/* Once there is a video, the script is its transcript: the caption lines (corrected ones when an editor saved them), each playing from its time. */}
             {video.status === "completed" && video.videoUrl ? (
-              <ShareTranscript playerId={SHARE_PLAYER_ID} cues={captionCuesFor(video).cues.map(({ startMs, endMs, text }) => ({ startMs, endMs, text }))} />
+              <ShareTranscript playerId={SHARE_PLAYER_ID} transcripts={transcriptsFor(video).map((t) => ({ ...t, ...(t.language ? { code: languageCode(t.language) } : {}) }))} />
             ) : (
               <p className="mt-6 whitespace-pre-wrap text-sm leading-relaxed text-slate-300">
                 {stripPauses(video.script)}

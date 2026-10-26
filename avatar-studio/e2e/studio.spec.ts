@@ -567,6 +567,20 @@ test("share page offers a download only when the owner allows it", async ({ page
   expect((await page.request.get(`/api/videos/${v.id}/captions?lang=French`)).status()).toBe(404);
   await page.goto(`/share/${v.id}`);
   await expect(page.getByTestId("share-player").locator("track[srclang='es']")).toHaveAttribute("label", "Spanish");
+  // The transcript follows the track the viewer turns on: Spanish lines while it shows, the script's otherwise.
+  const transcript = page.getByTestId("share-transcript");
+  await expect(transcript).not.toContainText("[Spanish]");
+  const showTrack = (label: string | null) =>
+    page.getByTestId("share-player").evaluate((el: HTMLVideoElement, wanted) => {
+      for (const t of Array.from(el.textTracks)) t.mode = t.label === wanted ? "showing" : "disabled";
+    }, label);
+  await showTrack("Spanish");
+  await expect(page.getByRole("heading", { name: "Transcript · Spanish" })).toBeVisible();
+  await expect(transcript).toContainText("[Spanish]");
+  await expect(transcript).toHaveAttribute("lang", "es");
+  await showTrack(null);
+  await expect(page.getByRole("heading", { name: "Transcript", exact: true })).toBeVisible();
+  await expect(transcript).not.toContainText("[Spanish]");
   await page.goto(`/videos/${v.id}`);
   await page.getByRole("button", { name: "Remove Spanish subtitles" }).click();
   await expect(page.getByTestId("subtitle-list")).toHaveCount(0);

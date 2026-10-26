@@ -2,14 +2,34 @@
 import { useEffect, useRef, useState } from "react";
 import { formatTimestamp } from "@/lib/text";
 
+type Cue = { startMs: number; endMs: number; text: string };
+
 /**
  * The share page's transcript: the caption lines with their times. A line plays the video from there,
  * and the line being spoken is marked as the video plays (scrolled into view inside the list only, so
- * the page itself never jumps).
+ * the page itself never jumps). It follows the subtitle track the viewer picks in the player: a
+ * translated track shows that language's lines, anything else the script's.
  */
-export function ShareTranscript({ playerId, cues }: { playerId: string; cues: Array<{ startMs: number; endMs: number; text: string }> }) {
+export function ShareTranscript({ playerId, transcripts }: { playerId: string; transcripts: Array<{ language?: string; code?: string; cues: Cue[] }> }) {
+  const [which, setWhich] = useState(0);
   const [active, setActive] = useState(-1);
   const list = useRef<HTMLOListElement>(null);
+  const shown = transcripts[which] ?? transcripts[0];
+  const cues = shown.cues;
+
+  useEffect(() => {
+    const el = document.getElementById(playerId) as HTMLVideoElement | null;
+    if (!el) return;
+    // Translated tracks are labelled with their language; the script's own track, or none, means the script.
+    const follow = () => {
+      const showing = Array.from(el.textTracks).find((t) => t.mode === "showing");
+      const i = showing ? transcripts.findIndex((t) => t.language && t.language === showing.label) : -1;
+      setWhich(i > 0 ? i : 0);
+    };
+    follow();
+    el.textTracks.addEventListener("change", follow);
+    return () => el.textTracks.removeEventListener("change", follow);
+  }, [playerId, transcripts]);
 
   useEffect(() => {
     const el = document.getElementById(playerId) as HTMLVideoElement | null;
@@ -22,6 +42,8 @@ export function ShareTranscript({ playerId, cues }: { playerId: string; cues: Ar
       while (i + 1 < cues.length && cues[i + 1].startMs <= ms) i++;
       setActive(i >= 0 && ms < cues[i].endMs ? i : -1);
     };
+    // Right away too: switching language mid-video marks the new language's line without waiting for playback.
+    sync();
     el.addEventListener("timeupdate", sync);
     el.addEventListener("seeked", sync);
     return () => {
@@ -50,9 +72,9 @@ export function ShareTranscript({ playerId, cues }: { playerId: string; cues: Ar
   return (
     <section className="mt-6" aria-labelledby="share-transcript-title">
       <h2 id="share-transcript-title" className="mb-2 text-sm font-semibold text-slate-200">
-        Transcript
+        Transcript{shown.language ? ` · ${shown.language}` : ""}
       </h2>
-      <ol ref={list} className="relative max-h-80 space-y-0.5 overflow-y-auto rounded-lg border border-slate-800 bg-slate-900/60 p-2" data-testid="share-transcript">
+      <ol ref={list} lang={shown.code} className="relative max-h-80 space-y-0.5 overflow-y-auto rounded-lg border border-slate-800 bg-slate-900/60 p-2" data-testid="share-transcript">
         {cues.map((cue, i) => (
           <li key={i}>
             <button

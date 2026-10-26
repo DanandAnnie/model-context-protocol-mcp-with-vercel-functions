@@ -17,6 +17,7 @@ import { languageLabel } from "@/lib/language";
 import { stripPauses } from "@/lib/pauses";
 import { MAX_IMPORT_BYTES, MAX_SCRIPT_CHARS, decodeScript, legacyEncodingFor, scenesFromText } from "@/lib/script-import";
 import { renderPdf, slideScripts } from "@/lib/pdf-slides";
+import { readPptx, type PptxSlide } from "@/lib/pptx-notes";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
 import { takeAgentDraft, type AgentDraft } from "@/lib/agent-draft";
@@ -74,6 +75,23 @@ class ImportCancelled extends Error {}
 
 /** A deck larger than this is refused before pdf.js reads it. */
 const MAX_PDF_BYTES = 50_000_000;
+/** A PowerPoint file larger than this is refused before it is unpacked (its pictures and video count, though only its text is read). */
+const MAX_PPTX_BYTES = 100_000_000;
+const PPTX_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+
+/** Whether the scenes hold anything worth asking about before they are replaced: a script, a clip, a presenter, a layout, or more than one scene. */
+const setUpScenes = (list: Scene[]) => list.length > 1 || list.some((sc) => sc.script.trim() || sc.audioId || sc.avatarId || sc.voiceId || sc.layout);
+
+/**
+ * The PowerPoint slides that match a PDF of the same deck page for page. PowerPoint leaves hidden slides out when it
+ * saves as PDF, so they are dropped unless the PDF has a page for every slide. `matches` is false when the counts
+ * still differ, and the notes are then paired by position as far as they go.
+ */
+function slidesForPages(slides: PptxSlide[], pages: number): { slides: PptxSlide[]; matches: boolean } {
+  if (slides.length === pages) return { slides, matches: true };
+  const shown = slides.filter((sl) => !sl.hidden);
+  return { slides: shown, matches: shown.length === pages };
+}
 
 const newScene = (script = "", background: Background = DEFAULT_BG, presenter: Pick<Scene, "avatarId" | "voiceId" | "layout" | "audioId"> = {}): Scene => ({
   script,
@@ -216,8 +234,7 @@ function CreateInner() {
     const doc = scenesFromText(decodeScript(new Uint8Array(await file.arrayBuffer()), legacyEncodingFor(navigator.language)), { markdown: /\.(md|markdown)$/i.test(file.name) || file.type === "text/markdown" });
     if (!doc.scenes.length) return setImportNote(`No script found in ${file.name}.`);
     // Anything already set up (a script, a clip, a presenter, a layout, more than one scene) is only replaced once confirmed.
-    const setUp = scenes.length > 1 || scenes.some((sc) => sc.script.trim() || sc.audioId || sc.avatarId || sc.voiceId || sc.layout);
-    if (setUp && !window.confirm(`Replace the ${scenes.length === 1 ? "current scene" : `current ${scenes.length} scenes`} with ${doc.scenes.length === 1 ? "1 scene" : `${doc.scenes.length} scenes`} from ${file.name}?`)) return;
+    if (setUpScenes(scenes) && !window.confirm(`Replace the ${scenes.length === 1 ? "current scene" : `current ${scenes.length} scenes`} with ${doc.scenes.length === 1 ? "1 scene" : `${doc.scenes.length} scenes`} from ${file.name}?`)) return;
     const background = scenes[0].background;
     setScenes(doc.scenes.map((script) => newScene(script, background)));
     setActiveIdx(0);
@@ -231,14 +248,79 @@ function CreateInner() {
   scenesNow.current = scenes;
   const aspectNow = useRef<AspectRatio>("16:9");
   /**
+   * Imports a slide deck chosen as a PDF, a PowerPoint (.pptx) file, or both. A PDF gives each scene its page as the
+   * background; a .pptx gives each scene its speaker notes as the script (the slide's text where it has none), as
+   * HeyGen's PowerPoint import does. With both, the PDF's pages get the matching slides' notes.
+   */
+  async function importDeck(files: File[]) {
+    if (!files.length || slidesProgress) return;
+    const pdfs = files.filter((f) => /\.pdf$/i.test(f.name) || f.type === "application/pdf");
+    const decks = files.filter((f) => !pdfs.includes(f) && (/\.pptx$/i.test(f.name) || f.type === PPTX_TYPE));
+    if (pdfs.length > 1 || decks.length > 1 || pdfs.length + decks.length < files.length) {
+      return setImportNote("Choose one slide deck: a PDF, a PowerPoint (.pptx) file, or both files of the same deck to show its pages with its speaker notes as the script.");
+    }
+    const [pdf] = pdfs;
+    const [deck] = decks;
+    let slides: PptxSlide[] | undefined;
+    if (deck) {
+      if (deck.size > MAX_PPTX_BYTES) return setImportNote(`${deck.name} is larger than ${MAX_PPTX_BYTES / 1_000_000} MB; save the deck with smaller pictures or as PDF.`);
+      setImportNote(null);
+      setSlidesProgress(`Reading ${deck.name}…`);
+      try {
+        slides = readPptx(new Uint8Array(await deck.arrayBuffer()), deck.name);
+      } catch (e) {
+        setSlidesProgress(null);
+        return setImportNote(`${(e instanceof Error ? e.message : `${deck.name} could not be read`).replace(/\.$/, "")}.`);
+      }
+      if (!pdf) {
+        setSlidesProgress(null);
+        return importNotes(deck, slides);
+      }
+    }
+    if (pdf) await importSlides(pdf, deck && slides ? { name: deck.name, slides } : undefined);
+  }
+  /**
+   * Replaces the scenes with a PowerPoint deck's slides on the current background, each scripted from its speaker
+   * notes or, where it has none, its text. Hidden slides are left out, as in the slide show.
+   */
+  function importNotes(file: File, slides: PptxSlide[]) {
+    const shown = slides.filter((sl) => !sl.hidden);
+    const kept = shown.slice(0, MAX_SCENES);
+    if (!kept.length) return setImportNote(`Every slide in ${file.name} is hidden.`);
+    const current = scenesNow.current;
+    if (setUpScenes(current) && !window.confirm(`Replace the ${current.length === 1 ? "current scene" : `current ${current.length} scenes`} with ${kept.length === 1 ? "the slide" : `the ${kept.length} slides`} of ${file.name}?`)) return;
+    const { scripts, truncated } = slideScripts(kept.map((sl) => sl.notes || sl.text));
+    const background = current[0].background;
+    setScenes(scripts.map((script) => newScene(script, background)));
+    setActiveIdx(0);
+    const base = file.name.replace(/\.pptx$/i, "").slice(0, 60) || "Slides";
+    setTitle((t) => (!t.trim() || t === "Untitled video" ? base : t));
+    const fromText = kept.filter((sl) => !sl.notes).length;
+    const blank = scripts.filter((sc) => !sc.trim()).length;
+    const hidden = slides.length - shown.length;
+    setImportNote(
+      [
+        `Imported ${kept.length === 1 ? "1 slide" : `${kept.length} slides`} of ${file.name} as scenes, each scripted from its speaker notes`,
+        fromText > blank ? `; ${fromText - blank === 1 ? "1 slide has" : `${fromText - blank} slides have`} no notes, so its text is the script` : "",
+        hidden ? `; ${hidden === 1 ? "1 hidden slide was" : `${hidden} hidden slides were`} left out` : "",
+        shown.length > kept.length ? `; a video holds ${MAX_SCENES} scenes, so the last ${shown.length - kept.length} slides were left out` : "",
+        truncated ? `; the notes were shortened to fit ${MAX_SCRIPT_CHARS} characters of script` : "",
+        blank ? `; ${blank === 1 ? "1 slide has" : `${blank} slides have`} no notes or text, so write what the presenter says there` : "",
+        ". To show each slide behind the presenter, choose the deck saved as PDF together with the .pptx.",
+      ].join(""),
+    );
+  }
+  /**
    * Replaces the scenes with a slide deck saved as PDF, like HeyGen's PDF import: each page (up to the scene limit)
    * becomes a scene with the page as its uploaded background image and the page's text as a first draft of the
-   * script, and the format follows the first page's shape. Pages are drawn and uploaded one at a time.
+   * script, and the format follows the first page's shape. Pages are drawn and uploaded one at a time. With the
+   * deck's PowerPoint slides, each page's script is its slide's speaker notes instead, where it has any.
    */
-  async function importSlides(file: File | undefined) {
-    if (!file || slidesProgress) return;
-    if (file.size > MAX_PDF_BYTES) return setImportNote(`${file.name} is larger than ${MAX_PDF_BYTES / 1_000_000} MB; save the deck as a smaller PDF.`);
-    const setUp = (list: Scene[]) => list.length > 1 || list.some((sc) => sc.script.trim() || sc.audioId || sc.avatarId || sc.voiceId || sc.layout);
+  async function importSlides(file: File, deck?: { name: string; slides: PptxSlide[] }) {
+    if (file.size > MAX_PDF_BYTES) {
+      setSlidesProgress(null);
+      return setImportNote(`${file.name} is larger than ${MAX_PDF_BYTES / 1_000_000} MB; save the deck as a smaller PDF.`);
+    }
     // Snapshots taken once the user has agreed, to tell whether the scenes or the format were changed during the import.
     let before = scenesNow.current;
     let aspectBefore = aspectNow.current;
@@ -258,7 +340,7 @@ function CreateInner() {
             throw new Error(`${file.name} needs ${count} background images, and ${room <= 0 ? "none are" : `only ${room} ${room === 1 ? "is" : "are"}`} left of the ${MAX_BACKDROPS} an account keeps; delete some under Background → Your images`);
           }
           const current = scenesNow.current;
-          if (setUp(current) && !window.confirm(`Replace the ${current.length === 1 ? "current scene" : `current ${current.length} scenes`} with ${count === 1 ? "the page" : `the ${count} pages`} of ${file.name}?`)) {
+          if (setUpScenes(current) && !window.confirm(`Replace the ${current.length === 1 ? "current scene" : `current ${current.length} scenes`} with ${count === 1 ? "the page" : `the ${count} pages`} of ${file.name}?`)) {
             throw new ImportCancelled();
           }
           before = scenesNow.current;
@@ -273,10 +355,12 @@ function CreateInner() {
       });
       if (!count) return setImportNote(`${file.name} has no pages.`);
       // Scenes edited while the deck was importing are not replaced without asking again.
-      if (scenesNow.current !== before && setUp(scenesNow.current) && !window.confirm(`The scenes changed while ${file.name} was importing. Replace them with its pages anyway?`)) {
+      if (scenesNow.current !== before && setUpScenes(scenesNow.current) && !window.confirm(`The scenes changed while ${file.name} was importing. Replace them with its pages anyway?`)) {
         return setImportNote(`The ${count} pages of ${file.name} are under Background → Your images; the scenes were left as they are.`);
       }
-      const { scripts, truncated } = slideScripts(texts);
+      const paired = deck ? slidesForPages(deck.slides, total) : undefined;
+      const notes = paired ? texts.map((_, i) => paired.slides[i]?.notes ?? "") : [];
+      const { scripts, truncated } = slideScripts(texts.map((text, i) => notes[i] || text));
       // The new images join the list in the same update as the scenes, so the check for scenes naming an image that
       // is gone never sees one without the other.
       setBackdropData((d) => ({ backdrops: [...[...made].reverse(), ...(d?.backdrops ?? []).filter((b) => !made.some((m) => m.id === b.id))] }));
@@ -286,12 +370,17 @@ function CreateInner() {
       if (aspectNow.current === aspectBefore) setAspect(deckAspect);
       setTitle((t) => (!t.trim() || t === "Untitled video" ? base : t));
       const blank = scripts.filter((sc) => !sc.trim()).length;
+      const fromText = deck ? texts.filter((text, i) => !notes[i] && text.trim()).length : 0;
       setImportNote(
         [
-          `Imported ${count === 1 ? "1 page" : `${count} pages`} of ${file.name} as scenes, each page behind the presenter and its text as the script to edit`,
+          deck
+            ? `Imported ${count === 1 ? "1 page" : `${count} pages`} of ${file.name} as scenes, each page behind the presenter and the speaker notes from ${deck.name} as the script to edit`
+            : `Imported ${count === 1 ? "1 page" : `${count} pages`} of ${file.name} as scenes, each page behind the presenter and its text as the script to edit`,
+          paired && !paired.matches ? `; ${deck!.name} has ${paired.slides.length === 1 ? "1 slide" : `${paired.slides.length} slides`} shown and ${file.name} ${total === 1 ? "1 page" : `${total} pages`}, so the notes were matched in order and may be off; check each scene's script` : "",
+          fromText ? `; ${fromText === 1 ? "1 page has" : `${fromText} pages have`} no notes, so its text is the script` : "",
           total > count ? `; a video holds ${MAX_SCENES} scenes, so the last ${total - count} of ${total} pages were left out` : "",
-          truncated ? `; the page text was shortened to fit ${MAX_SCRIPT_CHARS} characters of script` : "",
-          blank ? `; ${blank === 1 ? "1 page has" : `${blank} pages have`} no text, so write what the presenter says there` : "",
+          truncated ? `; the ${deck ? "script" : "page text"} was shortened to fit ${MAX_SCRIPT_CHARS} characters of script` : "",
+          blank ? `; ${blank === 1 ? "1 page has" : `${blank} pages have`} no ${deck ? "notes or text" : "text"}, so write what the presenter says there` : "",
           ".",
         ].join(""),
       );
@@ -790,7 +879,7 @@ function CreateInner() {
                 type="button"
                 onClick={() => slidesInput.current?.click()}
                 disabled={canEdit !== true || !!slidesProgress}
-                title="Each page of a slide deck saved as PDF becomes a scene: the page behind the presenter, its text as the script"
+                title="Each slide becomes a scene. A PDF puts each page behind the presenter; a PowerPoint (.pptx) file gives each scene its speaker notes as the script. Choose both files of a deck for both."
                 className="inline-flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:border-brand-400 hover:text-brand-700 disabled:opacity-50"
               >
                 <ImageIcon className="h-3.5 w-3.5" /> {slidesProgress ?? "Import slides"}
@@ -798,11 +887,12 @@ function CreateInner() {
               <input
                 ref={slidesInput}
                 type="file"
-                accept=".pdf,application/pdf"
-                aria-label="Import slides from a PDF"
+                accept={`.pdf,.pptx,application/pdf,${PPTX_TYPE}`}
+                multiple
+                aria-label="Import slides from a PDF or PowerPoint file"
                 className="hidden"
                 onChange={(e) => {
-                  void importSlides(e.target.files?.[0]);
+                  void importDeck([...(e.target.files ?? [])]);
                   e.target.value = "";
                 }}
               />

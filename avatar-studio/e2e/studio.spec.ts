@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { AxeBuilder } from "@axe-core/playwright";
+import { strToU8, zipSync } from "fflate";
 import { parseCsv } from "../src/lib/csv";
 
 // Demo-mode flows. The mock renderer completes ~12s after submission.
@@ -1166,6 +1167,60 @@ test("a slide deck as PDF becomes one scene per page, each page behind the prese
   page.once("dialog", (d) => d.accept());
   await page.getByLabel("Import slides from a PDF").setInputFiles({ name: "notes.pdf", mimeType: "application/pdf", buffer: Buffer.from("not a pdf") });
   await expect(page.getByTestId("import-note")).toContainText("could not be read as a PDF", { timeout: 30_000 });
+});
+
+/** A minimal PowerPoint deck: each slide's title and, optionally, its speaker notes and whether it is hidden. */
+function slidesPptx(slides: Array<{ title: string; notes?: string; hidden?: boolean }>): Buffer {
+  const ns = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
+  const rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+  const sp = (type: string, text: string) => `<p:sp><p:nvSpPr><p:cNvPr id="2" name="s"/><p:cNvSpPr/><p:nvPr><p:ph type="${type}"/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:p><a:r><a:t>${text}</a:t></a:r></a:p></p:txBody></p:sp>`;
+  const files: Record<string, Uint8Array> = {
+    "ppt/presentation.xml": strToU8(`<p:presentation ${ns}><p:sldIdLst>${slides.map((_, i) => `<p:sldId id="${256 + i}" r:id="rId${i + 1}"/>`).join("")}</p:sldIdLst></p:presentation>`),
+    "ppt/_rels/presentation.xml.rels": strToU8(`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${slides.map((_, i) => `<Relationship Id="rId${i + 1}" Type="${rel}/slide" Target="slides/slide${i + 1}.xml"/>`).join("")}</Relationships>`),
+  };
+  slides.forEach((s, i) => {
+    files[`ppt/slides/slide${i + 1}.xml`] = strToU8(`<p:sld ${ns}${s.hidden ? ' show="0"' : ""}><p:cSld><p:spTree>${sp("title", s.title)}</p:spTree></p:cSld></p:sld>`);
+    if (s.notes) {
+      files[`ppt/slides/_rels/slide${i + 1}.xml.rels`] = strToU8(`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${rel}/notesSlide" Target="../notesSlides/notesSlide${i + 1}.xml"/></Relationships>`);
+      files[`ppt/notesSlides/notesSlide${i + 1}.xml`] = strToU8(`<p:notes ${ns}><p:cSld><p:spTree>${sp("body", s.notes)}</p:spTree></p:cSld></p:notes>`);
+    }
+  });
+  return Buffer.from(zipSync(files));
+}
+
+test("a PowerPoint deck's speaker notes become the scripts, alone or with the deck saved as PDF", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const deck = slidesPptx([
+    { title: "Welcome aboard", notes: "Hi everyone, I&apos;m so glad you&apos;re here" },
+    { title: "Backup numbers", notes: "Skip this one", hidden: true },
+    { title: "Questions?" },
+  ]);
+  const pptx = { name: `kickoff-${tag}.pptx`, mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", buffer: deck };
+  // On its own: one scene per shown slide, scripted from its notes (its title where it has none).
+  await page.getByLabel("Import slides from a PDF or PowerPoint file").setInputFiles(pptx);
+  await expect(page.getByTestId("import-note")).toContainText("Imported 2 slides", { timeout: 30_000 });
+  await expect(page.getByTestId("import-note")).toContainText("1 hidden slide was left out");
+  await expect(page.getByTestId("import-note")).toContainText("1 slide has no notes, so its text is the script");
+  await expect(page.locator("textarea")).toHaveValue("Hi everyone, I'm so glad you're here.");
+  await expect(page.locator("input[placeholder='Video title']")).toHaveValue(`kickoff-${tag}`);
+  await page.getByRole("button", { name: /^Scene 2,/ }).click();
+  await expect(page.locator("textarea")).toHaveValue("Questions?");
+  // With the deck saved as PDF (which leaves the hidden slide out): the pages behind the presenter, the notes as scripts.
+  page.once("dialog", (d) => d.accept());
+  await page.getByLabel("Import slides from a PDF or PowerPoint file").setInputFiles([pptx, { name: `kickoff-${tag}.pdf`, mimeType: "application/pdf", buffer: slidesPdf([["Welcome aboard"], ["Questions?"]]) }]);
+  await expect(page.getByTestId("import-note")).toContainText(`Imported 2 pages of kickoff-${tag}.pdf as scenes, each page behind the presenter and the speaker notes from kickoff-${tag}.pptx`, { timeout: 30_000 });
+  await expect(page.getByTestId("import-note")).not.toContainText("may be off");
+  await expect(page.locator("textarea")).toHaveValue("Hi everyone, I'm so glad you're here.");
+  const { backdrops } = (await (await page.request.get("/api/backdrops")).json()) as { backdrops: Array<{ id: string; name: string }> };
+  const mine = backdrops.filter((b) => b.name.startsWith(`kickoff-${tag} – page`));
+  expect(mine).toHaveLength(2);
+  await expect(page.getByTestId("stage")).toHaveCSS("background-image", new RegExp(`/api/backdrops/${mine.find((b) => b.name.endsWith("page 1"))!.id}`));
+  for (const b of mine) expect((await page.request.delete(`/api/backdrops/${b.id}`)).status()).toBe(204);
+  // Two decks at once, or an old .ppt, are refused with a reason.
+  await page.getByLabel("Import slides from a PDF or PowerPoint file").setInputFiles([pptx, { ...pptx, name: "other.pptx" }]);
+  await expect(page.getByTestId("import-note")).toContainText("Choose one slide deck");
+  await page.getByLabel("Import slides from a PDF or PowerPoint file").setInputFiles({ ...pptx, name: "old.pptx", buffer: Buffer.from("not a zip") });
+  await expect(page.getByTestId("import-note")).toContainText("old.pptx could not be read as a PowerPoint (.pptx) file");
 });
 
 test("each space keeps its own draft, so a workspace never shows or spoils the personal one", async ({ page }) => {

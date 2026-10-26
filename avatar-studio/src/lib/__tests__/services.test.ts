@@ -54,7 +54,7 @@ import { parseCsv, toCsv } from "../csv";
 import { ANALYTICS_COLUMNS, analyticsRows, bumpViewsByDay, computeInsights, finishRateOf, viewsInLast, viewsPerDay } from "../insights";
 import { acceptInvite, canEdit, canManageAccount, createInvite, createWorkspace, deleteWorkspace, findInvite, inviteSchema, listWorkspaces, removeMember, revokeInvite, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
 import { roleArticle, roleCanEdit, roleSchema } from "../roles";
-import type { Video } from "../types";
+import { framingFor, isPhotoAvatar, type Video } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { MockEmailProvider, inviteEmail, setEmailProvider } from "../providers/email";
 import { forgetMemo, memo } from "../cache";
@@ -723,6 +723,9 @@ describe("scenes", () => {
     const photo = { ...ava, source: "custom" as const, providerAssetIds: { heygen: "tp_1" } };
     const photoStyle = (f?: "closeUp" | "circle") => (heygen as unknown as { character: (a: typeof photo, f?: string) => { talking_photo_style?: string } }).character(photo, f).talking_photo_style;
     assert.deepEqual([photoStyle(), photoStyle("closeUp"), photoStyle("circle")], ["square", "square", "circle"]);
+    // The editor and the stored video use the framing the presenter gets, so a photo's close-up is listed as its full frame.
+    assert.deepEqual([framingFor("closeUp", photo), framingFor("circle", photo), framingFor("closeUp", ava), framingFor(undefined, ava)], ["full", "circle", "closeUp", "full"]);
+    assert.equal(isPhotoAvatar({ tags: ["photo avatar"] }), true);
     assert.equal((await createVideo(videoRequestSchema.parse({ title: "Full", avatarId: "stock_1", voiceId: "stock_voice_1", scenes: [{ script: "Hi.", background: { type: "color", value: "#fff" }, layout: { scale: 1, x: 0, y: 0, framing: "full" } }] }))).scenes![0].layout, undefined);
     const circled = await createVideo(videoRequestSchema.parse({ title: "Circle", avatarId: "stock_1", voiceId: "stock_voice_1", scenes: [{ script: "Hi.", background: { type: "color", value: "#fff" }, layout: { scale: 1, x: 0, y: 0, framing: "circle" } }] }));
     assert.deepEqual(circled.scenes![0].layout, { scale: 1, x: 0, y: 0, framing: "circle" });

@@ -44,7 +44,8 @@ export default function BatchPage() {
   const [background, setBackground] = useState<Background | undefined>();
   const [startedFrom, setStartedFrom] = useState("");
   // A template's presenter and voice, held until both lists have loaded (a template can be picked first).
-  const [cast, setCast] = useState<{ avatarId?: string; voiceId?: string } | null>(null);
+  // Each holds the ids to try in order: the first scene's own, then the template's.
+  const [cast, setCast] = useState<{ avatarIds: string[]; voiceIds: string[] } | null>(null);
   const { data: templateData } = useApi<{ templates: VideoTemplate[] }>("/api/templates");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
@@ -61,8 +62,9 @@ export default function BatchPage() {
   // a voice that is gone gives way to the presenter's own default, a presenter that is gone keeps the choice.
   useEffect(() => {
     if (!cast || !avatarData || !voiceData) return;
-    const a = avatarData.avatars.find((x) => x.id === cast.avatarId);
-    const v = voiceData.voices.find((x) => x.id === cast.voiceId) ?? (a?.defaultVoiceId ? voiceData.voices.find((x) => x.id === a.defaultVoiceId) : undefined);
+    // A scene presenter that is gone gives way to the template's, as the editor does.
+    const a = cast.avatarIds.map((id) => avatarData.avatars.find((x) => x.id === id)).find(Boolean);
+    const v = cast.voiceIds.map((id) => voiceData.voices.find((x) => x.id === id)).find(Boolean) ?? (a?.defaultVoiceId ? voiceData.voices.find((x) => x.id === a.defaultVoiceId) : undefined);
     if (a) setAvatarId(a.id);
     if (v) setVoiceId(v.id);
     setCast(null);
@@ -92,11 +94,10 @@ export default function BatchPage() {
     }
     const script = t.scenes.map((sc) => sc.script.trim()).filter(Boolean).join("\n\n");
     setTemplate(script);
-    // Each template scene may hold 5000 characters; one batch script may hold 5000 in all.
-    if (script.length > MAX_BATCH_SCRIPT) setErr(`This template's scenes add up to ${script.length} characters; a batch script takes at most ${MAX_BATCH_SCRIPT}. Shorten it to generate.`);
     // The first scene's own presenter and voice lead, as they do in the editor; every row uses one cast.
     const first = t.scenes[0];
-    setCast({ avatarId: first?.avatarId ?? t.avatarId, voiceId: first?.voiceId ?? t.voiceId });
+    const ids = (...xs: Array<string | undefined>) => xs.filter((x): x is string => !!x);
+    setCast({ avatarIds: ids(first?.avatarId, t.avatarId), voiceIds: ids(first?.voiceId, t.voiceId) });
     setAspect(t.aspect);
     setResolution(t.resolution ?? "1080p");
     setCaptions(t.captions);
@@ -143,11 +144,13 @@ export default function BatchPage() {
       />
       {canEdit === false && <ViewOnlyNotice what="start batches" />}
       <ErrorBanner message={err} />
+      {/* Each template scene may hold 5000 characters; one batch script may hold 5000 in all. Shown while it is too long, gone once shortened. */}
+      <ErrorBanner message={template.length > MAX_BATCH_SCRIPT ? `The script is ${template.length} characters; a batch script takes at most ${MAX_BATCH_SCRIPT}. Shorten it to generate.` : null} />
       <div className="grid gap-6 xl:grid-cols-[1.1fr_1fr]">
         <div className="space-y-5">
           <Card className="space-y-4 p-4">
             {!!templateData?.templates.length && (
-              <Field label="Start from a saved template" hint="Fills in its script and settings; scenes become paragraphs of one script, spoken by the first scene's presenter and voice over its background.">
+              <Field label="Start from a saved template" hint="Fills in its script and settings; scenes become paragraphs of one script, spoken by the first scene's presenter and voice over its background; scene layouts are not used.">
                 <select className={inputClass} value={startedFrom} onChange={(e) => startFrom(e.target.value)} aria-label="Start from a saved template">
                   <option value="">None</option>
                   {templateData.templates.map((t) => (

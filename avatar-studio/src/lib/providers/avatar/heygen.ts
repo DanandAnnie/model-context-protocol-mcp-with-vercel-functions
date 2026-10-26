@@ -1,4 +1,4 @@
-import { dimensionsFor, type AudioClip, type Avatar, type PresenterFraming, type Scene, type VideoRequest, type Voice } from "../../types";
+import { dimensionsFor, type AudioClip, type Avatar, framingFor, type PresenterFraming, type Scene, type VideoRequest, type Voice } from "../../types";
 import { withBreakTags } from "../../pauses";
 import { heygenBurnsCaptions } from "../../captions";
 import { webhookUrl } from "../../config";
@@ -92,7 +92,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     const photoId = avatar.source === "custom" ? avatar.providerAssetIds?.[this.name] : avatar.tags?.includes("photo avatar") ? avatar.id : undefined;
     if (avatar.source === "custom" && !photoId) throw new Error(`Custom avatar "${avatar.name}" has not been uploaded to HeyGen yet.`);
     return photoId
-      ? { type: "talking_photo", talking_photo_id: photoId, talking_photo_style: framing === "circle" ? "circle" : "square" }
+      ? { type: "talking_photo", talking_photo_id: photoId, talking_photo_style: framingFor(framing, avatar) === "circle" ? "circle" : "square" }
       : { type: "avatar", avatar_id: avatar.id, avatar_style: framing === "closeUp" ? "closeUp" : framing === "circle" ? "circle" : "normal" };
   }
 

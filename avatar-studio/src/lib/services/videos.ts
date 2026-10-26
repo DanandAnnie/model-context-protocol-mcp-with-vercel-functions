@@ -3,7 +3,7 @@ import { z } from "zod";
 import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import { getStore } from "../store";
-import { EMPTY_WATCH, MAX_SCENES, TRASH_RETENTION_DAYS, isDefaultCaptionStyle, isDefaultLayout } from "../types";
+import { EMPTY_WATCH, MAX_SCENES, TRASH_RETENTION_DAYS, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
 import type { AudioClip, Avatar, CaptionCue, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
 import { buildCues } from "../captions";
 import { wellFormed } from "../text";
@@ -145,10 +145,13 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
   // Scenes keep the names of their own presenter and voice for the library and detail page.
   const scenes = req.scenes?.map((sc) => {
     const clip = sc.audioId ? cast.clips?.[sc.audioId] : undefined;
+    // A framing is stored as the presenter gets it (a photo avatar's close-up is its full frame), so the page lists what renders.
+    const framing = sc.layout ? framingFor(sc.layout.framing, (sc.avatarId && cast.avatars[sc.avatarId]) || avatar) : undefined;
+    const layout = sc.layout ? { scale: sc.layout.scale, x: sc.layout.x, y: sc.layout.y, ...(framing && framing !== "full" ? { framing } : {}) } : undefined;
     return stripUndefined({
       ...sc,
       // The renderer's default layout is stored as absent whichever client sent it, so the page and the provider see no customisation.
-      layout: sc.layout && !isDefaultLayout(sc.layout) ? sc.layout : undefined,
+      layout: layout && !isDefaultLayout(layout) ? layout : undefined,
       avatarName: sc.avatarId ? cast.avatars[sc.avatarId]?.name : undefined,
       // An audio scene has no voice of its own: the clip speaks.
       voiceId: clip ? undefined : sc.voiceId,

@@ -16,7 +16,7 @@ import { languageLabel } from "@/lib/language";
 import { stripPauses } from "@/lib/pauses";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
-import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, PRESENTER_FRAMINGS, RESOLUTIONS, isDefaultCaptionStyle as isDefaultCaptionStyleFn, isDefaultLayout, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS } from "@/lib/types";
+import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, PRESENTER_FRAMINGS, RESOLUTIONS, isDefaultCaptionStyle as isDefaultCaptionStyleFn, framingFor, isDefaultLayout, isPhotoAvatar, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -71,6 +71,14 @@ const CAPTION_FONT_STACKS: Record<CaptionFont, string> = {
   serif: 'Georgia, "Times New Roman", serif',
   rounded: 'ui-rounded, "SF Pro Rounded", "Arial Rounded MT Bold", "Nunito", system-ui, sans-serif',
   mono: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
+};
+/** A scene layout from a draft another build saved: a framing this build does not offer is dropped and the size and offset kept in bounds. */
+const clamp = (v: unknown, lo: number, hi: number, fallback: number) => (typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback);
+const restoredLayout = (l: SceneLayout | undefined): SceneLayout | undefined => {
+  if (!l) return undefined;
+  const framing = l.framing && PRESENTER_FRAMINGS.includes(l.framing) && l.framing !== "full" ? l.framing : undefined;
+  const out: SceneLayout = { scale: clamp(l.scale, 0.5, 1.5, 1), x: clamp(l.x, -1, 1, 0), y: clamp(l.y, -1, 1, 0), ...(framing ? { framing } : {}) };
+  return isDefaultLayout(out) ? undefined : out;
 };
 /** A caption style from a draft an older build saved: any value this build does not offer falls back to the default. */
 const restoredCaptionStyle = (s: CaptionStyle): CaptionStyle =>
@@ -150,7 +158,6 @@ function CreateInner() {
   }
   const setBackground = (value: Background) => updateScene(activeIdx, { background: value });
   const layout: SceneLayout = active.layout ?? DEFAULT_LAYOUT;
-  const framing: PresenterFraming = layout.framing ?? "full";
   // The default layout is stored as absent, so an untouched scene renders exactly as before.
   const setLayout = (value: SceneLayout) => updateScene(activeIdx, { layout: isDefaultLayout(value) ? undefined : value });
   function updateScene(idx: number, patch: Partial<Scene>) {
@@ -193,6 +200,9 @@ function CreateInner() {
   }
   // A scene may name its own presenter and voice; otherwise it uses the video's.
   const sceneAvatar = (active.avatarId && avatarData?.avatars.find((a) => a.id === active.avatarId)) || avatar;
+  // What the scene's presenter will get: a photo avatar has no close-up, so it is previewed and listed in full.
+  const framing: PresenterFraming = framingFor(layout.framing, sceneAvatar ?? undefined);
+  const photoPresenter = !!sceneAvatar && isPhotoAvatar(sceneAvatar);
   const sceneVoice = (active.voiceId && voiceData?.voices.find((v) => v.id === active.voiceId)) || voice;
   // Voices the video speaks with (its own and each spoken scene's), and those HeyGen says take no emotion.
   const spokenVoices = [...new Set(scenes.filter((sc) => !sc.audioId).map((sc) => (sc.voiceId && voiceData?.voices.find((v) => v.id === sc.voiceId)) || voice))].filter((v): v is Voice => !!v);
@@ -270,7 +280,7 @@ function CreateInner() {
     const d = readDraft();
     if (!d) return;
     setTitle(d.title);
-    setScenes(d.scenes.map((sc) => newScene(sc.script, sc.background, sc)));
+    setScenes(d.scenes.map((sc) => newScene(sc.script, sc.background, { ...sc, layout: restoredLayout(sc.layout) })));
     setActiveIdx(0);
     setAspect(d.aspect);
     setResolution(d.resolution ?? "1080p");
@@ -629,8 +639,10 @@ function CreateInner() {
                     key={f}
                     type="button"
                     aria-pressed={framing === f}
+                    disabled={f === "closeUp" && photoPresenter}
+                    title={f === "closeUp" && photoPresenter ? "A photo avatar has no close-up" : undefined}
                     onClick={() => setLayout({ ...layout, framing: f })}
-                    className={`rounded-md border px-2 py-1 ${framing === f ? "border-brand-600 bg-brand-50 text-brand-700" : "border-slate-200 bg-white hover:border-slate-300"}`}
+                    className={`rounded-md border px-2 py-1 ${framing === f ? "border-brand-600 bg-brand-50 text-brand-700" : "border-slate-200 bg-white hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-50"}`}
                   >
                     {FRAMING_LABELS[f]}
                   </button>

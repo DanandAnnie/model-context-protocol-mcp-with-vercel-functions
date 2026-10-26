@@ -113,6 +113,13 @@ export interface SceneLayout {
   framing?: PresenterFraming;
 }
 
+/** A presenter made from a photo (an uploaded portrait or a provider photo avatar): HeyGen frames it square or in a circle, never close up. */
+export const isPhotoAvatar = (a: { source?: string; tags?: string[] }) => a.source === "custom" || !!a.tags?.includes("photo avatar");
+
+/** The framing a presenter actually gets: a photo avatar's close-up shows its full frame. */
+export const framingFor = (framing: PresenterFraming | undefined, avatar?: { source?: string; tags?: string[] }): PresenterFraming =>
+  framing === "closeUp" && avatar && isPhotoAvatar(avatar) ? "full" : (framing ?? "full");
+
 /** True when a layout is the renderer's default and need not be stored. */
 export const isDefaultLayout = (l: SceneLayout) => l.scale === 1 && l.x === 0 && l.y === 0 && (l.framing ?? "full") === "full";
 

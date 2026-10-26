@@ -27,17 +27,21 @@ export const sceneLayoutSchema = z
 /** A scene's on-screen text; see `SceneText`. One line, its spaces collapsed; the default place, size, and colour are stored as absent. */
 export const sceneTextSchema = z
   .object({
-    text: z.string().max(MAX_SCENE_TEXT * 2),
+    // Measured once its spaces are collapsed, as it is stored and shown.
+    text: z
+      .string()
+      .max(5000)
+      .transform((t) => t.replace(/\s+/g, " ").trim())
+      .pipe(z.string().max(MAX_SCENE_TEXT, `On-screen text must be ${MAX_SCENE_TEXT} characters or fewer`)),
     position: z.enum(SCENE_TEXT_POSITIONS).optional(),
     size: z.enum(SCENE_TEXT_SIZES).optional(),
     color: z.string().regex(/^#[0-9a-fA-F]{6}$/, "A text colour must be a hex colour such as #ffffff").optional(),
   })
   .transform(({ text, position, size, color }) => ({
-    text: text.replace(/\s+/g, " ").trim(),
+    text,
     ...(position && position !== "top" ? { position } : {}),
     ...(size && size !== "medium" ? { size } : {}),
     ...(color && color.toLowerCase() !== "#ffffff" ? { color: color.toLowerCase() } : {}),
   }))
-  .refine((t) => t.text.length <= MAX_SCENE_TEXT, `On-screen text must be ${MAX_SCENE_TEXT} characters or fewer`)
   // Blank text is no text, so a cleared field is stored as absent.
   .transform((t) => (t.text ? t : undefined));

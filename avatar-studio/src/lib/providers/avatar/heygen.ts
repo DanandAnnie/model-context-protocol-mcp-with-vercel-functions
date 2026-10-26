@@ -83,9 +83,9 @@ export class HeyGenAvatarProvider implements AvatarProvider {
             : silentSeconds(scene.script)
               ? { type: "silence", duration: Math.max(1, silentSeconds(scene.script)) }
               : { type: "text", input_text: withBreakTags(scene.script), voice_id: this.voiceId(sceneVoice, req.voiceId), speed: scene.speed ?? req.speed, ...(req.pitch ? { pitch: req.pitch } : {}), ...(req.emotion && sceneVoice?.emotionSupport !== false ? { emotion: req.emotion } : {}) },
-          // A video background loops for the length of the scene, filling the frame unless the scene shows all of it.
           // On-screen text sits over the scene for its whole length.
           ...(scene.overlay ? { text: sceneText(scene.overlay, dimensionsFor(req.aspect, req.resolution)) } : {}),
+          // A video background loops for the length of the scene, filling the frame unless the scene shows all of it.
           background:
             scene.background.type === "video"
               ? { type: "video", url: scene.background.value, play_style: "loop", fit: scene.background.fit ?? "cover" }

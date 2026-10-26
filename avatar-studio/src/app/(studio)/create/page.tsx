@@ -1,6 +1,6 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Captions, ChevronLeft, ChevronRight, Clapperboard, Copy, Image as ImageIcon, Layers, Mic2, Palette, Pause, Play, Plus, Replace, Sparkles, Square, Trash2, Upload, Users, Wand2, X } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { VoiceRow } from "@/components/VoicePicker";
@@ -23,7 +23,7 @@ import { readDocx } from "@/lib/docx-text";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
 import { takeAgentDraft, type AgentDraft } from "@/lib/agent-draft";
-import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, framingFor, isDefaultLayout, isPhotoAvatar, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS } from "@/lib/types";
+import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, framingFor, isDefaultLayout, isPhotoAvatar, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -87,8 +87,10 @@ const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingm
 /** A Word file larger than this is refused before it is unpacked (its pictures count, though only its text is read). */
 const MAX_DOCX_BYTES = 50_000_000;
 
-/** Whether the scenes hold anything worth asking about before they are replaced: a script, a clip, a presenter, a layout, or more than one scene. */
-const setUpScenes = (list: Scene[]) => list.length > 1 || list.some((sc) => sc.script.trim() || sc.audioId || sc.avatarId || sc.voiceId || sc.layout);
+/** Whether the scenes hold anything worth asking about before they are replaced: a script, a clip, a presenter, a layout, on-screen text, or more than one scene. */
+const setUpScenes = (list: Scene[]) => list.length > 1 || list.some((sc) => sc.script.trim() || sc.audioId || sc.avatarId || sc.voiceId || sc.layout || sc.overlay?.text.trim());
+/** Whether a scene holds anything a draft should keep: a script or on-screen text. */
+const hasContent = (sc: Scene) => !!(sc.script.trim() || sc.overlay?.text.trim());
 
 /**
  * The PowerPoint slides that match a PDF of the same deck page for page. PowerPoint leaves hidden slides out when it
@@ -490,7 +492,8 @@ function CreateInner() {
         const dropAudio = !!sc.audioId && !!clipIds && !clipIds.has(sc.audioId);
         if (!dropAvatar && !dropVoice && !dropAudio) return sc;
         changed = true;
-        return newScene(sc.script, sc.background, { avatarId: dropAvatar ? undefined : sc.avatarId, voiceId: dropVoice ? undefined : sc.voiceId, layout: sc.layout, audioId: dropAudio ? undefined : sc.audioId, speed: sc.speed });
+        // Everything else the scene holds is kept: only the missing presenter, voice, or clip goes.
+        return newScene(sc.script, sc.background, { ...sc, avatarId: dropAvatar ? undefined : sc.avatarId, voiceId: dropVoice ? undefined : sc.voiceId, audioId: dropAudio ? undefined : sc.audioId });
       });
       return changed ? next : prev;
     });
@@ -609,7 +612,7 @@ function CreateInner() {
       }
     }
     // Nothing to restore without the space's key, or over words typed while the space was being looked up.
-    if (!editKey || scenesNow.current.some((sc) => sc.script.trim())) return;
+    if (!editKey || scenesNow.current.some(hasContent)) return;
     const d = readDraft(editKey);
     if (!d) return;
     setTitle(d.title);
@@ -631,7 +634,7 @@ function CreateInner() {
   // Autosave the editor state (debounced) so a refresh never loses work.
   useEffect(() => {
     if (!hydrated.current || !editKey) return;
-    const empty = scenes.every((sc) => !sc.script.trim()) && title === "Untitled video";
+    const empty = !scenes.some(hasContent) && title === "Untitled video";
     const t = setTimeout(() => {
       writeDraft(editKey, empty ? null : { title, scenes, aspect, resolution, captions, ...(isDefaultCaptionStyle ? {} : { captionStyle }), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
     }, 400);
@@ -796,7 +799,8 @@ function CreateInner() {
   const scriptChars = scenes.map((sc) => sc.script.trim()).join("\n\n").length;
   const scriptTooLong = scriptChars > MAX_SCRIPT_CHARS;
   // A template's {placeholders} left in a script would be read out as they are.
-  const unfilled = [...new Set(scenes.flatMap((sc) => sc.script.match(/\{[\p{L}_][\p{L}\p{N}_ -]{0,39}\}/gu) ?? []))];
+  // On-screen text is drawn as it is, so a placeholder there is checked too.
+  const unfilled = [...new Set(scenes.flatMap((sc) => [sc.script, sc.overlay?.text ?? ""].flatMap((t) => t.match(/\{[\p{L}_][\p{L}\p{N}_ -]{0,39}\}/gu) ?? [])))];
   const canEdit = useCanEdit();
   const canGenerate = canEdit !== false && !!avatar && !!voice && allScenesFilled && !silentIssue && !scriptTooLong && title.trim().length > 0 && !submitting;
 
@@ -908,10 +912,11 @@ function CreateInner() {
                 <div
                   data-testid="stage-text"
                   data-position={active.overlay.position ?? "top"}
-                  className="pointer-events-none absolute left-1/2 w-[90%] -translate-x-1/2 -translate-y-1/2 whitespace-pre-wrap break-words text-center font-bold leading-tight [text-shadow:0_1px_3px_rgba(0,0,0,0.6)]"
+                  // One line, as the renderer draws it: text too long for the frame runs off it here too, and the editor says so.
+                  className="pointer-events-none absolute left-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap text-center font-bold leading-tight [text-shadow:0_1px_3px_rgba(0,0,0,0.6)]"
                   style={{ top: `${SCENE_TEXT_Y[active.overlay.position ?? "top"] * 100}%`, fontSize: `${SCENE_TEXT_SCALE[active.overlay.size ?? "medium"] * 100}cqmin`, color: active.overlay.color ?? "#ffffff", fontFamily: "Arial, Helvetica, sans-serif" }}
                 >
-                  {active.overlay.text.trim()}
+                  {active.overlay.text.replace(/\s+/g, " ").trim()}
                 </div>
               )}
               {captions && stripPauses(active.script).trim() && (
@@ -925,7 +930,7 @@ function CreateInner() {
                   {stripPauses(active.script).trim().split(/(?<=[.!?])\s+/)[0].slice(0, 90)}
                 </div>
               )}
-              <span className={`absolute left-3 ${captions && captionStyle.position === "top" ? "bottom-3" : "top-3"} rounded px-2 py-0.5 text-[11px] font-medium ${bgIsDark ? "bg-white/15 text-white" : "bg-black/10 text-slate-800"}`}>
+              <span className={`absolute left-3 ${(captions && captionStyle.position === "top") || (active.overlay?.text.trim() && (active.overlay.position ?? "top") === "top") ? "bottom-3" : "top-3"} rounded px-2 py-0.5 text-[11px] font-medium ${bgIsDark ? "bg-white/15 text-white" : "bg-black/10 text-slate-800"}`}>
                 {aspect} preview{scenes.length > 1 ? ` · scene ${activeIdx + 1}` : ""}
               </span>
             </div>
@@ -1294,6 +1299,8 @@ function CreateInner() {
             <SceneTextFields
               key={`text-${activeIdx}`}
               overlay={active.overlay}
+              aspect={aspect}
+              captionsAt={captions ? captionStyle.position : undefined}
               scene={scenes.length > 1 ? activeIdx + 1 : undefined}
               disabled={canEdit === false}
               onChange={(overlay) => updateScene(activeIdx, { overlay })}
@@ -1671,7 +1678,7 @@ function FindReplace({
       }}
     >
       <div className="grid gap-2 sm:grid-cols-2">
-        <input ref={inputRef} aria-label="Find" placeholder="Find in every scene" value={find} onChange={(e) => onChange({ find: e.target.value })} className={inputClass} maxLength={200} />
+        <input ref={inputRef} aria-label="Find" placeholder="Find in every scene's script" value={find} onChange={(e) => onChange({ find: e.target.value })} className={inputClass} maxLength={200} />
         <input
           aria-label="Replace with"
           placeholder="Replace with"
@@ -1715,19 +1722,23 @@ function FindReplace({
 }
 
 /** A scene's on-screen text: what it says, and where, how large, and in what colour it shows. Cleared text removes it. */
-function SceneTextFields({ overlay, scene, disabled, onChange }: { overlay?: SceneText; scene?: number; disabled: boolean; onChange: (overlay: SceneText | undefined) => void }) {
+function SceneTextFields({ overlay, aspect, captionsAt, scene, disabled, onChange }: { overlay?: SceneText; aspect: AspectRatio; captionsAt?: CaptionStyle["position"]; scene?: number; disabled: boolean; onChange: (overlay: SceneText | undefined) => void }) {
+  const id = useId();
   const text = overlay?.text ?? "";
+  const shown = text.replace(/\s+/g, " ").trim();
+  const position = overlay?.position ?? "top";
   const set = (patch: Partial<SceneText>) => {
     const next = { ...overlay, text, ...patch };
     onChange(next.text ? restoredOverlay(next) ?? { text: next.text } : undefined);
   };
   return (
     <div className="mt-3 space-y-2">
-      <label className="block text-xs font-medium text-slate-600" htmlFor="scene-text">
+      <label className="block text-xs font-medium text-slate-600" htmlFor={id}>
         On-screen text{scene ? ` for scene ${scene}` : ""} <span className="font-normal text-slate-400">(optional: a title, a name and role, a price)</span>
       </label>
       <input
-        id="scene-text"
+        id={id}
+        aria-describedby={shown ? `${id}-notes` : undefined}
         className={inputClass}
         value={text}
         maxLength={MAX_SCENE_TEXT}
@@ -1751,7 +1762,17 @@ function SceneTextFields({ overlay, scene, disabled, onChange }: { overlay?: Sce
             Colour
             <input type="color" aria-label="Text colour" disabled={disabled} value={overlay?.color ?? "#ffffff"} onChange={(e) => set({ color: e.target.value })} className="h-8 w-10 cursor-pointer rounded border border-slate-200 bg-white p-0.5" />
           </label>
-          <span className="text-xs text-slate-400">{text.length}/{MAX_SCENE_TEXT}</span>
+        </div>
+      )}
+      {shown && (
+        <div id={`${id}-notes`} className="space-y-1 text-xs">
+          <p className="text-slate-400">{Array.from(shown).length}/{MAX_SCENE_TEXT} characters, shown on one line</p>
+          {!sceneTextFits({ ...overlay, text: shown }, aspect) && (
+            <p role="alert" className="font-medium text-amber-700">Too long for one line across a {aspect} frame at this size: shorten it or choose a smaller size, or it runs off the edges.</p>
+          )}
+          {captionsAt && position === captionsAt && (
+            <p className="text-amber-700">Captions sit at the {captionsAt} too and may cover this text; move one of them.</p>
+          )}
         </div>
       )}
     </div>

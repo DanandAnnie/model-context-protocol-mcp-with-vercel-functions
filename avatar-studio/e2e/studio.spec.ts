@@ -2545,6 +2545,33 @@ test("a scene can show text on screen, placed, sized, and coloured, and a copy k
   await expect(page.getByTestId("stage-text")).toHaveAttribute("data-position", "bottom");
 });
 
+test("on-screen text survives a reload, a voice that is gone, and warns when it will not fit one line", async ({ page }) => {
+  // Text typed before any script is a draft worth keeping.
+  await page.getByLabel("On-screen text").fill("Coming soon");
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("avatar-studio:draft") ?? "{}").scenes?.[0]?.overlay?.text)).toBe("Coming soon");
+  // A scene whose own voice no longer exists loses the voice, not its text.
+  await page.evaluate(() => {
+    const d = JSON.parse(localStorage.getItem("avatar-studio:draft") ?? "{}");
+    d.scenes = [{ script: "Welcome.", background: { type: "color", value: "#0f172a" }, voiceId: "voice_gone", overlay: { text: "12   Maple Street", position: "bottom" } }];
+    localStorage.setItem("avatar-studio:draft", JSON.stringify(d));
+  });
+  await page.reload();
+  await expect(page.getByLabel("On-screen text")).toHaveValue("12   Maple Street");
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("avatar-studio:draft") ?? "{}").scenes?.[0]?.voiceId ?? null)).toBeNull();
+  await expect(page.getByLabel("On-screen text")).toHaveValue("12   Maple Street");
+  // The stage shows it as it renders: spaces collapsed, on one line.
+  await expect(page.getByTestId("stage-text")).toHaveText("12 Maple Street");
+  await expect(page.getByText("Too long for one line")).toHaveCount(0);
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("button", { name: /^9:16/ }).click();
+  await page.getByLabel("Text size").selectOption("large");
+  await page.getByLabel("On-screen text").fill("Dana Lee, Listing agent at Maple Realty");
+  await expect(page.getByText(/Too long for one line across a 9:16 frame/)).toBeVisible();
+  await page.getByLabel("Text size").selectOption("small");
+  await page.getByLabel("On-screen text").fill("Dana Lee, Listing agent");
+  await expect(page.getByText("Too long for one line")).toHaveCount(0);
+});
+
 test("a dub can be voice only and name its speakers", async ({ page }) => {
   const tag = Date.now().toString(36);
   await page.goto("/translate");

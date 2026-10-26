@@ -6,6 +6,7 @@ import { MemoryStore } from "../store/memory";
 import { createTemplate, createVideo, templateInputSchema, videoRequestSchema } from "../services";
 import { sceneTextSchema } from "../services/schemas";
 import { sceneText } from "../providers/avatar/heygen";
+import { sceneTextFits } from "../types";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 
 beforeEach(() => {
@@ -18,8 +19,17 @@ describe("scene text", () => {
     assert.deepEqual(sceneTextSchema.parse({ text: "$450,000", position: "bottom", size: "large", color: "#FACC15" }), { text: "$450,000", position: "bottom", size: "large", color: "#facc15" });
     assert.equal(sceneTextSchema.parse({ text: "   ", position: "center" }), undefined);
     assert.throws(() => sceneTextSchema.parse({ text: "x".repeat(121) }), /120 characters/);
+    // The length is the text's once its spaces are collapsed, as stored.
+    assert.deepEqual(sceneTextSchema.parse({ text: `a${" ".repeat(300)}b` }), { text: "a b" });
     assert.throws(() => sceneTextSchema.parse({ text: "Hi", color: "red" }), /hex colour/);
     assert.throws(() => sceneTextSchema.parse({ text: "Hi", position: "left" }));
+  });
+
+  it("knows when a line is too long for the frame at its size", () => {
+    assert.equal(sceneTextFits({ text: "Dana Lee, Listing agent" }, "16:9"), true);
+    assert.equal(sceneTextFits({ text: "Dana Lee, Listing agent", size: "large" }, "9:16"), false);
+    assert.equal(sceneTextFits({ text: "Dana Lee, Listing agent", size: "small" }, "9:16"), true);
+    assert.equal(sceneTextFits({ text: "x".repeat(120), size: "small" }, "16:9"), false);
   });
 
   it("is stored on its scene, kept by a template, and sent to HeyGen placed in the frame", async () => {

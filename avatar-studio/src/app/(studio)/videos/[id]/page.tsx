@@ -1049,7 +1049,14 @@ export default function VideoDetailPage() {
                     ))}
                   </ol>
                 ) : (
-                  <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{video.script}</p>
+                  <>
+                    {video.scenes?.[0]?.overlay && (
+                      <p className="mt-2 text-xs text-slate-500">
+                        On-screen text “{video.scenes[0].overlay.text}”{video.provider !== "heygen" ? " (not applied by this renderer)" : ""}
+                      </p>
+                    )}
+                    <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{video.script}</p>
+                  </>
                 )}
               </Card>
               <ReviewPanel video={video} onChange={(next) => setData({ video: next })} />

@@ -143,6 +143,17 @@ export type SceneTextSize = (typeof SCENE_TEXT_SIZES)[number];
 export const SCENE_TEXT_Y: Record<SceneTextPosition, number> = { top: 0.12, center: 0.5, bottom: 0.82 };
 /** Text height as a share of the frame's shorter side, so a portrait video gets the same size of text as a wide one. */
 export const SCENE_TEXT_SCALE: Record<SceneTextSize, number> = { small: 0.045, medium: 0.065, large: 0.09 };
+/** Characters of bold Arial per em, on average: a little wide, so a line judged to fit does. */
+const TEXT_EM_PER_CHAR = 0.62;
+/**
+ * Whether a scene's text fits on one line across 90% of the frame. The renderer draws one line and does not wrap it,
+ * so text that does not fit runs off the frame; the editor warns before that happens.
+ */
+export function sceneTextFits(overlay: SceneText, aspect: AspectRatio): boolean {
+  const { width, height } = ASPECT_DIMENSIONS[aspect];
+  const fontPx = Math.min(width, height) * SCENE_TEXT_SCALE[overlay.size ?? "medium"];
+  return Array.from(overlay.text.replace(/\s+/g, " ").trim()).length * TEXT_EM_PER_CHAR * fontPx <= width * 0.9;
+}
 /** Longest on-screen text a scene shows: a title or a lower third, not a paragraph. */
 export const MAX_SCENE_TEXT = 120;
 

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
 import { MAX_SCENES, backdropIdOf } from "../types";
+import { silentProblem } from "../pauses";
 import type { Video, VideoTemplate } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { LimitError, NotFoundError, ValidationError } from "../errors";
@@ -13,7 +14,16 @@ import { backgroundSchema, captionStyleSchema, emotionSchema, pitchSchema, scene
 export const MAX_TEMPLATES = 50;
 
 const sceneSchema = z.object({
-  script: z.string().trim().min(1).max(5000),
+  script: z
+    .string()
+    .trim()
+    .min(1)
+    .max(5000)
+    // A silent scene (only pauses) has the same bounds as on a video.
+    .superRefine((s, ctx) => {
+      const problem = silentProblem(s);
+      if (problem) ctx.addIssue({ code: "custom", message: problem });
+    }),
   background: backgroundSchema,
   avatarId: z.string().min(1).optional(),
   voiceId: z.string().min(1).optional(),

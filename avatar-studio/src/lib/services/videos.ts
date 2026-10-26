@@ -7,7 +7,7 @@ import { EMPTY_WATCH, MAX_SCENES, TRASH_RETENTION_DAYS, backdropIdOf, isDefaultC
 import type { AudioClip, Avatar, Backdrop, Background, CaptionCue, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
 import { buildCues, spokenWords } from "../captions";
 import { wellFormed } from "../text";
-import { MAX_SILENT_SEC, pauseSeconds, silentSeconds, stripPauses } from "../pauses";
+import { pauseSeconds, silentProblem, silentSeconds, stripPauses } from "../pauses";
 import type { AvatarProvider, RenderCast } from "../providers/types";
 import { LOCAL_OWNER } from "../owner-id";
 import { renderLimitFor } from "../billing";
@@ -40,12 +40,8 @@ export const videoRequestSchema = z
       .array(
         z.object({
           // A scene of only pauses is a silent one, the presenter holding without a word (HeyGen's silent voice).
-          script: z
-            .string()
-            .trim()
-            .min(1)
-            .max(5000)
-            .refine((s) => silentSeconds(s) <= MAX_SILENT_SEC, `A silent scene (only pauses) lasts at most ${MAX_SILENT_SEC} seconds`),
+          // (Its length is checked below, where an audio scene, whose script is only what the clip says, is known.)
+          script: z.string().trim().min(1).max(5000),
           background: backgroundSchema,
           /** Presenter and voice for this scene; the video's when omitted. */
           avatarId: z.string().min(1).optional(),
@@ -76,6 +72,11 @@ export const videoRequestSchema = z
       const script = v.scenes.map((s) => s.script).join("\n\n");
       if (script.length > 5000) {
         ctx.addIssue({ code: "custom", path: ["scenes"], message: "Combined scene scripts must be 5000 characters or fewer" });
+        return z.NEVER;
+      }
+      const silence = v.scenes.findIndex((s) => !s.audioId && silentProblem(s.script));
+      if (silence >= 0) {
+        ctx.addIssue({ code: "custom", path: ["scenes", silence, "script"], message: silentProblem(v.scenes[silence].script)! });
         return z.NEVER;
       }
       if (!v.scenes.some((s) => s.audioId || !silentSeconds(s.script))) {
@@ -255,7 +256,7 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
       // An audio scene has no voice of its own: the clip speaks.
       voiceId: clip ? undefined : sc.voiceId,
       // A clip has its own pace; a scene's speed equal to the video's says nothing of its own.
-      speed: clip || sc.speed === undefined || sc.speed === req.speed ? undefined : sc.speed,
+      speed: clip || silentSeconds(sc.script) || sc.speed === undefined || sc.speed === req.speed ? undefined : sc.speed,
       voiceName: !clip && sc.voiceId ? cast.voices[sc.voiceId]?.name : undefined,
       audioName: clip?.name,
       audioSeconds: clip?.durationSec,
@@ -541,14 +542,19 @@ function timedCues(video: Timed, texts: string[]): CaptionCue[] {
 
 const paragraphsOf = (text: string) => text.split(/\n\s*\n/).map((t) => t.trim()).filter(Boolean);
 
+/** The paragraphs that have words; one of only pauses (a silent scene) is left to the scene's own share. */
+const spokenParagraphs = (text: string) => paragraphsOf(text).filter((p) => stripPauses(p).trim());
+
 /**
- * A translated subtitle track's cues. A translation keeps the script's paragraphs, so with as many paragraphs as the
- * scenes hold in all, each scene's are timed within its share; any other shape is timed evenly over the running time.
+ * A translated subtitle track's cues. A translation keeps the script's paragraphs, so with as many spoken paragraphs
+ * as the scenes hold in all, each scene's are timed within its share (a silent scene's share left without a line,
+ * whether or not the translation kept its pause); any other shape is timed evenly over the running time.
  */
 export function subtitleCues(video: Timed, text: string): CaptionCue[] {
-  const paragraphs = paragraphsOf(text);
-  const counts = (video.scenes ?? []).map((sc) => Math.max(1, paragraphsOf(sc.script).length));
-  if (counts.length < 2 || paragraphs.length !== counts.reduce((a, b) => a + b, 0)) return timedCues(video, [text]);
+  const paragraphs = spokenParagraphs(text);
+  const counts = (video.scenes ?? []).map((sc) => spokenParagraphs(sc.script).length);
+  const total = counts.reduce((a, b) => a + b, 0);
+  if (counts.length < 2 || !total || paragraphs.length !== total) return timedCues(video, [text]);
   let at = 0;
   return timedCues(video, counts.map((n) => paragraphs.slice(at, (at += n)).join("\n\n")));
 }

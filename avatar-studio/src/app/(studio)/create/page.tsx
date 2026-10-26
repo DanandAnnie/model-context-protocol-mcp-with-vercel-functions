@@ -14,7 +14,7 @@ import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib/client";
 import { languageLabel } from "@/lib/language";
-import { MAX_SILENT_SEC, silentSeconds, stripPauses } from "@/lib/pauses";
+import { silentProblem, silentSeconds, stripPauses } from "@/lib/pauses";
 import { MAX_IMPORT_BYTES, MAX_SCRIPT_CHARS, decodeScript, legacyEncodingFor, scenesFromText } from "@/lib/script-import";
 import { renderPdf, slideScripts } from "@/lib/pdf-slides";
 import { readPptx, type PptxSlide } from "@/lib/pptx-notes";
@@ -740,6 +740,8 @@ function CreateInner() {
   }, [voiceData, voiceQuery, voiceLanguage, favorites.voiceIds]);
 
   const words = wordCount(script);
+  // A voice is previewed on the first scene that says something (not a silent one), a pause cut in half dropped.
+  const previewText = (scenes.find((sc) => !sc.audioId && stripPauses(sc.script).trim())?.script ?? "").trim().slice(0, 200).replace(/\[[^\]]*$/, "").trim();
   /** A typed scene lasts as long as its words take at its speed (its own, else the video's); an audio scene as long as its clip. */
   const sceneSeconds = (sc: Scene) => {
     const clip = sc.audioId ? clips.find((c) => c.id === sc.audioId) : undefined;
@@ -753,14 +755,14 @@ function CreateInner() {
     [...typedBySpeed].reduce((sum, [pace, scripts]) => sum + estimateSeconds(scripts.join("\n\n"), pace), 0);
   // A scene of only pauses is a silent one (the presenter holds without a word), but the video as a whole needs words.
   const allScenesFilled = scenes.every((sc) => sc.script.trim().length > 0) && scenes.some((sc) => sc.audioId || !silentSeconds(sc.script));
-  const silentTooLong = scenes.some((sc) => !sc.audioId && silentSeconds(sc.script) > MAX_SILENT_SEC);
+  const silentIssue = scenes.map((sc) => (sc.audioId ? null : silentProblem(sc.script))).find(Boolean) ?? null;
   // The server takes up to 5000 characters of script across all scenes (joined by a blank line).
   const scriptChars = scenes.map((sc) => sc.script.trim()).join("\n\n").length;
   const scriptTooLong = scriptChars > MAX_SCRIPT_CHARS;
   // A template's {placeholders} left in a script would be read out as they are.
   const unfilled = [...new Set(scenes.flatMap((sc) => sc.script.match(/\{[\p{L}_][\p{L}\p{N}_ -]{0,39}\}/gu) ?? []))];
   const canEdit = useCanEdit();
-  const canGenerate = canEdit !== false && !!avatar && !!voice && allScenesFilled && !silentTooLong && !scriptTooLong && title.trim().length > 0 && !submitting;
+  const canGenerate = canEdit !== false && !!avatar && !!voice && allScenesFilled && !silentIssue && !scriptTooLong && title.trim().length > 0 && !submitting;
 
   async function generate() {
     if (!avatar || !voice) return;
@@ -865,7 +867,7 @@ function CreateInner() {
               ) : (
                 <Skeleton className="h-3/4 w-1/3" />
               )}
-              {captions && active.script.trim() && (
+              {captions && stripPauses(active.script).trim() && (
                 <div
                   data-testid="stage-caption"
                   className={`absolute ${captionStyle.position === "top" ? "top-4" : "bottom-4"} left-1/2 max-w-[85%] -translate-x-1/2 rounded-md px-3 py-1.5 text-center ${captionStyle.size === "small" ? "text-xs" : captionStyle.size === "large" ? "text-lg" : "text-sm"} ${stageLook(captionStyle.look ?? "classic", bgIsDark)}`}
@@ -998,7 +1000,7 @@ function CreateInner() {
                     <option key={a.id} value={a.id}>{a.name}</option>
                   ))}
                 </select>
-                {!active.audioId && (
+                {!active.audioId && !silentSeconds(active.script) && (
                   // HeyGen speaks each scene at its own pace, as its studio lets each scene set one.
                   <select aria-label="Scene speed" title="HeyGen speaks this scene at its own pace; D-ID keeps its natural pace" className={`${inputClass} w-auto py-1 text-xs`} value={active.speed ?? ""} onChange={(e) => updateScene(activeIdx, { speed: e.target.value ? Number(e.target.value) : undefined })}>
                     <option value="">{`Video speed (${speed.toFixed(2)}x)`}</option>
@@ -1083,9 +1085,9 @@ function CreateInner() {
                     ? `${wordCount(active.script)} words · ~${formatSeconds(sceneSeconds(active))} this scene · ~${formatSeconds(seconds)} total`
                     : `${words} words · ~${formatSeconds(seconds)}`}
                 </span>
-                {silentTooLong && (
+                {silentIssue && (
                   <span role="alert" className="text-xs font-medium text-rose-600">
-                    A silent scene lasts at most {MAX_SILENT_SEC} seconds
+                    {silentIssue}
                   </span>
                 )}
                 {!allScenesFilled && scenes.every((sc) => sc.script.trim()) && (
@@ -1114,7 +1116,7 @@ function CreateInner() {
                     ref={improveButton}
                     variant="secondary"
                     className="px-3 py-1.5"
-                    disabled={!active.script.trim()}
+                    disabled={!stripPauses(active.script).trim()}
                     loading={assistBusy}
                     aria-expanded={assistOpen}
                     aria-controls="improve-options"
@@ -1244,7 +1246,7 @@ function CreateInner() {
                         onSelect={() => setVoice(v)}
                         playing={playingId === v.id}
                         busy={busyId === v.id}
-                        onPreview={() => play(v, script.trim().slice(0, 200) || "Hi, this is a preview of my voice.", speed).catch((e) => setErr(e.message))}
+                        onPreview={() => play(v, previewText || "Hi, this is a preview of my voice.", speed).catch((e) => setErr(e.message))}
                         favorite={favorites.voiceIds.has(v.id)}
                         onToggleFavorite={favorites.canToggle ? () => favorites.toggle("voice", v.id) : undefined}
                       />

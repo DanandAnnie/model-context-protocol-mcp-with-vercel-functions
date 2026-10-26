@@ -42,12 +42,20 @@ export function pauseSeconds(text: string): number {
   return total;
 }
 
-/** A scene of nothing but pauses is a silent one (the presenter holds for that long), up to this many seconds. */
+/** A scene of nothing but pauses is a silent one (the presenter holds for that long), from one second to a minute. */
+export const MIN_SILENT_SEC = 1;
 export const MAX_SILENT_SEC = 60;
 
-/** How long a silent scene (one holding only pause markers) lasts, or 0 for a scene with words. */
+/** How long a silent scene (one holding only pause markers) lasts, to a tenth of a second, or 0 for a scene with words. */
 export function silentSeconds(script: string): number {
-  return script.trim() && !stripPauses(script).trim() ? pauseSeconds(script) : 0;
+  return script.trim() && !stripPauses(script).trim() ? Math.round(pauseSeconds(script) * 10) / 10 : 0;
+}
+
+/** Why a scene's silence is out of bounds, or null when it has words or a fitting length. */
+export function silentProblem(script: string): string | null {
+  const s = silentSeconds(script);
+  if (!s || (s >= MIN_SILENT_SEC && s <= MAX_SILENT_SEC)) return null;
+  return s < MIN_SILENT_SEC ? `A silent scene (only pauses) lasts at least ${MIN_SILENT_SEC} second` : `A silent scene (only pauses) lasts at most ${MAX_SILENT_SEC} seconds`;
 }
 
 /** The text cut at its markers: each piece of speech and the pause that follows it (0 after the last). */

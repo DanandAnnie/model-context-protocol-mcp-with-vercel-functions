@@ -57,6 +57,6 @@ export function shareBodyFor(video: Video, brand: BrandKit | null): ShareBody {
     ...(video.description && { description: video.description }),
     ...(rendered
       ? { transcripts: transcriptsFor(video).map((t) => ({ ...t, ...(t.language ? { code: languageCode(t.language) } : {}) })) }
-      : { script: stripPauses(video.script) }),
+      : { script: stripPauses(video.script).replace(/\n\s*\n\s*(?:\n\s*)+/g, "\n\n").trim() }),
   };
 }

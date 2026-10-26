@@ -81,11 +81,23 @@ export function decodeScript(bytes: Uint8Array, legacy = "windows-1252"): string
   if (bad <= 0 || valid >= bad) return utf8;
   if (legacy !== "windows-1252") {
     try {
-      const text = new TextDecoder(legacy).decode(bytes);
+      // Some decoders (EUC-KR, Big5) pass a byte they cannot place through as a C1 control, which no real text
+      // holds: it is a bad byte like any other.
+      const text = new TextDecoder(legacy).decode(bytes).replace(/[\x80-\x9f]/g, "\ufffd");
+      if (!text.includes("\ufffd")) return text;
+      // Only a double-byte file, whose high bytes come in runs, is let off a few bad bytes; a Western file's
+      // accents and curly quotes stand alone, and often pair with the next letter into a valid character.
+      let high = 0;
+      let paired = 0;
+      for (let i = 0; i < bytes.length; i++) {
+        if (bytes[i] < 0x80) continue;
+        high++;
+        if (bytes[i - 1] >= 0x80 || bytes[i + 1] >= 0x80) paired++;
+      }
       // A file in that code page has at most a stray bad byte (a pasted character, or one cut short at its end); a
       // Western file read on a Japanese, Chinese, or Korean system has many.
       const errors = text.replace(/\ufffd+$/, "").match(/\ufffd/g)?.length ?? 0;
-      if (errors === 0 || errors * 20 < (text.match(/[^\x00-\x7f]/g)?.length ?? 0)) return text;
+      if (paired * 2 > high && errors * 8 < (text.match(/[^\x00-\x7f]/g)?.length ?? 0)) return text;
     } catch {
       // Not that code page (or one this runtime does not know): Windows-1252 below.
     }
@@ -332,6 +344,8 @@ function markdownFenceSpans(lines: string[]): { open: number; close: number }[] 
       }
     }
   }
+  // A script fence left open (the reply cut short, or its last line not copied) runs to the end.
+  if (open >= 0) spans.push({ open, close: lines.length });
   return spans;
 }
 
@@ -433,7 +447,18 @@ export function scenesFromText(text: string, { markdown = true }: { markdown?: b
     const outside = [...lines.slice(0, span.open), ...lines.slice(span.close + 1)].filter((l) => l.trim());
     const inside = lines.slice(span.open + 1, span.close);
     const prose = inside.some((l) => l.trim() && !HEADING.test(l));
-    if (prose && outside.length <= 4 && outside.every((l) => l.length <= 300)) lines = withoutFrontMatter(inside);
+    // A bare fence outside that closes no code block of its own means the script went on past this close.
+    const marker = FENCE.exec(lines[span.open])![1];
+    let block = false;
+    let stray = false;
+    for (const l of outside) {
+      const f = FENCE.exec(l);
+      if (!f || f[1] !== marker) continue;
+      if (f[2]) block = true;
+      else if (block) block = false;
+      else stray = true;
+    }
+    if (prose && !stray && outside.length <= 4 && outside.every((l) => l.length <= 300)) lines = withoutFrontMatter(inside);
     else skip = new Set([span.open, span.close]);
   } else skip = new Set(spans.flatMap((s) => [s.open, s.close]));
   // Labels the document refers to ([text][label], [label][]): a definition of one is never spoken, whatever it points at.

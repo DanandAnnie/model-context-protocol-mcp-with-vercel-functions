@@ -248,6 +248,14 @@ describe("scenesFromText", () => {
     assert.equal(decodeScript(new Uint8Array([...sjis, 0x82]), "shift_jis"), "こんにちは、皆さん。\ufffd");
     const gbk = [0xb4, 0xf3, 0xbc, 0xd2, 0xba, 0xc3, 0xa3, 0xac, 0xbb, 0xb6, 0xd3, 0xad, 0xa1, 0xa3];
     assert.equal(decodeScript(new Uint8Array([...gbk, 0xb4]), "gbk"), "大家好，欢迎。\ufffd");
+    // A Western file stays Western whatever the code page: curly quotes before a letter make valid double-byte
+    // characters, so a Word export has few bad bytes, but its high bytes stand alone rather than in runs.
+    const cp1252 = (text: string) => new Uint8Array([...text].map((c) => ({ "’": 0x92, "—": 0x97, "…": 0x85, "é": 0xe9, "“": 0x93, "”": 0x94 })[c] ?? c.charCodeAt(0)));
+    const word = "Welcome back! Today we’re talking about what’s next… It’s time — we’re live.\r\n".repeat(6);
+    for (const page of ["shift_jis", "gbk", "big5", "euc-kr"]) {
+      assert.equal(decodeScript(cp1252(word), page), word, page);
+      for (const short of ["Café", "Hello everyone, and welcome…", "He said “hi”"]) assert.equal(decodeScript(cp1252(short), page), short, `${page}: ${short}`);
+    }
     // So does a longer one holding a pasted UTF-8 emoji.
     const emoji = new Uint8Array([...sjis, ...sjis, ...sjis, ...new TextEncoder().encode("😀"), ...sjis]);
     assert.ok(decodeScript(emoji, "shift_jis").startsWith("こんにちは、皆さん。"));
@@ -263,6 +271,11 @@ describe("scenesFromText", () => {
     const signOff = ["Here's your script:", "", "```markdown", "# Launch", "", "We ship today.", "```", "", "To turn it into captions, run:", "", "```bash", "npx captions script.md", "```"].join("\n");
     const signed = scenesFromText(signOff).scenes.join("\n");
     assert.ok(signed.includes("We ship today.") && !signed.includes("```"), signed);
+    // A bare code block inside the script does not end it, and a script fence left open runs to the end.
+    const bare = scenesFromText(["```markdown", "Open a terminal and type:", "```", "npm start", "```", "Then the app opens.", "```"].join("\n")).scenes.join("\n");
+    assert.ok(bare.includes("Open a terminal") && bare.includes("npm start") && bare.includes("Then the app opens."), bare);
+    const open = scenesFromText(["Here you go:", "```markdown", "**HOST:** Welcome to the show!", "```bash", "npm i", "```", "**HOST:** That's it."].join("\n")).scenes.join("\n");
+    assert.ok(open.includes("HOST: Welcome to the show!") && open.includes("HOST: That's it.") && !open.includes("```") && !open.includes("**"), open);
     // A fence that holds only a heading is an example in the prose, which is the script.
     const example = "In this video I'll show you how to make a heading. Type a hash, a space, and your text:\n\n```markdown\n# My Heading\n```\n\nThat's all there is to it.";
     const shown = scenesFromText(example).scenes.join("\n");

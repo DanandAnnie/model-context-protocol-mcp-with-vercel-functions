@@ -17,6 +17,16 @@ import { ApiError, api, formatDate, formatSeconds, isDarkHex, posterUrl, purgeAt
 import { socialShareLinks } from "@/lib/social";
 import { TRASH_RETENTION_DAYS, type Video } from "@/lib/types";
 
+/** Whether a drawn image is a single flat colour, judged on a coarse grid of pixels. Throws if the canvas is tainted. */
+function flatImage(ctx: CanvasRenderingContext2D, width: number, height: number): boolean {
+  const { data } = ctx.getImageData(0, 0, width, height);
+  const step = Math.max(1, Math.floor((width * height) / 400));
+  for (let i = step * 4; i < data.length; i += step * 4) {
+    if (Math.abs(data[i] - data[0]) + Math.abs(data[i + 1] - data[1]) + Math.abs(data[i + 2] - data[2]) > 6) return false;
+  }
+  return true;
+}
+
 export default function VideoDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -276,8 +286,15 @@ export default function VideoDetailPage() {
       const canvas = document.createElement("canvas");
       canvas.width = Math.max(1, Math.round(el.videoWidth * scale));
       canvas.height = Math.max(1, Math.round(el.videoHeight * scale));
-      canvas.getContext("2d")!.drawImage(el, 0, 0, canvas.width, canvas.height);
+      const ctx = canvas.getContext("2d")!;
       try {
+        // A decoder can report the seek before the frame is ready to draw, which paints one flat colour.
+        // Draw again a moment later, a few times; a scene that really is one colour is kept after the last try.
+        for (let attempt = 0; ; attempt++) {
+          ctx.drawImage(el, 0, 0, canvas.width, canvas.height);
+          if (attempt >= 5 || !flatImage(ctx, canvas.width, canvas.height)) break;
+          await new Promise((r) => setTimeout(r, 120));
+        }
         return canvas.toDataURL("image/jpeg", 0.85);
       } catch {
         throw new Error(unreadable);

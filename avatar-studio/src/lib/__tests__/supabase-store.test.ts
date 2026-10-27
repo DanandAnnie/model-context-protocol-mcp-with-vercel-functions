@@ -46,11 +46,25 @@ describe("SupabaseStore", () => {
     assert.equal(call.query.select, "data");
     assert.equal(call.query.kind, "eq.video");
     assert.equal(call.query["data->>ownerId"], "eq.u1");
-    assert.equal(call.query.order, "created_at.desc");
+    assert.equal(call.query.order, "created_at.desc,id.asc");
+    assert.deepEqual([call.query.offset, call.query.limit], ["0", "1000"]);
     assert.equal(call.headers.apikey, "service-role-key");
 
     await store.list("avatar");
     assert.equal("data->>ownerId" in calls[1].query, false, "no owner filter without an owner");
+  });
+
+  it("reads a long list page by page, as PostgREST answers at most a page of rows", async () => {
+    const all = Array.from({ length: 2345 }, (_, i) => ({ data: { id: `ml_${i}` } }));
+    respond = (call) => all.slice(Number(call.query.offset), Number(call.query.offset) + Number(call.query.limit));
+    const items = await store.list<{ id: string }>("madelook");
+    assert.equal(items.length, 2345);
+    assert.deepEqual(calls.map((c) => [c.query.offset, c.query.limit]), [["0", "1000"], ["1000", "1000"], ["2000", "1000"]]);
+    assert.equal(new Set(items.map((i) => i.id)).size, 2345, "no row read twice");
+    calls = [];
+    respond = (call) => all.slice(0, 1000).slice(Number(call.query.offset));
+    assert.equal((await store.list("madelook")).length, 1000, "a full last page is followed by one empty read");
+    assert.equal(calls.length, 2);
   });
 
   it("writes conditionally with one filtered UPDATE, reporting whether the row still matched", async () => {

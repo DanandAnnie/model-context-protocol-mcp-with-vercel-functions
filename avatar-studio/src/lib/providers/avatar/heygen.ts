@@ -13,7 +13,9 @@ import type { AvatarJobStatus, AvatarProvider, CleanupStatus, HighlightInput, Hi
  * Where a custom portrait's v3 photo avatar look is kept (`providerAssetIds`). Portraits uploaded as v1 talking photos
  * kept theirs under "heygen"; those are made again once as v3 looks rather than trusted to work as look ids.
  */
-const LOOK = "heygen:look";
+/** Where a photo avatar keeps the HeyGen look made of it (in the shared HeyGen account). */
+export const HEYGEN_LOOK_KEY = "heygen:look";
+const LOOK = HEYGEN_LOOK_KEY;
 /** Marks a photo avatar HeyGen was still preparing when last asked, so it is asked again. */
 const PENDING = "heygen:pending";
 /**

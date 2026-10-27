@@ -10,6 +10,7 @@ import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { PortraitGenerator } from "@/components/PortraitGenerator";
 import { LookPackList, LookPackPanel, type LookPack } from "@/components/LookPacks";
+import { lookPackName } from "@/lib/look-packs";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { api } from "@/lib/client";
@@ -42,17 +43,19 @@ function AvatarsInner() {
     }, 10_000);
     return () => clearInterval(timer);
   }, [making, refetchPacks]);
-  const readyLooks = packs.reduce((n, p) => n + p.looks.filter((l) => l.status === "completed").length, 0);
-  const seenReady = useRef<number | null>(null);
+  // Looks that become ready while the page is open bring their photo avatars into the library, and are announced.
+  const seenReady = useRef<Set<string> | null>(null);
   const [packNote, setPackNote] = useState<string | null>(null);
   useEffect(() => {
     if (!packData) return;
-    if (seenReady.current !== null && readyLooks > seenReady.current) {
-      refetch();
-      setPackNote(`${readyLooks - seenReady.current} new ${readyLooks - seenReady.current === 1 ? "look is" : "looks are"} ready in your avatars.`);
-    }
-    seenReady.current = readyLooks;
-  }, [packData, readyLooks, refetch]);
+    const ready = packData.lookPacks.flatMap((p) => p.looks.flatMap((l) => (l.status === "completed" && l.avatarId ? [{ id: l.avatarId, pack: p }] : [])));
+    const fresh = seenReady.current ? ready.filter((r) => !seenReady.current!.has(r.id)) : [];
+    seenReady.current = new Set([...(seenReady.current ?? []), ...ready.map((r) => r.id)]);
+    if (!fresh.length) return;
+    refetch();
+    const names = [...new Set(fresh.map((r) => `${lookPackName(r.pack.pack)} looks of ${r.pack.avatarName}`))].join(", ");
+    setPackNote(`${fresh.length} new ${fresh.length === 1 ? "look is" : "looks are"} ready in your avatars (${names}).`);
+  }, [packData, refetch]);
   const [looksFor, setLooksFor] = useState<Avatar | null>(null);
   const focusAfterRender = useFocusAfterRender();
   /** Closes the new-looks panel and gives the focus back to the button that opened it. */
@@ -176,6 +179,7 @@ function AvatarsInner() {
         packs={packs}
         avatars={data?.avatars ?? []}
         canEdit={canEdit !== false}
+        fallbackFocus={() => newButton.current}
         onForget={async (p) => {
           await api(`/api/look-packs/${p.id}`, { method: "DELETE" });
           setPackData((prev) => (prev ? { ...prev, lookPacks: prev.lookPacks.filter((x) => x.id !== p.id) } : prev));

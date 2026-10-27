@@ -1,7 +1,7 @@
 // Avatars: library presenters and custom photo avatars. Used by API routes only.
 import { z } from "zod";
 import { newId, nowIso } from "../ids";
-import { getAvatarProvider } from "../providers";
+import { LOOK_KEYS, getAvatarProvider } from "../providers";
 import { getStore } from "../store";
 import type { Agent, Avatar, LookPackJob, MadeLook, PortraitJob } from "../types";
 import { createHash } from "node:crypto";
@@ -29,13 +29,14 @@ export function providerAvatars(): Promise<Avatar[]> {
 async function studioMadeLooks(): Promise<Set<string>> {
   const [avatars, portraits, packs, made] = await Promise.all([getStore().list<Avatar>("avatar"), getStore().list<PortraitJob>("portrait"), getStore().list<LookPackJob>("lookpack"), getStore().list<MadeLook>("madelook")]);
   return new Set(
-    [...avatars.flatMap((a) => Object.values(a.providerAssetIds ?? {})), ...portraits.map((p) => p.providerJobId), ...packs.flatMap((p) => p.lookIds), ...made.map((m) => m.lookId)].filter(Boolean),
+    [...avatars.flatMap((a) => madeLooksOf("avatar", a)), ...portraits.map((p) => p.providerJobId), ...packs.flatMap((p) => p.lookIds), ...made.map((m) => m.lookId)].filter(Boolean),
   );
 }
 
 /**
  * Notes looks the studio made in the renderer's shared account, kept whatever becomes of the record that made them (one
- * row per look, by a hash of its id, with no owner, so deleting an account keeps them too).
+ * row per look, by a hash of its id, with no owner, so deleting an account keeps them too). Written as each look is made
+ * (a photo avatar prepared, a presenter drawn, a pack started) and again when its record is deleted.
  */
 export async function rememberMadeLooks(lookIds: Iterable<string | undefined>): Promise<void> {
   const ids = [...new Set([...lookIds].filter((id): id is string => !!id))];
@@ -45,7 +46,8 @@ export async function rememberMadeLooks(lookIds: Iterable<string | undefined>): 
 /** The looks a stored record made at the renderer: an avatar's uploads, a drawn portrait, or a pack's looks. */
 export function madeLooksOf(kind: string, item: unknown): string[] {
   const row = item as Partial<Avatar & PortraitJob & LookPackJob>;
-  if (kind === "avatar") return Object.values(row.providerAssetIds ?? {});
+  // Only the renderer's looks; an upload only the studio uses (D-ID's hosted portrait) is not kept after its avatar.
+  if (kind === "avatar") return LOOK_KEYS.map((k) => row.providerAssetIds?.[k]).filter((id): id is string => !!id);
   if (kind === "portrait") return row.providerJobId ? [row.providerJobId] : [];
   if (kind === "lookpack") return row.lookIds ?? [];
   return [];
@@ -114,9 +116,13 @@ export async function startPortrait(input: z.infer<typeof generatePortraitSchema
   if (!provider.generatePortrait) throw new ValidationError(`Generating a presenter is not available with the ${provider.name} renderer`);
   const now = Date.now();
   for (const old of await getStore().list<PortraitJob>("portrait", ownerId)) {
-    if (now - Date.parse(old.createdAt) > PORTRAIT_JOB_TTL_MS) await getStore().remove("portrait", old.id);
+    if (now - Date.parse(old.createdAt) <= PORTRAIT_JOB_TTL_MS) continue;
+    // The drawn look stays at the renderer; it stays the studio's, never offered to other accounts.
+    await rememberMadeLooks(madeLooksOf("portrait", old));
+    await getStore().remove("portrait", old.id);
   }
   const { jobId } = await provider.generatePortrait({ name: input.name, prompt: input.prompt });
+  await rememberMadeLooks([jobId]);
   const job: PortraitJob = { id: newId("pt"), ownerId, provider: provider.name, providerJobId: jobId, status: "processing", createdAt: nowIso() };
   await getStore().put("portrait", job);
   return { jobId: job.id };

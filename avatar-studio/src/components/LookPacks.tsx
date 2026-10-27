@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Shirt, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, StatusBadge } from "@/components/ui";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
-import { ApiError, api, formatDate } from "@/lib/client";
+import { api, formatDate, isRefusal } from "@/lib/client";
 import { LOOK_PACKS, lookPackName, type LookPackAspect, type LookPackKey } from "@/lib/look-packs";
 import type { Avatar, LookPackJob } from "@/lib/types";
 
@@ -40,8 +40,9 @@ export function LookPackPanel({ avatar, onClose, onStarted }: { avatar: Avatar; 
       onStarted(lookPack);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "The new looks could not be started");
-      // A refusal is an answer: trying again is a new start. A lost answer keeps its key, so a retry returns the same pack.
-      if (e instanceof ApiError && e.status < 500) setRequestKey(newKey());
+      // A refusal is an answer: trying again is a new start. A lost answer, or one HeyGen is still working on, keeps its
+      // key, so a retry returns the same pack instead of paying for another.
+      if (isRefusal(e)) setRequestKey(newKey());
       setBusy(false);
     }
   }
@@ -106,7 +107,7 @@ export function LookPackPanel({ avatar, onClose, onStarted }: { avatar: Avatar; 
 }
 
 /** The account's look packs: how many looks are ready, the presenters made of them, and any that failed. */
-export function LookPackList({ packs, avatars, canEdit, onForget }: { packs: LookPack[]; avatars: Avatar[]; canEdit: boolean; onForget: (pack: LookPack) => Promise<void> }) {
+export function LookPackList({ packs, avatars, canEdit, onForget, fallbackFocus }: { packs: LookPack[]; avatars: Avatar[]; canEdit: boolean; onForget: (pack: LookPack) => Promise<void>; fallbackFocus: () => HTMLElement | null }) {
   const listRef = useRef<HTMLDivElement>(null);
   const focusAfterRender = useFocusAfterRender();
   const [err, setErr] = useState<string | null>(null);
@@ -118,7 +119,8 @@ export function LookPackList({ packs, avatars, canEdit, onForget }: { packs: Loo
     const next = packs[packs.indexOf(p) + 1] ?? packs[packs.indexOf(p) - 1];
     try {
       await onForget(p);
-      focusAfterRender(() => (next ? listRef.current?.querySelector<HTMLElement>(`[data-look-pack="${next.id}"]`) : listRef.current?.querySelector<HTMLElement>("h2")));
+      // Focus moves to the next pack, or, with none left (the list goes), to the page's own control.
+      focusAfterRender(() => (next ? (listRef.current?.querySelector<HTMLElement>(`[data-look-pack="${next.id}"]`) ?? fallbackFocus()) : fallbackFocus()));
     } catch (e) {
       setErr(e instanceof Error ? e.message : "The look pack could not be forgotten");
     }

@@ -40,6 +40,14 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+/**
+ * An error answer that refuses a start, so trying again is a new start with a new idempotency key; not a lost answer
+ * (5xx, a timeout) nor a `409` for a start the renderer is still working on, whose retry must keep the key.
+ */
+export function isRefusal(e: unknown): boolean {
+  return e instanceof ApiError && e.status < 500 && !(e.status === 409 && /still being sent/.test(e.message));
+}
+
 /** The poster to show for a video: its custom cover (versioned so a replacement is never cached) or the provider thumbnail. */
 export function posterUrl(video: { id: string; cover?: { updatedAt: string }; thumbnailUrl?: string }, base = ""): string | undefined {
   if (video.cover) return `${base}/api/videos/${video.id}/cover?v=${Date.parse(video.cover.updatedAt)}`;

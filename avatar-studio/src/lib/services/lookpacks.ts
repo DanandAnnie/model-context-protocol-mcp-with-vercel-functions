@@ -117,14 +117,17 @@ export async function startLookPack(input: z.infer<typeof lookPackRequestSchema>
 /** Forgets one look pack; the photo avatars made of its looks stay (they are deleted one by one, as any). */
 export async function deleteLookPack(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
   const job = owned(await getStore().get<LookPackJob>("lookpack", lookPackIdSchema.parse(id)), ownerId, "Look pack");
+  await rememberMadeLooks(job.lookIds);
   await getStore().remove("lookpack", job.id);
 }
+
+class PictureTooLarge extends Error {}
 
 /** A finished look's picture, kept as a data URL so the photo avatar keeps it after the renderer's link expires. */
 async function keepPicture(url: string): Promise<string> {
   if (url.startsWith("data:")) return url;
   const { bytes, mimeType } = await loadImage(url, fetchPictures);
-  if (bytes.byteLength > MAX_PORTRAIT_BYTES) throw new Error("The look's picture is larger than a photo avatar may be");
+  if (bytes.byteLength > MAX_PORTRAIT_BYTES) throw new PictureTooLarge();
   return `data:${mimeType};base64,${Buffer.from(bytes).toString("base64")}`;
 }
 
@@ -148,7 +151,19 @@ async function refreshLookPack(job: LookPackJob): Promise<LookPackJob> {
         continue;
       }
       const lookId = job.lookIds[i];
-      const out = await provider.portraitStatus(lookId);
+      let out: Awaited<ReturnType<NonNullable<typeof provider.portraitStatus>>>;
+      try {
+        out = await provider.portraitStatus(lookId);
+      } catch (err) {
+        // One look the renderer no longer has ends there; any other failed check leaves it to the next, and the other
+        // looks are still followed.
+        if (/ failed: (404|410)\b/.test(err instanceof Error ? err.message : "")) looks.push({ status: "failed", error: "The renderer no longer has this look" });
+        else {
+          console.error(`look ${i + 1} of ${job.id}:`, err);
+          looks.push(look);
+        }
+        continue;
+      }
       if (out.status === "processing") {
         looks.push(look);
         continue;
@@ -162,7 +177,7 @@ async function refreshLookPack(job: LookPackJob): Promise<LookPackJob> {
         imageUrl = await keepPicture(out.imageUrl);
       } catch (err) {
         console.error(`look ${i + 1} of ${job.id}:`, err);
-        looks.push({ status: "failed", error: "The look was made but its picture could not be downloaded" });
+        looks.push({ status: "failed", error: err instanceof PictureTooLarge ? "The look's picture is larger than a photo avatar may be" : "The look was made but its picture could not be downloaded" });
         continue;
       }
       const avatarId = `av_${createHash("sha256").update(`${job.id}\0${i}`).digest("base64url").slice(0, 20)}`;
@@ -179,7 +194,8 @@ async function refreshLookPack(job: LookPackJob): Promise<LookPackJob> {
         providerAssetIds: provider.lookAssetIds(lookId),
         createdAt: nowIso(),
       };
-      await getStore().put("avatar", avatar);
+      // Written once: a check repeated after a failed job write leaves a rename, or a delete, made meanwhile alone.
+      await getStore().insert("avatar", avatar);
       looks.push({ status: "completed", avatarId });
     }
     const now = nowIso();

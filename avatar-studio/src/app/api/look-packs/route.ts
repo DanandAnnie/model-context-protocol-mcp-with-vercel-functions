@@ -4,7 +4,8 @@ import { rateLimit, rateLimitPair } from "@/lib/rate-limit";
 import { LimitError, listLookPacks, lookPackKeySchema, lookPackRequestSchema, lookPacksAvailable, publicLookPack, startLookPack } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+/** A first start may make the photo avatar first (an upload, then a wait for HeyGen) before asking for the looks. */
+export const maxDuration = 60;
 
 /**
  * Look packs an account may start per hour, and every account together: each one is paid for with the renderer.

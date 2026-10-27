@@ -75,7 +75,13 @@ describe("look packs", () => {
     await listLookPacks("u1");
     assert.equal((await getStore().list<Avatar>("avatar", "u1")).length, 6);
     assert.deepEqual(await listLookPacks("u2"), [], "another account sees none");
-    assert.equal((await listAvatars("u2")).some((a) => made.some((m) => m.id === a.id)), false);
+    await assert.rejects(getAvatar(made[0].id, "u2"), NotFoundError, "nor renders with its presenters by id");
+    // A rename made between checks is not undone by a later one.
+    await getStore().put("avatar", { ...made[0], name: "Dana on call" });
+    await getStore().put("lookpack", { ...done, status: "processing", looks: done.looks.map((l) => ({ status: "processing" as const })) });
+    forgetLookPackChecks();
+    await listLookPacks("u1");
+    assert.equal((await getAvatar(made[0].id, "u1")).name, "Dana on call");
     // Forgetting the pack keeps its presenters.
     await assert.rejects(deleteLookPack(done.id, "u2"), NotFoundError);
     await deleteLookPack(done.id, "u1");
@@ -141,6 +147,91 @@ describe("look packs", () => {
     await deleteOwnerData("u3");
     assert.equal((await listAvatars("u2")).some((a) => a.id === drawn), false, "nor does deleting the account that drew it");
     assert.ok((await listAvatars("u2")).some((a) => a.id === STOCK_AVATARS[2].id), "the renderer's own library is still offered");
+  });
+
+  it("keeps a pack's looks hidden by their record alone, once the pack is forgotten and its presenters deleted", async () => {
+    // Demo presenters stand in for looks in the renderer's shared account.
+    const looks = [STOCK_AVATARS[0].id, STOCK_AVATARS[1].id];
+    const proto = MockAvatarProvider.prototype as unknown as { startLookPack: (...a: unknown[]) => Promise<{ lookIds: string[] }>; portraitStatus: (id: string) => Promise<unknown> };
+    const real = { start: proto.startLookPack, status: proto.portraitStatus };
+    proto.startLookPack = async () => ({ lookIds: looks });
+    proto.portraitStatus = async () => ({ status: "completed", imageUrl: PNG });
+    try {
+      const dana = await mine("u1");
+      const job = await startLookPack(lookPackRequestSchema.parse({ avatarId: dana.id, pack: "keynote" }), "u1");
+      const [done] = await listLookPacks("u1");
+      await deleteLookPack(job.id, "u1");
+      for (const l of done.looks) await deleteAvatar(l.avatarId!, "u1");
+      assert.deepEqual(await getStore().list("lookpack"), []);
+      assert.equal((await getStore().list<Avatar>("avatar")).some((a) => looks.includes(a.providerAssetIds?.mock ?? "")), false, "nothing but the record knows the looks now");
+      const shared = (await listAvatars("u2")).map((a) => a.id);
+      assert.ok(looks.every((l) => !shared.includes(l)));
+      assert.ok(shared.includes(STOCK_AVATARS[2].id));
+    } finally {
+      proto.startLookPack = real.start;
+      proto.portraitStatus = real.status;
+    }
+  });
+
+  it("follows the other looks when one cannot be asked about, and ends a look the renderer no longer has", async () => {
+    const proto = MockAvatarProvider.prototype as unknown as { startLookPack: (...a: unknown[]) => Promise<{ lookIds: string[] }>; portraitStatus: (id: string) => Promise<unknown> };
+    const real = { start: proto.startLookPack, status: proto.portraitStatus };
+    const name = Buffer.from("Dana").toString("base64url");
+    proto.startLookPack = async () => ({ lookIds: ["look_gone", "look_down", `mockportrait_5_${name}`] });
+    proto.portraitStatus = async function (this: unknown, id: string) {
+      if (id === "look_gone") throw new Error("HeyGen GET https://api.heygen.com/v3/avatars/looks/look_gone failed: 404 not found");
+      if (id === "look_down") throw new Error("HeyGen GET https://api.heygen.com/v3/avatars/looks/look_down failed: 503 busy");
+      return real.status.call(this, id);
+    };
+    try {
+      const dana = await mine("u1");
+      await startLookPack(lookPackRequestSchema.parse({ avatarId: dana.id, pack: "fitness" }), "u1");
+      const [job] = await listLookPacks("u1");
+      assert.deepEqual(job.looks.map((l) => l.status), ["failed", "processing", "completed"], "one look's failed check does not hold up the rest");
+      assert.match(job.looks[0].error!, /no longer has this look/);
+      assert.equal(job.status, "processing", "a look still to be asked about keeps the pack going");
+      assert.ok(job.looks[2].avatarId);
+    } finally {
+      proto.startLookPack = real.start;
+      proto.portraitStatus = real.status;
+    }
+  });
+
+  it("records a drawn presenter's look when it is drawn, and keeps it hidden after its job is cleared a day later", async () => {
+    const { startPortrait } = await import("../services");
+    const proto = MockAvatarProvider.prototype as unknown as { generatePortrait: (...a: unknown[]) => Promise<{ jobId: string }> };
+    const real = proto.generatePortrait;
+    const drawn = STOCK_AVATARS[0].id;
+    proto.generatePortrait = async () => ({ jobId: drawn });
+    try {
+      const { jobId } = await startPortrait({ name: "Sam", prompt: "A friendly presenter in a navy blazer, studio light, smiling" }, "u1");
+      const old = (await getStore().get<{ createdAt: string }>("portrait", jobId))!;
+      await getStore().put("portrait", { ...old, id: jobId, createdAt: new Date(Date.now() - 2 * 86_400_000).toISOString() });
+      proto.generatePortrait = async () => ({ jobId: STOCK_AVATARS[1].id });
+      await startPortrait({ name: "Sam", prompt: "A friendly presenter in a grey suit, office light, smiling" }, "u1");
+      assert.equal(await getStore().get("portrait", jobId), null, "the old job is cleared");
+      assert.equal((await listAvatars("u2")).some((a) => a.id === drawn), false, "its drawn look is not handed to everyone");
+    } finally {
+      proto.generatePortrait = real;
+    }
+  });
+
+  it("records a photo avatar's new HeyGen look as it is made, even when the avatar is deleted meanwhile; never a D-ID upload", async () => {
+    const { prepareOnce } = await import("../services/videos");
+    const { HeyGenAvatarProvider } = await import("../providers/avatar/heygen");
+    const dana = await mine("u1", { provider: "heygen" });
+    const provider = new HeyGenAvatarProvider("key");
+    (provider as unknown as { prepareAvatar: (a: Avatar) => Promise<Avatar> }).prepareAvatar = async (a: Avatar) => {
+      await getStore().remove("avatar", a.id);
+      return { ...a, providerAssetIds: { "heygen:look": "look_fresh", "heygen:pending": "" } };
+    };
+    await prepareOnce(provider, dana);
+    assert.deepEqual((await getStore().list<{ lookId: string }>("madelook")).map((m) => m.lookId), ["look_fresh"]);
+    // D-ID keeps the portrait it hosts under its own key: that is not a look, and is not kept once the avatar goes.
+    const did = await mine("u1", { provider: "did" });
+    await getStore().put("avatar", { ...did, providerAssetIds: { did: "https://d-id.example/portraits/dana.png" } });
+    await deleteAvatar(did.id, "u1");
+    assert.deepEqual((await getStore().list<{ lookId: string }>("madelook")).map((m) => m.lookId), ["look_fresh"]);
   });
 
   it("asks HeyGen with the prepared photo avatar's look and the pack's template, follows each look, and keeps its picture", async () => {

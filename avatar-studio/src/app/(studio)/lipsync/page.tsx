@@ -6,7 +6,7 @@ import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
-import { ApiError, api, formatDate, formatSeconds } from "@/lib/client";
+import { api, formatDate, formatSeconds, isRefusal } from "@/lib/client";
 import { toWavDataUrl } from "@/lib/wav-client";
 import { MAX_CLIP_SECONDS, type AudioClip, type LipsyncJob, type LipsyncMode, type Video } from "@/lib/types";
 
@@ -180,9 +180,9 @@ export default function LipsyncPage() {
       focusAfterRender(() => listRef.current?.querySelector<HTMLElement>(`[data-lipsync="${lipsync.id}"]`) ?? firstInput.current);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "The video could not be lip-synced");
-      // A refusal is an answer: trying again (after topping up, say) is a new start. A lost answer keeps its key, so a
-      // retry returns the start that may have gone through.
-      if (e instanceof ApiError && e.status < 500) setRequestKey(newKey());
+      // A refusal is an answer: trying again (after topping up, say) is a new start. A lost answer, or one HeyGen is still
+      // working on, keeps its key, so a retry returns the start that may have gone through.
+      if (isRefusal(e)) setRequestKey(newKey());
     } finally {
       setBusy(false);
     }

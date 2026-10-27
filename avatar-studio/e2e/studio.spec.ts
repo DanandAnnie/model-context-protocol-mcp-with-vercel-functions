@@ -734,7 +734,7 @@ test("a photo avatar is dressed in a look pack, each look kept as a presenter of
   await open.click();
   const panel = page.getByTestId("look-pack-panel");
   await expect(panel.getByRole("heading", { name: `New looks of ${name}` })).toBeFocused();
-  // A presenter of no stated gender needs the pack's women's or men's looks chosen first.
+  // A presenter whose gender is neutral needs the pack's women's or men's looks chosen first.
   await expect(panel.getByRole("button", { name: "Make new looks" })).toBeDisabled();
   await panel.getByLabel("Men's", { exact: true }).check();
   await panel.getByLabel(/^Healthcare/).check();
@@ -761,6 +761,8 @@ test("a photo avatar is dressed in a look pack, each look kept as a presenter of
   page.once("dialog", (d) => d.accept());
   await pack.getByRole("button", { name: `Forget the Healthcare looks of ${name}` }).click();
   await expect(pack).toHaveCount(0);
+  // With no pack left the list goes, and focus moves to the page's own button rather than being lost.
+  await expect(page.getByRole("button", { name: "New photo avatar" })).toBeFocused();
   await expect(page.getByTestId("avatar-library").getByText(`${name} · Healthcare 1`)).toBeVisible();
   for (const id of [avatar.id, ...made]) expect((await page.request.delete(`/api/avatars/${id}`)).status()).toBe(200);
 });

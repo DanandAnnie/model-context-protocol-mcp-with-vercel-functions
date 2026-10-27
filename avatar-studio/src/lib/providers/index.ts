@@ -8,7 +8,7 @@ import type { ProviderStatus } from "../types";
 import { persistenceKind } from "../store";
 import { authEnabled, authMode } from "../auth";
 import { DidAvatarProvider } from "./avatar/did";
-import { HeyGenAvatarProvider } from "./avatar/heygen";
+import { HEYGEN_LOOK_KEY, HeyGenAvatarProvider } from "./avatar/heygen";
 import { MockAvatarProvider } from "./avatar/mock";
 import { AnthropicScriptProvider } from "./script/anthropic";
 import { MockScriptProvider } from "./script/mock";
@@ -40,6 +40,13 @@ export function getTtsProvider(): TtsProvider {
 }
 
 /** Provider that owns a stored job. Throws rather than guessing when its key is missing. */
+/**
+ * The keys of an avatar's `providerAssetIds` that hold a renderer look made of it in the renderer's shared account
+ * (HeyGen's look; the demo's stand-in). Other keys hold uploads only the studio uses (D-ID's hosted portrait), which are
+ * never kept once their avatar is deleted.
+ */
+export const LOOK_KEYS = [HEYGEN_LOOK_KEY, "mock"] as const;
+
 export function getAvatarProviderByName(name: string): AvatarProvider {
   if (name === "mock") return new MockAvatarProvider();
   if (name === "heygen" && config.heygenApiKey) return new HeyGenAvatarProvider(config.heygenApiKey);

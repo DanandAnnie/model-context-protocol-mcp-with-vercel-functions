@@ -14,7 +14,7 @@ import { LOCAL_OWNER } from "../owner-id";
 import { renderLimitFor } from "../billing";
 import { ConflictError, ForbiddenError, LimitError, NotFoundError, ValidationError } from "../errors";
 import { isWorkspaceId, type User } from "../workspaces";
-import { getAvatar } from "./avatars";
+import { getAvatar, madeLooksOf, rememberMadeLooks } from "./avatars";
 import { getClip, getClipAudio, saveClipAssetIds } from "./clips";
 import { getBackdrop, getBackdropImage, saveBackdropAssetIds } from "./backdrops";
 import { listVoices } from "./voices";
@@ -653,6 +653,8 @@ export function prepareOnce(provider: AvatarProvider, avatar: Avatar): Promise<A
   const run = (async () => {
     const prepared = await provider.prepareAvatar!(avatar);
     if (prepared === avatar) return avatar;
+    // The look is the studio's from now on, even if the avatar is deleted while it was being made.
+    await rememberMadeLooks(madeLooksOf("avatar", prepared));
     // The upload takes seconds; a rename that landed meanwhile must survive, so only the asset ids are written,
     // and an avatar deleted meanwhile is not brought back (this render still uses the upload).
     const current = await getStore().get<Avatar>("avatar", avatar.id);

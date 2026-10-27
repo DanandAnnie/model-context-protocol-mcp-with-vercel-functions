@@ -162,6 +162,23 @@ export class HeyGenClient {
     }>(`${V3}/filler-word-removals/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(10_000) });
   }
 
+  /** Starts a lip sync (`POST /v3/lipsyncs`); `key` makes a retried start return the same job. */
+  async createLipsync(body: Record<string, unknown>, key: string): Promise<string> {
+    const out = await this.request<{ lipsync_id?: string }>(`${V3}/lipsyncs`, { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": key }, signal: AbortSignal.timeout(20_000) });
+    if (!out?.lipsync_id) throw new Error("HeyGen returned no lip sync job id");
+    return out.lipsync_id;
+  }
+
+  /** A lip sync and, once done, its video (`GET /v3/lipsyncs/{id}`). */
+  lipsync(id: string) {
+    return this.request<{
+      status: "pending" | "running" | "completed" | "failed" | string;
+      duration?: number | null;
+      video_url?: string | null;
+      failure_message?: string | null;
+    }>(`${V3}/lipsyncs/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(10_000) });
+  }
+
   /** The account's API-ready Studio templates (`GET /v3/templates`; its page sits inside `data`), up to five pages. */
   async listTemplates() {
     type Row = { id: string; name?: string; thumbnail_url?: string | null; aspect_ratio?: string | null };

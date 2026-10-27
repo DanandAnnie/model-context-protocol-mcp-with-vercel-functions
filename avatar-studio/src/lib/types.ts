@@ -137,6 +137,35 @@ export interface CleanupJob {
   checkedAt?: string;
 }
 
+/** How closely a lip sync redraws the mouth: fast, or slower and truer to the face (HeyGen avatar inference). */
+export const LIPSYNC_MODES = ["speed", "precision"] as const;
+export type LipsyncMode = (typeof LIPSYNC_MODES)[number];
+
+/** A video given a new audio track, its speaker's mouth redrawn to match (HeyGen lip sync). */
+export interface LipsyncJob {
+  id: string;
+  ownerId: string;
+  title: string;
+  /** The footage: one of the account's videos, or a public https link. */
+  videoId?: string;
+  sourceUrl?: string;
+  /** The new audio: one of the account's audio clips, or a public https link. */
+  clipId?: string;
+  audioUrl?: string;
+  mode: LipsyncMode;
+  /** Renderer syncing it, and its job id there, never shown to the account. */
+  provider: string;
+  providerJobId: string;
+  status: "processing" | "completed" | "failed";
+  /** The lip-synced video, signed by the renderer for a limited time and renewed when it gets old. */
+  videoUrl?: string;
+  durationSec?: number;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+  checkedAt?: string;
+}
+
 export interface Voice {
   id: string;
   name: string;
@@ -920,6 +949,8 @@ export interface ProviderStatus {
   highlightClips: boolean;
   /** Whether the renderer can clean filler words and long silences out of a recording. */
   fillerRemoval: boolean;
+  /** Whether the renderer can put a new audio track on a video and redraw the mouth to match. */
+  lipsync: boolean;
   /** Whether the renderer offers HeyGen Studio templates to fill and render. */
   studioTemplates: boolean;
   /** Whether the TTS provider can design a voice from a description. */

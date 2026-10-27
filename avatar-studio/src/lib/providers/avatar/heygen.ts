@@ -6,7 +6,7 @@ import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
 import { HeyGenClient } from "../heygen-client";
 import { NotFoundError, ValidationError } from "../../errors";
-import type { AvatarJobStatus, AvatarProvider, CleanupStatus, HighlightInput, HighlightStatus, RenderCast } from "../types";
+import type { AvatarJobStatus, AvatarProvider, CleanupStatus, HighlightInput, HighlightStatus, LipsyncInput, LipsyncStatus, RenderCast } from "../types";
 
 /**
  * Where a custom portrait's v3 photo avatar look is kept (`providerAssetIds`). Portraits uploaded as v1 talking photos
@@ -378,6 +378,39 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       cuts: job.num_cuts ?? undefined,
       reductionPct: job.reduction_pct ?? undefined,
     });
+  }
+
+  /** A video given a new audio track, the speaker's mouth redrawn to match (v3 lip sync). */
+  async startLipsync({ videoUrl, audio, mode, title, key }: LipsyncInput) {
+    try {
+      const body = {
+        video: { type: "url", url: videoUrl },
+        audio: audio.type === "url" ? { type: "url", url: audio.url } : { type: "asset_id", asset_id: audio.assetId },
+        mode,
+        title,
+      };
+      return { jobId: await this.client.createLipsync(body, key) };
+    } catch (err) {
+      // Footage or audio HeyGen will not sync (no face, unreadable, too long, or past the plan) is the account's to change.
+      const message = err instanceof Error ? err.message : "";
+      if (/ failed: (400|402|404|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not lip-sync that video: ${heygenReason(message, "check that the video shows one speaker's face and the audio has speech")}`);
+      throw err;
+    }
+  }
+
+  async lipsyncStatus(jobId: string): Promise<LipsyncStatus> {
+    let job;
+    try {
+      job = await this.client.lipsync(jobId);
+    } catch (err) {
+      if (err instanceof Error && / failed: 404 /.test(err.message)) return { status: "failed", error: "This lip sync is no longer available from HeyGen; make it again" };
+      throw err;
+    }
+    if (job.status === "failed") return { status: "failed", error: job.failure_message || "HeyGen could not lip-sync that video" };
+    if (job.status !== "completed") return { status: "processing" };
+    const videoUrl = httpsOnly(job.video_url);
+    if (!videoUrl) return { status: "failed", error: "HeyGen finished without a lip-synced video" };
+    return stripEmpty({ status: "completed" as const, videoUrl, durationSec: job.duration ?? undefined });
   }
 
   /** The account's API-ready HeyGen Studio templates (made in HeyGen Studio and marked for the API). */

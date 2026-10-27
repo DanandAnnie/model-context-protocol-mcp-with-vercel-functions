@@ -664,6 +664,57 @@ test("a recording can be cleaned of filler words, from a link or the library, an
   await expect(page.getByTestId("cleanup")).toHaveCount(listed.length - 1);
 });
 
+test("a video is lip-synced to an uploaded clip or a linked track, at the chosen quality, and deleted", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Lip sync source ${Date.now().toString(36)}`);
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  await page.goto("/lipsync");
+  await expect(page.getByRole("heading", { name: "Lip sync", exact: true })).toBeVisible();
+  const start = page.getByRole("button", { name: "Lip-sync video" });
+  // Nothing to start until both the footage and the new audio are chosen.
+  await page.getByRole("combobox", { name: /^Library video\b/ }).selectOption(v.id);
+  await expect(start).toBeDisabled();
+  // An uploaded file is converted to WAV in the browser, saved as an audio clip, and chosen.
+  await page.getByLabel("Upload the new audio").setInputFiles({ name: "retake.wav", mimeType: "audio/wav", buffer: toneWav(2) });
+  const clipPicker = page.getByRole("combobox", { name: /^Audio clip\b/ });
+  await expect(clipPicker.locator("option:checked")).toHaveText("retake (2s)");
+  const clipId = await clipPicker.inputValue();
+  await page.getByLabel(/^Precise/).check();
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/lipsyncs") && r.method() === "POST");
+  await start.click();
+  const request = await sent;
+  expect(request.postDataJSON()).toEqual({ videoId: v.id, clipId, mode: "precision" });
+  // The start carries a key, so the same start sent again returns the same lip sync instead of paying for another.
+  const key = request.headers()["idempotency-key"];
+  expect(key).toMatch(/^[A-Za-z0-9_-]{8,100}$/);
+  const again = await page.request.post("/api/lipsyncs", { data: { videoId: v.id, clipId, mode: "precision" }, headers: { "Idempotency-Key": key } });
+  expect(again.status()).toBe(202);
+  const item = page.getByTestId("lipsync").first();
+  await expect(item).toContainText("(lip-synced)");
+  await expect(item.getByTestId("lipsync-meta")).toContainText("A library video · audio clip “retake” · Precise");
+  // Focus goes to the new lip sync rather than being lost with the cleared form.
+  await expect(item).toBeFocused();
+  // The demo renderer finishes a few seconds later; the page checks again on its own.
+  await expect(item.getByRole("link", { name: /^Download / })).toHaveAttribute("href", /\/demo\/render\.webm$/, { timeout: 20_000 });
+  const listed = (await (await page.request.get("/api/lipsyncs")).json()).lipsyncs as Array<Record<string, unknown>>;
+  expect(Object.keys(listed[0])).not.toContain("providerJobId");
+  expect((await again.json()).lipsync.id).toBe(listed[0].id);
+  // A linked track must be a public https address; a private one is refused with the reason, at the fast default.
+  await page.getByLabel("A link").nth(1).check();
+  await page.getByLabel("Audio URL").fill("https://127.0.0.1/voice-over.mp3");
+  await page.getByRole("combobox", { name: /^Library video\b/ }).selectOption(v.id);
+  const refused = page.waitForRequest((r) => r.url().endsWith("/api/lipsyncs") && r.method() === "POST");
+  await page.getByLabel(/^Fast/).check();
+  await start.click();
+  expect((await refused).postDataJSON()).toEqual({ videoId: v.id, audioUrl: "https://127.0.0.1/voice-over.mp3", mode: "speed" });
+  await expect(page.getByText("must point to a public host")).toBeVisible();
+  await expect(page.getByTestId("lipsync")).toHaveCount(listed.length);
+  // Deleting asks first.
+  page.once("dialog", (d) => d.accept());
+  await item.getByRole("button", { name: /^Delete / }).click();
+  await expect(page.getByTestId("lipsync")).toHaveCount(listed.length - 1);
+  expect((await page.request.delete(`/api/clips/${clipId}`)).status()).toBe(204);
+});
+
 test("a HeyGen Studio template is filled in and rendered as a library video", async ({ page }) => {
   await page.goto("/templates");
   const section = page.getByTestId("studio-templates");
@@ -1763,7 +1814,7 @@ test("no page scrolls sideways at phone width", async ({ browser }) => {
     // A transparent video's Background row and a cleaned recording with a long title are the widest content of their pages.
     const clear = await createVideoViaApi(page, "Phone width transparent", { transparent: true });
     expect((await page.request.post("/api/cleanups", { data: { sourceUrl: "https://93.184.216.34/webinar.mp4", title: "Team webinar on pricing and the spring roadmap (cleaned)" } })).status()).toBe(202);
-    const pages = ["/home", "/create", "/agent", "/videos", `/videos/${v.id}`, `/videos/${clear.id}`, "/templates", "/avatars", "/voices", "/batch", "/brand", "/interactive", "/workspace", "/settings", "/translate", "/cleanup", `/share/${v.id}`];
+    const pages = ["/home", "/create", "/agent", "/videos", `/videos/${v.id}`, `/videos/${clear.id}`, "/templates", "/avatars", "/voices", "/batch", "/brand", "/interactive", "/workspace", "/settings", "/translate", "/cleanup", "/lipsync", `/share/${v.id}`];
     for (const path of pages) {
       await page.goto(path);
       await expect(page.locator("h1").first()).toBeVisible();
@@ -2192,7 +2243,7 @@ test("library multi-select moves and deletes videos in bulk", async ({ page }) =
   expect(await (await page.request.post("/api/videos/bulk", { data: { action: "purge", ids: [a.id] } })).json()).toEqual({ done: 0, missing: [a.id] });
   expect((await page.request.get(`/api/videos/${a.id}`)).status()).toBe(200);
   expect((await page.request.post("/api/videos/bulk", { data: { action: "move", ids: [] } })).status()).toBe(400);
-  expect(dialogs).toEqual(["Folder name (leave empty to move to Unfiled)", "Move 1 video to the trash? You can restore it for 30 days.", "Delete this video for good? Its short clips and the recordings cleaned from it go too. This cannot be undone."]);
+  expect(dialogs).toEqual(["Folder name (leave empty to move to Unfiled)", "Move 1 video to the trash? You can restore it for 30 days.", "Delete this video for good? Its short clips, and the cleaned and lip-synced copies made from it, go too. This cannot be undone."]);
 });
 
 test("webhook settings reject private hosts and show the signing secret", async ({ page }) => {
@@ -2224,7 +2275,7 @@ test("webhook settings reject private hosts and show the signing secret", async 
 test("pages have no WCAG 2.1 AA violations", async ({ page }) => {
   const v = await createVideoViaApi(page, "Accessible video");
   const agent = (await (await page.request.post("/api/agents", { data: { name: "Axe agent", avatarId: "stock_1" } })).json()).agent as { id: string };
-  const paths = ["/", "/login", "/home", "/create", "/agent", "/videos", `/videos/${v.id}`, "/templates", "/batch", "/avatars", "/voices", "/translate", "/cleanup", "/interactive", "/brand", "/settings", `/share/${v.id}`, `/talk/${agent.id}`];
+  const paths = ["/", "/login", "/home", "/create", "/agent", "/videos", `/videos/${v.id}`, "/templates", "/batch", "/avatars", "/voices", "/translate", "/cleanup", "/lipsync", "/interactive", "/brand", "/settings", `/share/${v.id}`, `/talk/${agent.id}`];
   const report: string[] = [];
   for (const path of paths) {
     await page.goto(path);
@@ -2316,6 +2367,7 @@ test("a workspace viewer sees view-only notices instead of create controls", asy
     ["/batch", "start batches"],
     ["/translate", "start translations"],
     ["/cleanup", "clean up recordings"],
+    ["/lipsync", "lip-sync videos"],
     ["/avatars", "add or change avatars"],
     ["/voices", "clone, design, or change voices"],
     ["/brand", "change the brand kit"],

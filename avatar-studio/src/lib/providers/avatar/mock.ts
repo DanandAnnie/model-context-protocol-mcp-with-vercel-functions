@@ -4,7 +4,7 @@ import { SAMPLE_PREVIEW_VIDEO, STOCK_AVATARS, portraitSvg } from "../../stock";
 import { demoAssetUrl } from "../../config";
 import { NotFoundError } from "../../errors";
 import type { AudioClip, Avatar, StudioTemplate, StudioTemplateDetail, VideoRequest } from "../../types";
-import type { AvatarJobStatus, AvatarProvider, CleanupStatus, HighlightInput, HighlightStatus } from "../types";
+import type { AvatarJobStatus, AvatarProvider, CleanupStatus, HighlightInput, HighlightStatus, LipsyncStatus } from "../types";
 
 /** Labeled, self-hosted stand-in; no avatar synthesis or paid operation occurs. */
 const SAMPLE_VIDEO = SAMPLE_PREVIEW_VIDEO;
@@ -73,6 +73,18 @@ export class MockAvatarProvider implements AvatarProvider {
     const elapsed = Date.now() - Number(m[1]);
     if (elapsed < MockAvatarProvider.CLIP_MS) return { status: "processing", progress: Math.min(95, Math.round((elapsed / MockAvatarProvider.CLIP_MS) * 100)) };
     return { status: "completed", progress: 100, videoUrl: demoAssetUrl(SAMPLE_VIDEO), thumbnailUrl: SAMPLE_THUMB, originalSec: 64, outputSec: 58.5, cuts: 7, reductionPct: 8.6 };
+  }
+
+  /** Demo lip sync: the sample video stands in for the synced one a few seconds later; nothing is redrawn. */
+  async startLipsync() {
+    return { jobId: `mockls_${Date.now()}` };
+  }
+
+  async lipsyncStatus(jobId: string): Promise<LipsyncStatus> {
+    const m = /^mockls_(\d+)$/.exec(jobId);
+    if (!m) return { status: "failed", error: "No such lip sync" };
+    if (Date.now() - Number(m[1]) < MockAvatarProvider.CLIP_MS) return { status: "processing" };
+    return { status: "completed", videoUrl: demoAssetUrl(SAMPLE_VIDEO), durationSec: 12 };
   }
 
   /** Demo Studio templates: two layouts to fill in; rendering one is a demo render of its filled-in script. */

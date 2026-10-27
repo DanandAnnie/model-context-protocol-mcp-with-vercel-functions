@@ -6,7 +6,7 @@ import { LOCAL_OWNER } from "../owner-id";
 import { assertNoRenewingPlan } from "../billing";
 import { ConflictError } from "../errors";
 
-const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip", "videolead", "backdrop", "portrait", "highlight", "cleanup"] as const;
+const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip", "videolead", "backdrop", "portrait", "highlight", "cleanup", "lipsync"] as const;
 /**
  * Cover rows hold image bytes; the export describes each cover from its video (`cover.mimeType`, `cover.bytes`) instead
  * of loading them. Clip audio is never listed (each `clip` row names its own `clipaudio_<id>` row), so the export and
@@ -30,7 +30,7 @@ export async function exportOwnerData(ownerId: string = LOCAL_OWNER): Promise<Ow
       // A drawn portrait's picture is in the photo avatar made from it; the job keeps only what it was.
       if (kind === "portrait") delete copy.imageUrl;
       // The renderer and its job id never leave the server, in the export as on the page.
-      if (kind === "highlight" || kind === "cleanup") {
+      if (kind === "highlight" || kind === "cleanup" || kind === "lipsync") {
         delete copy.provider;
         delete copy.providerJobId;
       }

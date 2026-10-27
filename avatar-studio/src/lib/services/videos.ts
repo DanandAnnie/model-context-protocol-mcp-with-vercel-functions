@@ -31,6 +31,7 @@ import { clearComments } from "./comments";
 import { clearVideoLeads } from "./leads";
 import { clearHighlights } from "./highlights";
 import { clearCleanups } from "./cleanups";
+import { clearLipsyncs } from "./lipsyncs";
 import { reviseScript } from "./scripts";
 export { accentSchema, avatarEngineSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema };
 
@@ -665,7 +666,7 @@ function prepareOnce(provider: AvatarProvider, avatar: Avatar): Promise<Avatar> 
 const preparingClips = new Map<string, Promise<AudioClip>>();
 
 /** Uploads a clip to the renderer once and remembers its asset id, so retries and copies reuse it. */
-function prepareClipOnce(provider: AvatarProvider, clip: AudioClip, ownerId: string): Promise<AudioClip> {
+export function prepareClipOnce(provider: AvatarProvider, clip: AudioClip, ownerId: string): Promise<AudioClip> {
   if (clip.providerAssetIds?.[provider.assetKey ?? provider.name]) return Promise.resolve(clip);
   const key = `${provider.name}:${clip.id}`;
   const running = preparingClips.get(key);
@@ -710,6 +711,7 @@ async function purgeVideo(id: string, ownerId: string): Promise<void> {
   await clearVideoLeads(id, ownerId);
   await clearHighlights(id, ownerId);
   await clearCleanups(id, ownerId);
+  await clearLipsyncs(id, ownerId);
   await getStore().remove("video", id);
 }
 

@@ -129,7 +129,7 @@ function VideosInner() {
       targetFolder = answer;
     } else if (action === "delete" && !window.confirm(`Move ${ids.length} ${ids.length === 1 ? "video" : "videos"} to the trash? You can restore ${ids.length === 1 ? "it" : "them"} for ${TRASH_RETENTION_DAYS} days.`)) {
       return;
-    } else if (action === "purge" && !window.confirm(`Delete ${ids.length} ${ids.length === 1 ? "video" : "videos"} for good? ${ids.length === 1 ? "Its" : "Their"} short clips and the recordings cleaned from ${ids.length === 1 ? "it" : "them"} go too. This cannot be undone.`)) {
+    } else if (action === "purge" && !window.confirm(`Delete ${ids.length} ${ids.length === 1 ? "video" : "videos"} for good? ${ids.length === 1 ? "Its" : "Their"} short clips, and the cleaned and lip-synced copies made from ${ids.length === 1 ? "it" : "them"}, go too. This cannot be undone.`)) {
       return;
     }
     setBusy(action);

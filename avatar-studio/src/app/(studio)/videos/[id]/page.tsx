@@ -485,7 +485,7 @@ export default function VideoDetailPage() {
 
   async function remove(permanent = false) {
     if (!video) return;
-    if (!confirm(permanent ? "Delete this video for good? Its short clips and the recordings cleaned from it go too. This cannot be undone." : `Move this video to the trash? You can restore it for ${TRASH_RETENTION_DAYS} days.`)) return;
+    if (!confirm(permanent ? "Delete this video for good? Its short clips, and the cleaned and lip-synced copies made from it, go too. This cannot be undone." : `Move this video to the trash? You can restore it for ${TRASH_RETENTION_DAYS} days.`)) return;
     setDeleting(true);
     try {
       await api(`/api/videos/${video.id}${permanent ? "?permanent=true" : ""}`, { method: "DELETE" });

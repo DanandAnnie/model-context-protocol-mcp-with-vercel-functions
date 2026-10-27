@@ -97,6 +97,13 @@ export interface AvatarProvider {
   startCleanup?(input: { videoUrl: string; title: string; key: string }): Promise<{ jobId: string }>;
   /** Where a cleanup stands, with the cleaned cut once it is ready (its link signed for a limited time). */
   cleanupStatus?(jobId: string): Promise<CleanupStatus>;
+  /**
+   * Starts putting a new audio track on a video, the speaker's mouth redrawn to match (HeyGen lip sync). `key` makes a
+   * retried start return the same job. Absent when the provider cannot lip-sync videos.
+   */
+  startLipsync?(input: LipsyncInput): Promise<{ jobId: string }>;
+  /** Where a lip sync stands, with the video once it is ready (its link signed for a limited time). */
+  lipsyncStatus?(jobId: string): Promise<LipsyncStatus>;
   /** The account's HeyGen Studio templates ready to fill. Absent when the provider has none. */
   listStudioTemplates?(): Promise<StudioTemplate[]>;
   /** One template's variables (with their defaults) and scenes. */
@@ -221,6 +228,22 @@ export interface HighlightStatus {
   status: "processing" | "completed" | "failed";
   progress?: number;
   clips: HighlightClip[];
+  error?: string;
+}
+
+export interface LipsyncInput {
+  videoUrl: string;
+  /** A public link, or an audio clip already uploaded to the renderer (`prepareAudio`). */
+  audio: { type: "url"; url: string } | { type: "asset"; assetId: string };
+  mode: "speed" | "precision";
+  title: string;
+  key: string;
+}
+
+export interface LipsyncStatus {
+  status: "processing" | "completed" | "failed";
+  videoUrl?: string;
+  durationSec?: number;
   error?: string;
 }
 

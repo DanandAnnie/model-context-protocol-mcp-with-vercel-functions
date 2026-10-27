@@ -292,13 +292,14 @@ export interface VoiceChange {
   /** The instant voice it speaks in, and its name then. */
   voiceId: string;
   voiceName: string;
-  /** The audio clip spoken again. */
-  clipId: string;
+  /** The audio clip spoken again; or, for text spoken in the voice, the text (one or the other). */
+  clipId?: string;
+  text?: string;
   removeNoise?: true;
-  /** Renderer, the voice there, and the recording as it was sent, so a conversion still running is asked for again. */
+  /** Renderer, the voice there, and the recording as it was sent (none for text), so one still running is asked for again. */
   provider: string;
   providerVoiceId: string;
-  providerAudio: string;
+  providerAudio?: string;
   status: "processing" | "completed" | "failed";
   /** The spoken result (a WAV); the renderer's link is signed for a limited time. */
   audioUrl?: string;

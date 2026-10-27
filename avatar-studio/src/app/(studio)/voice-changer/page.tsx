@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Download, Mic2, Trash2, Upload, Wand2 } from "lucide-react";
+import { Download, Mic2, Trash2, Type, Upload, Wand2 } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
@@ -13,6 +13,9 @@ import type { AudioClip, InstantVoice, VoiceChange } from "@/lib/types";
 /** As the server lists them: never the renderer, its ids, or the upload sent to it. */
 type Voice = Omit<InstantVoice, "ownerId" | "provider" | "providerVoiceId">;
 type Change = Omit<VoiceChange, "ownerId" | "provider" | "providerVoiceId" | "providerAudio">;
+
+/** As the server keeps it (`MAX_SPEECH_CHARS`). */
+const MAX_SPEECH_CHARS = 2000;
 /** A fresh key for one start (a UUID where the browser has one, as it does over https and on localhost). */
 const newKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`);
 const VOICE_STATUS: Record<Voice["status"], string> = { processing: "Being made", completed: "Ready", failed: "Could not be made" };
@@ -121,6 +124,11 @@ export default function VoiceChangerPage() {
   const [title, setTitle] = useState("");
   const [changeKey, setChangeKey] = useState(() => newKey());
   const [changing, setChanging] = useState(false);
+  const [speechVoiceId, setSpeechVoiceId] = useState("");
+  const [speechText, setSpeechText] = useState("");
+  const [speechTitle, setSpeechTitle] = useState("");
+  const [speechKey, setSpeechKey] = useState(() => newKey());
+  const [speaking, setSpeaking] = useState(false);
   const [voiceName, setVoiceName] = useState("");
   const [sampleId, setSampleId] = useState("");
   const [agreed, setAgreed] = useState(false);
@@ -128,7 +136,7 @@ export default function VoiceChangerPage() {
   const [making, setMaking] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   // Where the message shows: in the card whose action it answers, so it is seen wherever the page is scrolled to.
-  const [errAt, setErrAt] = useState<"change" | "voice" | "lists">("lists");
+  const [errAt, setErrAt] = useState<"change" | "speech" | "voice" | "lists">("lists");
   // A message is shown in one card; clearing from a card leaves another card's message (or the lists') alone.
   const fail = (at: typeof errAt) => (message: string | null) => (message === null ? errAt === at && setErr(null) : (setErrAt(at), setErr(message)));
   const [note, setNote] = useState<string | null>(null);
@@ -167,6 +175,7 @@ export default function VoiceChangerPage() {
     if (/audio clip is no longer available/.test(e.message)) void refetchClips();
     if (/voice is no longer available/.test(e.message)) {
       setVoiceId("");
+      setSpeechVoiceId("");
       void refetch();
     }
   }
@@ -180,7 +189,8 @@ export default function VoiceChangerPage() {
   // Likewise a chosen voice that is no longer ready.
   useEffect(() => {
     if (data && voiceId && !data.voices.some((v) => v.id === voiceId && v.status === "completed")) setVoiceId("");
-  }, [data, voiceId]);
+    if (data && speechVoiceId && !data.voices.some((v) => v.id === speechVoiceId && v.status === "completed")) setSpeechVoiceId("");
+  }, [data, voiceId, speechVoiceId]);
   function clipDeleted(clip: AudioClip) {
     setClipData((prev) => (prev ? { clips: prev.clips.filter((c) => c.id !== clip.id) } : prev));
     void refetchClips();
@@ -209,6 +219,29 @@ export default function VoiceChangerPage() {
       else void refetch();
     } finally {
       setChanging(false);
+    }
+  }
+
+  async function speakText() {
+    setSpeaking(true);
+    setErr(null);
+    setNote(null);
+    try {
+      const body = { voiceId: speechVoiceId, text: speechText.trim(), ...(speechTitle.trim() ? { title: speechTitle.trim() } : {}) };
+      const { change } = await api<{ change: Change }>("/api/voice-changer/speech", { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": speechKey } });
+      setData((prev) => (prev ? { ...prev, changes: [change, ...prev.changes.filter((c) => c.id !== change.id)] } : prev));
+      void refetch();
+      setSpeechKey(newKey());
+      setSpeechTitle("");
+      setNote(change.status === "completed" ? `${change.title} is ready.` : `Speaking ${change.title}; it appears here when it is ready.`);
+      focusAfterRender(() => changesRef.current?.querySelector<HTMLElement>(`[data-change="${change.id}"]`));
+    } catch (e) {
+      fail("speech")(e instanceof Error ? e.message : "The text could not be spoken");
+      forgetGone(e);
+      if (isRefusal(e)) setSpeechKey(newKey());
+      else void refetch();
+    } finally {
+      setSpeaking(false);
     }
   }
 
@@ -273,6 +306,11 @@ export default function VoiceChangerPage() {
     }
   }
 
+  const voiceBeingMade = voices.some((v) => v.status === "processing");
+  const voiceHint = ready.length ? "One of your instant voices." : voiceBeingMade ? "Your voice is being made; it is ready in a few seconds." : "Make a voice below first.";
+  const voicePlaceholder = ready.length ? "Choose a voice" : voiceBeingMade ? "Being made…" : "No voices yet";
+  const speechNeeds = !speechVoiceId && !speechText.trim() ? "Choose a voice and write the text to speak it." : !speechVoiceId ? "Choose a voice to speak the text." : !speechText.trim() ? "Write the text to speak." : null;
+
   return (
     <>
       <SectionTitle title="Voice changer" subtitle="Speak a recording again in another voice, keeping its words and timing." />
@@ -292,9 +330,9 @@ export default function VoiceChangerPage() {
             <Card className="space-y-4 p-5">
               <h2 className="text-sm font-semibold text-slate-900">Change a recording&apos;s voice</h2>
               <ErrorBanner message={errAt === "change" ? err : null} />
-              <Field label="Voice" hint={ready.length ? "One of your instant voices." : voices.some((v) => v.status === "processing") ? "Your voice is being made; it is ready in a few seconds." : "Make a voice below first."}>
+              <Field label="Voice" hint={voiceHint}>
                 <select className={inputClass} value={voiceId} disabled={!editable} onChange={(e) => (setVoiceId(e.target.value), setChangeKey(newKey()), setErr(null))}>
-                  <option value="">{ready.length ? "Choose a voice" : voices.some((v) => v.status === "processing") ? "Being made…" : "No voices yet"}</option>
+                  <option value="">{voicePlaceholder}</option>
                   {ready.map((v) => (
                     <option key={v.id} value={v.id}>
                       {v.name}
@@ -333,6 +371,40 @@ export default function VoiceChangerPage() {
                 <Wand2 className="h-4 w-4" /> Change the voice
               </Button>
               <p className="text-xs text-slate-500">HeyGen takes up to a couple of minutes. The result is a WAV to play and download; its link lasts a limited time, so download it soon.</p>
+            </Card>
+
+            <Card className="space-y-4 p-5">
+              <h2 className="text-sm font-semibold text-slate-900">Speak text in a voice</h2>
+              <ErrorBanner message={errAt === "speech" ? err : null} />
+              <Field label="Speaking voice" hint={voiceHint}>
+                <select className={inputClass} value={speechVoiceId} disabled={!editable} onChange={(e) => (setSpeechVoiceId(e.target.value), setSpeechKey(newKey()), errAt === "speech" && setErr(null))}>
+                  <option value="">{voicePlaceholder}</option>
+                  {ready.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <div>
+                <Field label="Text" hint={`Plain prose, up to ${MAX_SPEECH_CHARS.toLocaleString("en-US")} characters; the language is worked out from the text.`}>
+                  <textarea className={`${inputClass} min-h-28`} value={speechText} maxLength={MAX_SPEECH_CHARS} disabled={!editable} onChange={(e) => (setSpeechText(e.target.value), setSpeechKey(newKey()))} placeholder="Welcome to the team. Here is what your first week looks like." />
+                </Field>
+                <p className="mt-1 text-right text-xs text-slate-400" aria-hidden>
+                  {speechText.length.toLocaleString("en-US")} / {MAX_SPEECH_CHARS.toLocaleString("en-US")}
+                </p>
+              </div>
+              <Field label="Title for the text (optional)">
+                <input className={inputClass} value={speechTitle} maxLength={120} disabled={!editable} onChange={(e) => (setSpeechTitle(e.target.value), setSpeechKey(newKey()))} placeholder="The text's first words, in the voice" />
+              </Field>
+              {editable && speechNeeds !== null && (
+                <p id="speech-needs" className="text-xs text-slate-500">
+                  {speechNeeds}
+                </p>
+              )}
+              <Button onClick={speakText} loading={speaking} disabled={!editable || speechNeeds !== null} className="w-full" aria-describedby={editable && speechNeeds !== null ? "speech-needs" : undefined}>
+                <Type className="h-4 w-4" /> Speak the text
+              </Button>
             </Card>
 
             <Card className="space-y-4 p-5">
@@ -402,7 +474,7 @@ export default function VoiceChangerPage() {
                 Recordings in other voices
               </h2>
               {!data ? null : changes.length === 0 ? (
-                <EmptyState icon={<Wand2 className="h-8 w-8" />} title="No recordings yet" body="Choose a voice and a recording on the left." />
+                <EmptyState icon={<Wand2 className="h-8 w-8" />} title="No recordings yet" body="Choose a voice and a recording, or write a text, on the left." />
               ) : (
                 <div className="space-y-3">
                   {changes.map((c) => (
@@ -414,6 +486,7 @@ export default function VoiceChangerPage() {
                             In “{c.voiceName}” · {formatDate(c.createdAt)}
                             {typeof c.durationSec === "number" && c.durationSec > 0 ? ` · ${formatSeconds(Math.max(1, Math.round(c.durationSec)))}` : ""}
                             {c.removeNoise ? " · noise removed" : ""}
+                            {c.text !== undefined ? " · from text" : ""}
                           </div>
                           {c.error && <div className="mt-1 text-xs text-rose-600">{c.error}</div>}
                         </div>

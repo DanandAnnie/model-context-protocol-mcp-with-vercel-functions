@@ -169,6 +169,12 @@ export class MockAvatarProvider implements AvatarProvider {
     return { status: "completed", audioUrl: demoAssetUrl("/demo/revoiced.mp3"), durationSec: 0 };
   }
 
+  /** Demo text to speech: the same sample recording, its length as the text would take to read aloud. */
+  async speakText(input: { text: string }): Promise<{ status: "completed"; audioUrl: string; durationSec: number }> {
+    const words = input.text.trim().split(/\s+/).filter(Boolean).length;
+    return { status: "completed", audioUrl: demoAssetUrl("/demo/revoiced.mp3"), durationSec: Math.max(1, Math.round((words / 2.5) * 10) / 10) };
+  }
+
   async musicMixStatus(jobId: string): Promise<LipsyncStatus> {
     const m = /^mockmm_(\d+)$/.exec(jobId);
     if (!m) return { status: "failed", error: "No such video with music" };

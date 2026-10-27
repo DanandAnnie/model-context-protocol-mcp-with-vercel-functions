@@ -1,5 +1,5 @@
 // The voice changer: instant voices made from one of the account's audio clips with the speaker's agreement, and
-// recordings spoken again in one of them; each account's own, retried by key, followed while the renderer works, deleted
+// recordings and text spoken in one of them; each account's own, retried by key, followed while the renderer works, deleted
 // at the renderer with the voice or the account; and the HeyGen requests behind them.
 // Run with: npm test
 import assert from "node:assert/strict";
@@ -20,7 +20,9 @@ import {
   publicInstantVoice,
   publicVoiceChange,
   startVoiceChange,
+  startVoiceSpeech,
   voiceChangeSchema,
+  voiceSpeechSchema,
 } from "../services";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { providerStatus } from "../providers";
@@ -278,6 +280,84 @@ describe("voice changer", () => {
       assert.equal(asked, 1, "a day old, it would be spoken and paid for again, so it is not asked");
     } finally {
       proto.changeVoice = real;
+    }
+  });
+
+  it("speaks text in one of the account's voices, once for a client key, kept with its recordings", async () => {
+    assert.throws(() => voiceSpeechSchema.parse({ voiceId: "iv_x", text: "   " }), /Write the text/);
+    assert.throws(() => voiceSpeechSchema.parse({ voiceId: "iv_x", text: "x".repeat(2001) }), /2,000 characters/);
+    const voice = await ready("u1");
+    let admitted = 0;
+    const admit = () => void admitted++;
+    const text = "Welcome to the team. Here is what your first week looks like, day by day.";
+    const spoken = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text }), "u1", { key: "speech-key-1", admit });
+    assert.deepEqual([spoken.status, spoken.title, spoken.text, spoken.clipId, spoken.voiceName], ["completed", "Welcome to the team. Here is what your… in Narrator", text, undefined, "Narrator"]);
+    assert.match(spoken.audioUrl ?? "", /\/demo\/revoiced\.mp3$/);
+    assert.equal(spoken.durationSec, 6, "the demo's length is the text's at about two and a half words a second");
+    for (const key of ["ownerId", "provider", "providerVoiceId", "providerAudio"]) assert.equal(key in publicVoiceChange(spoken), false);
+    const again = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text }), "u1", { key: "speech-key-1", admit });
+    assert.deepEqual([again.id, admitted], [spoken.id, 1]);
+    await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Other words" }), "u1", { key: "speech-key-1" }), ConflictError);
+    // A key used for text is not a recording's, nor the other way round.
+    const take = await clip("u1");
+    await assert.rejects(startVoiceChange(voiceChangeSchema.parse({ voiceId: voice.id, clipId: take.id }), "u1", { key: "speech-key-1" }), ConflictError);
+    assert.deepEqual((await listVoiceChanges("u1")).map((c) => c.id), [spoken.id]);
+    // Refused like a recording: another account's voice, one not ready, a short title kept as given.
+    const theirs = await ready("u2", "Theirs");
+    await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: theirs.id, text }), "u1"), /no longer available/);
+    const titled = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Hi.", title: "Greeting" }), "u1");
+    assert.equal(titled.title, "Greeting");
+    const out = (await exportOwnerData("u1")) as unknown as Record<string, Array<Record<string, unknown>>>;
+    assert.deepEqual(out.voicechange.map((c) => c.text).sort(), ["Hi.", text]);
+  });
+
+  it("asks HeyGen to speak text in an instant voice, following one not done in time and telling a refusal apart", async () => {
+    // A voice made beforehand, as HeyGen holds it.
+    const voice: InstantVoice = { ...(await ready("u1")), status: "completed", provider: "heygen", providerVoiceId: "hv_1" };
+    await getStore().put<InstantVoice>("instantvoice", voice);
+    const { config } = await import("../config");
+    const saved = { avatar: config.avatarProvider, key: config.heygenApiKey };
+    const calls: Array<{ url: string; body: Record<string, unknown> | null; idem: string | null }> = [];
+    const realFetch = globalThis.fetch;
+    let tts: "slow" | "done" | "refuse" = "slow";
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = typeof init?.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : null;
+      calls.push({ url, body, idem: new Headers(init?.headers).get("idempotency-key") });
+      if (url === "https://api.heygen.com/v3/models/audio/tts") {
+        if (tts === "slow") {
+          const err = new Error("The operation was aborted due to timeout");
+          err.name = "TimeoutError";
+          throw err;
+        }
+        if (tts === "refuse") return Response.json({ error: { code: "invalid_parameter", message: "text language is not supported", param: "text" } }, { status: 400 });
+        return Response.json({ data: { audio_url: "https://files.heygen.ai/generated/speech.wav", duration: 3.4 } });
+      }
+      return new Response("unexpected", { status: 500 });
+    }) as typeof fetch;
+    Object.assign(config, { avatarProvider: "heygen", heygenApiKey: "hg_key" });
+    try {
+      const started = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Hello there." }), "u1");
+      assert.equal(started.status, "processing");
+      assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1", voice_id: "hv_1", text: "Hello there." });
+      assert.equal(calls.at(-1)!.idem, started.id);
+      tts = "done";
+      forgetVoiceChangerChecks();
+      const [done] = await listVoiceChanges("u1");
+      assert.deepEqual([done.status, done.audioUrl, done.durationSec], ["completed", "https://files.heygen.ai/generated/speech.wav", 3.4]);
+      assert.deepEqual(new Set(calls.map((c) => c.idem)), new Set([started.id]), "asked again with the same key");
+      tts = "refuse";
+      await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Bonjour." }), "u1"), (e: unknown) => e instanceof ValidationError && /could not speak that text: text language is not supported/.test((e as Error).message));
+      assert.equal((await listVoiceChanges("u1")).length, 1, "nothing is kept for a refused text");
+      // Given up like a recording: past half an hour still running, it says the text was not finished.
+      tts = "slow";
+      const late = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Later." }), "u1");
+      await getStore().put<VoiceChange>("voicechange", { ...late, createdAt: new Date(Date.now() - 31 * 60 * 1000).toISOString() });
+      forgetVoiceChangerChecks();
+      assert.equal((await listVoiceChanges("u1")).find((c) => c.id === late.id)!.error, "The renderer did not finish speaking this text; try again");
+    } finally {
+      globalThis.fetch = realFetch;
+      Object.assign(config, { avatarProvider: saved.avatar, heygenApiKey: saved.key });
     }
   });
 

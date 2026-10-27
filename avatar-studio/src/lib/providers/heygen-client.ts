@@ -316,6 +316,11 @@ export class HeyGenClient {
     return this.request<{ audio_url?: string | null; duration?: number | null }>(`${V3}/models/audio/sts`, { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": key }, signal: AbortSignal.timeout(waitMs) });
   }
 
+  /** Text spoken in a HeyGen Voice (`POST /v3/models/audio/tts`): one WAV, waited for. */
+  textToSpeech(body: Record<string, unknown>, key: string, waitMs: number) {
+    return this.request<{ audio_url?: string | null; duration?: number | null }>(`${V3}/models/audio/tts`, { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": key }, signal: AbortSignal.timeout(waitMs) });
+  }
+
   /** Deletes a HyperFrames render and its video (`DELETE /v3/hyperframes/renders/{id}`). */
   async deleteHyperframesRender(id: string): Promise<void> {
     await this.request(`${V3}/hyperframes/renders/${encodeURIComponent(id)}`, { method: "DELETE", signal: AbortSignal.timeout(10_000) });

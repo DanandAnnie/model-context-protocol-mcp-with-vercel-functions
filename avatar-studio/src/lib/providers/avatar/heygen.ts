@@ -619,21 +619,31 @@ export class HeyGenAvatarProvider implements AvatarProvider {
 
   async changeVoice(input: { voiceId: string; assetId: string; removeNoise: boolean; key: string; waitMs: number }): Promise<{ status: "processing" } | { status: "completed"; audioUrl: string; durationSec: number }> {
     const body = { voice_id: input.voiceId, audio: { type: "asset_id", asset_id: input.assetId }, ...(input.removeNoise ? { remove_background_noise: true } : {}) };
+    return this.voiceAudio(() => this.client.speechToSpeech(body, input.key, input.waitMs), { what: "recording", fix: "try a clearer recording" });
+  }
+
+  async speakText(input: { voiceId: string; text: string; key: string; waitMs: number }): Promise<{ status: "processing" } | { status: "completed"; audioUrl: string; durationSec: number }> {
+    const body = { model: "heygen-voice-1", voice_id: input.voiceId, text: input.text };
+    return this.voiceAudio(() => this.client.textToSpeech(body, input.key, input.waitMs), { what: "text", fix: "check the text is plain prose in a supported language" });
+  }
+
+  /** One WAV spoken in an instant voice (speech to speech or text to speech), with HeyGen's refusals told apart. */
+  private async voiceAudio(ask: () => Promise<{ audio_url?: string | null; duration?: number | null }>, words: { what: string; fix: string }): Promise<{ status: "processing" } | { status: "completed"; audioUrl: string; durationSec: number }> {
     let out;
     try {
-      out = await this.client.speechToSpeech(body, input.key, input.waitMs);
+      out = await ask();
     } catch (err) {
       const message = err instanceof Error ? err.message : "";
       const status = Number(message.match(/ failed: (\d{3}) /)?.[1] ?? 0);
       const code = heygenCode(message);
       if (code === "voice_training_failed") throw new ValidationError("HeyGen could not make this voice; make it again from another recording");
-      if (code === "conflict") throw new ValidationError("This recording was already asked for with other details; make it again");
+      if (code === "conflict") throw new ValidationError(`This ${words.what} was already asked for with other details; make it again`);
       if (status === 404) throw new ValidationError("HeyGen no longer has this voice; make it again");
-      if (status === 429) throw new LimitError("HeyGen is speaking too many recordings just now; try again in a minute");
-      if (status === 401 || status === 403) throw new ValidationError("The HeyGen account behind this studio may not change voices; ask its operator");
-      if (status === 400 || status === 402 || status === 422 || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not speak that recording again: ${heygenReason(message, "try a clearer recording")}`);
+      if (status === 429) throw new LimitError(`HeyGen is speaking too many ${words.what === "text" ? "texts" : "recordings"} just now; try again in a minute`);
+      if (status === 401 || status === 403) throw new ValidationError("The HeyGen account behind this studio may not use instant voices; ask its operator");
+      if (status === 400 || status === 402 || status === 422 || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not speak that ${words.what === "text" ? "text" : "recording again"}: ${heygenReason(message, words.fix)}`);
       // Anything else (not done in time, still running or the voice still being prepared, a server error, a dropped
-      // connection) may still be running at HeyGen: asked again with the same key, so it is paid for once.
+      // connection) may still be running at HeyGen: asked again with the same key, so a finished answer is replayed.
       return { status: "processing" };
     }
     const audioUrl = httpsOnly(out?.audio_url);

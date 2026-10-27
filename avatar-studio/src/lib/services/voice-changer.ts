@@ -54,6 +54,15 @@ export const voiceChangeSchema = z.object({
   title: z.string().trim().max(120, "Keep the title to 120 characters").optional(),
 });
 
+/** Text an account may have spoken at once: well under the renderer's 5,000 characters, so it is ready within a minute. */
+export const MAX_SPEECH_CHARS = 2000;
+
+export const voiceSpeechSchema = z.object({
+  voiceId: z.string({ error: "Choose one of your instant voices" }).regex(/^iv_[A-Za-z0-9_-]{1,64}$/, "Choose one of your instant voices"),
+  text: z.string({ error: "Write the text to speak" }).trim().min(1, "Write the text to speak").max(MAX_SPEECH_CHARS, `Keep the text to ${MAX_SPEECH_CHARS.toLocaleString("en-US")} characters`),
+  title: z.string().trim().max(120, "Keep the title to 120 characters").optional(),
+});
+
 export const instantVoiceIdSchema = z.string().regex(/^iv_[A-Za-z0-9_-]{1,64}$/, "Unknown instant voice");
 export const voiceChangeIdSchema = z.string().regex(/^vc_[A-Za-z0-9_-]{1,64}$/, "Unknown recording");
 
@@ -211,15 +220,7 @@ export async function startVoiceChange(input: z.infer<typeof voiceChangeSchema>,
   }
   const provider = getAvatarProvider();
   if (!provider.changeVoice) throw new ValidationError(`The voice changer is not available with the ${provider.name} renderer`);
-  if ((await getStore().list<VoiceChange>("voicechange", ownerId)).length >= MAX_VOICE_CHANGES) throw new ConflictError(`An account keeps at most ${MAX_VOICE_CHANGES} recordings spoken again; delete one to make another`);
-  let voice: InstantVoice;
-  try {
-    voice = owned(await getStore().get<InstantVoice>("instantvoice", input.voiceId), ownerId, "Instant voice");
-  } catch (err) {
-    if (err instanceof NotFoundError) throw new ValidationError("That voice is no longer available; choose another");
-    throw err;
-  }
-  if (voice.status !== "completed") throw new ValidationError(voice.status === "failed" ? `The voice "${voice.name}" could not be made; choose another` : `The voice "${voice.name}" is still being made; try again in a moment`);
+  const voice = await readyVoice(input.voiceId, ownerId);
   const clip = await clipOf(input.clipId, ownerId);
   opts.admit?.();
   const assetId = await assetOf(clip, ownerId);
@@ -260,6 +261,76 @@ export async function startVoiceChange(input: z.infer<typeof voiceChangeSchema>,
   }
 }
 
+/** Room for one more recording, and one of the account's voices that is ready to speak. */
+async function readyVoice(voiceId: string, ownerId: string): Promise<InstantVoice> {
+  if ((await getStore().list<VoiceChange>("voicechange", ownerId)).length >= MAX_VOICE_CHANGES) throw new ConflictError(`An account keeps at most ${MAX_VOICE_CHANGES} recordings in its voices; delete one to make another`);
+  let voice: InstantVoice;
+  try {
+    voice = owned(await getStore().get<InstantVoice>("instantvoice", voiceId), ownerId, "Instant voice");
+  } catch (err) {
+    if (err instanceof NotFoundError) throw new ValidationError("That voice is no longer available; choose another");
+    throw err;
+  }
+  if (voice.status !== "completed") throw new ValidationError(voice.status === "failed" ? `The voice "${voice.name}" could not be made; choose another` : `The voice "${voice.name}" is still being made; try again in a moment`);
+  return voice;
+}
+
+/**
+ * Speaks text in one of the account's instant voices, kept with the recordings spoken again. As for those, the record is
+ * stored before the renderer is asked, the start waits for most of a minute, and one not done by then is asked for
+ * again with the same key while the list is open. With a client `key`, a start retried after a lost answer returns it.
+ */
+export async function startVoiceSpeech(input: z.infer<typeof voiceSpeechSchema>, ownerId: string = LOCAL_OWNER, opts: { key?: string; admit?: () => void } = {}): Promise<VoiceChange> {
+  const arrived = Date.now();
+  const id = opts.key ? keyedId("vc", ownerId, opts.key) : newId("vc");
+  const existing = opts.key ? await getStore().get<VoiceChange>("voicechange", id) : null;
+  if (existing && existing.ownerId === ownerId) {
+    if (existing.voiceId !== input.voiceId || existing.text !== input.text || (input.title && existing.title !== input.title)) throw new ConflictError("This Idempotency-Key was already used for another recording; send a new key");
+    return existing;
+  }
+  const provider = getAvatarProvider();
+  if (!provider.speakText) throw new ValidationError(`Text to speech in an instant voice is not available with the ${provider.name} renderer`);
+  const voice = await readyVoice(input.voiceId, ownerId);
+  opts.admit?.();
+  const now = nowIso();
+  const change: VoiceChange = {
+    id,
+    ownerId,
+    title: input.title || withSuffix(speechTitle(input.text), ` in ${voice.name}`, 120),
+    voiceId: voice.id,
+    voiceName: voice.name,
+    text: input.text,
+    provider: provider.name,
+    providerVoiceId: voice.providerVoiceId,
+    status: "processing",
+    createdAt: now,
+    updatedAt: now,
+  };
+  await getStore().put("voicechange", change);
+  try {
+    const waitMs = Math.max(MIN_WAIT_MS, START_DEADLINE_MS - (Date.now() - arrived));
+    const out = await provider.speakText({ voiceId: voice.providerVoiceId, text: input.text, key: id, waitMs });
+    if (out.status === "processing") return change;
+    const done: VoiceChange = { ...change, status: "completed", audioUrl: out.audioUrl, ...(out.durationSec ? { durationSec: out.durationSec } : {}), checkedAt: nowIso(), updatedAt: nowIso() };
+    return (await getStore().putIf("voicechange", done, "updatedAt", change.updatedAt)) ? done : change;
+  } catch (err) {
+    if (err instanceof ValidationError || err instanceof LimitError) {
+      await getStore().remove("voicechange", change.id);
+      throw err;
+    }
+    console.error(`voice speech ${change.id} start failed; it is followed:`, err);
+    return change;
+  }
+}
+
+/** The first words of a text, as a title: up to about 40 characters, cut at a word and marked when cut. */
+function speechTitle(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (flat.length <= 40) return flat;
+  const cut = flat.slice(0, 40);
+  return `${cut.slice(0, cut.lastIndexOf(" ") > 20 ? cut.lastIndexOf(" ") : 40).replace(/[\s,.;:!?-]+$/, "")}…`;
+}
+
 /** Forgets one recording spoken again (the renderer's copy expires on its own). */
 export async function deleteVoiceChange(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
   const change = owned(await getStore().get<VoiceChange>("voicechange", voiceChangeIdSchema.parse(id)), ownerId, "Recording");
@@ -272,14 +343,17 @@ async function refreshVoiceChange(change: VoiceChange): Promise<VoiceChange> {
   let next: VoiceChange;
   try {
     const age = Date.now() - Date.parse(change.createdAt);
-    const giveUp: VoiceChange = { ...change, status: "failed", error: "The renderer did not finish speaking this recording; try again", checkedAt: now, updatedAt: now };
+    const giveUp: VoiceChange = { ...change, status: "failed", error: `The renderer did not finish speaking this ${change.text !== undefined ? "text" : "recording"}; try again`, checkedAt: now, updatedAt: now };
     if (age > KEY_KEPT_MS) {
       next = giveUp;
     } else {
       // Asked even when long unanswered (a page closed meanwhile): a finished one is returned under its key, unpaid.
       const provider = getAvatarProviderByName(change.provider);
-      if (!provider.changeVoice) return change;
-      const out = await provider.changeVoice({ voiceId: change.providerVoiceId, assetId: change.providerAudio, removeNoise: !!change.removeNoise, key: change.id, waitMs: CHECK_WAIT_MS });
+      const out =
+        change.text !== undefined
+          ? provider.speakText && (await provider.speakText({ voiceId: change.providerVoiceId, text: change.text, key: change.id, waitMs: CHECK_WAIT_MS }))
+          : provider.changeVoice && change.providerAudio && (await provider.changeVoice({ voiceId: change.providerVoiceId, assetId: change.providerAudio, removeNoise: !!change.removeNoise, key: change.id, waitMs: CHECK_WAIT_MS }));
+      if (!out) return change;
       if (out.status === "completed") next = { ...change, status: "completed", audioUrl: out.audioUrl, durationSec: out.durationSec || change.durationSec, checkedAt: now, updatedAt: now };
       else next = age > GIVE_UP_MS ? giveUp : { ...change, checkedAt: now };
     }

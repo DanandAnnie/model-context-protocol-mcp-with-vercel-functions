@@ -829,6 +829,24 @@ test("an instant voice is made from a recording with the speaker's agreement, an
   const listed = (await (await page.request.get("/api/voice-changer")).json()) as { voices: Array<Record<string, unknown>>; changes: Array<Record<string, unknown>> };
   for (const key of ["provider", "providerVoiceId", "ownerId"]) expect(Object.keys(listed.voices[0])).not.toContain(key);
   expect(Object.keys(listed.changes[0])).not.toContain("providerAudio");
+  // Text is spoken in the same voice, kept with the recordings, and marked as from text.
+  const speak = page.getByRole("button", { name: "Speak the text" });
+  await expect(speak).toBeDisabled();
+  await page.getByRole("combobox", { name: /^Speaking voice\b/ }).selectOption({ label: name });
+  await expect(speak).toBeDisabled();
+  await page.getByRole("textbox", { name: /^Text\b/ }).fill("Welcome to the team.");
+  const said = page.waitForRequest((r) => r.url().endsWith("/api/voice-changer/speech") && r.method() === "POST");
+  await speak.click();
+  const saidRequest = await said;
+  expect(saidRequest.postDataJSON()).toEqual({ voiceId: expect.stringMatching(/^iv_/), text: "Welcome to the team." });
+  expect(saidRequest.headers()["idempotency-key"]).toMatch(/^[A-Za-z0-9_-]{8,100}$/);
+  const spokenCard = page.getByTestId("voice-change").filter({ hasText: `Welcome to the team. in ${name}` });
+  await expect(spokenCard).toBeFocused();
+  await expect(spokenCard.getByTestId("voice-change-meta")).toContainText("from text");
+  await expect(spokenCard.getByRole("link", { name: /^Download / })).toHaveAttribute("href", /\/demo\/revoiced\.mp3$/);
+  page.once("dialog", (d) => d.accept());
+  await spokenCard.getByRole("button", { name: /^Delete / }).click();
+  await expect(spokenCard).toHaveCount(0);
   // Deleting asks first; the recording spoken already stays when its voice is deleted.
   page.once("dialog", (d) => d.accept());
   await voiceRow.getByRole("button", { name: `Delete the voice ${name}` }).click();

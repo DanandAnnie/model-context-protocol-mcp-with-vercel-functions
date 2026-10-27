@@ -139,6 +139,11 @@ export interface AvatarProvider {
    * once done, without paying twice.
    */
   changeVoice?(input: { voiceId: string; assetId: string; removeNoise: boolean; key: string; waitMs: number }): Promise<{ status: "processing" } | { status: "completed"; audioUrl: string; durationSec: number }>;
+  /**
+   * Speaks text in an instant voice (HeyGen Voice's text to speech), as `changeVoice` does a recording: waits up to
+   * `waitMs`, and one not done by then is asked for again with the same `key`.
+   */
+  speakText?(input: { voiceId: string; text: string; key: string; waitMs: number }): Promise<{ status: "processing" } | { status: "completed"; audioUrl: string; durationSec: number }>;
   /** Where a music mix stands, with the video once it is ready (its link signed for a limited time). */
   musicMixStatus?(jobId: string): Promise<LipsyncStatus>;
   /** Deletes a music mix and its video at the renderer; one it no longer has counts as deleted. */

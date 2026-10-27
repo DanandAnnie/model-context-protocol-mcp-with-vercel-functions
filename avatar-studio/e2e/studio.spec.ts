@@ -4137,6 +4137,8 @@ test("a shared video is copied for an email as its moving preview, linked to the
   expect(copied.text).toBe(share);
   expect(copied.html).toContain(`<a href="${share}"><img src="${share}/preview.gif" alt="Watch the video: Email preview`);
   expect(copied.html).toContain('width="480" height="270"');
+  await page.getByRole("button", { name: "Share", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Share link copied" })).toHaveCount(1);
   // The picture's address is fixed and redirects to the renderer's GIF, which loads as an image.
   const preview = await page.request.get(`/share/${v.id}/preview.gif`, { maxRedirects: 0 });
   expect(preview.status()).toBe(302);
@@ -4153,6 +4155,8 @@ test("a shared video is copied for an email as its moving preview, linked to the
     delete (window as { ClipboardItem?: unknown }).ClipboardItem;
   });
   await bare.goto(`/videos/${v.id}`);
+  expect(await bare.evaluate(() => typeof (window as { ClipboardItem?: unknown }).ClipboardItem)).toBe("undefined");
+  await bare.evaluate(() => navigator.clipboard.writeText("sentinel"));
   await bare.getByRole("button", { name: "Email", exact: true }).click();
   await expect(bare.getByRole("button", { name: "Email copied" })).toBeVisible();
   const fallback = await bare.evaluate(async () => {
@@ -4174,12 +4178,18 @@ test("a shared video is copied for an email as its moving preview, linked to the
   expect((await page.request.get(`/share/${v.id}/preview.gif`, { maxRedirects: 0 })).status()).toBe(404);
   await page.goto(`/videos/${v.id}`);
   await expect(page.getByRole("button", { name: "Email", exact: true })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Email", exact: true })).toHaveAccessibleDescription("No email preview behind a password.");
+  await expect(page.getByRole("button", { name: "Email", exact: true })).toHaveAccessibleDescription("Email preview unavailable while the link has a password.");
   // Nor while the link is off, and the page says why.
   expect((await page.request.patch(`/api/videos/${v.id}`, { data: { sharePassword: null, shareDisabled: true } })).status()).toBe(200);
   await page.reload();
   await expect(page.getByRole("button", { name: "Email", exact: true })).toBeDisabled();
-  await expect(page.locator("#email-preview-note")).toHaveText("The email preview shows once the share link is live again.");
+  await expect(page.locator("#email-preview-note")).toHaveText("Turn the share link on to copy an email preview.");
+  // Nor once the link expires, while the page is open.
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareDisabled: false, shareExpiresAt: new Date(Date.now() + 6_000).toISOString() } })).status()).toBe(200);
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Email", exact: true })).toBeEnabled();
+  await expect(page.locator("#email-preview-note")).toHaveText("Link expired: set a later expiry to copy an email preview.", { timeout: 15_000 });
+  await expect(page.getByRole("button", { name: "Email", exact: true })).toBeDisabled();
   expect((await page.request.get(`/share/vid_missing/preview.gif`, { maxRedirects: 0 })).status()).toBe(404);
 });
 

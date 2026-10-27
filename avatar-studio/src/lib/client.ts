@@ -72,12 +72,14 @@ function escapeHtml(text: string): string {
  * What an email carries for a shared video: its animated preview (a fixed address that redirects to the renderer's GIF,
  * or to the cover) linked to the share page, as HTML for a mail client, and the bare link for one that pastes text.
  */
-export function emailSnippet(video: { id: string; title: string; aspect?: string }, base: string): { html: string; text: string } {
+export function emailSnippet(video: { id: string; title: string; aspect?: string; cover?: unknown }, base: string): { html: string; text: string } {
   const share = `${base.replace(/\/$/, "")}/share/${video.id}`;
-  // Sized in the video's shape: a mail client that ignores the style (Outlook) still keeps it.
+  // Sized in the video's shape, so a mail client that ignores the style (Outlook) keeps it; a cover, which the picture
+  // may be (a link asking for an email first) and can be of any shape, is sized by its width alone.
   const [width, height] = video.aspect === "9:16" ? [270, 480] : video.aspect === "1:1" ? [360, 360] : [480, 270];
+  const sized = video.cover ? "" : ` height="${height}"`;
   const alt = escapeHtml(`Watch the video: ${video.title}`);
-  const html = `<a href="${escapeHtml(share)}"><img src="${escapeHtml(`${share}/preview.gif`)}" alt="${alt}" width="${width}" height="${height}" style="display:block;max-width:100%;height:auto;border:0"></a>`;
+  const html = `<a href="${escapeHtml(share)}"><img src="${escapeHtml(`${share}/preview.gif`)}" alt="${alt}" width="${width}"${sized} style="display:block;max-width:100%;height:auto;border:0"></a>`;
   return { html, text: share };
 }
 

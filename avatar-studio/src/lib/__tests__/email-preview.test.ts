@@ -187,6 +187,7 @@ describe("email snippet", () => {
       html,
       `<a href="https://studio.example/share/vid_1"><img src="https://studio.example/share/vid_1/preview.gif" alt="Watch the video: Tom &amp; &quot;Jerry&quot; &lt;live&gt;" width="270" height="480" style="display:block;max-width:100%;height:auto;border:0"></a>`,
     );
-    assert.match(emailSnippet({ id: "v", title: "x" }, "https://s").html, /width="480"/);
+    assert.match(emailSnippet({ id: "v", title: "x" }, "https://s").html, /width="480" height="270"/);
+    assert.match(emailSnippet({ id: "v", title: "x", aspect: "1:1", cover: { updatedAt: "t" } }, "https://s").html, /width="360" style=/, "a cover of any shape is sized by width alone");
   });
 });

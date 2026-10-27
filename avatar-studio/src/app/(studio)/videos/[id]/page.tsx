@@ -45,9 +45,15 @@ export default function VideoDetailPage() {
   const [embedCopied, setEmbedCopied] = useState(false);
   const [emailCopied, setEmailCopied] = useState(false);
   const [copyNote, setCopyNote] = useState("");
+  const copyNoteTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // Emptied first, so a second copy of the same thing is announced again; the newest copy's note stays its full time.
   function announceCopy(note: string) {
-    setCopyNote(note);
-    setTimeout(() => setCopyNote((n) => (n === note ? "" : n)), 2000);
+    clearTimeout(copyNoteTimer.current);
+    setCopyNote("");
+    copyNoteTimer.current = setTimeout(() => {
+      setCopyNote(note);
+      copyNoteTimer.current = setTimeout(() => setCopyNote(""), 2000);
+    }, 50);
   }
   const [embedAutoplay, setEmbedAutoplay] = useState(false);
   const [embedLoop, setEmbedLoop] = useState(false);
@@ -239,8 +245,19 @@ export default function VideoDetailPage() {
     }
   }
   const shareLive = !(shareDraft.shareDisabled ?? !!video?.shareDisabled);
-  // A picture for an email loads only from a live, unprotected share link.
-  const emailReady = !!video && shareLive && !shareExpired(video) && !video.shareLocked;
+  // A picture for an email loads only from a live, unprotected share link. The expiry is the one being saved, if any.
+  const expiresAt = shareDraft.shareExpiresAt !== undefined ? shareDraft.shareExpiresAt ?? undefined : video?.shareExpiresAt;
+  const linkExpired = !!video && shareExpired({ shareExpiresAt: expiresAt });
+  const emailReady = !!video && shareLive && !linkExpired && !video.shareLocked;
+  const emailBlocked = !video ? "" : video.shareLocked ? "Email preview unavailable while the link has a password." : !shareLive ? "Turn the share link on to copy an email preview." : linkExpired ? "Link expired: set a later expiry to copy an email preview." : "";
+  // Drawn again when the link expires, so the button and the note follow without a reload.
+  const [, setExpiryTick] = useState(0);
+  useEffect(() => {
+    const left = expiresAt ? Date.parse(expiresAt) - Date.now() : NaN;
+    if (!(left > 0) || left > 2 ** 31 - 1) return;
+    const timer = setTimeout(() => setExpiryTick((t) => t + 1), left + 50);
+    return () => clearTimeout(timer);
+  }, [expiresAt]);
   // Expiry: the owner types a local date and time; the API stores it as an instant.
   const [expiryDraft, setExpiryDraft] = useState("");
   const expiryInput = (iso?: string) => {
@@ -642,7 +659,7 @@ export default function VideoDetailPage() {
                     </Button>
                     {!emailReady && (
                       <span id="email-preview-note" className="text-xs text-slate-500">
-                        {video.shareLocked ? "No email preview behind a password." : "The email preview shows once the share link is live again."}
+                        {emailBlocked}
                       </span>
                     )}
                     <Button variant="secondary" onClick={copyEmbed} title="Copy an iframe snippet for your site">
@@ -1209,6 +1226,7 @@ function Row({ label, children, wrap = false }: { label: string; children: React
 function copyRendered(html: string, text: string): boolean {
   let filled = false;
   const fill = (e: ClipboardEvent) => {
+    // Without clipboard data the selected link is copied as usual, but the caller is told it failed and shows the HTML.
     if (!e.clipboardData) return;
     e.clipboardData.setData("text/html", html);
     e.clipboardData.setData("text/plain", text);

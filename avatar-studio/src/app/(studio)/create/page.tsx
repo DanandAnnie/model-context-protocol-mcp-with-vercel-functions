@@ -222,7 +222,7 @@ function CreateInner() {
   // Uploaded background images; the picker adds and removes them here, so the list is always the editor's.
   const { data: backdropData, error: backdropError, setData: setBackdropData } = useApi<{ backdrops: Backdrop[] }>("/api/backdrops");
   // Generated clips (the B-roll page) a scene can loop as its video background; only finished ones are offered.
-  const { data: footageData } = useApi<{ footage: Array<Pick<FootageJob, "id" | "title" | "status" | "durationSec" | "aspect">>; available: boolean }>("/api/footage");
+  const { data: footageData, refetch: refetchFootage } = useApi<{ footage: Array<Pick<FootageJob, "id" | "title" | "status" | "durationSec" | "aspect">>; available: boolean }>("/api/footage");
   const readyFootage = (footageData?.footage ?? []).filter((f) => f.status === "completed");
   const { play, playingId, busyId } = useVoicePreview();
 
@@ -980,6 +980,12 @@ function CreateInner() {
 
   const stageAspect = aspect === "9:16" ? "aspect-[9/16]" : aspect === "1:1" ? "aspect-square" : "aspect-video";
   // A transparent stage is drawn as a light checkerboard, whatever background the scene keeps.
+  // A scene's clip that is gone or not ready (once the list has loaded) is said under the picker, before Generate.
+  const clipMissing = !!footageData && !!footageIdOf(background) && !readyFootage.some((f) => f.id === footageIdOf(background));
+  // A clip finished on the B-roll page since the editor opened is offered once the Background tab is opened again.
+  useEffect(() => {
+    if (tab === "background") void refetchFootage();
+  }, [tab, refetchFootage]);
   const bgIsDark = !sentTransparent && ((background.type === "color" && isDarkHex(background.value)) || background.type === "video");
 
   return (
@@ -1529,6 +1535,8 @@ function CreateInner() {
             ).map(([key, label, Icon]) => (
               <button
                 key={key}
+                type="button"
+                aria-pressed={tab === key}
                 onClick={() => setTab(key)}
                 className={`flex min-w-0 flex-1 items-center justify-center gap-1 px-1 py-3 text-xs font-medium sm:gap-2 sm:px-3 sm:text-sm ${tab === key ? "border-b-2 border-brand-600 text-brand-700" : "text-slate-500 hover:text-slate-900"}`}
               >
@@ -1655,8 +1663,13 @@ function CreateInner() {
                 </Field>
                 {(footageData?.footage.length || footageIdOf(background)) && (
                   // A clip made on the B-roll page loops behind the presenter; the render looks up a fresh link for it.
-                  <Field label="Generated clip" hint={readyFootage.length ? "A clip made on the B-roll page, looped behind the avatar. HeyGen plays it." : "No finished clips yet; make one on the B-roll page."}>
+                  <div>
+                    <label htmlFor="generated-clip" className="mb-1.5 block text-sm font-medium text-slate-700">
+                      Generated clip
+                    </label>
                     <select
+                      id="generated-clip"
+                      aria-describedby="generated-clip-hint"
                       className={inputClass}
                       value={footageIdOf(background) ?? ""}
                       onChange={(e) => setBackground(e.target.value ? { type: "video", value: footagePath(e.target.value) } : DEFAULT_BG)}
@@ -1669,7 +1682,15 @@ function CreateInner() {
                       ))}
                       {footageIdOf(background) && !readyFootage.some((f) => f.id === footageIdOf(background)) && <option value={footageIdOf(background)!}>A clip that is gone or not ready</option>}
                     </select>
-                  </Field>
+                    {/* The hint sits outside the label, so the list's name is "Generated clip" alone. */}
+                    <p id="generated-clip-hint" className={`mt-1 text-xs ${clipMissing ? "text-rose-600" : "text-slate-500"}`}>
+                      {clipMissing
+                        ? "This scene's clip is gone or not ready, so the video cannot render; choose another background, or wait for the clip on the B-roll page."
+                        : readyFootage.length
+                          ? "A clip made on the B-roll page, looped behind the avatar. HeyGen plays it."
+                          : "No finished clips yet; make one on the B-roll page."}
+                    </p>
+                  </div>
                 )}
               </div>
             )}

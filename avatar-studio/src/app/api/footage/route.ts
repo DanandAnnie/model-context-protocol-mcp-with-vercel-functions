@@ -33,7 +33,7 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const owner = await requireEditor();
-    const input = footageRequestSchema.parse(await readJson(req));
+    const input = footageRequestSchema.parse(await readJson(req, "The picture is larger than 3 MB"));
     // A client key makes a retried start return the same clip instead of paying for another.
     const header = req.headers.get("idempotency-key");
     const key = header ? footageKeySchema.parse(header) : undefined;

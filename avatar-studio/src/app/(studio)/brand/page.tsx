@@ -11,7 +11,7 @@ import { MAX_PRONUNCIATIONS, formatPronunciations, parsePronunciations } from "@
 import { MAX_FORCED_TRANSLATIONS, MAX_FORCED_TRANSLATION_LENGTH, MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH, MIN_GLOSSARY_TERM_LENGTH, formatForcedTranslations, parseForcedTranslations, parseGlossary } from "@/lib/glossary";
 import { LOGO_TYPES, logoDataUrlValid, logoFileType } from "@/lib/logo-types";
 import type { BrandSuggestion } from "@/lib/brand-import";
-import { backdropIdOf, type AspectRatio, type Avatar, type Backdrop, type BrandKit, type Resolution, type Voice, type WatermarkCorner } from "@/lib/types";
+import { backdropIdOf, footageIdOf, footagePath, type FootageJob, type AspectRatio, type Avatar, type Backdrop, type BrandKit, type Resolution, type Voice, type WatermarkCorner } from "@/lib/types";
 
 const DEFAULT_PRIMARY = "#4f46e5";
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -27,11 +27,14 @@ export default function BrandPage() {
   const [logoUrl, setLogoUrl] = useState("");
   const [primary, setPrimary] = useState(DEFAULT_PRIMARY);
   const [accent, setAccent] = useState("");
-  const [bgType, setBgType] = useState<"" | "image" | "video">("");
+  // "clip" is a video background that is one of the account's generated clips (the B-roll page), picked from a list.
+  const [bgType, setBgType] = useState<"" | "image" | "video" | "clip">("");
   const [bgUrl, setBgUrl] = useState("");
   const [bgWhole, setBgWhole] = useState(false);
   // Uploaded images, so the kit's default background can be one of them like any scene's.
   const { data: backdropData, error: backdropError, setData: setBackdropData } = useApi<{ backdrops: Backdrop[] }>("/api/backdrops");
+  const { data: footageData } = useApi<{ footage: Array<Pick<FootageJob, "id" | "title" | "status" | "durationSec" | "aspect">>; available: boolean }>("/api/footage");
+  const readyFootage = (footageData?.footage ?? []).filter((f) => f.status === "completed");
   // An uploaded image that is gone (deleted here, or elsewhere and so taken off the saved kit) is not offered for saving.
   useEffect(() => {
     if (!backdropData) return;
@@ -79,7 +82,7 @@ export default function BrandPage() {
     }
     setPrimary(b.primaryColor);
     setAccent(b.accentColor ?? "");
-    setBgType(b.defaultBackground && b.defaultBackground.type !== "color" ? b.defaultBackground.type : "");
+    setBgType(b.defaultBackground && b.defaultBackground.type !== "color" ? (footageIdOf(b.defaultBackground) ? "clip" : b.defaultBackground.type) : "");
     setBgUrl(b.defaultBackground && b.defaultBackground.type !== "color" ? b.defaultBackground.value : "");
     setBgWhole(b.defaultBackground?.fit === "contain");
     setPronunciations(formatPronunciations(b.pronunciations ?? []));
@@ -206,7 +209,7 @@ export default function BrandPage() {
           logoUrl,
           primaryColor: primary,
           accentColor: accent || undefined,
-          defaultBackground: bgType && bgUrl.trim() ? { type: bgType, value: bgUrl.trim(), ...(bgWhole ? { fit: "contain" } : {}) } : undefined,
+          defaultBackground: bgType && bgUrl.trim() ? { type: bgType === "clip" ? "video" : bgType, value: bgUrl.trim(), ...(bgWhole ? { fit: "contain" } : {}) } : undefined,
           pronunciations: rules,
           glossary: terms,
           forcedTranslations: parsed.rules,
@@ -390,8 +393,10 @@ export default function BrandPage() {
                 value={bgType}
                 onChange={(e) => {
                   const next = e.target.value as typeof bgType;
-                  // An uploaded image's path means nothing as a video URL (or as nothing): start that field empty.
+                  // An uploaded image's or a clip's path means nothing as a URL of another kind: start that field empty.
                   if (next !== "image" && backdropIdOf({ type: "image", value: bgUrl })) setBgUrl("");
+                  if (next !== "clip" && footageIdOf({ type: "video", value: bgUrl })) setBgUrl("");
+                  if (next === "clip" && !footageIdOf({ type: "video", value: bgUrl })) setBgUrl("");
                   setBgType(next);
                 }}
                 className={inputClass}
@@ -399,9 +404,29 @@ export default function BrandPage() {
                 <option value="">Primary colour</option>
                 <option value="image">Image (uploaded or by URL)</option>
                 <option value="video">Video URL</option>
+                {(readyFootage.length > 0 || bgType === "clip") && <option value="clip">Generated clip</option>}
               </select>
             </Field>
-            {bgType && !(bgType === "image" && backdropIdOf({ type: "image", value: bgUrl })) && (
+            {bgType === "clip" && (
+              <div>
+                <label htmlFor="brand-clip" className="mb-1.5 block text-sm font-medium text-slate-700">
+                  Generated clip
+                </label>
+                <select id="brand-clip" aria-describedby="brand-clip-hint" value={footageIdOf({ type: "video", value: bgUrl }) ?? ""} onChange={(e) => setBgUrl(e.target.value ? footagePath(e.target.value) : "")} className={inputClass}>
+                  <option value="">Choose a clip</option>
+                  {readyFootage.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.title} ({f.durationSec} s{f.aspect ? `, ${f.aspect}` : ""})
+                    </option>
+                  ))}
+                  {footageIdOf({ type: "video", value: bgUrl }) && !readyFootage.some((f) => f.id === footageIdOf({ type: "video", value: bgUrl })) && <option value={footageIdOf({ type: "video", value: bgUrl })!}>A clip that is gone or not ready</option>}
+                </select>
+                <p id="brand-clip-hint" className="mt-1 text-xs text-slate-500">
+                  A clip made on the B-roll page, looped behind the presenter in every new video; the kit cannot be saved without one.
+                </p>
+              </div>
+            )}
+            {bgType && bgType !== "clip" && !(bgType === "image" && backdropIdOf({ type: "image", value: bgUrl })) && (
               <Field label={bgType === "video" ? "Background video URL" : "Background image URL"} hint={bgType === "image" ? "A public URL, or pick one of your images below; the kit cannot be saved without one." : "A public URL; the kit cannot be saved while this is empty."}>
                 <input aria-label="Default background URL" value={bgUrl} onChange={(e) => setBgUrl(e.target.value)} placeholder={bgType === "video" ? "https://…/loop.mp4" : "https://…/background.jpg"} className={inputClass} maxLength={2000} />
               </Field>
@@ -503,7 +528,7 @@ export default function BrandPage() {
               <li>Aspect: {aspect || "16:9"}</li>
               <li>Quality: {resolution || "1080p"}</li>
               <li>Captions: {captions ? "on" : "off"}</li>
-              <li>Background: {bgType === "video" && bgUrl.trim() ? "looping video" : bgType === "image" && bgUrl.trim() ? (backdropIdOf({ type: "image", value: bgUrl.trim() }) ? "uploaded image" : "image") : primaryValid ? primary : DEFAULT_PRIMARY}</li>
+              <li>Background: {bgType === "clip" && bgUrl.trim() ? "generated clip" : bgType === "video" && bgUrl.trim() ? "looping video" : bgType === "image" && bgUrl.trim() ? (backdropIdOf({ type: "image", value: bgUrl.trim() }) ? "uploaded image" : "image") : primaryValid ? primary : DEFAULT_PRIMARY}</li>
             </ul>
             <p className="mt-3 text-xs text-slate-500">Templates keep their own aspect ratio; copies keep every setting of the original.</p>
           </Card>

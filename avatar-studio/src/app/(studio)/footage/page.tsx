@@ -172,7 +172,6 @@ export default function FootagePage() {
       <SectionTitle title="B-roll" subtitle="Describe a shot, or bring a picture to life, and get a short clip to download or loop behind a presenter." />
       {canEdit === false && <ViewOnlyNotice what="make clips" />}
       <ErrorBanner message={error} />
-      <ErrorBanner message={err} />
       <p role="status" className="sr-only">
         {note ?? ""}
       </p>
@@ -237,7 +236,12 @@ export default function FootagePage() {
                   <div className="flex flex-wrap gap-4 text-sm text-slate-700">
                     {FOOTAGE_ASPECTS.map((a) => (
                       <label key={a} className="flex items-center gap-2">
-                        <input type="radio" name="footage-frame" className="accent-brand-600" checked={aspect === a} onChange={() => (setAspect(a), changed())} />
+                        <input type="radio" name="footage-frame" className="accent-brand-600" checked={aspect === a} onChange={() => {
+                            setAspect(a);
+                            // A square clip cannot be HD: the choice is moved to standard, and stays there when the frame changes back.
+                            if (a === "1:1") setQuality("standard");
+                            changed();
+                          }} />
                         {FRAMES[a]}
                       </label>
                     ))}
@@ -248,7 +252,7 @@ export default function FootagePage() {
                 <legend className="mb-1.5 text-sm font-medium text-slate-700">Quality</legend>
                 <div className="flex flex-wrap gap-4 text-sm text-slate-700">
                   <label className="flex items-center gap-2">
-                    <input type="radio" name="footage-quality" className="accent-brand-600" checked={quality === "standard" || hdBlocked} onChange={() => (setQuality("standard"), changed())} />
+                    <input type="radio" name="footage-quality" className="accent-brand-600" checked={quality === "standard" || hdBlocked} onChange={() => (setQuality("standard"), changed())} onClick={() => setQuality("standard")} />
                     Standard (768p)
                   </label>
                   <label className="flex items-center gap-2">
@@ -264,8 +268,10 @@ export default function FootagePage() {
                 <label htmlFor="footage-title" className="mb-1.5 block text-sm font-medium text-slate-700">
                   Title (optional)
                 </label>
-                <input id="footage-title" className={inputClass} value={title} maxLength={120} disabled={canEdit === false} onChange={(e) => setTitle(e.target.value)} placeholder="The start of the description" />
+                <input id="footage-title" className={inputClass} value={title} maxLength={120} disabled={canEdit === false} onChange={(e) => (setTitle(e.target.value), changed())} placeholder="The start of the description" />
               </div>
+              {/* A refusal is shown by the button that was pressed, so it is seen on a phone too. */}
+              <ErrorBanner message={err} />
               <Button onClick={submit} loading={busy} disabled={shortPrompt || reading || !canStart} className="w-full" aria-describedby={shortPrompt ? "footage-start-note" : undefined}>
                 <MonitorPlay className="h-4 w-4" /> Make the clip
               </Button>
@@ -312,7 +318,7 @@ export default function FootagePage() {
                     <>
                       <video src={f.videoUrl} controls preload="none" className="mt-3 w-full rounded-lg bg-black" aria-label={f.title} />
                       <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
-                        <a href={f.videoUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-medium text-brand-700 hover:underline" aria-label={`Download ${f.title}`}>
+                        <a href={f.videoUrl} download target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-medium text-brand-700 hover:underline" aria-label={`Download ${f.title}`}>
                           <Download className="h-3 w-3" aria-hidden /> Download
                         </a>
                         <span className="text-slate-500" data-testid="footage-use" data-path={footagePath(f.id)}>

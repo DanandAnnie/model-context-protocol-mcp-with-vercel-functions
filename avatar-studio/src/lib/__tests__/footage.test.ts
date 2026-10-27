@@ -83,6 +83,7 @@ describe("generated clips", () => {
     await assert.rejects(startFootage(ask({ image: png(2) }), "u1", { key: "key-footage-1" }), ConflictError, "another picture");
     await assert.rejects(startFootage(ask({ durationSec: 6, image: png(1) }), "u1", { key: "key-footage-1" }), ConflictError, "another length");
     await assert.rejects(startFootage(ask(), "u1", { key: "key-footage-1" }), ConflictError, "no picture");
+    await assert.rejects(startFootage(ask({ image: png(1), title: "Paper boat in the rain" }), "u1", { key: "key-footage-1" }), ConflictError, "another title");
   });
 
   it("give a render a fresh link, renewing an old one, and refuse one not ready or deleted", async () => {
@@ -96,6 +97,8 @@ describe("generated clips", () => {
     assert.match((await footageForRender(job.id, "u1")).videoUrl, /\/demo\//);
     await deleteFootage(job.id, "u1");
     await assert.rejects(footageForRender(job.id, "u1"), (e: unknown) => e instanceof ValidationError && /was deleted/.test((e as Error).message));
+    // A malformed id reads as not found, like an unknown one, without telling the id's shape.
+    await assert.rejects(footageLink("not-a-clip", "u1"), (e: unknown) => (e as Error).message === "Clip not found");
   });
 
   it("are asked about when a render needs one still being made, without waiting for a listing", async () => {
@@ -145,6 +148,9 @@ describe("generated clips", () => {
     assert.equal(video.status, "processing");
     assert.deepEqual(video.background, { type: "video", value: footagePath(job.id) }, "the fixed address is kept, not the expiring link");
     await assert.rejects(req("u2"), "another account's clip is not found");
+    // A refusal says which scene loops the clip.
+    const multi = videoRequestSchema.parse({ title: "Tour", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, scenes: [{ script: "One.", background: { type: "color", value: "#101820" } }, { script: "Two.", background: { type: "video", value: footagePath("ft_gone") } }] });
+    await assert.rejects(createVideo(multi, "u1"), (e: unknown) => e instanceof ValidationError && /^Scene 2: A scene loops a generated clip that was deleted/.test((e as Error).message));
   });
 
   it("ask HeyGen Video with the description or the picture, follow the clip, and say why one is refused", async () => {

@@ -1185,10 +1185,13 @@ test("a b-roll clip is made from a description and loops behind a presenter as a
   await expect(page.getByLabel("Length: 8 seconds")).toBeFocused();
   await page.getByLabel("Portrait 9:16").check();
   // A square clip cannot be HD; the choice says why.
+  await page.getByLabel("HD (1080p)").check();
   await page.getByLabel("Square 1:1").check();
   await expect(page.getByLabel("HD (1080p)")).toBeDisabled();
   await expect(page.getByText("HD clips are landscape or portrait, not square.")).toBeVisible();
+  // Square moves the choice to standard, and it stays standard when the frame changes back (HD costs three times as much).
   await page.getByLabel("Portrait 9:16").check();
+  await expect(page.getByLabel("Standard (768p)")).toBeChecked();
   await page.getByLabel("HD (1080p)").check();
   const sent = page.waitForRequest((r) => r.url().endsWith("/api/footage") && r.method() === "POST");
   await make.click();
@@ -1211,7 +1214,8 @@ test("a b-roll clip is made from a description and loops behind a presenter as a
   // In the editor the clip is offered as a scene's video background and previewed on the stage.
   await page.goto("/create");
   await page.getByRole("button", { name: "Background" }).click();
-  await page.getByLabel("Generated clip").selectOption(id);
+  await expect(page.getByRole("button", { name: "Background", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("combobox", { name: "Generated clip", exact: true }).selectOption(id);
   await expect(page.getByTestId("stage-video")).toHaveAttribute("src", `/api/footage/${id}/clip`);
   const clip = await page.request.get(`/api/footage/${id}/clip`, { maxRedirects: 0 });
   expect(clip.status()).toBe(302);
@@ -1220,11 +1224,20 @@ test("a b-roll clip is made from a description and loops behind a presenter as a
   const video = await createVideoViaApi(page, `B-roll ${tag}`, { background: { type: "video", value: `/api/footage/${id}/clip` } });
   const stored = (await (await page.request.get(`/api/videos/${video.id}`)).json()).video as { background: unknown };
   expect(stored.background).toEqual({ type: "video", value: `/api/footage/${id}/clip` });
+  // The brand kit can loop it behind every new video too.
+  await page.goto("/brand");
+  await page.getByLabel("Default background", { exact: true }).selectOption("clip");
+  await page.getByRole("combobox", { name: "Generated clip", exact: true }).selectOption(id);
+  await page.getByRole("button", { name: "Save brand kit" }).click();
+  await expect.poll(async () => ((await (await page.request.get("/api/brand")).json()).brand as { defaultBackground?: unknown } | null)?.defaultBackground).toEqual({ type: "video", value: `/api/footage/${id}/clip` });
   // A clip deleted since can no longer be looped, and a render naming it is refused with a reason.
   await page.goto("/footage");
   page.once("dialog", (d) => d.accept());
   await page.getByTestId("footage").filter({ hasText: tag }).getByRole("button", { name: /^Delete / }).click();
   await expect(page.getByTestId("footage").filter({ hasText: tag })).toHaveCount(0);
+  expect(((await (await page.request.get("/api/brand")).json()).brand as { defaultBackground?: unknown }).defaultBackground, "the kit lets go of the deleted clip").toBeUndefined();
+  expect((await page.request.get(`/api/footage/${id}/clip`)).status()).toBe(404);
+  expect((await page.request.get("/api/footage/not-a-clip/clip")).status(), "a malformed id reads as not found too").toBe(404);
   const refused = await page.request.post("/api/videos", { data: { title: "Gone clip", avatarId: "stock_1", voiceId: "stock_voice_1", script: "Hello there.", background: { type: "video", value: `/api/footage/${id}/clip` } } });
   expect(refused.status()).toBe(400);
   expect((await refused.json()).error).toContain("generated clip that was deleted");

@@ -43,6 +43,12 @@ type FootageRequest = z.infer<typeof footageRequestSchema>;
 
 export const footageIdSchema = z.string().regex(/^ft_[A-Za-z0-9_-]{1,64}$/, "Unknown clip");
 
+/** A clip id as a lookup takes it: one that cannot be a clip's reads as not found, like an unknown one. */
+function clipId(id: string): string {
+  if (!footageIdSchema.safeParse(id).success) throw new NotFoundError("Clip not found");
+  return id;
+}
+
 /** A client's key for one start (`Idempotency-Key`): letters, digits, `-` and `_`. */
 export const footageKeySchema = z.string().regex(/^[A-Za-z0-9_-]{8,100}$/, "The Idempotency-Key header takes 8 to 100 letters, digits, - or _");
 
@@ -102,7 +108,7 @@ export async function startFootage(input: FootageRequest, ownerId: string = LOCA
   const id = opts.key ? `ft_${createHash("sha256").update(`${ownerId}\0${opts.key}`).digest("base64url").slice(0, 32)}` : newId("ft");
   const existing = opts.key ? await getStore().get<FootageJob>("footage", id) : null;
   if (existing && existing.ownerId === ownerId) {
-    const same = existing.prompt === input.prompt && existing.durationSec === input.durationSec && existing.aspect === aspect && existing.quality === input.quality && (existing.imageDigest ?? "") === (imageDigest ?? "");
+    const same = existing.title === (input.title || promptExcerpt(input.prompt, 60)) && existing.prompt === input.prompt && existing.durationSec === input.durationSec && existing.aspect === aspect && existing.quality === input.quality && (existing.imageDigest ?? "") === (imageDigest ?? "");
     if (!same) throw new ConflictError("This Idempotency-Key was already used for another clip; send a new key");
     return existing;
   }
@@ -138,7 +144,7 @@ export async function startFootage(input: FootageRequest, ownerId: string = LOCA
  * takes its place, as for a deleted image), so a batch or a video started from them still renders.
  */
 export async function deleteFootage(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
-  const job = owned(await getStore().get<FootageJob>("footage", footageIdSchema.parse(id)), ownerId, "Clip");
+  const job = owned(await getStore().get<FootageJob>("footage", clipId(id)), ownerId, "Clip");
   const names = (bg: Background | undefined) => footageIdOf(bg) === job.id;
   for (const kit of await getStore().list<BrandKit>("brand", ownerId)) {
     await rewriteIfNamed<BrandKit>("brand", kit, (k) => names(k.defaultBackground), (k) => {
@@ -158,7 +164,7 @@ export async function deleteFootage(id: string, ownerId: string = LOCAL_OWNER): 
 
 /** One of the owner's clips, for a record that will loop it later (a brand kit, a template): a foreign or unknown id reads as not found. */
 export async function getFootage(id: string, ownerId: string = LOCAL_OWNER): Promise<FootageJob> {
-  return owned(await getStore().get<FootageJob>("footage", footageIdSchema.parse(id)), ownerId, "Clip");
+  return owned(await getStore().get<FootageJob>("footage", clipId(id)), ownerId, "Clip");
 }
 
 /**
@@ -168,7 +174,7 @@ export async function getFootage(id: string, ownerId: string = LOCAL_OWNER): Pro
 export async function footageLink(id: string, ownerId: string = LOCAL_OWNER): Promise<{ job: FootageJob; videoUrl: string }> {
   // A clip still being made is asked about here too (a render may come before any listing does), and an old link is
   // renewed; both through the shared checker, so lookups side by side make one renderer call, at most every few seconds.
-  const [job] = await checks.follow([owned(await getStore().get<FootageJob>("footage", footageIdSchema.parse(id)), ownerId, "Clip")]);
+  const [job] = await checks.follow([owned(await getStore().get<FootageJob>("footage", clipId(id)), ownerId, "Clip")]);
   if (job.status !== "completed" || !job.videoUrl) {
     throw new ValidationError(job.status === "failed" ? `The generated clip "${job.title}" could not be made; choose another background` : `The generated clip "${job.title}" is not ready yet; wait for it, or choose another background`);
   }

@@ -232,6 +232,18 @@ function footageIdsOf(req: { background?: Background; scenes?: Array<{ backgroun
   return Array.from(new Set(ids));
 }
 
+/** A clip a request loops, its refusal saying where: the video's background, or the first scene that loops it. */
+async function footageForScene(id: string, req: { background?: Background; scenes?: Array<{ background?: Background }> }, ownerId: string) {
+  try {
+    return await footageForRender(id, ownerId);
+  } catch (err) {
+    if (!(err instanceof ValidationError)) throw err;
+    const scene = (req.scenes ?? []).findIndex((sc) => footageIdOf(sc.background) === id);
+    const where = scene >= 0 && (req.scenes?.length ?? 0) > 1 ? `Scene ${scene + 1}: ` : "";
+    throw new ValidationError(`${where}${err.message}`);
+  }
+}
+
 export interface RenderContext {
   avatar: Avatar;
   voice: Voice;
@@ -255,7 +267,7 @@ export async function resolveRenderContext(
     Promise.all(clipIds.map((id) => getClip(id, ownerId))),
     Promise.all(backdropIds.map((id) => getBackdrop(id, ownerId))),
     // A generated clip is looked up with a link fresh enough to render from; one not ready, or gone, is refused here.
-    Promise.all(footageIds.map(async (id) => [id, await footageForRender(id, ownerId)] as const)),
+    Promise.all(footageIds.map(async (id) => [id, await footageForScene(id, req, ownerId)] as const)),
   ]);
   const avatars = Object.fromEntries(avatarList.map((a) => [a.id, a]));
   // An audio scene speaks its clip, so its voice is neither needed nor checked.
@@ -372,7 +384,7 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
       if (!cast.backdrops?.[id]) cast.backdrops = { ...cast.backdrops, [id]: await getBackdrop(id, ownerId) };
     }
     for (const id of rendersFootage(provider) ? footageIdsOf(req) : []) {
-      if (!cast.footage?.[id]) cast.footage = { ...cast.footage, [id]: await footageForRender(id, ownerId) };
+      if (!cast.footage?.[id]) cast.footage = { ...cast.footage, [id]: await footageForScene(id, req, ownerId) };
     }
     if (cast.backdrops && provider.prepareBackdrop) {
       for (const b of Object.values(cast.backdrops)) cast.backdrops[b.id] = await prepareBackdropOnce(provider, b, ownerId);

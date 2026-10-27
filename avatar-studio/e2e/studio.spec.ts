@@ -634,7 +634,8 @@ test("a recording can be cleaned of filler words, from a link or the library, an
   await expect(page.getByText("must point to a public host")).toBeVisible();
   // From the library: the video's title, marked cleaned.
   await page.getByLabel("One of my videos").check();
-  await page.getByLabel("Video", { exact: true }).selectOption(v.id);
+  // The picker is named by its label and its hint ("Video A finished video of your library.").
+  await page.getByRole("combobox", { name: /^Video\b/ }).selectOption(v.id);
   const sent = page.waitForRequest((r) => r.url().endsWith("/api/cleanups") && r.method() === "POST");
   await page.getByRole("button", { name: "Clean up recording" }).click();
   const request = await sent;

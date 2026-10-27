@@ -45,16 +45,16 @@ describe("transparent background", () => {
   it("reaches HeyGen as a single-avatar WebM with no background or burned captions, and D-ID refuses it", async () => {
     const { HeyGenAvatarProvider } = await import("../providers/avatar/heygen");
     const heygen = new HeyGenAvatarProvider("key");
-    let sent: Record<string, unknown> | null = null;
+    const last: { body?: Record<string, unknown> } = {};
     (heygen as unknown as { client: Record<string, (...a: unknown[]) => Promise<unknown>> }).client.generateVideo = async (b) => {
-      sent = b as Record<string, unknown>;
+      last.body = b as Record<string, unknown>;
       return { video_id: "hg_1" };
     };
     const twin: Avatar = { ...STOCK_AVATARS[0], id: "look_twin", provider: "heygen", source: "provider", avatarV: true };
     const voice = { ...STOCK_VOICES[0], provider: "heygen" };
     const req = videoRequestSchema.parse({ title: "Overlay", avatarId: twin.id, voiceId: voice.id, transparent: true, captions: true, avatarEngine: "avatar_v", motionPrompt: "Waves", scenes: [{ script: "Hi [pause 1s] there.", background: image, speed: 1.1 }] });
     await heygen.createVideo(req, twin, voice, { avatars: { [twin.id]: twin }, voices: { [voice.id]: voice } });
-    assert.deepEqual(sent, {
+    assert.deepEqual(last.body, {
       type: "avatar",
       title: "Overlay",
       aspect_ratio: "16:9",
@@ -69,7 +69,7 @@ describe("transparent background", () => {
     });
     // Without it, the same video is a studio composition with its background and captions, as before.
     await heygen.createVideo(videoRequestSchema.parse({ ...req, transparent: undefined }), twin, voice, { avatars: { [twin.id]: twin }, voices: { [voice.id]: voice } });
-    assert.equal(sent!.type, "studio");
+    assert.equal(last.body?.type, "studio");
     const { DidAvatarProvider } = await import("../providers/avatar/did");
     await assert.rejects(new DidAvatarProvider("key").createVideo(videoRequestSchema.parse({ ...base, transparent: true }), STOCK_AVATARS[0], STOCK_VOICES[0]), /D-ID renders an MP4 with a background/);
   });

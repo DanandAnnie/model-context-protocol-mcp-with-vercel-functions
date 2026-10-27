@@ -67,13 +67,14 @@ function withVoiceLock<T>(ownerId: string, fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
-export const MAX_VOICE_SAMPLE_BYTES = 10 * 1024 * 1024;
+/** Samples a clone may send in all: encoded for the request (a third larger), they fit the 4.5 MB a request may carry. */
+export const MAX_VOICE_SAMPLE_BYTES = 3 * 1024 * 1024;
 export const MAX_CLONED_VOICES = 5;
 
 export const cloneVoiceSchema = z.object({
   name: z.string().trim().min(1).max(60),
-  /** Audio samples as data URLs (audio/*), one to five, 10 MB in total. */
-  samples: z.array(z.string().min(1).max(14_000_000)).min(1).max(5),
+  /** Audio samples as data URLs (audio/*), one to five, 3 MB in total. */
+  samples: z.array(z.string().min(1).max(4_500_000, "Samples must be under 3 MB in total; use a shorter recording")).min(1, "Add a recording or an audio file").max(5, "Up to five samples; remove one to add another"),
   language: z.string().trim().max(40).optional(),
 });
 
@@ -90,7 +91,7 @@ export async function cloneVoice(input: z.infer<typeof cloneVoiceSchema>, ownerI
     if (!dataUrl.startsWith("data:audio/")) throw new ValidationError("Samples must be audio recordings or files");
     const { bytes, mimeType } = decodeDataUrl(dataUrl);
     total += bytes.byteLength;
-    if (total > MAX_VOICE_SAMPLE_BYTES) throw new ValidationError("Samples must be under 10 MB in total");
+    if (total > MAX_VOICE_SAMPLE_BYTES) throw new ValidationError("Samples must be under 3 MB in total; use a shorter recording");
     const ext = mimeType.includes("webm") ? "webm" : mimeType.includes("wav") ? "wav" : mimeType.includes("ogg") ? "ogg" : mimeType.includes("mp4") || mimeType.includes("m4a") ? "m4a" : "mp3";
     return { bytes, mimeType, filename: `sample-${i + 1}.${ext}` };
   });

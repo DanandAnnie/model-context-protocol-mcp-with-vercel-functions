@@ -1,4 +1,5 @@
 "use client";
+import type { ReactNode } from "react";
 import { Loader2, Pause, Play } from "lucide-react";
 import { FavoriteStar } from "@/components/FavoriteStar";
 import type { Voice } from "@/lib/types";
@@ -12,6 +13,7 @@ export function VoiceRow({
   busy,
   favorite,
   onToggleFavorite,
+  actions,
 }: {
   voice: Voice;
   selected?: boolean;
@@ -21,6 +23,8 @@ export function VoiceRow({
   busy: boolean;
   favorite?: boolean;
   onToggleFavorite?: () => void;
+  /** Controls of the row's own (rename, delete), laid out after the name so a long name truncates before them. */
+  actions?: ReactNode;
 }) {
   const meta = [voice.language, voice.gender, ...(voice.tags ?? [])].filter(Boolean).slice(0, 4).join(" · ") || voice.provider;
   const nameBlock = (
@@ -55,6 +59,7 @@ export function VoiceRow({
       ) : (
         <div className="min-w-0 flex-1">{nameBlock}</div>
       )}
+      {actions && <span className="flex shrink-0 gap-1">{actions}</span>}
       {onToggleFavorite && <FavoriteStar name={voice.name} on={!!favorite} onToggle={onToggleFavorite} className="shrink-0 shadow-none" />}
     </div>
   );

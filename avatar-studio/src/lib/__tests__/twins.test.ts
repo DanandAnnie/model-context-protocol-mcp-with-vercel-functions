@@ -51,6 +51,7 @@ describe("digital twins", () => {
     assert.throws(() => twinRequestSchema.parse({ name: " ", footageUrl: FOOTAGE, agreed: true }), /Give the twin a name/);
     await assert.rejects(startTwin(input({ footageUrl: "http://93.184.216.34/a.mp4" }), "u1"), /public https link to the footage/);
     await assert.rejects(startTwin(input({ footageUrl: "https://127.0.0.1/a.mp4" }), "u1"), ValidationError);
+    await assert.rejects(startTwin(input({ footageUrl: "https://dana:secret@93.184.216.34/a.mp4" }), "u1"), /without a name or password/);
   });
 
   it("trains in demo mode, waits for the person's consent, then is a presenter of the account only", async () => {
@@ -215,6 +216,26 @@ describe("digital twins", () => {
       assert.deepEqual([failed.status, failed.training, failed.error], ["failed", "failed", "More than one person was found in the footage."]);
     } finally {
       Object.assign(config, { avatarProvider: saved.avatar, heygenApiKey: saved.key });
+    }
+  });
+
+  it("names the twin's voice within what a rename allows, even with emoji", async () => {
+    const saved = clipMs.CLIP_MS;
+    clipMs.CLIP_MS = 0;
+    try {
+      const long = "👩🏽‍💻 Dana Ruiz, head of customer onboarding and partner success 👩🏽‍💻";
+      const job = await startTwin(input({ name: long }), "u1");
+      await requestTwinConsent(job.id, "u1");
+      forgetTwinChecks();
+      const [twin] = await listTwins("u1");
+      assert.equal(twin.status, "completed");
+      const voice = (await getStore().list<Voice>("voice", "u1")).find((v) => v.tags?.includes("digital twin"))!;
+      assert.ok(voice.name.endsWith(" (twin)"));
+      assert.ok(voice.name.length <= 60, `${voice.name.length} UTF-16 units`);
+      const { updateVoiceSchema } = await import("../services");
+      assert.doesNotThrow(() => updateVoiceSchema.parse({ name: voice.name }));
+    } finally {
+      clipMs.CLIP_MS = saved;
     }
   });
 

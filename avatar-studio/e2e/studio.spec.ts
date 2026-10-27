@@ -801,6 +801,8 @@ test("a digital twin is trained from footage, waits for the person's consent, th
   await expect(twin.getByTestId("twin-step")).toContainText("waiting for the person's consent");
   // The page checks again on its own; the demo counts consent as given a few seconds after the link was made.
   await expect(twin.getByTestId("twin-step")).toContainText("Ready: it is in your avatars", { timeout: 30_000 });
+  // The consent row went with the wait; the keyboard is taken to the twin rather than dropped on the page.
+  await expect(twin).toBeFocused();
   await expect(page.getByTestId("avatar-library").getByText(name, { exact: true })).toBeVisible();
   const listed = (await (await page.request.get("/api/twins")).json()).twins as Array<Record<string, unknown>>;
   const mine = listed.find((t) => t.name === name)!;
@@ -2499,8 +2501,16 @@ test("a workspace viewer sees view-only notices instead of create controls", asy
   await expect(page.getByRole("link", { name: "Create video" })).toHaveCount(1);
   await page.goto("/avatars");
   await expect(page.getByRole("button", { name: "New photo avatar" })).toBeDisabled();
+  // A voice of the space's own is listed for the viewer, without rename or delete.
+  const sample = "data:audio/webm;base64," + Buffer.from("viewer sees this voice").toString("base64");
+  const own = (await (await page.request.post("/api/voices/clone", { data: { name: `Viewer hears ${Date.now().toString(36)}`, samples: [sample] } })).json()).voice as { id: string; name: string };
   await page.goto("/voices");
   await expect(page.getByTestId("voice-cloner")).toHaveCount(0);
+  await expect(page.getByTestId("view-only")).toBeVisible();
+  await expect(page.getByText(own.name, { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: `Rename ${own.name}` })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: `Delete ${own.name}` })).toHaveCount(0);
+  expect((await page.request.delete(`/api/voices/${own.id}`)).status()).toBe(204);
   // Starred avatars and voices are the workspace's, so a viewer gets no stars to click. The view-only notice
   // shows once the role is known, so the star checks below cannot pass merely because it is still loading.
   await expect(page.getByTestId("view-only")).toBeVisible();
@@ -2951,6 +2961,40 @@ test("a voice provider that clones from one recording is sent the samples joined
   const long = pcm(sent[0]).length / 16_000;
   expect(long).toBeGreaterThan(89.9);
   expect(long).toBeLessThanOrEqual(90.01);
+});
+
+test("the voice cloner caps its samples, announces the clone, and keeps the keyboard's place", async ({ page }) => {
+  await page.goto("/voices");
+  const cloner = page.getByTestId("voice-cloner");
+  const mp3 = "e2e/fixtures/voice-over.mp3";
+  const input = cloner.locator('input[type="file"]');
+  await input.setInputFiles([mp3, mp3, mp3, mp3]);
+  await expect(cloner.getByRole("listitem")).toHaveCount(4);
+  // Five at most, however they are picked; the rest are left out with a reason.
+  await input.setInputFiles([mp3, mp3, mp3]);
+  await expect(cloner.getByRole("listitem")).toHaveCount(5);
+  await expect(cloner.getByText("Up to 5 samples; the rest were left out.")).toBeVisible();
+  // Removing one moves the focus to the sample that took its place, and the same file can be picked again.
+  await cloner.getByRole("button", { name: "Remove voice-over.mp3" }).first().focus();
+  await page.keyboard.press("Enter");
+  await expect(cloner.getByRole("listitem")).toHaveCount(4);
+  await expect(cloner.getByRole("button", { name: "Remove voice-over.mp3" }).first()).toBeFocused();
+  for (let i = 0; i < 4; i++) await cloner.getByRole("button", { name: "Remove voice-over.mp3" }).first().click();
+  await expect(cloner.getByRole("button", { name: "Upload" })).toBeFocused();
+  await input.setInputFiles(mp3);
+  await expect(cloner.getByRole("listitem")).toHaveCount(1);
+  const name = `Announced ${Date.now().toString(36)}`;
+  await cloner.getByLabel("Voice name").fill(name);
+  await cloner.getByRole("button", { name: "Clone voice" }).click();
+  await expect(cloner.getByRole("status")).toHaveText(`${name} is cloned and listed with your voices.`);
+  await expect(cloner.getByLabel("Voice name")).toBeFocused();
+  const voice = ((await (await page.request.get("/api/voices")).json()).voices as Array<{ id: string; name: string }>).find((v) => v.name === name)!;
+  expect((await page.request.delete(`/api/voices/${voice.id}`)).status()).toBe(204);
+  // More than a request can carry is refused with the reason, not as malformed JSON.
+  const big = await page.request.post("/api/voices/clone", { data: { name: "Big", samples: ["data:audio/webm;base64," + "A".repeat(5_000_000)] } });
+  expect(big.status()).toBe(400);
+  const refused = (await big.json()) as { error: string; issues?: Array<{ message: string }> };
+  expect(refused.issues?.[0]?.message ?? refused.error).toMatch(/under 3 MB in total|too large/);
 });
 
 test("voice cloning saves a private voice that renders and can be deleted", async ({ page }) => {

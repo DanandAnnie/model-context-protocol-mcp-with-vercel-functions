@@ -81,11 +81,11 @@ export default function VoicesPage() {
       <SectionTitle title="Voices" subtitle="Preview any voice with your own sample text, clone your own, or design one from a description." />
       {canEdit === false && <ViewOnlyNotice what="clone, design, or change voices" />}
       <ErrorBanner message={error ?? previewErr ?? actionErr} />
-      {canEdit !== false && (
-        <div className={`mb-6 grid gap-4 ${canEdit === true && status?.voiceDesign ? "lg:grid-cols-2" : ""}`}>
+      {/* Shown once the role is known: a viewer never sees them while the workspace is still loading. */}
+      {canEdit === true && (
+        <div className={`mb-6 grid gap-4 ${status?.voiceDesign ? "lg:grid-cols-2" : ""}`}>
           <VoiceCloner available={status?.tts !== "mock"} oneRecording={!!status?.voiceCloneOneRecording} onCloned={() => refetch()} />
-          {/* Shown once the role is known: a viewer never sees it while the workspace is still loading. */}
-          {canEdit === true && status?.voiceDesign && <VoiceDesigner available={status.tts !== "mock"} ownCount={data?.own?.count ?? 0} limit={data?.own?.limit ?? 5} onSaved={() => refetch()} />}
+          {status?.voiceDesign && <VoiceDesigner available={status.tts !== "mock"} ownCount={data?.own?.count ?? 0} limit={data?.own?.limit ?? 5} onSaved={() => refetch()} />}
         </div>
       )}
       <div className="mb-5 grid gap-3 md:grid-cols-[1fr_2fr]">
@@ -125,7 +125,7 @@ export default function VoicesPage() {
         // Columns that can shrink below their content, so a long voice name truncates rather than pushing the page sideways.
         <div className="grid grid-cols-1 gap-2 md:grid-cols-2" data-testid="voice-list">
           {voices.map((v) => (
-            <div key={v.id} className="relative min-w-0">
+            <div key={v.id} className="min-w-0">
               <VoiceRow
                 voice={v}
                 playing={playingId === v.id}
@@ -133,29 +133,32 @@ export default function VoicesPage() {
                 onPreview={() => play(v, sample || SAMPLE).catch((e) => setPreviewErr(e.message))}
                 favorite={favorites.voiceIds.has(v.id)}
                 onToggleFavorite={favorites.canToggle ? () => favorites.toggle("voice", v.id) : undefined}
+                // Shown once the role is known, and never to a viewer (the server would refuse them).
+                actions={
+                  v.source === "custom" && canEdit === true ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => renameVoice(v)}
+                        aria-label={`Rename ${v.name}`}
+                        title="Rename this voice of your own; videos already rendered keep the old name"
+                        className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand-700"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeVoice(v)}
+                        aria-label={`Delete ${v.name}`}
+                        title="Delete this voice of your own"
+                        className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-700"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </>
+                  ) : undefined
+                }
               />
-              {v.source === "custom" && (
-                <span className="absolute right-12 top-1/2 flex -translate-y-1/2 gap-1">
-                  <button
-                    type="button"
-                    onClick={() => renameVoice(v)}
-                    aria-label={`Rename ${v.name}`}
-                    title="Rename this voice of your own; videos already rendered keep the old name"
-                    className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand-700"
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => removeVoice(v)}
-                    aria-label={`Delete ${v.name}`}
-                    title="Delete this voice of your own"
-                    className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-700"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </span>
-              )}
             </div>
           ))}
         </div>

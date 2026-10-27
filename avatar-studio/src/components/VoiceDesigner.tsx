@@ -135,9 +135,9 @@ export function VoiceDesigner({ available, onSaved, ownCount, limit }: { availab
   const textShort = text.trim().length > 0 && text.trim().length < 100;
   return (
     <Card className="p-5" data-testid="voice-designer">
-      <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+      <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
         <Wand2 className="h-4 w-4 text-slate-400" /> Design a voice
-      </h3>
+      </h2>
       <p className="mt-1 text-xs text-slate-500">
         Describe the voice you want (age, accent, tone, pace) and choose from the previews. The voice you keep is private to your account and usable in every video.
         {!available && " Voice design needs ElevenLabs as the voice provider; in demo mode the voice is saved, and the previews and the saved voice use the browser's voice."}

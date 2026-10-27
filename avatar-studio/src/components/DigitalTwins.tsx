@@ -52,6 +52,12 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [asking, setAsking] = useState<string | null>(null);
+  /** Says `text`, even when it is what was said last (a second copy, say): cleared first, then set. */
+  const say = (text: string) => {
+    setNote(null);
+    requestAnimationFrame(() => setNote(text));
+  };
   const [requestKey, setRequestKey] = useState(() => newKey());
   const listRef = useRef<HTMLElement>(null);
   const openButton = useRef<HTMLButtonElement>(null);
@@ -64,11 +70,13 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
     if (!data) return;
     const parts: string[] = [];
     let ready = false;
+    let settled: string | null = null;
     for (const t of data.twins) {
       const before = seen.current.get(t.id);
       if (before?.status === "processing" && t.status !== "processing") {
         parts.push(t.status === "completed" ? `${t.name} is ready in your avatars.` : `${t.name} could not be trained: ${t.error ?? "the renderer failed"}.`);
         ready ||= t.status === "completed";
+        settled ??= t.id;
       } else if (before && before.consent !== "rejected" && t.consent === "rejected" && t.status === "processing") {
         parts.push(`The consent for ${t.name} was not accepted${t.error ? `: ${t.error}` : ""}. Get a new consent link to record it again.`);
       }
@@ -76,6 +84,11 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
     }
     if (ready) onReady();
     if (parts.length) setNote(parts.join(" "));
+    // Its consent row is gone with it; a keyboard user who was in it is taken to the twin rather than to the page.
+    if (settled && (document.activeElement === document.body || !document.activeElement)) {
+      const id = settled;
+      requestAnimationFrame(() => listRef.current?.querySelector<HTMLElement>(`[data-twin="${CSS.escape(id)}"]`)?.focus());
+    }
   }, [data, onReady]);
   useEffect(() => {
     if (open) headingRef.current?.focus();
@@ -116,6 +129,8 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
   }
 
   async function askConsent(t: Twin) {
+    if (asking) return;
+    setAsking(t.id);
     setErr(null);
     try {
       const { twin } = await api<{ twin: Twin }>(`/api/twins/${t.id}/consent`, { method: "POST" });
@@ -124,6 +139,8 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
       focusAfterRender(() => listRef.current?.querySelector<HTMLElement>(`[data-twin="${CSS.escape(twin.id)}"] [data-consent-link]`));
     } catch (e) {
       setErr(e instanceof Error ? e.message : "The consent link could not be made");
+    } finally {
+      setAsking(null);
     }
   }
 
@@ -132,9 +149,9 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
     const link = new URL(t.consentUrl, window.location.origin).href;
     try {
       await navigator.clipboard.writeText(link);
-      setNote(`The consent link for ${t.name} is copied.`);
+      say(`The consent link for ${t.name} is copied.`);
     } catch {
-      setNote(`Copy the consent link for ${t.name} from the field.`);
+      say(`Copy the consent link for ${t.name} from the field.`);
     }
   }
 
@@ -160,7 +177,7 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
     <section ref={listRef} className="mb-6" data-testid="digital-twins">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-slate-900">Digital twins</h2>
-        {canEdit !== false && !open && data?.available && (
+        {canEdit === true && !open && data?.available && (
           <Button ref={openButton} variant="secondary" className="px-3 py-1.5 text-xs" onClick={() => setOpen(true)}>
             <UserRound className="h-3.5 w-3.5" /> New digital twin
           </Button>
@@ -204,9 +221,14 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
             <input type="checkbox" className="mt-0.5 accent-brand-600" checked={agreed} onChange={(e) => (setAgreed(e.target.checked), changed())} />
             <span>The person in this footage agreed to be made into a digital twin, and will record their consent on HeyGen&apos;s page.</span>
           </label>
-          <Button className="mt-4" onClick={start} loading={busy} disabled={!ready}>
+          <Button className="mt-4" onClick={start} loading={busy} disabled={!ready} aria-describedby={ready ? undefined : "twin-missing"}>
             <UserRound className="h-4 w-4" /> Train the twin
           </Button>
+          {!ready && (
+            <p id="twin-missing" className="mt-2 text-xs text-slate-500">
+              {!name.trim() ? "Give the twin a name" : !/^https:\/\/\S+$/i.test(footageUrl.trim()) ? "Paste a public https link to the footage" : "Confirm that the person in the footage agreed"} to train it.
+            </p>
+          )}
         </Card>
       )}
       {twins.length > 0 && (
@@ -222,14 +244,14 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <StatusBadge status={t.status} />
-                  {canEdit !== false && (
+                  {canEdit === true && (
                     <button type="button" onClick={() => forget(t)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-rose-600" aria-label={`Forget the digital twin ${t.name}`}>
                       <Trash2 className="h-4 w-4" />
                     </button>
                   )}
                 </div>
               </div>
-              {t.status === "processing" && canEdit !== false && (
+              {t.status === "processing" && canEdit === true && (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   {t.consentUrl && t.consent !== "rejected" ? (
                     <>
@@ -242,7 +264,7 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
                       </a>
                     </>
                   ) : (
-                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => askConsent(t)}>
+                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => askConsent(t)} loading={asking === t.id}>
                       {t.consent === "rejected" || t.consentLinkExpired ? "Get a new consent link" : "Get the consent link"}
                     </Button>
                   )}

@@ -109,6 +109,8 @@ export async function startTwin(input: z.infer<typeof twinRequestSchema>, ownerI
   const url = input.footageUrl;
   // The renderer downloads the footage itself, so it must be a public https address (not this network's, say).
   if (!/^https:\/\/[^\s]+$/i.test(url) || !URL.canParse(url)) throw new ValidationError("Paste a public https link to the footage");
+  // A name and password in the link would be kept with the twin and shown back; a public link needs none.
+  if (new URL(url).username || new URL(url).password) throw new ValidationError("Paste the link to the footage without a name or password in it");
   try {
     await assertPublicHttpUrl(url, "The link to the footage");
   } catch (err) {
@@ -358,7 +360,7 @@ async function keepVoice(job: TwinJob): Promise<string | undefined> {
   const known = await Promise.resolve(tts.describeVoice?.(job.voiceId)).catch((err: unknown) => (console.error(`twin voice ${job.voiceId}:`, err), undefined));
   const voice: Voice = {
     id: job.voiceId,
-    name: withSuffix(job.name, " (twin)", 60),
+    name: twinVoiceName(job.name),
     provider: tts.name,
     ...(job.gender ? { gender: job.gender } : {}),
     ...known,
@@ -369,6 +371,14 @@ async function keepVoice(job: TwinJob): Promise<string | undefined> {
   };
   await getStore().insert("voice", voice);
   return job.voiceId;
+}
+
+/** "Name (twin)", within the 60 characters a voice's name may have when it is renamed (counted as the rename counts). */
+function twinVoiceName(name: string): string {
+  let room = 60;
+  let out = withSuffix(name, " (twin)", room);
+  while (out.length > 60 && room > 8) out = withSuffix(name, " (twin)", --room);
+  return out;
 }
 
 /** Throws NotFound for a twin that is not the account's (routes use it before acting on one). */

@@ -269,7 +269,7 @@ export class HeyGenClient {
   async searchMusic(query: string, limit = 12): Promise<Array<{ id: string; name: string; description?: string | null; audio_url?: string | null; duration?: number | null }>> {
     const json = await this.envelope<Array<{ id: string; name: string; description?: string | null; audio_url?: string | null; duration?: number | null }>>(
       `${V3}/audio/sounds?query=${encodeURIComponent(query)}&limit=${limit}&type=music`,
-      { signal: AbortSignal.timeout(15_000) },
+      { signal: AbortSignal.timeout(8_000) },
     );
     return Array.isArray(json.data) ? json.data : [];
   }
@@ -283,7 +283,14 @@ export class HeyGenClient {
 
   /** A HyperFrames render and, once done, its video (`GET /v3/hyperframes/renders/{id}`). */
   hyperframesRender(id: string) {
-    return this.request<{ status: "queued" | "rendering" | "completed" | "failed" | string; video_url?: string | null; duration?: number | null; failure_message?: string | null }>(`${V3}/hyperframes/renders/${encodeURIComponent(id)}`);
+    return this.request<{ status: "queued" | "rendering" | "completed" | "failed" | string; video_url?: string | null; duration?: number | null; failure_message?: string | null }>(`${V3}/hyperframes/renders/${encodeURIComponent(id)}`, {
+      signal: AbortSignal.timeout(10_000),
+    });
+  }
+
+  /** Deletes a HyperFrames render and its video (`DELETE /v3/hyperframes/renders/{id}`). */
+  async deleteHyperframesRender(id: string): Promise<void> {
+    await this.request(`${V3}/hyperframes/renders/${encodeURIComponent(id)}`, { method: "DELETE", signal: AbortSignal.timeout(10_000) });
   }
 
   /** A lip sync and, once done, its video (`GET /v3/lipsyncs/{id}`). */

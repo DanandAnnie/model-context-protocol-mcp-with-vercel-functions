@@ -26,11 +26,11 @@ export interface MusicMixLayout {
 
 /** Where each copy of the track plays: one after another from the start, the last cut where the video ends. */
 export function musicSegments(durationSec: number, musicDurationSec: number): Array<{ start: number; duration: number }> {
-  // A track of unknown length plays once, as long as it lasts (cut at the video's end).
-  if (!(musicDurationSec > 0)) return [{ start: 0, duration: durationSec }];
+  // A track of unknown length, or under a second, plays once, as long as it lasts (cut at the video's end).
+  if (!(musicDurationSec >= 1)) return [{ start: 0, duration: durationSec }];
   const out: Array<{ start: number; duration: number }> = [];
-  // At most 200 copies: a 30-second track under an hour and a half of video, far past what a render takes.
-  for (let start = 0; start < durationSec - 0.05 && out.length < 200; start += musicDurationSec) {
+  // As many copies as the video needs (a guard of 4,000 for a page the renderer is sent: an hour of one-second tracks).
+  for (let start = 0; start < durationSec - 0.05 && out.length < 4000; start += musicDurationSec) {
     out.push({ start, duration: Math.min(musicDurationSec, durationSec - start) });
   }
   return out;

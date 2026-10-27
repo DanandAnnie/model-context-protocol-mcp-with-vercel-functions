@@ -10,7 +10,6 @@ import type { AvatarJobStatus, AvatarProvider, CleanupStatus, HighlightInput, Hi
 const SAMPLE_VIDEO = SAMPLE_PREVIEW_VIDEO;
 const SAMPLE_THUMB = "/demo/poster.svg";
 
-/** Simulates an async render that completes ~12s after submission. */
 
 /** The demo's background-music tracks (short tones of the studio's own, in public/demo). */
 const DEMO_MUSIC = [
@@ -18,6 +17,7 @@ const DEMO_MUSIC = [
   { id: "demo_music_upbeat", name: "Bright steps", description: "upbeat happy energetic pop corporate motivational", previewUrl: "/demo/music-upbeat.mp3", durationSec: 16 },
   { id: "demo_music_cinematic", name: "Wide horizon", description: "cinematic epic dramatic tense inspiring trailer", previewUrl: "/demo/music-cinematic.mp3", durationSec: 24 },
 ];
+/** Simulates an async render that completes ~12s after submission. */
 export class MockAvatarProvider implements AvatarProvider {
   readonly name = "mock";
   private static RENDER_MS = 12_000;
@@ -146,6 +146,8 @@ export class MockAvatarProvider implements AvatarProvider {
   async startMusicMix() {
     return { jobId: `mockmm_${Date.now()}` };
   }
+
+  async deleteMusicMix() {}
 
   async musicMixStatus(jobId: string): Promise<LipsyncStatus> {
     const m = /^mockmm_(\d+)$/.exec(jobId);

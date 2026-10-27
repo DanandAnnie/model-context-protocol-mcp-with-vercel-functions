@@ -7,7 +7,8 @@ import { assertNoRenewingPlan } from "../billing";
 import { ConflictError } from "../errors";
 import { madeLooksOf, rememberMadeLooks } from "./avatars";
 import { dropTwinVoice } from "./twins";
-import type { TwinJob } from "../types";
+import type { MusicJob, TwinJob } from "../types";
+import { dropMusicRender } from "./music";
 
 const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip", "videolead", "backdrop", "portrait", "highlight", "cleanup", "lipsync", "lookpack", "twin", "music"] as const;
 /**
@@ -105,6 +106,8 @@ export async function deleteOwnerData(ownerId: string = LOCAL_OWNER, opts: { bil
         // voice that never became the account's (those went with the voices) is deleted there.
         await rememberMadeLooks(madeLooksOf(kind, item));
         if (kind === "twin") await dropTwinVoice(item as TwinJob);
+        // A mix is a full copy of the account's footage at the renderer.
+        if (kind === "music") await dropMusicRender(item as MusicJob);
         await getStore().remove(kind, item.id);
         removed.add(item.id);
       }

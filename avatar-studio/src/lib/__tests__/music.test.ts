@@ -59,7 +59,8 @@ describe("the music mix page sent to the renderer", () => {
     ]);
     assert.deepEqual(musicSegments(10, 30), [{ start: 0, duration: 10 }], "a track longer than the video is cut at its end");
     assert.deepEqual(musicSegments(12, 0), [{ start: 0, duration: 12 }], "a track of unknown length plays once");
-    assert.equal(musicSegments(10_000, 1).length, 200, "never more than 200 copies");
+    assert.equal(musicSegments(30 * 60, 1).length, 1800, "as many copies as half an hour of one-second tracks needs");
+    assert.deepEqual(musicSegments(12, 0.5), [{ start: 0, duration: 12 }], "a track under a second plays once");
   });
 
   it("is one page: the video full frame with its sound, the music under it faded in and out, links escaped", () => {
@@ -161,7 +162,7 @@ describe("background music", () => {
     const { config } = await import("../config");
     const saved = { avatar: config.avatarProvider, key: config.heygenApiKey };
     const calls: Array<{ url: string; method: string; body: unknown; idem: string | null }> = [];
-    let render: Record<string, unknown> = { status: "rendering" };
+    let render: Record<string, unknown> | "gone" = { status: "rendering" };
     let refuse: { status: number; message: string } | null = null;
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -172,7 +173,8 @@ describe("background music", () => {
         if (refuse) return Response.json({ error: { code: "invalid_parameter", message: refuse.message } }, { status: refuse.status });
         return Response.json({ data: { render_id: "hfr_1" } });
       }
-      if (url === "https://api.heygen.com/v3/hyperframes/renders/hfr_1") return Response.json({ data: render });
+      if (url === "https://api.heygen.com/v3/hyperframes/renders/hfr_1" && init?.method === "DELETE") return Response.json({ data: { render_id: "hfr_1" } });
+      if (url === "https://api.heygen.com/v3/hyperframes/renders/hfr_1") return render === "gone" ? Response.json({ error: { code: "not_found" } }, { status: 404 }) : Response.json({ data: render });
       return new Response("unexpected", { status: 500 });
     }) as typeof fetch;
     Object.assign(config, { avatarProvider: "heygen", heygenApiKey: "hg_key" });
@@ -185,8 +187,8 @@ describe("background music", () => {
       assert.equal(calls.filter((c) => c.url.includes("/v3/audio/sounds")).length, 2, "the track's link is asked for again at the start");
       const post = calls.find((c) => c.url.endsWith("/v3/hyperframes/renders") && c.method === "POST")!;
       assert.equal(post.idem, job.id);
-      const body = post.body as { project: { type: string; media_type: string; data: string }; format: string; resolution: string; aspect_ratio: string; title: string };
-      assert.deepEqual([body.project.type, body.project.media_type, body.format, body.resolution, body.aspect_ratio, body.title], ["base64", "application/zip", "mp4", "1080p", "1:1", "Founder update (with music)"]);
+      const body = post.body as { project: { type: string; media_type: string; data: string }; format: string; resolution: string; fps: number; quality: string; aspect_ratio: string; title: string };
+      assert.deepEqual([body.project.type, body.project.media_type, body.format, body.resolution, body.fps, body.quality, body.aspect_ratio, body.title], ["base64", "application/zip", "mp4", "1080p", 25, "high", "1:1", "Founder update (with music)"]);
       const files = unzipSync(Buffer.from(body.project.data, "base64"));
       assert.deepEqual(Object.keys(files), ["index.html"]);
       const html = strFromU8(files["index.html"]);
@@ -201,8 +203,33 @@ describe("background music", () => {
       forgetMusicChecks();
       const [done] = await listMusicJobs("u1");
       assert.deepEqual([done.status, done.videoUrl, done.durationSec], ["completed", "https://files.heygen.ai/mixed.mp4?sig=2", 70.1]);
+      // Deleting it deletes the render at HeyGen, a full copy of the footage there.
+      await deleteMusicJob(job.id, "u1");
+      assert.ok(calls.some((c) => c.method === "DELETE" && c.url.endsWith("/v3/hyperframes/renders/hfr_1")));
+      // A render that fails says HeyGen's reason; one HeyGen no longer has, or one finished without a video, fails too.
+      const failing = await startMusic(musicRequestSchema.parse({ videoId: video.id, trackId: "trk_1", query: "upbeat corporate" }), "u1");
+      render = { status: "failed", failure_message: "The composition could not load its media." };
+      forgetMusicChecks();
+      assert.deepEqual([(await listMusicJobs("u1"))[0].status, (await listMusicJobs("u1"))[0].error], ["failed", "The composition could not load its media."]);
+      await getStore().put("music", { ...(await getStore().get<MusicJob>("music", failing.id))!, status: "processing" });
+      render = "gone";
+      forgetMusicChecks();
+      assert.match((await listMusicJobs("u1"))[0].error!, /no longer available from HeyGen/);
+      await getStore().put("music", { ...(await getStore().get<MusicJob>("music", failing.id))!, status: "processing" });
+      render = { status: "completed", video_url: null };
+      forgetMusicChecks();
+      assert.equal((await listMusicJobs("u1"))[0].error, "HeyGen finished without the video");
+      // Deleting the account deletes the renders left at HeyGen.
+      const deletes = calls.filter((c) => c.method === "DELETE").length;
+      await deleteOwnerData("u1");
+      assert.equal(calls.filter((c) => c.method === "DELETE").length, deletes + 1);
       refuse = { status: 400, message: "The project is invalid." };
-      await assert.rejects(startMusic(musicRequestSchema.parse({ videoId: video.id, trackId: "trk_1", query: "upbeat corporate" }), "u1"), (e: unknown) => e instanceof ValidationError && /could not add music to that video: The project is invalid\./.test((e as Error).message));
+      const again = await finished("u1", { provider: "heygen", providerJobId: "hg_video", aspect: "1:1", durationSec: 70 });
+      await assert.rejects(startMusic(musicRequestSchema.parse({ videoId: again.id, trackId: "trk_1", query: "upbeat corporate" }), "u1"), (e: unknown) => e instanceof ValidationError && /could not add music to that video: The project is invalid\./.test((e as Error).message));
+      // A start counts against the account's searches before the catalog is asked again.
+      let searched = 0;
+      await assert.rejects(startMusic(musicRequestSchema.parse({ videoId: again.id, trackId: "missing", query: "upbeat corporate" }), "u1", { search: () => void searched++ }), /no longer offered/);
+      assert.equal(searched, 1);
     } finally {
       Object.assign(config, { avatarProvider: saved.avatar, heygenApiKey: saved.key });
     }

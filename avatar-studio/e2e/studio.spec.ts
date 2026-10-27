@@ -761,10 +761,11 @@ test("a catalog track found by describing it is mixed under a finished video, fo
   // A suggestion searches at once.
   await page.getByRole("button", { name: "Cinematic and inspiring" }).click();
   await expect(tracks.getByLabel("Wide horizon", { exact: true })).toBeChecked();
-  // Deleting asks first, and the focus goes to the list's heading when none is left.
+  // Deleting asks first; the focus goes to the next video with music, or to the list's heading when none is left.
   page.once("dialog", (d) => d.accept());
   await item.getByRole("button", { name: /^Delete / }).click();
   await expect(page.getByTestId("mix")).toHaveCount(listed.length - 1);
+  await expect(page.locator('[data-testid="mix"]:focus, h2:focus')).toHaveCount(1);
 });
 
 test("a photo avatar is dressed in a look pack, each look kept as a presenter of its own", async ({ page }) => {

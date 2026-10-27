@@ -87,9 +87,10 @@ async function resolveVideo(videoId: string, ownerId: string): Promise<Video> {
  * track is looked up again by its description, as its link is signed only for a short time. With a client `key`, the
  * job's id is derived from the account and the key: a start retried with the same key returns the job already stored,
  * or sends the renderer the same idempotency key, so the mix is not rendered or paid for twice. `admit` runs once
- * everything is checked, before the renderer is asked (the hourly limit).
+ * everything is checked, before the renderer is asked (the hourly limit); `search` before the catalog is asked again
+ * (the account's hourly searches).
  */
-export async function startMusic(input: z.infer<typeof musicRequestSchema>, ownerId: string = LOCAL_OWNER, opts: { key?: string; admit?: () => void } = {}): Promise<MusicJob> {
+export async function startMusic(input: z.infer<typeof musicRequestSchema>, ownerId: string = LOCAL_OWNER, opts: { key?: string; admit?: () => void; search?: () => void } = {}): Promise<MusicJob> {
   const id = opts.key ? `mm_${createHash("sha256").update(`${ownerId}\0${opts.key}`).digest("base64url").slice(0, 32)}` : newId("mm");
   const existing = opts.key ? await getStore().get<MusicJob>("music", id) : null;
   if (existing && existing.ownerId === ownerId) {
@@ -101,6 +102,7 @@ export async function startMusic(input: z.infer<typeof musicRequestSchema>, owne
   // Read then written: two starts at the same moment can between them pass the cap.
   if ((await getStore().list<MusicJob>("music", ownerId)).length >= MAX_MUSIC_MIXES) throw new ConflictError(`An account keeps at most ${MAX_MUSIC_MIXES} videos with music; delete one to make another`);
   const video = await resolveVideo(input.videoId, ownerId);
+  opts.search?.();
   const track = (await provider.searchMusic(input.query)).find((t) => t.id === input.trackId);
   if (!track) throw new ValidationError("That track is no longer offered for this description; search again and choose one");
   opts.admit?.();
@@ -140,16 +142,29 @@ export async function startMusic(input: z.infer<typeof musicRequestSchema>, owne
   return job;
 }
 
-/** Removes every mix of a library video, when the video is deleted for good (the mix is its footage too). */
-export async function clearMusicJobs(videoId: string, ownerId: string): Promise<void> {
-  const all = await getStore().list<MusicJob>("music", ownerId);
-  await Promise.all(all.filter((j) => j.videoId === videoId).map((j) => getStore().remove("music", j.id)));
+/**
+ * Deletes a mix's render at the renderer: it is a full copy of the account's footage in the renderer's shared account.
+ * Never throws; a render left behind is logged (the studio no longer offers it to anyone).
+ */
+export async function dropMusicRender(job: MusicJob): Promise<void> {
+  try {
+    await getAvatarProviderByName(job.provider).deleteMusicMix?.(job.providerJobId);
+  } catch (err) {
+    console.error(`music render ${job.id} was not deleted at the renderer:`, err);
+  }
 }
 
-/** Forgets one video with music (the renderer's copy expires on its own). */
+/** Removes every mix of a library video, when the video is deleted for good (the mix is its footage too). */
+export async function clearMusicJobs(videoId: string, ownerId: string): Promise<void> {
+  const all = (await getStore().list<MusicJob>("music", ownerId)).filter((j) => j.videoId === videoId);
+  await Promise.all(all.map(async (j) => (await getStore().remove("music", j.id), await dropMusicRender(j))));
+}
+
+/** Forgets one video with music, and deletes its render at the renderer. */
 export async function deleteMusicJob(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
   const job = owned(await getStore().get<MusicJob>("music", musicIdSchema.parse(id)), ownerId, "Video with music");
   await getStore().remove("music", job.id);
+  await dropMusicRender(job);
 }
 
 /** Asks the renderer where a mix stands and stores the answer. Never throws: a failed check keeps what was known. */

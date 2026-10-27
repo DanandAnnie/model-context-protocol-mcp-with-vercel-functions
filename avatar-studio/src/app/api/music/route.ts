@@ -4,7 +4,8 @@ import { rateLimit, rateLimitPair } from "@/lib/rate-limit";
 import { LimitError, listMusicJobs, musicAvailable, musicKeySchema, musicRequestSchema, publicMusicJob, startMusic } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+// The track is looked up again, the video's link renewed, and the render started, one after another.
+export const maxDuration = 60;
 
 /**
  * Videos with music an account may start per hour, and every account together: each one is a render paid for with
@@ -12,6 +13,8 @@ export const maxDuration = 30;
  */
 const PER_OWNER = 10;
 const PER_INSTANCE = 40;
+/** Catalog searches an account may make per hour, shared with the track search: a start looks its track up again. */
+const SEARCHES_PER_OWNER = 120;
 /** Listings an account may make per hour: the page asks every ten seconds while a mix renders. */
 const LISTS_PER_OWNER = 1500;
 const WINDOW_MS = 60 * 60 * 1000;
@@ -41,7 +44,12 @@ export async function POST(req: Request) {
       const limit = rateLimitPair(`music:${owner}`, PER_OWNER, "music:*", PER_INSTANCE, WINDOW_MS);
       if (!limit.allowed) throw new LimitError(`Too many videos with music for now; try again in ${Math.ceil(limit.retryAfterSec / 60)} minutes`);
     };
-    return json({ mix: publicMusicJob(await startMusic(input, owner, { key, admit })) }, { status: 202 });
+    // The renderer's catalog is asked again for the track on every start that gets that far, so those count too.
+    const search = () => {
+      const limit = rateLimit(`musicsearch:${owner}`, SEARCHES_PER_OWNER, WINDOW_MS);
+      if (!limit.allowed) throw new LimitError("Too many searches for now; try again later");
+    };
+    return json({ mix: publicMusicJob(await startMusic(input, owner, { key, admit, search })) }, { status: 202 });
   } catch (err) {
     return errorResponse(err);
   }

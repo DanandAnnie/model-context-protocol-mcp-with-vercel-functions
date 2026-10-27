@@ -121,6 +121,8 @@ export interface AvatarProvider {
   startMusicMix?(input: MusicMixInput): Promise<{ jobId: string }>;
   /** Where a music mix stands, with the video once it is ready (its link signed for a limited time). */
   musicMixStatus?(jobId: string): Promise<LipsyncStatus>;
+  /** Deletes a music mix and its video at the renderer; one it no longer has counts as deleted. */
+  deleteMusicMix?(jobId: string): Promise<void>;
   /**
    * Starts a set of new looks for a custom photo avatar already prepared for rendering (HeyGen Look Packs): its face in a
    * pack's wardrobe and setting. `key` makes a retried start return the same looks. Each look is followed with

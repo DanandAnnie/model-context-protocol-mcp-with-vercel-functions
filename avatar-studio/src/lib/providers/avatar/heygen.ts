@@ -522,6 +522,9 @@ export class HeyGenAvatarProvider implements AvatarProvider {
         project: { type: "base64", media_type: "application/zip", data: Buffer.from(zip).toString("base64") },
         format: "mp4",
         resolution: "1080p",
+        // The whole video is captured again frame by frame, so at HeyGen's own frame rate and the best quality.
+        fps: 25,
+        quality: "high",
         aspect_ratio: input.aspect,
         title: input.title,
       };
@@ -531,6 +534,14 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       if (/ failed: 409 /.test(message)) throw new ConflictError(STILL_SENDING);
       if (/ failed: (400|402|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not add music to that video: ${heygenReason(message, "try another track")}`);
       throw err;
+    }
+  }
+
+  async deleteMusicMix(jobId: string) {
+    try {
+      await this.client.deleteHyperframesRender(jobId);
+    } catch (err) {
+      if (!/ failed: 404\b/.test(err instanceof Error ? err.message : "")) throw err;
     }
   }
 

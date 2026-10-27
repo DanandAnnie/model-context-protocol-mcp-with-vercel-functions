@@ -57,6 +57,8 @@ export interface RenderCast {
   clips?: Record<string, AudioClip>;
   /** Uploaded background images the video or its scenes name, prepared like clips. */
   backdrops?: Record<string, Backdrop>;
+  /** Generated clips the video or its scenes loop as video backgrounds, each with a link fresh enough to render from. */
+  footage?: Record<string, { videoUrl: string }>;
 }
 
 export interface AvatarProvider {
@@ -121,6 +123,13 @@ export interface AvatarProvider {
   startCleanup?(input: { videoUrl: string; title: string; key: string }): Promise<{ jobId: string }>;
   /** Where a cleanup stands, with the cleaned cut once it is ready (its link signed for a limited time). */
   cleanupStatus?(jobId: string): Promise<CleanupStatus>;
+  /**
+   * Starts generating a short clip from a description of the shot, or from a picture as its first frame (HeyGen Video).
+   * `key` makes a retried start return the same job. Absent when the provider cannot.
+   */
+  startFootage?(input: { prompt: string; image?: { bytes: Uint8Array; mimeType: string }; durationSec: number; aspect?: "16:9" | "9:16" | "1:1"; quality: "standard" | "hd"; key: string }): Promise<{ jobId: string }>;
+  /** Where a generated clip stands, with the clip once it is ready (its link signed for a limited time). */
+  footageStatus?(jobId: string): Promise<FootageStatus>;
   /**
    * Starts putting a new audio track on a video, the speaker's mouth redrawn to match (HeyGen lip sync). `key` makes a
    * retried start return the same job. Absent when the provider cannot lip-sync videos.
@@ -345,6 +354,15 @@ export interface LipsyncStatus {
   status: "processing" | "completed" | "failed";
   videoUrl?: string;
   durationSec?: number;
+  error?: string;
+}
+
+export interface FootageStatus {
+  status: "processing" | "completed" | "failed";
+  videoUrl?: string;
+  durationSec?: number;
+  width?: number;
+  height?: number;
   error?: string;
 }
 

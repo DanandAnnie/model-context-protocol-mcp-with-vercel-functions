@@ -1171,6 +1171,65 @@ test("a photo avatar is given a look described in words, with a picture of the c
   for (const id of [avatar.id, ...made]) expect((await page.request.delete(`/api/avatars/${id}`)).status()).toBe(200);
 });
 
+test("a b-roll clip is made from a description and loops behind a presenter as a scene's background", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  await page.goto("/footage");
+  const make = page.getByRole("button", { name: "Make the clip" });
+  await expect(make).toBeDisabled();
+  await expect(make).toHaveAccessibleDescription("Describe the shot in a few words first.");
+  const prompt = `A slow push-in on a sunlit kitchen ${tag}; steam rises from a coffee cup`;
+  await page.getByRole("textbox", { name: "Describe the shot", exact: true }).fill(prompt);
+  const length = page.getByLabel("Length: 5 seconds");
+  await length.focus();
+  for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowRight");
+  await expect(page.getByLabel("Length: 8 seconds")).toBeFocused();
+  await page.getByLabel("Portrait 9:16").check();
+  // A square clip cannot be HD; the choice says why.
+  await page.getByLabel("Square 1:1").check();
+  await expect(page.getByLabel("HD (1080p)")).toBeDisabled();
+  await expect(page.getByText("HD clips are landscape or portrait, not square.")).toBeVisible();
+  await page.getByLabel("Portrait 9:16").check();
+  await page.getByLabel("HD (1080p)").check();
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/footage") && r.method() === "POST");
+  await make.click();
+  const request = await sent;
+  expect(request.postDataJSON()).toEqual({ prompt, durationSec: 8, aspect: "9:16", quality: "hd" });
+  const key = request.headers()["idempotency-key"];
+  expect(key).toMatch(/^[A-Za-z0-9_-]{8,100}$/);
+  const item = page.getByTestId("footage").filter({ hasText: tag });
+  await expect(item).toBeFocused();
+  await expect(item.getByTestId("footage-meta")).toContainText("8 s · 9:16 · HD");
+  // The same start sent again returns the same clip instead of paying for another.
+  const again = (await (await page.request.post("/api/footage", { data: { prompt, durationSec: 8, aspect: "9:16", quality: "hd" }, headers: { "Idempotency-Key": key } })).json()).footage as { id: string };
+  const id = (await item.getAttribute("data-footage"))!;
+  expect(again.id).toBe(id);
+  // The demo clip is ready a few seconds later, to watch and download.
+  await expect(item.getByText("Completed")).toBeVisible({ timeout: 20_000 });
+  await expect(item.locator("video")).toBeVisible();
+  const listed = ((await (await page.request.get("/api/footage")).json()).footage as Array<Record<string, unknown>>).find((f) => f.id === id)!;
+  expect(Object.keys(listed)).not.toContain("providerJobId");
+  // In the editor the clip is offered as a scene's video background and previewed on the stage.
+  await page.goto("/create");
+  await page.getByRole("button", { name: "Background" }).click();
+  await page.getByLabel("Generated clip").selectOption(id);
+  await expect(page.getByTestId("stage-video")).toHaveAttribute("src", `/api/footage/${id}/clip`);
+  const clip = await page.request.get(`/api/footage/${id}/clip`, { maxRedirects: 0 });
+  expect(clip.status()).toBe(302);
+  expect(clip.headers()["location"]).toContain("/demo/");
+  // A video looping it renders, and keeps the clip's fixed address as its background.
+  const video = await createVideoViaApi(page, `B-roll ${tag}`, { background: { type: "video", value: `/api/footage/${id}/clip` } });
+  const stored = (await (await page.request.get(`/api/videos/${video.id}`)).json()).video as { background: unknown };
+  expect(stored.background).toEqual({ type: "video", value: `/api/footage/${id}/clip` });
+  // A clip deleted since can no longer be looped, and a render naming it is refused with a reason.
+  await page.goto("/footage");
+  page.once("dialog", (d) => d.accept());
+  await page.getByTestId("footage").filter({ hasText: tag }).getByRole("button", { name: /^Delete / }).click();
+  await expect(page.getByTestId("footage").filter({ hasText: tag })).toHaveCount(0);
+  const refused = await page.request.post("/api/videos", { data: { title: "Gone clip", avatarId: "stock_1", voiceId: "stock_voice_1", script: "Hello there.", background: { type: "video", value: `/api/footage/${id}/clip` } } });
+  expect(refused.status()).toBe(400);
+  expect((await refused.json()).error).toContain("generated clip that was deleted");
+});
+
 test("a digital twin is trained from footage, waits for the person's consent, then is a presenter", async ({ page }) => {
   const name = `Twin ${Date.now().toString(36)}`;
   await page.goto("/avatars");
@@ -2333,7 +2392,7 @@ test("no page scrolls sideways at phone width", async ({ browser }) => {
     // A transparent video's Background row and a cleaned recording with a long title are the widest content of their pages.
     const clear = await createVideoViaApi(page, "Phone width transparent", { transparent: true });
     expect((await page.request.post("/api/cleanups", { data: { sourceUrl: "https://93.184.216.34/webinar.mp4", title: "Team webinar on pricing and the spring roadmap (cleaned)" } })).status()).toBe(202);
-    const pages = ["/home", "/create", "/agent", "/videos", `/videos/${v.id}`, `/videos/${clear.id}`, "/templates", "/avatars", "/voices", "/batch", "/brand", "/interactive", "/workspace", "/settings", "/translate", "/cleanup", "/lipsync", "/music", "/cinematic", "/voice-changer", `/share/${v.id}`];
+    const pages = ["/home", "/create", "/agent", "/videos", `/videos/${v.id}`, `/videos/${clear.id}`, "/templates", "/avatars", "/voices", "/batch", "/brand", "/interactive", "/workspace", "/settings", "/translate", "/cleanup", "/lipsync", "/music", "/cinematic", "/footage", "/voice-changer", `/share/${v.id}`];
     for (const path of pages) {
       await page.goto(path);
       await expect(page.locator("h1").first()).toBeVisible();
@@ -2794,7 +2853,7 @@ test("webhook settings reject private hosts and show the signing secret", async 
 test("pages have no WCAG 2.1 AA violations", async ({ page }) => {
   const v = await createVideoViaApi(page, "Accessible video");
   const agent = (await (await page.request.post("/api/agents", { data: { name: "Axe agent", avatarId: "stock_1" } })).json()).agent as { id: string };
-  const paths = ["/", "/login", "/home", "/create", "/agent", "/videos", `/videos/${v.id}`, "/templates", "/batch", "/avatars", "/voices", "/translate", "/cleanup", "/lipsync", "/music", "/cinematic", "/voice-changer", "/interactive", "/brand", "/settings", `/share/${v.id}`, `/talk/${agent.id}`, "/demo-consent"];
+  const paths = ["/", "/login", "/home", "/create", "/agent", "/videos", `/videos/${v.id}`, "/templates", "/batch", "/avatars", "/voices", "/translate", "/cleanup", "/lipsync", "/music", "/cinematic", "/footage", "/voice-changer", "/interactive", "/brand", "/settings", `/share/${v.id}`, `/talk/${agent.id}`, "/demo-consent"];
   const report: string[] = [];
   for (const path of paths) {
     await page.goto(path);
@@ -2889,6 +2948,7 @@ test("a workspace viewer sees view-only notices instead of create controls", asy
     ["/lipsync", "lip-sync videos"],
     ["/music", "add music to videos"],
     ["/cinematic", "make cinematic shots"],
+    ["/footage", "make clips"],
     ["/voice-changer", "change voices or make new ones"],
     ["/avatars", "add or change avatars"],
     ["/voices", "clone, design, or change voices"],

@@ -23,6 +23,7 @@ export * from "./cleanups";
 export * from "./lipsyncs";
 export * from "./music";
 export * from "./lookpacks";
+export * from "./footage";
 export * from "./twins";
 export * from "./studio-templates";
 export * from "./cinematic";

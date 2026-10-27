@@ -1,0 +1,188 @@
+// Generated clips: a short shot the renderer makes from a description, or brings to life from a picture as its first
+// frame (HeyGen Video), to watch, download, or loop behind a presenter as a scene's video background. Used by API
+// routes and by renders that loop one.
+import { z } from "zod";
+import { createHash } from "node:crypto";
+import { newId, nowIso } from "../ids";
+import { getStore } from "../store";
+import { getAvatarProvider, getAvatarProviderByName } from "../providers";
+import { FOOTAGE_ASPECTS, FOOTAGE_MAX_SEC, FOOTAGE_MIN_SEC, type FootageJob } from "../types";
+import { LOCAL_OWNER } from "../owner-id";
+import { ConflictError, NotFoundError, ValidationError } from "../errors";
+import { decodeDataUrl } from "../providers/image";
+import { owned, stripUndefined } from "./shared";
+import { jobChecker, RELINK_MS } from "./job-checks";
+import { sniff } from "./backdrops";
+import { promptExcerpt } from "./lookpacks";
+
+/** Generated clips an account keeps; another needs one deleted first. */
+export const MAX_FOOTAGE = 50;
+/** The longest description of a shot (HeyGen takes far more; a shot is a few sentences). */
+export const MAX_FOOTAGE_PROMPT = 2000;
+/** A first-frame picture, decoded (the page shrinks larger ones first). */
+export const MAX_FOOTAGE_IMAGE_BYTES = 3 * 1024 * 1024;
+
+export const footageRequestSchema = z
+  .object({
+    title: z.string().trim().max(120).optional(),
+    /** The shot: what is seen, what happens, how the camera moves. */
+    prompt: z.string().trim().min(10, "Describe the shot in a few words").max(MAX_FOOTAGE_PROMPT, `Describe the shot in at most ${MAX_FOOTAGE_PROMPT} characters`),
+    durationSec: z.number().int().min(FOOTAGE_MIN_SEC).max(FOOTAGE_MAX_SEC).default(FOOTAGE_MIN_SEC),
+    /** Ignored shape for a clip from a picture, which takes the picture's shape. */
+    aspect: z.enum(FOOTAGE_ASPECTS).optional(),
+    quality: z.enum(["standard", "hd"]).default("standard"),
+    /** A data URL of a PNG or JPEG the clip opens on, as its first frame. */
+    image: z.string().max(Math.ceil((MAX_FOOTAGE_IMAGE_BYTES * 4) / 3) + 100, "The picture is larger than 3 MB").optional(),
+  })
+  .strict()
+  .refine((v) => !(v.image && v.aspect), { message: "A clip from a picture takes the picture's shape; leave the frame out", path: ["aspect"] })
+  // HeyGen renders HD in landscape or portrait only.
+  .refine((v) => v.quality !== "hd" || v.image || (v.aspect ?? "16:9") !== "1:1", { message: "HD clips are landscape or portrait; choose 16:9 or 9:16, or standard quality", path: ["quality"] });
+type FootageRequest = z.infer<typeof footageRequestSchema>;
+
+export const footageIdSchema = z.string().regex(/^ft_[A-Za-z0-9_-]{1,64}$/, "Unknown clip");
+
+/** A client's key for one start (`Idempotency-Key`): letters, digits, `-` and `_`. */
+export const footageKeySchema = z.string().regex(/^[A-Za-z0-9_-]{8,100}$/, "The Idempotency-Key header takes 8 to 100 letters, digits, - or _");
+
+export function footageAvailable(): boolean {
+  return typeof getAvatarProvider().startFootage === "function";
+}
+
+/** What the account sees of a clip: never the renderer, its job id, or the picture's digest, which stay on the server. */
+export type PublicFootage = Omit<FootageJob, "ownerId" | "provider" | "providerJobId" | "imageDigest">;
+export function publicFootage(job: FootageJob): PublicFootage {
+  const { ownerId: _o, provider: _p, providerJobId: _j, imageDigest: _d, ...rest } = job;
+  void _o;
+  void _p;
+  void _j;
+  void _d;
+  return rest;
+}
+
+const checks = jobChecker<FootageJob>((job) => refreshFootage(job));
+
+/** Forgets when clips were last asked about (tests). */
+export function forgetFootageChecks(): void {
+  checks.forget();
+}
+
+/** The account's generated clips, newest first; any still being made, or holding an old link, is asked about first. */
+export async function listFootage(ownerId: string = LOCAL_OWNER): Promise<FootageJob[]> {
+  const jobs = await getStore().list<FootageJob>("footage", ownerId);
+  return (await checks.follow(jobs)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+/** The picture a clip opens on, as bytes, checked to be a PNG or JPEG of at most 3 MB. */
+function firstFrame(url: string): { bytes: Uint8Array; mimeType: string } {
+  if (!url.startsWith("data:image/")) throw new ValidationError("The picture must be an image file");
+  let decoded: ReturnType<typeof decodeDataUrl>;
+  try {
+    decoded = decodeDataUrl(url);
+  } catch {
+    throw new ValidationError("The picture is malformed");
+  }
+  if (decoded.bytes.byteLength > MAX_FOOTAGE_IMAGE_BYTES) throw new ValidationError("The picture is larger than 3 MB");
+  const mimeType = sniff(decoded.bytes);
+  if (!mimeType) throw new ValidationError("The picture is not a PNG or JPEG image");
+  return { bytes: decoded.bytes, mimeType };
+}
+
+/**
+ * Starts generating one clip; the renderer keeps the job and the studio follows it. With a client `key`, the job's id
+ * is derived from the account and the key: a start retried with the same key returns the job already stored, or, when
+ * the first try reached the renderer but was never stored, sends the renderer the same key and body, so the clip is not
+ * made or paid for twice. `admit` runs once everything is checked, before the renderer is asked (the hourly limit).
+ */
+export async function startFootage(input: FootageRequest, ownerId: string = LOCAL_OWNER, opts: { key?: string; admit?: () => void } = {}): Promise<FootageJob> {
+  const image = input.image ? firstFrame(input.image) : undefined;
+  const imageDigest = image ? createHash("sha256").update(image.bytes).digest("base64url") : undefined;
+  const aspect = image ? undefined : (input.aspect ?? "16:9");
+  const id = opts.key ? `ft_${createHash("sha256").update(`${ownerId}\0${opts.key}`).digest("base64url").slice(0, 32)}` : newId("ft");
+  const existing = opts.key ? await getStore().get<FootageJob>("footage", id) : null;
+  if (existing && existing.ownerId === ownerId) {
+    const same = existing.prompt === input.prompt && existing.durationSec === input.durationSec && existing.aspect === aspect && existing.quality === input.quality && (existing.imageDigest ?? "") === (imageDigest ?? "");
+    if (!same) throw new ConflictError("This Idempotency-Key was already used for another clip; send a new key");
+    return existing;
+  }
+  const provider = getAvatarProvider();
+  if (!provider.startFootage) throw new ValidationError(`Generated clips are not available with the ${provider.name} renderer`);
+  // Read then written: two starts at the same moment can between them pass the cap.
+  if ((await getStore().list<FootageJob>("footage", ownerId)).length >= MAX_FOOTAGE) throw new ConflictError(`An account keeps at most ${MAX_FOOTAGE} generated clips; delete one to make another`);
+  opts.admit?.();
+  const { jobId } = await provider.startFootage({ prompt: input.prompt, image, durationSec: input.durationSec, aspect, quality: input.quality, key: id });
+  const now = nowIso();
+  const job: FootageJob = stripUndefined({
+    id,
+    ownerId,
+    title: input.title || promptExcerpt(input.prompt, 60),
+    prompt: input.prompt,
+    fromPicture: image ? (true as const) : undefined,
+    durationSec: input.durationSec,
+    aspect,
+    quality: input.quality,
+    imageDigest,
+    provider: provider.name,
+    providerJobId: jobId,
+    status: "processing" as const,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return getStore().put("footage", job);
+}
+
+/** Forgets one generated clip (the renderer's copy expires on its own). Scenes that loop it can no longer render. */
+export async function deleteFootage(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
+  const job = owned(await getStore().get<FootageJob>("footage", footageIdSchema.parse(id)), ownerId, "Clip");
+  await getStore().remove("footage", job.id);
+}
+
+/**
+ * A finished clip of the account with a link fresh enough to use now: for a render that loops it, and for the editor's
+ * preview. An old link is renewed first; one the renderer cannot renew is tried as it is.
+ */
+export async function footageLink(id: string, ownerId: string = LOCAL_OWNER): Promise<{ job: FootageJob; videoUrl: string }> {
+  let job = owned(await getStore().get<FootageJob>("footage", footageIdSchema.parse(id)), ownerId, "Clip");
+  if (job.status === "completed" && Date.now() - Date.parse(job.checkedAt ?? job.updatedAt) > RELINK_MS) job = await refreshFootage(job);
+  if (job.status !== "completed" || !job.videoUrl) {
+    throw new ValidationError(job.status === "failed" ? `The generated clip "${job.title}" could not be made; choose another background` : `The generated clip "${job.title}" is not ready yet; wait for it, or choose another background`);
+  }
+  return { job, videoUrl: job.videoUrl };
+}
+
+/** A generated clip a scene loops, or a missing one, said as a render's error rather than the store's. */
+export async function footageForRender(id: string, ownerId: string): Promise<{ videoUrl: string }> {
+  try {
+    return { videoUrl: (await footageLink(id, ownerId)).videoUrl };
+  } catch (err) {
+    if (err instanceof NotFoundError) throw new ValidationError("A scene loops a generated clip that was deleted; choose another background");
+    throw err;
+  }
+}
+
+/** Asks the renderer where a clip stands and stores the answer. Never throws: a failed check keeps what was known. */
+async function refreshFootage(job: FootageJob): Promise<FootageJob> {
+  try {
+    const provider = getAvatarProviderByName(job.provider);
+    if (!provider.footageStatus) return job;
+    const out = await provider.footageStatus(job.providerJobId);
+    const now = nowIso();
+    const { videoUrl: _v, width: _w, height: _h, error: _e, ...kept } = job;
+    void _v;
+    void _w;
+    void _h;
+    void _e;
+    const next: FootageJob = {
+      ...kept,
+      // The length asked for is kept (it is what a retried start is compared on); the clip's own is in the file.
+      ...stripUndefined({ status: out.status, videoUrl: out.videoUrl, width: out.width, height: out.height, error: out.error }),
+      checkedAt: now,
+      updatedAt: out.status !== job.status ? now : job.updatedAt,
+    };
+    // Written only over the record that was read, so a delete meanwhile stays deleted.
+    return (await getStore().putIf("footage", next, "updatedAt", job.updatedAt)) ? next : job;
+  } catch (err) {
+    console.error(`clip check failed for ${job.id}:`, err);
+    return job;
+  }
+}

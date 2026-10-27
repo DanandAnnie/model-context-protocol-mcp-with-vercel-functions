@@ -110,6 +110,53 @@ export interface HighlightJob {
   checkedAt?: string;
 }
 
+/** Frames a generated clip can be made in (a clip from a picture takes the picture's shape instead). */
+export const FOOTAGE_ASPECTS = ["16:9", "9:16", "1:1"] as const;
+export type FootageAspect = (typeof FOOTAGE_ASPECTS)[number];
+/** Shortest and longest generated clip, in seconds (HeyGen Video). */
+export const FOOTAGE_MIN_SEC = 5;
+export const FOOTAGE_MAX_SEC = 15;
+
+/**
+ * A short clip the renderer generates from a description of the shot, or brings to life from a picture as its first
+ * frame (HeyGen Video): b-roll to watch, download, or loop behind a presenter as a scene's video background.
+ */
+export interface FootageJob {
+  id: string;
+  ownerId: string;
+  title: string;
+  /** The shot, in words, and whether a picture was its first frame (the picture is not kept). */
+  prompt: string;
+  fromPicture?: true;
+  durationSec: number;
+  /** The frame asked for; a clip from a picture follows the picture, so it has none. */
+  aspect?: FootageAspect;
+  quality: "standard" | "hd";
+  /** A digest of the picture, so a retried start with the same key is known to be the same one. Server only. */
+  imageDigest?: string;
+  /** Renderer generating it, and its job id there, never shown to the account. */
+  provider: string;
+  providerJobId: string;
+  status: "processing" | "completed" | "failed";
+  /** The clip, signed by the renderer for a limited time and renewed when it gets old. */
+  videoUrl?: string;
+  width?: number;
+  height?: number;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+  checkedAt?: string;
+}
+
+/** The path a video background takes when it is a generated clip, and the editor's preview URL for it. */
+export const footagePath = (id: string) => `/api/footage/${id}/clip`;
+
+/** The generated clip a video background names, or null for a background given by URL. */
+export function footageIdOf(background: Pick<Background, "type" | "value"> | undefined): string | null {
+  if (!background || background.type !== "video") return null;
+  return /^\/api\/footage\/(ft_[A-Za-z0-9_-]+)\/clip$/.exec(background.value)?.[1] ?? null;
+}
+
 /** A recording cleaned of filler words ("um", "uh") and overlong silences by the renderer (HeyGen filler word removal). */
 export interface CleanupJob {
   id: string;
@@ -1216,6 +1263,8 @@ export interface ProviderStatus {
   highlightClips: boolean;
   /** Whether the renderer can clean filler words and long silences out of a recording. */
   fillerRemoval: boolean;
+  /** Whether the renderer can generate a short clip from a description or a picture (HeyGen Video). */
+  generatedFootage: boolean;
   /** Whether the renderer can put a new audio track on a video and redraw the mouth to match. */
   lipsync: boolean;
   /** Whether the renderer can generate a pack of new looks for a photo avatar. */

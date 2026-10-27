@@ -2,11 +2,11 @@
 // imports no service, so any service may import it without creating a cycle.
 import { z } from "zod";
 import { graphemes } from "../text";
-import { AVATAR_ENGINES, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, VOICE_ACCENTS, BACKGROUND_FITS, CAPTION_FONTS, CAPTION_POSITIONS, CAPTION_LOOKS, CAPTION_SIZES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SIZES, VOICE_EMOTIONS, backdropIdOf } from "../types";
+import { AVATAR_ENGINES, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, VOICE_ACCENTS, BACKGROUND_FITS, CAPTION_FONTS, CAPTION_POSITIONS, CAPTION_LOOKS, CAPTION_SIZES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SIZES, VOICE_EMOTIONS, backdropIdOf, footageIdOf } from "../types";
 
 export const backgroundSchema = z
   .object({ type: z.enum(["color", "image", "video"]), value: z.string().min(1).max(2000, "A background must be a colour or a URL of at most 2000 characters"), fit: z.enum(BACKGROUND_FITS).optional() })
-  .refine((b) => b.type !== "video" || /^https?:\/\//.test(b.value), "A video background must be a public http(s) URL")
+  .refine((b) => b.type !== "video" || /^https?:\/\//.test(b.value) || footageIdOf(b) !== null, "A video background must be a public http(s) URL or a generated clip (/api/footage/<id>/clip)")
   // An image is a public address or an uploaded image exactly as the app names it, so nothing in between reaches a renderer as a URL.
   .refine((b) => b.type !== "image" || /^https?:\/\//.test(b.value) || backdropIdOf(b) !== null, "An image background must be a public http(s) URL or an uploaded image (/api/backdrops/<id>)")
   // Filling the frame is what an unnamed fit means, and a colour has nothing to fit, so both are stored as absent.

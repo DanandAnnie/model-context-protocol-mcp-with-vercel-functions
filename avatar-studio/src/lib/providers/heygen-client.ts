@@ -272,6 +272,29 @@ export class HeyGenClient {
     return ids;
   }
 
+  /**
+   * Starts generating a clip with HeyGen Video (`POST /v3/models/videos`, model `heygen-video-1`); `key` makes a retried
+   * start return the first answer for a day.
+   */
+  async createModelVideo(body: Record<string, unknown>, key: string): Promise<string> {
+    const out = await this.request<{ video_id?: string }>(`${V3}/models/videos`, { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": key }, signal: AbortSignal.timeout(30_000) });
+    if (!out?.video_id) throw new Error("HeyGen returned no video id for the clip");
+    return out.video_id;
+  }
+
+  /** Where a HeyGen Video clip stands (`GET /v3/models/videos/:id`), with a freshly signed link once it is done. */
+  async modelVideo(id: string) {
+    return this.request<{
+      status?: "pending" | "processing" | "completed" | "failed" | "cancelled";
+      video_url?: string | null;
+      duration?: number | null;
+      width?: number | null;
+      height?: number | null;
+      failure_code?: string | null;
+      failure_message?: string | null;
+    }>(`${V3}/models/videos/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(10_000) });
+  }
+
   /** Starts a lip sync (`POST /v3/lipsyncs`); `key` makes a retried start return the same job. */
   async createLipsync(body: Record<string, unknown>, key: string): Promise<string> {
     const out = await this.request<{ lipsync_id?: string }>(`${V3}/lipsyncs`, { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": key }, signal: AbortSignal.timeout(20_000) });

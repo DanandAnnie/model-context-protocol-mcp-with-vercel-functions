@@ -25,7 +25,7 @@ import { findTemplate } from "@/lib/templates";
 import { capSceneText, fitSceneTextEdit, sceneTextLength } from "@/lib/scene-text";
 import { graphemes } from "@/lib/text";
 import { takeAgentDraft, type AgentDraft } from "@/lib/agent-draft";
-import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, framingFor, isDefaultLayout, isPhotoAvatar, rendersOnAvatarV, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, type PhotoExpressiveness, VOICE_ACCENTS, type VoiceAccent, AVATAR_ENGINES, type AvatarEngine } from "@/lib/types";
+import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, footageIdOf, footagePath, type FootageJob, framingFor, isDefaultLayout, isPhotoAvatar, rendersOnAvatarV, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, type PhotoExpressiveness, VOICE_ACCENTS, type VoiceAccent, AVATAR_ENGINES, type AvatarEngine } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -221,6 +221,9 @@ function CreateInner() {
   const clips = clipData?.clips ?? [];
   // Uploaded background images; the picker adds and removes them here, so the list is always the editor's.
   const { data: backdropData, error: backdropError, setData: setBackdropData } = useApi<{ backdrops: Backdrop[] }>("/api/backdrops");
+  // Generated clips (the B-roll page) a scene can loop as its video background; only finished ones are offered.
+  const { data: footageData } = useApi<{ footage: Array<Pick<FootageJob, "id" | "title" | "status" | "durationSec" | "aspect">>; available: boolean }>("/api/footage");
+  const readyFootage = (footageData?.footage ?? []).filter((f) => f.status === "completed");
   const { play, playingId, busyId } = useVoicePreview();
 
   const [title, setTitle] = useState("Untitled video");
@@ -1021,7 +1024,7 @@ function CreateInner() {
             {/* A portrait stage is sized by its height and takes its width from the ratio, so it really is 9:16 (a width-first box capped in height came out near square and cropped portrait slides); the height is also capped by the screen's width, so a narrow phone keeps the shape. */}
             <div data-testid="stage" className={`relative mx-auto ${aspect === "9:16" ? "h-[min(520px,70vh,calc((100vw_-_5rem)*16/9))] max-w-full" : "w-full"} ${stageAspect} flex items-end justify-center overflow-hidden [container-type:size]`} style={sentTransparent ? { backgroundColor: "#fff", backgroundImage: "repeating-conic-gradient(#e2e8f0 0 25%, #fff 0 50%)", backgroundSize: "24px 24px" } : background.type === "color" ? { background: background.value } : background.type === "image" ? { backgroundImage: `url(${background.value})`, backgroundSize: background.fit ?? "cover", backgroundPosition: "center", backgroundRepeat: "no-repeat", backgroundColor: "#000" } : { background: background.fit ? "#000" : "#0f172a" }} data-fit={background.type === "color" ? undefined : (background.fit ?? "cover")} data-transparent={sentTransparent ? "" : undefined}>
               {/* Only a complete URL is previewed, so a half-typed one is not requested keystroke by keystroke. */}
-              {!sentTransparent && background.type === "video" && /^https?:\/\/\S+\.\S+/.test(background.value) && (
+              {!sentTransparent && background.type === "video" && (/^https?:\/\/\S+\.\S+/.test(background.value) || footageIdOf(background)) && (
                 <video key={background.value} src={background.value} muted loop autoPlay playsInline aria-hidden="true" data-testid="stage-video" className={`absolute inset-0 h-full w-full ${background.fit === "contain" ? "object-contain" : "object-cover"}`} />
               )}
               {active.hidePresenter ? null : sceneAvatar ? (
@@ -1644,12 +1647,30 @@ function CreateInner() {
                     <input
                       className={inputClass}
                       placeholder="https://…/background.mp4"
-                      value={background.type === "video" ? background.value : ""}
+                      value={background.type === "video" && !footageIdOf(background) ? background.value : ""}
                       onChange={(e) => setBackground(e.target.value ? { type: "video", value: e.target.value } : DEFAULT_BG)}
                     />
                     <span className="flex items-center text-slate-400"><Clapperboard className="h-5 w-5" /></span>
                   </div>
                 </Field>
+                {(footageData?.footage.length || footageIdOf(background)) && (
+                  // A clip made on the B-roll page loops behind the presenter; the render looks up a fresh link for it.
+                  <Field label="Generated clip" hint={readyFootage.length ? "A clip made on the B-roll page, looped behind the avatar. HeyGen plays it." : "No finished clips yet; make one on the B-roll page."}>
+                    <select
+                      className={inputClass}
+                      value={footageIdOf(background) ?? ""}
+                      onChange={(e) => setBackground(e.target.value ? { type: "video", value: footagePath(e.target.value) } : DEFAULT_BG)}
+                    >
+                      <option value="">None</option>
+                      {readyFootage.map((f) => (
+                        <option key={f.id} value={f.id}>
+                          {f.title} ({f.durationSec} s{f.aspect ? `, ${f.aspect}` : ""})
+                        </option>
+                      ))}
+                      {footageIdOf(background) && !readyFootage.some((f) => f.id === footageIdOf(background)) && <option value={footageIdOf(background)!}>A clip that is gone or not ready</option>}
+                    </select>
+                  </Field>
+                )}
               </div>
             )}
 

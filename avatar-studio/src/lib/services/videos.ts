@@ -3,7 +3,7 @@ import { z } from "zod";
 import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import { getStore } from "../store";
-import { EMPTY_WATCH, MAX_SCENES, TRASH_RETENTION_DAYS, backdropIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
+import { EMPTY_WATCH, MAX_SCENES, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
 import type { AudioClip, Avatar, Backdrop, Background, CaptionCue, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
 import { buildCues } from "../captions";
 import { captionDurationSec, sceneBoundsMs, type Timed } from "../chapters";
@@ -17,6 +17,7 @@ import { isWorkspaceId, type User } from "../workspaces";
 import { getAvatar, madeLooksOf, rememberMadeLooks } from "./avatars";
 import { getClip, getClipAudio, saveClipAssetIds } from "./clips";
 import { getBackdrop, getBackdropImage, saveBackdropAssetIds } from "./backdrops";
+import { footageForRender } from "./footage";
 import { listVoices } from "./voices";
 import { PUBLIC_ACCESS, owned, scheduleNotification, stripUndefined } from "./shared";
 import { SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, clearShareLock, setShareLock, shareUnlocked } from "../share-lock";
@@ -224,6 +225,13 @@ function backdropIdsOf(req: { background?: Background; scenes?: Array<{ backgrou
   return Array.from(new Set(ids));
 }
 
+/** The generated clips a request loops as video backgrounds (none for a transparent video). */
+function footageIdsOf(req: { background?: Background; scenes?: Array<{ background?: Background }>; transparent?: true }): string[] {
+  if (req.transparent) return [];
+  const ids = [req.background, ...(req.scenes ?? []).map((s) => s.background)].map(footageIdOf).filter((id): id is string => !!id);
+  return Array.from(new Set(ids));
+}
+
 export interface RenderContext {
   avatar: Avatar;
   voice: Voice;
@@ -238,12 +246,15 @@ export async function resolveRenderContext(
   const avatarIds = Array.from(new Set([req.avatarId, ...(req.scenes ?? []).map((s) => s.avatarId).filter((id): id is string => !!id)]));
   const clipIds = Array.from(new Set((req.scenes ?? []).map((s) => s.audioId).filter((id): id is string => !!id)));
   const backdropIds = backdropIdsOf(req);
-  const [avatarList, voices, clipList, backdropList] = await Promise.all([
+  const footageIds = footageIdsOf(req);
+  const [avatarList, voices, clipList, backdropList, footageList] = await Promise.all([
     Promise.all(avatarIds.map((id) => getAvatar(id, ownerId))),
     listVoices(ownerId),
     // A clip or background image from another account reads as not found, like any record the caller does not own.
     Promise.all(clipIds.map((id) => getClip(id, ownerId))),
     Promise.all(backdropIds.map((id) => getBackdrop(id, ownerId))),
+    // A generated clip is looked up with a link fresh enough to render from; one not ready, or gone, is refused here.
+    Promise.all(footageIds.map(async (id) => [id, await footageForRender(id, ownerId)] as const)),
   ]);
   const avatars = Object.fromEntries(avatarList.map((a) => [a.id, a]));
   // An audio scene speaks its clip, so its voice is neither needed nor checked.
@@ -253,6 +264,7 @@ export async function resolveRenderContext(
     voices: {},
     ...(clipList.length ? { clips: Object.fromEntries(clipList.map((c) => [c.id, c])) } : {}),
     ...(backdropList.length ? { backdrops: Object.fromEntries(backdropList.map((b) => [b.id, b])) } : {}),
+    ...(footageList.length ? { footage: Object.fromEntries(footageList) } : {}),
   };
   for (const id of voiceIds) {
     const voice = voices.find((v) => v.id === id);
@@ -357,6 +369,9 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
     // A context made for other backgrounds (a batch's, say) may lack an image this request names.
     for (const id of backdropIdsOf(req)) {
       if (!cast.backdrops?.[id]) cast.backdrops = { ...cast.backdrops, [id]: await getBackdrop(id, ownerId) };
+    }
+    for (const id of footageIdsOf(req)) {
+      if (!cast.footage?.[id]) cast.footage = { ...cast.footage, [id]: await footageForRender(id, ownerId) };
     }
     if (cast.backdrops && provider.prepareBackdrop) {
       for (const b of Object.values(cast.backdrops)) cast.backdrops[b.id] = await prepareBackdropOnce(provider, b, ownerId);

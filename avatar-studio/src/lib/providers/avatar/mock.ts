@@ -4,7 +4,7 @@ import { SAMPLE_PREVIEW_VIDEO, STOCK_AVATARS, portraitSvg } from "../../stock";
 import { demoAssetUrl } from "../../config";
 import { NotFoundError } from "../../errors";
 import type { AudioClip, Avatar, MusicTrack, StudioTemplate, StudioTemplateDetail, VideoRequest } from "../../types";
-import type { AvatarJobStatus, AvatarProvider, CleanupStatus, HighlightInput, HighlightStatus, LipsyncStatus } from "../types";
+import type { AvatarJobStatus, AvatarProvider, CleanupStatus, FootageStatus, HighlightInput, HighlightStatus, LipsyncStatus } from "../types";
 
 /** Labeled, self-hosted stand-in; no avatar synthesis or paid operation occurs. */
 const SAMPLE_VIDEO = SAMPLE_PREVIEW_VIDEO;
@@ -79,6 +79,18 @@ export class MockAvatarProvider implements AvatarProvider {
   }
 
   /** Demo cleanup: the sample video stands in for the cleaned cut a few seconds later, with made-up statistics; nothing is cut. */
+  /** Demo generated clip: the studio's sample clip, "made" a few seconds after it is asked for; nothing is generated. */
+  async startFootage({ durationSec }: { durationSec: number }) {
+    return { jobId: `mockft_${Date.now()}_${durationSec}` };
+  }
+
+  async footageStatus(jobId: string): Promise<FootageStatus> {
+    const m = /^mockft_(\d+)_(\d+)$/.exec(jobId);
+    if (!m) return { status: "failed", error: "No such clip" };
+    if (Date.now() - Number(m[1]) < MockAvatarProvider.CLIP_MS) return { status: "processing" };
+    return { status: "completed", videoUrl: demoAssetUrl(SAMPLE_VIDEO), durationSec: Number(m[2]), width: 1280, height: 720 };
+  }
+
   async startCleanup() {
     return { jobId: `mockcu_${Date.now()}` };
   }

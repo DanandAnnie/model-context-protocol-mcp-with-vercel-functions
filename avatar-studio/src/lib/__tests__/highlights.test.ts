@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
-import { MAX_HIGHLIGHT_JOBS, deleteHighlights, deleteOwnerData, deleteVideo, exportOwnerData, highlightRequestSchema, listHighlights, startHighlights } from "../services";
+import { MAX_HIGHLIGHT_JOBS, deleteHighlights, deleteOwnerData, deleteVideo, exportOwnerData, forgetHighlightChecks, highlightRequestSchema, listHighlights, publicHighlight, startHighlights } from "../services";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { providerStatus } from "../providers";
 import { MockAvatarProvider } from "../providers/avatar/mock";
@@ -13,6 +13,7 @@ import type { HighlightJob, Video } from "../types";
 
 beforeEach(() => {
   globalThis.__avatarStudioStore = new MemoryStore();
+  forgetHighlightChecks();
 });
 
 const now = () => new Date().toISOString();
@@ -60,11 +61,15 @@ describe("highlight clips", () => {
       clipMs.CLIP_MS = 60_000;
       const job = await startHighlights(video.id, highlightRequestSchema.parse({ lengths: ["30", "60"], frame: "1:1", captions: false, prompt: "the kitchen" }), "u1");
       assert.match(job.id, /^hl_/, "the studio's own id, not the renderer's");
+      assert.deepEqual(Object.keys(publicHighlight(job)).filter((k) => ["ownerId", "provider", "providerJobId"].includes(k)), [], "the renderer and its job id stay on the server");
       assert.deepEqual([job.status, job.lengths, job.frame, job.captions, job.prompt, job.clips], ["processing", ["30", "60"], "1:1", false, "the kitchen", []]);
       const [running] = await listHighlights(video.id, "u1");
       assert.equal(running.status, "processing");
       assert.equal(typeof running.progress, "number");
       clipMs.CLIP_MS = 0;
+      // Asked again at once, the set is not checked twice: pages following it share a check every few seconds.
+      assert.equal((await listHighlights(video.id, "u1"))[0].status, "processing");
+      forgetHighlightChecks();
       const [done] = await listHighlights(video.id, "u1");
       assert.equal(done.status, "completed");
       assert.equal(done.progress, undefined);
@@ -94,8 +99,24 @@ describe("highlight clips", () => {
     await assert.rejects(startHighlights(full.id, input, "u1"), ConflictError);
     // A job id of another video is refused.
     const other = (await listHighlights(short.id, "u1"))[0];
-    await assert.rejects(deleteHighlights(full.id, other.id, "u1"), /another video/);
+    await assert.rejects(deleteHighlights(full.id, other.id, "u1"), NotFoundError);
     await assert.rejects(deleteHighlights(full.id, "../x", "u1"), /Unknown clipping job/);
+  });
+
+  it("is not kept for a video deleted for good while it was being started", async () => {
+    const video = await finished("u1");
+    const proto = MockAvatarProvider.prototype as unknown as { startHighlights: (...a: unknown[]) => Promise<{ jobId: string }> };
+    const real = proto.startHighlights;
+    proto.startHighlights = async function (this: unknown, ...a: unknown[]) {
+      await getStore().remove("video", video.id);
+      return real.apply(this, a);
+    };
+    try {
+      await assert.rejects(startHighlights(video.id, highlightRequestSchema.parse({ lengths: ["30"] }), "u1"), NotFoundError);
+      assert.deepEqual(await getStore().list("highlight", "u1"), []);
+    } finally {
+      proto.startHighlights = real;
+    }
   });
 
   it("goes with the video when it is deleted for good, and with the account", async () => {
@@ -127,7 +148,7 @@ describe("highlight clips", () => {
         if (body.output_settings.prompt === "refuse") return Response.json({ error: { code: "invalid_parameter", message: "The video is too short to clip." } }, { status: 400 });
         return Response.json({ data: { ai_clipping_id: "clip_job_1" } });
       }
-      if (url === "https://api.heygen.com/v3/ai-clipping/clip_job_1") return Response.json(clipping);
+      if (url === "https://api.heygen.com/v3/ai-clipping/clip_job_1") return clipping.gone ? Response.json({ error: { code: "not_found" } }, { status: 404 }) : Response.json(clipping);
       return new Response("unexpected", { status: 500 });
     }) as typeof fetch;
     Object.assign(config, { avatarProvider: "heygen", heygenApiKey: "hg_key" });
@@ -150,6 +171,7 @@ describe("highlight clips", () => {
           clips: [{ id: "c1", status: "completed", title: "Why we changed our pricing", duration_seconds: 26.4, virality_score: 65, thumbnail_url: "https://r.heygen.ai/c1.jpeg", video_url: "https://r.heygen.ai/c1.mp4?sig=a" }],
         },
       };
+      forgetHighlightChecks();
       const [done] = await listHighlights(video.id, "u1");
       assert.deepEqual(done.clips, [{ id: "c1", status: "completed", title: "Why we changed our pricing", durationSec: 26.4, viralityScore: 65, thumbnailUrl: "https://r.heygen.ai/c1.jpeg", videoUrl: "https://r.heygen.ai/c1.mp4?sig=a" }]);
       // Read again soon after, HeyGen is not asked; once the links are old, they are renewed.
@@ -158,15 +180,36 @@ describe("highlight clips", () => {
       assert.equal(calls.length, asked);
       await getStore().put("highlight", { ...done, checkedAt: new Date(Date.now() - 31 * 60 * 1000).toISOString() });
       (clipping.data as { clips: Array<{ video_url: string }> }).clips[0].video_url = "https://r.heygen.ai/c1.mp4?sig=b";
+      forgetHighlightChecks();
       assert.equal((await listHighlights(video.id, "u1"))[0].clips[0].videoUrl, "https://r.heygen.ai/c1.mp4?sig=b");
+      // A link that is not https is not kept.
+      (clipping.data as { clips: Array<{ video_url: string }> }).clips[0].video_url = "javascript:alert(1)";
+      await getStore().put("highlight", { ...(await getStore().get<HighlightJob>("highlight", job.id))!, checkedAt: new Date(Date.now() - 31 * 60 * 1000).toISOString() });
+      forgetHighlightChecks();
+      assert.equal((await listHighlights(video.id, "u1"))[0].clips[0].videoUrl, undefined);
       // A failed job keeps its reason; a check HeyGen cannot answer keeps what was known.
       clipping = { data: { status: "failed", failure_message: "The source video could not be read.", clips: [] } };
       await getStore().put("highlight", { ...(await getStore().get<HighlightJob>("highlight", job.id))!, status: "processing" });
+      forgetHighlightChecks();
       const [failed] = await listHighlights(video.id, "u1");
       assert.deepEqual([failed.status, failed.error], ["failed", "The source video could not be read."]);
       clipping = { error: { message: "down" } };
       await getStore().put("highlight", { ...failed, status: "processing" });
+      forgetHighlightChecks();
       assert.equal((await listHighlights(video.id, "u1"))[0].status, "processing");
+      // A finished set whose check keeps failing is not asked about on every look: the next try waits.
+      await getStore().put("highlight", { ...failed, status: "completed", checkedAt: new Date(Date.now() - 31 * 60 * 1000).toISOString() });
+      forgetHighlightChecks();
+      const before = calls.length;
+      await listHighlights(video.id, "u1");
+      await listHighlights(video.id, "u1");
+      assert.equal(calls.length, before + 1, "one failed check, then a wait");
+      // A job HeyGen no longer has fails with a reason instead of being asked about forever.
+      clipping = { gone: true };
+      await getStore().put("highlight", { ...failed, status: "processing" });
+      forgetHighlightChecks();
+      const [expired] = await listHighlights(video.id, "u1");
+      assert.deepEqual([expired.status, expired.error], ["failed", "These clips are no longer available from HeyGen; cut them again"]);
     } finally {
       globalThis.fetch = realFetch;
       Object.assign(config, { avatarProvider: saved.avatar, heygenApiKey: saved.key });

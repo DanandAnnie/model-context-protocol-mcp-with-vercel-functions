@@ -608,11 +608,18 @@ test("a finished video can be cut into short clips, listed with the video until 
   await expect(card.getByText("30 seconds, 1 minute · 1:1 · no captions · “the welcome”")).toBeVisible();
   // The demo renderer finishes a few seconds later; the card checks again on its own.
   await expect(card.getByTestId("highlight-clip")).toHaveCount(2, { timeout: 20_000 });
-  await expect(card.getByRole("link", { name: "Download" }).first()).toHaveAttribute("href", /\/demo\/render\.webm$/);
+  await expect(card.getByRole("link", { name: /^Download Demo highlight/ }).first()).toHaveAttribute("href", /\/demo\/render\.webm$/);
   await page.reload();
   await expect(page.getByTestId("highlight-clip")).toHaveCount(2);
+  // Deleting asks first; declined, the set stays.
+  page.once("dialog", (d) => d.dismiss());
+  await page.getByRole("button", { name: /^Delete these clips/ }).click();
+  await expect(page.getByTestId("highlight-clip")).toHaveCount(2);
+  page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: /^Delete these clips/ }).click();
   await expect(page.getByTestId("highlight-clip")).toHaveCount(0);
+  // Focus goes to the card rather than being lost with the button.
+  await expect(page.getByRole("heading", { name: "Short clips" })).toBeFocused();
   expect((await (await page.request.get(`/api/videos/${v.id}/highlights`)).json()).highlights).toEqual([]);
 });
 

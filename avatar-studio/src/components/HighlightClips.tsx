@@ -7,6 +7,13 @@ import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { api } from "@/lib/client";
 import { HIGHLIGHT_FRAMES, HIGHLIGHT_LENGTHS, type HighlightFrame, type HighlightJob, type HighlightLength, type Video } from "@/lib/types";
 
+/** A set as the server lists it: never the renderer or its job id. */
+type Highlight = Omit<HighlightJob, "ownerId" | "provider" | "providerJobId">;
+/** Finished clips' links are renewed by the server once this old; a page left open asks again when it is looked at. */
+const RELINK_MS = 30 * 60 * 1000;
+/** Sets a video keeps (the server refuses more). */
+const MAX_SETS = 5;
+
 const LENGTH_NAMES: Record<HighlightLength, string> = { "30": "30 seconds", "60": "1 minute", "180": "3 minutes" };
 const FRAME_NAMES: Record<HighlightFrame, string> = { "9:16": "9:16 portrait (stories, reels, shorts)", "16:9": "16:9 landscape", "1:1": "1:1 square" };
 
@@ -17,7 +24,7 @@ const FRAME_NAMES: Record<HighlightFrame, string> = { "9:16": "9:16 portrait (st
  */
 export function HighlightClips({ video, canEdit }: { video: Video; canEdit: boolean }) {
   const id = useId();
-  const { data, error: loadError, setData, refetch } = useApi<{ highlights: HighlightJob[]; available: boolean }>(`/api/videos/${video.id}/highlights`);
+  const { data, error: loadError, setData, refetch } = useApi<{ highlights: Highlight[]; available: boolean }>(`/api/videos/${video.id}/highlights`);
   const running = (data?.highlights ?? []).some((h) => h.status === "processing");
   useEffect(() => {
     if (!running) return;
@@ -27,6 +34,18 @@ export function HighlightClips({ video, canEdit }: { video: Video; canEdit: bool
     }, 5000);
     return () => clearInterval(timer);
   }, [running, refetch]);
+  // A page left open past the clips' link lifetime asks again when it is looked at, so the player and links still work.
+  const loadedAt = useRef(Date.now());
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && Date.now() - loadedAt.current > RELINK_MS) {
+        loadedAt.current = Date.now();
+        void refetch();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [refetch]);
   // Lengths as long as the video or longer have no highlight, so they are not offered.
   const lengths = HIGHLIGHT_LENGTHS.filter((l) => !video.durationSec || Number(l) < video.durationSec);
   const [chosen, setChosen] = useState<HighlightLength[]>(["30"]);
@@ -36,20 +55,33 @@ export function HighlightClips({ video, canEdit }: { video: Video; canEdit: bool
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  // A set that finishes or fails while the page is open is announced.
+  const seen = useRef<Map<string, Highlight["status"]>>(new Map());
+  useEffect(() => {
+    for (const h of data?.highlights ?? []) {
+      const before = seen.current.get(h.id);
+      if (before === "processing" && h.status !== "processing") setNote(h.status === "completed" ? `${h.clips.length === 1 ? "1 clip is" : `${h.clips.length} clips are`} ready.` : `The clips could not be cut: ${h.error ?? "the renderer failed"}.`);
+      seen.current.set(h.id, h.status);
+    }
+  }, [data]);
   const listRef = useRef<HTMLUListElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const focusAfterRender = useFocusAfterRender();
   const sets = data?.highlights ?? [];
   const sending = chosen.filter((l) => lengths.includes(l));
   const canMake = canEdit && !video.deletedAt && video.status === "completed" && !!data?.available;
-  if (!canMake && sets.length === 0) return null;
+  // Until the first answer the card shows, so a failed load is said rather than hidden.
+  if (data && !canMake && sets.length === 0) return null;
 
   async function make() {
     setBusy(true);
     setErr(null);
     setNote(null);
     try {
-      const { highlight } = await api<{ highlight: HighlightJob }>(`/api/videos/${video.id}/highlights`, { method: "POST", body: JSON.stringify({ lengths: sending, frame, captions, prompt }) });
+      const { highlight } = await api<{ highlight: Highlight }>(`/api/videos/${video.id}/highlights`, { method: "POST", body: JSON.stringify({ lengths: sending, frame, captions, prompt }) });
       setData((prev) => ({ available: prev?.available ?? true, highlights: [highlight, ...(prev?.highlights ?? [])] }));
+      // A check that left before this set was made would answer without it; asking again retires it.
+      void refetch();
       setNote("Cutting the clips; they appear here when they are ready.");
       focusAfterRender(() => listRef.current?.querySelector<HTMLElement>(`[data-highlight="${highlight.id}"]`));
     } catch (e) {
@@ -59,12 +91,18 @@ export function HighlightClips({ video, canEdit }: { video: Video; canEdit: bool
     }
   }
 
-  async function remove(job: HighlightJob) {
+  async function remove(job: Highlight) {
+    if (!window.confirm(job.status === "processing" ? "Delete these clips? They are still being cut, and cutting them again uses another job." : "Delete these clips? Cutting them again uses another job.")) return;
     setErr(null);
+    setNote(null);
+    const next = sets[sets.indexOf(job) + 1] ?? sets[sets.indexOf(job) - 1];
     try {
       await api(`/api/videos/${video.id}/highlights/${job.id}`, { method: "DELETE" });
       setData((prev) => (prev ? { ...prev, highlights: prev.highlights.filter((h) => h.id !== job.id) } : prev));
-      setNote("Clips deleted.");
+      void refetch();
+      setNote(`Clips deleted (${job.lengths.map((l) => LENGTH_NAMES[l]).join(", ")}).`);
+      // Focus moves to the next set, or to the card's heading, rather than being lost with the button.
+      focusAfterRender(() => (next ? listRef.current?.querySelector<HTMLElement>(`[data-highlight="${next.id}"]`) : headingRef.current));
     } catch (e) {
       setErr(e instanceof Error ? e.message : "The clips could not be deleted");
     }
@@ -72,7 +110,7 @@ export function HighlightClips({ video, canEdit }: { video: Video; canEdit: bool
 
   return (
     <Card className="p-4" data-testid="highlight-clips">
-      <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+      <h3 ref={headingRef} tabIndex={-1} className="flex items-center gap-2 text-sm font-semibold text-slate-900 outline-none">
         <Scissors className="h-4 w-4" aria-hidden /> Short clips
       </h3>
       <p role="status" className="sr-only">
@@ -105,7 +143,7 @@ export function HighlightClips({ video, canEdit }: { video: Video; canEdit: bool
                   {h.clips.map((c) => (
                     <li key={c.id} className="min-w-0" data-testid="highlight-clip">
                       {c.status === "completed" && c.videoUrl ? (
-                        <video src={c.videoUrl} poster={c.thumbnailUrl} controls preload="none" className={`w-full rounded-md bg-black ${h.frame === "9:16" ? "aspect-[9/16] max-h-80" : h.frame === "1:1" ? "aspect-square" : "aspect-video"}`} aria-label={c.title ?? "Highlight clip"} />
+                        <video src={c.videoUrl} poster={c.thumbnailUrl} controls preload="none" className={`rounded-md bg-black ${h.frame === "9:16" ? "mx-auto block aspect-[9/16] h-80 max-w-full" : h.frame === "1:1" ? "aspect-square w-full" : "aspect-video w-full"}`} aria-label={c.title ?? "Highlight clip"} />
                       ) : (
                         <p className="text-xs text-slate-500">{c.status === "failed" ? "This clip could not be cut." : "Still cutting…"}</p>
                       )}
@@ -116,7 +154,7 @@ export function HighlightClips({ video, canEdit }: { video: Video; canEdit: bool
                         {typeof c.durationSec === "number" && <span>{Math.round(c.durationSec)}s</span>}
                         {typeof c.viralityScore === "number" && <span title="The renderer's estimate of how well it would do on social media">Virality {c.viralityScore}/100</span>}
                         {c.videoUrl && (
-                          <a href={c.videoUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-brand-700 underline">
+                          <a href={c.videoUrl} target="_blank" rel="noopener noreferrer" aria-label={`Download ${c.title ?? "this clip"}`} className="inline-flex items-center gap-1 text-brand-700 underline">
                             <Download className="h-3 w-3" aria-hidden /> Download
                           </a>
                         )}
@@ -134,7 +172,9 @@ export function HighlightClips({ video, canEdit }: { video: Video; canEdit: bool
           <p className="mt-2 text-xs text-slate-500">
             The renderer picks the best moments of this video and cuts a short clip of each length, framed for social media. The clips are not added to the library; download the ones you want.
           </p>
-          {lengths.length === 0 ? (
+          {sets.length >= MAX_SETS ? (
+            <p className="mt-2 text-xs text-slate-500">This video keeps at most {MAX_SETS} sets of clips; delete one to cut more.</p>
+          ) : lengths.length === 0 ? (
             <p className="mt-2 text-xs text-slate-500">This video is shorter than the shortest clip (30 seconds).</p>
           ) : (
             <div className="mt-2 space-y-3">

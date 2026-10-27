@@ -5,7 +5,7 @@ import { getStore } from "../store";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import { HIGHLIGHT_FRAMES, HIGHLIGHT_LENGTHS, type HighlightJob, type Video } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
-import { ConflictError, ValidationError } from "../errors";
+import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { owned } from "./shared";
 import { getVideo } from "./videos";
 
@@ -14,6 +14,31 @@ export const MAX_HIGHLIGHT_JOBS = 5;
 
 /** Finished clips' links are signed for a limited time, so they are renewed once this old. */
 const RELINK_MS = 30 * 60 * 1000;
+/** A set being cut is asked about at most this often, however many pages follow it. */
+const RECHECK_MS = 4_000;
+/** After a check of a finished set fails, the next waits this long, so a dead job does not cost a call per page view. */
+const RETRY_FINISHED_MS = 5 * 60 * 1000;
+/** How long the renderer is given to say where the source video is. */
+const SOURCE_TIMEOUT_MS = 10_000;
+
+/** What the account sees of a set: never the renderer or its job id, which stay on the server. */
+export type PublicHighlight = Omit<HighlightJob, "ownerId" | "provider" | "providerJobId">;
+export function publicHighlight(job: HighlightJob): PublicHighlight {
+  const { ownerId: _o, provider: _p, providerJobId: _j, ...rest } = job;
+  void _o;
+  void _p;
+  void _j;
+  return rest;
+}
+
+/** When each set was last asked about (this instance), and the checks under way, shared by everyone following it. */
+const attempted = new Map<string, number>();
+const inFlight = new Map<string, Promise<HighlightJob>>();
+
+/** Forgets when sets were last asked about (tests). */
+export function forgetHighlightChecks(): void {
+  attempted.clear();
+}
 
 export const highlightRequestSchema = z.object({
   lengths: z
@@ -43,15 +68,12 @@ export async function listHighlights(videoId: string, ownerId: string = LOCAL_OW
   await getVideo(videoId, ownerId, false);
   const jobs = (await getStore().list<HighlightJob>("highlight", ownerId)).filter((j) => j.videoId === videoId);
   const now = Date.now();
-  const fresh = await Promise.all(jobs.map((j) => (needsCheck(j, now) ? refreshHighlights(j) : j)));
+  const fresh = await Promise.all(jobs.map((j) => (needsCheck(j, now) ? checkOnce(j, now) : j)));
   return fresh.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-/**
- * Starts cutting one of the account's finished videos into short clips, one per length. The renderer gets a fresh link
- * to the video (a stored one may have expired) and keeps the job; the studio keeps the settings and follows it.
- */
-export async function startHighlights(videoId: string, input: z.infer<typeof highlightRequestSchema>, ownerId: string = LOCAL_OWNER): Promise<HighlightJob> {
+/** Everything a start would refuse, checked before it counts against the hourly limit. */
+export async function assertCanStartHighlights(videoId: string, input: z.infer<typeof highlightRequestSchema>, ownerId: string = LOCAL_OWNER): Promise<Video> {
   const provider = getAvatarProvider();
   if (!provider.startHighlights) throw new ValidationError(`Cutting highlight clips is not available with the ${provider.name} renderer`);
   const video = await getVideo(videoId, ownerId, false);
@@ -62,9 +84,20 @@ export async function startHighlights(videoId: string, input: z.infer<typeof hig
     const tooLong = input.lengths.filter((l) => Number(l) >= video.durationSec!);
     if (tooLong.length) throw new ValidationError(`This video runs ${Math.round(video.durationSec)} seconds, so it has no ${tooLong.map((l) => `${l}-second`).join(" or ")} highlight; choose a shorter length`);
   }
+  // Read then written: two starts at the same moment can between them pass the cap.
   const existing = (await getStore().list<HighlightJob>("highlight", ownerId)).filter((j) => j.videoId === videoId);
   if (existing.length >= MAX_HIGHLIGHT_JOBS) throw new ConflictError(`A video keeps at most ${MAX_HIGHLIGHT_JOBS} sets of clips; delete one to cut more`);
-  const { jobId } = await provider.startHighlights({ videoUrl: await sourceUrl(video), title: video.title, ...input });
+  return video;
+}
+
+/**
+ * Starts cutting one of the account's finished videos into short clips, one per length. The renderer gets a fresh link
+ * to the video (a stored one may have expired) and keeps the job; the studio keeps the settings and follows it.
+ */
+export async function startHighlights(videoId: string, input: z.infer<typeof highlightRequestSchema>, ownerId: string = LOCAL_OWNER): Promise<HighlightJob> {
+  const video = await assertCanStartHighlights(videoId, input, ownerId);
+  const provider = getAvatarProvider();
+  const { jobId } = await provider.startHighlights!({ videoUrl: await sourceUrl(video), title: video.title, ...input });
   const now = nowIso();
   const job: HighlightJob = {
     id: newId("hl"),
@@ -81,13 +114,19 @@ export async function startHighlights(videoId: string, input: z.infer<typeof hig
     createdAt: now,
     updatedAt: now,
   };
-  return getStore().put("highlight", job);
+  await getStore().put("highlight", job);
+  // A video deleted for good while the job was being started has already had its sets cleared; this one goes too.
+  if (!(await getStore().get<Video>("video", videoId))) {
+    await getStore().remove("highlight", job.id);
+    throw new NotFoundError(`Video ${videoId} not found`);
+  }
+  return job;
 }
 
 /** Forgets one of a video's clipping jobs and its clips (the renderer's copy expires on its own). */
 export async function deleteHighlights(videoId: string, jobId: string, ownerId: string = LOCAL_OWNER): Promise<void> {
   const job = owned(await getStore().get<HighlightJob>("highlight", highlightJobIdSchema.parse(jobId)), ownerId, "Clipping job");
-  if (job.videoId !== videoId) throw new ValidationError("That clipping job belongs to another video");
+  if (job.videoId !== videoId) throw new NotFoundError("Clipping job not found");
   await getStore().remove("highlight", job.id);
 }
 
@@ -98,8 +137,21 @@ export async function clearHighlights(videoId: string, ownerId: string): Promise
 }
 
 function needsCheck(job: HighlightJob, now: number): boolean {
-  if (job.status === "processing") return true;
-  return job.status === "completed" && now - Date.parse(job.checkedAt ?? job.updatedAt) > RELINK_MS;
+  const since = now - (attempted.get(job.id) ?? 0);
+  if (job.status === "processing") return since >= RECHECK_MS;
+  return job.status === "completed" && now - Date.parse(job.checkedAt ?? job.updatedAt) > RELINK_MS && since >= RETRY_FINISHED_MS;
+}
+
+/** One check per set at a time: pages following the same set share it, and the attempt is noted whether or not it works. */
+function checkOnce(job: HighlightJob, now: number): Promise<HighlightJob> {
+  const running = inFlight.get(job.id);
+  if (running) return running;
+  attempted.set(job.id, now);
+  // Forgotten once old, so the map does not grow without bound.
+  for (const [id, at] of attempted) if (now - at > RETRY_FINISHED_MS * 2) attempted.delete(id);
+  const run = refreshHighlights(job).finally(() => inFlight.delete(job.id));
+  inFlight.set(job.id, run);
+  return run;
 }
 
 /** Asks the renderer where a job stands and stores the answer. Never throws: a failed check keeps what was known. */
@@ -132,7 +184,10 @@ async function refreshHighlights(job: HighlightJob): Promise<HighlightJob> {
 async function sourceUrl(video: Video): Promise<string> {
   if (video.providerJobId && video.provider === getAvatarProvider().name && video.provider !== "mock") {
     try {
-      const status = await getAvatarProvider().getStatus(video.providerJobId);
+      const status = await Promise.race([
+        getAvatarProvider().getStatus(video.providerJobId),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timed out")), SOURCE_TIMEOUT_MS).unref?.()),
+      ]);
       if (status.status === "completed" && status.videoUrl) return status.videoUrl;
     } catch {
       // The stored link is tried instead.

@@ -301,15 +301,22 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       });
       return { jobId };
     } catch (err) {
-      // A video HeyGen will not clip (too short, unreadable, or past the plan) is the account's to change.
+      // A video HeyGen will not clip (too short, unreadable, or past the plan) is the account's to change; a refused key is not.
       const message = err instanceof Error ? err.message : "";
-      if (/ failed: (400|402|403|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not clip that video: ${heygenReason(message)}`);
+      if (/ failed: (400|402|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not clip that video: ${heygenReason(message)}`);
       throw err;
     }
   }
 
   async highlightsStatus(jobId: string): Promise<HighlightStatus> {
-    const job = await this.client.clipping(jobId);
+    let job;
+    try {
+      job = await this.client.clipping(jobId);
+    } catch (err) {
+      // A job HeyGen no longer has (expired, or made with another key) will not come back: its links are dead too.
+      if (err instanceof Error && / failed: 404 /.test(err.message)) return { status: "failed", clips: [], error: "These clips are no longer available from HeyGen; cut them again" };
+      throw err;
+    }
     const clips = (job.clips ?? []).map((c) =>
       stripEmpty({
         id: c.id,
@@ -317,8 +324,9 @@ export class HeyGenAvatarProvider implements AvatarProvider {
         title: c.title ?? undefined,
         durationSec: c.duration_seconds ?? undefined,
         viralityScore: c.virality_score ?? undefined,
-        thumbnailUrl: c.thumbnail_url ?? undefined,
-        videoUrl: c.video_url ?? undefined,
+        // Only https links are kept, as the page plays and links them.
+        thumbnailUrl: httpsOnly(c.thumbnail_url),
+        videoUrl: httpsOnly(c.video_url),
       }),
     );
     if (job.status === "completed") return { status: "completed", progress: 100, clips };
@@ -347,6 +355,10 @@ export class HeyGenAvatarProvider implements AvatarProvider {
 
 /** HeyGen's names for the clip framings. */
 const CLIP_FRAMES = { "9:16": "portrait", "16:9": "landscape", "1:1": "square" } as const;
+
+function httpsOnly(url: string | null | undefined): string | undefined {
+  return url && /^https:\/\//i.test(url) ? url : undefined;
+}
 
 /** The object without its undefined fields, so a clip stores only what HeyGen said. */
 function stripEmpty<T extends Record<string, unknown>>(o: T): T {

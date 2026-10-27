@@ -1177,8 +1177,31 @@ export default function VideoDetailPage() {
                 <h3 className="text-sm font-semibold text-slate-900">{video.directed ? "Brief" : video.cinematic ? "Shot" : video.scenes && video.scenes.length > 1 ? `Script · ${video.scenes.length} scenes` : "Script"}</h3>
                 {video.directed ? (
                   <>
-                    <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{video.directed.prompt}</p>
-                    <p className="mt-2 text-xs text-slate-500">HeyGen&apos;s Video Agent wrote the script from this brief, so it is not kept here: no captions, subtitles, or copy to edit.</p>
+                    {/* A long brief scrolls in its card rather than stretching the page. */}
+                    <p className="mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-700" tabIndex={0} aria-label="The request">
+                      {video.directed.prompt}
+                    </p>
+                    <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-slate-600">
+                      <dt className="text-slate-500">Length asked</dt>
+                      <dd>About {video.directed.lengthSec} seconds</dd>
+                      <dt className="text-slate-500">Language</dt>
+                      <dd>{video.directed.language}</dd>
+                      {video.directed.url && (
+                        <>
+                          <dt className="text-slate-500">Page</dt>
+                          <dd className="break-all">{video.directed.url}</dd>
+                        </>
+                      )}
+                      {video.directed.documentName && (
+                        <>
+                          <dt className="text-slate-500">Document</dt>
+                          <dd className="break-words">{video.directed.documentName}</dd>
+                        </>
+                      )}
+                    </dl>
+                    <p className="mt-2 text-xs text-slate-500">
+                      {video.status === "completed" ? "HeyGen's Video Agent wrote the script from this brief" : "HeyGen's Video Agent writes the script from this brief"}, so it is not kept here: no captions, subtitles, or copy to edit.
+                    </p>
                   </>
                 ) : video.cinematic ? (
                   <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{video.cinematic.prompt}</p>

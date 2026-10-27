@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { FileText, PencilLine, Sparkles, X } from "lucide-react";
@@ -6,7 +7,7 @@ import { Button, Card, ErrorBanner, Field, SectionTitle, inputClass } from "@/co
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
-import { api } from "@/lib/client";
+import { ApiError, api } from "@/lib/client";
 import { AGENT_DRAFT_KEY } from "@/lib/agent-draft";
 import { documentText } from "@/lib/document-text";
 import type { Avatar, ProviderStatus, Video, Voice } from "@/lib/types";
@@ -67,6 +68,8 @@ export default function VideoAgentPage() {
       const read = await documentText(file, navigator.language);
       moveFocus.current = true;
       setDoc({ name: file.name.slice(0, 200), ...read });
+      // A note asking for the document again is answered.
+      setNotice((n) => (n && n.includes("attach it again") ? null : n));
     } catch (e) {
       moveFocus.current = true;
       setDoc(null);
@@ -81,6 +84,11 @@ export default function VideoAgentPage() {
   const [lengthSec, setLengthSec] = useState(60);
   const [language, setLanguage] = useState("English");
   const [busy, setBusy] = useState<"generate" | "plan" | "direct" | null>(null);
+  // Whether the form was changed by hand, so a brief filled in late never mixes with what was typed meanwhile.
+  const edited = useRef(false);
+  const touch = () => {
+    edited.current = true;
+  };
   // "Ask the agent again" from a video HeyGen's Video Agent directed fills the brief it was given (read once).
   useEffect(() => {
     const from = new URLSearchParams(window.location.search).get("from");
@@ -91,30 +99,52 @@ export default function VideoAgentPage() {
           setNotice(`“${video.title}” was not directed by HeyGen's Video Agent, so there is no brief to fill in.`);
           return;
         }
+        if (edited.current) {
+          setNotice(`Your changes are kept, so the brief of “${video.title}” was not filled in.`);
+          return;
+        }
         const asked = video.directed;
         setMaker("heygen");
-        // Text typed while the video was being fetched is kept.
-        setPrompt((typed) => typed || asked.prompt);
-        setOrientation(asked.orientation);
+        setPrompt(asked.prompt);
+        setOrientation(asked.autoOrientation ? "auto" : asked.orientation);
         setLengthSec(asked.lengthSec);
         setLanguage(asked.language);
-        if (asked.url) setUrl((typed) => typed || asked.url!);
-        if (video.avatarId) setAvatarId(video.avatarId);
-        if (video.voiceId) setVoiceId(video.voiceId);
+        setUrl(asked.url ?? "");
+        // Checked against the library once it is listed (see below): one deleted since is not sent.
+        setAvatarId(video.avatarId);
+        setVoiceId(video.voiceId);
         setFolder(video.folder);
         // The document's words were sent, not kept: it has to be attached again.
         if (asked.documentName) setNotice(`“${asked.documentName}” was attached to the brief but is not kept; attach it again to write from it.`);
       })
-      .catch((e) => setNotice(`The video to ask about again could not be opened (${e instanceof Error ? e.message : "unknown error"}); describe a new video instead.`));
+      .catch(() => setNotice("The video to ask about again could not be opened; describe a new video instead."));
   }, []);
+  // A presenter or voice no longer listed (deleted since it was chosen) is not chosen, and the page says so.
+  useEffect(() => {
+    if (!avatarData || !avatarId || avatarData.avatars.some((a) => a.id === avatarId)) return;
+    setAvatarId("");
+    setNotice("The presenter it was made with is no longer in your library, so none is chosen.");
+  }, [avatarData, avatarId]);
+  useEffect(() => {
+    if (!voiceData || !voiceId || voiceData.voices.some((v) => v.id === voiceId)) return;
+    setVoiceId("");
+    setNotice("The voice it was made with is no longer available, so none is chosen.");
+  }, [voiceData, voiceId]);
+  // A render that could not start is still in the library: the error links to it.
+  const [failed, setFailed] = useState<{ id: string; title: string } | null>(null);
+  const buttons = useRef<Partial<Record<"generate" | "plan" | "direct", HTMLButtonElement | null>>>({});
   const [err, setErr] = useState<string | null>(null);
 
   const urlOk = !url.trim() || /^https?:\/\/\S+$/.test(url.trim());
-  const ready = prompt.trim().length >= 3 && urlOk && canEdit !== false && !busy && !reading;
+  // Not while busy: the pressed button stays focusable (marked busy), so the focus is not lost if the start fails.
+  const ready = prompt.trim().length >= 3 && urlOk && canEdit !== false && !reading;
+  const otherBusy = (mode: "generate" | "plan" | "direct") => !!busy && busy !== mode;
 
   async function run(mode: "generate" | "plan" | "direct") {
+    if (busy) return;
     setBusy(mode);
     setErr(null);
+    setFailed(null);
     const body = { prompt, mode, orientation, lengthSec, language, ...(mode === "direct" && folder ? { folder } : {}), ...(url.trim() ? { url: url.trim() } : {}), ...(doc ? { document: { name: doc.name, text: doc.text } } : {}), ...(avatarId ? { avatarId } : {}), ...(voiceId ? { voiceId } : {}) };
     try {
       if (mode === "plan") {
@@ -132,15 +162,33 @@ export default function VideoAgentPage() {
       router.push(`/videos/${video.id}`);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "The video agent could not make that video");
+      const stored = e instanceof ApiError ? (e.body?.video as Video | undefined) : undefined;
+      if (stored?.id) setFailed({ id: stored.id, title: stored.title });
       setBusy(null);
+      buttons.current[mode]?.focus();
     }
   }
 
   return (
     <>
-      <SectionTitle title="Video Agent" subtitle="Describe the video you want. The agent writes the script, splits it into scenes, frames them, and picks a format, with your brand kit applied." />
+      <SectionTitle
+        title="Video Agent"
+        subtitle={
+          byHeygen
+            ? "Describe the video you want. HeyGen's Video Agent writes the script, chooses the presenter, voice, and visuals, and renders it."
+            : "Describe the video you want. The agent writes the script, splits it into scenes, frames them, and picks a format, with your brand kit applied."
+        }
+      />
       {canEdit === false && <ViewOnlyNotice what="make videos" />}
       <ErrorBanner message={err} />
+      {failed && (
+        <p className="-mt-2 mb-4 text-sm">
+          <Link href={`/videos/${failed.id}`} className="font-medium text-brand-700 underline">
+            Open “{failed.title}”
+          </Link>{" "}
+          <span className="text-slate-600">to retry it from its page.</span>
+        </p>
+      )}
       {notice && (
         <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">
           {notice}
@@ -154,19 +202,19 @@ export default function VideoAgentPage() {
                 className={`${inputClass} min-h-40`}
                 value={prompt}
                 maxLength={10_000}
-                onChange={(e) => setPrompt(e.target.value)}
+                onChange={(e) => (touch(), setPrompt(e.target.value))}
                 placeholder="A one-minute explainer for first-time buyers on how our pre-approval works…"
               />
             </Field>
             <div className="flex flex-wrap gap-1.5" role="group" aria-label="Example prompts">
               {EXAMPLES.map((ex, i) => (
-                <button key={i} type="button" className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-left text-xs text-slate-600 hover:bg-slate-50" onClick={() => setPrompt(ex)}>
+                <button key={i} type="button" className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-left text-xs text-slate-600 hover:bg-slate-50" onClick={() => (touch(), setPrompt(ex))}>
                   {ex.length > 64 ? `${ex.slice(0, 63)}…` : ex}
                 </button>
               ))}
             </div>
             <Field label="Reference page (optional)" hint="A public web page the agent reads and writes from, using only its facts.">
-              <input className={inputClass} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" inputMode="url" />
+              <input className={inputClass} value={url} onChange={(e) => (touch(), setUrl(e.target.value))} placeholder="https://…" inputMode="url" />
             </Field>
             {!urlOk && <p className="text-xs text-red-600">Enter a full address starting with http:// or https://</p>}
             {/* Not a Field: a label around the attached file would hand every click on it to the Remove button. */}
@@ -226,42 +274,50 @@ export default function VideoAgentPage() {
               <fieldset>
                 <legend className="mb-1.5 block text-sm font-medium text-slate-700">Who makes it</legend>
                 <div className="space-y-2 text-sm text-slate-700">
-                  <label className="flex items-start gap-2">
-                    <input type="radio" name="agent-maker" className="mt-0.5 accent-brand-600" checked={maker === "studio"} onChange={() => setMaker("studio")} />
-                    <span>
+                  <div>
+                    <label className="flex items-start gap-2">
+                      <input type="radio" name="agent-maker" className="mt-0.5 accent-brand-600" aria-describedby="agent-maker-studio" checked={maker === "studio"} onChange={() => (touch(), setMaker("studio"), setErr(null), setFailed(null))} />
                       This studio&apos;s agent
-                      <span className="block text-xs text-slate-500">Plans the scenes with your brand kit; review and edit them, or render straight away.</span>
+                    </label>
+                    <span id="agent-maker-studio" className="ml-6 block text-xs text-slate-500">
+                      Plans the scenes with your brand kit; review and edit them, or render straight away.
                     </span>
-                  </label>
-                  <label className="flex items-start gap-2">
-                    <input
-                      type="radio"
-                      name="agent-maker"
-                      className="mt-0.5 accent-brand-600"
-                      checked={maker === "heygen"}
-                      onChange={() => {
-                        setMaker("heygen");
-                        if (orientation === "square") setOrientation("auto");
-                      }}
-                    />
-                    <span>
+                  </div>
+                  <div>
+                    <label className="flex items-start gap-2">
+                      <input
+                        type="radio"
+                        name="agent-maker"
+                        className="mt-0.5 accent-brand-600"
+                        aria-describedby="agent-maker-heygen"
+                        checked={maker === "heygen"}
+                        onChange={() => {
+                          touch();
+                          setMaker("heygen");
+                          setErr(null);
+                          setFailed(null);
+                          if (orientation === "square") setOrientation("auto");
+                        }}
+                      />
                       HeyGen&apos;s Video Agent
-                      <span className="block text-xs text-slate-500">Writes the script and chooses the presenter, voice, and visuals itself, then renders; there is nothing to edit afterwards.</span>
+                    </label>
+                    <span id="agent-maker-heygen" className="ml-6 block text-xs text-slate-500">
+                      Writes the script and chooses the presenter, voice, and visuals itself, then renders; there is nothing to edit afterwards.
                     </span>
-                  </label>
+                  </div>
                 </div>
               </fieldset>
             )}
             {byHeygen ? (
-              <Button onClick={() => run("direct")} loading={busy === "direct"} disabled={!ready} className="w-full">
+              <Button ref={(el) => void (buttons.current.direct = el)} onClick={() => run("direct")} loading={busy === "direct"} disabled={!ready} className="w-full">
                 <Sparkles className="h-4 w-4" /> Generate with HeyGen
               </Button>
             ) : (
               <div className="flex flex-col gap-2 sm:flex-row">
-                <Button onClick={() => run("generate")} loading={busy === "generate"} disabled={!ready} className="flex-1">
+                <Button ref={(el) => void (buttons.current.generate = el)} onClick={() => run("generate")} loading={busy === "generate"} disabled={!ready || otherBusy("generate")} className="flex-1">
                   <Sparkles className="h-4 w-4" /> Generate video
                 </Button>
-                <Button variant="secondary" onClick={() => run("plan")} loading={busy === "plan"} disabled={!ready} className="flex-1">
+                <Button ref={(el) => void (buttons.current.plan = el)} variant="secondary" onClick={() => run("plan")} loading={busy === "plan"} disabled={!ready || otherBusy("plan")} className="flex-1">
                   <PencilLine className="h-4 w-4" /> Review in editor first
                 </Button>
               </div>
@@ -278,7 +334,7 @@ export default function VideoAgentPage() {
           <h2 className="mb-3 text-sm font-semibold text-slate-900">Options</h2>
           <div className="space-y-4">
             <Field label="Presenter">
-              <select className={inputClass} value={avatarId} onChange={(e) => setAvatarId(e.target.value)}>
+              <select className={inputClass} value={avatarId} onChange={(e) => (touch(), setAvatarId(e.target.value))}>
                 <option value="">{byHeygen ? "Let HeyGen choose" : "Brand kit default"}</option>
                 {avatarData?.avatars.map((a) => (
                   <option key={a.id} value={a.id}>
@@ -288,7 +344,7 @@ export default function VideoAgentPage() {
               </select>
             </Field>
             <Field label="Voice">
-              <select className={inputClass} value={voiceId} onChange={(e) => setVoiceId(e.target.value)}>
+              <select className={inputClass} value={voiceId} onChange={(e) => (touch(), setVoiceId(e.target.value))}>
                 <option value="">{byHeygen ? "Let HeyGen choose" : "The presenter's or brand kit's voice"}</option>
                 {voiceData?.voices.map((v) => (
                   <option key={v.id} value={v.id}>
@@ -298,7 +354,7 @@ export default function VideoAgentPage() {
               </select>
             </Field>
             <Field label="Format">
-              <select className={inputClass} value={orientation} onChange={(e) => setOrientation(e.target.value as typeof orientation)}>
+              <select className={inputClass} value={orientation} onChange={(e) => (touch(), setOrientation(e.target.value as typeof orientation))}>
                 {/* HeyGen's Video Agent makes landscape or portrait videos only. */}
                 {ORIENTATIONS.filter((o) => !byHeygen || o.value !== "square").map((o) => (
                   <option key={o.value} value={o.value}>
@@ -309,7 +365,7 @@ export default function VideoAgentPage() {
             </Field>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
               <Field label="Length">
-                <select className={inputClass} value={lengthSec} onChange={(e) => setLengthSec(Number(e.target.value))}>
+                <select className={inputClass} value={lengthSec} onChange={(e) => (touch(), setLengthSec(Number(e.target.value)))}>
                   {LENGTHS.map((l) => (
                     <option key={l.sec} value={l.sec}>
                       {l.label}
@@ -318,7 +374,7 @@ export default function VideoAgentPage() {
                 </select>
               </Field>
               <Field label="Language">
-                <select className={inputClass} value={language} onChange={(e) => setLanguage(e.target.value)}>
+                <select className={inputClass} value={language} onChange={(e) => (touch(), setLanguage(e.target.value))}>
                   {LANGUAGES.map((l) => (
                     <option key={l}>{l}</option>
                   ))}

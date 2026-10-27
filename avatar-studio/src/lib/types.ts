@@ -657,6 +657,8 @@ export interface DirectedVideo {
   avatarName?: string;
   voiceName?: string;
   orientation: "landscape" | "portrait";
+  /** The orientation was left to the agent (and read from the request), so asking again leaves it so. */
+  autoOrientation?: true;
 }
 
 /** Longest and shortest cinematic shot, in seconds (HeyGen's `duration`); a shot without one is timed by HeyGen. */

@@ -183,17 +183,26 @@ export async function generateAgentVideo(input: VideoAgentInput, ownerId: string
  * "YouTube Shorts") or the shape ("vertical", "9:16"), not words that only sound like one ("customer stories").
  */
 export function asksForPortrait(prompt: string): boolean {
+  // A wide format named outright wins ("a landscape explainer, not a TikTok", "a YouTube video about our TikTok").
+  if (asksForLandscape(prompt.replace(/\byoutube\s+shorts?\b/gi, ""))) return false;
   return /\b(tik\s?toks?|(?:instagram|ig|facebook)\s+(?:reels?|stor(?:y|ies))|reels?\s+video|youtube\s+shorts?|vertical(?:\s+video|\s+format)?|portrait\s+(?:video|format|orientation|mode)|9\s*:\s*16)\b/i.test(prompt);
 }
 
-/** The words sources take in a brief: what HeyGen takes, less the request and the instructions around it. */
+/** Fewest characters of a page or document worth sending; less is no source at all. */
+const MIN_SOURCE_ROOM = 500;
+
+/**
+ * The brief HeyGen's agent gets: the length and language, the request, then the sources, cut to fit what HeyGen takes.
+ * A request too long to leave the length and language (or the sources asked for) their room is refused, never cut.
+ */
 function briefOf(input: VideoAgentInput, source: string | undefined): string {
-  // The length and language lead, so a request near the limit is what is cut, never them.
   const asks = `Length: about ${input.lengthSec} seconds. Language: ${input.language}.\n\n${input.prompt}`;
-  if (!source) return asks.slice(0, MAX_DIRECTED_BRIEF);
+  if (asks.length > MAX_DIRECTED_BRIEF) throw new ValidationError(`HeyGen's Video Agent takes up to ${MAX_DIRECTED_BRIEF.toLocaleString("en-US")} characters with the length and language; shorten the request by ${(asks.length - MAX_DIRECTED_BRIEF).toLocaleString("en-US")}`);
+  if (!source) return asks;
   const lead = "\n\nWrite from these sources, using only their facts:\n";
   const room = MAX_DIRECTED_BRIEF - asks.length - lead.length;
-  return room > 200 ? `${asks}${lead}${cut(source, room)}` : asks.slice(0, MAX_DIRECTED_BRIEF);
+  if (room < MIN_SOURCE_ROOM) throw new ValidationError(`The request leaves no room for the ${input.document ? "attached document" : "page"} in HeyGen's ${MAX_DIRECTED_BRIEF.toLocaleString("en-US")}-character brief; shorten the request, or remove the ${input.document && input.url ? "document and page" : input.document ? "document" : "page"}`);
+  return `${asks}${lead}${cut(source, room)}`;
 }
 
 /**
@@ -207,7 +216,10 @@ export async function directAgentVideo(input: VideoAgentInput, ownerId: string =
   const provider = getAvatarProvider();
   if (!provider.startDirected) throw new ValidationError(`HeyGen's Video Agent is not available with the ${provider.name} renderer`);
   await enforceRenderLimit(ownerId);
+  // The request alone is checked before the page is read.
+  briefOf(input, undefined);
   const source = await sourcesOf(input, fetchImpl);
+  const brief = briefOf(input, source);
   const orientation = input.orientation === "landscape" || input.orientation === "portrait" ? input.orientation : asksForPortrait(input.prompt) ? "portrait" : "landscape";
   const title = input.prompt.replace(/\s+/g, " ").trim();
   return createVideo(
@@ -223,9 +235,10 @@ export async function directAgentVideo(input: VideoAgentInput, ownerId: string =
       captions: false,
       speed: 1,
       directed: {
-        brief: briefOf(input, source),
+        brief,
         prompt: input.prompt,
         orientation,
+        ...(input.orientation === "auto" ? { autoOrientation: true as const } : {}),
         lengthSec: input.lengthSec,
         language: input.language,
         ...(input.url ? { url: input.url } : {}),

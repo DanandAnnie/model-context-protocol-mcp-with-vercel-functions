@@ -4198,6 +4198,8 @@ test("HeyGen's Video Agent directs a whole video from a brief, and is asked agai
   await page.goto("/agent");
   // This studio's planner is the default; HeyGen's agent is the other choice where the renderer offers it.
   await expect(page.getByLabel(/^This studio's agent/)).toBeChecked();
+  // Each choice is named briefly and described by its line.
+  await expect(page.getByRole("radio", { name: "HeyGen's Video Agent", exact: true })).toHaveAccessibleDescription(/^Writes the script and chooses the presenter/);
   await page.getByLabel(/^HeyGen's Video Agent/).check();
   await expect(page.getByRole("button", { name: "Review in editor first" })).toHaveCount(0);
   await expect(page.getByRole("combobox", { name: "Presenter" }).locator("option").first()).toHaveText("Let HeyGen choose");
@@ -4214,6 +4216,8 @@ test("HeyGen's Video Agent directs a whole video from a brief, and is asked agai
   await expect(page.getByRole("heading", { name: "Brief" })).toBeVisible();
   const brief = page.getByRole("heading", { name: "Brief" }).locator("..");
   await expect(brief.getByText("A TikTok with three quick tips for staging a home before a showing", { exact: true })).toBeVisible();
+  await expect(brief).toContainText("About 90 seconds");
+  await expect(brief).toContainText("Spanish");
   await expect(page.getByText("HeyGen's Video Agent", { exact: true })).toBeVisible();
   await expect(page.getByText("Chosen by HeyGen")).toHaveCount(2);
   await expect(page.getByRole("link", { name: "Edit a copy" })).toHaveCount(0);
@@ -4228,7 +4232,8 @@ test("HeyGen's Video Agent directs a whole video from a brief, and is asked agai
   await page.waitForURL(/\/agent\?from=/);
   await expect(page.getByLabel(/^HeyGen's Video Agent/)).toBeChecked();
   await expect(page.getByLabel("What should the video be?")).toHaveValue("A TikTok with three quick tips for staging a home before a showing");
-  await expect(page.getByRole("combobox", { name: "Format" })).toHaveValue("portrait");
+  // Left to the agent, it is left to the agent again.
+  await expect(page.getByRole("combobox", { name: "Format" })).toHaveValue("auto");
   await expect(page.getByRole("combobox", { name: "Length" })).toHaveValue("90");
   await expect(page.getByRole("combobox", { name: "Language" })).toHaveValue("Spanish");
   // A square video is refused by the API too, with the reason.

@@ -28,7 +28,7 @@ describe("videos HeyGen's Video Agent directs", () => {
     assert.equal(video.status, "processing");
     assert.match(video.providerJobId ?? "", /^mockagent_\d+$/, "followed as the agent's session first");
     assert.deepEqual([video.script, video.captions, video.aspect, video.avatarId, video.voiceId, video.avatarName], ["", false, "16:9", "", "", undefined]);
-    assert.deepEqual(video.directed, { brief: `Length: about 90 seconds. Language: Spanish.\n\n${ASK.prompt}`, prompt: ASK.prompt, orientation: "landscape", lengthSec: 90, language: "Spanish" });
+    assert.deepEqual(video.directed, { brief: `Length: about 90 seconds. Language: Spanish.\n\n${ASK.prompt}`, prompt: ASK.prompt, orientation: "landscape", autoOrientation: true, lengthSec: 90, language: "Spanish" });
     assert.equal(video.title, ASK.prompt.slice(0, 79).replace(/\s+\S*$/, "") + "…", "named after the request's first words");
   });
 
@@ -52,6 +52,8 @@ describe("videos HeyGen's Video Agent directs", () => {
     assert.equal(asksForPortrait("A product update for the team"), false);
     // Words that only sound like a vertical format are not one.
     for (const landscape of ["Three customer success stories", "A highlight reel of our conference", "Our summer shorts line", "A portrait of our founder"]) assert.equal(asksForPortrait(landscape), false, landscape);
+    // A wide format named outright wins over a platform mentioned in passing.
+    for (const wide of ["A landscape explainer, not a TikTok", "A YouTube video about our TikTok strategy"]) assert.equal(asksForPortrait(wide), false, wide);
     for (const vertical of ["A YouTube Shorts teaser", "Instagram stories for the launch", "A vertical video for the lobby screen", "9:16 please"]) assert.equal(asksForPortrait(vertical), true, vertical);
   });
 
@@ -64,6 +66,16 @@ describe("videos HeyGen's Video Agent directs", () => {
     assert.equal(video.directed!.documentName, "faq.txt", "the document is named, so asking again can say it was not kept");
     assert.ok(brief.endsWith("."), "cut at a sentence end");
     assert.equal(video.directed!.prompt, ASK.prompt, "the page shows the request as typed");
+  });
+
+  it("refuses a request too long for the brief, rather than cutting it or dropping its sources", async () => {
+    const long = "word ".repeat(1995).trim();
+    await assert.rejects(directAgentVideo(videoAgentSchema.parse({ ...ASK, prompt: long }), "u1"), /shorten the request by \d+/);
+    const nearly = "word ".repeat(1900).trim();
+    await assert.rejects(directAgentVideo(videoAgentSchema.parse({ ...ASK, prompt: nearly, document: { name: "notes.txt", text: "Important fact." } }), "u1"), /no room for the attached document[\s\S]*remove the document/);
+    assert.equal((await getStore().list<Video>("video", "u1")).length, 0, "nothing is started or counted");
+    const fits = await directAgentVideo(videoAgentSchema.parse({ ...ASK, prompt: nearly }), "u1");
+    assert.ok(fits.directed!.brief.endsWith("word"), "a request that fits is sent whole");
   });
 
   it("follows the session until it names its render, then the render, to the finished video", async () => {

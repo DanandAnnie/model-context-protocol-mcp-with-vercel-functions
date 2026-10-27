@@ -812,15 +812,17 @@ test("a digital twin is trained from footage, waits for the person's consent, th
   const presenter = (await (await page.request.get("/api/avatars")).json()).avatars.find((a: { id: string }) => a.id === mine.avatarId);
   expect(presenter.defaultVoiceId).toBe(voice.id);
   // Forgetting the twin asks first, saying what stays, and keeps its presenter and voice.
-  const dialog = page.waitForEvent("dialog");
+  let asked = "";
+  page.once("dialog", (d) => {
+    asked = d.message();
+    void d.accept();
+  });
   await twin.getByRole("button", { name: `Forget the digital twin ${name}` }).click();
-  const asked = await dialog;
-  expect(asked.message()).toContain("The presenter it became stays in your avatars");
-  await asked.accept();
   await expect(twin).toHaveCount(0);
+  expect(asked).toContain("The presenter it became stays in your avatars");
   await expect(page.getByRole("button", { name: "New digital twin" })).toBeFocused();
   expect((await page.request.delete(`/api/avatars/${mine.avatarId}`)).status()).toBe(200);
-  expect((await page.request.delete(`/api/voices/${voice.id}`)).status()).toBe(200);
+  expect((await page.request.delete(`/api/voices/${voice.id}`)).status()).toBe(204);
 });
 
 test("a HeyGen Studio template is filled in and rendered as a library video", async ({ page }) => {

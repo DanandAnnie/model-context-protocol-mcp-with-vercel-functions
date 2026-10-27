@@ -447,8 +447,8 @@ test("photo avatar motion is set in the editor, kept with the video and its copy
   await page.locator("textarea").fill("Welcome to the open house.");
   await page.getByRole("button", { name: "Settings" }).click();
   const group = page.getByTestId("photo-motion");
-  // A library presenter is not a photo avatar, so the panel says nothing applies yet.
-  await expect(group).toContainText("no scene shows either now");
+  // A library presenter is not a photo avatar, so the panel says the settings wait for one (or, for gestures, for Avatar V).
+  await expect(group).toContainText("For photo avatars (an uploaded portrait or a HeyGen photo avatar), and gestures also for video avatars on Avatar V;");
   await group.getByLabel("Expressiveness").selectOption("high");
   await group.getByLabel("Gestures (optional)").fill("  Nods warmly and   gestures toward the room ");
   const sent = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
@@ -529,7 +529,8 @@ test("Avatar V is chosen for presenters whose look supports it, kept with the vi
   await page.getByRole("button", { name: "Settings" }).click();
   const engine = page.getByLabel("Avatar engine", { exact: true });
   await expect(engine).toBeEnabled();
-  await expect(page.locator("#photo-motion-hint")).toContainText("gestures also for video avatars on Avatar V");
+  // On Avatar IV, Ava's gestures wait for Avatar V, and the panel says so.
+  await expect(page.locator("#photo-motion-hint")).toContainText("choose Avatar V above for gestures to reach this video's presenter");
   await engine.selectOption("avatar_v");
   // Ava is a video avatar, so on Avatar V she takes gestures too.
   await expect(page.locator("#photo-motion-hint")).toContainText("Gestures reach the video avatars rendering on Avatar V");

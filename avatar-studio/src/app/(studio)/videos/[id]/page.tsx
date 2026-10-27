@@ -877,13 +877,15 @@ export default function VideoDetailPage() {
                     </Row>
                   ) : null}
                   {video.expressiveness || video.motionPrompt ? (
-                    <Row label="Photo avatar motion">
+                    <Row label="Avatar motion">
                       {[video.expressiveness ? `${video.expressiveness} expressiveness` : "", video.motionPrompt ? `“${video.motionPrompt}”` : ""].filter(Boolean).join(" · ")}
                       {video.provider !== "heygen"
                         ? " (not applied by this renderer)"
                         : video.scenes?.length && video.scenes.every((sc) => sc.hidePresenter)
                           ? " (not applied: no scene shows the presenter)"
-                          : video.avatarEngine === "avatar_v" ? " (photo avatars; gestures also for video avatars on Avatar V)" : " (photo avatars only)"}
+                          : video.avatarEngine === "avatar_v" && video.motionPrompt
+                            ? " (photo avatars; gestures also for video avatars on Avatar V, where the look supports it)"
+                            : " (photo avatars only)"}
                     </Row>
                   ) : null}
                   <Row label="Captions">{video.captions ? `On${video.captionStyle ? ` · ${video.captionStyle.position}, ${video.captionStyle.size}${video.captionStyle.look ? `, ${video.captionStyle.look}` : ""}${video.captionStyle.font ? `, ${video.captionStyle.font} type` : ""}` : ""}` : "Off"}</Row>

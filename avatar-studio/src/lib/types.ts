@@ -304,7 +304,7 @@ export interface VideoRequest {
    * Applies to scenes whose presenter is a photo avatar; other presenters and renderers ignore it.
    */
   expressiveness?: PhotoExpressiveness;
-  /** Body motion and gestures for photo avatars, in words (HeyGen's motion prompt); absent means none. */
+  /** Body motion and gestures in words (HeyGen's motion prompt), for photo avatars and video avatars on Avatar V; absent means none. */
   motionPrompt?: string;
   /**
    * The accent the voice speaks in, for voices that offer several (HeyGen's `voice_settings.locale`); absent means the

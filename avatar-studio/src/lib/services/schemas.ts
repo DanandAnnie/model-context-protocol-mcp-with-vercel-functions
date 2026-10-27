@@ -21,7 +21,7 @@ export const expressivenessSchema = z
   .enum(PHOTO_EXPRESSIVENESS)
   .transform((v) => (v === "low" ? undefined : v))
   .optional();
-/** A photo avatar's gestures in words, one line; blank is none. */
+/** Gestures in words for photo avatars, and video avatars on Avatar V; one line, blank is none. */
 export const motionPromptSchema = z
   .string()
   .max(MAX_MOTION_PROMPT * 4, `Describe the gestures in at most ${MAX_MOTION_PROMPT} characters`)

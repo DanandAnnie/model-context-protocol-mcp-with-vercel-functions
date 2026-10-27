@@ -588,17 +588,16 @@ function CreateInner() {
   });
   const [accent, setAccent] = useState<VoiceAccent | "">("");
   const [avatarEngine, setAvatarEngine] = useState<AvatarEngine>("avatar_iv");
-  // Whether gestures reach a video avatar: one rendering on Avatar V takes them (a photo avatar given them stays on IV).
-  const gesturesOnV =
-    avatarEngine === "avatar_v" &&
-    scenes.some((sc) => {
-      if (sc.hidePresenter) return false;
-      const a = (sc.avatarId && avatarData?.avatars.find((x) => x.id === sc.avatarId)) || avatar;
-      return !!a && !isPhotoAvatar(a) && !!a.avatarV;
-    });
+  // Whether gestures reach a video avatar: one whose look supports Avatar V takes them there, and not on Avatar IV.
+  const videoLookOnV = scenes.some((sc) => {
+    if (sc.hidePresenter) return false;
+    const a = (sc.avatarId && avatarData?.avatars.find((x) => x.id === sc.avatarId)) || avatar;
+    return !!a && !isPhotoAvatar(a) && !!a.avatarV;
+  });
+  const gesturesOnV = avatarEngine === "avatar_v" && videoLookOnV;
   const sentAccent = accent && accentVoices.some((v) => voiceTakesAccent(v, accent)) ? accent : undefined;
   const accentTakers = accent ? accentVoices.filter((v) => voiceTakesAccent(v, accent)) : accentVoices;
-  /** Both apply to photo avatars only; anything else is sent as none. */
+  /** Expressiveness applies to photo avatars, gestures also to video avatars on Avatar V; the defaults are sent as none. */
   const motion = { ...(expressiveness !== "low" ? { expressiveness } : {}), ...(motionPrompt.trim() ? { motionPrompt: motionPrompt.trim() } : {}) };
   const [tab, setTab] = useState<Tab>("avatar");
   const [writerOpen, setWriterOpen] = useState(params.get("writer") === "1");
@@ -1722,13 +1721,15 @@ function CreateInner() {
                   </select>
                 </Field>
                 <div role="group" aria-labelledby="photo-motion-title" className="space-y-2 rounded-lg border border-slate-200 px-3 py-3" data-testid="photo-motion">
-                  <div id="photo-motion-title" className="text-sm font-medium text-slate-800">Photo avatar motion</div>
+                  <div id="photo-motion-title" className="text-sm font-medium text-slate-800">Avatar motion</div>
                   <p id="photo-motion-hint" className="text-xs text-slate-500">
                     {photoInUse || !avatarData
                       ? `How a photo avatar moves as it speaks, on HeyGen (Avatar IV).${gesturesOnV ? " Gestures also reach the video avatars rendering on Avatar V." : ""} Other presenters keep their own motion, and D-ID and the demo renderer ignore it.`
                       : gesturesOnV
                         ? "Gestures reach the video avatars rendering on Avatar V, on HeyGen; expressiveness is for photo avatars (an uploaded portrait or a HeyGen photo avatar), and no scene shows one now."
-                        : "For photo avatars (an uploaded portrait or a HeyGen photo avatar), and gestures also for video avatars on Avatar V; no scene shows either now, so nothing here applies yet."}
+                        : videoLookOnV
+                          ? "For photo avatars (an uploaded portrait or a HeyGen photo avatar), and gestures also for video avatars on Avatar V; choose Avatar V above for gestures to reach this video's presenter."
+                          : "For photo avatars (an uploaded portrait or a HeyGen photo avatar), and gestures also for video avatars on Avatar V; no scene shows either now, so nothing here applies yet."}
                   </p>
                   <Field label="Expressiveness">
                     <select value={expressiveness} onChange={(e) => setExpressiveness(asExpressiveness(e.target.value))} aria-describedby="photo-motion-hint" className={inputClass}>

@@ -213,3 +213,8 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
 - Gestures for video avatars on Avatar V. HeyGen's v3 API takes a motion prompt for a video avatar when it renders on Avatar V, though not on Avatar IV, so `motionPrompt` now reaches those scenes too.
   - Photo avatars get it as before, on Avatar IV. Expressiveness stays photo-only.
   - The editor's motion panel says when gestures will reach a video avatar, and the video page notes it. A unit test checks that a video avatar on Avatar V gets the prompt and one on Avatar IV never does. The e2e test checks the panel's wording.
+  - An independent review of `668ea50` found every body valid against HeyGen's v3 schema, and the editor following the provider's rule. Its findings are fixed:
+    - The video page claimed gestures for a video with expressiveness alone. It now names them only when there are some, and only where the look supports Avatar V.
+    - The panel and the row are now titled "Avatar motion". On Avatar IV, the panel says to choose Avatar V when a presenter's look would take gestures there.
+    - The README and code comments no longer say gestures are for photo avatars only.
+    - The unit tests now cover a video avatar on Avatar V given both settings (gestures, never expressiveness). They also cover a look that supports Avatar V left on Avatar IV (no gestures), which fails if the rule tests the look alone, and a scene's own presenter on Avatar V.

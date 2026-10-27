@@ -933,10 +933,19 @@ test("an instant voice is made from a recording with the speaker's agreement, an
   await expect(lipsyncPage).toHaveURL(/\/lipsync$/);
   // One the page cannot offer (deleted, made up, too old) is not chosen, says so, and is never sent.
   await lipsyncPage.goto("/lipsync?voiceChange=vc_madeup123&keep=1");
-  await expect(lipsyncPage.getByText("That recording is no longer available, or was made over an hour ago", { exact: false }).first()).toBeVisible();
+  const voicePicker = lipsyncPage.getByRole("combobox", { name: /^Recording in your voice\b/ });
+  await expect(lipsyncPage.locator("#voice-gone")).toHaveText(/^That recording is no longer available, or was made over an hour ago/);
+  await expect(voicePicker).toHaveAccessibleDescription(/^That recording is no longer available/);
   await expect(lipsyncPage).toHaveURL(/\/lipsync\?keep=1$/);
-  await expect(lipsyncPage.getByRole("combobox", { name: /^Recording in your voice\b/ })).toHaveValue("");
+  await expect(voicePicker).toHaveValue("");
+  // With footage chosen, it is still the missing recording that holds the start back.
+  await lipsyncPage.getByLabel("A link").first().check();
+  await lipsyncPage.getByRole("textbox", { name: /^Video URL\b/ }).fill("https://example.com/a.mp4");
   await expect(lipsyncPage.getByRole("button", { name: "Lip-sync video" })).toBeDisabled();
+  // Choosing a recording again takes the note away.
+  await voicePicker.selectOption(String(spokenRow.id));
+  await expect(lipsyncPage.locator("#voice-gone")).toHaveCount(0);
+  await expect(lipsyncPage.getByRole("button", { name: "Lip-sync video" })).toBeEnabled();
   await lipsyncPage.close();
   for (const key of ["provider", "providerVoiceId", "providerAudio", "ownerId", "clipId"]) expect(Object.keys(spokenRow)).not.toContain(key);
   page.once("dialog", (d) => d.accept());

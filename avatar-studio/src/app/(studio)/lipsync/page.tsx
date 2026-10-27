@@ -41,7 +41,7 @@ export default function LipsyncPage() {
   const videos = (library?.videos ?? []).filter((v) => v.videoUrl && !v.deletedAt);
   const { data: clipData, setData: setClipData, refetch: refetchClips } = useApi<{ clips: AudioClip[] }>("/api/clips");
   const clips = clipData?.clips ?? [];
-  // Asked again each minute, so a recording leaves the choices once it is over an hour old.
+  // Drawn again each minute, so a recording leaves the choices once it is over an hour old.
   const [, setMinute] = useState(0);
   useEffect(() => {
     const timer = setInterval(() => setMinute((m) => m + 1), 60_000);
@@ -73,12 +73,13 @@ export default function LipsyncPage() {
   }, []);
   // A chosen recording not on offer (deleted, another account's, or too old to send) is not chosen, and the page says so.
   useEffect(() => {
-    if (!voiceData || !voiceChangeId || voiced.some((c) => c.id === voiceChangeId)) return;
+    if (audioFrom !== "voice" || !voiceData || !voiceChangeId || voiced.some((c) => c.id === voiceChangeId)) return;
     const why = "That recording is no longer available, or was made over an hour ago; make it again in the voice changer.";
     setVoiceChangeId("");
     setVoiceGone(why);
+    // Announced too: the note under the choice is only read with the choice.
     setNote(why);
-  }, [voiceData, voiceChangeId, voiced]);
+  }, [audioFrom, voiceData, voiceChangeId, voiced]);
   const [clipId, setClipId] = useState("");
   const [audioUrl, setAudioUrl] = useState("");
   const [mode, setMode] = useState<LipsyncMode>("speed");
@@ -176,6 +177,7 @@ export default function LipsyncPage() {
       setAudioUrl("");
       setClipId("");
       setVoiceChangeId("");
+      setVoiceGone(null);
       setTitle("");
       setNote(`Lip-syncing ${lipsync.title}; it appears here when it is ready.`);
       // Focus goes to the new lip sync, rather than being lost with the cleared form.
@@ -188,7 +190,7 @@ export default function LipsyncPage() {
         void refetchClips();
       }
       // A recording gone or too old to send is no longer chosen; the list is asked again so it leaves the choices too.
-      if (e instanceof Error && /recording in another voice is no longer available|over an hour ago|made by another renderer/.test(e.message)) {
+      if (e instanceof Error && /^That recording in another voice is no longer available|^“.*” was made (?:by another renderer|over an hour ago)/.test(e.message)) {
         setVoiceChangeId("");
         void refetchVoices();
       }
@@ -275,7 +277,7 @@ export default function LipsyncPage() {
                   </label>
                   {(voiced.length > 0 || audioFrom === "voice") && (
                     <label className="flex items-center gap-2">
-                      <input type="radio" name="lipsync-audio" className="accent-brand-600" checked={audioFrom === "voice"} disabled={canEdit === false} onChange={() => (setAudioFrom("voice"), changed())} />
+                      <input type="radio" name="lipsync-audio" className="accent-brand-600" checked={audioFrom === "voice"} disabled={canEdit === false} onChange={() => (setAudioFrom("voice"), setVoiceGone(null), changed())} />
                       In one of my voices
                     </label>
                   )}

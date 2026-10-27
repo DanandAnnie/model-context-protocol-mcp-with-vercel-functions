@@ -150,10 +150,12 @@ describe("looks from a description", () => {
         aspect_ratio: "9:16",
         avatar_id: "look_dana",
         reference_images: [
-          { type: "base64", content: b64(png(1)) },
-          { type: "base64", content: b64(jpeg(2)) },
+          { type: "base64", media_type: "image/png", data: b64(png(1)) },
+          { type: "base64", media_type: "image/jpeg", data: b64(jpeg(2)) },
         ],
       });
+      // HeyGen's inline asset is strict: its type, its media type, and the data, nothing else.
+      for (const r of post.body.reference_images as Array<Record<string, unknown>>) assert.deepEqual(Object.keys(r).sort(), ["data", "media_type", "type"]);
       assert.equal(post.idem, job.id, "a retried start replays HeyGen's first answer");
       // A start whose answer was lost (never stored) is sent again with the same key and the very same body, so HeyGen
       // can give back the look it already drew instead of refusing the key.

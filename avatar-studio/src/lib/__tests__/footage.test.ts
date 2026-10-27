@@ -178,7 +178,7 @@ describe("generated clips", () => {
       assert.equal(calls[0].idem, text.id);
       await startFootage(ask({ image: png(7) }), "u1");
       const b64 = png(7).slice(png(7).indexOf(",") + 1);
-      assert.deepEqual(calls[1].body, { model: "heygen-video-1", mode: "image_to_video", prompt: PROMPT, duration: 5, resolution: "768p", image: { type: "base64", content: b64 } }, "a picture sets the shape: no frame is sent");
+      assert.deepEqual(calls[1].body, { model: "heygen-video-1", mode: "image_to_video", prompt: PROMPT, duration: 5, resolution: "768p", image: { type: "base64", media_type: "image/png", data: b64 } }, "a picture sets the shape, and goes as HeyGen's inline asset: no frame is sent");
 
       // Followed until HeyGen has it, then kept with its link and size.
       assert.equal((await listFootage("u1")).find((f) => f.id === text.id)!.status, "processing");

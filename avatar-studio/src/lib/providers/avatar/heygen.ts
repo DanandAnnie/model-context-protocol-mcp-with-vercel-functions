@@ -5,7 +5,7 @@ import { heygenBurnsCaptions } from "../../captions";
 import { voiceTakesAccent } from "../../language";
 import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
-import { HeyGenClient } from "../heygen-client";
+import { HeyGenClient, inlineAsset } from "../heygen-client";
 import { ConflictError, LimitError, NotFoundError, ValidationError } from "../../errors";
 import type { AvatarJobStatus, AvatarProvider, CleanupStatus, FootageStatus, HighlightInput, HighlightStatus, LipsyncInput, LipsyncStatus, MusicMixInput, RenderCast } from "../types";
 import { musicComposition } from "../../music-mix";
@@ -437,7 +437,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
           prompt,
           duration: durationSec,
           resolution: quality === "hd" ? "1080p" : "768p",
-          ...(image ? { image: { type: "base64", content: Buffer.from(image.bytes).toString("base64") } } : { aspect_ratio: aspect ?? "16:9" }),
+          ...(image ? { image: inlineAsset({ data: Buffer.from(image.bytes).toString("base64"), mimeType: image.mimeType }) } : { aspect_ratio: aspect ?? "16:9" }),
         },
         key,
       );
@@ -539,7 +539,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     if (!reference) throw new ValidationError(`"${avatar.name}" has not been made into a HeyGen photo avatar yet`);
     if (avatar.providerAssetIds?.[PENDING]) throw new ConflictError(`HeyGen is still preparing "${avatar.name}"; try again in a minute`);
     try {
-      const pictures = references.map((r) => Buffer.from(r.bytes).toString("base64"));
+      const pictures = references.map((r) => ({ data: Buffer.from(r.bytes).toString("base64"), mimeType: r.mimeType }));
       const { look_id } = await this.client.createPromptAvatar(avatar.name.slice(0, 80), prompt, { avatarId: reference, aspect, references: pictures, key });
       return { lookIds: [look_id] };
     } catch (err) {

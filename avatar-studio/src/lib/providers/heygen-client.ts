@@ -9,6 +9,11 @@ type VoiceDetail = { language?: string | null; gender?: string | null; preview_a
 const V2 = "https://api.heygen.com/v2";
 const V3 = "https://api.heygen.com/v3";
 
+/** A file sent inline to a v3 call: HeyGen's base64 asset (`AssetBase64`) names its type and takes no other field. */
+export function inlineAsset(file: { data: string; mimeType: string }) {
+  return { type: "base64" as const, media_type: file.mimeType, data: file.data };
+}
+
 export class HeyGenClient {
   constructor(private apiKey: string) {}
 
@@ -108,7 +113,7 @@ export class HeyGenClient {
   async createPromptAvatar(
     name: string,
     prompt: string,
-    opts: { avatarId?: string; aspect?: "4:5" | "16:9" | "9:16"; references?: string[]; key?: string } = {},
+    opts: { avatarId?: string; aspect?: "4:5" | "16:9" | "9:16"; references?: Array<{ data: string; mimeType: string }>; key?: string } = {},
   ): Promise<{ look_id: string; status?: string }> {
     const out = await this.envelope<{ look_id: string; status?: string }>(`${V3}/avatars`, {
       method: "POST",
@@ -118,7 +123,7 @@ export class HeyGenClient {
         prompt,
         aspect_ratio: opts.aspect ?? "4:5",
         ...(opts.avatarId ? { avatar_id: opts.avatarId } : {}),
-        ...(opts.references?.length ? { reference_images: opts.references.map((content) => ({ type: "base64", content })) } : {}),
+        ...(opts.references?.length ? { reference_images: opts.references.map(inlineAsset) } : {}),
       }),
       ...(opts.key ? { headers: { "Idempotency-Key": opts.key }, signal: AbortSignal.timeout(20_000) } : {}),
     });

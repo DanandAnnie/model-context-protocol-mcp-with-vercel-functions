@@ -4205,12 +4205,15 @@ test("HeyGen's Video Agent directs a whole video from a brief, and is asked agai
   const start = page.getByRole("button", { name: "Generate with HeyGen" });
   await expect(start).toBeDisabled();
   await page.getByLabel("What should the video be?").fill("A TikTok with three quick tips for staging a home before a showing");
+  await page.getByRole("combobox", { name: "Length" }).selectOption("90");
+  await page.getByRole("combobox", { name: "Language" }).selectOption("Spanish");
   await start.click();
   await page.waitForURL(/\/videos\/vid_/);
   const id = new URL(page.url()).pathname.split("/").at(-1)!;
   // The page shows the brief, who directed it, and nothing that needs a script.
   await expect(page.getByRole("heading", { name: "Brief" })).toBeVisible();
-  await expect(page.getByText("A TikTok with three quick tips for staging a home before a showing", { exact: true })).toBeVisible();
+  const brief = page.getByRole("heading", { name: "Brief" }).locator("..");
+  await expect(brief.getByText("A TikTok with three quick tips for staging a home before a showing", { exact: true })).toBeVisible();
   await expect(page.getByText("HeyGen's Video Agent", { exact: true })).toBeVisible();
   await expect(page.getByText("Chosen by HeyGen")).toHaveCount(2);
   await expect(page.getByRole("link", { name: "Edit a copy" })).toHaveCount(0);
@@ -4226,6 +4229,8 @@ test("HeyGen's Video Agent directs a whole video from a brief, and is asked agai
   await expect(page.getByLabel(/^HeyGen's Video Agent/)).toBeChecked();
   await expect(page.getByLabel("What should the video be?")).toHaveValue("A TikTok with three quick tips for staging a home before a showing");
   await expect(page.getByRole("combobox", { name: "Format" })).toHaveValue("portrait");
+  await expect(page.getByRole("combobox", { name: "Length" })).toHaveValue("90");
+  await expect(page.getByRole("combobox", { name: "Language" })).toHaveValue("Spanish");
   // A square video is refused by the API too, with the reason.
   const square = await page.request.post("/api/video-agent", { data: { prompt: "A square video for our feed", mode: "direct", orientation: "square" } });
   expect(square.status()).toBe(400);

@@ -91,12 +91,19 @@ export default function VideoAgentPage() {
           setNotice(`“${video.title}” was not directed by HeyGen's Video Agent, so there is no brief to fill in.`);
           return;
         }
+        const asked = video.directed;
         setMaker("heygen");
-        setPrompt(video.directed.prompt);
-        setOrientation(video.directed.orientation);
+        // Text typed while the video was being fetched is kept.
+        setPrompt((typed) => typed || asked.prompt);
+        setOrientation(asked.orientation);
+        setLengthSec(asked.lengthSec);
+        setLanguage(asked.language);
+        if (asked.url) setUrl((typed) => typed || asked.url!);
         if (video.avatarId) setAvatarId(video.avatarId);
         if (video.voiceId) setVoiceId(video.voiceId);
         setFolder(video.folder);
+        // The document's words were sent, not kept: it has to be attached again.
+        if (asked.documentName) setNotice(`“${asked.documentName}” was attached to the brief but is not kept; attach it again to write from it.`);
       })
       .catch((e) => setNotice(`The video to ask about again could not be opened (${e instanceof Error ? e.message : "unknown error"}); describe a new video instead.`));
   }, []);

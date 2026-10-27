@@ -646,8 +646,13 @@ export const MAX_DIRECTED_BRIEF = 10_000;
 export interface DirectedVideo {
   /** The brief as sent: the request, its length and language, and any page or document folded in. */
   brief: string;
-  /** The request as typed, shown on the video page. */
+  /** The request as typed, shown on the video page, with what else was asked, so it can be asked again. */
   prompt: string;
+  lengthSec: number;
+  language: string;
+  /** The page it wrote from, and the name of the document it was given (the document itself is not kept). */
+  url?: string;
+  documentName?: string;
   /** The account's presenter and voice it was told to use, by name as they were then; absent when HeyGen chose. */
   avatarName?: string;
   voiceName?: string;

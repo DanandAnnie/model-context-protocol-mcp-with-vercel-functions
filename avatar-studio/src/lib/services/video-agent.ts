@@ -1,6 +1,6 @@
 // The Video Agent: one prompt in, a whole video out (HeyGen's Video Agent). Used by API routes only.
 import { z } from "zod";
-import { getScriptProvider } from "../providers";
+import { getAvatarProvider, getScriptProvider } from "../providers";
 import type { VideoPlan } from "../providers/types";
 import { LOCAL_OWNER } from "../owner-id";
 import { NotFoundError, ValidationError } from "../errors";
@@ -41,6 +41,7 @@ export const videoAgentSchema = z.object({
    * to HeyGen's own Video Agent, which writes, casts, and renders the whole video itself.
    */
   mode: z.enum(["generate", "plan", "direct"]).default("generate"),
+  /** Where a "direct" video is filed (the folder of the one asked again); the other modes leave it to the editor. */
   folder: z.string().trim().max(40).optional(),
 });
 export type VideoAgentInput = z.infer<typeof videoAgentSchema>;
@@ -177,14 +178,18 @@ export async function generateAgentVideo(input: VideoAgentInput, ownerId: string
   return { video, draft };
 }
 
-/** Whether a brief asks for a vertical format itself ("a TikTok", "Instagram Reels"), as HeyGen would read it. */
+/**
+ * Whether a request names a vertical format itself: a platform's vertical format ("a TikTok", "Instagram Reels",
+ * "YouTube Shorts") or the shape ("vertical", "9:16"), not words that only sound like one ("customer stories").
+ */
 export function asksForPortrait(prompt: string): boolean {
-  return /\b(portrait|vertical|tiktok|tik tok|reels?|shorts|stories|9\s*:\s*16)\b/i.test(prompt);
+  return /\b(tik\s?toks?|(?:instagram|ig|facebook)\s+(?:reels?|stor(?:y|ies))|reels?\s+video|youtube\s+shorts?|vertical(?:\s+video|\s+format)?|portrait\s+(?:video|format|orientation|mode)|9\s*:\s*16)\b/i.test(prompt);
 }
 
 /** The words sources take in a brief: what HeyGen takes, less the request and the instructions around it. */
 function briefOf(input: VideoAgentInput, source: string | undefined): string {
-  const asks = `${input.prompt}\n\nLength: about ${input.lengthSec} seconds. Language: ${input.language}.`;
+  // The length and language lead, so a request near the limit is what is cut, never them.
+  const asks = `Length: about ${input.lengthSec} seconds. Language: ${input.language}.\n\n${input.prompt}`;
   if (!source) return asks.slice(0, MAX_DIRECTED_BRIEF);
   const lead = "\n\nWrite from these sources, using only their facts:\n";
   const room = MAX_DIRECTED_BRIEF - asks.length - lead.length;
@@ -198,6 +203,9 @@ function briefOf(input: VideoAgentInput, source: string | undefined): string {
  */
 export async function directAgentVideo(input: VideoAgentInput, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<Video> {
   if (input.orientation === "square") throw new ValidationError("HeyGen's Video Agent makes landscape or portrait videos; choose one of those, or let it choose");
+  // Before the page is read, so a renderer without the agent refuses without fetching anything.
+  const provider = getAvatarProvider();
+  if (!provider.startDirected) throw new ValidationError(`HeyGen's Video Agent is not available with the ${provider.name} renderer`);
   await enforceRenderLimit(ownerId);
   const source = await sourcesOf(input, fetchImpl);
   const orientation = input.orientation === "landscape" || input.orientation === "portrait" ? input.orientation : asksForPortrait(input.prompt) ? "portrait" : "landscape";
@@ -214,7 +222,15 @@ export async function directAgentVideo(input: VideoAgentInput, ownerId: string =
       background: { type: "color", value: "#000000" },
       captions: false,
       speed: 1,
-      directed: { brief: briefOf(input, source), prompt: input.prompt, orientation },
+      directed: {
+        brief: briefOf(input, source),
+        prompt: input.prompt,
+        orientation,
+        lengthSec: input.lengthSec,
+        language: input.language,
+        ...(input.url ? { url: input.url } : {}),
+        ...(input.document ? { documentName: input.document.name } : {}),
+      },
     },
     ownerId,
     undefined,

@@ -70,8 +70,8 @@ export function shareBodyFor(video: Video, brand: BrandKit | null): ShareBody {
     ...(rendered && video.shareDownload && { download: video.videoUrl }),
     ...(video.description && { description: video.description }),
     ...(rendered && video.scenes && video.scenes.length > 1 && { chapters: videoChapters(video) }),
-    // A cinematic shot has no script, so nothing to read along with.
-    ...(video.cinematic
+    // A cinematic shot has no script, and HeyGen's Video Agent keeps the one it wrote, so nothing to read along with.
+    ...(video.cinematic || video.directed
       ? {}
       : rendered
       ? { transcripts: transcriptsFor(video).map((t) => ({ ...t, ...(t.language ? { code: languageCode(t.language) } : {}) })) }

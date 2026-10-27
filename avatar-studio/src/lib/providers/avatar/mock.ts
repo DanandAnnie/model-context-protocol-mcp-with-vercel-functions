@@ -214,7 +214,21 @@ export class MockAvatarProvider implements AvatarProvider {
     return { status: "completed" as const, imageUrl: portraitSvg(Buffer.from(m[2], "base64url").toString() || "AI", Number(m[1])) };
   }
 
+  /**
+   * A demo stand-in for HeyGen's Video Agent: the sample video, rendered as a 30-second job. Like HeyGen's, the job
+   * starts as the agent's session and moves to its render halfway (see `getStatus`); the brief is not read.
+   */
+  async startDirected(): Promise<{ providerJobId: string }> {
+    return { providerJobId: `mockagent_${Date.now()}` };
+  }
+
   async getStatus(providerJobId: string): Promise<AvatarJobStatus> {
+    const agent = /^mockagent_(\d+)$/.exec(providerJobId);
+    if (agent) {
+      // Writing and casting for the first half, then the render, which finishes when any demo render would.
+      if (Date.now() - Number(agent[1]) < MockAvatarProvider.RENDER_MS / 2) return { status: "processing" };
+      return { status: "processing", providerJobId: `mock_${agent[1]}_30` };
+    }
     if (!/^mock_\d+_\d+$/.test(providerJobId)) throw new Error(`Not a demo job id: ${providerJobId}`);
     const [, startedAt, duration] = providerJobId.split("_");
     const elapsed = Date.now() - Number(startedAt);

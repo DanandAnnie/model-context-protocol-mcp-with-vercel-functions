@@ -277,6 +277,7 @@ export type VideoExtras = Partial<Pick<Video, "folder" | "description" | "batchI
 export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWNER, ctx?: RenderContext, skipLimit = false, allExtras: VideoExtras = {}): Promise<Video> {
   if (req.studioTemplate) return createStudioTemplateVideo({ ...req, studioTemplate: req.studioTemplate }, ownerId, skipLimit, allExtras);
   if (req.cinematic) return createCinematicVideo({ ...req, cinematic: req.cinematic }, ownerId, skipLimit, allExtras);
+  if (req.directed) return createDirectedVideo({ ...req, directed: req.directed }, ownerId, skipLimit, allExtras);
   // A callback is never part of the stored video; the studio's own renders do not report starting.
   const { onStarted: _started, ...extras } = allExtras;
   void _started;
@@ -484,6 +485,7 @@ export async function addSubtitles(id: string, language: string, ownerId: string
   if (purgeDue(video, Date.now())) throw new NotFoundError(`Video ${id} not found`);
   if (video.deletedAt) throw new ConflictError("Restore the video from the trash before adding subtitles");
   if (video.cinematic) throw new ValidationError("A cinematic shot has no script to subtitle");
+  if (video.directed) throw new ValidationError("A video HeyGen's Video Agent directed has no script here to subtitle");
   if (!subtitleKey(video, language) && Object.keys(video.subtitles ?? {}).length >= MAX_SUBTITLE_LANGUAGES) {
     throw new ValidationError(`At most ${MAX_SUBTITLE_LANGUAGES} subtitle languages per video`);
   }
@@ -618,6 +620,7 @@ export function saveCaptionCues(id: string, input: z.infer<typeof captionCuesSch
   return updateKeepingCounters(id, ownerId, (video) => {
     if (video.deletedAt) throw new ConflictError("Restore the video from the trash before editing its captions");
     if (video.cinematic) throw new ValidationError("A cinematic shot has no script, so no captions to edit");
+    if (video.directed) throw new ValidationError("A video HeyGen's Video Agent directed has no script here, so no captions to edit");
     const next: Video = { ...video, captionCues: input.cues.map(({ startMs, endMs, text }) => ({ startMs, endMs, text })), updatedAt: nowIso() };
     if (next.review?.status === "approved") delete next.review;
     return next;
@@ -837,7 +840,8 @@ async function refreshNow(video: Video): Promise<Video> {
     if (!current) return { next: video }; // deleted meanwhile; do not bring it back
     if (!isPending(current)) return { next: current }; // someone else already recorded the outcome
     const next: Video = { ...current, ...stripUndefined(stampGif(update)), updatedAt: nowIso() };
-    if (next.status === current.status && next.videoUrl === current.videoUrl) return { next };
+    // A render that moved to another job (a directed video once it renders) is stored, so the next check follows it.
+    if (next.status === current.status && next.videoUrl === current.videoUrl && next.providerJobId === current.providerJobId) return { next };
     await getStore().put("video", next);
     return { next, before: current };
   });
@@ -1292,6 +1296,45 @@ async function createCinematicVideo(req: VideoRequest & { cinematic: NonNullable
   }, onStarted);
 }
 
+/**
+ * A video HeyGen's Video Agent writes, casts, and renders from a brief: the presenter and voice are resolved (as the
+ * account's own) and prepared only when the request names them; HeyGen chooses otherwise. Counted, stored, and
+ * followed like any render; the job is the agent's session until it names the video it renders.
+ */
+async function createDirectedVideo(req: VideoRequest & { directed: NonNullable<VideoRequest["directed"]> }, ownerId: string, skipLimit: boolean, { onStarted, ...extras }: VideoExtras): Promise<Video> {
+  if (!skipLimit) await enforceRenderLimit(ownerId);
+  const provider = getAvatarProvider();
+  if (!provider.startDirected) throw new ValidationError(`HeyGen's Video Agent is not available with the ${provider.name} renderer`);
+  const avatar = req.avatarId
+    ? await getAvatar(req.avatarId, ownerId).catch((err) => {
+        if (err instanceof NotFoundError) throw new NotFoundError(req.directed.avatarName ? `The presenter “${req.directed.avatarName}” is no longer in your library; choose another or let HeyGen choose` : "That presenter is no longer in your library; choose another or let HeyGen choose");
+        throw err;
+      })
+    : null;
+  let voice: Voice | null = null;
+  if (req.voiceId) {
+    voice = (await listVoices(ownerId)).find((v) => v.id === req.voiceId) ?? null;
+    if (!voice) throw new ValidationError(req.directed.voiceName ? `The voice “${req.directed.voiceName}” is not available; choose another or let HeyGen choose` : `Voice ${req.voiceId} is not available`);
+  }
+  req = { ...req, directed: stripUndefined({ ...req.directed, avatarName: avatar?.name, voiceName: voice?.name }) };
+  const base: Video = {
+    ...req,
+    ...stripUndefined(extras),
+    id: extras.id ?? newId("vid"),
+    ownerId,
+    status: "queued",
+    provider: provider.name,
+    ...(avatar ? { avatarName: avatar.name } : {}),
+    ...(voice ? { voiceName: voice.name } : {}),
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  };
+  return startReserved(base, ownerId, !!extras.id, async () => {
+    const prepared = avatar && avatar.source === "custom" && provider.prepareAvatar ? await prepareOnce(provider, avatar) : avatar;
+    return provider.startDirected!(req, prepared, voice);
+  }, onStarted);
+}
+
 /** The request a stored video was rendered from, to render it again (a retry, another size). */
 function requestOf(video: Video): VideoRequest {
   return {
@@ -1315,6 +1358,7 @@ function requestOf(video: Video): VideoRequest {
     ...(video.transparent ? { transparent: true as const } : {}),
     ...(video.studioTemplate ? { studioTemplate: video.studioTemplate } : {}),
     ...(video.cinematic ? { cinematic: video.cinematic } : {}),
+    ...(video.directed ? { directed: video.directed } : {}),
   };
 }
 
@@ -1381,6 +1425,7 @@ export async function resizeVideo(id: string, input: z.infer<typeof resizeSchema
   if (source.studioTemplate) throw new ValidationError("A video made from a HeyGen template keeps the template's shape; make the other size in HeyGen Studio");
   // A shot is directed for its frame: another shape is another shot, made from the description again.
   if (source.cinematic) throw new ValidationError("A cinematic shot is directed for its own shape; make the shot again in another shape from the Cinematic page");
+  if (source.directed) throw new ValidationError("A video HeyGen's Video Agent directed is made for its own shape; ask it again for the other shape from the Video Agent page");
   // A shape the video already has is not made again: the original's (even in the trash, as it can be restored) and
   // each size made from it that is not in the trash. A size whose render could not be started used no render and holds
   // nothing to watch, so its shape can be made again.
@@ -1534,7 +1579,7 @@ export function filterVideos(videos: Video[], query: VideoQuery): Video[] {
       if (query.review !== "all" && (v.review?.status ?? "none") !== query.review) return false;
       if (query.folder !== undefined && (v.folder ?? "") !== query.folder) return false;
       if (query.status === "processing" ? v.status !== "processing" && v.status !== "queued" : query.status !== "all" && v.status !== query.status) return false;
-      return !needle || `${v.title} ${v.description ?? ""} ${stripPauses(v.script)} ${v.cinematic?.prompt ?? ""} ${v.avatarName ?? ""} ${v.voiceName ?? ""}`.toLowerCase().includes(needle);
+      return !needle || `${v.title} ${v.description ?? ""} ${stripPauses(v.script)} ${v.cinematic?.prompt ?? ""} ${v.directed?.prompt ?? ""} ${v.avatarName ?? ""} ${v.voiceName ?? ""}`.toLowerCase().includes(needle);
     })
     .sort(SORTERS[query.sort]);
 }

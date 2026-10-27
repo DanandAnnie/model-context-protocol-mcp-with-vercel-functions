@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { ArchiveRestore, ArrowLeft, Captions, Check, Clock, Code2, Copy, Download, Eye, Film, FolderOpen, Languages, LayoutTemplate, Link2, Lock, Mail, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { ArchiveRestore, ArrowLeft, Captions, Check, Clock, Code2, Copy, Download, Eye, Film, FolderOpen, Languages, LayoutTemplate, Link2, Lock, Mail, Pencil, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge, inputClass } from "@/components/ui";
 import { ViewSparkline } from "@/components/ViewSparkline";
 import { VideoComments } from "@/components/VideoComments";
@@ -248,6 +248,9 @@ export default function VideoDetailPage() {
   // A picture for an email loads only from a live, unprotected share link. The expiry is the one being saved, if any.
   const expiresAt = shareDraft.shareExpiresAt !== undefined ? shareDraft.shareExpiresAt ?? undefined : video?.shareExpiresAt;
   const linkExpired = !!video && shareExpired({ shareExpiresAt: expiresAt });
+  // Made from a description rather than a script (a cinematic shot, or a video HeyGen's Video Agent directed): no
+  // script to caption, subtitle, copy, or resize.
+  const described = !!video?.cinematic || !!video?.directed;
   const emailReady = !!video && shareLive && !linkExpired && !video.shareLocked;
   const emailBlocked = !video ? "" : video.shareLocked ? "Email preview unavailable while the link has a password." : !shareLive ? "Turn the share link on to copy an email preview." : linkExpired ? "Link expired: set a later expiry to copy an email preview." : "";
   // Drawn again when the link expires, so the button and the note follow without a reload.
@@ -639,7 +642,7 @@ export default function VideoDetailPage() {
                       {copyNote}
                     </span>
                     {/* A cinematic shot has no script, so no captions to download. */}
-                    {!video.cinematic && (
+                    {!described && (
                       <a href={`/api/videos/${video.id}/captions`} download className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50" title="Also available as WebVTT with ?format=vtt">
                         <Captions className="h-4 w-4" /> Captions (.srt)
                       </a>
@@ -766,12 +769,16 @@ export default function VideoDetailPage() {
                 )}
                 {/* A HeyGen template's scenes live in HeyGen Studio, so it is remade from the template, not copied or saved here;
                     a cinematic shot is made again from its description. */}
-                {!video.studioTemplate && !video.cinematic && (
+                {!video.studioTemplate && !described && (
                   <Link href={`/create?from=${video.id}`} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50">
                     <Copy className="h-4 w-4" /> Edit a copy
                   </Link>
                 )}
-                {video.cinematic ? (
+                {video.directed ? (
+                  <Link href={`/agent?from=${video.id}`} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50">
+                    <Sparkles className="h-4 w-4" /> Ask the agent again
+                  </Link>
+                ) : video.cinematic ? (
                   <Link href={`/cinematic?from=${video.id}`} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50">
                     <Film className="h-4 w-4" /> Make the shot again
                   </Link>
@@ -926,6 +933,13 @@ export default function VideoDetailPage() {
                     )}
                   </Row>
                   {video.studioTemplate && <Row label="HeyGen template">{video.studioTemplate.name}</Row>}
+                  {video.directed && (
+                    <>
+                      <Row label="Directed by">HeyGen&apos;s Video Agent</Row>
+                      <Row label="Presenter">{video.directed.avatarName ?? "Chosen by HeyGen"}</Row>
+                      <Row label="Voice">{video.directed.voiceName ?? "Chosen by HeyGen"}</Row>
+                    </>
+                  )}
                   {video.cinematic && (
                     <>
                       <Row label={video.cinematic.avatarNames.length > 1 ? "Presenters" : "Presenter"}>{video.cinematic.avatarNames.join(", ")}</Row>
@@ -933,7 +947,7 @@ export default function VideoDetailPage() {
                       {video.cinematic.enhancePrompt && <Row label="Description">Enriched by HeyGen</Row>}
                     </>
                   )}
-                  {!video.studioTemplate && !video.cinematic && (
+                  {!video.studioTemplate && !described && (
                   <>
                   <Row label="Avatar">
                     {video.scenes?.length && video.scenes.every((sc) => sc.hidePresenter)
@@ -947,7 +961,7 @@ export default function VideoDetailPage() {
                   </Row>
                   </>
                   )}
-                  {!video.studioTemplate && !video.cinematic && <Row label="Speed">{video.speed}x{video.speed !== 1 && video.provider !== "heygen" && video.provider !== "mock" ? " (not applied by this renderer)" : ""}</Row>}
+                  {!video.studioTemplate && !described && <Row label="Speed">{video.speed}x{video.speed !== 1 && video.provider !== "heygen" && video.provider !== "mock" ? " (not applied by this renderer)" : ""}</Row>}
                   {video.pitch ? <Row label="Pitch">{`${video.pitch > 0 ? `+${video.pitch}` : video.pitch}${video.provider !== "heygen" ? " (not applied by this renderer)" : ""}`}</Row> : null}
                   {video.emotion ? (
                     <Row label="Voice emotion">{`${video.emotion} (not applied: no renderer takes an emotion since HeyGen's v3 API)`}</Row>
@@ -981,8 +995,8 @@ export default function VideoDetailPage() {
                             : " (photo avatars only)"}
                     </Row>
                   ) : null}
-                  {!video.cinematic && <Row label="Captions">{video.captions ? `On${video.captionStyle ? ` · ${video.captionStyle.position}, ${video.captionStyle.size}${video.captionStyle.look ? `, ${video.captionStyle.look}` : ""}${video.captionStyle.font ? `, ${video.captionStyle.font} type` : ""}` : ""}` : "Off"}</Row>}
-                  {!video.studioTemplate && !video.cinematic && (
+                  {!described && <Row label="Captions">{video.captions ? `On${video.captionStyle ? ` · ${video.captionStyle.position}, ${video.captionStyle.size}${video.captionStyle.look ? `, ${video.captionStyle.look}` : ""}${video.captionStyle.font ? `, ${video.captionStyle.font} type` : ""}` : ""}` : "Off"}</Row>}
+                  {!video.studioTemplate && !described && (
                   <Row label="Background">
                     {video.transparent ? (
                       `Transparent (WebM, the presenter alone)${video.provider !== "heygen" ? " (not applied by this renderer)" : ""}`
@@ -1104,8 +1118,8 @@ export default function VideoDetailPage() {
                 </Card>
               )}
               {!video.deletedAt && <ViewerEmails videoId={video.id} gateOn={!!video.shareGate} />}
-              {!video.deletedAt && video.status === "completed" && canEdit && !video.cinematic && <CaptionEditor video={video} burnedIn={captionsBurnedIn(video)} onUpdated={applyServer} />}
-              {!video.deletedAt && !video.cinematic && <SubtitleLanguages video={video} onUpdated={applyServer} />}
+              {!video.deletedAt && video.status === "completed" && canEdit && !described && <CaptionEditor video={video} burnedIn={captionsBurnedIn(video)} onUpdated={applyServer} />}
+              {!video.deletedAt && !described && <SubtitleLanguages video={video} onUpdated={applyServer} />}
               <Card className="p-4" data-testid="share-description-card">
                 <h3 className="text-sm font-semibold text-slate-900">Description</h3>
                 <p className="mt-1 text-xs text-slate-500">Shown under the player on the share page and in link previews. Leave it empty to show nothing.</p>
@@ -1160,8 +1174,13 @@ export default function VideoDetailPage() {
                 </form>
               </Card>
               <Card className="p-4">
-                <h3 className="text-sm font-semibold text-slate-900">{video.cinematic ? "Shot" : video.scenes && video.scenes.length > 1 ? `Script · ${video.scenes.length} scenes` : "Script"}</h3>
-                {video.cinematic ? (
+                <h3 className="text-sm font-semibold text-slate-900">{video.directed ? "Brief" : video.cinematic ? "Shot" : video.scenes && video.scenes.length > 1 ? `Script · ${video.scenes.length} scenes` : "Script"}</h3>
+                {video.directed ? (
+                  <>
+                    <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{video.directed.prompt}</p>
+                    <p className="mt-2 text-xs text-slate-500">HeyGen&apos;s Video Agent wrote the script from this brief, so it is not kept here: no captions, subtitles, or copy to edit.</p>
+                  </>
+                ) : video.cinematic ? (
                   <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{video.cinematic.prompt}</p>
                 ) : video.scenes && video.scenes.length > 1 ? (
                   <ol className="mt-2 space-y-3">
@@ -1197,7 +1216,7 @@ export default function VideoDetailPage() {
               </Card>
               <VideoChapters video={video} />
               {/* Offered once the role is known to allow it, so a viewer never sees a button the server would refuse. */}
-              {(canEdit === true || video.resizedFrom) && !video.studioTemplate && !video.cinematic && <OtherSizes video={video} canEdit={canEdit === true} />}
+              {(canEdit === true || video.resizedFrom) && !video.studioTemplate && !described && <OtherSizes video={video} canEdit={canEdit === true} />}
               {video.status === "completed" && canEdit !== null && <HighlightClips video={video} canEdit={canEdit === true} />}
               <ReviewPanel video={video} onChange={(next) => setData({ video: next })} />
               <VideoComments videoId={video.id} player={video.status === "completed" && video.videoUrl ? player : undefined} />

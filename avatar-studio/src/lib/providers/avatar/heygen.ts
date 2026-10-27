@@ -21,6 +21,8 @@ export const HEYGEN_LOOK_KEY = "heygen:look";
 const LOOK = HEYGEN_LOOK_KEY;
 /** Marks a photo avatar HeyGen was still preparing when last asked, so it is asked again. */
 const PENDING = "heygen:pending";
+/** The job id of a directed video while it is still its Video Agent session (`agent_<session id>`). */
+const AGENT_JOB = "agent_";
 /**
  * Where uploaded clips and background images keep their v3 asset ids. Ids from the v1 upload endpoint, kept under
  * "heygen", are uploaded again once rather than trusted as v3 asset ids.
@@ -721,7 +723,40 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     });
   }
 
+  /**
+   * A whole video HeyGen's Video Agent writes, casts, and renders from the brief (v3 `POST /v3/video-agents`, one-shot).
+   * The session is followed until it names the video it renders, then that video (see `getStatus`).
+   */
+  async startDirected(req: VideoRequest, avatar: Avatar | null, voice: Voice | null) {
+    const directed = req.directed;
+    if (!directed) throw new ValidationError("Nothing to direct");
+    const body = {
+      prompt: directed.brief,
+      mode: "generate",
+      orientation: directed.orientation,
+      ...(avatar ? { avatar_id: this.lookId(avatar) } : {}),
+      ...(voice ? { voice_id: this.voiceId(voice, voice.id) } : {}),
+    };
+    let data;
+    try {
+      data = await this.client.createVideoAgent(body);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      if (/ failed: (400|402|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen's Video Agent could not take that brief: ${heygenReason(message, "describe the video in more detail")}`);
+      throw err;
+    }
+    if (!data.session_id) throw new Error("HeyGen's Video Agent answered without a session");
+    return { providerJobId: `${AGENT_JOB}${data.session_id}` };
+  }
+
   async getStatus(providerJobId: string): Promise<AvatarJobStatus> {
+    // A directed video is its agent session until the session names the video it renders; from then on, that video.
+    if (providerJobId.startsWith(AGENT_JOB)) {
+      const session = await this.client.videoAgentStatus(providerJobId.slice(AGENT_JOB.length));
+      if (session.status === "failed") return { status: "failed", error: session.failure_message || session.error || "HeyGen's Video Agent could not make that video" };
+      if (!session.video_id) return { status: "processing" };
+      return { ...(await this.getStatus(session.video_id)), providerJobId: session.video_id };
+    }
     const s = await this.client.videoStatus(providerJobId);
     if (s.status === "completed") {
       return stripEmpty({ status: "completed" as const, videoUrl: s.video_url, thumbnailUrl: s.thumbnail_url, gifUrl: httpsOnly(s.gif_url), durationSec: s.duration });

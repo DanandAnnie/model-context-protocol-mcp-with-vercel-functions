@@ -4193,3 +4193,41 @@ test("a shared video is copied for an email as its moving preview, linked to the
   expect((await page.request.get(`/share/vid_missing/preview.gif`, { maxRedirects: 0 })).status()).toBe(404);
 });
 
+
+test("HeyGen's Video Agent directs a whole video from a brief, and is asked again from the video's page", async ({ page }) => {
+  await page.goto("/agent");
+  // This studio's planner is the default; HeyGen's agent is the other choice where the renderer offers it.
+  await expect(page.getByLabel(/^This studio's agent/)).toBeChecked();
+  await page.getByLabel(/^HeyGen's Video Agent/).check();
+  await expect(page.getByRole("button", { name: "Review in editor first" })).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: "Presenter" }).locator("option").first()).toHaveText("Let HeyGen choose");
+  await expect(page.getByRole("combobox", { name: "Format" }).locator("option", { hasText: "Square" })).toHaveCount(0);
+  const start = page.getByRole("button", { name: "Generate with HeyGen" });
+  await expect(start).toBeDisabled();
+  await page.getByLabel("What should the video be?").fill("A TikTok with three quick tips for staging a home before a showing");
+  await start.click();
+  await page.waitForURL(/\/videos\/vid_/);
+  const id = new URL(page.url()).pathname.split("/").at(-1)!;
+  // The page shows the brief, who directed it, and nothing that needs a script.
+  await expect(page.getByRole("heading", { name: "Brief" })).toBeVisible();
+  await expect(page.getByText("A TikTok with three quick tips for staging a home before a showing", { exact: true })).toBeVisible();
+  await expect(page.getByText("HeyGen's Video Agent", { exact: true })).toBeVisible();
+  await expect(page.getByText("Chosen by HeyGen")).toHaveCount(2);
+  await expect(page.getByRole("link", { name: "Edit a copy" })).toHaveCount(0);
+  const video = (await (await page.request.get(`/api/videos/${id}`)).json()).video as { aspect: string; script: string; directed: { orientation: string } };
+  expect([video.aspect, video.script, video.directed.orientation]).toEqual(["9:16", "", "portrait"]);
+  // Followed as the agent's session, then its render, to a finished video.
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  await page.reload();
+  await expect(page.getByRole("link", { name: /^Captions/ })).toHaveCount(0);
+  // Asked again, the agent page opens with the same brief and HeyGen's agent chosen.
+  await page.getByRole("link", { name: "Ask the agent again" }).click();
+  await page.waitForURL(/\/agent\?from=/);
+  await expect(page.getByLabel(/^HeyGen's Video Agent/)).toBeChecked();
+  await expect(page.getByLabel("What should the video be?")).toHaveValue("A TikTok with three quick tips for staging a home before a showing");
+  await expect(page.getByRole("combobox", { name: "Format" })).toHaveValue("portrait");
+  // A square video is refused by the API too, with the reason.
+  const square = await page.request.post("/api/video-agent", { data: { prompt: "A square video for our feed", mode: "direct", orientation: "square" } });
+  expect(square.status()).toBe(400);
+  expect((await square.json()).error).toMatch(/landscape or portrait/);
+});

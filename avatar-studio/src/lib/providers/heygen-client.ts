@@ -372,6 +372,16 @@ export class HeyGenClient {
     return this.request<{ video_id: string; status?: string }>(`${V3}/videos`, { method: "POST", body: JSON.stringify(body), ...(key ? { headers: { "Idempotency-Key": key } } : {}) });
   }
 
+  /** HeyGen's Video Agent, one-shot (v3 `POST /v3/video-agents`, `mode: "generate"`): it writes, casts, and renders. */
+  createVideoAgent(body: Record<string, unknown>) {
+    return this.request<{ session_id?: string; status?: string; video_id?: string | null }>(`${V3}/video-agents`, { method: "POST", body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
+  }
+
+  /** A Video Agent session: its status, and the video it renders once it has one. */
+  videoAgentStatus(sessionId: string) {
+    return this.request<{ session_id?: string; status?: string; video_id?: string | null; failure_message?: string | null; error?: string | null }>(`${V3}/video-agents/${encodeURIComponent(sessionId)}`, { signal: AbortSignal.timeout(10_000) });
+  }
+
   videoStatus(videoId: string) {
     return this.request<{
       status: "pending" | "processing" | "completed" | "failed" | string;

@@ -851,6 +851,10 @@ function CreateInner() {
           setErr(`"${video.title}" is a cinematic shot made from a description; make it again from the Cinematic page.`);
           return;
         }
+        if (video.directed) {
+          setErr(`"${video.title}" was directed by HeyGen's Video Agent from a brief; ask the agent again from the Video Agent page.`);
+          return;
+        }
         if (video.studioTemplate) {
           setErr(`"${video.title}" was made from the HeyGen template "${video.studioTemplate.name}"; use the template again from the Templates page to make another.`);
           return;

@@ -631,6 +631,27 @@ export interface VideoRequest {
    * and `avatarId` and `voiceId` only describe it.
    */
   cinematic?: CinematicShot;
+  /**
+   * A whole video HeyGen's Video Agent writes, casts, and directs from a brief (its one-shot "generate" mode). There is
+   * no script here (HeyGen writes it); `script` is empty, and `avatarId` and `voiceId` only describe the presenter and
+   * voice it was told to use, if any.
+   */
+  directed?: DirectedVideo;
+}
+
+/** Longest brief HeyGen's Video Agent takes, in characters. */
+export const MAX_DIRECTED_BRIEF = 10_000;
+
+/** What a video HeyGen's Video Agent directed was made from. */
+export interface DirectedVideo {
+  /** The brief as sent: the request, its length and language, and any page or document folded in. */
+  brief: string;
+  /** The request as typed, shown on the video page. */
+  prompt: string;
+  /** The account's presenter and voice it was told to use, by name as they were then; absent when HeyGen chose. */
+  avatarName?: string;
+  voiceName?: string;
+  orientation: "landscape" | "portrait";
 }
 
 /** Longest and shortest cinematic shot, in seconds (HeyGen's `duration`); a shot without one is timed by HeyGen. */
@@ -1191,6 +1212,8 @@ export interface ProviderStatus {
   studioTemplates: boolean;
   /** Whether the renderer directs cinematic shots from a description (HeyGen's Cinematic Avatar). */
   cinematicShots: boolean;
+  /** Whether the renderer directs whole videos from a brief (HeyGen's Video Agent). */
+  directedVideos: boolean;
   /** Whether the TTS provider can design a voice from a description. */
   voiceDesign: boolean;
   /** Present when the request carried an owner (signed in, or open/password mode). */

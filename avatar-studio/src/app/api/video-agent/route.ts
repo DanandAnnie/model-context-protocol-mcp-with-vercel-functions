@@ -1,7 +1,7 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { recordRequestActivity } from "@/lib/activity-request";
 import { requireEditor } from "@/lib/owner";
-import { generateAgentVideo, planVideo, videoAgentSchema } from "@/lib/services";
+import { directAgentVideo, generateAgentVideo, planVideo, videoAgentSchema } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -12,6 +12,12 @@ export async function POST(req: Request) {
     const owner = await requireEditor();
     const input = videoAgentSchema.parse(await readJson(req));
     if (input.mode === "plan") return json({ draft: await planVideo(input, owner) });
+    if (input.mode === "direct") {
+      const video = await directAgentVideo(input, owner);
+      if (video.status === "failed") return json({ video, error: video.error ?? "HeyGen's Video Agent could not be started" }, { status: 502 });
+      await recordRequestActivity(owner, "video.created", { subject: video.title, subjectId: video.id });
+      return json({ video }, { status: 201 });
+    }
     const { video, draft } = await generateAgentVideo(input, owner);
     if (video.status === "failed") return json({ video, draft, error: video.error ?? "The render could not be started" }, { status: 502 });
     await recordRequestActivity(owner, "video.created", { subject: video.title, subjectId: video.id });

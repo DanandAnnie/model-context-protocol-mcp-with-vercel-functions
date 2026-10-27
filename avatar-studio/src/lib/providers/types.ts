@@ -43,6 +43,8 @@ export interface AvatarJobStatus {
   thumbnailUrl?: string;
   /** A short animated GIF of the render, for an email, where the renderer makes one. */
   gifUrl?: string;
+  /** The job to follow from now on, when the renderer moved the render to another (a directed video once it renders). */
+  providerJobId?: string;
   durationSec?: number;
   error?: string;
 }
@@ -81,6 +83,11 @@ export interface AvatarProvider {
    * shot's presenters from `cast.avatars` (prepared like any presenter) and needs no voice. Absent when it cannot.
    */
   readonly cinematicShots?: true;
+  /**
+   * Starts a request's `directed` video from its brief (HeyGen's Video Agent), with the presenter (prepared) and voice
+   * only when the request names them; HeyGen chooses otherwise. Absent when the renderer cannot.
+   */
+  startDirected?(req: VideoRequest, avatar: Avatar | null, voice: Voice | null): Promise<{ providerJobId: string }>;
   /**
    * Make an audio clip usable by this renderer, e.g. by uploading it. Returns the clip with
    * `providerAssetIds[provider]` set; the caller persists it. Renderers without it cannot use audio scenes.

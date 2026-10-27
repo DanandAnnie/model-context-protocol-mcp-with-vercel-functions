@@ -7,7 +7,7 @@ import { NotFoundError, ValidationError } from "../errors";
 import { stripPauses } from "../pauses";
 import { fetchPageText } from "../webpage";
 import type { FetchLike } from "../safe-fetch";
-import { MAX_DOCUMENT_CHARS, MAX_SCENES, type AspectRatio, type Avatar, type Background, type Resolution, type SceneLayout, type Video } from "../types";
+import { MAX_DIRECTED_BRIEF, MAX_DOCUMENT_CHARS, MAX_SCENES, type AspectRatio, type Avatar, type Background, type Resolution, type SceneLayout, type Video } from "../types";
 import { getAvatar, listAvatars } from "./avatars";
 import { getBrandKit } from "./brand";
 import { listVoices } from "./voices";
@@ -36,8 +36,12 @@ export const videoAgentSchema = z.object({
   orientation: z.enum(["auto", "landscape", "portrait", "square"]).default("auto"),
   lengthSec: z.number().int().min(15).max(300).default(60),
   language: z.string().trim().min(2).max(40).default("English"),
-  /** "generate" renders straight away; "plan" returns the draft to review in the editor first. */
-  mode: z.enum(["generate", "plan"]).default("generate"),
+  /**
+   * "generate" renders straight away; "plan" returns the draft to review in the editor first; "direct" hands the brief
+   * to HeyGen's own Video Agent, which writes, casts, and renders the whole video itself.
+   */
+  mode: z.enum(["generate", "plan", "direct"]).default("generate"),
+  folder: z.string().trim().max(40).optional(),
 });
 export type VideoAgentInput = z.infer<typeof videoAgentSchema>;
 
@@ -105,8 +109,11 @@ async function presenter(avatarId: string | undefined, kitAvatarId: string | und
   return first;
 }
 
-/** Plans a video from a prompt and makes it ready to render, with the owner's brand kit applied. */
-export async function planVideo(input: VideoAgentInput, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<VideoAgentDraft> {
+/**
+ * What the agent writes from: the attached document first (the user chose it for this video), then the page; named
+ * when there are both, so they can be told apart.
+ */
+async function sourcesOf(input: VideoAgentInput, fetchImpl?: FetchLike): Promise<string | undefined> {
   let page: string | undefined;
   if (input.url) {
     try {
@@ -115,10 +122,13 @@ export async function planVideo(input: VideoAgentInput, ownerId: string = LOCAL_
       throw new ValidationError(err instanceof Error ? err.message : "The page could not be read");
     }
   }
-  // The attached document first (the user chose it for this video), then the page; named when there are both, so the
-  // planner can tell them apart.
   const doc = input.document?.text;
-  const source = doc && page ? `From the attached document "${input.document!.name}":\n${doc}\n\nFrom the web page ${input.url}:\n${page}` : doc || page;
+  return doc && page ? `From the attached document "${input.document!.name}":\n${doc}\n\nFrom the web page ${input.url}:\n${page}` : doc || page;
+}
+
+/** Plans a video from a prompt and makes it ready to render, with the owner's brand kit applied. */
+export async function planVideo(input: VideoAgentInput, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<VideoAgentDraft> {
+  const source = await sourcesOf(input, fetchImpl);
   const kit = await getBrandKit(ownerId);
   const avatar = await presenter(input.avatarId, kit?.defaultAvatarId, ownerId);
   const voices = await listVoices(ownerId);
@@ -166,3 +176,50 @@ export async function generateAgentVideo(input: VideoAgentInput, ownerId: string
   const video = await createVideo(videoRequestSchema.parse(draft), ownerId);
   return { video, draft };
 }
+
+/** Whether a brief asks for a vertical format itself ("a TikTok", "Instagram Reels"), as HeyGen would read it. */
+export function asksForPortrait(prompt: string): boolean {
+  return /\b(portrait|vertical|tiktok|tik tok|reels?|shorts|stories|9\s*:\s*16)\b/i.test(prompt);
+}
+
+/** The words sources take in a brief: what HeyGen takes, less the request and the instructions around it. */
+function briefOf(input: VideoAgentInput, source: string | undefined): string {
+  const asks = `${input.prompt}\n\nLength: about ${input.lengthSec} seconds. Language: ${input.language}.`;
+  if (!source) return asks.slice(0, MAX_DIRECTED_BRIEF);
+  const lead = "\n\nWrite from these sources, using only their facts:\n";
+  const room = MAX_DIRECTED_BRIEF - asks.length - lead.length;
+  return room > 200 ? `${asks}${lead}${cut(source, room)}` : asks.slice(0, MAX_DIRECTED_BRIEF);
+}
+
+/**
+ * Hands the request to HeyGen's own Video Agent (its one-shot mode), which writes the script, chooses the presenter,
+ * voice, and visuals (the ones named here, when named), and renders. The page and document are read here and folded
+ * into the brief. Counted like any render; HeyGen makes landscape or portrait videos only.
+ */
+export async function directAgentVideo(input: VideoAgentInput, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<Video> {
+  if (input.orientation === "square") throw new ValidationError("HeyGen's Video Agent makes landscape or portrait videos; choose one of those, or let it choose");
+  await enforceRenderLimit(ownerId);
+  const source = await sourcesOf(input, fetchImpl);
+  const orientation = input.orientation === "landscape" || input.orientation === "portrait" ? input.orientation : asksForPortrait(input.prompt) ? "portrait" : "landscape";
+  const title = input.prompt.replace(/\s+/g, " ").trim();
+  return createVideo(
+    {
+      title: title.length <= 80 ? title : `${title.slice(0, 79).replace(/\s+\S*$/, "")}…`,
+      // HeyGen writes the script: none is kept here, so nothing is captioned or subtitled from it.
+      script: "",
+      avatarId: input.avatarId ?? "",
+      voiceId: input.voiceId ?? "",
+      aspect: orientation === "portrait" ? "9:16" : "16:9",
+      resolution: "1080p",
+      background: { type: "color", value: "#000000" },
+      captions: false,
+      speed: 1,
+      directed: { brief: briefOf(input, source), prompt: input.prompt, orientation },
+    },
+    ownerId,
+    undefined,
+    true,
+    input.folder ? { folder: input.folder } : {},
+  );
+}
+

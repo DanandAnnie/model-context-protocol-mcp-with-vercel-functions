@@ -9,7 +9,7 @@ import { useCanEdit } from "@/hooks/useCanEdit";
 import { api } from "@/lib/client";
 import { AGENT_DRAFT_KEY } from "@/lib/agent-draft";
 import { documentText } from "@/lib/document-text";
-import type { Avatar, Video, Voice } from "@/lib/types";
+import type { Avatar, ProviderStatus, Video, Voice } from "@/lib/types";
 
 const LENGTHS = [
   { sec: 30, label: "About 30 seconds" },
@@ -36,6 +36,13 @@ export default function VideoAgentPage() {
   const canEdit = useCanEdit();
   const { data: avatarData } = useApi<{ avatars: Avatar[] }>("/api/avatars");
   const { data: voiceData } = useApi<{ voices: Voice[] }>("/api/voices");
+  const { data: status } = useApi<ProviderStatus>("/api/status");
+  // Who makes the video: this studio's planner (scenes to review and edit), or HeyGen's own Video Agent, which writes,
+  // casts, and directs the whole video itself, where the renderer offers it.
+  const [maker, setMaker] = useState<"studio" | "heygen">("studio");
+  const byHeygen = maker === "heygen" && status?.directedVideos === true;
+  const [folder, setFolder] = useState<string | undefined>(undefined);
+  const [notice, setNotice] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [url, setUrl] = useState("");
   // An attached document, read to its words in the browser; only those are sent.
@@ -73,16 +80,35 @@ export default function VideoAgentPage() {
   const [orientation, setOrientation] = useState<(typeof ORIENTATIONS)[number]["value"]>("auto");
   const [lengthSec, setLengthSec] = useState(60);
   const [language, setLanguage] = useState("English");
-  const [busy, setBusy] = useState<"generate" | "plan" | null>(null);
+  const [busy, setBusy] = useState<"generate" | "plan" | "direct" | null>(null);
+  // "Ask the agent again" from a video HeyGen's Video Agent directed fills the brief it was given (read once).
+  useEffect(() => {
+    const from = new URLSearchParams(window.location.search).get("from");
+    if (!from) return;
+    api<{ video: Video }>(`/api/videos/${encodeURIComponent(from)}`)
+      .then(({ video }) => {
+        if (!video.directed) {
+          setNotice(`“${video.title}” was not directed by HeyGen's Video Agent, so there is no brief to fill in.`);
+          return;
+        }
+        setMaker("heygen");
+        setPrompt(video.directed.prompt);
+        setOrientation(video.directed.orientation);
+        if (video.avatarId) setAvatarId(video.avatarId);
+        if (video.voiceId) setVoiceId(video.voiceId);
+        setFolder(video.folder);
+      })
+      .catch((e) => setNotice(`The video to ask about again could not be opened (${e instanceof Error ? e.message : "unknown error"}); describe a new video instead.`));
+  }, []);
   const [err, setErr] = useState<string | null>(null);
 
   const urlOk = !url.trim() || /^https?:\/\/\S+$/.test(url.trim());
   const ready = prompt.trim().length >= 3 && urlOk && canEdit !== false && !busy && !reading;
 
-  async function run(mode: "generate" | "plan") {
+  async function run(mode: "generate" | "plan" | "direct") {
     setBusy(mode);
     setErr(null);
-    const body = { prompt, mode, orientation, lengthSec, language, ...(url.trim() ? { url: url.trim() } : {}), ...(doc ? { document: { name: doc.name, text: doc.text } } : {}), ...(avatarId ? { avatarId } : {}), ...(voiceId ? { voiceId } : {}) };
+    const body = { prompt, mode, orientation, lengthSec, language, ...(mode === "direct" && folder ? { folder } : {}), ...(url.trim() ? { url: url.trim() } : {}), ...(doc ? { document: { name: doc.name, text: doc.text } } : {}), ...(avatarId ? { avatarId } : {}), ...(voiceId ? { voiceId } : {}) };
     try {
       if (mode === "plan") {
         const { draft } = await api<{ draft: unknown }>("/api/video-agent", { method: "POST", body: JSON.stringify(body) });
@@ -108,6 +134,11 @@ export default function VideoAgentPage() {
       <SectionTitle title="Video Agent" subtitle="Describe the video you want. The agent writes the script, splits it into scenes, frames them, and picks a format, with your brand kit applied." />
       {canEdit === false && <ViewOnlyNotice what="make videos" />}
       <ErrorBanner message={err} />
+      {notice && (
+        <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">
+          {notice}
+        </p>
+      )}
       <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
         <Card className="p-5">
           <div className="space-y-4">
@@ -184,17 +215,53 @@ export default function VideoAgentPage() {
                 {docErr}
               </p>
             )}
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Button onClick={() => run("generate")} loading={busy === "generate"} disabled={!ready} className="flex-1">
-                <Sparkles className="h-4 w-4" /> Generate video
+            {status?.directedVideos && (
+              <fieldset>
+                <legend className="mb-1.5 block text-sm font-medium text-slate-700">Who makes it</legend>
+                <div className="space-y-2 text-sm text-slate-700">
+                  <label className="flex items-start gap-2">
+                    <input type="radio" name="agent-maker" className="mt-0.5 accent-brand-600" checked={maker === "studio"} onChange={() => setMaker("studio")} />
+                    <span>
+                      This studio&apos;s agent
+                      <span className="block text-xs text-slate-500">Plans the scenes with your brand kit; review and edit them, or render straight away.</span>
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2">
+                    <input
+                      type="radio"
+                      name="agent-maker"
+                      className="mt-0.5 accent-brand-600"
+                      checked={maker === "heygen"}
+                      onChange={() => {
+                        setMaker("heygen");
+                        if (orientation === "square") setOrientation("auto");
+                      }}
+                    />
+                    <span>
+                      HeyGen&apos;s Video Agent
+                      <span className="block text-xs text-slate-500">Writes the script and chooses the presenter, voice, and visuals itself, then renders; there is nothing to edit afterwards.</span>
+                    </span>
+                  </label>
+                </div>
+              </fieldset>
+            )}
+            {byHeygen ? (
+              <Button onClick={() => run("direct")} loading={busy === "direct"} disabled={!ready} className="w-full">
+                <Sparkles className="h-4 w-4" /> Generate with HeyGen
               </Button>
-              <Button variant="secondary" onClick={() => run("plan")} loading={busy === "plan"} disabled={!ready} className="flex-1">
-                <PencilLine className="h-4 w-4" /> Review in editor first
-              </Button>
-            </div>
+            ) : (
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Button onClick={() => run("generate")} loading={busy === "generate"} disabled={!ready} className="flex-1">
+                  <Sparkles className="h-4 w-4" /> Generate video
+                </Button>
+                <Button variant="secondary" onClick={() => run("plan")} loading={busy === "plan"} disabled={!ready} className="flex-1">
+                  <PencilLine className="h-4 w-4" /> Review in editor first
+                </Button>
+              </div>
+            )}
             {busy && (
               <p className="text-sm text-slate-500" role="status">
-                {busy === "plan" ? "Planning the scenes…" : "Planning the scenes and starting the render…"}
+                {busy === "plan" ? "Planning the scenes…" : busy === "direct" ? "Handing the brief to HeyGen's Video Agent…" : "Planning the scenes and starting the render…"}
               </p>
             )}
           </div>
@@ -205,7 +272,7 @@ export default function VideoAgentPage() {
           <div className="space-y-4">
             <Field label="Presenter">
               <select className={inputClass} value={avatarId} onChange={(e) => setAvatarId(e.target.value)}>
-                <option value="">Brand kit default</option>
+                <option value="">{byHeygen ? "Let HeyGen choose" : "Brand kit default"}</option>
                 {avatarData?.avatars.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name}
@@ -215,7 +282,7 @@ export default function VideoAgentPage() {
             </Field>
             <Field label="Voice">
               <select className={inputClass} value={voiceId} onChange={(e) => setVoiceId(e.target.value)}>
-                <option value="">The presenter&apos;s or brand kit&apos;s voice</option>
+                <option value="">{byHeygen ? "Let HeyGen choose" : "The presenter's or brand kit's voice"}</option>
                 {voiceData?.voices.map((v) => (
                   <option key={v.id} value={v.id}>
                     {v.name}
@@ -225,7 +292,8 @@ export default function VideoAgentPage() {
             </Field>
             <Field label="Format">
               <select className={inputClass} value={orientation} onChange={(e) => setOrientation(e.target.value as typeof orientation)}>
-                {ORIENTATIONS.map((o) => (
+                {/* HeyGen's Video Agent makes landscape or portrait videos only. */}
+                {ORIENTATIONS.filter((o) => !byHeygen || o.value !== "square").map((o) => (
                   <option key={o.value} value={o.value}>
                     {o.label}
                   </option>

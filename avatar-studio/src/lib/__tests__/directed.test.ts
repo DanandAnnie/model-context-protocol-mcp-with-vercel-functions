@@ -189,7 +189,10 @@ describe("videos HeyGen's Video Agent directs", () => {
     const realFetch = globalThis.fetch;
     const bodies: Array<Record<string, unknown>> = [];
     globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
-      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      if (init?.body) bodies.push(JSON.parse(String(init.body)));
+      // The render a session names: hg_v15 finished before its session's webhook came; the others are still rendering.
+      if (String(_input).endsWith("/v3/videos/hg_v15")) return Response.json({ data: { status: "completed", video_url: "https://cdn/v15.mp4", duration: 30 } });
+      if (/\/v3\/videos\/hg_v/.test(String(_input))) return Response.json({ data: { status: "processing" } });
       return Response.json({ data: { session_id: "sess_9", status: "thinking", video_id: null } });
     }) as typeof fetch;
     Object.assign(config, { avatarProvider: "heygen", heygenApiKey: "hg_key", webhookSecret: "s3cret" });
@@ -224,6 +227,11 @@ describe("videos HeyGen's Video Agent directs", () => {
       const fourth = await directAgentVideo(videoAgentSchema.parse(ASK), "u1");
       const linked = await applyAvatarWebhook("heygen", { event_type: "video_agent.success", event_data: { video_id: "hg_v14", url: "https://app.heygen.com/session/x", callback_id: fourth.id } });
       assert.deepEqual([linked?.status, linked?.providerJobId, linked?.videoUrl], ["processing", "hg_v14", undefined]);
+      // A render whose own webhook came first (without the id, matching nothing) is asked about when the session names it.
+      const fifth = await directAgentVideo(videoAgentSchema.parse(ASK), "u1");
+      assert.equal(await applyAvatarWebhook("heygen", { event_type: "avatar_video.success", event_data: { video_id: "hg_v15", url: "https://cdn/v15.mp4" } }), null);
+      const caught = await applyAvatarWebhook("heygen", { event_type: "video_agent.success", event_data: { video_id: "hg_v15", callback_id: fifth.id } });
+      assert.deepEqual([caught?.status, caught?.videoUrl, caught?.providerJobId], ["completed", "https://cdn/v15.mp4", "hg_v15"]);
     } finally {
       globalThis.fetch = realFetch;
       Object.assign(config, { avatarProvider: saved.avatar, heygenApiKey: saved.key, webhookSecret: saved.secret });

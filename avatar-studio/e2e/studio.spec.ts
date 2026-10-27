@@ -4119,3 +4119,40 @@ test("a share page can ask for an email before playing, and the owner sees who w
   expect((await page.request.post(`/api/videos/${v.id}/lead`, { data: { email: "late@example.com" } })).status()).toBe(404);
   expect((await page.request.post(`/api/videos/vid_nope/lead`, { data: { email: "x@example.com" } })).status()).toBe(404);
 });
+
+test("a shared video is copied for an email as its moving preview, linked to the share page", async ({ page, context }) => {
+  const v = await createVideoViaApi(page, `Email preview ${Date.now().toString(36)}`, { aspect: "16:9" });
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto(`/videos/${v.id}`);
+  await page.getByRole("button", { name: "Email", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Email copied" })).toBeVisible();
+  // A mail client pastes the linked picture; a plain-text field gets the share link.
+  const copied = await page.evaluate(async () => {
+    const [item] = await navigator.clipboard.read();
+    return { html: await (await item.getType("text/html")).text(), text: await (await item.getType("text/plain")).text() };
+  });
+  const share = new URL(`/share/${v.id}`, page.url()).href;
+  expect(copied.text).toBe(share);
+  expect(copied.html).toContain(`<a href="${share}"><img src="${share}/preview.gif" alt="Watch the video: Email preview`);
+  expect(copied.html).toContain('width="480"');
+  // The picture's address is fixed and redirects to the renderer's GIF, which loads as an image.
+  const preview = await page.request.get(`/share/${v.id}/preview.gif`, { maxRedirects: 0 });
+  expect(preview.status()).toBe(302);
+  expect(new URL(preview.headers().location).pathname).toBe("/demo/preview.gif");
+  expect(preview.headers()["cache-control"]).toBe("public, max-age=300");
+  await page.setContent(copied.html);
+  await expect.poll(() => page.locator("img").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(320);
+  // A link that asks for an email first shows the cover instead, so the footage does not stand in for the form.
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareGate: true } })).status()).toBe(200);
+  const gated = await page.request.get(`/share/${v.id}/preview.gif`, { maxRedirects: 0 });
+  expect(new URL(gated.headers().location).pathname).toBe("/demo/poster.svg");
+  // Behind a password there is no picture, and the button says why.
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareGate: false, sharePassword: "letmein1" } })).status()).toBe(200);
+  expect((await page.request.get(`/share/${v.id}/preview.gif`, { maxRedirects: 0 })).status()).toBe(404);
+  await page.goto(`/videos/${v.id}`);
+  await expect(page.getByRole("button", { name: "Email", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Email", exact: true })).toHaveAttribute("title", "A password-protected video has no preview for an email");
+  expect((await page.request.get(`/share/vid_missing/preview.gif`, { maxRedirects: 0 })).status()).toBe(404);
+});
+

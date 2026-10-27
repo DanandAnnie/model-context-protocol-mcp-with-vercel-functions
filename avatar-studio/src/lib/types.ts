@@ -817,6 +817,10 @@ export interface Video extends VideoRequest {
   providerJobId?: string;
   videoUrl?: string;
   thumbnailUrl?: string;
+  /** The renderer's short animated GIF of the video, for an email; signed for a limited time and renewed when old. */
+  gifUrl?: string;
+  /** When `gifUrl` was last asked for; absent when it came with the finished render, so the first look asks again. */
+  gifCheckedAt?: string;
   durationSec?: number;
   error?: string;
   createdAt: string;

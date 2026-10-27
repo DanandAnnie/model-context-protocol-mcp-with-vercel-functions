@@ -63,6 +63,23 @@ export function posterUrl(video: { id: string; cover?: { updatedAt: string }; th
   return video.thumbnailUrl;
 }
 
+/** Text made safe inside an HTML attribute or element. */
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/**
+ * What an email carries for a shared video: its animated preview (a fixed address that redirects to the renderer's GIF,
+ * or to the cover) linked to the share page, as HTML for a mail client, and the bare link for one that pastes text.
+ */
+export function emailSnippet(video: { id: string; title: string; aspect?: string }, base: string): { html: string; text: string } {
+  const share = `${base.replace(/\/$/, "")}/share/${video.id}`;
+  const width = video.aspect === "9:16" ? 270 : video.aspect === "1:1" ? 360 : 480;
+  const alt = escapeHtml(`Watch the video: ${video.title}`);
+  const html = `<a href="${escapeHtml(share)}"><img src="${escapeHtml(`${share}/preview.gif`)}" alt="${alt}" width="${width}" style="display:block;max-width:100%;height:auto;border:0"></a>`;
+  return { html, text: share };
+}
+
 /** True once a share link's expiry has passed. */
 export function shareExpired(video: { shareExpiresAt?: string }, now = Date.now()): boolean {
   return !!video.shareExpiresAt && Date.parse(video.shareExpiresAt) <= now;

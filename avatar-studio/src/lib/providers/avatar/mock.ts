@@ -9,6 +9,7 @@ import type { AvatarJobStatus, AvatarProvider, CleanupStatus, HighlightInput, Hi
 /** Labeled, self-hosted stand-in; no avatar synthesis or paid operation occurs. */
 const SAMPLE_VIDEO = SAMPLE_PREVIEW_VIDEO;
 const SAMPLE_THUMB = "/demo/poster.svg";
+const SAMPLE_GIF = "/demo/preview.gif";
 
 
 /** The demo's background-music tracks (short tones of the studio's own, in public/demo). */
@@ -25,6 +26,7 @@ const DEMO_EFFECTS = [
 /** Simulates an async render that completes ~12s after submission. */
 export class MockAvatarProvider implements AvatarProvider {
   readonly name = "mock";
+  readonly gifPreviews = true;
   readonly cinematicShots = true as const;
   private static RENDER_MS = 12_000;
   /** How long a demo clipping job takes. */
@@ -221,6 +223,7 @@ export class MockAvatarProvider implements AvatarProvider {
       status: "completed",
       videoUrl: demoAssetUrl(SAMPLE_VIDEO),
       thumbnailUrl: demoAssetUrl(SAMPLE_THUMB),
+      gifUrl: demoAssetUrl(SAMPLE_GIF),
       durationSec: Number(duration),
     };
   }

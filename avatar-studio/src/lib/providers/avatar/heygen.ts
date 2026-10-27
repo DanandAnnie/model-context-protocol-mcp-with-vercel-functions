@@ -60,6 +60,7 @@ const PHOTO_CHECK_MS = 3000;
 export class HeyGenAvatarProvider implements AvatarProvider {
   readonly name = "heygen";
   readonly assetKey = ASSET;
+  readonly gifPreviews = true;
   readonly cinematicShots = true as const;
   private client: HeyGenClient;
   constructor(apiKey: string) {
@@ -723,17 +724,17 @@ export class HeyGenAvatarProvider implements AvatarProvider {
   async getStatus(providerJobId: string): Promise<AvatarJobStatus> {
     const s = await this.client.videoStatus(providerJobId);
     if (s.status === "completed") {
-      return { status: "completed", videoUrl: s.video_url, thumbnailUrl: s.thumbnail_url, durationSec: s.duration };
+      return stripEmpty({ status: "completed" as const, videoUrl: s.video_url, thumbnailUrl: s.thumbnail_url, gifUrl: httpsOnly(s.gif_url), durationSec: s.duration });
     }
     if (s.status === "failed") return { status: "failed", error: s.failure_message ?? "Render failed" };
     return { status: s.status === "pending" || s.status === "waiting" ? "queued" : "processing" };
   }
 
   parseWebhook(body: unknown) {
-    const b = body as { event_type?: string; event_data?: { video_id?: string; url?: string; msg?: string } };
+    const b = body as { event_type?: string; event_data?: { video_id?: string; url?: string; gif_download_url?: string; msg?: string } };
     const id = b?.event_data?.video_id;
     if (!id) return null;
-    if (b.event_type === "avatar_video.success") return { providerJobId: id, update: { status: "completed" as const, videoUrl: b.event_data?.url } };
+    if (b.event_type === "avatar_video.success") return { providerJobId: id, update: stripEmpty({ status: "completed" as const, videoUrl: b.event_data?.url, gifUrl: httpsOnly(b.event_data?.gif_download_url) }) };
     if (b.event_type === "avatar_video.fail") return { providerJobId: id, update: { status: "failed" as const, error: b.event_data?.msg ?? "Render failed" } };
     return null;
   }

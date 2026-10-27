@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { ArchiveRestore, ArrowLeft, Captions, Check, Clock, Code2, Copy, Download, Eye, Film, FolderOpen, Languages, LayoutTemplate, Link2, Lock, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { ArchiveRestore, ArrowLeft, Captions, Check, Clock, Code2, Copy, Download, Eye, Film, FolderOpen, Languages, LayoutTemplate, Link2, Lock, Mail, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge, inputClass } from "@/components/ui";
 import { ViewSparkline } from "@/components/ViewSparkline";
 import { VideoComments } from "@/components/VideoComments";
@@ -19,7 +19,7 @@ import { captionsBurnedIn } from "@/lib/captions";
 import { silentSeconds } from "@/lib/pauses";
 import { languageLabel } from "@/lib/language";
 import { useApi } from "@/hooks/useApi";
-import { ApiError, api, formatDate, formatSeconds, isDarkHex, posterUrl, purgeAt, shareExpired } from "@/lib/client";
+import { ApiError, api, formatDate, formatSeconds, isDarkHex, emailSnippet, posterUrl, purgeAt, shareExpired } from "@/lib/client";
 import { socialShareLinks } from "@/lib/social";
 import { TRASH_RETENTION_DAYS, type Video } from "@/lib/types";
 
@@ -43,6 +43,7 @@ export default function VideoDetailPage() {
   const [deleting, setDeleting] = useState(false);
   const [copied, setCopied] = useState(false);
   const [embedCopied, setEmbedCopied] = useState(false);
+  const [emailCopied, setEmailCopied] = useState(false);
   const [embedAutoplay, setEmbedAutoplay] = useState(false);
   const [embedLoop, setEmbedLoop] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -462,6 +463,19 @@ export default function VideoDetailPage() {
     }
   }
 
+  async function copyEmail() {
+    if (!video) return;
+    const { html, text } = emailSnippet(video, shareBase());
+    try {
+      // As HTML a mail client pastes the linked picture itself; a plain-text field gets the link.
+      await navigator.clipboard.write([new ClipboardItem({ "text/html": new Blob([html], { type: "text/html" }), "text/plain": new Blob([text], { type: "text/plain" }) })]);
+      setEmailCopied(true);
+      setTimeout(() => setEmailCopied(false), 2000);
+    } catch {
+      window.prompt("Copy this HTML into your email", html);
+    }
+  }
+
   const [retrying, setRetrying] = useState(false);
   const [retryErr, setRetryErr] = useState<string | null>(null);
   async function retry() {
@@ -600,6 +614,14 @@ export default function VideoDetailPage() {
                     </Button>
                     <Button variant="secondary" onClick={copyEmbed} title="Copy an iframe snippet for your site">
                       {embedCopied ? <Check className="h-4 w-4 text-emerald-600" /> : <Code2 className="h-4 w-4" />} {embedCopied ? "Embed copied" : "Embed"}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={copyEmail}
+                      disabled={!!video.shareLocked}
+                      title={video.shareLocked ? "A password-protected video has no preview for an email" : "Copy a moving preview, linked to the share page, to paste into an email"}
+                    >
+                      {emailCopied ? <Check className="h-4 w-4 text-emerald-600" /> : <Mail className="h-4 w-4" />} {emailCopied ? "Email copied" : "Email"}
                     </Button>
                     <span className="inline-flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700" title="Options for the embed snippet; the share link itself is unchanged">
                       <label className="inline-flex items-center gap-1.5">

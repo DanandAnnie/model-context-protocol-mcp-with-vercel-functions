@@ -10,7 +10,7 @@ const PUBLIC_PREFIXES = ["/login", "/demo-consent", "/auth/", "/api/auth/", "/sh
 // reads a proofread's corrected lines (behind the job's own secret) without a session.
 const PUBLIC_PATTERNS = [/^\/api\/videos\/[^/]+\/(captions|cover|logo)$/, /^\/api\/videos\/[^/]+\/(view|cta|watch|unlock|lead)$/, /^\/api\/translate\/[^/]+\/srt$/];
 // Only bundled non-private sample assets; public share pages need these without a session.
-const DEMO_ASSETS = new Set(["/demo/render.mp4", "/demo/render.webm", "/demo/poster.svg"]);
+const DEMO_ASSETS = new Set(["/demo/render.mp4", "/demo/render.webm", "/demo/poster.svg", "/demo/preview.gif"]);
 
 export async function proxy(req: NextRequest) {
   const mode = authMode();

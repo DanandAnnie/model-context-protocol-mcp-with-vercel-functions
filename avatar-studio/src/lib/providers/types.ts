@@ -41,6 +41,8 @@ export interface AvatarJobStatus {
   status: Video["status"];
   videoUrl?: string;
   thumbnailUrl?: string;
+  /** A short animated GIF of the render, for an email, where the renderer makes one. */
+  gifUrl?: string;
   durationSec?: number;
   error?: string;
 }
@@ -59,6 +61,8 @@ export interface AvatarProvider {
   readonly name: string;
   /** Where this renderer keeps the ids of the clips and background images it was given (`providerAssetIds`); its name when absent. */
   readonly assetKey?: string;
+  /** True when a finished render's status carries an animated GIF of it (`gifUrl`), so it is worth asking for one. */
+  readonly gifPreviews?: boolean;
   listAvatars(): Promise<Avatar[]>;
   /**
    * Make a custom (uploaded) avatar usable by this provider, e.g. by uploading

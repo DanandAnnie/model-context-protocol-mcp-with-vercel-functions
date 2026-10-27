@@ -377,6 +377,7 @@ export class HeyGenClient {
       status: "pending" | "processing" | "completed" | "failed" | string;
       video_url?: string;
       thumbnail_url?: string;
+      gif_url?: string | null;
       duration?: number;
       failure_code?: string;
       failure_message?: string;

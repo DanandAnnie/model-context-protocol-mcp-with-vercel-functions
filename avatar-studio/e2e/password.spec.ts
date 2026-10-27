@@ -87,6 +87,15 @@ test("an offline share link is hidden from the public but not from the owner", a
   const id = ((await made.json()) as { video: { id: string } }).video.id;
   const anon = await playwright.request.newContext({ baseURL: "http://localhost:3102" });
   expect((await anon.get(`/share/${id}`)).status()).toBe(200);
+  // The email preview is public too (a mail client has no session), once the video is finished.
+  expect((await anon.get(`/share/${id}/preview.gif`, { maxRedirects: 0 })).status()).toBe(404);
+  await expect.poll(async () => (await (await request.get(`/api/videos/${id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  const preview = await anon.get(`/share/${id}/preview.gif`, { maxRedirects: 0 });
+  expect(preview.status()).toBe(302);
+  expect(new URL(preview.headers().location).pathname).toBe("/demo/preview.gif");
+  const gif = await anon.get("/demo/preview.gif");
+  expect(gif.status()).toBe(200);
+  expect(gif.headers()["content-type"]).toBe("image/gif");
   expect((await anon.get(`/api/videos/${id}/captions`)).status()).toBe(200);
   // The captions path is public for the share player, but only a signed-in editor changes them.
   const cues = { cues: [{ startMs: 0, endMs: 1000, text: "Defaced" }] };
@@ -103,6 +112,7 @@ test("an offline share link is hidden from the public but not from the owner", a
 
   expect((await request.patch(`/api/videos/${id}`, { data: { shareDisabled: true } })).status()).toBe(200);
   expect((await anon.get(`/share/${id}`)).status()).toBe(404);
+  expect((await anon.get(`/share/${id}/preview.gif`, { maxRedirects: 0 })).status()).toBe(404);
   expect((await anon.get(`/api/videos/${id}/captions`)).status()).toBe(404);
   // The cover goes offline with the link for everyone but the owner.
   expect((await anon.get(`/api/videos/${id}/cover`)).status()).toBe(404);

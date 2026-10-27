@@ -21,7 +21,7 @@ import { listVoices } from "./voices";
 import { PUBLIC_ACCESS, owned, scheduleNotification, stripUndefined } from "./shared";
 import { SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, clearShareLock, setShareLock, shareUnlocked } from "../share-lock";
 import { clearCover, setCover } from "../cover";
-import { shareOffline } from "../client";
+import { posterUrl, shareOffline } from "../client";
 import { bumpViewsByDay } from "../insights";
 
 import { accentSchema, avatarEngineSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema } from "./schemas";
@@ -34,6 +34,8 @@ import { clearCleanups } from "./cleanups";
 import { clearLipsyncs } from "./lipsyncs";
 import { clearMusicJobs } from "./music";
 import { reviseScript } from "./scripts";
+import { RELINK_MS, RETRY_FINISHED_MS } from "./job-checks";
+import { config } from "../config";
 export { accentSchema, avatarEngineSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema };
 
 export const videoRequestSchema = z
@@ -994,9 +996,10 @@ const COUNTER_FIELDS = ["views", "lastViewedAt", "viewsByDay", "watch", "ctaClic
  * Fields other writers own, which an edit built from an earlier read must take from the stored
  * record rather than from its own copy: the counters, the subtitle tracks, which a translation adds
  * under the lock, the corrected captions, which their own route saves under the lock, the trash mark, which a trash or restore sets under the lock, and the review, which
- * a request or decision sets under the lock; an owner edit changes none of them.
+ * a request or decision sets under the lock, and the email preview's GIF link, which its renewal sets under the lock; an
+ * owner edit changes none of them.
  */
-const CONCURRENT_FIELDS = [...COUNTER_FIELDS, "subtitles", "captionCues", "deletedAt", "review"] as const;
+const CONCURRENT_FIELDS = [...COUNTER_FIELDS, "subtitles", "captionCues", "deletedAt", "review", "gifUrl", "gifCheckedAt"] as const;
 
 /**
  * Writes a video built from `base` while keeping whatever counters, subtitle tracks, and trash mark
@@ -1560,4 +1563,71 @@ export async function queryVideos(ownerId: string = LOCAL_OWNER, query: VideoQue
     rendering: live.filter((v) => v.status === "processing" || v.status === "queued").length,
     trashed,
   };
+}
+
+// The picture an email shows for a shared video: the renderer's animated GIF of it, linked to the share page. The GIF's
+// link is the renderer's, signed for a limited time, so it is asked for again once old, at most once per video every
+// few minutes however many inboxes open the email.
+
+const gifAttempted = new Map<string, number>();
+const gifInFlight = new Map<string, Promise<string | undefined>>();
+
+/**
+ * Where a shared video's email picture is, for the public: the animated GIF, or the cover (or the renderer's thumbnail)
+ * when there is no GIF or the link asks for an email first, since moving footage would stand in for the form. Null for a
+ * password-protected link, an unfinished video, or a video with no picture at all; not found like the share page.
+ */
+export async function emailPreview(id: string, now = Date.now()): Promise<{ url: string; animated: boolean } | null> {
+  const video = await getVideo(id, PUBLIC_ACCESS, false);
+  if (video.shareLocked || video.status !== "completed") return null;
+  const poster = posterUrl(video, config.appUrl.replace(/\/$/, ""));
+  const still = poster ? { url: poster, animated: false } : null;
+  if (video.shareGate) return still;
+  const gif = await freshGif(video, now);
+  return gif ? { url: gif, animated: true } : still;
+}
+
+async function freshGif(video: Video, now: number): Promise<string | undefined> {
+  // One that came with the finished render has no check time of its own (an edit moves `updatedAt`), so it is asked for once.
+  if (video.gifUrl && video.gifCheckedAt && now - Date.parse(video.gifCheckedAt) <= RELINK_MS) return video.gifUrl;
+  let provider: AvatarProvider;
+  try {
+    provider = getAvatarProviderByName(video.provider);
+  } catch {
+    return video.gifUrl;
+  }
+  if (!provider.gifPreviews || !video.providerJobId) return video.gifUrl;
+  const running = gifInFlight.get(video.id);
+  if (running) return running;
+  // A renderer that could not answer (or had no GIF) is not asked again for a while, so a busy email cannot cost a call per open.
+  if (now - (gifAttempted.get(video.id) ?? 0) < RETRY_FINISHED_MS) return video.gifUrl;
+  gifAttempted.set(video.id, now);
+  for (const [vid, at] of gifAttempted) if (now - at > RETRY_FINISHED_MS * 2) gifAttempted.delete(vid);
+  const run = renewGif(provider, video).finally(() => gifInFlight.delete(video.id));
+  gifInFlight.set(video.id, run);
+  return run;
+}
+
+/** Asks the renderer for a fresh GIF link and stores it; never throws (the old link, if any, is the answer then). */
+async function renewGif(provider: AvatarProvider, video: Video): Promise<string | undefined> {
+  let gifUrl: string | undefined;
+  try {
+    const status = await provider.getStatus(video.providerJobId!);
+    gifUrl = status.status === "completed" ? status.gifUrl : undefined;
+  } catch (err) {
+    console.error(`preview refresh failed for ${video.id}:`, err);
+    return video.gifUrl;
+  }
+  if (!gifUrl) return video.gifUrl;
+  await withCounterLock(video.id, async () => {
+    const current = await getStore().get<Video>("video", video.id);
+    // Deleted meanwhile: never brought back.
+    if (current) await getStore().put("video", { ...current, gifUrl, gifCheckedAt: nowIso() });
+  });
+  return gifUrl;
+}
+
+/** Forgets when previews were last asked for (tests). */
+export function forgetGifChecks(): void {
+  gifAttempted.clear();
 }

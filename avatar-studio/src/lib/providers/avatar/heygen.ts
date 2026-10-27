@@ -5,7 +5,7 @@ import { voiceTakesAccent } from "../../language";
 import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
 import { HeyGenClient } from "../heygen-client";
-import { NotFoundError, ValidationError } from "../../errors";
+import { ConflictError, NotFoundError, ValidationError } from "../../errors";
 import type { AvatarJobStatus, AvatarProvider, CleanupStatus, HighlightInput, HighlightStatus, LipsyncInput, LipsyncStatus, RenderCast } from "../types";
 
 /**
@@ -20,6 +20,8 @@ const PENDING = "heygen:pending";
  * "heygen", are uploaded again once rather than trusted as v3 asset ids.
  */
 const ASSET = "heygen:asset";
+/** HeyGen's answer (409) to an idempotency key whose first request it is still working on. */
+const STILL_SENDING = "This start is still being sent to HeyGen; try again in a moment";
 /** How often, and how long, a new photo avatar is waited for before its first render: about ten seconds. */
 const PHOTO_CHECKS = 4;
 const PHOTO_CHECK_MS = 3000;
@@ -351,6 +353,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     } catch (err) {
       // A recording HeyGen will not clean (no speech, unreadable, too long, or past the plan) is the account's to change.
       const message = err instanceof Error ? err.message : "";
+      if (/ failed: 409 /.test(message)) throw new ConflictError(STILL_SENDING);
       if (/ failed: (400|402|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not clean that recording: ${heygenReason(message, "check that the recording has speech and is at most two hours long")}`);
       throw err;
     }
@@ -393,6 +396,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     } catch (err) {
       // Footage or audio HeyGen will not sync (no face, unreadable, too long, or past the plan) is the account's to change.
       const message = err instanceof Error ? err.message : "";
+      if (/ failed: 409 /.test(message)) throw new ConflictError(STILL_SENDING);
       if (/ failed: (400|402|404|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not lip-sync that video: ${heygenReason(message, "check that the video shows one speaker's face and the audio has speech")}`);
       throw err;
     }

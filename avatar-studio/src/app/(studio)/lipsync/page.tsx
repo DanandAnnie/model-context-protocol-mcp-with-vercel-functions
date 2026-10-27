@@ -6,9 +6,9 @@ import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
-import { api, formatDate, formatSeconds } from "@/lib/client";
+import { ApiError, api, formatDate, formatSeconds } from "@/lib/client";
 import { toWavDataUrl } from "@/lib/wav-client";
-import type { AudioClip, LipsyncJob, LipsyncMode, Video } from "@/lib/types";
+import { MAX_CLIP_SECONDS, type AudioClip, type LipsyncJob, type LipsyncMode, type Video } from "@/lib/types";
 
 /** A lip sync as the server lists it: never the renderer or its job id. */
 type Lipsync = Omit<LipsyncJob, "ownerId" | "provider" | "providerJobId">;
@@ -17,6 +17,49 @@ const newKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? 
 /** Lip-synced videos' links are renewed by the server once this old; a page left open asks again when it is looked at. */
 const RELINK_MS = 30 * 60 * 1000;
 const MODE_LABEL: Record<LipsyncMode, string> = { speed: "Fast", precision: "Precise" };
+/** Largest file the clips route takes (3 MB, which fits one request once base64-encoded). */
+const MAX_UPLOAD_BYTES = 3 * 1024 * 1024;
+
+/** An MP3's length from its metadata, or null when the browser cannot tell (it is then converted instead). */
+function mp3Seconds(file: File): Promise<number | null> {
+  const url = URL.createObjectURL(file);
+  return new Promise<number | null>((resolve) => {
+    const audio = new Audio();
+    audio.preload = "metadata";
+    audio.onloadedmetadata = () => resolve(Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : null);
+    audio.onerror = () => resolve(null);
+    audio.src = url;
+  }).finally(() => URL.revokeObjectURL(url));
+}
+
+const asDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("The file could not be read"));
+    reader.readAsDataURL(file);
+  });
+
+/**
+ * The clip to save for an uploaded file. The clip becomes the video's whole soundtrack, so an MP3 the server takes as it
+ * is (up to 3 MB and 90 seconds) is kept as it is; anything else is converted in the browser to the 16 kHz mono WAV the
+ * editor saves for audio scenes.
+ */
+async function clipBody(file: File, name: string): Promise<{ name: string; audio: string; durationSec?: number }> {
+  if (file.type === "audio/mpeg" && file.size <= MAX_UPLOAD_BYTES) {
+    const seconds = await mp3Seconds(file);
+    if (seconds !== null && seconds <= MAX_CLIP_SECONDS) return { name, audio: (await asDataUrl(file)).replace(/^data:[^;,]*/, "data:audio/mpeg"), durationSec: Math.max(0.1, Math.round(seconds * 10) / 10) };
+    if (seconds !== null) throw new Error(`The new audio can be at most ${MAX_CLIP_SECONDS} seconds long; trim it, or paste a link to the full track`);
+  }
+  try {
+    const { dataUrl } = await toWavDataUrl(file);
+    return { name, audio: dataUrl };
+  } catch (err) {
+    // The converter's advice is for scenes; here the way round a long track is a link to it.
+    if (err instanceof Error && /at most \d+ seconds/.test(err.message)) throw new Error(`The new audio can be at most ${MAX_CLIP_SECONDS} seconds long; trim it, or paste a link to the full track`);
+    throw err;
+  }
+}
 
 /**
  * "Lip sync": a video given a new audio track, the speaker's mouth redrawn to match (HeyGen lip sync). For a line
@@ -37,7 +80,7 @@ export default function LipsyncPage() {
   }, [running, refetch]);
   const { data: library } = useApi<{ videos: Video[]; hasMore?: boolean }>("/api/videos?status=completed&limit=200");
   const videos = (library?.videos ?? []).filter((v) => v.videoUrl && !v.deletedAt);
-  const { data: clipData, setData: setClipData } = useApi<{ clips: AudioClip[] }>("/api/clips");
+  const { data: clipData, setData: setClipData, refetch: refetchClips } = useApi<{ clips: AudioClip[] }>("/api/clips");
   const clips = clipData?.clips ?? [];
   const [from, setFrom] = useState<"link" | "library">("library");
   const [sourceUrl, setSourceUrl] = useState("");
@@ -96,10 +139,11 @@ export default function LipsyncPage() {
     setUploading(true);
     setErr(null);
     try {
-      const { dataUrl } = await toWavDataUrl(file);
       const name = file.name.replace(/\.[^.]+$/, "").slice(0, 80) || "Uploaded audio";
-      const { clip } = await api<{ clip: AudioClip }>("/api/clips", { method: "POST", body: JSON.stringify({ name, audio: dataUrl }) });
+      const { clip } = await api<{ clip: AudioClip }>("/api/clips", { method: "POST", body: JSON.stringify(await clipBody(file, name)) });
       setClipData((prev) => ({ clips: [clip, ...(prev?.clips ?? []).filter((c) => c.id !== clip.id)] }));
+      // A first listing still on its way would land without the new clip; asking again retires it.
+      void refetchClips();
       setClipId(clip.id);
       changed();
       setNote(`Uploaded ${clip.name}.`);
@@ -136,6 +180,9 @@ export default function LipsyncPage() {
       focusAfterRender(() => listRef.current?.querySelector<HTMLElement>(`[data-lipsync="${lipsync.id}"]`) ?? firstInput.current);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "The video could not be lip-synced");
+      // A refusal is an answer: trying again (after topping up, say) is a new start. A lost answer keeps its key, so a
+      // retry returns the start that may have gone through.
+      if (e instanceof ApiError && e.status < 500) setRequestKey(newKey());
     } finally {
       setBusy(false);
     }
@@ -191,7 +238,7 @@ export default function LipsyncPage() {
               </fieldset>
               {from === "link" ? (
                 <Field label="Video URL" hint="A public https link to a video of one person speaking, face to camera.">
-                  <input ref={firstInput} className={inputClass} value={sourceUrl} disabled={canEdit === false} onChange={(e) => (setSourceUrl(e.target.value), changed())} placeholder="https://…/interview.mp4" />
+                  <input ref={firstInput} type="url" inputMode="url" className={inputClass} value={sourceUrl} disabled={canEdit === false} onChange={(e) => (setSourceUrl(e.target.value), changed())} placeholder="https://…/interview.mp4" />
                 </Field>
               ) : (
                 <Field label="Library video" hint={!library ? "Loading your videos…" : videos.length ? (library.hasMore ? "Your 200 newest finished videos." : "A finished video of your library.") : "No finished videos yet."}>
@@ -220,11 +267,11 @@ export default function LipsyncPage() {
               </fieldset>
               {audioFrom === "link" ? (
                 <Field label="Audio URL" hint="A public https link to an MP3 or WAV file with the new speech.">
-                  <input className={inputClass} value={audioUrl} disabled={canEdit === false} onChange={(e) => (setAudioUrl(e.target.value), changed())} placeholder="https://…/new-voice-over.mp3" />
+                  <input type="url" inputMode="url" className={inputClass} value={audioUrl} disabled={canEdit === false} onChange={(e) => (setAudioUrl(e.target.value), changed())} placeholder="https://…/new-voice-over.mp3" />
                 </Field>
               ) : (
                 <div>
-                  <Field label="Audio clip" hint={clips.length ? "Your saved clips, including those recorded for a scene; or upload one (up to 90 seconds)." : "Upload an audio file (up to 90 seconds); it is saved with your audio clips."}>
+                  <Field label="Audio clip" hint={clips.length ? "Your saved clips, including those recorded for a scene; or upload one (up to 90 seconds). An MP3 is kept as it is; other files are saved as 16 kHz mono WAV." : "Upload an audio file (up to 90 seconds); it is saved with your audio clips. An MP3 is kept as it is; other files are saved as 16 kHz mono WAV."}>
                     <select className={inputClass} value={clipId} disabled={canEdit === false || uploading} onChange={(e) => (setClipId(e.target.value), changed())}>
                       <option value="">{clips.length ? "Choose a clip" : "No clips yet"}</option>
                       {clips.map((c) => (

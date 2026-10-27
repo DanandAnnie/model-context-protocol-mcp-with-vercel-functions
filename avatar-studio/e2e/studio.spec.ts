@@ -712,6 +712,15 @@ test("a video is lip-synced to an uploaded clip or a linked track, at the chosen
   page.once("dialog", (d) => d.accept());
   await item.getByRole("button", { name: /^Delete / }).click();
   await expect(page.getByTestId("lipsync")).toHaveCount(listed.length - 1);
+  // An MP3 is kept as it is, as the clip becomes the whole soundtrack; its length is read in the browser.
+  await page.getByLabel("An audio clip").check();
+  await page.getByLabel("Upload the new audio").setInputFiles("e2e/fixtures/voice-over.mp3");
+  await expect(clipPicker.locator("option:checked")).toHaveText("voice-over (3s)");
+  const mp3 = ((await (await page.request.get("/api/clips")).json()).clips as Array<{ id: string; name: string; mimeType: string; durationSec: number }>).find((c) => c.name === "voice-over")!;
+  expect(mp3.mimeType).toBe("audio/mpeg");
+  expect(mp3.durationSec).toBeGreaterThan(2.5);
+  expect((await page.request.get(`/api/clips/${mp3.id}`)).headers()["content-type"]).toBe("audio/mpeg");
+  expect((await page.request.delete(`/api/clips/${mp3.id}`)).status()).toBe(204);
   expect((await page.request.delete(`/api/clips/${clipId}`)).status()).toBe(204);
 });
 

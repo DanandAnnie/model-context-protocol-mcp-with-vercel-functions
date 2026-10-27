@@ -199,6 +199,7 @@ describe("lip syncs", () => {
       if (url === "https://api.heygen.com/v3/videos/hg_video") return Response.json({ data: { status: "completed", video_url: "https://files.heygen.ai/fresh.mp4?sig=1" } });
       if (url === "https://api.heygen.com/v3/assets" && init?.method === "POST") return Response.json({ data: { asset_id: "asset_take" } });
       if (url === "https://api.heygen.com/v3/lipsyncs" && init?.method === "POST") {
+        if ((body as { title: string }).title === "in flight") return Response.json({ error: { code: "request_in_progress", message: "A request with this key is in progress." } }, { status: 409 });
         if ((body as { title: string }).title === "refuse") return Response.json({ error: { code: "invalid_parameter", message: "No face was found in the video." } }, { status: 400 });
         return Response.json({ data: { lipsync_id: "ls_hg1" } });
       }
@@ -219,11 +220,12 @@ describe("lip syncs", () => {
       assert.equal(calls.filter((c) => c.url.endsWith("/v3/assets")).length, 1);
       await startLipsync(lipsyncRequestSchema.parse({ sourceUrl: VIDEO, audioUrl: AUDIO }), "u1");
       assert.deepEqual(calls.filter((c) => c.url.endsWith("/v3/lipsyncs") && c.method === "POST").at(-1)!.body, { video: { type: "url", url: VIDEO }, audio: { type: "url", url: AUDIO }, mode: "speed", title: "Lip-synced video" });
+      await assert.rejects(startLipsync(lipsyncRequestSchema.parse({ sourceUrl: VIDEO, audioUrl: AUDIO, title: "in flight" }), "u1"), (e: unknown) => e instanceof ConflictError && /still being sent/.test((e as Error).message) && !/api\.heygen\.com/.test((e as Error).message));
       await assert.rejects(startLipsync(lipsyncRequestSchema.parse({ sourceUrl: VIDEO, audioUrl: AUDIO, title: "refuse" }), "u1"), (e: unknown) => e instanceof ValidationError && /could not lip-sync that video: No face was found in the video\./.test((e as Error).message));
 
       const mine = async () => (await listLipsyncs("u1")).find((l) => l.id === job.id)!;
-      const reset = async () => {
-        await getStore().put("lipsync", { ...(await getStore().get<LipsyncJob>("lipsync", job.id))!, status: "processing" });
+      const reset = async (extra: Partial<LipsyncJob> = {}) => {
+        await getStore().put("lipsync", { ...(await getStore().get<LipsyncJob>("lipsync", job.id))!, status: "processing", ...extra });
         forgetLipsyncChecks();
       };
       assert.equal((await mine()).status, "processing");
@@ -236,9 +238,10 @@ describe("lip syncs", () => {
       await reset();
       assert.deepEqual([(await mine()).status, (await mine()).error], ["failed", "HeyGen finished without a lip-synced video"]);
       lipsync = { data: { status: "failed", failure_message: "The audio has no speech." } };
-      await reset();
+      // A link from an earlier answer is held, so the failure is seen to drop it.
+      await reset({ videoUrl: "https://files2.heygen.ai/synced.mp4?sig=a", durationSec: 41.5 });
       const failed = await mine();
-      assert.deepEqual([failed.status, failed.error, failed.videoUrl], ["failed", "The audio has no speech.", undefined], "a failure drops the old link");
+      assert.deepEqual([failed.status, failed.error, failed.videoUrl, failed.durationSec], ["failed", "The audio has no speech.", undefined, undefined], "a failure drops the old link");
       lipsync = { gone: true };
       await reset();
       assert.match((await mine()).error!, /no longer available from HeyGen/);

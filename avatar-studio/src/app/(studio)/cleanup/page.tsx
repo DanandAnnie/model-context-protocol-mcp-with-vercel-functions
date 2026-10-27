@@ -6,7 +6,7 @@ import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
-import { api, formatDate, formatSeconds } from "@/lib/client";
+import { ApiError, api, formatDate, formatSeconds } from "@/lib/client";
 import type { CleanupJob, Video } from "@/lib/types";
 
 /** A cleanup as the server lists it: never the renderer or its job id. */
@@ -103,6 +103,9 @@ export default function CleanupPage() {
       focusAfterRender(() => listRef.current?.querySelector<HTMLElement>(`[data-cleanup="${cleanup.id}"]`) ?? sourceInput.current);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "The recording could not be cleaned up");
+      // A refusal is an answer: trying again (after topping up, say) is a new start. A lost answer keeps its key, so a
+      // retry returns the start that may have gone through.
+      if (e instanceof ApiError && e.status < 500) setRequestKey(newKey());
     } finally {
       setBusy(false);
     }
@@ -156,7 +159,7 @@ export default function CleanupPage() {
               </fieldset>
               {from === "link" ? (
                 <Field label="Recording URL" hint="A public https link to a video with speech, up to 2 hours long: a webinar, a screen recording, an interview.">
-                  <input ref={sourceInput} className={inputClass} value={sourceUrl} disabled={canEdit === false} onChange={(e) => {
+                  <input ref={sourceInput} type="url" inputMode="url" className={inputClass} value={sourceUrl} disabled={canEdit === false} onChange={(e) => {
                       setSourceUrl(e.target.value);
                       setErr(null);
                       setRequestKey(newKey());

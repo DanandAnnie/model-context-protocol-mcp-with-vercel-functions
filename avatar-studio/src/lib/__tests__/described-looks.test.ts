@@ -91,15 +91,15 @@ describe("looks from a description", () => {
     const calls: Array<{ url: string; method: string; body: unknown; idem: string | null }> = [];
     let assets = 0;
     let look: Record<string, unknown> = { status: "processing" };
-    let refuse: { status: number; message: string } | null = null;
+    let refuse: { status: number; message: string; code?: string } | null = null;
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
       calls.push({ url, method: init?.method ?? "GET", body, idem: new Headers(init?.headers).get("idempotency-key") });
-      if (url === "https://api.heygen.com/v3/assets") return Response.json({ data: { asset_id: assets++ === 0 ? "asset_dana" : `asset_ref${assets - 1}` } });
+      if (url === "https://api.heygen.com/v3/assets") return Response.json({ data: { asset_id: `asset_${++assets}` } });
       if (url === "https://api.heygen.com/v3/avatars" && init?.method === "POST") {
         if (body?.type === "photo") return Response.json({ data: { avatar_item: { id: "look_dana", status: "processing" } } });
-        if (refuse) return Response.json({ error: { code: "invalid_parameter", message: refuse.message } }, { status: refuse.status });
+        if (refuse) return Response.json({ error: { code: refuse.code ?? "invalid_parameter", message: refuse.message } }, { status: refuse.status });
         return Response.json({ data: { look_id: "look_new", status: "processing" } });
       }
       if (url === "https://api.heygen.com/v3/avatars/looks/look_dana") return Response.json({ data: { status: "completed", preview_image_url: "https://files.heygen.ai/dana.png" } });
@@ -116,8 +116,10 @@ describe("looks from a description", () => {
       const dana = await mine("u1", { provider: "heygen" });
       const job: LookPackJob = await startLookPack(described(dana.id, { aspect: "9:16", references: [png(1), jpeg(2)] }), "u1", { key: "key-heygen-1" });
       const uploads = calls.filter((c) => c.url.endsWith("/v3/assets"));
-      assert.equal(uploads.length, 3, "the portrait, then each picture");
-      const post = calls.find((c) => c.url.endsWith("/v3/avatars") && (c.body as { type?: string })?.type === "prompt")!;
+      assert.equal(uploads.length, 1, "only the portrait is uploaded; the pictures go with the request");
+      const posts = () => calls.filter((c) => c.url.endsWith("/v3/avatars") && (c.body as { type?: string })?.type === "prompt");
+      const post = posts()[0];
+      const b64 = (url: string) => url.slice(url.indexOf(",") + 1);
       assert.deepEqual(post.body, {
         type: "prompt",
         name: "Dana",
@@ -125,11 +127,17 @@ describe("looks from a description", () => {
         aspect_ratio: "9:16",
         avatar_id: "look_dana",
         reference_images: [
-          { type: "asset_id", asset_id: "asset_ref1" },
-          { type: "asset_id", asset_id: "asset_ref2" },
+          { type: "base64", content: b64(png(1)) },
+          { type: "base64", content: b64(jpeg(2)) },
         ],
       });
       assert.equal(post.idem, job.id, "a retried start replays HeyGen's first answer");
+      // A start whose answer was lost (never stored) is sent again with the same key and the very same body, so HeyGen
+      // can give back the look it already drew instead of refusing the key.
+      await getStore().remove("lookpack", job.id);
+      const retried = await startLookPack(described(dana.id, { aspect: "9:16", references: [png(1), jpeg(2)] }), "u1", { key: "key-heygen-1" });
+      assert.equal(retried.id, job.id);
+      assert.deepEqual([posts()[1].body, posts()[1].idem], [post.body, post.idem]);
 
       assert.equal((await listLookPacks("u1"))[0].status, "processing");
       look = { status: "completed", preview_image_url: "https://93.184.216.34/look_new.png" };
@@ -150,6 +158,9 @@ describe("looks from a description", () => {
       await assert.rejects(startLookPack(described(dana.id, { prompt: `${PROMPT}, once more` }), "u1"), (e: unknown) => e instanceof ValidationError && /could not draw that look of "Dana": The referenced avatar has no usable image\./.test((e as Error).message));
       refuse = { status: 409, message: "A request with this key is in progress." };
       await assert.rejects(startLookPack(described(dana.id, { prompt: `${PROMPT}, once more` }), "u1"), ConflictError);
+      // HeyGen's `conflict` (the key was used with another body) is a refusal to start again, not a wait.
+      refuse = { status: 409, message: "Idempotency key reused with a different request.", code: "conflict" };
+      await assert.rejects(startLookPack(described(dana.id, { prompt: `${PROMPT}, once more` }), "u1"), (e: unknown) => e instanceof ValidationError && /already asked for with other details/.test((e as Error).message));
     } finally {
       proto.sleep = realSleep;
       Object.assign(config, { avatarProvider: saved.avatar, heygenApiKey: saved.key });

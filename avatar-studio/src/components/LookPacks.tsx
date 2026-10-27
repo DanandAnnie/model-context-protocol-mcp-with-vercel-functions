@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { ImagePlus, Shirt, Sparkles, Trash2, X } from "lucide-react";
-import { Button, Card, ErrorBanner, Field, inputClass, StatusBadge } from "@/components/ui";
+import { Button, Card, ErrorBanner, inputClass, StatusBadge } from "@/components/ui";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { api, formatDate, isRefusal } from "@/lib/client";
 import { toUploadable } from "@/lib/image-upload";
@@ -48,9 +48,13 @@ export function LookPackPanel({ avatar, canPack = true, canDescribe = false, onC
   const described = mode === "described";
   const shortPrompt = prompt.trim().length < 10;
 
-  async function addPictures(files: FileList | null) {
-    const picked = Array.from(files ?? []);
-    if (!picked.length) return;
+  async function addPictures(input: HTMLInputElement) {
+    const picked = Array.from(input.files ?? []);
+    // The control stays enabled while busy (disabling it would drop its focus); a pick made then is ignored.
+    if (!picked.length || busy || reading) {
+      input.value = "";
+      return;
+    }
     const room = MAX_LOOK_REFERENCES - pictures.length;
     setReading(true);
     setErr(null);
@@ -59,6 +63,9 @@ export function LookPackPanel({ avatar, canPack = true, canDescribe = false, onC
       for (const file of picked.slice(0, room)) added.push({ name: file.name, url: await toUploadable(file, { maxBytes: MAX_REFERENCE_BYTES, maxEdge: REFERENCE_EDGE }) });
       setPictures((list) => [...list, ...added].slice(0, MAX_LOOK_REFERENCES));
       setRequestKey(newKey());
+      // With the last picture added the add control goes; the focus moves to the last picture's remove button.
+      const count = Math.min(MAX_LOOK_REFERENCES, pictures.length + added.length);
+      if (count === MAX_LOOK_REFERENCES) focusAfterRender(() => document.querySelector<HTMLElement>(`[data-look-reference="${count - 1}"]`));
       if (picked.length > room) setErr(`Only ${MAX_LOOK_REFERENCES} pictures can go with a look; the first ${room === 1 ? "one was" : `${room} were`} added.`);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "That picture could not be read");
@@ -122,16 +129,22 @@ export function LookPackPanel({ avatar, canPack = true, canDescribe = false, onC
       {described ? (
         <>
           <div className="mt-4">
-            <Field label="Describe the look" hint={`The clothes, the setting, and the light; the face stays ${avatar.name}'s. ${prompt.length} of ${MAX_LOOK_PROMPT} characters.`} hintId="look-prompt-hint">
-              <textarea
-                className={`${inputClass} min-h-24`}
-                value={prompt}
-                maxLength={MAX_LOOK_PROMPT}
-                aria-describedby="look-prompt-hint"
-                placeholder="A navy blazer over a white shirt, in a bright office with plants behind, soft window light"
-                onChange={(e) => (setPrompt(e.target.value), changed())}
-              />
-            </Field>
+            {/* The hint (with the live count) sits outside the label, so the box's name stays "Describe the look". */}
+            <label htmlFor="look-prompt" className="mb-1.5 block text-sm font-medium text-slate-700">
+              Describe the look
+            </label>
+            <textarea
+              id="look-prompt"
+              className={`${inputClass} min-h-24`}
+              value={prompt}
+              maxLength={MAX_LOOK_PROMPT}
+              aria-describedby="look-prompt-hint"
+              placeholder="A navy blazer over a white shirt, in a bright office with plants behind, soft window light"
+              onChange={(e) => (setPrompt(e.target.value), changed())}
+            />
+            <p id="look-prompt-hint" className="mt-1 text-xs text-slate-500">
+              The clothes, the setting, and the light; the face stays {avatar.name}&apos;s. {prompt.length} of {MAX_LOOK_PROMPT} characters.
+            </p>
           </div>
           <div className="mt-4">
             <div className="mb-1.5 text-sm font-medium text-slate-700" id="look-pictures-label">
@@ -154,12 +167,11 @@ export function LookPackPanel({ avatar, canPack = true, canDescribe = false, onC
               </ul>
             )}
             {pictures.length < MAX_LOOK_REFERENCES && (
-              <>
-                <input ref={fileRef} type="file" accept="image/*" multiple className="sr-only" id="look-pictures" aria-describedby="look-pictures-hint" onChange={(e) => addPictures(e.target.files)} disabled={busy || reading} />
-                <label htmlFor="look-pictures" className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 focus-within:ring-2 focus-within:ring-brand-500 ${busy || reading ? "pointer-events-none opacity-60" : ""}`}>
-                  <ImagePlus className="h-4 w-4" /> {reading ? "Reading…" : "Add pictures"}
-                </label>
-              </>
+              // The input is inside its label, so the label shows the focus ring when the input has the focus.
+              <label className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 focus-within:ring-2 focus-within:ring-brand-500 ${busy || reading ? "opacity-60" : ""}`}>
+                <input ref={fileRef} type="file" accept="image/*" multiple className="sr-only" id="look-pictures" aria-describedby="look-pictures-hint" aria-disabled={busy || reading} onChange={(e) => addPictures(e.currentTarget)} />
+                <ImagePlus className="h-4 w-4" aria-hidden /> {reading ? "Reading…" : "Add pictures"}
+              </label>
             )}
           </div>
           <fieldset className="mt-4">

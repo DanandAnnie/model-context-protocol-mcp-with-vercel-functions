@@ -39,7 +39,7 @@ export const lookPackRequestSchema = z.discriminatedUnion("pack", [
     /** The outfit and setting, in words; the face stays the avatar's. */
     prompt: z.string().trim().min(10, "Describe the outfit and setting in a few words").max(MAX_LOOK_PROMPT, `Describe the look in at most ${MAX_LOOK_PROMPT} characters`),
     aspect: z.enum(DESCRIBED_ASPECTS).default("4:5"),
-    /** Data URLs of PNG or JPEG pictures of the clothes or the place, used as guidance and not kept. */
+    /** Data URLs of PNG or JPEG pictures of the clothes or the place, sent to the renderer as guidance; the studio keeps only a digest. */
     references: z
       .array(z.string().max(Math.ceil((MAX_REFERENCE_BYTES * 4) / 3) + 100, "A picture is larger than 1 MB"))
       .max(MAX_LOOK_REFERENCES, `Send at most ${MAX_LOOK_REFERENCES} pictures`)

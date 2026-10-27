@@ -100,8 +100,9 @@ export class HeyGenClient {
   /**
    * Prompt to avatar (v3): a synthetic presenter drawn from a description, as a look to follow with `getLook`. With
    * `avatarId` (a look of the account's), the description restyles that person instead: their outfit and setting
-   * change, the face stays, and the look joins their character. Up to three `references` (asset ids) guide the
-   * wardrobe or setting; `key` makes a retried start replay the first answer. Read from `data` when the answer is
+   * change, the face stays, and the look joins their character. Up to three `references` (base64 pictures, sent with
+   * the request so a retry sends the same body) guide the wardrobe or setting; `key` makes a retried start replay the
+   * first answer. Read from `data` when the answer is
    * wrapped as the other v3 calls are, else from the answer itself.
    */
   async createPromptAvatar(
@@ -117,7 +118,7 @@ export class HeyGenClient {
         prompt,
         aspect_ratio: opts.aspect ?? "4:5",
         ...(opts.avatarId ? { avatar_id: opts.avatarId } : {}),
-        ...(opts.references?.length ? { reference_images: opts.references.map((id) => ({ type: "asset_id", asset_id: id })) } : {}),
+        ...(opts.references?.length ? { reference_images: opts.references.map((content) => ({ type: "base64", content })) } : {}),
       }),
       ...(opts.key ? { headers: { "Idempotency-Key": opts.key }, signal: AbortSignal.timeout(20_000) } : {}),
     });

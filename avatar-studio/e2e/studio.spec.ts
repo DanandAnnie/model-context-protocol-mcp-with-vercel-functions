@@ -1106,15 +1106,24 @@ test("a photo avatar is given a look described in words, with a picture of the c
   await panel.getByRole("button", { name: "Remove coat.png" }).click();
   await expect(panel.getByRole("img")).toHaveCount(1);
   await expect(panel.getByRole("button", { name: "Remove street.png" })).toBeFocused();
+  // Filling the last places takes the add control away; the focus goes to the last picture rather than the page.
+  await panel.getByLabel("Add pictures").setInputFiles([
+    { name: "hat.png", mimeType: "image/png", buffer: pixel },
+    { name: "shoes.png", mimeType: "image/png", buffer: pixel },
+  ]);
+  await expect(panel.getByRole("img")).toHaveCount(3);
+  await expect(panel.getByLabel("Add pictures")).toHaveCount(0);
+  await expect(panel.getByRole("button", { name: "Remove shoes.png" })).toBeFocused();
+  await expect(panel.getByRole("textbox", { name: "Describe the look", exact: true })).toHaveValue(prompt);
   await panel.getByLabel("Landscape 16:9").check();
   const sent = page.waitForRequest((r) => r.url().endsWith("/api/look-packs") && r.method() === "POST");
   await draw.click();
   const request = await sent;
-  expect(request.postDataJSON()).toEqual({ avatarId: avatar.id, pack: "described", prompt, aspect: "16:9", references: [`data:image/png;base64,${pixel.toString("base64")}`] });
+  expect(request.postDataJSON()).toEqual({ avatarId: avatar.id, pack: "described", prompt, aspect: "16:9", references: Array(3).fill(`data:image/png;base64,${pixel.toString("base64")}`) });
   // The look is listed with its description, and the demo renderer's look is ready at once and joins the library.
   const look = page.getByTestId("look-pack").filter({ hasText: `A described look of ${name}` });
   await expect(look).toBeFocused();
-  await expect(look.getByTestId("look-prompt")).toHaveText(`${prompt} (with 1 picture)`);
+  await expect(look.getByTestId("look-prompt")).toHaveText(`${prompt} (with 3 pictures)`);
   await expect(look.getByTestId("look-pack-meta")).toContainText("1 of 1 ready · 16:9");
   await expect(page.getByTestId("avatar-library").getByText(`${name} · Described look`)).toBeVisible();
   const listed = (await (await page.request.get("/api/look-packs")).json()).lookPacks as Array<Record<string, unknown>>;

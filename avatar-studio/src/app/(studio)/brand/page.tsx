@@ -44,6 +44,15 @@ export default function BrandPage() {
       setBgType("");
     }
   }, [backdropData, bgUrl]);
+  // Likewise a generated clip deleted since (here or in another tab) is let go of, rather than failing the save.
+  useEffect(() => {
+    if (!footageData) return;
+    const id = footageIdOf({ type: "video", value: bgUrl });
+    if (id && !footageData.footage.some((f) => f.id === id)) {
+      setBgUrl("");
+      setBgType("");
+    }
+  }, [footageData, bgUrl]);
   const [pronunciations, setPronunciations] = useState("");
   const [glossary, setGlossary] = useState("");
   const [forced, setForced] = useState("");

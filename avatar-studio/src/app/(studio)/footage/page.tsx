@@ -46,6 +46,8 @@ export default function FootagePage() {
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // A delete that fails is reported by the list, where its button was, and also when clips can no longer be made here.
+  const [listErr, setListErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   // One key per start: a retry of the same start (after a timeout, say) sends it again and gets the same clip back.
   const [requestKey, setRequestKey] = useState(() => newKey());
@@ -112,6 +114,8 @@ export default function FootagePage() {
 
   function removePicture() {
     setPicture(null);
+    // Without the picture a square clip is standard only, so HD chosen for the picture does not come back on another frame.
+    if (aspect === "1:1") setQuality("standard");
     changed();
     // The focus goes to the control that adds one, which takes the remove button's place.
     focusAfterRender(() => fileRef.current);
@@ -151,7 +155,7 @@ export default function FootagePage() {
 
   async function remove(f: Footage) {
     if (!window.confirm(`Delete “${f.title}”? Scenes that loop it can no longer be rendered, and making it again uses another job.`)) return;
-    setErr(null);
+    setListErr(null);
     setNote(null);
     const next = items[items.indexOf(f) + 1] ?? items[items.indexOf(f) - 1];
     try {
@@ -163,7 +167,7 @@ export default function FootagePage() {
       // Focus moves to the next clip, or to the list's heading, rather than being lost with the button.
       focusAfterRender(() => (next ? listRef.current?.querySelector<HTMLElement>(`[data-footage="${next.id}"]`) : headingRef.current));
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "The clip could not be deleted");
+      setListErr(e instanceof Error ? e.message : "The clip could not be deleted");
     }
   }
 
@@ -288,6 +292,7 @@ export default function FootagePage() {
           <h2 ref={headingRef} tabIndex={-1} className="mb-3 text-sm font-semibold text-slate-900 outline-none">
             Your clips
           </h2>
+          <ErrorBanner message={listErr} />
           {!data ? null : items.length === 0 ? (
             <EmptyState icon={<MonitorPlay className="h-8 w-8" />} title="No clips yet" body="Describe a shot on the left to make one." />
           ) : (

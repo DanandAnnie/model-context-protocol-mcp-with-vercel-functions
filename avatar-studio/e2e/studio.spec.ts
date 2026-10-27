@@ -1189,6 +1189,14 @@ test("a b-roll clip is made from a description and loops behind a presenter as a
   await page.getByLabel("Square 1:1").check();
   await expect(page.getByLabel("HD (1080p)")).toBeDisabled();
   await expect(page.getByText("HD clips are landscape or portrait, not square.")).toBeVisible();
+  // HD chosen for a picture does not come back once the picture is removed on a square frame.
+  await page.locator('input[type="file"][accept="image/*"]').setInputFiles({ name: "frame.png", mimeType: "image/png", buffer: Buffer.from(TINY_PNG, "base64") });
+  await page.getByLabel("HD (1080p)").check();
+  await page.getByRole("button", { name: "Remove frame.png" }).click();
+  await expect(page.getByLabel("Standard (768p)")).toBeChecked();
+  await page.getByLabel("Landscape 16:9").check();
+  await expect(page.getByLabel("Standard (768p)")).toBeChecked();
+  await page.getByLabel("Square 1:1").check();
   // Square moves the choice to standard, and it stays standard when the frame changes back (HD costs three times as much).
   await page.getByLabel("Portrait 9:16").check();
   await expect(page.getByLabel("Standard (768p)")).toBeChecked();
@@ -1224,18 +1232,24 @@ test("a b-roll clip is made from a description and loops behind a presenter as a
   const video = await createVideoViaApi(page, `B-roll ${tag}`, { background: { type: "video", value: `/api/footage/${id}/clip` } });
   const stored = (await (await page.request.get(`/api/videos/${video.id}`)).json()).video as { background: unknown };
   expect(stored.background).toEqual({ type: "video", value: `/api/footage/${id}/clip` });
-  // The brand kit can loop it behind every new video too.
-  await page.goto("/brand");
-  await page.getByLabel("Default background", { exact: true }).selectOption("clip");
-  await page.getByRole("combobox", { name: "Generated clip", exact: true }).selectOption(id);
-  await page.getByRole("button", { name: "Save brand kit" }).click();
-  await expect.poll(async () => ((await (await page.request.get("/api/brand")).json()).brand as { defaultBackground?: unknown } | null)?.defaultBackground).toEqual({ type: "video", value: `/api/footage/${id}/clip` });
-  // A clip deleted since can no longer be looped, and a render naming it is refused with a reason.
-  await page.goto("/footage");
-  page.once("dialog", (d) => d.accept());
-  await page.getByTestId("footage").filter({ hasText: tag }).getByRole("button", { name: /^Delete / }).click();
-  await expect(page.getByTestId("footage").filter({ hasText: tag })).toHaveCount(0);
-  expect(((await (await page.request.get("/api/brand")).json()).brand as { defaultBackground?: unknown }).defaultBackground, "the kit lets go of the deleted clip").toBeUndefined();
+  // The brand kit can loop it behind every new video too (the kit is put back afterwards: later tests expect the plain defaults).
+  const before = (await (await page.request.get("/api/brand")).json()).brand as Record<string, unknown> | null;
+  try {
+    await page.goto("/brand");
+    await page.getByLabel("Default background", { exact: true }).selectOption("clip");
+    await page.getByRole("combobox", { name: "Generated clip", exact: true }).selectOption(id);
+    await page.getByRole("button", { name: "Save brand kit" }).click();
+    await expect.poll(async () => ((await (await page.request.get("/api/brand")).json()).brand as { defaultBackground?: unknown } | null)?.defaultBackground).toEqual({ type: "video", value: `/api/footage/${id}/clip` });
+    // A clip deleted since can no longer be looped, and a render naming it is refused with a reason.
+    await page.goto("/footage");
+    page.once("dialog", (d) => d.accept());
+    await page.getByTestId("footage").filter({ hasText: tag }).getByRole("button", { name: /^Delete / }).click();
+    await expect(page.getByTestId("footage").filter({ hasText: tag })).toHaveCount(0);
+    expect(((await (await page.request.get("/api/brand")).json()).brand as { defaultBackground?: unknown }).defaultBackground, "the kit lets go of the deleted clip").toBeUndefined();
+  } finally {
+    const restored = before ? await page.request.put("/api/brand", { data: before }) : await page.request.delete("/api/brand");
+    expect(restored.ok()).toBe(true);
+  }
   expect((await page.request.get(`/api/footage/${id}/clip`)).status()).toBe(404);
   expect((await page.request.get("/api/footage/not-a-clip/clip")).status(), "a malformed id reads as not found too").toBe(404);
   const refused = await page.request.post("/api/videos", { data: { title: "Gone clip", avatarId: "stock_1", voiceId: "stock_voice_1", script: "Hello there.", background: { type: "video", value: `/api/footage/${id}/clip` } } });

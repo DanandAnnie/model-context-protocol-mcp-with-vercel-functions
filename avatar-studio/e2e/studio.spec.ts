@@ -543,7 +543,7 @@ test("Avatar V is chosen for presenters whose look supports it, kept with the vi
   await page.getByRole("button", { name: "Avatar", exact: true }).click();
   await page.getByRole("button", { name: "Sofia Reyes Sofia Reyes" }).click();
   await page.getByRole("button", { name: "Settings" }).click();
-  await expect(page.getByLabel("Avatar engine", { exact: true }).locator("option:checked")).toHaveText("Avatar V (not sent: no presenter here supports it)");
+  await expect(page.getByLabel("Avatar engine", { exact: true }).locator("option:checked")).toHaveText("Avatar V (not sent: no presenter here renders on it)");
   const again = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
   await page.getByRole("button", { name: "Generate video" }).click();
   expect("avatarEngine" in ((await again).postDataJSON() as Record<string, unknown>)).toBe(false);

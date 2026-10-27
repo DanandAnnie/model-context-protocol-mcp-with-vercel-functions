@@ -250,6 +250,17 @@ export interface LipsyncJob {
 }
 
 /** A track of the renderer's background-music catalog, found by describing it (HeyGen's audio catalog). */
+/** Sound effects one video with music may place at moments of the video. */
+export const MAX_MUSIC_EFFECTS = 5;
+
+/** A catalog sound effect placed at a moment of the video (in seconds), and the description it was found with. */
+export interface MusicEffect {
+  trackId: string;
+  name: string;
+  query: string;
+  atSec: number;
+}
+
 export interface MusicTrack {
   id: string;
   name: string;
@@ -321,6 +332,8 @@ export interface MusicJob {
   trackName: string;
   query: string;
   volume: MusicVolume;
+  /** Sound effects placed at moments of the video, earliest first. */
+  effects?: MusicEffect[];
   /** Renderer mixing it, and its job id there, never shown to the account. */
   provider: string;
   providerJobId: string;

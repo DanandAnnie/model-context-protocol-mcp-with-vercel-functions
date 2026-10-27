@@ -264,12 +264,12 @@ export class HeyGenClient {
   }
 
   /**
-   * Background music matching a description (`GET /v3/audio/sounds`, the music catalog), best first; each track's
-   * `audio_url` is signed for a short time.
+   * Background music or sound effects matching a description (`GET /v3/audio/sounds`, `type=music` or
+   * `type=sound_effects`), best first; each track's `audio_url` is signed for a short time.
    */
-  async searchMusic(query: string, limit = 12): Promise<Array<{ id: string; name: string; description?: string | null; audio_url?: string | null; duration?: number | null }>> {
+  async searchMusic(query: string, limit = 12, type: "music" | "sound_effects" = "music"): Promise<Array<{ id: string; name: string; description?: string | null; audio_url?: string | null; duration?: number | null }>> {
     const json = await this.envelope<Array<{ id: string; name: string; description?: string | null; audio_url?: string | null; duration?: number | null }>>(
-      `${V3}/audio/sounds?query=${encodeURIComponent(query)}&limit=${limit}&type=music`,
+      `${V3}/audio/sounds?query=${encodeURIComponent(query)}&limit=${limit}&type=${type}`,
       { signal: AbortSignal.timeout(8_000) },
     );
     return Array.isArray(json.data) ? json.data : [];

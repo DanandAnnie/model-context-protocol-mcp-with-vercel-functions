@@ -1,5 +1,5 @@
 // Background music (HeyGen's music catalog and HyperFrames): a catalog track, found by describing it, mixed under a
-// finished library video and rendered as a new video. The page sent to the renderer, what is accepted, what HeyGen is
+// finished library video with any sound effects placed at its moments, and rendered as a new video. The page sent to the renderer, what is accepted, what HeyGen is
 // asked, how a mix is followed, and that it goes with its video and the account.
 // Run with: npm test
 import assert from "node:assert/strict";
@@ -74,6 +74,30 @@ describe("the music mix page sent to the renderer", () => {
     assert.match(audio[2], /data-start="32" data-duration="8" .*data-fade-out="2"/);
     assert.doesNotMatch(html, /<script/i, "nothing runs in the page");
   });
+
+  it("plays each sound effect once from its moment at full volume, cut at the video's end, and leaves out one past it", () => {
+    const html = musicComposition({
+      videoUrl: "https://cdn.example/v.mp4",
+      durationSec: 40,
+      aspect: "16:9",
+      musicUrl: "https://cdn.example/m.wav",
+      musicDurationSec: 60,
+      volume: 0.25,
+      effects: [
+        { url: "https://cdn.example/whoosh.wav?a=1&b=2", atSec: 5, durationSec: 1.2 },
+        { url: "https://cdn.example/chime.wav", atSec: 39.5, durationSec: 3 },
+        { url: "https://cdn.example/late.wav", atSec: 45, durationSec: 1 },
+        { url: "https://cdn.example/unknown.wav", atSec: 30, durationSec: 0 },
+      ],
+    });
+    const effects = html.match(/<audio id="effect-[^>]+>/g)!;
+    assert.equal(effects.length, 3);
+    assert.equal(effects[0], '<audio id="effect-1" src="https://cdn.example/whoosh.wav?a=1&amp;b=2" data-start="5" data-duration="1.2" data-media-start="0" data-volume="1">');
+    assert.match(effects[1], /data-start="39\.5" data-duration="0\.5"/, "cut where the video ends");
+    assert.match(effects[2], /src="https:\/\/cdn\.example\/unknown\.wav" data-start="30" data-duration="10"/, "one of unknown length may play to the end");
+    assert.doesNotMatch(html, /late\.wav/);
+    assert.doesNotMatch(effects.join(""), /data-fade/, "effects are not faded");
+  });
 });
 
 describe("background music", () => {
@@ -106,6 +130,53 @@ describe("background music", () => {
       assert.deepEqual(await listMusicJobs("u1"), []);
     } finally {
       clipMs.CLIP_MS = saved;
+    }
+  });
+
+  it("places sound effects from the demo catalog at moments of the video, in the order they play, retried by key", async () => {
+    const effects = await searchMusicTracks("whoosh transition", "effects");
+    assert.deepEqual(effects.map((t) => t.id).slice(0, 1), ["demo_effect_whoosh"]);
+    assert.match(effects[0].previewUrl, /\/demo\/effect-whoosh\.mp3$/);
+    await assert.rejects(searchMusicTracks("x", "effects"), /Describe the sound effect in a few words/);
+    const proto = MockAvatarProvider.prototype as unknown as { startMusicMix: (...a: unknown[]) => Promise<{ jobId: string }> };
+    const real = proto.startMusicMix;
+    const sent: Array<{ effects?: unknown }> = [];
+    proto.startMusicMix = async function (this: unknown, ...a: unknown[]) {
+      sent.push(a[0] as { effects?: unknown });
+      return real.apply(this, a);
+    };
+    try {
+      const video = await finished("u1");
+      const chosen = [
+        { trackId: "demo_effect_pop", query: "pop click", atSec: 12.25 },
+        { trackId: "demo_effect_whoosh", query: "whoosh transition", atSec: 3 },
+      ];
+      const job = await startMusic(request(video.id, { effects: chosen }), "u1", { key: "effects-key-1" });
+      assert.deepEqual(job.effects, [
+        { trackId: "demo_effect_whoosh", name: "Whoosh", query: "whoosh transition", atSec: 3 },
+        { trackId: "demo_effect_pop", name: "Pop", query: "pop click", atSec: 12.25 },
+      ]);
+      assert.deepEqual(sent[0].effects, [
+        { url: effects[0].previewUrl, atSec: 3, durationSec: 0.9 },
+        { url: (await searchMusicTracks("pop", "effects"))[0].previewUrl, atSec: 12.25, durationSec: 0.4 },
+      ]);
+      // The same effects in another order are the same start; another moment is not.
+      assert.equal((await startMusic(request(video.id, { effects: [...chosen].reverse() }), "u1", { key: "effects-key-1" })).id, job.id);
+      assert.equal(sent.length, 1);
+      await assert.rejects(startMusic(request(video.id, { effects: [{ ...chosen[0], atSec: 13 }, chosen[1]] }), "u1", { key: "effects-key-1" }), ConflictError);
+      await assert.rejects(startMusic(request(video.id), "u1", { key: "effects-key-1" }), ConflictError, "nor is the mix without them");
+      // One past the end, or no longer offered, is refused before the renderer is asked; more than five never arrives.
+      await assert.rejects(startMusic(request(video.id, { effects: [{ ...chosen[0], atSec: 40 }] }), "u1"), /at 0:40 is past the end of the video \(0:40\)/);
+      await assert.rejects(startMusic(request(video.id, { effects: [{ ...chosen[0], trackId: "gone" }] }), "u1"), (e: unknown) => e instanceof ValidationError && /no longer offered for “pop click”/.test((e as Error).message));
+      assert.throws(() => request(video.id, { effects: Array.from({ length: 6 }, (_, i) => ({ ...chosen[0], atSec: i })) }), /at most 5 sound effects/);
+      assert.throws(() => request(video.id, { effects: [{ ...chosen[0], atSec: -1 }] }), /0 seconds or later/);
+      assert.equal(sent.length, 1);
+      // Each description is asked again once, and each ask counts against the account's searches.
+      let searched = 0;
+      await startMusic(request(video.id, { effects: [chosen[0], { ...chosen[0], atSec: 20 }, chosen[1]] }), "u1", { search: () => void searched++ });
+      assert.equal(searched, 3, "the music's description and the two effects' descriptions");
+    } finally {
+      proto.startMusicMix = real;
     }
   });
 
@@ -171,6 +242,7 @@ describe("background music", () => {
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       calls.push({ url, method: init?.method ?? "GET", body: typeof init?.body === "string" ? JSON.parse(init.body) : null, idem: new Headers(init?.headers).get("idempotency-key") });
+      if (url.startsWith("https://api.heygen.com/v3/audio/sounds?") && url.endsWith("type=sound_effects")) return Response.json({ data: [{ id: "sfx_1", name: "Whoosh 3", audio_url: "https://heygen-product.s3.amazonaws.com/w.wav?X-Amz=2", duration: 1.5, type: "sound_effects" }], has_more: false });
       if (url.startsWith("https://api.heygen.com/v3/audio/sounds?")) return Response.json({ data: [{ id: "trk_1", name: "Astral 1", description: "upbeat corporate", audio_url: "https://heygen-product.s3.amazonaws.com/m1.wav?X-Amz=1", duration: 30, score: 0.93, type: "music" }, { id: "trk_2", name: "No link", audio_url: null, duration: 20 }], has_more: false });
       if (url === "https://api.heygen.com/v3/videos/hg_video") return Response.json({ data: { status: "completed", video_url: "https://files.heygen.ai/fresh.mp4?sig=1" } });
       if (url === "https://api.heygen.com/v3/hyperframes/renders" && init?.method === "POST") {
@@ -200,6 +272,14 @@ describe("background music", () => {
       assert.match(html, /data-width="1080" data-height="1080" data-duration="70"/);
       assert.equal((html.match(/<audio /g) ?? []).length, 3, "a 30-second track under 70 seconds plays three times");
       assert.match(html, /data-volume="0\.6"/);
+      // A sound effect is found in HeyGen's sound-effect catalog, asked again at the start, and played from its moment.
+      assert.deepEqual(await searchMusicTracks("whoosh", "effects"), [{ id: "sfx_1", name: "Whoosh 3", previewUrl: "https://heygen-product.s3.amazonaws.com/w.wav?X-Amz=2", durationSec: 1.5 }]);
+      assert.match(calls.at(-1)!.url, /\/v3\/audio\/sounds\?query=whoosh&limit=12&type=sound_effects$/);
+      const withEffect = await startMusic(musicRequestSchema.parse({ videoId: video.id, trackId: "trk_1", query: "upbeat corporate", effects: [{ trackId: "sfx_1", query: "whoosh", atSec: 10 }] }), "u1", { key: "music-key-hg-sfx" });
+      const sfxPost = calls.filter((c) => c.url.endsWith("/v3/hyperframes/renders") && c.method === "POST").find((c) => c.idem === withEffect.id)!;
+      const sfxHtml = strFromU8(unzipSync(Buffer.from((sfxPost.body as { project: { data: string } }).project.data, "base64"))["index.html"]);
+      assert.match(sfxHtml, /<audio id="effect-1" src="https:\/\/heygen-product\.s3\.amazonaws\.com\/w\.wav\?X-Amz=2" data-start="10" data-duration="1\.5" data-media-start="0" data-volume="1"><\/audio>/);
+      await deleteMusicJob(withEffect.id, "u1");
       // Rendering, then done; a failed render says HeyGen's reason; a refused start is the account's with the reason.
       forgetMusicChecks();
       assert.equal((await listMusicJobs("u1"))[0].status, "processing");

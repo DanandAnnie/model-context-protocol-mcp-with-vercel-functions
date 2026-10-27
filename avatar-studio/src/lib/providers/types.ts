@@ -118,7 +118,7 @@ export interface AvatarProvider {
   /** Where a lip sync stands, with the video once it is ready (its link signed for a limited time). */
   lipsyncStatus?(jobId: string): Promise<LipsyncStatus>;
   /** Background-music tracks matching a description, best first, each with a short-lived link to hear it. */
-  searchMusic?(query: string): Promise<MusicTrack[]>;
+  searchMusic?(query: string, kind?: "music" | "effects"): Promise<MusicTrack[]>;
   /**
    * Starts mixing a music track under a finished video (looped to its length, faded in and out), rendered as a new
    * video. `key` makes a retried start return the same job. Absent when the provider cannot.
@@ -315,6 +315,8 @@ export interface MusicMixInput {
   musicDurationSec: number;
   /** The music's gain under the video's sound, 0 to 1. */
   volume: number;
+  /** Sound effects, each played once from its moment of the video, at full volume. */
+  effects?: Array<{ url: string; atSec: number; durationSec: number }>;
   title: string;
   key: string;
 }

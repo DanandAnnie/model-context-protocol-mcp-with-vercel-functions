@@ -737,7 +737,7 @@ test("a catalog track found by describing it is mixed under a finished video, fo
   // Nothing to add until a track is found and chosen.
   await expect(start).toBeDisabled();
   await page.getByLabel("Describe the music").fill("upbeat energetic");
-  await page.getByRole("button", { name: "Search" }).click();
+  await page.getByRole("button", { name: "Search", exact: true }).click();
   const tracks = page.getByTestId("music-tracks");
   // The best match is chosen and focused, and each track can be heard first.
   await expect(tracks.getByLabel("Bright steps", { exact: true })).toBeChecked();
@@ -745,19 +745,55 @@ test("a catalog track found by describing it is mixed under a finished video, fo
   await expect(tracks.getByRole("radio")).toHaveCount(3);
   await expect(tracks.getByLabel("Hear Bright steps")).toHaveAttribute("src", /\/demo\/music-upbeat\.mp3$/);
   await page.getByLabel("Medium").check();
+  // Sound effects are found by describing them too, and each placed at a moment of the video.
+  await page.getByLabel("Describe a sound effect").fill("whoosh transition");
+  await page.getByRole("button", { name: "Search sound effects" }).click();
+  await expect(page.getByRole("button", { name: "Add Whoosh" })).toBeFocused();
+  await expect(page.getByLabel("Hear Whoosh")).toHaveAttribute("src", /\/demo\/effect-whoosh\.mp3$/);
+  await page.getByRole("button", { name: "Add Whoosh" }).click();
+  const whoosh = page.getByRole("spinbutton", { name: "When Whoosh plays, in seconds from the start" });
+  await expect(whoosh).toBeFocused();
+  await whoosh.fill("1.5");
+  await page.getByRole("button", { name: "Add Pop" }).click();
+  const pop = page.getByRole("spinbutton", { name: "When Pop plays, in seconds from the start" });
+  // A moment past the end of the video is caught before anything is sent.
+  await pop.fill("999");
+  await expect(page.getByTestId("music-effects")).toContainText("is past the end of the video");
+  await expect(start).toBeDisabled();
+  await pop.fill("2");
+  await expect(start).toBeEnabled();
+  // One taken out again leaves the focus on the one before it.
+  await page.getByRole("button", { name: "Add Bright chime" }).click();
+  await page.getByRole("button", { name: /^Remove Bright chime at / }).click();
+  await expect(pop).toBeFocused();
+  await expect(page.getByTestId("chosen-effects").getByRole("listitem")).toHaveCount(2);
   const sent = page.waitForRequest((r) => r.url().endsWith("/api/music") && r.method() === "POST");
   await start.click();
   const request = await sent;
-  expect(request.postDataJSON()).toEqual({ videoId: v.id, trackId: "demo_music_upbeat", query: "upbeat energetic", volume: "medium" });
+  expect(request.postDataJSON()).toEqual({
+    videoId: v.id,
+    trackId: "demo_music_upbeat",
+    query: "upbeat energetic",
+    volume: "medium",
+    effects: [
+      { trackId: "demo_effect_whoosh", query: "whoosh transition", atSec: 1.5 },
+      { trackId: "demo_effect_pop", query: "whoosh transition", atSec: 2 },
+    ],
+  });
+  await expect(page.getByTestId("chosen-effects")).toHaveCount(0);
   expect(request.headers()["idempotency-key"]).toMatch(/^[A-Za-z0-9_-]{8,100}$/);
   const item = page.getByTestId("mix").first();
   await expect(item).toBeFocused();
   await expect(item).toContainText("(with music)");
-  await expect(item.getByTestId("mix-meta")).toContainText("“Bright steps” · Medium volume");
+  await expect(item.getByTestId("mix-meta")).toContainText("“Bright steps” · Medium volume · 2 sound effects");
   // The demo renderer finishes a few seconds later; the page checks again on its own.
   await expect(item.getByRole("link", { name: /^Download / })).toHaveAttribute("href", /\/demo\/render\./, { timeout: 20_000 });
   const listed = (await (await page.request.get("/api/music")).json()).mixes as Array<Record<string, unknown>>;
   for (const key of ["provider", "providerJobId", "ownerId"]) expect(Object.keys(listed[0])).not.toContain(key);
+  expect(listed[0].effects).toEqual([
+    { trackId: "demo_effect_whoosh", name: "Whoosh", query: "whoosh transition", atSec: 1.5 },
+    { trackId: "demo_effect_pop", name: "Pop", query: "whoosh transition", atSec: 2 },
+  ]);
   // A suggestion searches at once.
   await page.getByRole("button", { name: "Cinematic and inspiring" }).click();
   await expect(tracks.getByLabel("Wide horizon", { exact: true })).toBeChecked();

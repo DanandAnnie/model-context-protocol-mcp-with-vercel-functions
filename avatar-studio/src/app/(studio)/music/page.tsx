@@ -1,13 +1,13 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Download, Music, Search, Trash2 } from "lucide-react";
+import { Download, Music, Plus, Search, Trash2, X } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api, formatDate, formatSeconds, isRefusal } from "@/lib/client";
-import { MUSIC_VOLUMES, type MusicJob, type MusicTrack, type MusicVolume, type Video } from "@/lib/types";
+import { MAX_MUSIC_EFFECTS, MUSIC_VOLUMES, type MusicJob, type MusicTrack, type MusicVolume, type Video } from "@/lib/types";
 
 /** A mix as the server lists it: never the renderer or its job id. */
 type Mix = Omit<MusicJob, "ownerId" | "provider" | "providerJobId">;
@@ -19,6 +19,10 @@ const VOLUME_LABEL: Record<MusicVolume, string> = { quiet: "Quiet", low: "Low", 
 /** A mix's name for its controls: its title, track, and day, as one video can be given music more than once. */
 const mixName = (m: Mix) => `${m.title}, “${m.trackName}”, ${formatDate(m.createdAt)}`;
 const SUGGESTIONS = ["Calm ambient corporate", "Upbeat and motivational", "Cinematic and inspiring"];
+/** A sound effect chosen for the mix: the track found, the description it was found with, and when it plays. */
+type ChosenEffect = { key: string; track: MusicTrack; query: string; atSec: number };
+/** Seconds as a short clock, for the moments effects play at. */
+const atClock = (sec: number) => `${Math.floor(sec / 60)}:${(sec % 60).toFixed(1).padStart(4, "0")}`;
 
 /**
  * "Music": a track of the renderer's music catalog, found by describing it, mixed under a finished library video and
@@ -59,6 +63,13 @@ export default function MusicPage() {
   const [volume, setVolume] = useState<MusicVolume>("low");
   const [title, setTitle] = useState("");
   const [searching, setSearching] = useState(false);
+  const [effectQuery, setEffectQuery] = useState("");
+  const [effectSearched, setEffectSearched] = useState<string | null>(null);
+  const [effectResults, setEffectResults] = useState<MusicTrack[] | null>(null);
+  const [effectSearching, setEffectSearching] = useState(false);
+  const [effects, setEffects] = useState<ChosenEffect[]>([]);
+  const effectsRef = useRef<HTMLUListElement>(null);
+  const effectResultsRef = useRef<HTMLUListElement>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -109,6 +120,10 @@ export default function MusicPage() {
     setRequestKey(newKey());
   }
   const track = tracks?.find((t) => t.id === trackId);
+  const video = videos.find((v) => v.id === videoId);
+  const length = video?.durationSec && video.durationSec > 0 ? video.durationSec : null;
+  // An effect is placed at a moment of the video: within it, once the video is known.
+  const lateEffect = length !== null ? effects.find((e) => e.atSec >= length) : undefined;
   const canStart = canEdit === true && data?.available !== false;
 
   async function search(text = query) {
@@ -135,19 +150,67 @@ export default function MusicPage() {
     }
   }
 
+  async function searchEffects() {
+    const q = effectQuery.trim();
+    if (q.length < 2) {
+      setErr("Describe the sound effect in a few words");
+      return;
+    }
+    setEffectSearching(true);
+    setErr(null);
+    try {
+      const out = await api<{ tracks: MusicTrack[] }>(`/api/music/tracks?type=effects&query=${encodeURIComponent(q)}`);
+      setEffectQuery(q);
+      setEffectSearched(q);
+      setEffectResults(out.tracks);
+      setNote(out.tracks.length ? `${out.tracks.length} sound effects for “${q}”.` : `No sound effects for “${q}”; describe it another way.`);
+      if (out.tracks.length) focusAfterRender(() => effectResultsRef.current?.querySelector<HTMLButtonElement>("button:not([disabled])"));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "The sound effects could not be searched");
+    } finally {
+      setEffectSearching(false);
+    }
+  }
+
+  function addEffect(t: MusicTrack) {
+    if (!effectSearched || effects.length >= MAX_MUSIC_EFFECTS) return;
+    const key = newKey();
+    setEffects((prev) => [...prev, { key, track: t, query: effectSearched, atSec: 0 }]);
+    changed();
+    setNote(`Added ${t.name} at 0:00.0; set when it plays below.`);
+    focusAfterRender(() => effectsRef.current?.querySelector<HTMLInputElement>(`[data-effect="${key}"] input`));
+  }
+
+  function removeEffect(e: ChosenEffect) {
+    const at = effects.indexOf(e);
+    const next = effects[at + 1] ?? effects[at - 1];
+    setEffects((prev) => prev.filter((x) => x.key !== e.key));
+    changed();
+    setNote(`Removed ${e.track.name}.`);
+    focusAfterRender(() => (next ? effectsRef.current?.querySelector<HTMLInputElement>(`[data-effect="${next.key}"] input`) : document.getElementById("effect-query")));
+  }
+
   async function submit() {
     if (!track || !searched) return;
     setBusy(true);
     setErr(null);
     setNote(null);
     try {
-      const body = { videoId, trackId: track.id, query: searched, volume, ...(title.trim() ? { title: title.trim() } : {}) };
+      const body = {
+        videoId,
+        trackId: track.id,
+        query: searched,
+        volume,
+        ...(effects.length ? { effects: effects.map((e) => ({ trackId: e.track.id, query: e.query, atSec: e.atSec })) } : {}),
+        ...(title.trim() ? { title: title.trim() } : {}),
+      };
       const { mix } = await api<{ mix: Mix }>("/api/music", { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": requestKey } });
       setData((prev) => ({ available: prev?.available ?? true, mixes: [mix, ...(prev?.mixes ?? []).filter((m) => m.id !== mix.id)] }));
       // A check that left before this mix was started would answer without it; asking again retires it.
       void refetch();
       setRequestKey(newKey());
       setTitle("");
+      setEffects([]);
       setNote(`Adding “${track.name}” to ${mix.title.replace(/ \(with music\)$/, "")}; it appears here when it is ready.`);
       focusAfterRender(() => listRef.current?.querySelector<HTMLElement>(`[data-mix="${mix.id}"]`) ?? videoRef.current);
     } catch (e) {
@@ -184,7 +247,7 @@ export default function MusicPage() {
 
   return (
     <>
-      <SectionTitle title="Music" subtitle="Find a background track by describing it, and mix it under one of your finished videos." />
+      <SectionTitle title="Music" subtitle="Find a background track and sound effects by describing them, and mix them into one of your finished videos." />
       {canEdit === false && <ViewOnlyNotice what="add music to videos" />}
       <ErrorBanner message={error} />
       <ErrorBanner message={err} />
@@ -267,10 +330,82 @@ export default function MusicPage() {
                 </div>
                 <p className="mt-1 text-xs text-slate-500">Under the speech; Low suits most talking videos.</p>
               </fieldset>
+              <fieldset data-testid="music-effects">
+                <legend className="mb-1.5 block text-sm font-medium text-slate-700">Sound effects (optional)</legend>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void searchEffects();
+                  }}
+                  className="flex items-end gap-2"
+                >
+                  <div className="min-w-0 flex-1">
+                    <Field label="Describe a sound effect" hint={`Up to ${MAX_MUSIC_EFFECTS}, each played once from a moment of the video.`}>
+                      <input id="effect-query" className={inputClass} value={effectQuery} maxLength={200} disabled={canEdit !== true} onChange={(e) => setEffectQuery(e.target.value)} placeholder="Whoosh for a scene change" />
+                    </Field>
+                  </div>
+                  <Button type="submit" variant="secondary" loading={effectSearching} disabled={canEdit !== true} className="mb-5" aria-label="Search sound effects">
+                    <Search className="h-4 w-4" /> Search
+                  </Button>
+                </form>
+                {effectResults && effectResults.length > 0 && (
+                  <ul ref={effectResultsRef} className="mt-2 space-y-2" aria-label={`Sound effects for “${effectSearched}”`}>
+                    {effectResults.map((t) => (
+                      <li key={t.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 p-2 text-sm">
+                        <span className="min-w-0 flex-1 truncate font-medium text-slate-900">
+                          {t.name}
+                          {t.durationSec > 0 && <span className="ml-1 text-xs font-normal text-slate-500">{`${t.durationSec.toFixed(1)}s`}</span>}
+                        </span>
+                        <audio controls preload="none" src={t.previewUrl} className="h-8 w-40" aria-label={`Hear ${t.name}`} />
+                        <Button variant="secondary" className="px-2.5 py-1 text-xs" disabled={canEdit !== true || effects.length >= MAX_MUSIC_EFFECTS} onClick={() => addEffect(t)} aria-label={`Add ${t.name}`}>
+                          <Plus className="h-3.5 w-3.5" /> Add
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {effects.length > 0 && (
+                  <ul ref={effectsRef} className="mt-3 space-y-2" aria-label="Sound effects in the mix" data-testid="chosen-effects">
+                    {effects.map((e) => (
+                      <li key={e.key} data-effect={e.key} className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 p-2 text-sm">
+                        <span className="min-w-0 flex-1 truncate text-slate-900">{e.track.name}</span>
+                        <label className="flex items-center gap-1 text-xs text-slate-600">
+                          Plays at
+                          <input
+                            type="number"
+                            min={0}
+                            max={length ?? undefined}
+                            step={0.1}
+                            className={`${inputClass} w-20 py-1`}
+                            value={e.atSec}
+                            disabled={canEdit !== true}
+                            aria-label={`When ${e.track.name} plays, in seconds from the start`}
+                            onChange={(ev) => {
+                              const at = Math.max(0, Math.round((Number(ev.target.value) || 0) * 10) / 10);
+                              setEffects((prev) => prev.map((x) => (x.key === e.key ? { ...x, atSec: at } : x)));
+                              changed();
+                            }}
+                          />
+                          s
+                        </label>
+                        <button type="button" disabled={canEdit !== true} onClick={() => removeEffect(e)} className="rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-rose-600" aria-label={`Remove ${e.track.name} at ${atClock(e.atSec)}`}>
+                          <X className="h-4 w-4" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {lateEffect && length !== null && (
+                  <p id="effects-late" className="mt-1 text-xs text-amber-700">
+                    {lateEffect.track.name} at {atClock(lateEffect.atSec)} is past the end of the video ({atClock(length)}); move it earlier.
+                  </p>
+                )}
+                {effects.length >= MAX_MUSIC_EFFECTS && <p className="mt-1 text-xs text-slate-500">{`That is ${MAX_MUSIC_EFFECTS} sound effects, the most one video takes.`}</p>}
+              </fieldset>
               <Field label="Title (optional)">
                 <input className={inputClass} value={title} maxLength={120} disabled={canEdit !== true} onChange={(e) => (setTitle(e.target.value), changed())} placeholder="The video's title, marked with music" />
               </Field>
-              <Button onClick={submit} loading={busy} disabled={!videoId || !track || !canStart} className="w-full">
+              <Button onClick={submit} loading={busy} disabled={!videoId || !track || !canStart || !!lateEffect} className="w-full" aria-describedby={lateEffect ? "effects-late" : undefined}>
                 <Music className="h-4 w-4" /> Add music
               </Button>
               <p className="text-xs text-slate-500">The video with music is not added to the library; download it once it is ready. The music fades in at the start and out at the end.</p>
@@ -292,7 +427,8 @@ export default function MusicPage() {
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium text-slate-900">{m.title}</div>
                       <div className="mt-0.5 text-xs text-slate-500" data-testid="mix-meta">
-                        “{m.trackName}” · {VOLUME_LABEL[m.volume]} volume · {formatDate(m.createdAt)}
+                        “{m.trackName}” · {VOLUME_LABEL[m.volume]} volume
+                        {m.effects?.length ? ` · ${m.effects.length === 1 ? "1 sound effect" : `${m.effects.length} sound effects`}` : ""} · {formatDate(m.createdAt)}
                         {m.status === "completed" && typeof m.durationSec === "number" ? ` · ${formatSeconds(Math.max(1, Math.round(m.durationSec)))}` : ""}
                       </div>
                       {m.error && <div className="mt-1 text-xs text-rose-600">{m.error}</div>}

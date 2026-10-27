@@ -1,6 +1,7 @@
 // The composition a music mix renders (HyperFrames, HeyGen's HTML-to-video renderer): the finished video full frame
 // with its own sound, and the music under it, laid end to end until the video ends, faded in at the start and out at
-// the end. Pure, so the page that is sent can be checked without the renderer.
+// the end, with any sound effects each played once from its moment. Pure, so the page that is sent can be checked
+// without the renderer.
 import { dimensionsFor, type AspectRatio } from "./types";
 
 /** Seconds the music takes to rise at the start, and to fall at the end (or less, on a short video). */
@@ -22,6 +23,8 @@ export interface MusicMixLayout {
   musicUrl: string;
   musicDurationSec: number;
   volume: number;
+  /** Sound effects, each played once from its moment, at full volume, cut where the video ends. */
+  effects?: Array<{ url: string; atSec: number; durationSec: number }>;
 }
 
 /** Where each copy of the track plays: one after another from the start, the last cut where the video ends. */
@@ -48,6 +51,14 @@ export function musicComposition(layout: MusicMixLayout): string {
       return `    <audio id="music-${i + 1}" src="${attr(layout.musicUrl)}" data-start="${secs(seg.start)}" data-duration="${secs(seg.duration)}" data-media-start="0" data-volume="${secs(volume)}"${fades}></audio>`;
     })
     .join("\n");
+  // An effect of unknown length plays until the video ends (the renderer stops it at its own end).
+  const effects = (layout.effects ?? [])
+    .filter((e) => e.atSec >= 0 && e.atSec < duration)
+    .map((e, i) => {
+      const length = Math.min(e.durationSec > 0 ? e.durationSec : duration, duration - e.atSec);
+      return `    <audio id="effect-${i + 1}" src="${attr(e.url)}" data-start="${secs(e.atSec)}" data-duration="${secs(length)}" data-media-start="0" data-volume="1"></audio>`;
+    })
+    .join("\n");
   return `<!doctype html>
 <html>
   <head>
@@ -61,7 +72,7 @@ export function musicComposition(layout: MusicMixLayout): string {
   <body>
     <div id="mix" data-composition-id="music-mix" data-start="0" data-width="${width}" data-height="${height}" data-duration="${secs(duration)}" data-no-timeline>
     <video id="footage" src="${attr(layout.videoUrl)}" data-start="0" data-duration="${secs(duration)}" data-has-audio="true" playsinline></video>
-${audio}
+${audio}${effects ? `\n${effects}` : ""}
     </div>
   </body>
 </html>

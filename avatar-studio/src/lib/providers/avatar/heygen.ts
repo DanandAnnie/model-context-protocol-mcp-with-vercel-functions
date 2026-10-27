@@ -538,12 +538,12 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     }
   }
 
-  /** Background music from HeyGen's catalog, described in plain words; tracks without a link to hear are left out. */
-  async searchMusic(query: string): Promise<MusicTrack[]> {
-    const tracks = await this.client.searchMusic(query);
+  /** Background music or sound effects from HeyGen's catalog, described in plain words; tracks without a link to hear are left out. */
+  async searchMusic(query: string, kind: "music" | "effects" = "music"): Promise<MusicTrack[]> {
+    const tracks = await this.client.searchMusic(query, 12, kind === "effects" ? "sound_effects" : "music");
     return tracks.flatMap((t) => {
       const previewUrl = httpsOnly(t.audio_url);
-      return previewUrl && t.id ? [stripEmpty({ id: t.id, name: t.name || "Music", description: t.description ?? undefined, previewUrl, durationSec: typeof t.duration === "number" && t.duration > 0 ? t.duration : 0 })] : [];
+      return previewUrl && t.id ? [stripEmpty({ id: t.id, name: t.name || (kind === "effects" ? "Sound effect" : "Music"), description: t.description ?? undefined, previewUrl, durationSec: typeof t.duration === "number" && t.duration > 0 ? t.duration : 0 })] : [];
     });
   }
 

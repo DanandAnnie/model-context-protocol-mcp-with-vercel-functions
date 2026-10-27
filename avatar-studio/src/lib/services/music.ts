@@ -1,11 +1,12 @@
 // Background music: a track of the renderer's music catalog (HeyGen's), found by describing it, mixed under a finished
-// library video and rendered as a new video (HeyGen HyperFrames). Used by API routes only.
+// library video with any sound effects of its catalog placed at moments of the video, and rendered as a new video
+// (HeyGen HyperFrames). Used by API routes only.
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
-import { MUSIC_VOLUMES, type MusicJob, type MusicTrack, type MusicVolume, type Video } from "../types";
+import { MAX_MUSIC_EFFECTS, MUSIC_VOLUMES, type MusicEffect, type MusicJob, type MusicTrack, type MusicVolume, type Video } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { owned, stripUndefined } from "./shared";
@@ -20,6 +21,14 @@ export const MAX_MUSIC_MIXES = 50;
 export const MAX_MUSIC_VIDEO_SEC = 30 * 60;
 
 export const musicQuerySchema = z.string().trim().min(2, "Describe the music in a few words").max(200, "Describe the music in at most 200 characters");
+export const effectQuerySchema = z.string().trim().min(2, "Describe the sound effect in a few words").max(200, "Describe the sound effect in at most 200 characters");
+
+/** A sound effect chosen from a search, and the moment of the video it plays from. */
+export const musicEffectSchema = z.object({
+  trackId: z.string().trim().min(1, "Choose a sound effect").max(200),
+  query: effectQuerySchema,
+  atSec: z.number({ error: "Say when the sound effect plays" }).min(0, "A sound effect plays from 0 seconds or later").max(MAX_MUSIC_VIDEO_SEC),
+});
 
 export const musicRequestSchema = z.object({
   /** One of the account's finished videos. */
@@ -29,6 +38,7 @@ export const musicRequestSchema = z.object({
   query: musicQuerySchema,
   volume: z.enum(Object.keys(MUSIC_VOLUMES) as [MusicVolume, ...MusicVolume[]]).default("low"),
   title: z.string().trim().max(120, "Keep the title to 120 characters").optional(),
+  effects: z.array(musicEffectSchema).max(MAX_MUSIC_EFFECTS, `Add at most ${MAX_MUSIC_EFFECTS} sound effects`).default([]),
 });
 
 export const musicIdSchema = z.string().regex(/^mm_[A-Za-z0-9_-]{1,64}$/, "Unknown video with music");
@@ -51,12 +61,27 @@ export function publicMusicJob(job: MusicJob): PublicMusicJob {
   return rest;
 }
 
-/** Tracks of the renderer's catalog matching a description, best first, each with a short-lived link to hear it. */
-export async function searchMusicTracks(query: string): Promise<MusicTrack[]> {
+/**
+ * Tracks of the renderer's catalog matching a description, best first, each with a short-lived link to hear it: music,
+ * or with `kind: "effects"` sound effects.
+ */
+export async function searchMusicTracks(query: string, kind: "music" | "effects" = "music"): Promise<MusicTrack[]> {
   const provider = getAvatarProvider();
   if (!provider.searchMusic) throw new ValidationError(`Background music is not available with the ${provider.name} renderer`);
-  return provider.searchMusic(musicQuerySchema.parse(query));
+  return provider.searchMusic((kind === "effects" ? effectQuerySchema : musicQuerySchema).parse(query), kind);
 }
+
+/** Effects in the order they play, as compared and stored: one moment to the millisecond, then the track. */
+function effectsInOrder<T extends { trackId: string; query: string; atSec: number }>(effects: T[]): T[] {
+  return [...effects].map((e) => ({ ...e, atSec: Math.round(e.atSec * 1000) / 1000 })).sort((a, b) => a.atSec - b.atSec || a.trackId.localeCompare(b.trackId));
+}
+const sameEffects = (a: Array<{ trackId: string; query: string; atSec: number }>, b: Array<{ trackId: string; query: string; atSec: number }>) => {
+  const [x, y] = [effectsInOrder(a), effectsInOrder(b)];
+  return x.length === y.length && x.every((e, i) => e.trackId === y[i].trackId && e.query === y[i].query && e.atSec === y[i].atSec);
+};
+
+/** Formats seconds as the page shows them, for a message. */
+const clock = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, "0")}`;
 
 const checks = jobChecker<MusicJob>((job) => refreshMusic(job));
 
@@ -95,7 +120,7 @@ export async function startMusic(input: z.infer<typeof musicRequestSchema>, owne
   const existing = opts.key ? await getStore().get<MusicJob>("music", id) : null;
   if (existing && existing.ownerId === ownerId) {
     // A title given must be the one kept; one left out took the video's, which is not read again here.
-    const same = existing.videoId === input.videoId && existing.trackId === input.trackId && existing.volume === input.volume && existing.query === input.query && (!input.title || existing.title === input.title);
+    const same = existing.videoId === input.videoId && existing.trackId === input.trackId && existing.volume === input.volume && existing.query === input.query && sameEffects(existing.effects ?? [], input.effects) && (!input.title || existing.title === input.title);
     if (!same) throw new ConflictError("This Idempotency-Key was already used for another video with music; send a new key");
     return existing;
   }
@@ -104,9 +129,23 @@ export async function startMusic(input: z.infer<typeof musicRequestSchema>, owne
   // Read then written: two starts at the same moment can between them pass the cap.
   if ((await getStore().list<MusicJob>("music", ownerId)).length >= MAX_MUSIC_MIXES) throw new ConflictError(`An account keeps at most ${MAX_MUSIC_MIXES} videos with music; delete one to make another`);
   const video = await resolveVideo(input.videoId, ownerId);
+  const wanted = effectsInOrder(input.effects);
+  const late = wanted.find((e) => e.atSec >= video.durationSec!);
+  if (late) throw new ValidationError(`A sound effect at ${clock(late.atSec)} is past the end of the video (${clock(video.durationSec!)}); move it earlier`);
   opts.search?.();
   const track = (await provider.searchMusic(input.query)).find((t) => t.id === input.trackId);
   if (!track) throw new ValidationError("That track is no longer offered for this description; search again and choose one");
+  // Each effect's link is asked for again by its description (one search per description), as the links expire.
+  const found = new Map<string, MusicTrack[]>();
+  for (const q of new Set(wanted.map((e) => e.query))) {
+    opts.search?.();
+    found.set(q, await provider.searchMusic(q, "effects"));
+  }
+  const effects = wanted.map((e) => {
+    const hit = found.get(e.query)?.find((t) => t.id === e.trackId);
+    if (!hit) throw new ValidationError(`A sound effect is no longer offered for “${e.query}”; search again and choose one`);
+    return { ...e, track: hit };
+  });
   opts.admit?.();
   const title = input.title || withSuffix(video.title, " (with music)", 120);
   const { jobId } = await provider.startMusicMix({
@@ -116,6 +155,7 @@ export async function startMusic(input: z.infer<typeof musicRequestSchema>, owne
     musicUrl: track.previewUrl,
     musicDurationSec: track.durationSec,
     volume: MUSIC_VOLUMES[input.volume],
+    ...(effects.length ? { effects: effects.map((e) => ({ url: e.track.previewUrl, atSec: e.atSec, durationSec: e.track.durationSec })) } : {}),
     title,
     key: id,
   });
@@ -129,6 +169,7 @@ export async function startMusic(input: z.infer<typeof musicRequestSchema>, owne
     trackName: track.name,
     query: input.query,
     volume: input.volume,
+    effects: effects.length ? effects.map((e): MusicEffect => ({ trackId: e.trackId, name: e.track.name, query: e.query, atSec: e.atSec })) : undefined,
     provider: provider.name,
     providerJobId: jobId,
     status: "processing" as const,

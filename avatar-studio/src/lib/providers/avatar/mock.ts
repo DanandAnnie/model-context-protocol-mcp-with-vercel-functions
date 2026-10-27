@@ -17,6 +17,11 @@ const DEMO_MUSIC = [
   { id: "demo_music_upbeat", name: "Bright steps", description: "upbeat happy energetic pop corporate motivational", previewUrl: "/demo/music-upbeat.mp3", durationSec: 16 },
   { id: "demo_music_cinematic", name: "Wide horizon", description: "cinematic epic dramatic tense inspiring trailer", previewUrl: "/demo/music-cinematic.mp3", durationSec: 24 },
 ];
+const DEMO_EFFECTS = [
+  { id: "demo_effect_whoosh", name: "Whoosh", description: "whoosh swoosh transition scene change swipe air", previewUrl: "/demo/effect-whoosh.mp3", durationSec: 0.9 },
+  { id: "demo_effect_chime", name: "Bright chime", description: "chime bell ding notification success sparkle", previewUrl: "/demo/effect-chime.mp3", durationSec: 1.3 },
+  { id: "demo_effect_pop", name: "Pop", description: "pop click bubble tap button appear", previewUrl: "/demo/effect-pop.mp3", durationSec: 0.4 },
+];
 /** Simulates an async render that completes ~12s after submission. */
 export class MockAvatarProvider implements AvatarProvider {
   readonly name = "mock";
@@ -138,9 +143,9 @@ export class MockAvatarProvider implements AvatarProvider {
    * Demo background music: three short tracks of the studio's own, ranked by how many of the description's words their
    * description shares (all three when none match). Nothing is searched.
    */
-  async searchMusic(query: string): Promise<MusicTrack[]> {
+  async searchMusic(query: string, kind: "music" | "effects" = "music"): Promise<MusicTrack[]> {
     const words = query.toLowerCase().match(/[a-z]+/g) ?? [];
-    const scored = DEMO_MUSIC.map((t) => ({ t, score: words.filter((w) => t.description.includes(w)).length }));
+    const scored = (kind === "effects" ? DEMO_EFFECTS : DEMO_MUSIC).map((t) => ({ t, score: words.filter((w) => t.description.includes(w)).length }));
     return scored.sort((a, b) => b.score - a.score).map(({ t }) => ({ ...t, previewUrl: demoAssetUrl(t.previewUrl) }));
   }
 

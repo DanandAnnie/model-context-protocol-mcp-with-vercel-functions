@@ -104,6 +104,7 @@ export function providerStatus(): ProviderStatus {
     lookPacks: typeof getAvatarProvider().startLookPack === "function",
     digitalTwins: typeof getAvatarProvider().startTwin === "function",
     studioTemplates: typeof getAvatarProvider().listStudioTemplates === "function",
+    cinematicShots: getAvatarProvider().cinematicShots === true,
     authEnabled: authEnabled(),
     authMode: authMode(),
     renderLimitPerMonth: config.renderLimitPerMonth ?? null,

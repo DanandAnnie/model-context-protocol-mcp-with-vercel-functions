@@ -846,7 +846,11 @@ function CreateInner() {
     if (!fromId || !spacesKnown || keptEdits()) return;
     api<{ video: Video }>(`/api/videos/${fromId}`)
       .then(({ video }) => {
-        // A HeyGen template's scenes are not here to copy; its form is the way to make another.
+        // A cinematic shot has no scenes to copy, and a HeyGen template's are not here; each has its own form to make another.
+        if (video.cinematic) {
+          setErr(`"${video.title}" is a cinematic shot made from a description; make it again from the Cinematic page.`);
+          return;
+        }
         if (video.studioTemplate) {
           setErr(`"${video.title}" was made from the HeyGen template "${video.studioTemplate.name}"; use the template again from the Templates page to make another.`);
           return;

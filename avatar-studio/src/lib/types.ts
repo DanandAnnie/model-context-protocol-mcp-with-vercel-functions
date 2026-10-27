@@ -551,6 +551,31 @@ export interface VideoRequest {
    * with. The template owns the layout, presenter, and voice; `script`, `avatarId`, and `voiceId` only describe it.
    */
   studioTemplate?: StudioTemplateUse;
+  /**
+   * A shot the renderer directs from a description rather than a script (HeyGen's Cinematic Avatar): one to three of
+   * the account's presenters in a scene it composes, frames, and moves. There is no script or voice; `script` is empty,
+   * and `avatarId` and `voiceId` only describe it.
+   */
+  cinematic?: CinematicShot;
+}
+
+/** Longest and shortest cinematic shot, in seconds (HeyGen's `duration`); a shot without one is timed by HeyGen. */
+export const CINEMATIC_MIN_SEC = 4;
+export const CINEMATIC_MAX_SEC = 15;
+/** Most presenters one cinematic shot features. */
+export const CINEMATIC_MAX_LOOKS = 3;
+
+/** What a cinematic shot was made from. */
+export interface CinematicShot {
+  /** The shot in words: the setting, what the presenters do, the camera, the mood. */
+  prompt: string;
+  /** The account's presenters in the shot (their avatar ids here), with their names as they were then. */
+  avatarIds: string[];
+  avatarNames: string[];
+  /** Seconds asked for; absent lets the renderer choose. */
+  durationSec?: number;
+  /** The renderer expands a short description into a fuller one before directing the shot. */
+  enhancePrompt?: true;
 }
 
 /** A filled-in variable of a HeyGen Studio template, in HeyGen's own shape. */
@@ -1084,6 +1109,8 @@ export interface ProviderStatus {
   digitalTwins: boolean;
   /** Whether the renderer offers HeyGen Studio templates to fill and render. */
   studioTemplates: boolean;
+  /** Whether the renderer directs cinematic shots from a description (HeyGen's Cinematic Avatar). */
+  cinematicShots: boolean;
   /** Whether the TTS provider can design a voice from a description. */
   voiceDesign: boolean;
   /** Present when the request carried an owner (signed in, or open/password mode). */

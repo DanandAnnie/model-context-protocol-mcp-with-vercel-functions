@@ -768,6 +768,58 @@ test("a catalog track found by describing it is mixed under a finished video, fo
   await expect(page.locator('[data-testid="mix"]:focus, h2:focus')).toHaveCount(1);
 });
 
+test("a cinematic shot is directed from a description with chosen presenters, kept in the library, and made again", async ({ page }) => {
+  const avatars = ((await (await page.request.get("/api/avatars")).json()).avatars as Array<{ id: string; name: string }>).slice(0, 4);
+  await page.goto("/cinematic");
+  await expect(page.getByRole("heading", { name: "Cinematic", exact: true })).toBeVisible();
+  const start = page.getByRole("button", { name: "Make the shot" });
+  const presenters = page.getByTestId("cinematic-presenters");
+  // Nothing to direct until a presenter is chosen.
+  await expect(start).toBeDisabled();
+  await page.getByRole("button", { name: "Office walkthrough" }).click();
+  await expect(page.getByLabel("Describe the shot")).toHaveValue(/sunlit open-plan office/);
+  // At most three presenters: once three are ticked, the others cannot be.
+  for (const a of avatars.slice(0, 3)) await presenters.getByRole("checkbox", { name: a.name, exact: true }).check();
+  await expect(presenters.getByRole("checkbox", { name: avatars[3].name, exact: true })).toBeDisabled();
+  await expect(page.getByText("3 chosen (the most a shot takes)")).toBeVisible();
+  await presenters.getByRole("checkbox", { name: avatars[2].name, exact: true }).uncheck();
+  await expect(presenters.getByRole("checkbox", { name: avatars[3].name, exact: true })).toBeEnabled();
+  await page.getByRole("combobox", { name: "Shape" }).selectOption("9:16");
+  await page.getByRole("combobox", { name: "Length" }).selectOption("6");
+  await page.getByLabel("Title (optional)").fill("Office walk shot");
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/cinematic") && r.method() === "POST");
+  await start.click();
+  const request = await sent;
+  expect(request.postDataJSON()).toEqual({
+    prompt: expect.stringContaining("sunlit open-plan office"),
+    avatarIds: [avatars[0].id, avatars[1].id],
+    aspect: "9:16",
+    resolution: "1080p",
+    duration: 6,
+    enhancePrompt: false,
+    title: "Office walk shot",
+  });
+  expect(request.headers()["idempotency-key"]).toMatch(/^[A-Za-z0-9_-]{8,100}$/);
+  // The shot is a library video: its page shows the description and the presenters, and offers no script tools.
+  await expect(page).toHaveURL(/\/videos\/vid_/);
+  await expect(page.getByRole("heading", { name: "Shot", exact: true })).toBeVisible();
+  await expect(page.getByText(/sunlit open-plan office/)).toBeVisible();
+  await expect(page.getByText(`${avatars[0].name}, ${avatars[1].name}`).first()).toBeVisible();
+  await expect(page.getByText("6 seconds")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Edit a copy" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Save as template" })).toHaveCount(0);
+  // The demo renderer finishes a few seconds later; a finished shot still has no captions to download.
+  await expect(page.getByRole("link", { name: /^Download$/ })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("link", { name: "Captions (.srt)" })).toHaveCount(0);
+  // "Make the shot again" fills the form with this shot.
+  await page.getByRole("link", { name: "Make the shot again" }).click();
+  await expect(page).toHaveURL(/\/cinematic\?from=vid_/);
+  await expect(page.getByLabel("Describe the shot")).toHaveValue(/sunlit open-plan office/);
+  await expect(presenters.getByRole("checkbox", { checked: true })).toHaveCount(2);
+  await expect(page.getByRole("combobox", { name: "Shape" })).toHaveValue("9:16");
+  await expect(page.getByRole("combobox", { name: "Length" })).toHaveValue("6");
+});
+
 test("a photo avatar is dressed in a look pack, each look kept as a presenter of its own", async ({ page }) => {
   const tag = Date.now().toString(36);
   const name = `Looks ${tag}`;
@@ -1973,7 +2025,7 @@ test("no page scrolls sideways at phone width", async ({ browser }) => {
     // A transparent video's Background row and a cleaned recording with a long title are the widest content of their pages.
     const clear = await createVideoViaApi(page, "Phone width transparent", { transparent: true });
     expect((await page.request.post("/api/cleanups", { data: { sourceUrl: "https://93.184.216.34/webinar.mp4", title: "Team webinar on pricing and the spring roadmap (cleaned)" } })).status()).toBe(202);
-    const pages = ["/home", "/create", "/agent", "/videos", `/videos/${v.id}`, `/videos/${clear.id}`, "/templates", "/avatars", "/voices", "/batch", "/brand", "/interactive", "/workspace", "/settings", "/translate", "/cleanup", "/lipsync", `/share/${v.id}`];
+    const pages = ["/home", "/create", "/agent", "/videos", `/videos/${v.id}`, `/videos/${clear.id}`, "/templates", "/avatars", "/voices", "/batch", "/brand", "/interactive", "/workspace", "/settings", "/translate", "/cleanup", "/lipsync", "/music", "/cinematic", `/share/${v.id}`];
     for (const path of pages) {
       await page.goto(path);
       await expect(page.locator("h1").first()).toBeVisible();
@@ -2434,7 +2486,7 @@ test("webhook settings reject private hosts and show the signing secret", async 
 test("pages have no WCAG 2.1 AA violations", async ({ page }) => {
   const v = await createVideoViaApi(page, "Accessible video");
   const agent = (await (await page.request.post("/api/agents", { data: { name: "Axe agent", avatarId: "stock_1" } })).json()).agent as { id: string };
-  const paths = ["/", "/login", "/home", "/create", "/agent", "/videos", `/videos/${v.id}`, "/templates", "/batch", "/avatars", "/voices", "/translate", "/cleanup", "/lipsync", "/music", "/interactive", "/brand", "/settings", `/share/${v.id}`, `/talk/${agent.id}`, "/demo-consent"];
+  const paths = ["/", "/login", "/home", "/create", "/agent", "/videos", `/videos/${v.id}`, "/templates", "/batch", "/avatars", "/voices", "/translate", "/cleanup", "/lipsync", "/music", "/cinematic", "/interactive", "/brand", "/settings", `/share/${v.id}`, `/talk/${agent.id}`, "/demo-consent"];
   const report: string[] = [];
   for (const path of paths) {
     await page.goto(path);
@@ -2528,6 +2580,7 @@ test("a workspace viewer sees view-only notices instead of create controls", asy
     ["/cleanup", "clean up recordings"],
     ["/lipsync", "lip-sync videos"],
     ["/music", "add music to videos"],
+    ["/cinematic", "make cinematic shots"],
     ["/avatars", "add or change avatars"],
     ["/voices", "clone, design, or change voices"],
     ["/brand", "change the brand kit"],

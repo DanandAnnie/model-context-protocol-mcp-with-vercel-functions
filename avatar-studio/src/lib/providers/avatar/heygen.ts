@@ -51,6 +51,7 @@ const PHOTO_CHECK_MS = 3000;
 export class HeyGenAvatarProvider implements AvatarProvider {
   readonly name = "heygen";
   readonly assetKey = ASSET;
+  readonly cinematicShots = true as const;
   private client: HeyGenClient;
   constructor(apiKey: string) {
     this.client = new HeyGenClient(apiKey);
@@ -156,6 +157,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       const { video_id } = await this.client.generateFromTemplate(req.studioTemplate.id, body, req.idempotencyKey);
       return { providerJobId: video_id };
     }
+    if (req.cinematic) return this.createCinematic(req, req.cinematic, cast);
     const scenes: Scene[] = req.scenes?.length ? req.scenes : [{ script: req.script, background: req.background }];
     // Every scene's presenter, clip, voice, and background is checked before anything is uploaded for the render.
     const sceneAvatarOf = (scene: Scene) => (scene.avatarId && cast?.avatars[scene.avatarId]) || avatar;
@@ -258,6 +260,32 @@ export class HeyGenAvatarProvider implements AvatarProvider {
   }
 
   /** The look a presenter renders as: a provider avatar's own id, or the photo avatar made from a custom portrait. */
+  /**
+   * A Cinematic Avatar shot (v3 `POST /v3/videos`, `type: "cinematic_avatar"`): HeyGen composes the scene, motion, and
+   * framing from the description, featuring each presenter's look. It takes no script, voice, background, or captions,
+   * and refuses a `callback_url`, so the shot is followed by asking. The studio's video id is HeyGen's key, so a start
+   * repeated after a lost answer is not directed twice.
+   */
+  private async createCinematic(req: VideoRequest, shot: NonNullable<VideoRequest["cinematic"]>, cast?: RenderCast) {
+    const looks = shot.avatarIds.map((id) => {
+      const avatar = cast?.avatars[id];
+      if (!avatar) throw new ValidationError(`Presenter ${id} is not available`);
+      return this.lookId(avatar);
+    });
+    const body = {
+      type: "cinematic_avatar",
+      prompt: shot.prompt,
+      avatar_id: looks,
+      aspect_ratio: req.aspect,
+      resolution: req.resolution ?? "1080p",
+      ...(shot.durationSec ? { duration: shot.durationSec } : { auto_duration: true }),
+      ...(shot.enhancePrompt ? { enhance_prompt: true } : {}),
+      title: req.title,
+    };
+    const data = await this.client.generateVideo(body, req.idempotencyKey);
+    return { providerJobId: data.video_id };
+  }
+
   private lookId(avatar: Avatar): string {
     if (avatar.source !== "custom") return avatar.id;
     const id = avatar.providerAssetIds?.[LOOK];

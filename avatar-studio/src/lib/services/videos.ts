@@ -272,6 +272,7 @@ export type VideoExtras = Partial<Pick<Video, "folder" | "description" | "batchI
 
 export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWNER, ctx?: RenderContext, skipLimit = false, extras: VideoExtras = {}): Promise<Video> {
   if (req.studioTemplate) return createStudioTemplateVideo({ ...req, studioTemplate: req.studioTemplate }, ownerId, skipLimit, extras);
+  if (req.cinematic) return createCinematicVideo({ ...req, cinematic: req.cinematic }, ownerId, skipLimit, extras);
   if (!skipLimit) await enforceRenderLimit(ownerId);
   const resolved = ctx ?? (await resolveRenderContext(req, ownerId));
   let avatar = resolved.avatar;
@@ -475,6 +476,7 @@ export async function addSubtitles(id: string, language: string, ownerId: string
   const video = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
   if (purgeDue(video, Date.now())) throw new NotFoundError(`Video ${id} not found`);
   if (video.deletedAt) throw new ConflictError("Restore the video from the trash before adding subtitles");
+  if (video.cinematic) throw new ValidationError("A cinematic shot has no script to subtitle");
   if (!subtitleKey(video, language) && Object.keys(video.subtitles ?? {}).length >= MAX_SUBTITLE_LANGUAGES) {
     throw new ValidationError(`At most ${MAX_SUBTITLE_LANGUAGES} subtitle languages per video`);
   }
@@ -608,6 +610,7 @@ export function captionCuesFor(video: Timed & Pick<Video, "captionCues">): { cue
 export function saveCaptionCues(id: string, input: z.infer<typeof captionCuesSchema>, ownerId: string = LOCAL_OWNER): Promise<Video> {
   return updateKeepingCounters(id, ownerId, (video) => {
     if (video.deletedAt) throw new ConflictError("Restore the video from the trash before editing its captions");
+    if (video.cinematic) throw new ValidationError("A cinematic shot has no script, so no captions to edit");
     const next: Video = { ...video, captionCues: input.cues.map(({ startMs, endMs, text }) => ({ startMs, endMs, text })), updatedAt: nowIso() };
     if (next.review?.status === "approved") delete next.review;
     return next;
@@ -1175,13 +1178,13 @@ export async function retryVideo(id: string, ownerId: string = LOCAL_OWNER): Pro
   return createVideo(req, ownerId, undefined, false, { folder: failed.folder, description: failed.description, batchId: failed.batchId, rowLabel: failed.rowLabel, retryOf: failed.id, resizedFrom: failed.resizedFrom });
 }
 
+/** How long a keyed render's reserved row stands for a start still being sent (a function is cut off well before). */
+const RESERVATION_MS = 2 * 60 * 1000;
+
 /**
  * A render of a HeyGen Studio template: the template owns its scenes, presenter, and voice, so nothing is resolved or
  * prepared here; the renderer gets the template and its variables. Counted, stored, and followed like any render.
  */
-/** How long a keyed render's reserved row stands for a start still being sent (a function is cut off well before). */
-const RESERVATION_MS = 2 * 60 * 1000;
-
 async function createStudioTemplateVideo(req: VideoRequest & { studioTemplate: NonNullable<VideoRequest["studioTemplate"]> }, ownerId: string, skipLimit: boolean, extras: VideoExtras): Promise<Video> {
   if (!skipLimit) await enforceRenderLimit(ownerId);
   const provider = getAvatarProvider();
@@ -1197,10 +1200,20 @@ async function createStudioTemplateVideo(req: VideoRequest & { studioTemplate: N
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
-  if (extras.id) {
-    // A render with a client key reserves its row before the renderer is asked, so a retry arriving while this one is
-    // still being sent is told so instead of starting a second render. One reserved long ago whose start never came
-    // back (the function died) is started again; the renderer gets the same key, so it is not rendered twice there.
+  return startReserved(base, ownerId, !!extras.id, () =>
+    provider.createVideo({ ...req, ...(extras.id ? { idempotencyKey: extras.id } : {}) }, { id: req.avatarId, name: req.studioTemplate.name, provider: provider.name, source: "provider" } as Avatar, null),
+  );
+}
+
+/**
+ * Starts a render whose row is already built (a template render, a cinematic shot) and stores it, counted unless it
+ * failed to start. With a client key (`keyed`, the row's id derived from it), the row is reserved before the renderer
+ * is asked, so a retry arriving while this one is still being sent is told so instead of starting a second render. One
+ * reserved long ago whose start never came back (the function died) is started again; the renderer gets the same key,
+ * so it is not rendered twice there.
+ */
+async function startReserved(base: Video, ownerId: string, keyed: boolean, send: () => Promise<{ providerJobId: string }>): Promise<Video> {
+  if (keyed) {
     if (!(await getStore().insert("video", base))) {
       const held = await getStore().get<Video>("video", base.id);
       if (held && (held.status !== "queued" || held.providerJobId)) return held;
@@ -1208,7 +1221,7 @@ async function createStudioTemplateVideo(req: VideoRequest & { studioTemplate: N
     }
   }
   try {
-    const { providerJobId } = await provider.createVideo({ ...req, ...(extras.id ? { idempotencyKey: extras.id } : {}) }, { id: req.avatarId, name: req.studioTemplate.name, provider: provider.name, source: "provider" } as Avatar, null);
+    const { providerJobId } = await send();
     base.providerJobId = providerJobId;
     base.status = "processing";
   } catch (err) {
@@ -1217,6 +1230,40 @@ async function createStudioTemplateVideo(req: VideoRequest & { studioTemplate: N
   }
   if (base.status !== "failed") await countRender(base, ownerId);
   return getStore().put("video", base);
+}
+
+/**
+ * A cinematic shot: the renderer directs the scene from the description with the shot's presenters, so only they are
+ * resolved (as the account's own, like any render's) and prepared; there is no voice, script, or background to send.
+ * Counted, stored, and followed like any render.
+ */
+async function createCinematicVideo(req: VideoRequest & { cinematic: NonNullable<VideoRequest["cinematic"]> }, ownerId: string, skipLimit: boolean, extras: VideoExtras): Promise<Video> {
+  if (!skipLimit) await enforceRenderLimit(ownerId);
+  const provider = getAvatarProvider();
+  if (!provider.cinematicShots) throw new ValidationError(`Cinematic shots are not available with the ${provider.name} renderer`);
+  // Another account's presenter reads as not found, like any record the caller does not own.
+  const avatars = await Promise.all(req.cinematic.avatarIds.map((id) => getAvatar(id, ownerId)));
+  const base: Video = {
+    ...req,
+    ...stripUndefined(extras),
+    id: extras.id ?? newId("vid"),
+    ownerId,
+    status: "queued",
+    provider: provider.name,
+    avatarName: avatars.map((a) => a.name).join(", "),
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  };
+  return startReserved(base, ownerId, !!extras.id, async () => {
+    const cast: RenderCast = { avatars: {}, voices: {} };
+    // Side by side, so several presenters waiting on the renderer wait once.
+    await Promise.all(
+      avatars.map(async (a) => {
+        cast.avatars[a.id] = a.source === "custom" && provider.prepareAvatar ? await prepareOnce(provider, a) : a;
+      }),
+    );
+    return provider.createVideo({ ...req, ...(extras.id ? { idempotencyKey: extras.id } : {}) }, cast.avatars[avatars[0].id], null, cast);
+  });
 }
 
 /** The request a stored video was rendered from, to render it again (a retry, another size). */
@@ -1241,6 +1288,7 @@ function requestOf(video: Video): VideoRequest {
     ...(video.avatarEngine ? { avatarEngine: video.avatarEngine } : {}),
     ...(video.transparent ? { transparent: true as const } : {}),
     ...(video.studioTemplate ? { studioTemplate: video.studioTemplate } : {}),
+    ...(video.cinematic ? { cinematic: video.cinematic } : {}),
   };
 }
 
@@ -1305,6 +1353,8 @@ export async function resizeVideo(id: string, input: z.infer<typeof resizeSchema
   if (source.deletedAt) throw new ConflictError("Restore the video from the trash before making other sizes");
   // A HeyGen Studio template has one shape, its own.
   if (source.studioTemplate) throw new ValidationError("A video made from a HeyGen template keeps the template's shape; make the other size in HeyGen Studio");
+  // A shot is directed for its frame: another shape is another shot, made from the description again.
+  if (source.cinematic) throw new ValidationError("A cinematic shot is directed for its own shape; make the shot again in another shape from the Cinematic page");
   // A shape the video already has is not made again: the original's (even in the trash, as it can be restored) and
   // each size made from it that is not in the trash. A size whose render could not be started used no render and holds
   // nothing to watch, so its shape can be made again.

@@ -335,8 +335,8 @@ export class HeyGenClient {
   }
 
   /** A video (v3, `POST /v3/videos`); a studio request composes its scenes into one render. */
-  generateVideo(body: Record<string, unknown>) {
-    return this.request<{ video_id: string; status?: string }>(`${V3}/videos`, { method: "POST", body: JSON.stringify(body) });
+  generateVideo(body: Record<string, unknown>, key?: string) {
+    return this.request<{ video_id: string; status?: string }>(`${V3}/videos`, { method: "POST", body: JSON.stringify(body), ...(key ? { headers: { "Idempotency-Key": key } } : {}) });
   }
 
   videoStatus(videoId: string) {

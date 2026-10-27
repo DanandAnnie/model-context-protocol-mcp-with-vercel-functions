@@ -20,6 +20,7 @@ const DEMO_MUSIC = [
 /** Simulates an async render that completes ~12s after submission. */
 export class MockAvatarProvider implements AvatarProvider {
   readonly name = "mock";
+  readonly cinematicShots = true as const;
   private static RENDER_MS = 12_000;
   /** How long a demo clipping job takes. */
   private static CLIP_MS = 4_000;
@@ -39,7 +40,8 @@ export class MockAvatarProvider implements AvatarProvider {
     // An audio scene lasts as long as its clip; a typed one as long as its words take at its speed (the scene's, else the video's), plus its pauses.
     const scenes = req.scenes?.length ? req.scenes : [{ script: req.script }];
     const seconds = scenes.reduce((sum, sc) => sum + ("audioSeconds" in sc && sc.audioSeconds ? sc.audioSeconds : words(sc.script) / 2.5 / (("speed" in sc && sc.speed) || req.speed) + pauseSeconds(sc.script)), 0);
-    const durationSec = Math.max(3, Math.round(seconds));
+    // A cinematic shot lasts as long as asked, or 8 seconds when the renderer would choose.
+    const durationSec = req.cinematic ? (req.cinematic.durationSec ?? 8) : Math.max(3, Math.round(seconds));
     // Encode submission time + duration in the job id so status needs no state.
     return { providerJobId: `mock_${Date.now()}_${durationSec}` };
   }

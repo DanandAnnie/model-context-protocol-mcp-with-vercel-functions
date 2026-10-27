@@ -84,6 +84,7 @@ export async function createTemplate(input: TemplateInput, ownerId: string = LOC
     owned(video, ownerId, `Video ${input.fromVideoId}`);
     // Its scenes, presenter, and voice live in the HeyGen template, so there is nothing here to keep as a template.
     if (video.studioTemplate) throw new ValidationError("A video made from a HeyGen template is remade from that template, not saved as one here");
+    if (video.cinematic) throw new ValidationError("A cinematic shot has no script to save as a template; make it again from the Cinematic page");
     // Scenes keep their presenter ids but not the display names, which are filled in again at render time.
     const scenes = (video.scenes?.length ? video.scenes : [{ script: video.script, background: video.background }]).map((sc) => ({
       script: sc.script,

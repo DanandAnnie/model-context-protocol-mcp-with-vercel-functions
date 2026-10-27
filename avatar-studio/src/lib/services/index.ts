@@ -25,3 +25,4 @@ export * from "./music";
 export * from "./lookpacks";
 export * from "./twins";
 export * from "./studio-templates";
+export * from "./cinematic";

@@ -73,6 +73,11 @@ export interface AvatarProvider {
    */
   createVideo(req: VideoRequest, avatar: Avatar, voice: Voice | null, cast?: RenderCast): Promise<{ providerJobId: string }>;
   /**
+   * The renderer directs a request's `cinematic` shot (HeyGen's Cinematic Avatar): `createVideo` then features the
+   * shot's presenters from `cast.avatars` (prepared like any presenter) and needs no voice. Absent when it cannot.
+   */
+  readonly cinematicShots?: true;
+  /**
    * Make an audio clip usable by this renderer, e.g. by uploading it. Returns the clip with
    * `providerAssetIds[provider]` set; the caller persists it. Renderers without it cannot use audio scenes.
    */

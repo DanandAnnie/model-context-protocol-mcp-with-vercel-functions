@@ -169,6 +169,8 @@ describe("lip syncs", () => {
       // Exactly one audio source.
       assert.throws(() => lipsyncRequestSchema.parse({ videoId: video.id, voiceChangeId: "vc_ready", audioUrl: AUDIO }), /Choose one of your audio clips or recordings/);
       assert.throws(() => lipsyncRequestSchema.parse({ videoId: video.id, voiceChangeId: "nope" }), /recordings in another voice/);
+      // An empty field is one left out, whichever it is.
+      assert.deepEqual(JSON.parse(JSON.stringify(lipsyncRequestSchema.parse({ videoId: video.id, voiceChangeId: " vc_ready ", clipId: "", audioUrl: "  " }))), { videoId: video.id, voiceChangeId: "vc_ready", mode: "speed" });
     } finally {
       proto.startLipsync = real;
     }

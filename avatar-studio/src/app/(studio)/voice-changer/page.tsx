@@ -119,6 +119,12 @@ export default function VoiceChangerPage() {
     return () => clearInterval(timer);
   }, [running, refetch]);
 
+  // Drawn again each minute, so a result's link to lip sync goes once the result is over an hour old.
+  const [, setMinute] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setMinute((m) => m + 1), 60_000);
+    return () => clearInterval(timer);
+  }, []);
   const [voiceId, setVoiceId] = useState("");
   const [clipId, setClipId] = useState("");
   const [removeNoise, setRemoveNoise] = useState(false);
@@ -520,7 +526,7 @@ export default function VoiceChangerPage() {
                       </div>
                       {c.status === "completed" && c.audioUrl && (
                         <div className="mt-3 flex flex-wrap items-center gap-2">
-                          <audio controls preload="none" src={c.audioUrl} className="h-8 min-w-0 flex-1" aria-label={`Play ${c.title}`} />
+                          <audio controls preload="none" src={c.audioUrl} className="h-8 min-w-48 flex-1" aria-label={`Play ${c.title}`} />
                           <a href={c.audioUrl} download target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:underline" aria-label={`Download ${c.title}, ${formatDate(c.createdAt)}`}>
                             <Download className="h-3 w-3" aria-hidden /> Download
                           </a>

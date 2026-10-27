@@ -20,6 +20,9 @@ import { withSuffix } from "../text";
 /** Lip-synced videos an account keeps; another needs one deleted first. */
 export const MAX_LIPSYNCS = 50;
 
+/** "" or only spaces, as a field left out. */
+const emptyAsAbsent = (v: unknown) => (typeof v === "string" && !v.trim() ? undefined : v);
+
 export const lipsyncRequestSchema = z
   .object({
     title: z.string().trim().max(120).optional(),
@@ -30,9 +33,10 @@ export const lipsyncRequestSchema = z
      * The new audio: one of the account's audio clips, a public https link to an audio file, or one of its recordings or
      * texts spoken in an instant voice (the voice changer's).
      */
-    clipId: z.string().trim().min(1).optional(),
-    audioUrl: z.string().trim().max(2000, "The link is too long").optional(),
-    voiceChangeId: z.string().trim().regex(/^vc_[A-Za-z0-9_-]{1,64}$/, "Choose one of your recordings in another voice").optional(),
+    // An empty field is one not given, whichever it is.
+    clipId: z.preprocess(emptyAsAbsent, z.string().trim().min(1).optional()),
+    audioUrl: z.preprocess(emptyAsAbsent, z.string().trim().max(2000, "The link is too long").optional()),
+    voiceChangeId: z.preprocess(emptyAsAbsent, z.string().trim().regex(/^vc_[A-Za-z0-9_-]{1,64}$/, "Choose one of your recordings in another voice").optional()),
     mode: z.enum(LIPSYNC_MODES).default("speed"),
   })
   .refine((v) => !!v.videoId !== !!v.sourceUrl, { message: "Choose one of your videos or paste a link to a video", path: ["sourceUrl"] })

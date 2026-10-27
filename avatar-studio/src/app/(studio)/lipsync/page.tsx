@@ -41,7 +41,13 @@ export default function LipsyncPage() {
   const videos = (library?.videos ?? []).filter((v) => v.videoUrl && !v.deletedAt);
   const { data: clipData, setData: setClipData, refetch: refetchClips } = useApi<{ clips: AudioClip[] }>("/api/clips");
   const clips = clipData?.clips ?? [];
-  const { data: voiceData, error: voiceError } = useApi<{ changes: Voiced[] }>("/api/voice-changer");
+  // Asked again each minute, so a recording leaves the choices once it is over an hour old.
+  const [, setMinute] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setMinute((m) => m + 1), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+  const { data: voiceData, error: voiceError, refetch: refetchVoices } = useApi<{ changes: Voiced[] }>("/api/voice-changer");
   // Ready ones whose link from the renderer is still good (the server refuses the others).
   const voiced = (voiceData?.changes ?? []).filter((c) => c.status === "completed" && c.audioUrl && Date.now() - Date.parse(c.checkedAt ?? c.updatedAt) <= VOICE_RESULT_LINK_MS);
   const [from, setFrom] = useState<"link" | "library">("library");
@@ -49,6 +55,8 @@ export default function LipsyncPage() {
   const [videoId, setVideoId] = useState("");
   const [audioFrom, setAudioFrom] = useState<"clip" | "link" | "voice">("clip");
   const [voiceChangeId, setVoiceChangeId] = useState("");
+  // Why a recording chosen by the link, or chosen before, is no longer chosen; shown under the choice.
+  const [voiceGone, setVoiceGone] = useState<string | null>(null);
   // Sent here from the voice changer with one of its recordings chosen.
   useEffect(() => {
     const chosen = new URLSearchParams(window.location.search).get("voiceChange");
@@ -56,14 +64,20 @@ export default function LipsyncPage() {
       setAudioFrom("voice");
       setVoiceChangeId(chosen);
     }
-    // Read once: a reload after a start does not choose it again.
-    if (chosen) window.history.replaceState(null, "", window.location.pathname);
+    // Read once: a reload after a start does not choose it again (the rest of the address is kept).
+    if (chosen) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("voiceChange");
+      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    }
   }, []);
   // A chosen recording not on offer (deleted, another account's, or too old to send) is not chosen, and the page says so.
   useEffect(() => {
     if (!voiceData || !voiceChangeId || voiced.some((c) => c.id === voiceChangeId)) return;
+    const why = "That recording is no longer available, or was made over an hour ago; make it again in the voice changer.";
     setVoiceChangeId("");
-    setNote("That recording is no longer available, or was made over an hour ago; make it again in the voice changer.");
+    setVoiceGone(why);
+    setNote(why);
   }, [voiceData, voiceChangeId, voiced]);
   const [clipId, setClipId] = useState("");
   const [audioUrl, setAudioUrl] = useState("");
@@ -119,7 +133,7 @@ export default function LipsyncPage() {
     setRequestKey(newKey());
   }
   const videoReady = from === "link" ? /^https:\/\/\S+$/i.test(sourceUrl.trim()) : !!videoId;
-  const audioReady = audioFrom === "link" ? /^https:\/\/\S+$/i.test(audioUrl.trim()) : audioFrom === "voice" ? !!voiceChangeId : !!clipId;
+  const audioReady = audioFrom === "link" ? /^https:\/\/\S+$/i.test(audioUrl.trim()) : audioFrom === "voice" ? voiced.some((c) => c.id === voiceChangeId) : !!clipId;
   const canStart = canEdit !== false && data?.available !== false;
 
   async function upload(file: File) {
@@ -173,7 +187,11 @@ export default function LipsyncPage() {
         setClipId("");
         void refetchClips();
       }
-      if (e instanceof Error && /recording in another voice is no longer available/.test(e.message)) setVoiceChangeId("");
+      // A recording gone or too old to send is no longer chosen; the list is asked again so it leaves the choices too.
+      if (e instanceof Error && /recording in another voice is no longer available|over an hour ago|made by another renderer/.test(e.message)) {
+        setVoiceChangeId("");
+        void refetchVoices();
+      }
       // A refusal is an answer: trying again (after topping up, say) is a new start. A lost answer, or one HeyGen is still
       // working on, keeps its key, so a retry returns the start that may have gone through.
       if (isRefusal(e)) setRequestKey(newKey());
@@ -268,17 +286,24 @@ export default function LipsyncPage() {
                 </div>
               </fieldset>
               {audioFrom === "voice" ? (
-                <Field label="Recording in your voice" hint={voiced.length ? "A recording or text spoken in one of your instant voices within the last hour, from the voice changer." : voiceData ? "None made within the last hour is ready; make one in the voice changer." : voiceError ? "Your recordings could not be loaded." : "Loading your recordings…"}>
-                  <select className={inputClass} value={voiceChangeId} disabled={canEdit === false} onChange={(e) => (setVoiceChangeId(e.target.value), changed())}>
-                    <option value="">{voiced.length ? "Choose a recording" : "No recordings yet"}</option>
-                    {voiced.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.title}
-                        {typeof c.durationSec === "number" && c.durationSec > 0 ? ` (${formatSeconds(Math.max(1, Math.round(c.durationSec)))})` : ""}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
+                <div>
+                  <Field label="Recording in your voice" hint={voiced.length ? "A recording or text spoken in one of your instant voices within the last hour, from the voice changer." : voiceData ? "None made within the last hour is ready; make one in the voice changer." : voiceError ? "Your recordings could not be loaded." : "Loading your recordings…"}>
+                    <select className={inputClass} value={voiceChangeId} disabled={canEdit === false} aria-describedby={voiceGone ? "voice-gone" : undefined} onChange={(e) => (setVoiceChangeId(e.target.value), setVoiceGone(null), changed())}>
+                      <option value="">{voiced.length ? "Choose a recording" : "No recordings yet"}</option>
+                      {voiced.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.title}
+                          {typeof c.durationSec === "number" && c.durationSec > 0 ? ` (${formatSeconds(Math.max(1, Math.round(c.durationSec)))})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  {voiceGone && (
+                    <p id="voice-gone" className="mt-1 text-xs text-amber-700">
+                      {voiceGone}
+                    </p>
+                  )}
+                </div>
               ) : audioFrom === "link" ? (
                 <Field label="Audio URL" hint="A public https link to an MP3 or WAV file with the new speech.">
                   <input type="url" inputMode="url" className={inputClass} value={audioUrl} disabled={canEdit === false} onChange={(e) => (setAudioUrl(e.target.value), changed())} placeholder="https://…/new-voice-over.mp3" />
@@ -357,7 +382,7 @@ export default function LipsyncPage() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium text-slate-900">{l.title}</div>
-                      <div className="mt-0.5 text-xs text-slate-500" data-testid="lipsync-meta">
+                      <div className="mt-0.5 break-words text-xs text-slate-500" data-testid="lipsync-meta">
                         {l.videoId ? "A library video" : "A linked video"} · {l.voiceChangeId ? `“${l.audioName ?? "a recording"}” in your voice` : l.clipId ? (clipName(l.clipId) ? `audio clip “${clipName(l.clipId)}”` : "an audio clip") : "linked audio"} · {MODE_LABEL[l.mode]} · {formatDate(l.createdAt)}
                         {l.status === "completed" && typeof l.durationSec === "number" ? ` · ${formatSeconds(Math.max(1, Math.round(l.durationSec)))}` : ""}
                       </div>

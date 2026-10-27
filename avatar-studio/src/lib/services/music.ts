@@ -23,12 +23,12 @@ export const musicQuerySchema = z.string().trim().min(2, "Describe the music in 
 
 export const musicRequestSchema = z.object({
   /** One of the account's finished videos. */
-  videoId: z.string().trim().min(1, "Choose one of your videos"),
+  videoId: z.string({ error: "Choose one of your videos" }).trim().min(1, "Choose one of your videos"),
   /** The track chosen, and the description it was found with: the track's link is asked for again with it. */
   trackId: z.string().trim().min(1, "Choose a track").max(200),
   query: musicQuerySchema,
   volume: z.enum(Object.keys(MUSIC_VOLUMES) as [MusicVolume, ...MusicVolume[]]).default("low"),
-  title: z.string().trim().max(120).optional(),
+  title: z.string().trim().max(120, "Keep the title to 120 characters").optional(),
 });
 
 export const musicIdSchema = z.string().regex(/^mm_[A-Za-z0-9_-]{1,64}$/, "Unknown video with music");
@@ -94,7 +94,9 @@ export async function startMusic(input: z.infer<typeof musicRequestSchema>, owne
   const id = opts.key ? `mm_${createHash("sha256").update(`${ownerId}\0${opts.key}`).digest("base64url").slice(0, 32)}` : newId("mm");
   const existing = opts.key ? await getStore().get<MusicJob>("music", id) : null;
   if (existing && existing.ownerId === ownerId) {
-    if (existing.videoId !== input.videoId || existing.trackId !== input.trackId || existing.volume !== input.volume) throw new ConflictError("This Idempotency-Key was already used for another video with music; send a new key");
+    // A title given must be the one kept; one left out took the video's, which is not read again here.
+    const same = existing.videoId === input.videoId && existing.trackId === input.trackId && existing.volume === input.volume && existing.query === input.query && (!input.title || existing.title === input.title);
+    if (!same) throw new ConflictError("This Idempotency-Key was already used for another video with music; send a new key");
     return existing;
   }
   const provider = getAvatarProvider();

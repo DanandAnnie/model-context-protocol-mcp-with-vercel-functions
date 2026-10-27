@@ -137,6 +137,10 @@ describe("background music", () => {
       assert.equal(again.id, first.id);
       assert.deepEqual([keys, admitted], [[first.id], 1]);
       await assert.rejects(startMusic(request(video.id, { volume: "high" }), "u1", { key: "music-key-1" }), ConflictError);
+      await assert.rejects(startMusic(request(video.id, { query: "calm piano" }), "u1", { key: "music-key-1" }), ConflictError, "the description it was found with too");
+      await assert.rejects(startMusic(request(video.id, { title: "Another title" }), "u1", { key: "music-key-1" }), ConflictError, "and a title given");
+      assert.throws(() => musicRequestSchema.parse({ trackId: "t", query: "calm" }), /Choose one of your videos/);
+      assert.throws(() => musicRequestSchema.parse({ videoId: "v", trackId: "t", query: "calm", title: "x".repeat(121) }), /Keep the title to 120 characters/);
     } finally {
       proto.startMusicMix = real;
     }

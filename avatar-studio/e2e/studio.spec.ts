@@ -817,6 +817,8 @@ test("a cinematic shot is directed from a description with chosen presenters, ke
   // The demo renderer finishes a few seconds later; a finished shot still has no captions to download.
   await expect(page.getByRole("link", { name: /^Download$/ })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole("link", { name: "Captions (.srt)" })).toHaveCount(0);
+  // Nor anything to dub: a shot has no script or voice.
+  await expect(page.getByRole("link", { name: "Translate", exact: true })).toHaveCount(0);
   // "Make the shot again" fills the form with this shot.
   await page.getByRole("link", { name: "Make the shot again" }).click();
   await expect(page).toHaveURL(/\/cinematic\?from=vid_/);
@@ -836,6 +838,11 @@ test("a cinematic shot is directed from a description with chosen presenters, ke
   await expect(page.getByTestId("cinematic-notice")).toContainText(`${own.name} is no longer in your library and was left out`);
   await expect(presenters.getByRole("checkbox", { checked: true })).toHaveCount(1);
   await expect(start).toBeEnabled();
+  // A video that is not a shot fills nothing in, and the page says so.
+  const plain = await createVideoViaApi(page, `Not a shot ${tag}`);
+  await page.goto(`/cinematic?from=${plain.id}`);
+  await expect(page.getByTestId("cinematic-notice")).toContainText("is not a cinematic shot");
+  await expect(page.getByLabel("Describe the shot")).toHaveValue("");
 });
 
 test("a photo avatar is dressed in a look pack, each look kept as a presenter of its own", async ({ page }) => {

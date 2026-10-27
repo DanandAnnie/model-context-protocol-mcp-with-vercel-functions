@@ -78,6 +78,13 @@ describe("cinematic shots", () => {
     await assert.rejects(startCinematic(cinematicSchema.parse({ ...SHOT, prompt: `${SHOT.prompt} At dusk.` }), "u1", { key: "shot-key-1" }), ConflictError);
     await assert.rejects(startCinematic(cinematicSchema.parse({ ...SHOT, duration: 6 }), "u1", { key: "shot-key-1" }), ConflictError, "every setting of the shot is compared");
     await assert.rejects(startCinematic(cinematicSchema.parse({ ...SHOT, title: "Another title" }), "u1", { key: "shot-key-1" }), ConflictError);
+    await assert.rejects(startCinematic(cinematicSchema.parse({ ...SHOT, folder: "Launch" }), "u1", { key: "shot-key-1" }), ConflictError, "and the folder");
+    // Only the start that set the shot going says so, never a replay (the route records "created" on it).
+    let started = 0;
+    await startCinematic(cinematicSchema.parse(SHOT), "u1", { key: "shot-key-1", onStarted: () => void started++ });
+    const fresh = await startCinematic(cinematicSchema.parse(SHOT), "u1", { key: "shot-key-2", onStarted: () => void started++ });
+    assert.equal(started, 1);
+    assert.equal("onStarted" in fresh, false, "the callback is not stored with the video");
     const theirs = await startCinematic(cinematicSchema.parse(SHOT), "u2", { key: "shot-key-1" });
     assert.notEqual(theirs.id, first.id, "another account's key is its own");
     await deleteVideo(first.id, "u1");
@@ -100,6 +107,10 @@ describe("cinematic shots", () => {
     await getStore().put("video", { ...shot, id: "vid_shot_renamed", status: "failed", providerJobId: undefined });
     const retried = await retryVideo("vid_shot_renamed", "u1");
     assert.deepEqual([retried.avatarName, retried.cinematic?.avatarNames], ["Rae Lin", ["Rae Lin"]]);
+    // A presenter deleted since is named, not shown as an id.
+    await getStore().remove("avatar", "av_mine");
+    await getStore().put("video", { ...retried, id: "vid_shot_gone", status: "failed", providerJobId: undefined });
+    await assert.rejects(retryVideo("vid_shot_gone", "u1"), (e: unknown) => e instanceof NotFoundError && (e as Error).message === "The presenter “Rae Lin” is no longer in your library; make the shot with another");
   });
 
   it("is refused by a renderer that does not direct shots", async () => {

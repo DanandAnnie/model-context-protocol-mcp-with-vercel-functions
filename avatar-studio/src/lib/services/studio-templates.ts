@@ -155,7 +155,7 @@ export function filledScript(template: StudioTemplateDetail, variables: Record<s
 const ASPECTS: AspectRatio[] = ["16:9", "9:16", "1:1"];
 
 /** Renders one of the renderer's templates with the account's values, as a library video counted like any render. */
-export async function renderStudioTemplate(id: string, input: z.infer<typeof studioRenderSchema>, ownerId: string = LOCAL_OWNER, opts: { key?: string } = {}): Promise<Video> {
+export async function renderStudioTemplate(id: string, input: z.infer<typeof studioRenderSchema>, ownerId: string = LOCAL_OWNER, opts: { key?: string; onStarted?: () => void } = {}): Promise<Video> {
   // With a client key, the video's id is derived from the account and the key, so a render retried after a lost answer
   // returns the video already made instead of rendering (and counting) a second one.
   const videoId = opts.key ? `vid_${createHash("sha256").update(`${ownerId}\0studio-template\0${opts.key}`).digest("base64url").slice(0, 24)}` : undefined;
@@ -197,6 +197,6 @@ export async function renderStudioTemplate(id: string, input: z.infer<typeof stu
     ownerId,
     undefined,
     false,
-    videoId ? { id: videoId } : {},
+    { ...(videoId ? { id: videoId } : {}), ...(opts.onStarted ? { onStarted: opts.onStarted } : {}) },
   );
 }

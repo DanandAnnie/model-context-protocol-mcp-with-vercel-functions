@@ -65,19 +65,32 @@ function CinematicInner() {
 
   // "Make the shot again" from a video's page fills the form with that shot.
   const from = params.get("from");
-  const { data: source } = useApi<{ video: Video }>(from ? `/api/videos/${encodeURIComponent(from)}` : null);
+  const { data: source, error: sourceError } = useApi<{ video: Video }>(from ? `/api/videos/${encodeURIComponent(from)}` : null);
+  // The folder of the shot made again, so the new one is filed beside it.
+  const [folder, setFolder] = useState<string | undefined>(undefined);
   const filled = useRef(false);
   useEffect(() => {
-    const shot = source?.video.cinematic;
-    if (!shot || filled.current) return;
+    if (sourceError && !filled.current) {
+      filled.current = true;
+      setNotice(`The video to make again could not be opened (${sourceError}); describe a new shot instead.`);
+    }
+  }, [sourceError]);
+  useEffect(() => {
+    if (!source || filled.current) return;
     filled.current = true;
+    const shot = source.video.cinematic;
+    if (!shot) {
+      setNotice(`“${source.video.title}” is not a cinematic shot, so there is nothing to fill in; describe a new shot instead.`);
+      return;
+    }
+    setFolder(source.video.folder);
     setPrompt(shot.prompt);
     setChosen(shot.avatarIds);
     setAspect(source.video.aspect);
     if (source.video.resolution) setResolution(source.video.resolution);
     setDuration(shot.durationSec ?? "auto");
     setEnhance(!!shot.enhancePrompt);
-    setNotice(`The shot of “${source.video.title}” is filled in; change it and make it again.`);
+    setNotice(`The shot of “${source.video.title}” is filled in${source.video.folder ? ` and goes in the folder “${source.video.folder}”` : ""}; change it and make it again.`);
   }, [source]);
 
   const avatars = library?.avatars ?? [];
@@ -129,7 +142,7 @@ function CinematicInner() {
     setErr(null);
     setNote(null);
     try {
-      const body = { prompt: prompt.trim(), avatarIds: chosen, aspect, resolution, duration, enhancePrompt: enhance, ...(title.trim() ? { title: title.trim() } : {}) };
+      const body = { prompt: prompt.trim(), avatarIds: chosen, aspect, resolution, duration, enhancePrompt: enhance, ...(title.trim() ? { title: title.trim() } : {}), ...(folder ? { folder } : {}) };
       const { video } = await api<{ video: Video }>("/api/cinematic", { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": requestKey } });
       router.push(`/videos/${video.id}`);
     } catch (e) {
@@ -162,7 +175,42 @@ function CinematicInner() {
         </Card>
       ) : (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.3fr_1fr]">
-          <Card className="space-y-4 p-5">
+          {/* The presenters come first (in reading and Tab order), as the shot needs one before it can be made; on a wide
+              screen they sit in the right-hand column. */}
+          <Card className="p-5 lg:order-2">
+            <fieldset>
+              <legend className="text-sm font-semibold text-slate-900">Presenters</legend>
+              <p className="mt-0.5 text-xs text-slate-500" id="presenters-hint">
+                Up to {CINEMATIC_MAX_LOOKS} in the shot · {chosen.length} chosen{full ? " (the most a shot takes)" : ""}
+              </p>
+              <input className={`${inputClass} mt-3`} value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Search presenters" aria-label="Search presenters" />
+              {!library ? (
+                <p className="mt-3 text-xs text-slate-500">Loading your presenters…</p>
+              ) : avatars.length === 0 ? (
+                <p className="mt-3 text-xs text-slate-500">No presenters yet; add one on the Avatars page.</p>
+              ) : (
+                <ul className="mt-3 grid max-h-[28rem] grid-cols-2 gap-2 overflow-y-auto sm:grid-cols-3" data-testid="cinematic-presenters">
+                  {matching.map((a) => {
+                    const on = chosen.includes(a.id);
+                    return (
+                      <li key={a.id}>
+                        <label className={`flex cursor-pointer flex-col gap-1 rounded-lg border p-2 text-xs ${on ? "border-brand-500 bg-brand-50" : "border-slate-200"} ${!on && full ? "opacity-50" : ""}`}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={a.imageUrl} alt="" className="aspect-square w-full rounded object-cover" />
+                          <span className="flex items-center gap-1.5">
+                            <input type="checkbox" className="accent-brand-600" checked={on} disabled={locked || (!on && full)} aria-describedby="presenters-hint" onChange={() => toggle(a.id)} />
+                            <span className="min-w-0 truncate font-medium text-slate-800">{a.name}</span>
+                          </span>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              {library && avatars.length > SHOWN && !filter.trim() && <p className="mt-2 text-xs text-slate-500">Showing {SHOWN} of {avatars.length}; search to find others.</p>}
+            </fieldset>
+          </Card>
+          <Card className="space-y-4 p-5 lg:order-1">
             <Field label="Describe the shot" hint="What happens, where, and how the camera moves; there is no script.">
               <textarea
                 ref={promptRef}
@@ -233,39 +281,6 @@ function CinematicInner() {
             <p className="text-xs text-slate-500">The shot is added to your library and counts as one render. It has no captions, as nothing is scripted.</p>
           </Card>
 
-          <Card className="p-5">
-            <fieldset>
-              <legend className="text-sm font-semibold text-slate-900">Presenters</legend>
-              <p className="mt-0.5 text-xs text-slate-500" id="presenters-hint">
-                Up to {CINEMATIC_MAX_LOOKS} in the shot · {chosen.length} chosen{full ? " (the most a shot takes)" : ""}
-              </p>
-              <input className={`${inputClass} mt-3`} value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Search presenters" aria-label="Search presenters" />
-              {!library ? (
-                <p className="mt-3 text-xs text-slate-500">Loading your presenters…</p>
-              ) : avatars.length === 0 ? (
-                <p className="mt-3 text-xs text-slate-500">No presenters yet; add one on the Avatars page.</p>
-              ) : (
-                <ul className="mt-3 grid max-h-[28rem] grid-cols-2 gap-2 overflow-y-auto sm:grid-cols-3" data-testid="cinematic-presenters">
-                  {matching.map((a) => {
-                    const on = chosen.includes(a.id);
-                    return (
-                      <li key={a.id}>
-                        <label className={`flex cursor-pointer flex-col gap-1 rounded-lg border p-2 text-xs ${on ? "border-brand-500 bg-brand-50" : "border-slate-200"} ${!on && full ? "opacity-50" : ""}`}>
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={a.imageUrl} alt="" className="aspect-square w-full rounded object-cover" />
-                          <span className="flex items-center gap-1.5">
-                            <input type="checkbox" className="accent-brand-600" checked={on} disabled={locked || (!on && full)} aria-describedby="presenters-hint" onChange={() => toggle(a.id)} />
-                            <span className="min-w-0 truncate font-medium text-slate-800">{a.name}</span>
-                          </span>
-                        </label>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-              {library && avatars.length > SHOWN && !filter.trim() && <p className="mt-2 text-xs text-slate-500">Showing {SHOWN} of {avatars.length}; search to find others.</p>}
-            </fieldset>
-          </Card>
         </div>
       )}
     </>

@@ -268,6 +268,8 @@ export async function resolveRenderContext(
 export type VideoExtras = Partial<Pick<Video, "folder" | "description" | "batchId" | "rowLabel" | "retryOf" | "resizedFrom" | "captionCues" | "subtitles">> & {
   /** The video's id, when a client key decides it (a template render retried after a lost answer). */
   id?: string;
+  /** Called once the renderer has started this render here, never for a replay of one started before (never stored). */
+  onStarted?: () => void;
 };
 
 export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWNER, ctx?: RenderContext, skipLimit = false, extras: VideoExtras = {}): Promise<Video> {
@@ -1185,7 +1187,7 @@ const RESERVATION_MS = 2 * 60 * 1000;
  * A render of a HeyGen Studio template: the template owns its scenes, presenter, and voice, so nothing is resolved or
  * prepared here; the renderer gets the template and its variables. Counted, stored, and followed like any render.
  */
-async function createStudioTemplateVideo(req: VideoRequest & { studioTemplate: NonNullable<VideoRequest["studioTemplate"]> }, ownerId: string, skipLimit: boolean, extras: VideoExtras): Promise<Video> {
+async function createStudioTemplateVideo(req: VideoRequest & { studioTemplate: NonNullable<VideoRequest["studioTemplate"]> }, ownerId: string, skipLimit: boolean, { onStarted, ...extras }: VideoExtras): Promise<Video> {
   if (!skipLimit) await enforceRenderLimit(ownerId);
   const provider = getAvatarProvider();
   if (!provider.listStudioTemplates) throw new ValidationError(`HeyGen Studio templates are not available with the ${provider.name} renderer`);
@@ -1200,8 +1202,12 @@ async function createStudioTemplateVideo(req: VideoRequest & { studioTemplate: N
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
-  return startReserved(base, ownerId, !!extras.id, () =>
-    provider.createVideo({ ...req, ...(extras.id ? { idempotencyKey: extras.id } : {}) }, { id: req.avatarId, name: req.studioTemplate.name, provider: provider.name, source: "provider" } as Avatar, null),
+  return startReserved(
+    base,
+    ownerId,
+    !!extras.id,
+    () => provider.createVideo({ ...req, ...(extras.id ? { idempotencyKey: extras.id } : {}) }, { id: req.avatarId, name: req.studioTemplate.name, provider: provider.name, source: "provider" } as Avatar, null),
+    onStarted,
   );
 }
 
@@ -1212,7 +1218,7 @@ async function createStudioTemplateVideo(req: VideoRequest & { studioTemplate: N
  * reserved long ago whose start never came back (the function died) is started again; the renderer gets the same key,
  * so it is not rendered twice there.
  */
-async function startReserved(base: Video, ownerId: string, keyed: boolean, send: () => Promise<{ providerJobId: string }>): Promise<Video> {
+async function startReserved(base: Video, ownerId: string, keyed: boolean, send: () => Promise<{ providerJobId: string }>, onStarted?: () => void): Promise<Video> {
   if (keyed) {
     if (!(await getStore().insert("video", base))) {
       const held = await getStore().get<Video>("video", base.id);
@@ -1231,7 +1237,9 @@ async function startReserved(base: Video, ownerId: string, keyed: boolean, send:
     base.error = err instanceof Error ? err.message : String(err);
   }
   if (base.status !== "failed") await countRender(base, ownerId);
-  return getStore().put("video", base);
+  const stored = await getStore().put("video", base);
+  if (stored.status !== "failed") onStarted?.();
+  return stored;
 }
 
 /**
@@ -1239,13 +1247,21 @@ async function startReserved(base: Video, ownerId: string, keyed: boolean, send:
  * resolved (as the account's own, like any render's) and prepared; there is no voice, script, or background to send.
  * Counted, stored, and followed like any render.
  */
-async function createCinematicVideo(req: VideoRequest & { cinematic: NonNullable<VideoRequest["cinematic"]> }, ownerId: string, skipLimit: boolean, extras: VideoExtras): Promise<Video> {
+async function createCinematicVideo(req: VideoRequest & { cinematic: NonNullable<VideoRequest["cinematic"]> }, ownerId: string, skipLimit: boolean, { onStarted, ...extras }: VideoExtras): Promise<Video> {
   if (!skipLimit) await enforceRenderLimit(ownerId);
   const provider = getAvatarProvider();
   if (!provider.cinematicShots) throw new ValidationError(`Cinematic shots are not available with the ${provider.name} renderer`);
-  // Another account's presenter reads as not found, like any record the caller does not own. Their names are taken
-  // now, so a retry after a presenter was renamed shows the names it renders with.
-  const avatars = await Promise.all(req.cinematic.avatarIds.map((id) => getAvatar(id, ownerId)));
+  // Another account's presenter reads as not found, like any record the caller does not own; one deleted since is
+  // named by its name then, not its id. Their names are taken now, so a retry after a rename shows the names it renders with.
+  const avatars = await Promise.all(
+    req.cinematic.avatarIds.map((id, i) =>
+      getAvatar(id, ownerId).catch((err) => {
+        if (!(err instanceof NotFoundError)) throw err;
+        const name = req.cinematic.avatarNames[i];
+        throw new NotFoundError(name ? `The presenter “${name}” is no longer in your library; make the shot with another` : "A presenter of the shot is no longer in your library; choose another");
+      }),
+    ),
+  );
   req = { ...req, avatarId: avatars[0].id, cinematic: { ...req.cinematic, avatarNames: avatars.map((a) => a.name) } };
   const base: Video = {
     ...req,
@@ -1267,7 +1283,7 @@ async function createCinematicVideo(req: VideoRequest & { cinematic: NonNullable
       }),
     );
     return provider.createVideo({ ...req, ...(extras.id ? { idempotencyKey: extras.id } : {}) }, cast.avatars[avatars[0].id], null, cast);
-  });
+  }, onStarted);
 }
 
 /** The request a stored video was rendered from, to render it again (a retry, another size). */

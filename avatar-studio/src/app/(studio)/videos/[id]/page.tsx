@@ -694,7 +694,8 @@ export default function VideoDetailPage() {
                     {shareErr && <span className="text-xs text-rose-600">{shareErr}</span>}
                   </>
                 )}
-                {video.videoUrl && (
+                {/* A cinematic shot has no script or voice to dub. */}
+                {video.videoUrl && !video.cinematic && (
                   <Link href={`/translate?source=${encodeURIComponent(video.videoUrl)}&title=${encodeURIComponent(video.title)}`} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50">
                     <Languages className="h-4 w-4" /> Translate
                   </Link>

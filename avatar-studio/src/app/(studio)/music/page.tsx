@@ -16,6 +16,8 @@ const newKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? 
 /** Mixed videos' links are renewed by the server once this old; a page left open asks again when it is looked at. */
 const RELINK_MS = 30 * 60 * 1000;
 const VOLUME_LABEL: Record<MusicVolume, string> = { quiet: "Quiet", low: "Low", medium: "Medium", high: "High" };
+/** A mix's name for its controls: its title, track, and day, as one video can be given music more than once. */
+const mixName = (m: Mix) => `${m.title}, “${m.trackName}”, ${formatDate(m.createdAt)}`;
 const SUGGESTIONS = ["Calm ambient corporate", "Upbeat and motivational", "Cinematic and inspiring"];
 
 /**
@@ -35,7 +37,16 @@ export default function MusicPage() {
     }, 10_000);
     return () => clearInterval(timer);
   }, [running, refetch]);
-  const { data: library } = useApi<{ videos: Video[]; hasMore?: boolean }>("/api/videos?status=completed&limit=200");
+  const { data: library, refetch: refetchLibrary } = useApi<{ videos: Video[]; hasMore?: boolean; rendering?: number }>("/api/videos?status=completed&limit=200");
+  // A video that finishes while the page is open joins the choices: the list is asked again while renders are in flight.
+  const libraryRendering = (library?.rendering ?? 0) > 0;
+  useEffect(() => {
+    if (!libraryRendering) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void refetchLibrary();
+    }, 10_000);
+    return () => clearInterval(timer);
+  }, [libraryRendering, refetchLibrary]);
   const videos = (library?.videos ?? []).filter((v) => v.videoUrl && !v.deletedAt && !v.transparent);
   const [videoId, setVideoId] = useState("");
   const [query, setQuery] = useState("");
@@ -81,11 +92,12 @@ export default function MusicPage() {
       if (document.visibilityState === "visible" && Date.now() - loadedAt.current > RELINK_MS) {
         loadedAt.current = Date.now();
         void refetch();
+        void refetchLibrary();
       }
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
-  }, [refetch]);
+  }, [refetch, refetchLibrary]);
 
   const items = data?.mixes ?? [];
   // Any change to what would be mixed is a different start: its own key, and an error about the last one no longer applies.
@@ -187,7 +199,8 @@ export default function MusicPage() {
                   <option value="">Choose a video</option>
                   {videos.map((v) => (
                     <option key={v.id} value={v.id}>
-                      {v.title}
+                      {/* Shape and date tell apart videos of one title (another size, a shot made twice). */}
+                      {`${v.title} · ${v.aspect} · ${formatDate(v.createdAt)}`}
                     </option>
                   ))}
                 </select>
@@ -284,7 +297,7 @@ export default function MusicPage() {
                     <div className="flex shrink-0 items-center gap-2">
                       <StatusBadge status={m.status} />
                       {canEdit === true && (
-                        <button type="button" onClick={() => remove(m)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-rose-600" aria-label={`Delete ${m.title}`}>
+                        <button type="button" onClick={() => remove(m)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-rose-600" aria-label={`Delete ${mixName(m)}`}>
                           <Trash2 className="h-4 w-4" />
                         </button>
                       )}
@@ -292,8 +305,8 @@ export default function MusicPage() {
                   </div>
                   {m.status === "completed" && m.videoUrl && (
                     <>
-                      <video src={m.videoUrl} controls preload="none" className="mt-3 w-full rounded-lg bg-black" aria-label={m.title} />
-                      <a href={m.videoUrl} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:underline" aria-label={`Download ${m.title}`}>
+                      <video src={m.videoUrl} controls preload="none" className="mt-3 w-full rounded-lg bg-black" aria-label={mixName(m)} />
+                      <a href={m.videoUrl} download target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:underline" aria-label={`Download ${mixName(m)}`}>
                         <Download className="h-3 w-3" aria-hidden /> Download
                       </a>
                     </>

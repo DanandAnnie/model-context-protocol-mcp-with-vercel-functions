@@ -26,7 +26,7 @@ export const cinematicSchema = z.object({
   /** Seconds, or "auto" for the renderer to choose. */
   duration: z.union([z.literal("auto"), z.number().int().min(CINEMATIC_MIN_SEC, `A shot lasts at least ${CINEMATIC_MIN_SEC} seconds`).max(CINEMATIC_MAX_SEC, `A shot lasts at most ${CINEMATIC_MAX_SEC} seconds`)]).default("auto"),
   enhancePrompt: z.boolean().default(false),
-  folder: z.string().trim().max(MAX_FOLDER_NAME).optional(),
+  folder: z.string().trim().max(MAX_FOLDER_NAME, `Keep the folder name to ${MAX_FOLDER_NAME} characters`).optional(),
 });
 
 /** A client's key for one shot (`Idempotency-Key`): letters, digits, `-` and `_`. */
@@ -47,7 +47,7 @@ function titleOf(prompt: string): string {
  * video's id is derived from the account and the key, so a shot retried after a lost answer returns the video already
  * started instead of directing (and counting) a second one.
  */
-export async function startCinematic(input: z.infer<typeof cinematicSchema>, ownerId: string = LOCAL_OWNER, opts: { key?: string } = {}): Promise<Video> {
+export async function startCinematic(input: z.infer<typeof cinematicSchema>, ownerId: string = LOCAL_OWNER, opts: { key?: string; onStarted?: () => void } = {}): Promise<Video> {
   const videoId = opts.key ? `vid_${createHash("sha256").update(`${ownerId}\0cinematic\0${opts.key}`).digest("base64url").slice(0, 24)}` : undefined;
   if (videoId) {
     const existing = await getStore().get<Video>("video", videoId);
@@ -62,7 +62,8 @@ export async function startCinematic(input: z.infer<typeof cinematicSchema>, own
         existing.resolution === input.resolution &&
         (shot.durationSec ?? "auto") === input.duration &&
         !!shot.enhancePrompt === input.enhancePrompt &&
-        existing.title === (input.title || titleOf(input.prompt));
+        existing.title === (input.title || titleOf(input.prompt)) &&
+        (existing.folder ?? "") === (input.folder ?? "");
       if (!same) throw new ConflictError("This Idempotency-Key was already used for another shot; send a new key");
       if (existing.deletedAt) throw new ConflictError("The video this key started is in the trash; send a new key to make the shot again");
       // A row reserved by a start still being sent is not an answer yet.
@@ -94,6 +95,6 @@ export async function startCinematic(input: z.infer<typeof cinematicSchema>, own
     ownerId,
     undefined,
     false,
-    { ...(videoId ? { id: videoId } : {}), ...(input.folder ? { folder: input.folder } : {}) },
+    { ...(videoId ? { id: videoId } : {}), ...(input.folder ? { folder: input.folder } : {}), ...(opts.onStarted ? { onStarted: opts.onStarted } : {}) },
   );
 }

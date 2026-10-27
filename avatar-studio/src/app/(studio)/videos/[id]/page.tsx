@@ -16,6 +16,7 @@ import { useCanEdit } from "@/hooks/useCanEdit";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { captionsBurnedIn } from "@/lib/captions";
 import { silentSeconds } from "@/lib/pauses";
+import { languageLabel } from "@/lib/language";
 import { useApi } from "@/hooks/useApi";
 import { ApiError, api, formatDate, formatSeconds, isDarkHex, posterUrl, purgeAt, shareExpired } from "@/lib/client";
 import { socialShareLinks } from "@/lib/social";
@@ -857,6 +858,12 @@ export default function VideoDetailPage() {
                   {video.pitch ? <Row label="Pitch">{video.pitch > 0 ? `+${video.pitch}` : video.pitch}</Row> : null}
                   {video.emotion ? (
                     <Row label="Voice emotion">{`${video.emotion} (not applied: no renderer takes an emotion since HeyGen's v3 API)`}</Row>
+                  ) : null}
+                  {video.accent ? (
+                    <Row label="Accent">
+                      {`${languageLabel(video.accent)} (${video.accent})`}
+                      {video.provider !== "heygen" ? " (not applied by this renderer)" : " (voices that offer accents)"}
+                    </Row>
                   ) : null}
                   {video.expressiveness || video.motionPrompt ? (
                     <Row label="Photo avatar motion">

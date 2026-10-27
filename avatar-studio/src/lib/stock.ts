@@ -66,10 +66,10 @@ export const STOCK_AVATARS: Avatar[] = STOCK_NAMES.map((p, i) => ({
 }));
 
 export const STOCK_VOICES: Voice[] = [
-  { id: "stock_voice_1", name: "Emma", provider: "mock", language: "en-US", gender: "female", tags: ["warm", "narration"] },
+  { id: "stock_voice_1", name: "Emma", provider: "mock", language: "en-US", gender: "female", tags: ["warm", "narration"], accents: true },
   { id: "stock_voice_2", name: "James", provider: "mock", language: "en-US", gender: "male", tags: ["confident", "sales"] },
   { id: "stock_voice_3", name: "Olivia", provider: "mock", language: "en-GB", gender: "female", tags: ["calm", "training"] },
-  { id: "stock_voice_4", name: "Mateo", provider: "mock", language: "es-ES", gender: "male", tags: ["friendly"] },
+  { id: "stock_voice_4", name: "Mateo", provider: "mock", language: "es-ES", gender: "male", tags: ["friendly"], accents: true },
   { id: "stock_voice_5", name: "Lea", provider: "mock", language: "fr-FR", gender: "female", tags: ["bright"] },
   { id: "stock_voice_6", name: "Kenji", provider: "mock", language: "ja-JP", gender: "male", tags: ["measured"] },
 ];

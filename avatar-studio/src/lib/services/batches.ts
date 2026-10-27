@@ -7,7 +7,7 @@ import { LOCAL_OWNER } from "../owner-id";
 import { renderLimitFor } from "../billing";
 import { ValidationError } from "../errors";
 import { fillTemplate, parseCsv, placeholdersIn } from "../csv";
-import { backgroundSchema, captionStyleSchema, createVideo, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, rendersThisMonth, resolveRenderContext } from "./videos";
+import { accentSchema, backgroundSchema, captionStyleSchema, createVideo, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, rendersThisMonth, resolveRenderContext } from "./videos";
 import { getBrandKit } from "./brand";
 import { stripPauses } from "../pauses";
 
@@ -65,6 +65,7 @@ export const batchRequestSchema = z.object({
   emotion: emotionSchema.optional(),
   expressiveness: expressivenessSchema,
   motionPrompt: motionPromptSchema,
+  accent: accentSchema,
 });
 
 export interface BatchResult {
@@ -135,6 +136,7 @@ export async function createBatch(input: z.infer<typeof batchRequestSchema>, own
         ...(input.emotion ? { emotion: input.emotion } : {}),
         ...(input.expressiveness ? { expressiveness: input.expressiveness } : {}),
         ...(input.motionPrompt ? { motionPrompt: input.motionPrompt } : {}),
+        ...(input.accent ? { accent: input.accent } : {}),
       },
       ownerId,
       ctx,

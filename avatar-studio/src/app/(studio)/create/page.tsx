@@ -13,7 +13,7 @@ import { BackdropPicker } from "@/components/BackdropPicker";
 import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib/client";
-import { languageLabel } from "@/lib/language";
+import { accentsFor, languageLabel } from "@/lib/language";
 import { silentProblem, silentSeconds, stripPauses } from "@/lib/pauses";
 import { countMatches, replaceAll } from "@/lib/find-replace";
 import { MAX_IMPORT_BYTES, MAX_SCRIPT_CHARS, decodeScript, legacyEncodingFor, scenesFromText } from "@/lib/script-import";
@@ -25,7 +25,7 @@ import { findTemplate } from "@/lib/templates";
 import { capSceneText, fitSceneTextEdit, sceneTextLength } from "@/lib/scene-text";
 import { graphemes } from "@/lib/text";
 import { takeAgentDraft, type AgentDraft } from "@/lib/agent-draft";
-import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, framingFor, isDefaultLayout, isPhotoAvatar, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, type PhotoExpressiveness } from "@/lib/types";
+import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, framingFor, isDefaultLayout, isPhotoAvatar, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, type PhotoExpressiveness, VOICE_ACCENTS, type VoiceAccent } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -52,6 +52,7 @@ interface Draft {
   emotion?: VoiceEmotion;
   expressiveness?: PhotoExpressiveness;
   motionPrompt?: string;
+  accent?: VoiceAccent;
   avatarId?: string;
   voiceId?: string;
   savedAt: string;
@@ -174,6 +175,8 @@ const withoutDefaults = ({ look, font, ...rest }: CaptionStyle): CaptionStyle =>
 const asExpressiveness = (v: unknown): PhotoExpressiveness => ((PHOTO_EXPRESSIVENESS as readonly unknown[]).includes(v) ? (v as PhotoExpressiveness) : "low");
 /** A gesture description from a draft, a copy, or a template: a string within the limit, or none. */
 const asMotionPrompt = (v: unknown): string => (typeof v === "string" ? v.slice(0, MAX_MOTION_PROMPT) : "");
+/** An accent this build offers, or "" (the voice's own) for anything else. */
+const asAccent = (v: unknown): VoiceAccent | "" => ((VOICE_ACCENTS as readonly unknown[]).includes(v) ? (v as VoiceAccent) : "");
 /** An emotion the renderer takes, or "" (natural) for anything else. */
 const asEmotion = (v: unknown): VoiceEmotion | "" => ((VOICE_EMOTIONS as readonly unknown[]).includes(v) ? (v as VoiceEmotion) : "");
 const TONES = ["friendly", "professional", "formal", "energetic", "calm"] as const;
@@ -500,6 +503,9 @@ function CreateInner() {
     const a = (sc.avatarId && avatarData?.avatars.find((x) => x.id === sc.avatarId)) || avatar;
     return !!a && isPhotoAvatar(a);
   });
+  // The voice an accent is chosen for: the video's when it offers accents, else the first scene voice that does.
+  const accentVoice = [voice, ...scenes.map((sc) => (sc.voiceId && !sc.audioId ? voiceData?.voices.find((v) => v.id === sc.voiceId) : undefined))].find((v) => v?.accents);
+  const accentOptions = accentVoice ? accentsFor(accentVoice.language) : [];
   // What the scene's presenter will get: a photo avatar has no close-up, so it is previewed and listed in full.
   const framing: PresenterFraming = framingFor(layout.framing, sceneAvatar ?? undefined);
   const photoPresenter = !!sceneAvatar && isPhotoAvatar(sceneAvatar);
@@ -567,6 +573,7 @@ function CreateInner() {
   const [emotion, setEmotion] = useState<VoiceEmotion | "">("");
   const [expressiveness, setExpressiveness] = useState<PhotoExpressiveness>("low");
   const [motionPrompt, setMotionPrompt] = useState("");
+  const [accent, setAccent] = useState<VoiceAccent | "">("");
   /** Both apply to photo avatars only; anything else is sent as none. */
   const motion = { ...(expressiveness !== "low" ? { expressiveness } : {}), ...(motionPrompt.trim() ? { motionPrompt: motionPrompt.trim() } : {}) };
   const [tab, setTab] = useState<Tab>("avatar");
@@ -700,6 +707,7 @@ function CreateInner() {
     setEmotion(asEmotion(d.emotion));
     setExpressiveness(asExpressiveness(d.expressiveness));
     setMotionPrompt(asMotionPrompt(d.motionPrompt));
+    setAccent(asAccent(d.accent));
     setPrefill({ avatarId: d.avatarId, voiceId: d.voiceId });
     setDraftRestored(d.savedAt);
   }, [draftSource, params, editKey, spacesKnown]);
@@ -709,10 +717,10 @@ function CreateInner() {
     if (!hydrated.current || !editKey) return;
     const empty = !scenes.some(hasContent) && title === "Untitled video";
     const t = setTimeout(() => {
-      writeDraft(editKey, empty ? null : { title, scenes, aspect, resolution, captions, ...(isDefaultCaptionStyle ? {} : { captionStyle }), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...(expressiveness !== "low" ? { expressiveness } : {}), ...(motionPrompt ? { motionPrompt } : {}), avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
+      writeDraft(editKey, empty ? null : { title, scenes, aspect, resolution, captions, ...(isDefaultCaptionStyle ? {} : { captionStyle }), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...(expressiveness !== "low" ? { expressiveness } : {}), ...(motionPrompt ? { motionPrompt } : {}), ...(accent ? { accent } : {}), avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
     }, 400);
     return () => clearTimeout(t);
-  }, [title, scenes, aspect, resolution, captions, captionStyle, isDefaultCaptionStyle, speed, pitch, emotion, expressiveness, motionPrompt, avatar, voice, editKey]);
+  }, [title, scenes, aspect, resolution, captions, captionStyle, isDefaultCaptionStyle, speed, pitch, emotion, expressiveness, motionPrompt, accent, avatar, voice, editKey]);
 
   function discardDraft() {
     if (editKey) writeDraft(editKey, null);
@@ -732,6 +740,7 @@ function CreateInner() {
     setEmotion("");
     setExpressiveness("low");
     setMotionPrompt("");
+    setAccent("");
     setCaptionStyle(DEFAULT_CAPTION_STYLE);
     // Back to a fresh editor's presenter and voice: the first ones, then the brand kit's defaults on top.
     setAvatar(null);
@@ -790,6 +799,7 @@ function CreateInner() {
         setEmotion(template.emotion ?? "");
         setExpressiveness(asExpressiveness(template.expressiveness));
         setMotionPrompt(asMotionPrompt(template.motionPrompt));
+        setAccent(asAccent(template.accent));
         setPrefill({ avatarId: template.avatarId, voiceId: template.voiceId });
       })
       .catch((e) => setErr(e instanceof Error ? e.message : "Could not load the template"));
@@ -814,6 +824,7 @@ function CreateInner() {
         setEmotion(video.emotion ?? "");
         setExpressiveness(asExpressiveness(video.expressiveness));
         setMotionPrompt(asMotionPrompt(video.motionPrompt));
+        setAccent(asAccent(video.accent));
         setPrefill({ avatarId: video.avatarId, voiceId: video.voiceId });
       })
       .catch((e) => setErr(e instanceof Error ? e.message : "Could not load the original video"));
@@ -890,7 +901,7 @@ function CreateInner() {
     try {
       const { video } = await api<{ video: Video }>("/api/videos", {
         method: "POST",
-        body: JSON.stringify({ title, scenes: scenes.map(sentScene), avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...motion }),
+        body: JSON.stringify({ title, scenes: scenes.map(sentScene), avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...motion, ...(accent ? { accent } : {}) }),
       });
       if (editKey) writeDraft(editKey, null);
       router.push(`/videos/${video.id}`);
@@ -1643,6 +1654,24 @@ function CreateInner() {
                         {e}
                       </option>
                     ))}
+                  </select>
+                </Field>
+                <Field
+                  label="Accent"
+                  hint={
+                    accentVoice
+                      ? `How ${accentVoice.name} pronounces the script, on HeyGen; scenes whose voice offers no accents, or speaks another language, keep their own.`
+                      : "For voices that speak several accents; no voice in this video offers one."
+                  }
+                >
+                  <select value={accent} onChange={(e) => setAccent(asAccent(e.target.value))} disabled={!accentVoice && !accent} aria-label="Accent" className={inputClass}>
+                    <option value="">{accentVoice ? "The voice's own" : "None to choose"}</option>
+                    {accentOptions.map((a) => (
+                      <option key={a} value={a}>
+                        {languageLabel(a)} ({a})
+                      </option>
+                    ))}
+                    {accent && !accentOptions.includes(accent) ? <option value={accent}>{`${languageLabel(accent)} (${accent}), not used by this voice`}</option> : null}
                   </select>
                 </Field>
                 <div role="group" aria-labelledby="photo-motion-title" className="space-y-2 rounded-lg border border-slate-200 px-3 py-3" data-testid="photo-motion">

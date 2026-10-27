@@ -1,6 +1,7 @@
 import { backdropIdOf, isPhotoAvatar, type AudioClip, type Avatar, type Backdrop, type Background, type Scene, type VideoRequest, type Voice } from "../../types";
 import { silentSeconds, withBreakTags } from "../../pauses";
 import { heygenBurnsCaptions } from "../../captions";
+import { voiceTakesAccent } from "../../language";
 import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
 import { HeyGenClient } from "../heygen-client";
@@ -129,6 +130,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
         clip: scene.audioId ? this.audioAssetId(scene.audioId, cast) : undefined,
         silent: scene.audioId ? 0 : silentSeconds(scene.script),
         voiceId: scene.audioId ? undefined : this.voiceId(sceneVoice, req.voiceId),
+        accent: voiceTakesAccent(sceneVoice, req.accent) ? req.accent : undefined,
         background: this.background(scene.background, cast),
       };
     });
@@ -148,12 +150,12 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       // own is captioned by the share page's subtitle track instead, so the chosen look is the only one.
       ...(heygenBurnsCaptions(req) ? { caption: { file_format: "srt", style: "default" } } : {}),
       ...(webhookUrl("heygen") ? { callback_url: webhookUrl("heygen") } : {}),
-      scenes: parts.map(({ scene, hidden, avatarId, clip, silent, voiceId, background }) => {
+      scenes: parts.map(({ scene, hidden, avatarId, clip, silent, voiceId, accent, background }) => {
         const audio = clip ?? (silent ? silences.get(silent) : undefined);
-        // An audio scene lip-syncs to its clip, a silent one to its silence; speed and pitch apply to speech only.
+        // An audio scene lip-syncs to its clip, a silent one to its silence; speed, pitch, and accent apply to speech only.
         const sound = audio
           ? { audio_asset_id: audio }
-          : { script: withBreakTags(scene.script), voice_id: voiceId, voice_settings: { speed: scene.speed ?? req.speed ?? 1, ...(req.pitch ? { pitch: req.pitch } : {}) } };
+          : { script: withBreakTags(scene.script), voice_id: voiceId, voice_settings: { speed: scene.speed ?? req.speed ?? 1, ...(req.pitch ? { pitch: req.pitch } : {}), ...(accent ? { locale: accent } : {}) } };
         if (hidden) {
           const { source } = background as { source: unknown };
           // A picture is narrated, or held as long as the silence; a video loops muted under the narration, as it

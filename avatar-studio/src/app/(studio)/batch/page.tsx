@@ -8,7 +8,7 @@ import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api } from "@/lib/client";
 import { decodeScript, legacyEncodingFor } from "@/lib/script-import";
-import { VOICE_EMOTIONS, type AspectRatio, type Avatar, type Background, type BrandKit, type CaptionStyle, type PhotoExpressiveness, type Resolution, type Voice, type VideoTemplate, type VoiceEmotion } from "@/lib/types";
+import { VOICE_EMOTIONS, type AspectRatio, type Avatar, type Background, type BrandKit, type CaptionStyle, type PhotoExpressiveness, type VoiceAccent, type Resolution, type Voice, type VideoTemplate, type VoiceEmotion } from "@/lib/types";
 
 const MAX_BATCH_SCRIPT = 5000;
 
@@ -45,7 +45,7 @@ export default function BatchPage() {
   // Set only by a saved template: the batch API takes them, the page has no controls of its own for them.
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle | undefined>();
   const [background, setBackground] = useState<Background | undefined>();
-  const [motion, setMotion] = useState<{ expressiveness?: PhotoExpressiveness; motionPrompt?: string }>({});
+  const [carried, setCarried] = useState<{ expressiveness?: PhotoExpressiveness; motionPrompt?: string; accent?: VoiceAccent }>({});
   const [startedFrom, setStartedFrom] = useState("");
   // A template's presenter and voice, held until both lists have loaded (a template can be picked first).
   // Each holds the ids to try in order: the first scene's own, then the template's.
@@ -115,7 +115,7 @@ export default function BatchPage() {
       // "None": drop the settings the page has no controls for, so they do not ride along unseen.
       setCaptionStyle(undefined);
       setBackground(undefined);
-      setMotion({});
+      setCarried({});
       setCast(null);
       return;
     }
@@ -133,7 +133,7 @@ export default function BatchPage() {
     setPitch(t.pitch ?? 0);
     setEmotion(t.emotion ?? "");
     setBackground(t.scenes[0]?.background);
-    setMotion({ ...(t.expressiveness ? { expressiveness: t.expressiveness } : {}), ...(t.motionPrompt ? { motionPrompt: t.motionPrompt } : {}) });
+    setCarried({ ...(t.expressiveness ? { expressiveness: t.expressiveness } : {}), ...(t.motionPrompt ? { motionPrompt: t.motionPrompt } : {}), ...(t.accent ? { accent: t.accent } : {}) });
   }
 
   function onFile(file: File | undefined) {
@@ -148,7 +148,7 @@ export default function BatchPage() {
     try {
       const result = await api<{ batchId: string; videos: unknown[]; skipped: Array<{ row: number; reason: string }>; failed: Array<{ row: number; reason: string }> }>("/api/videos/batch", {
         method: "POST",
-        body: JSON.stringify({ title, scriptTemplate: template, csv, avatarId, voiceId, aspect, resolution, captions, ...(captions && captionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...(background ? { background } : {}), ...motion }),
+        body: JSON.stringify({ title, scriptTemplate: template, csv, avatarId, voiceId, aspect, resolution, captions, ...(captions && captionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...(background ? { background } : {}), ...carried }),
       });
       const note = `${result.skipped.length ? `&skipped=${result.skipped.length}` : ""}${result.failed.length ? `&failed=${result.failed.length}` : ""}`;
       router.push(`/videos?batch=${result.batchId}${note}`);

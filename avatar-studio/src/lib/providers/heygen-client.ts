@@ -69,7 +69,7 @@ export class HeyGenClient {
 
   /** Voices (v3): the account's own (cloned in HeyGen) first, then the shared library; v3 lists only one kind per call. */
   async listVoices() {
-    type V = { voice_id: string; name: string; language?: string; gender?: string; preview_audio_url?: string };
+    type V = { voice_id: string; name: string; language?: string; gender?: string; preview_audio_url?: string; support_locale?: boolean };
     const [own, shared] = await Promise.all([this.listAll<V>("/voices?type=private", 100, 100), this.listAll<V>("/voices?type=public", 100)]);
     return unique([...own, ...shared], (v) => v.voice_id);
   }

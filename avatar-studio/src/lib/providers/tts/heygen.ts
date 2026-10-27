@@ -18,6 +18,7 @@ export class HeyGenTtsProvider implements TtsProvider {
       language: v.language,
       gender: (v.gender?.toLowerCase() as Voice["gender"]) ?? undefined,
       previewUrl: v.preview_audio_url,
+      ...(v.support_locale ? { accents: true as const } : {}),
     }));
   }
 

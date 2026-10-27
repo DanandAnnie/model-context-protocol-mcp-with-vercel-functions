@@ -68,13 +68,16 @@ describe("HeyGen v3", () => {
   it("lists the account's own HeyGen voices beside the shared library, and stops paging the library after a bounded number of pages", async () => {
     let n = 0;
     const calls = serve((url) => {
-      if (url.includes("type=private")) return Response.json({ data: [{ voice_id: "mine", name: "My clone" }], has_more: false });
+      if (url.includes("type=private")) return Response.json({ data: [{ voice_id: "mine", name: "My clone", support_locale: false }], has_more: false });
+      if (!url.includes("token=")) return Response.json({ data: [{ voice_id: `v${n++}`, name: "Sara", language: "English", support_locale: true }], has_more: true, next_token: `t${n}` });
       return Response.json({ data: [{ voice_id: `v${n}`, name: `V${n++}` }], has_more: true, next_token: `t${n}` });
     });
     const { HeyGenTtsProvider } = await import("../providers/tts/heygen");
     const voices = await new HeyGenTtsProvider("key").listVoices();
     assert.equal(voices[0].id, "mine", "a voice cloned in the HeyGen account is listed, so videos naming it still render");
     assert.equal(voices.length, 21);
+    assert.equal(voices[0].accents, undefined);
+    assert.equal(voices[1].accents, true, "a voice that speaks several accents says so");
     assert.equal(calls.filter((c) => c.url.includes("type=public")).length, 20);
     assert.ok(calls.some((c) => c.url === "https://api.heygen.com/v3/voices?type=private&limit=100"));
   });

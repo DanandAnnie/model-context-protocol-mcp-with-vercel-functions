@@ -183,3 +183,8 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The video page no longer says "(photo avatars only)" for a HeyGen video whose scenes all leave the presenter out.
     - The editor panel no longer says "no scene shows one" while the presenter list is still loading.
     - The tests now check that retries, other sizes, batch rows, and spelled-out templates keep the setting, and the hidden-scene check is no longer vacuous. The API docs list the template fields and say other sizes keep photo avatar motion.
+- Voice accent (HeyGen's `voice_settings.locale` for voices that report `support_locale`). A video can ask its voice for one of 34 accents, such as `en-GB`, `en-AU`, `es-MX`, or `fr-CA`.
+  - Voices that speak several accents are marked `accents: true` in the voice list. The editor's Settings tab offers the accents of that voice's language, and is disabled with a hint when no voice in the video offers any.
+  - HeyGen gets the accent on every spoken scene whose voice offers accents and speaks the accent's language, narrated pictures included. Scenes with recorded audio or silence, voices of one accent, and voices of another language keep their own.
+  - Drafts, copies, templates, retries, other sizes, and batches keep it. The batch page carries a template's accent. The video page lists it.
+  - New `accent.test.ts`, a voice-list check in `heygen-v3.test.ts`, and an e2e test.

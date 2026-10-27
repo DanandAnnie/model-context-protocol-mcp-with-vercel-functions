@@ -24,13 +24,13 @@ import { clearCover, setCover } from "../cover";
 import { shareOffline } from "../client";
 import { bumpViewsByDay } from "../insights";
 
-import { backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema } from "./schemas";
+import { accentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema } from "./schemas";
 import { getBrandKit } from "./brand";
 import { spokenCopy } from "../pronounce";
 import { clearComments } from "./comments";
 import { clearVideoLeads } from "./leads";
 import { reviseScript } from "./scripts";
-export { backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema };
+export { accentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema };
 
 export const videoRequestSchema = z
   .object({
@@ -73,6 +73,7 @@ export const videoRequestSchema = z
     emotion: emotionSchema.optional(),
     expressiveness: expressivenessSchema,
     motionPrompt: motionPromptSchema,
+    accent: accentSchema,
   })
   .transform((v, ctx) => {
     if (v.scenes) {
@@ -306,6 +307,7 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
   if (!base.pitch) delete base.pitch; // no shift is stored as absent
   if (!base.expressiveness) delete base.expressiveness;
   if (!base.motionPrompt) delete base.motionPrompt;
+  if (!base.accent) delete base.accent;
 
   try {
     if (provider.prepareAvatar) {
@@ -1165,6 +1167,7 @@ function requestOf(video: Video): VideoRequest {
     ...(video.emotion ? { emotion: video.emotion } : {}),
     ...(video.expressiveness ? { expressiveness: video.expressiveness } : {}),
     ...(video.motionPrompt ? { motionPrompt: video.motionPrompt } : {}),
+    ...(video.accent ? { accent: video.accent } : {}),
   };
 }
 

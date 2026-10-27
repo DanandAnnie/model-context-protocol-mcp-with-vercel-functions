@@ -72,6 +72,8 @@ export interface Voice {
   gender?: "male" | "female" | "neutral";
   previewUrl?: string;
   tags?: string[];
+  /** The voice can speak its language in another accent (HeyGen's `support_locale`); see `VOICE_ACCENTS`. */
+  accents?: true;
   /** "custom" for a cloned voice owned by an account; absent for provider voices. */
   source?: "provider" | "custom";
   ownerId?: string;
@@ -98,6 +100,7 @@ export interface VideoTemplate {
   emotion?: VoiceEmotion;
   expressiveness?: PhotoExpressiveness;
   motionPrompt?: string;
+  accent?: VoiceAccent;
   /** The video it was saved from, when it was. */
   sourceVideoId?: string;
   createdAt: string;
@@ -293,7 +296,26 @@ export interface VideoRequest {
   expressiveness?: PhotoExpressiveness;
   /** Body motion and gestures for photo avatars, in words (HeyGen's motion prompt); absent means none. */
   motionPrompt?: string;
+  /**
+   * The accent the voice speaks in, for voices that offer several (HeyGen's `voice_settings.locale`); absent means the
+   * voice's own. Applies to scenes whose voice has `accents` and speaks the accent's language; others ignore it.
+   */
+  accent?: VoiceAccent;
 }
+
+/** The accents a video can ask a voice for, as BCP 47 tags; each voice is offered those of its own language. */
+export const VOICE_ACCENTS = [
+  "en-US", "en-GB", "en-AU", "en-CA", "en-IE", "en-IN", "en-NZ", "en-ZA",
+  "es-ES", "es-MX", "es-US", "es-AR", "es-CO",
+  "fr-FR", "fr-CA", "fr-BE", "fr-CH",
+  "de-DE", "de-AT", "de-CH",
+  "pt-BR", "pt-PT",
+  "it-IT", "nl-NL", "nl-BE",
+  "zh-CN", "zh-TW", "zh-HK",
+  "ar-SA", "ar-AE", "ar-EG",
+  "hi-IN", "ja-JP", "ko-KR",
+] as const;
+export type VoiceAccent = (typeof VOICE_ACCENTS)[number];
 
 /** HeyGen's expressiveness levels for photo avatars; "low" is its default and is stored as absent. */
 export const PHOTO_EXPRESSIVENESS = ["low", "medium", "high"] as const;

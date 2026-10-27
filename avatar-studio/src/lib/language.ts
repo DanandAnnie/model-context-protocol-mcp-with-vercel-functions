@@ -1,5 +1,6 @@
 // Voice languages arrive in whatever form a provider uses: BCP 47 tags ("en-US"), bare codes
 // ("en") or display names ("English", "Spanish"). The browser's speech APIs want a tag.
+import { VOICE_ACCENTS, type VoiceAccent } from "./types";
 
 const CANDIDATE_CODES = [
   "en", "es", "fr", "de", "it", "pt", "nl", "sv", "da", "no", "fi", "pl", "cs", "sk", "hu", "ro", "bg", "el", "tr", "ru", "uk",
@@ -61,4 +62,16 @@ export function languageLabel(value: string): string {
   } catch {
     return value;
   }
+}
+
+/** The accents offered for a voice's language, all of them when the language is not known ("Multilingual"). */
+export function accentsFor(language?: string | null): VoiceAccent[] {
+  const code = languageCode(language);
+  const mine = VOICE_ACCENTS.filter((a) => a.split("-")[0] === code);
+  return mine.length ? mine : [...VOICE_ACCENTS];
+}
+
+/** Whether a voice takes the accent: it offers accents, and the accent is one of its language's. */
+export function voiceTakesAccent(voice: { accents?: true; language?: string } | null | undefined, accent: VoiceAccent | undefined): boolean {
+  return !!accent && !!voice?.accents && accentsFor(voice.language).includes(accent);
 }

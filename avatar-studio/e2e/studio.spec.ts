@@ -472,6 +472,32 @@ test("photo avatar motion is set in the editor, kept with the video and its copy
   expect("expressiveness" in body || "motionPrompt" in body).toBe(false);
 });
 
+test("a voice that speaks several accents can be given one, kept with the video and its copy", async ({ page }) => {
+  await page.locator("input[placeholder='Video title']").fill("Accented tour");
+  await page.locator("textarea").fill("Welcome to the open house.");
+  await page.getByRole("button", { name: "Settings" }).click();
+  const accent = page.getByLabel("Accent", { exact: true });
+  // Emma speaks English in several accents, so only English ones are offered.
+  await expect(accent).toBeEnabled();
+  await expect(accent.locator("option[value='en-GB']")).toHaveCount(1);
+  await expect(accent.locator("option[value='es-MX']")).toHaveCount(0);
+  await accent.selectOption("en-GB");
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
+  await page.getByRole("button", { name: "Generate video" }).click();
+  expect((await sent).postDataJSON()).toMatchObject({ accent: "en-GB" });
+  await page.waitForURL(/\/videos\/vid_/);
+  const id = page.url().split("/").pop()!;
+  expect((await (await page.request.get(`/api/videos/${id}`)).json()).video.accent).toBe("en-GB");
+  await expect(page.getByText("British English (en-GB) (not applied by this renderer)")).toBeVisible();
+  await page.goto(`/create?from=${id}`);
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByLabel("Accent", { exact: true })).toHaveValue("en-GB");
+  await page.getByLabel("Accent", { exact: true }).selectOption("");
+  const again = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
+  await page.getByRole("button", { name: "Generate video" }).click();
+  expect("accent" in ((await again).postDataJSON() as Record<string, unknown>)).toBe(false);
+});
+
 test("a scene can leave the presenter out and let its picture fill the frame", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Kitchen tour");
   await page.locator("textarea").fill("Welcome in, let me show you around.");

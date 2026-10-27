@@ -43,7 +43,9 @@ export default function VideoAgentPage() {
   const [maker, setMaker] = useState<"studio" | "heygen">("studio");
   const byHeygen = maker === "heygen" && status?.directedVideos === true;
   const [folder, setFolder] = useState<string | undefined>(undefined);
-  const [notice, setNotice] = useState<string | null>(null);
+  // Notes about what was or was not filled in, each shown once, so a later one does not replace an earlier one.
+  const [notices, setNotices] = useState<string[]>([]);
+  const addNotice = (note: string) => setNotices((all) => (all.includes(note) ? all : [...all, note]));
   const [prompt, setPrompt] = useState("");
   const [url, setUrl] = useState("");
   // An attached document, read to its words in the browser; only those are sent.
@@ -68,8 +70,9 @@ export default function VideoAgentPage() {
       const read = await documentText(file, navigator.language);
       moveFocus.current = true;
       setDoc({ name: file.name.slice(0, 200), ...read });
-      // A note asking for the document again is answered.
-      setNotice((n) => (n && n.includes("attach it again") ? null : n));
+      // Attaching is an edit, and answers a note asking for the document again.
+      touch();
+      setNotices((all) => all.filter((n) => !n.includes("attach it again")));
     } catch (e) {
       moveFocus.current = true;
       setDoc(null);
@@ -96,11 +99,11 @@ export default function VideoAgentPage() {
     api<{ video: Video }>(`/api/videos/${encodeURIComponent(from)}`)
       .then(({ video }) => {
         if (!video.directed) {
-          setNotice(`“${video.title}” was not directed by HeyGen's Video Agent, so there is no brief to fill in.`);
+          addNotice(`“${video.title}” was not directed by HeyGen's Video Agent, so there is no brief to fill in.`);
           return;
         }
         if (edited.current) {
-          setNotice(`Your changes are kept, so the brief of “${video.title}” was not filled in.`);
+          addNotice(`Your changes are kept, so the brief of “${video.title}” was not filled in.`);
           return;
         }
         const asked = video.directed;
@@ -115,20 +118,20 @@ export default function VideoAgentPage() {
         setVoiceId(video.voiceId);
         setFolder(video.folder);
         // The document's words were sent, not kept: it has to be attached again.
-        if (asked.documentName) setNotice(`“${asked.documentName}” was attached to the brief but is not kept; attach it again to write from it.`);
+        if (asked.documentName) addNotice(`“${asked.documentName}” was attached to the brief but is not kept; attach it again to write from it.`);
       })
-      .catch(() => setNotice("The video to ask about again could not be opened; describe a new video instead."));
+      .catch(() => addNotice("The video to ask about again could not be opened; describe a new video instead."));
   }, []);
   // A presenter or voice no longer listed (deleted since it was chosen) is not chosen, and the page says so.
   useEffect(() => {
     if (!avatarData || !avatarId || avatarData.avatars.some((a) => a.id === avatarId)) return;
     setAvatarId("");
-    setNotice("The presenter it was made with is no longer in your library, so none is chosen.");
+    addNotice("The presenter it was made with is no longer in your library, so none is chosen.");
   }, [avatarData, avatarId]);
   useEffect(() => {
     if (!voiceData || !voiceId || voiceData.voices.some((v) => v.id === voiceId)) return;
     setVoiceId("");
-    setNotice("The voice it was made with is no longer available, so none is chosen.");
+    addNotice("The voice it was made with is no longer available, so none is chosen.");
   }, [voiceData, voiceId]);
   // A render that could not start is still in the library: the error links to it.
   const [failed, setFailed] = useState<{ id: string; title: string } | null>(null);
@@ -165,7 +168,8 @@ export default function VideoAgentPage() {
       const stored = e instanceof ApiError ? (e.body?.video as Video | undefined) : undefined;
       if (stored?.id) setFailed({ id: stored.id, title: stored.title });
       setBusy(null);
-      buttons.current[mode]?.focus();
+      // Back to the button only if the focus was lost; someone who moved on while waiting is left where they are.
+      if (!document.activeElement || document.activeElement === document.body) buttons.current[mode]?.focus();
     }
   }
 
@@ -189,10 +193,12 @@ export default function VideoAgentPage() {
           <span className="text-slate-600">to retry it from its page.</span>
         </p>
       )}
-      {notice && (
-        <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">
-          {notice}
-        </p>
+      {notices.length > 0 && (
+        <div className="mb-4 space-y-1 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">
+          {notices.map((n) => (
+            <p key={n}>{n}</p>
+          ))}
+        </div>
       )}
       <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
         <Card className="p-5">
@@ -292,7 +298,7 @@ export default function VideoAgentPage() {
                         aria-describedby="agent-maker-heygen"
                         checked={maker === "heygen"}
                         onChange={() => {
-                          touch();
+                          // Not an edit a brief being filled in would undo: it chooses HeyGen's agent too.
                           setMaker("heygen");
                           setErr(null);
                           setFailed(null);

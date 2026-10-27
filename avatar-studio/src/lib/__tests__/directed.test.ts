@@ -54,6 +54,8 @@ describe("videos HeyGen's Video Agent directs", () => {
     for (const landscape of ["Three customer success stories", "A highlight reel of our conference", "Our summer shorts line", "A portrait of our founder"]) assert.equal(asksForPortrait(landscape), false, landscape);
     // A wide format named outright wins over a platform mentioned in passing.
     for (const wide of ["A landscape explainer, not a TikTok", "A YouTube video about our TikTok strategy"]) assert.equal(asksForPortrait(wide), false, wide);
+    // The shape named outright, and the platform named first, decide.
+    for (const vertical of ["A vertical video for YouTube", "9:16 teaser for our YouTube channel", "A TikTok promoting our YouTube channel", "A portrait video, not landscape", "Instagram Reels, vertical, no horizontal footage", "A YouTube-Shorts teaser"]) assert.equal(asksForPortrait(vertical), true, vertical);
     for (const vertical of ["A YouTube Shorts teaser", "Instagram stories for the launch", "A vertical video for the lobby screen", "9:16 please"]) assert.equal(asksForPortrait(vertical), true, vertical);
   });
 

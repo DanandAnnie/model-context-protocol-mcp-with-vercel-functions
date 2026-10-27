@@ -183,9 +183,14 @@ export async function generateAgentVideo(input: VideoAgentInput, ownerId: string
  * "YouTube Shorts") or the shape ("vertical", "9:16"), not words that only sound like one ("customer stories").
  */
 export function asksForPortrait(prompt: string): boolean {
-  // A wide format named outright wins ("a landscape explainer, not a TikTok", "a YouTube video about our TikTok").
-  if (asksForLandscape(prompt.replace(/\byoutube\s+shorts?\b/gi, ""))) return false;
-  return /\b(tik\s?toks?|(?:instagram|ig|facebook)\s+(?:reels?|stor(?:y|ies))|reels?\s+video|youtube\s+shorts?|vertical(?:\s+video|\s+format)?|portrait\s+(?:video|format|orientation|mode)|9\s*:\s*16)\b/i.test(prompt);
+  // The shape named outright decides: vertical first ("a portrait video, not landscape"), then wide.
+  if (/\b(vertical|portrait\s+(?:video|format|orientation|mode)|9\s*:\s*16)\b/i.test(prompt)) return true;
+  if (/\b(landscape|widescreen|wide[- ]screen|horizontal|16\s*:\s*9)\b/i.test(prompt)) return false;
+  // Else the platform named first: "a TikTok promoting our YouTube channel" is vertical, "a YouTube video about our
+  // TikTok strategy" wide.
+  const vertical = /\b(tik\s?toks?|(?:instagram|ig|facebook)\s+(?:reels?|stor(?:y|ies))|reels?\s+video|youtube[\s-]+shorts?)\b/i.exec(prompt);
+  const wide = /\byoutube\b(?![\s-]+shorts?\b)/i.exec(prompt);
+  return !!vertical && (!wide || vertical.index < wide.index);
 }
 
 /** Fewest characters of a page or document worth sending; less is no source at all. */
@@ -216,8 +221,8 @@ export async function directAgentVideo(input: VideoAgentInput, ownerId: string =
   const provider = getAvatarProvider();
   if (!provider.startDirected) throw new ValidationError(`HeyGen's Video Agent is not available with the ${provider.name} renderer`);
   await enforceRenderLimit(ownerId);
-  // The request alone is checked before the page is read.
-  briefOf(input, undefined);
+  // The request is checked before the page is read: its own length, and the room it leaves for the sources asked for.
+  briefOf(input, input.url || input.document ? "-" : undefined);
   const source = await sourcesOf(input, fetchImpl);
   const brief = briefOf(input, source);
   const orientation = input.orientation === "landscape" || input.orientation === "portrait" ? input.orientation : asksForPortrait(input.prompt) ? "portrait" : "landscape";

@@ -820,7 +820,7 @@ test("an instant voice is made from a recording with the speaker's agreement, an
   const spoken = page.waitForRequest((r) => r.url().endsWith("/api/voice-changer/changes") && r.method() === "POST");
   await change.click();
   expect((await spoken).postDataJSON()).toEqual({ voiceId: expect.stringMatching(/^iv_/), clipId: expect.stringMatching(/^clip_/), removeNoise: true });
-  const card = page.getByTestId("voice-change").first();
+  const card = page.getByTestId("voice-change").filter({ hasText: `voice-over in ${name}` });
   await expect(card).toBeFocused();
   await expect(card).toContainText(`voice-over in ${name}`);
   await expect(card.getByTestId("voice-change-meta")).toContainText(`In “${name}”`);
@@ -844,6 +844,9 @@ test("an instant voice is made from a recording with the speaker's agreement, an
   await expect(spokenCard).toBeFocused();
   await expect(spokenCard.getByTestId("voice-change-meta")).toContainText("from text");
   await expect(spokenCard.getByRole("link", { name: /^Download / })).toHaveAttribute("href", /\/demo\/revoiced\.mp3$/);
+  const withText = (await (await page.request.get("/api/voice-changer")).json()) as { changes: Array<Record<string, unknown>> };
+  const spokenRow = withText.changes.find((c) => c.text === "Welcome to the team.")!;
+  for (const key of ["provider", "providerVoiceId", "providerAudio", "ownerId", "clipId"]) expect(Object.keys(spokenRow)).not.toContain(key);
   page.once("dialog", (d) => d.accept());
   await spokenCard.getByRole("button", { name: /^Delete / }).click();
   await expect(spokenCard).toHaveCount(0);

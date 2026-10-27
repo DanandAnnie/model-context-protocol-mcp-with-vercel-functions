@@ -643,7 +643,8 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       if (status === 401 || status === 403) throw new ValidationError("The HeyGen account behind this studio may not use instant voices; ask its operator");
       if (status === 400 || status === 402 || status === 422 || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not speak that ${words.what === "text" ? "text" : "recording again"}: ${heygenReason(message, words.fix)}`);
       // Anything else (not done in time, still running or the voice still being prepared, a server error, a dropped
-      // connection) may still be running at HeyGen: asked again with the same key, so a finished answer is replayed.
+      // connection) may still be running at HeyGen. A recording is asked again with the same key, which HeyGen
+      // documents as replaying a finished answer unpaid; a text is not asked again.
       return { status: "processing" };
     }
     const audioUrl = httpsOnly(out?.audio_url);

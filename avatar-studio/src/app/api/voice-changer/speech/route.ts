@@ -4,7 +4,7 @@ import { rateLimitPair } from "@/lib/rate-limit";
 import { LimitError, publicVoiceChange, startVoiceSpeech, voiceChangerKeySchema, voiceSpeechSchema } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
-// The renderer answers in seconds for most texts; the start waits for most of a minute before handing over.
+// The renderer answers in seconds for most texts; the start waits for most of a minute, then gives up (502).
 export const maxDuration = 60;
 
 /** Texts an account may have spoken per hour, and every account together, per server instance. */

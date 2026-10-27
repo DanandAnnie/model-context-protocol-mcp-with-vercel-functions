@@ -140,8 +140,8 @@ export interface AvatarProvider {
    */
   changeVoice?(input: { voiceId: string; assetId: string; removeNoise: boolean; key: string; waitMs: number }): Promise<{ status: "processing" } | { status: "completed"; audioUrl: string; durationSec: number }>;
   /**
-   * Speaks text in an instant voice (HeyGen Voice's text to speech), as `changeVoice` does a recording: waits up to
-   * `waitMs`, and one not done by then is asked for again with the same `key`.
+   * Speaks text in an instant voice (HeyGen Voice's text to speech): waits up to `waitMs`, sending `key` as the
+   * Idempotency-Key; "processing" means not done by then. Unlike a recording, a text is never asked for again.
    */
   speakText?(input: { voiceId: string; text: string; key: string; waitMs: number }): Promise<{ status: "processing" } | { status: "completed"; audioUrl: string; durationSec: number }>;
   /** Where a music mix stands, with the video once it is ready (its link signed for a limited time). */

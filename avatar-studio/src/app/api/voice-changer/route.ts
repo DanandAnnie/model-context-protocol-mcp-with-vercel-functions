@@ -1,7 +1,7 @@
 import { errorResponse, json } from "@/lib/api-utils";
 import { requireOwner } from "@/lib/owner";
 import { rateLimit } from "@/lib/rate-limit";
-import { listInstantVoices, listVoiceChanges, publicInstantVoice, publicVoiceChange, voiceChangerAvailable } from "@/lib/services";
+import { listInstantVoices, listVoiceChanges, publicInstantVoice, publicVoiceChange, voiceChangerAvailable, voiceSpeechAvailable } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 // A conversion still running is asked for again on the way, which can take a few seconds.
@@ -18,7 +18,7 @@ export async function GET() {
     const limit = rateLimit(`voicechangerlist:${owner}`, LISTS_PER_OWNER, WINDOW_MS);
     if (!limit.allowed) return json({ error: "Too many checks for now; try again later" }, { status: 429, headers: { "Retry-After": String(limit.retryAfterSec) } });
     const [voices, changes] = await Promise.all([listInstantVoices(owner), listVoiceChanges(owner)]);
-    return json({ voices: voices.map(publicInstantVoice), changes: changes.map(publicVoiceChange), available: voiceChangerAvailable() });
+    return json({ voices: voices.map(publicInstantVoice), changes: changes.map(publicVoiceChange), available: voiceChangerAvailable(), speech: voiceSpeechAvailable() });
   } catch (err) {
     return errorResponse(err);
   }

@@ -102,7 +102,7 @@ function ClipChoice(props: { label: string; hint: string; uploadLabel: string; c
  */
 export default function VoiceChangerPage() {
   const canEdit = useCanEdit();
-  const { data, error, setData, refetch } = useApi<{ voices: Voice[]; changes: Change[]; available: boolean }>("/api/voice-changer");
+  const { data, error, setData, refetch } = useApi<{ voices: Voice[]; changes: Change[]; available: boolean; speech?: boolean }>("/api/voice-changer");
   const { data: clipData, setData: setClipData, refetch: refetchClips } = useApi<{ clips: AudioClip[] }>("/api/clips");
   const clips = clipData?.clips ?? [];
   const voices = data?.voices ?? [];
@@ -169,13 +169,13 @@ export default function VoiceChangerPage() {
     void refetchClips();
     setNote(`Uploaded ${clip.name}.`);
   }
-  // A clip or voice deleted meanwhile leaves the choices, so a retry is not refused the same way.
-  function forgetGone(e: unknown) {
+  // A clip or voice deleted meanwhile leaves the choices of the card that sent it, so a retry is not refused the same way.
+  function forgetGone(e: unknown, at: "change" | "speech" | "voice") {
     if (!(e instanceof Error)) return;
     if (/audio clip is no longer available/.test(e.message)) void refetchClips();
     if (/voice is no longer available/.test(e.message)) {
-      setVoiceId("");
-      setSpeechVoiceId("");
+      if (at === "change") setVoiceId("");
+      if (at === "speech") setSpeechVoiceId("");
       void refetch();
     }
   }
@@ -212,7 +212,7 @@ export default function VoiceChangerPage() {
       focusAfterRender(() => changesRef.current?.querySelector<HTMLElement>(`[data-change="${change.id}"]`));
     } catch (e) {
       fail("change")(e instanceof Error ? e.message : "The recording could not be spoken again");
-      forgetGone(e);
+      forgetGone(e, "change");
       // A refusal is an answer: trying again is a new recording. Anything else (a server error, a start cut off) may
       // still be running, so the key is kept and the list asked again, where a recording still being spoken shows.
       if (isRefusal(e)) setChangeKey(newKey());
@@ -237,7 +237,7 @@ export default function VoiceChangerPage() {
       focusAfterRender(() => changesRef.current?.querySelector<HTMLElement>(`[data-change="${change.id}"]`));
     } catch (e) {
       fail("speech")(e instanceof Error ? e.message : "The text could not be spoken");
-      forgetGone(e);
+      forgetGone(e, "speech");
       if (isRefusal(e)) setSpeechKey(newKey());
       else void refetch();
     } finally {
@@ -260,7 +260,7 @@ export default function VoiceChangerPage() {
       focusAfterRender(() => voicesRef.current?.querySelector<HTMLElement>(`[data-voice="${voice.id}"]`));
     } catch (e) {
       fail("voice")(e instanceof Error ? e.message : "The voice could not be made");
-      forgetGone(e);
+      forgetGone(e, "voice");
       if (isRefusal(e)) setVoiceKey(newKey());
       else void refetch();
     } finally {
@@ -373,39 +373,42 @@ export default function VoiceChangerPage() {
               <p className="text-xs text-slate-500">HeyGen takes up to a couple of minutes. The result is a WAV to play and download; its link lasts a limited time, so download it soon.</p>
             </Card>
 
-            <Card className="space-y-4 p-5">
-              <h2 className="text-sm font-semibold text-slate-900">Speak text in a voice</h2>
-              <ErrorBanner message={errAt === "speech" ? err : null} />
-              <Field label="Speaking voice" hint={voiceHint}>
-                <select className={inputClass} value={speechVoiceId} disabled={!editable} onChange={(e) => (setSpeechVoiceId(e.target.value), setSpeechKey(newKey()), errAt === "speech" && setErr(null))}>
-                  <option value="">{voicePlaceholder}</option>
-                  {ready.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <div>
-                <Field label="Text" hint={`Plain prose, up to ${MAX_SPEECH_CHARS.toLocaleString("en-US")} characters; the language is worked out from the text.`}>
-                  <textarea className={`${inputClass} min-h-28`} value={speechText} maxLength={MAX_SPEECH_CHARS} disabled={!editable} onChange={(e) => (setSpeechText(e.target.value), setSpeechKey(newKey()))} placeholder="Welcome to the team. Here is what your first week looks like." />
+            {data?.speech !== false && (
+              <Card className="space-y-4 p-5">
+                <h2 className="text-sm font-semibold text-slate-900">Speak text in a voice</h2>
+                <ErrorBanner message={errAt === "speech" ? err : null} />
+                <Field label="Speaking voice" hint={voiceHint}>
+                  <select className={inputClass} value={speechVoiceId} disabled={!editable} onChange={(e) => (setSpeechVoiceId(e.target.value), setSpeechKey(newKey()), errAt === "speech" && setErr(null))}>
+                    <option value="">{voicePlaceholder}</option>
+                    {ready.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name}
+                      </option>
+                    ))}
+                  </select>
                 </Field>
-                <p className="mt-1 text-right text-xs text-slate-400" aria-hidden>
-                  {speechText.length.toLocaleString("en-US")} / {MAX_SPEECH_CHARS.toLocaleString("en-US")}
-                </p>
-              </div>
-              <Field label="Title for the text (optional)">
-                <input className={inputClass} value={speechTitle} maxLength={120} disabled={!editable} onChange={(e) => (setSpeechTitle(e.target.value), setSpeechKey(newKey()))} placeholder="The text's first words, in the voice" />
-              </Field>
-              {editable && speechNeeds !== null && (
-                <p id="speech-needs" className="text-xs text-slate-500">
-                  {speechNeeds}
-                </p>
-              )}
+                <div>
+                  <Field label="Text" hint={`Plain prose, up to ${MAX_SPEECH_CHARS.toLocaleString("en-US")} characters; the language is worked out from the text.`}>
+                    <textarea className={`${inputClass} min-h-28`} value={speechText} maxLength={MAX_SPEECH_CHARS} disabled={!editable} onChange={(e) => (setSpeechText(e.target.value), setSpeechKey(newKey()), errAt === "speech" && setErr(null))} placeholder="Welcome to the team. Here is what your first week looks like." />
+                  </Field>
+                  <p className="mt-1 text-right text-xs text-slate-400" aria-hidden>
+                    {speechText.length.toLocaleString("en-US")} / {MAX_SPEECH_CHARS.toLocaleString("en-US")}
+                  </p>
+                </div>
+                <Field label="Title for the text (optional)">
+                  <input className={inputClass} value={speechTitle} maxLength={120} disabled={!editable} onChange={(e) => (setSpeechTitle(e.target.value), setSpeechKey(newKey()), errAt === "speech" && setErr(null))} placeholder="The text's first words, in the voice" />
+                </Field>
+                {editable && speechNeeds !== null && (
+                  <p id="speech-needs" className="text-xs text-slate-500">
+                    {speechNeeds}
+                  </p>
+            )}
               <Button onClick={speakText} loading={speaking} disabled={!editable || speechNeeds !== null} className="w-full" aria-describedby={editable && speechNeeds !== null ? "speech-needs" : undefined}>
                 <Type className="h-4 w-4" /> Speak the text
               </Button>
+              <p className="text-xs text-slate-500">Most texts are ready in a few seconds; one not done within a minute is dropped, to try again.</p>
             </Card>
+            )}
 
             <Card className="space-y-4 p-5">
               <h2 className="text-sm font-semibold text-slate-900">Make a voice</h2>

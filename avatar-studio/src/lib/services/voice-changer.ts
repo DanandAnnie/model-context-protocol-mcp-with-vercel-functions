@@ -9,13 +9,13 @@ import { getStore } from "../store";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import type { AudioClip, InstantVoice, VoiceChange } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
-import { ConflictError, LimitError, NotFoundError, ValidationError } from "../errors";
+import { ConflictError, LimitError, NotFoundError, UpstreamError, ValidationError } from "../errors";
 import { owned, stripUndefined } from "./shared";
 import { getClip } from "./clips";
 import { prepareClipOnce } from "./videos";
 import { rememberMadeVoices } from "./voices";
 import { jobChecker } from "./job-checks";
-import { withSuffix } from "../text";
+import { graphemes, withSuffix } from "../text";
 
 /** Instant voices an account keeps; another needs one deleted first. */
 export const MAX_INSTANT_VOICES = 10;
@@ -54,6 +54,12 @@ export const voiceChangeSchema = z.object({
   title: z.string().trim().max(120, "Keep the title to 120 characters").optional(),
 });
 
+/**
+ * A text still marked as being spoken this long after it started was cut off with its request (which waits at most a
+ * minute); it is given up. Text is never asked for again: the renderer documents no replay of a finished answer for
+ * text to speech, so asking again could speak, and charge for, it twice.
+ */
+const SPEECH_GIVE_UP_MS = 90_000;
 /** Text an account may have spoken at once: well under the renderer's 5,000 characters, so it is ready within a minute. */
 export const MAX_SPEECH_CHARS = 2000;
 
@@ -68,6 +74,11 @@ export const voiceChangeIdSchema = z.string().regex(/^vc_[A-Za-z0-9_-]{1,64}$/, 
 
 export function voiceChangerAvailable(): boolean {
   return typeof getAvatarProvider().changeVoice === "function";
+}
+
+/** Whether the renderer can speak text in an instant voice. */
+export function voiceSpeechAvailable(): boolean {
+  return typeof getAvatarProvider().speakText === "function";
 }
 
 /** What the account sees: never the renderer, its ids, or the upload sent to it. */
@@ -276,9 +287,10 @@ async function readyVoice(voiceId: string, ownerId: string): Promise<InstantVoic
 }
 
 /**
- * Speaks text in one of the account's instant voices, kept with the recordings spoken again. As for those, the record is
- * stored before the renderer is asked, the start waits for most of a minute, and one not done by then is asked for
- * again with the same key while the list is open. With a client `key`, a start retried after a lost answer returns it.
+ * Speaks text in one of the account's instant voices, kept with the recordings spoken again. The record is stored before
+ * the renderer is asked (so a start retried while the first is running returns it) and the start waits for most of a
+ * minute; one not done by then is not asked for again (see `SPEECH_GIVE_UP_MS`) but dropped, with a 502 to try again.
+ * With a client `key`, a start retried after a lost answer returns what was spoken.
  */
 export async function startVoiceSpeech(input: z.infer<typeof voiceSpeechSchema>, ownerId: string = LOCAL_OWNER, opts: { key?: string; admit?: () => void } = {}): Promise<VoiceChange> {
   const arrived = Date.now();
@@ -310,25 +322,26 @@ export async function startVoiceSpeech(input: z.infer<typeof voiceSpeechSchema>,
   try {
     const waitMs = Math.max(MIN_WAIT_MS, START_DEADLINE_MS - (Date.now() - arrived));
     const out = await provider.speakText({ voiceId: voice.providerVoiceId, text: input.text, key: id, waitMs });
-    if (out.status === "processing") return change;
+    if (out.status === "processing") throw new UpstreamError("HeyGen did not finish speaking the text in time; try again, or try a shorter text");
     const done: VoiceChange = { ...change, status: "completed", audioUrl: out.audioUrl, ...(out.durationSec ? { durationSec: out.durationSec } : {}), checkedAt: nowIso(), updatedAt: nowIso() };
     return (await getStore().putIf("voicechange", done, "updatedAt", change.updatedAt)) ? done : change;
   } catch (err) {
-    if (err instanceof ValidationError || err instanceof LimitError) {
-      await getStore().remove("voicechange", change.id);
-      throw err;
-    }
-    console.error(`voice speech ${change.id} start failed; it is followed:`, err);
-    return change;
+    // Nothing to follow: a refusal made nothing, and anything else is not asked again.
+    await getStore().remove("voicechange", change.id);
+    if (!(err instanceof ValidationError || err instanceof LimitError || err instanceof UpstreamError)) console.error(`voice speech ${change.id} start failed:`, err);
+    throw err;
   }
 }
 
 /** The first words of a text, as a title: up to about 40 characters, cut at a word and marked when cut. */
 function speechTitle(text: string): string {
-  const flat = text.replace(/\s+/g, " ").trim();
-  if (flat.length <= 40) return flat;
-  const cut = flat.slice(0, 40);
-  return `${cut.slice(0, cut.lastIndexOf(" ") > 20 ? cut.lastIndexOf(" ") : 40).replace(/[\s,.;:!?-]+$/, "")}…`;
+  const chars = graphemes(text.replace(/\s+/g, " ").trim());
+  if (chars.length <= 40) return chars.join("");
+  const cut = chars.slice(0, 40);
+  const space = cut.lastIndexOf(" ");
+  const words = cut.slice(0, space > 20 ? space : 40).join("");
+  // Cut back to the last word, without trailing punctuation; a text of punctuation alone keeps its first characters.
+  return `${words.replace(/[\s,.;:!?-]+$/, "") || words}…`;
 }
 
 /** Forgets one recording spoken again (the renderer's copy expires on its own). */
@@ -344,16 +357,16 @@ async function refreshVoiceChange(change: VoiceChange): Promise<VoiceChange> {
   try {
     const age = Date.now() - Date.parse(change.createdAt);
     const giveUp: VoiceChange = { ...change, status: "failed", error: `The renderer did not finish speaking this ${change.text !== undefined ? "text" : "recording"}; try again`, checkedAt: now, updatedAt: now };
-    if (age > KEY_KEPT_MS) {
+    if (age > KEY_KEPT_MS || (change.text !== undefined && age > SPEECH_GIVE_UP_MS)) {
       next = giveUp;
+    } else if (change.text !== undefined) {
+      // Its start is still waiting for the renderer; it finishes it, or this gives it up.
+      return change;
     } else {
       // Asked even when long unanswered (a page closed meanwhile): a finished one is returned under its key, unpaid.
       const provider = getAvatarProviderByName(change.provider);
-      const out =
-        change.text !== undefined
-          ? provider.speakText && (await provider.speakText({ voiceId: change.providerVoiceId, text: change.text, key: change.id, waitMs: CHECK_WAIT_MS }))
-          : provider.changeVoice && change.providerAudio && (await provider.changeVoice({ voiceId: change.providerVoiceId, assetId: change.providerAudio, removeNoise: !!change.removeNoise, key: change.id, waitMs: CHECK_WAIT_MS }));
-      if (!out) return change;
+      if (!provider.changeVoice || !change.providerAudio) return change;
+      const out = await provider.changeVoice({ voiceId: change.providerVoiceId, assetId: change.providerAudio, removeNoise: !!change.removeNoise, key: change.id, waitMs: CHECK_WAIT_MS });
       if (out.status === "completed") next = { ...change, status: "completed", audioUrl: out.audioUrl, durationSec: out.durationSec || change.durationSec, checkedAt: now, updatedAt: now };
       else next = age > GIVE_UP_MS ? giveUp : { ...change, checkedAt: now };
     }

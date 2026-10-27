@@ -7,3 +7,5 @@ export class ForbiddenError extends Error {}
 export class LimitError extends Error {}
 /** The item is in a state that does not allow the action (HTTP 409). */
 export class ConflictError extends Error {}
+/** The renderer did not answer in time or failed, and nothing was kept to follow (HTTP 502). */
+export class UpstreamError extends Error {}

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
-import { ConflictError, ForbiddenError, LimitError, NotFoundError, UnauthorizedError, ValidationError } from "./errors";
+import { ConflictError, ForbiddenError, LimitError, NotFoundError, UnauthorizedError, UpstreamError, ValidationError } from "./errors";
 
 export function json<T>(data: T, init?: ResponseInit) {
   return NextResponse.json(data, init);
@@ -16,6 +16,7 @@ export function errorResponse(err: unknown) {
   if (err instanceof LimitError) return NextResponse.json({ error: err.message }, { status: 429 });
   if (err instanceof ConflictError) return NextResponse.json({ error: err.message }, { status: 409 });
   if (err instanceof NotFoundError) return NextResponse.json({ error: err.message }, { status: 404 });
+  if (err instanceof UpstreamError) return NextResponse.json({ error: err.message }, { status: 502 });
   console.error(err);
   const message = err instanceof Error ? err.message : "Unexpected error";
   return NextResponse.json({ error: message }, { status: 500 });

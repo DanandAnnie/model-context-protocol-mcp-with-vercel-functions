@@ -249,6 +249,44 @@ export interface LipsyncJob {
   checkedAt?: string;
 }
 
+/** A track of the renderer's background-music catalog, found by describing it (HeyGen's audio catalog). */
+export interface MusicTrack {
+  id: string;
+  name: string;
+  description?: string;
+  /** A short-lived link to hear it; the track is looked up again when a mix starts. */
+  previewUrl: string;
+  durationSec: number;
+}
+
+/** How loud the music plays under the video's own sound, from barely there to as loud as the speech. */
+export const MUSIC_VOLUMES = { quiet: 0.12, low: 0.25, medium: 0.4, high: 0.6 } as const;
+export type MusicVolume = keyof typeof MUSIC_VOLUMES;
+
+/** A library video with a background-music track mixed under its sound (a render of the renderer's own). */
+export interface MusicJob {
+  id: string;
+  ownerId: string;
+  title: string;
+  videoId: string;
+  /** The catalog track, and the description it was found with (asked again for its link when the mix starts). */
+  trackId: string;
+  trackName: string;
+  query: string;
+  volume: MusicVolume;
+  /** Renderer mixing it, and its job id there, never shown to the account. */
+  provider: string;
+  providerJobId: string;
+  status: "processing" | "completed" | "failed";
+  /** The mixed video, signed by the renderer for a limited time and renewed when it gets old. */
+  videoUrl?: string;
+  durationSec?: number;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+  checkedAt?: string;
+}
+
 export interface Voice {
   id: string;
   name: string;
@@ -1030,6 +1068,8 @@ export interface ProviderStatus {
   voiceCloning: boolean;
   /** The voice provider clones from one WAV or MP3 recording (HeyGen): the page joins the samples into one WAV first. */
   voiceCloneOneRecording?: true;
+  /** Whether the renderer can mix a background-music track under a finished video. */
+  backgroundMusic: boolean;
   /** Whether the renderer can draw a presenter from a description. */
   portraitGeneration: boolean;
   /** Whether the renderer can cut a finished video into short highlight clips. */

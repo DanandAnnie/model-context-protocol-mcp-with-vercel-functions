@@ -727,6 +727,46 @@ test("a video is lip-synced to an uploaded clip or a linked track, at the chosen
   expect((await page.request.delete(`/api/clips/${clipId}`)).status()).toBe(204);
 });
 
+test("a catalog track found by describing it is mixed under a finished video, followed until ready, and deleted", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Music source ${Date.now().toString(36)}`);
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  await page.goto("/music");
+  await expect(page.getByRole("heading", { name: "Music", exact: true })).toBeVisible();
+  const start = page.getByRole("button", { name: "Add music" });
+  await page.getByRole("combobox", { name: /^Library video\b/ }).selectOption(v.id);
+  // Nothing to add until a track is found and chosen.
+  await expect(start).toBeDisabled();
+  await page.getByLabel("Describe the music").fill("upbeat energetic");
+  await page.getByRole("button", { name: "Search" }).click();
+  const tracks = page.getByTestId("music-tracks");
+  // The best match is chosen and focused, and each track can be heard first.
+  await expect(tracks.getByLabel("Bright steps", { exact: true })).toBeChecked();
+  await expect(tracks.getByLabel("Bright steps", { exact: true })).toBeFocused();
+  await expect(tracks.getByRole("radio")).toHaveCount(3);
+  await expect(tracks.getByLabel("Hear Bright steps")).toHaveAttribute("src", /\/demo\/music-upbeat\.mp3$/);
+  await page.getByLabel("Medium").check();
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/music") && r.method() === "POST");
+  await start.click();
+  const request = await sent;
+  expect(request.postDataJSON()).toEqual({ videoId: v.id, trackId: "demo_music_upbeat", query: "upbeat energetic", volume: "medium" });
+  expect(request.headers()["idempotency-key"]).toMatch(/^[A-Za-z0-9_-]{8,100}$/);
+  const item = page.getByTestId("mix").first();
+  await expect(item).toBeFocused();
+  await expect(item).toContainText("(with music)");
+  await expect(item.getByTestId("mix-meta")).toContainText("“Bright steps” · Medium volume");
+  // The demo renderer finishes a few seconds later; the page checks again on its own.
+  await expect(item.getByRole("link", { name: /^Download / })).toHaveAttribute("href", /\/demo\/render\./, { timeout: 20_000 });
+  const listed = (await (await page.request.get("/api/music")).json()).mixes as Array<Record<string, unknown>>;
+  for (const key of ["provider", "providerJobId", "ownerId"]) expect(Object.keys(listed[0])).not.toContain(key);
+  // A suggestion searches at once.
+  await page.getByRole("button", { name: "Cinematic and inspiring" }).click();
+  await expect(tracks.getByLabel("Wide horizon", { exact: true })).toBeChecked();
+  // Deleting asks first, and the focus goes to the list's heading when none is left.
+  page.once("dialog", (d) => d.accept());
+  await item.getByRole("button", { name: /^Delete / }).click();
+  await expect(page.getByTestId("mix")).toHaveCount(listed.length - 1);
+});
+
 test("a photo avatar is dressed in a look pack, each look kept as a presenter of its own", async ({ page }) => {
   const tag = Date.now().toString(36);
   const name = `Looks ${tag}`;
@@ -2393,7 +2433,7 @@ test("webhook settings reject private hosts and show the signing secret", async 
 test("pages have no WCAG 2.1 AA violations", async ({ page }) => {
   const v = await createVideoViaApi(page, "Accessible video");
   const agent = (await (await page.request.post("/api/agents", { data: { name: "Axe agent", avatarId: "stock_1" } })).json()).agent as { id: string };
-  const paths = ["/", "/login", "/home", "/create", "/agent", "/videos", `/videos/${v.id}`, "/templates", "/batch", "/avatars", "/voices", "/translate", "/cleanup", "/lipsync", "/interactive", "/brand", "/settings", `/share/${v.id}`, `/talk/${agent.id}`, "/demo-consent"];
+  const paths = ["/", "/login", "/home", "/create", "/agent", "/videos", `/videos/${v.id}`, "/templates", "/batch", "/avatars", "/voices", "/translate", "/cleanup", "/lipsync", "/music", "/interactive", "/brand", "/settings", `/share/${v.id}`, `/talk/${agent.id}`, "/demo-consent"];
   const report: string[] = [];
   for (const path of paths) {
     await page.goto(path);
@@ -2486,6 +2526,7 @@ test("a workspace viewer sees view-only notices instead of create controls", asy
     ["/translate", "start translations"],
     ["/cleanup", "clean up recordings"],
     ["/lipsync", "lip-sync videos"],
+    ["/music", "add music to videos"],
     ["/avatars", "add or change avatars"],
     ["/voices", "clone, design, or change voices"],
     ["/brand", "change the brand kit"],

@@ -1,4 +1,4 @@
-import type { AudioClip, Avatar, Backdrop, CaptionCue, HighlightClip, HighlightFrame, HighlightLength, StudioTemplate, StudioTemplateDetail, Translation, TranslationRequest, Video, VideoRequest, Voice } from "../types";
+import type { AudioClip, Avatar, Backdrop, CaptionCue, HighlightClip, HighlightFrame, HighlightLength, StudioTemplate, StudioTemplateDetail, Translation, TranslationRequest, Video, VideoRequest, Voice, MusicTrack, AspectRatio } from "../types";
 
 export interface TtsProvider {
   readonly name: string;
@@ -112,6 +112,15 @@ export interface AvatarProvider {
   startLipsync?(input: LipsyncInput): Promise<{ jobId: string }>;
   /** Where a lip sync stands, with the video once it is ready (its link signed for a limited time). */
   lipsyncStatus?(jobId: string): Promise<LipsyncStatus>;
+  /** Background-music tracks matching a description, best first, each with a short-lived link to hear it. */
+  searchMusic?(query: string): Promise<MusicTrack[]>;
+  /**
+   * Starts mixing a music track under a finished video (looped to its length, faded in and out), rendered as a new
+   * video. `key` makes a retried start return the same job. Absent when the provider cannot.
+   */
+  startMusicMix?(input: MusicMixInput): Promise<{ jobId: string }>;
+  /** Where a music mix stands, with the video once it is ready (its link signed for a limited time). */
+  musicMixStatus?(jobId: string): Promise<LipsyncStatus>;
   /**
    * Starts a set of new looks for a custom photo avatar already prepared for rendering (HeyGen Look Packs): its face in a
    * pack's wardrobe and setting. `key` makes a retried start return the same looks. Each look is followed with
@@ -267,6 +276,18 @@ export interface LipsyncInput {
   /** A public link, or an audio clip already uploaded to the renderer (`prepareAudio`). */
   audio: { type: "url"; url: string } | { type: "asset"; assetId: string };
   mode: "speed" | "precision";
+  title: string;
+  key: string;
+}
+
+export interface MusicMixInput {
+  videoUrl: string;
+  durationSec: number;
+  aspect: AspectRatio;
+  musicUrl: string;
+  musicDurationSec: number;
+  /** The music's gain under the video's sound, 0 to 1. */
+  volume: number;
   title: string;
   key: string;
 }

@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { useMobileNav } from "@/components/MobileNav";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
-import { AudioLines, Clapperboard, Eraser, Home, Languages, Layers3, LayoutTemplate, LogOut, MessageSquare, Mic2, Palette, Settings, Users, Video, Sparkles, X } from "lucide-react";
+import { AudioLines, Clapperboard, Music, Eraser, Home, Languages, Layers3, LayoutTemplate, LogOut, MessageSquare, Mic2, Palette, Settings, Users, Video, Sparkles, X } from "lucide-react";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import type { ProviderStatus } from "@/lib/types";
@@ -21,6 +21,7 @@ const NAV = [
   { href: "/translate", label: "Video translate", icon: Languages },
   { href: "/cleanup", label: "Clean up", icon: Eraser },
   { href: "/lipsync", label: "Lip sync", icon: AudioLines },
+  { href: "/music", label: "Music", icon: Music },
   { href: "/interactive", label: "Interactive avatar", icon: MessageSquare },
   { href: "/brand", label: "Brand kit", icon: Palette },
   { href: "/settings", label: "Settings", icon: Settings },

@@ -99,6 +99,7 @@ export function providerStatus(): ProviderStatus {
     portraitGeneration: typeof getAvatarProvider().generatePortrait === "function",
     highlightClips: typeof getAvatarProvider().startHighlights === "function",
     fillerRemoval: typeof getAvatarProvider().startCleanup === "function",
+    backgroundMusic: typeof getAvatarProvider().startMusicMix === "function",
     lipsync: typeof getAvatarProvider().startLipsync === "function",
     lookPacks: typeof getAvatarProvider().startLookPack === "function",
     digitalTwins: typeof getAvatarProvider().startTwin === "function",

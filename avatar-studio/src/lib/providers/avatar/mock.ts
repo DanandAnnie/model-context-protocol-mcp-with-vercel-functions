@@ -3,7 +3,7 @@ import { pauseSeconds, stripPauses } from "../../pauses";
 import { SAMPLE_PREVIEW_VIDEO, STOCK_AVATARS, portraitSvg } from "../../stock";
 import { demoAssetUrl } from "../../config";
 import { NotFoundError } from "../../errors";
-import type { AudioClip, Avatar, StudioTemplate, StudioTemplateDetail, VideoRequest } from "../../types";
+import type { AudioClip, Avatar, MusicTrack, StudioTemplate, StudioTemplateDetail, VideoRequest } from "../../types";
 import type { AvatarJobStatus, AvatarProvider, CleanupStatus, HighlightInput, HighlightStatus, LipsyncStatus } from "../types";
 
 /** Labeled, self-hosted stand-in; no avatar synthesis or paid operation occurs. */
@@ -11,6 +11,13 @@ const SAMPLE_VIDEO = SAMPLE_PREVIEW_VIDEO;
 const SAMPLE_THUMB = "/demo/poster.svg";
 
 /** Simulates an async render that completes ~12s after submission. */
+
+/** The demo's background-music tracks (short tones of the studio's own, in public/demo). */
+const DEMO_MUSIC = [
+  { id: "demo_music_calm", name: "Calm morning", description: "calm ambient soft piano corporate background gentle", previewUrl: "/demo/music-calm.mp3", durationSec: 20 },
+  { id: "demo_music_upbeat", name: "Bright steps", description: "upbeat happy energetic pop corporate motivational", previewUrl: "/demo/music-upbeat.mp3", durationSec: 16 },
+  { id: "demo_music_cinematic", name: "Wide horizon", description: "cinematic epic dramatic tense inspiring trailer", previewUrl: "/demo/music-cinematic.mp3", durationSec: 24 },
+];
 export class MockAvatarProvider implements AvatarProvider {
   readonly name = "mock";
   private static RENDER_MS = 12_000;
@@ -121,6 +128,28 @@ export class MockAvatarProvider implements AvatarProvider {
   async lipsyncStatus(jobId: string): Promise<LipsyncStatus> {
     const m = /^mockls_(\d+)$/.exec(jobId);
     if (!m) return { status: "failed", error: "No such lip sync" };
+    if (Date.now() - Number(m[1]) < MockAvatarProvider.CLIP_MS) return { status: "processing" };
+    return { status: "completed", videoUrl: demoAssetUrl(SAMPLE_VIDEO), durationSec: 12 };
+  }
+
+  /**
+   * Demo background music: three short tracks of the studio's own, ranked by how many of the description's words their
+   * description shares (all three when none match). Nothing is searched.
+   */
+  async searchMusic(query: string): Promise<MusicTrack[]> {
+    const words = query.toLowerCase().match(/[a-z]+/g) ?? [];
+    const scored = DEMO_MUSIC.map((t) => ({ t, score: words.filter((w) => t.description.includes(w)).length }));
+    return scored.sort((a, b) => b.score - a.score).map(({ t }) => ({ ...t, previewUrl: demoAssetUrl(t.previewUrl) }));
+  }
+
+  /** Demo music mix: the sample video stands in for the mixed one a few seconds later; nothing is mixed. */
+  async startMusicMix() {
+    return { jobId: `mockmm_${Date.now()}` };
+  }
+
+  async musicMixStatus(jobId: string): Promise<LipsyncStatus> {
+    const m = /^mockmm_(\d+)$/.exec(jobId);
+    if (!m) return { status: "failed", error: "No such video with music" };
     if (Date.now() - Number(m[1]) < MockAvatarProvider.CLIP_MS) return { status: "processing" };
     return { status: "completed", videoUrl: demoAssetUrl(SAMPLE_VIDEO), durationSec: 12 };
   }

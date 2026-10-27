@@ -32,6 +32,7 @@ import { clearVideoLeads } from "./leads";
 import { clearHighlights } from "./highlights";
 import { clearCleanups } from "./cleanups";
 import { clearLipsyncs } from "./lipsyncs";
+import { clearMusicJobs } from "./music";
 import { reviseScript } from "./scripts";
 export { accentSchema, avatarEngineSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema };
 
@@ -717,6 +718,7 @@ async function purgeVideo(id: string, ownerId: string): Promise<void> {
   await clearHighlights(id, ownerId);
   await clearCleanups(id, ownerId);
   await clearLipsyncs(id, ownerId);
+  await clearMusicJobs(id, ownerId);
   await getStore().remove("video", id);
 }
 

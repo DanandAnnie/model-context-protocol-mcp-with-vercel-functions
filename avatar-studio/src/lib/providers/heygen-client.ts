@@ -262,6 +262,30 @@ export class HeyGenClient {
     return out.lipsync_id;
   }
 
+  /**
+   * Background music matching a description (`GET /v3/audio/sounds`, the music catalog), best first; each track's
+   * `audio_url` is signed for a short time.
+   */
+  async searchMusic(query: string, limit = 12): Promise<Array<{ id: string; name: string; description?: string | null; audio_url?: string | null; duration?: number | null }>> {
+    const json = await this.envelope<Array<{ id: string; name: string; description?: string | null; audio_url?: string | null; duration?: number | null }>>(
+      `${V3}/audio/sounds?query=${encodeURIComponent(query)}&limit=${limit}&type=music`,
+      { signal: AbortSignal.timeout(15_000) },
+    );
+    return Array.isArray(json.data) ? json.data : [];
+  }
+
+  /** Starts a HyperFrames render (`POST /v3/hyperframes/renders`) of a project zip; `key` replays a retried start. */
+  async createHyperframesRender(body: Record<string, unknown>, key: string): Promise<string> {
+    const out = await this.request<{ render_id?: string }>(`${V3}/hyperframes/renders`, { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": key }, signal: AbortSignal.timeout(20_000) });
+    if (!out?.render_id) throw new Error("HeyGen returned no render id");
+    return out.render_id;
+  }
+
+  /** A HyperFrames render and, once done, its video (`GET /v3/hyperframes/renders/{id}`). */
+  hyperframesRender(id: string) {
+    return this.request<{ status: "queued" | "rendering" | "completed" | "failed" | string; video_url?: string | null; duration?: number | null; failure_message?: string | null }>(`${V3}/hyperframes/renders/${encodeURIComponent(id)}`);
+  }
+
   /** A lip sync and, once done, its video (`GET /v3/lipsyncs/{id}`). */
   lipsync(id: string) {
     return this.request<{

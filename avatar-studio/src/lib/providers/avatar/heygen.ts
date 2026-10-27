@@ -1,4 +1,4 @@
-import { STUDIO_VARIABLE_TYPES, backdropIdOf, isPhotoAvatar, rendersOnAvatarV, type AudioClip, type Avatar, type Backdrop, type Background, type Scene, type StudioTemplate, type StudioTemplateDetail, type StudioVariable, type VideoRequest, type Voice } from "../../types";
+import { STUDIO_VARIABLE_TYPES, backdropIdOf, isPhotoAvatar, rendersOnAvatarV, type AudioClip, type Avatar, type Backdrop, type Background, type Scene, type StudioTemplate, type StudioTemplateDetail, type StudioVariable, type VideoRequest, type Voice, type MusicTrack } from "../../types";
 import { silentSeconds, withBreakTags } from "../../pauses";
 import type { LookPackKey } from "../../look-packs";
 import { heygenBurnsCaptions } from "../../captions";
@@ -7,7 +7,9 @@ import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
 import { HeyGenClient } from "../heygen-client";
 import { ConflictError, NotFoundError, ValidationError } from "../../errors";
-import type { AvatarJobStatus, AvatarProvider, CleanupStatus, HighlightInput, HighlightStatus, LipsyncInput, LipsyncStatus, RenderCast } from "../types";
+import type { AvatarJobStatus, AvatarProvider, CleanupStatus, HighlightInput, HighlightStatus, LipsyncInput, LipsyncStatus, MusicMixInput, RenderCast } from "../types";
+import { musicComposition } from "../../music-mix";
+import { strToU8, zipSync } from "fflate";
 
 /**
  * Where a custom portrait's v3 photo avatar look is kept (`providerAssetIds`). Portraits uploaded as v1 talking photos
@@ -497,6 +499,54 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       if (/ failed: (400|402|404|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not lip-sync that video: ${heygenReason(message, "check that the video shows one speaker's face and the audio has speech")}`);
       throw err;
     }
+  }
+
+  /** Background music from HeyGen's catalog, described in plain words; tracks without a link to hear are left out. */
+  async searchMusic(query: string): Promise<MusicTrack[]> {
+    const tracks = await this.client.searchMusic(query);
+    return tracks.flatMap((t) => {
+      const previewUrl = httpsOnly(t.audio_url);
+      return previewUrl && t.id ? [stripEmpty({ id: t.id, name: t.name || "Music", description: t.description ?? undefined, previewUrl, durationSec: typeof t.duration === "number" && t.duration > 0 ? t.duration : 0 })] : [];
+    });
+  }
+
+  /**
+   * A track mixed under a finished video, rendered by HyperFrames (HeyGen's HTML-to-video renderer): the studio sends a
+   * one-page project, the video full frame with its sound and the track laid under it to the end (see `musicComposition`).
+   */
+  async startMusicMix(input: MusicMixInput) {
+    const html = musicComposition(input);
+    const zip = zipSync({ "index.html": strToU8(html) });
+    try {
+      const body = {
+        project: { type: "base64", media_type: "application/zip", data: Buffer.from(zip).toString("base64") },
+        format: "mp4",
+        resolution: "1080p",
+        aspect_ratio: input.aspect,
+        title: input.title,
+      };
+      return { jobId: await this.client.createHyperframesRender(body, input.key) };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      if (/ failed: 409 /.test(message)) throw new ConflictError(STILL_SENDING);
+      if (/ failed: (400|402|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not add music to that video: ${heygenReason(message, "try another track")}`);
+      throw err;
+    }
+  }
+
+  async musicMixStatus(jobId: string): Promise<LipsyncStatus> {
+    let job;
+    try {
+      job = await this.client.hyperframesRender(jobId);
+    } catch (err) {
+      if (err instanceof Error && / failed: 404 /.test(err.message)) return { status: "failed", error: "This video with music is no longer available from HeyGen; make it again" };
+      throw err;
+    }
+    if (job.status === "failed") return { status: "failed", error: job.failure_message || "HeyGen could not add music to that video" };
+    if (job.status !== "completed") return { status: "processing" };
+    const videoUrl = httpsOnly(job.video_url);
+    if (!videoUrl) return { status: "failed", error: "HeyGen finished without the video" };
+    return stripEmpty({ status: "completed" as const, videoUrl, durationSec: job.duration ?? undefined });
   }
 
   async lipsyncStatus(jobId: string): Promise<LipsyncStatus> {

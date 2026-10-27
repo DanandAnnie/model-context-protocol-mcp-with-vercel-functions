@@ -57,6 +57,7 @@ export class HeyGenClient {
       id: string;
       name: string;
       avatar_type?: "studio_avatar" | "digital_twin" | "photo_avatar" | string;
+      supported_api_engines?: string[];
       preview_image_url?: string;
       preview_video_url?: string;
       gender?: string;

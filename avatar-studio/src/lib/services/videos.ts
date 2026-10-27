@@ -24,13 +24,13 @@ import { clearCover, setCover } from "../cover";
 import { shareOffline } from "../client";
 import { bumpViewsByDay } from "../insights";
 
-import { accentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema } from "./schemas";
+import { accentSchema, avatarEngineSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema } from "./schemas";
 import { getBrandKit } from "./brand";
 import { spokenCopy } from "../pronounce";
 import { clearComments } from "./comments";
 import { clearVideoLeads } from "./leads";
 import { reviseScript } from "./scripts";
-export { accentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema };
+export { accentSchema, avatarEngineSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema };
 
 export const videoRequestSchema = z
   .object({
@@ -74,6 +74,7 @@ export const videoRequestSchema = z
     expressiveness: expressivenessSchema,
     motionPrompt: motionPromptSchema,
     accent: accentSchema,
+    avatarEngine: avatarEngineSchema,
   })
   .transform((v, ctx) => {
     if (v.scenes) {
@@ -308,6 +309,7 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
   if (!base.expressiveness) delete base.expressiveness;
   if (!base.motionPrompt) delete base.motionPrompt;
   if (!base.accent) delete base.accent;
+  if (!base.avatarEngine) delete base.avatarEngine;
 
   try {
     if (provider.prepareAvatar) {
@@ -1168,6 +1170,7 @@ function requestOf(video: Video): VideoRequest {
     ...(video.expressiveness ? { expressiveness: video.expressiveness } : {}),
     ...(video.motionPrompt ? { motionPrompt: video.motionPrompt } : {}),
     ...(video.accent ? { accent: video.accent } : {}),
+    ...(video.avatarEngine ? { avatarEngine: video.avatarEngine } : {}),
   };
 }
 

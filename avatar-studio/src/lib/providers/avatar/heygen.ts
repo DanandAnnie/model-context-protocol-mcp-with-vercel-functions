@@ -46,6 +46,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
         provider: this.name,
         gender: (l.gender?.toLowerCase() as Avatar["gender"]) ?? undefined,
         ...(l.avatar_type === "photo_avatar" ? { tags: ["photo avatar"] } : l.tags?.length ? { tags: l.tags.slice(0, 4) } : {}),
+        ...(l.supported_api_engines?.includes("avatar_v") ? { avatarV: true as const } : {}),
       }));
   }
 
@@ -167,7 +168,10 @@ export class HeyGenAvatarProvider implements AvatarProvider {
         // A photo avatar moves as asked (Avatar IV); HeyGen refuses a motion prompt for a video avatar on that engine.
         const photo = isPhotoAvatar(sceneAvatarOf(scene));
         const motion = photo ? { ...(req.expressiveness ? { expressiveness: req.expressiveness } : {}), ...(req.motionPrompt ? { motion_prompt: req.motionPrompt } : {}) } : {};
-        return { type: "avatar_video", input: { type: "avatar", avatar_id: avatarId, ...sound, ...motion, background } };
+        // Avatar V where the look supports it. A photo avatar asked for gestures stays on Avatar IV: Avatar V refuses
+        // a motion prompt for a photo avatar it renders without a reference look, which the request cannot know.
+        const engine = req.avatarEngine === "avatar_v" && sceneAvatarOf(scene).avatarV && !(photo && req.motionPrompt) ? { engine: { type: "avatar_v" } } : {};
+        return { type: "avatar_video", input: { type: "avatar", avatar_id: avatarId, ...sound, ...motion, ...engine, background } };
       }),
     };
     const data = await this.client.generateVideo(body);

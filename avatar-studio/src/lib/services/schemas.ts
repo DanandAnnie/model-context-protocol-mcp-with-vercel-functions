@@ -2,7 +2,7 @@
 // imports no service, so any service may import it without creating a cycle.
 import { z } from "zod";
 import { graphemes } from "../text";
-import { MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, VOICE_ACCENTS, BACKGROUND_FITS, CAPTION_FONTS, CAPTION_POSITIONS, CAPTION_LOOKS, CAPTION_SIZES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SIZES, VOICE_EMOTIONS, backdropIdOf } from "../types";
+import { AVATAR_ENGINES, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, VOICE_ACCENTS, BACKGROUND_FITS, CAPTION_FONTS, CAPTION_POSITIONS, CAPTION_LOOKS, CAPTION_SIZES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SIZES, VOICE_EMOTIONS, backdropIdOf } from "../types";
 
 export const backgroundSchema = z
   .object({ type: z.enum(["color", "image", "video"]), value: z.string().min(1).max(2000, "A background must be a colour or a URL of at most 2000 characters"), fit: z.enum(BACKGROUND_FITS).optional() })
@@ -28,6 +28,11 @@ export const motionPromptSchema = z
   .transform((v) => v.replace(/\s+/g, " ").trim())
   .refine((v) => v.length <= MAX_MOTION_PROMPT, `Describe the gestures in at most ${MAX_MOTION_PROMPT} characters`)
   .transform((v) => v || undefined)
+  .optional();
+/** HeyGen's avatar engine; the default, Avatar IV, is stored as absent. Optional where it is used. */
+export const avatarEngineSchema = z
+  .enum(AVATAR_ENGINES)
+  .transform((v) => (v === "avatar_iv" ? undefined : v))
   .optional();
 /** An accent for voices that offer several; optional where it is used. */
 export const accentSchema = z.enum(VOICE_ACCENTS, { error: "Choose one of the listed accents (a BCP 47 tag such as en-GB)" }).optional();

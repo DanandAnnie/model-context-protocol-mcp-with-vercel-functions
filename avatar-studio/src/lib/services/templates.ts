@@ -9,7 +9,7 @@ import { LOCAL_OWNER } from "../owner-id";
 import { LimitError, NotFoundError, ValidationError } from "../errors";
 import { owned } from "./shared";
 import { getBackdrop, plainScene } from "./backdrops";
-import { accentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema } from "./videos";
+import { accentSchema, avatarEngineSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema } from "./videos";
 
 export const MAX_TEMPLATES = 50;
 
@@ -56,6 +56,7 @@ export const templateInputSchema = z.object({
   expressiveness: expressivenessSchema,
   motionPrompt: motionPromptSchema,
   accent: accentSchema,
+  avatarEngine: avatarEngineSchema,
 });
 export type TemplateInput = z.infer<typeof templateInputSchema>;
 
@@ -104,6 +105,7 @@ export async function createTemplate(input: TemplateInput, ownerId: string = LOC
       ...(video.expressiveness ? { expressiveness: video.expressiveness } : {}),
       ...(video.motionPrompt ? { motionPrompt: video.motionPrompt } : {}),
       ...(video.accent ? { accent: video.accent } : {}),
+      ...(video.avatarEngine ? { avatarEngine: video.avatarEngine } : {}),
       sourceVideoId: video.id,
     };
   } else {
@@ -124,6 +126,7 @@ export async function createTemplate(input: TemplateInput, ownerId: string = LOC
       ...(input.expressiveness ? { expressiveness: input.expressiveness } : {}),
       ...(input.motionPrompt ? { motionPrompt: input.motionPrompt } : {}),
       ...(input.accent ? { accent: input.accent } : {}),
+      ...(input.avatarEngine ? { avatarEngine: input.avatarEngine } : {}),
     };
   }
   // An uploaded background image must be the owner's and still there, as a render would check. Copied from a video,

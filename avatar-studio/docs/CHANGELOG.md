@@ -194,3 +194,9 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - While the voice list loads, the control no longer says that no voice offers an accent. Its hint is announced with it (`aria-describedby`), so a disabled control explains itself.
     - The hint and the video page say that HeyGen applies the accent where the voice offers it. The unit test covers recorded-audio and silent scenes, and the e2e test picks Emma itself.
     - The API docs list the voice list's `accents` field and say that the accent follows the voice's language. They also note that HeyGen documents `locale` as a free tag, so the list is unconfirmed against a live account.
+- Avatar engine (HeyGen v3's `engine: { "type": "avatar_v" }`). A video can ask for Avatar V, HeyGen's higher-quality engine, in place of its default, Avatar IV.
+  - HeyGen looks that list `avatar_v` in `supported_api_engines` are marked `avatarV: true`. HeyGen gets the engine on every scene whose presenter's look supports it. Other presenters, uploaded portraits, and scenes without the presenter stay on Avatar IV.
+  - So do photo avatars given gestures: Avatar V refuses a motion prompt for a photo avatar it renders without a reference look, and the request cannot tell whether one exists.
+  - The editor's Settings tab has an "Avatar engine" choice that says when no presenter in the video supports Avatar V, and sends nothing then. Drafts, copies, templates, retries, other sizes, and batches keep it. The video page lists it.
+  - Two of the demo presenters are marked as supporting it, so the choice can be tried without a key.
+  - New `avatar-engine.test.ts` and an e2e test.

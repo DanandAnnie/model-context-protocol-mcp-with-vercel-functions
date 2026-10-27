@@ -59,6 +59,8 @@ export const STOCK_AVATARS: Avatar[] = STOCK_NAMES.map((p, i) => ({
   imageUrl: portraitSvg(p.name, i),
   // Like a provider's library, some presenters come with a short preview clip the tiles play on hover.
   ...(i < 2 ? { previewVideoUrl: SAMPLE_PREVIEW_VIDEO } : {}),
+  // ...and a couple of looks that support a higher-quality engine, as some of HeyGen's do.
+  ...(i < 2 ? { avatarV: true as const } : {}),
   source: "stock",
   provider: "mock",
   gender: p.gender,

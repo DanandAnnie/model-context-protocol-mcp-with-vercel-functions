@@ -865,6 +865,9 @@ export default function VideoDetailPage() {
                       {video.provider !== "heygen" ? " (not applied by this renderer)" : " (where the voice offers it)"}
                     </Row>
                   ) : null}
+                  {video.avatarEngine === "avatar_v" ? (
+                    <Row label="Avatar engine">{`Avatar V${video.provider !== "heygen" ? " (not applied by this renderer)" : " (where the presenter's look supports it)"}`}</Row>
+                  ) : null}
                   {video.expressiveness || video.motionPrompt ? (
                     <Row label="Photo avatar motion">
                       {[video.expressiveness ? `${video.expressiveness} expressiveness` : "", video.motionPrompt ? `“${video.motionPrompt}”` : ""].filter(Boolean).join(" · ")}

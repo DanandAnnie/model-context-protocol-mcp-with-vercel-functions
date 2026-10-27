@@ -43,6 +43,8 @@ export interface Avatar {
   /** Voice the editor switches to when this photo avatar is picked; must be available to the owner. */
   defaultVoiceId?: string;
   tags?: string[];
+  /** The look can render on HeyGen's Avatar V engine (its `supported_api_engines`); see `AvatarEngine`. */
+  avatarV?: true;
   /** Ids assigned by rendering providers after uploading a custom portrait, keyed by provider name. */
   providerAssetIds?: Record<string, string>;
   /** Workspace that owns this avatar (user id with accounts, "local" otherwise). */
@@ -101,6 +103,7 @@ export interface VideoTemplate {
   expressiveness?: PhotoExpressiveness;
   motionPrompt?: string;
   accent?: VoiceAccent;
+  avatarEngine?: AvatarEngine;
   /** The video it was saved from, when it was. */
   sourceVideoId?: string;
   createdAt: string;
@@ -301,7 +304,16 @@ export interface VideoRequest {
    * voice's own. Applies to scenes whose voice has `accents` and speaks the accent's language; others ignore it.
    */
   accent?: VoiceAccent;
+  /**
+   * HeyGen's avatar engine: "avatar_v" asks for its higher-quality Avatar V on every scene whose presenter's look
+   * supports it (`avatarV`); absent is HeyGen's default, Avatar IV. Other renderers ignore it.
+   */
+  avatarEngine?: AvatarEngine;
 }
+
+/** HeyGen's avatar engines a video can choose; "avatar_iv" is its default and is stored as absent. */
+export const AVATAR_ENGINES = ["avatar_iv", "avatar_v"] as const;
+export type AvatarEngine = (typeof AVATAR_ENGINES)[number];
 
 /** The accents a video can ask a voice for, as BCP 47 tags; each voice is offered those of its own language. */
 export const VOICE_ACCENTS = [

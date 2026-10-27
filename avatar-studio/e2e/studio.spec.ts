@@ -506,6 +506,36 @@ test("a voice that speaks several accents can be given one, kept with the video 
   expect("accent" in ((await again).postDataJSON() as Record<string, unknown>)).toBe(false);
 });
 
+test("Avatar V is chosen for presenters whose look supports it, kept with the video and its copy", async ({ page }) => {
+  await page.locator("input[placeholder='Video title']").fill("Sharper tour");
+  await page.locator("textarea").fill("Welcome to the open house.");
+  await expect(page.getByText(/ · 16:9 · 1 scene · /)).not.toContainText("No voice");
+  // Ava Chen's look supports Avatar V; Sofia Reyes's does not.
+  await page.getByRole("button", { name: "Avatar", exact: true }).click();
+  await page.getByRole("button", { name: "Ava Chen Ava Chen" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  const engine = page.getByLabel("Avatar engine", { exact: true });
+  await expect(engine).toBeEnabled();
+  await engine.selectOption("avatar_v");
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
+  await page.getByRole("button", { name: "Generate video" }).click();
+  expect((await sent).postDataJSON()).toMatchObject({ avatarEngine: "avatar_v" });
+  await page.waitForURL(/\/videos\/vid_/);
+  const id = page.url().split("/").pop()!;
+  expect((await (await page.request.get(`/api/videos/${id}`)).json()).video.avatarEngine).toBe("avatar_v");
+  await expect(page.getByText("Avatar V (not applied by this renderer)")).toBeVisible();
+  await page.goto(`/create?from=${id}`);
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByLabel("Avatar engine", { exact: true })).toHaveValue("avatar_v");
+  await page.getByRole("button", { name: "Avatar", exact: true }).click();
+  await page.getByRole("button", { name: "Sofia Reyes Sofia Reyes" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByLabel("Avatar engine", { exact: true }).locator("option:checked")).toHaveText("Avatar V (not sent: no presenter here supports it)");
+  const again = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
+  await page.getByRole("button", { name: "Generate video" }).click();
+  expect("avatarEngine" in ((await again).postDataJSON() as Record<string, unknown>)).toBe(false);
+});
+
 test("a scene can leave the presenter out and let its picture fill the frame", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Kitchen tour");
   await page.locator("textarea").fill("Welcome in, let me show you around.");

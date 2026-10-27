@@ -25,7 +25,7 @@ import { findTemplate } from "@/lib/templates";
 import { capSceneText, fitSceneTextEdit, sceneTextLength } from "@/lib/scene-text";
 import { graphemes } from "@/lib/text";
 import { takeAgentDraft, type AgentDraft } from "@/lib/agent-draft";
-import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, framingFor, isDefaultLayout, isPhotoAvatar, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, type PhotoExpressiveness, VOICE_ACCENTS, type VoiceAccent } from "@/lib/types";
+import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, framingFor, isDefaultLayout, isPhotoAvatar, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, type PhotoExpressiveness, VOICE_ACCENTS, type VoiceAccent, AVATAR_ENGINES, type AvatarEngine } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -53,6 +53,7 @@ interface Draft {
   expressiveness?: PhotoExpressiveness;
   motionPrompt?: string;
   accent?: VoiceAccent;
+  avatarEngine?: AvatarEngine;
   avatarId?: string;
   voiceId?: string;
   savedAt: string;
@@ -177,6 +178,8 @@ const asExpressiveness = (v: unknown): PhotoExpressiveness => ((PHOTO_EXPRESSIVE
 const asMotionPrompt = (v: unknown): string => (typeof v === "string" ? v.slice(0, MAX_MOTION_PROMPT) : "");
 /** An accent this build offers, or "" (the voice's own) for anything else. */
 const asAccent = (v: unknown): VoiceAccent | "" => ((VOICE_ACCENTS as readonly unknown[]).includes(v) ? (v as VoiceAccent) : "");
+/** An engine this build offers, or "avatar_iv" (HeyGen's default) for anything else. */
+const asAvatarEngine = (v: unknown): AvatarEngine => ((AVATAR_ENGINES as readonly unknown[]).includes(v) ? (v as AvatarEngine) : "avatar_iv");
 /** An emotion the renderer takes, or "" (natural) for anything else. */
 const asEmotion = (v: unknown): VoiceEmotion | "" => ((VOICE_EMOTIONS as readonly unknown[]).includes(v) ? (v as VoiceEmotion) : "");
 const TONES = ["friendly", "professional", "formal", "energetic", "calm"] as const;
@@ -503,6 +506,12 @@ function CreateInner() {
     const a = (sc.avatarId && avatarData?.avatars.find((x) => x.id === sc.avatarId)) || avatar;
     return !!a && isPhotoAvatar(a);
   });
+  // Whether any scene shows a presenter whose look supports Avatar V, the only scenes the engine choice reaches.
+  const avatarVInUse = scenes.some((sc) => {
+    if (sc.hidePresenter) return false;
+    const a = (sc.avatarId && avatarData?.avatars.find((x) => x.id === sc.avatarId)) || avatar;
+    return !!a?.avatarV;
+  });
   // The voice an accent is chosen for: the first voice that speaks a scene (its own, else the video's) and offers
   // accents of its language. An accent no speaking voice takes is not sent.
   const accentVoice = scenes
@@ -578,6 +587,7 @@ function CreateInner() {
   const [expressiveness, setExpressiveness] = useState<PhotoExpressiveness>("low");
   const [motionPrompt, setMotionPrompt] = useState("");
   const [accent, setAccent] = useState<VoiceAccent | "">("");
+  const [avatarEngine, setAvatarEngine] = useState<AvatarEngine>("avatar_iv");
   const sentAccent = accent && accentOptions.includes(accent) ? accent : undefined;
   /** Both apply to photo avatars only; anything else is sent as none. */
   const motion = { ...(expressiveness !== "low" ? { expressiveness } : {}), ...(motionPrompt.trim() ? { motionPrompt: motionPrompt.trim() } : {}) };
@@ -713,6 +723,7 @@ function CreateInner() {
     setExpressiveness(asExpressiveness(d.expressiveness));
     setMotionPrompt(asMotionPrompt(d.motionPrompt));
     setAccent(asAccent(d.accent));
+    setAvatarEngine(asAvatarEngine(d.avatarEngine));
     setPrefill({ avatarId: d.avatarId, voiceId: d.voiceId });
     setDraftRestored(d.savedAt);
   }, [draftSource, params, editKey, spacesKnown]);
@@ -722,10 +733,10 @@ function CreateInner() {
     if (!hydrated.current || !editKey) return;
     const empty = !scenes.some(hasContent) && title === "Untitled video";
     const t = setTimeout(() => {
-      writeDraft(editKey, empty ? null : { title, scenes, aspect, resolution, captions, ...(isDefaultCaptionStyle ? {} : { captionStyle }), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...(expressiveness !== "low" ? { expressiveness } : {}), ...(motionPrompt ? { motionPrompt } : {}), ...(accent ? { accent } : {}), avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
+      writeDraft(editKey, empty ? null : { title, scenes, aspect, resolution, captions, ...(isDefaultCaptionStyle ? {} : { captionStyle }), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...(expressiveness !== "low" ? { expressiveness } : {}), ...(motionPrompt ? { motionPrompt } : {}), ...(accent ? { accent } : {}), ...(avatarEngine !== "avatar_iv" ? { avatarEngine } : {}), avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
     }, 400);
     return () => clearTimeout(t);
-  }, [title, scenes, aspect, resolution, captions, captionStyle, isDefaultCaptionStyle, speed, pitch, emotion, expressiveness, motionPrompt, accent, avatar, voice, editKey]);
+  }, [title, scenes, aspect, resolution, captions, captionStyle, isDefaultCaptionStyle, speed, pitch, emotion, expressiveness, motionPrompt, accent, avatarEngine, avatar, voice, editKey]);
 
   function discardDraft() {
     if (editKey) writeDraft(editKey, null);
@@ -746,6 +757,7 @@ function CreateInner() {
     setExpressiveness("low");
     setMotionPrompt("");
     setAccent("");
+    setAvatarEngine("avatar_iv");
     setCaptionStyle(DEFAULT_CAPTION_STYLE);
     // Back to a fresh editor's presenter and voice: the first ones, then the brand kit's defaults on top.
     setAvatar(null);
@@ -805,6 +817,7 @@ function CreateInner() {
         setExpressiveness(asExpressiveness(template.expressiveness));
         setMotionPrompt(asMotionPrompt(template.motionPrompt));
         setAccent(asAccent(template.accent));
+        setAvatarEngine(asAvatarEngine(template.avatarEngine));
         setPrefill({ avatarId: template.avatarId, voiceId: template.voiceId });
       })
       .catch((e) => setErr(e instanceof Error ? e.message : "Could not load the template"));
@@ -830,6 +843,7 @@ function CreateInner() {
         setExpressiveness(asExpressiveness(video.expressiveness));
         setMotionPrompt(asMotionPrompt(video.motionPrompt));
         setAccent(asAccent(video.accent));
+        setAvatarEngine(asAvatarEngine(video.avatarEngine));
         setPrefill({ avatarId: video.avatarId, voiceId: video.voiceId });
       })
       .catch((e) => setErr(e instanceof Error ? e.message : "Could not load the original video"));
@@ -906,7 +920,7 @@ function CreateInner() {
     try {
       const { video } = await api<{ video: Video }>("/api/videos", {
         method: "POST",
-        body: JSON.stringify({ title, scenes: scenes.map(sentScene), avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...motion, ...(sentAccent ? { accent: sentAccent } : {}) }),
+        body: JSON.stringify({ title, scenes: scenes.map(sentScene), avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...motion, ...(sentAccent ? { accent: sentAccent } : {}), ...(avatarEngine !== "avatar_iv" && avatarVInUse ? { avatarEngine } : {}) }),
       });
       if (editKey) writeDraft(editKey, null);
       router.push(`/videos/${video.id}`);
@@ -1682,6 +1696,20 @@ function CreateInner() {
                     {accent && !accentOptions.includes(accent) ? (
                       <option value={accent}>{voiceData ? `${languageLabel(accent)} (${accent}), not sent: no voice here takes it` : `${languageLabel(accent)} (${accent})`}</option>
                     ) : null}
+                  </select>
+                </Field>
+                <Field
+                  label="Avatar engine"
+                  hintId="avatar-engine-hint"
+                  hint={
+                    !avatarData || avatarVInUse
+                      ? "Avatar V is HeyGen's higher-quality engine, for looks that support it; other presenters, and photo avatars given gestures, stay on Avatar IV. Other renderers ignore it."
+                      : "No presenter in this video supports Avatar V, so every scene renders on Avatar IV."
+                  }
+                >
+                  <select value={avatarEngine} onChange={(e) => setAvatarEngine(asAvatarEngine(e.target.value))} disabled={!!avatarData && !avatarVInUse && avatarEngine === "avatar_iv"} aria-label="Avatar engine" aria-describedby="avatar-engine-hint" className={inputClass}>
+                    <option value="avatar_iv">Avatar IV (standard)</option>
+                    <option value="avatar_v">{!avatarData || avatarVInUse ? "Avatar V (higher quality)" : "Avatar V (not sent: no presenter here supports it)"}</option>
                   </select>
                 </Field>
                 <div role="group" aria-labelledby="photo-motion-title" className="space-y-2 rounded-lg border border-slate-200 px-3 py-3" data-testid="photo-motion">

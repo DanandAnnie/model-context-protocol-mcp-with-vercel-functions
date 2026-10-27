@@ -95,6 +95,16 @@ describe("videos HeyGen's Video Agent directs", () => {
     assert.ok(done.videoUrl);
   });
 
+  it("leaves a job a webhook moved alone when a check of the old one answers late", async () => {
+    const { refreshStatus } = await import("../services");
+    const video = await directAgentVideo(videoAgentSchema.parse(ASK), "u1");
+    const stale = { ...video, providerJobId: `mockagent_${Date.now() - 7_000}` };
+    await getStore().put("video", { ...video, providerJobId: "hg_render_1" });
+    const after = await refreshStatus(stale);
+    assert.equal(after.providerJobId, "hg_render_1");
+    assert.equal((await getStore().get<Video>("video", video.id))!.providerJobId, "hg_render_1", "the stale answer is not stored");
+  });
+
   it("is retried with the same brief, and is not resized, subtitled, captioned, copied, or saved as a template", async () => {
     const video = await directAgentVideo(videoAgentSchema.parse(ASK), "u1");
     await assert.rejects(resizeVideo(video.id, { aspects: ["9:16"] }, "u1"), /made for its own shape/);
@@ -206,6 +216,14 @@ describe("videos HeyGen's Video Agent directs", () => {
       await getStore().put("video", { ...other, id: "vid_plain", directed: undefined, providerJobId: "agent_1_sess_x", status: "processing" } as Video);
       assert.equal(await applyAvatarWebhook("heygen", { event_type: "avatar_video.success", event_data: { video_id: "hg_v11", url: "https://cdn/v.mp4", callback_id: "vid_plain" } }), null);
       assert.equal(await applyAvatarWebhook("heygen", { event_type: "avatar_video.success", event_data: { video_id: "hg_v12", url: "https://cdn/v.mp4", callback_id: done!.id } }), null, "one that follows its render already");
+      // Nor does another renderer's directed video.
+      const demo = { ...third, id: "vid_demo_directed", provider: "mock", providerJobId: "mockagent_1", status: "processing" as const, error: undefined };
+      await getStore().put("video", demo);
+      assert.equal(await applyAvatarWebhook("heygen", { event_type: "video_agent.success", event_data: { video_id: "hg_v13", callback_id: demo.id } }), null);
+      // A session's success with a link only moves the job: the render's webhook, or a check, finishes it.
+      const fourth = await directAgentVideo(videoAgentSchema.parse(ASK), "u1");
+      const linked = await applyAvatarWebhook("heygen", { event_type: "video_agent.success", event_data: { video_id: "hg_v14", url: "https://app.heygen.com/session/x", callback_id: fourth.id } });
+      assert.deepEqual([linked?.status, linked?.providerJobId, linked?.videoUrl], ["processing", "hg_v14", undefined]);
     } finally {
       globalThis.fetch = realFetch;
       Object.assign(config, { avatarProvider: saved.avatar, heygenApiKey: saved.key, webhookSecret: saved.secret });

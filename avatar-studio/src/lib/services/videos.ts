@@ -839,6 +839,8 @@ async function refreshNow(video: Video): Promise<Video> {
     const current = await getStore().get<Video>("video", video.id);
     if (!current) return { next: video }; // deleted meanwhile; do not bring it back
     if (!isPending(current)) return { next: current }; // someone else already recorded the outcome
+    // A webhook moved it to another job (its render) while this check asked about the old one: that answer is stale.
+    if (current.providerJobId !== video.providerJobId) return { next: current };
     const next: Video = { ...current, ...stripUndefined(stampGif(update)), updatedAt: nowIso() };
     // A render that moved to another job (a directed video once it renders) is stored, so the next check follows it.
     if (next.status === current.status && next.videoUrl === current.videoUrl && next.providerJobId === current.providerJobId) return { next };
@@ -1511,7 +1513,12 @@ export function restoreVideo(id: string, ownerId: string = LOCAL_OWNER): Promise
 async function awaitingRender(providerName: string, videoId: string | undefined): Promise<Video | null> {
   if (!videoId) return null;
   const video = await getStore().get<Video>("video", videoId);
-  return video && video.directed && video.provider === providerName && /^(?:mock)?agent_/.test(video.providerJobId ?? "") ? video : null;
+  return video && stillSession(video) && video.provider === providerName ? video : null;
+}
+
+/** A directed video still following its agent's session, not yet the render the session started. */
+function stillSession(video: Video): boolean {
+  return !!video.directed && /^(?:mock)?agent_/.test(video.providerJobId ?? "");
 }
 
 export async function applyAvatarWebhook(providerName: string, body: unknown): Promise<Video | null> {
@@ -1521,15 +1528,20 @@ export async function applyAvatarWebhook(providerName: string, body: unknown): P
   const byJob = parsed.providerJobId ? await getStore().findBy<Video>("video", "providerJobId", parsed.providerJobId) : null;
   const video = byJob ?? (await awaitingRender(providerName, parsed.callbackId));
   if (!video) return null;
-  // Found by its own id, it is still following the agent's session: from now on it follows the render the webhook names.
-  const update: Partial<Video> = !byJob && parsed.providerJobId ? { ...parsed.update, providerJobId: parsed.providerJobId } : parsed.update;
+  // Found by its own id, it is still following the agent's session: from now on it follows the render the webhook names
+  // (a failure names none worth following).
+  const update: Partial<Video> = !byJob && parsed.providerJobId && parsed.update.status !== "failed" ? { ...parsed.update, providerJobId: parsed.providerJobId } : parsed.update;
   // A late or repeated terminal webhook must not overwrite a recorded outcome (and the counts
   // that landed on it since), nor announce the completion twice. The record is read again under the
   // video's lock, so an edit, review, or beacon that landed after the lookup is kept.
   const result = await withCounterLock(video.id, async () => {
     const current = await getStore().get<Video>("video", video.id);
     if (!current || !isPending(current)) return { next: current ?? video };
+    // Found by its own id, but a check moved it to its render meanwhile: that render's own webhook decides.
+    if (!byJob && !stillSession(current)) return { next: current };
     const next: Video = { ...current, ...stripUndefined(stampGif(update)), updatedAt: nowIso() };
+    // A repeated webhook that changes nothing is not written.
+    if (next.status === current.status && next.videoUrl === current.videoUrl && next.providerJobId === current.providerJobId) return { next: current };
     await getStore().put("video", next);
     return { next, before: current };
   });

@@ -790,11 +790,9 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     if (!id) return null;
     if (b.event_type === "avatar_video.success") return { providerJobId: id, update: stripEmpty({ status: "completed" as const, videoUrl: b.event_data?.url, gifUrl: httpsOnly(b.event_data?.gif_download_url) }), ...callbackId };
     if (b.event_type === "avatar_video.fail") return { providerJobId: id, update: { status: "failed" as const, error: b.event_data?.msg ?? "Render failed" }, ...callbackId };
-    // The session finished its work: its render is the one to follow from now on (done, if the link came with it).
-    if (b.event_type === "video_agent.success") {
-      const url = httpsOnly(data?.url);
-      return { providerJobId: id, update: url ? { status: "completed" as const, videoUrl: url, providerJobId: id } : { status: "processing" as const, providerJobId: id }, ...callbackId };
-    }
+    // The session finished its work: its render is the one to follow from now on. Only the render's own webhook, or a
+    // check of it, finishes the video (with its length and picture); a link here may not be the video's.
+    if (b.event_type === "video_agent.success") return { providerJobId: id, update: { status: "processing" as const, providerJobId: id }, ...callbackId };
     return null;
   }
 }

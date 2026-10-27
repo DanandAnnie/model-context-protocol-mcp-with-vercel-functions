@@ -179,8 +179,11 @@ export class HeyGenAvatarProvider implements AvatarProvider {
         return { type: "avatar_video", input: { type: "avatar", avatar_id: avatarId, ...sound, ...motion, ...engine, background } };
       }),
     };
+    // A transparent video is HeyGen's single-avatar video as a WebM: the presenter alone, its background removed
+    // (HeyGen refuses a background with WebM) and no captions burned over the alpha; the share page subtitles it.
+    const sent = req.transparent ? this.transparentBody(body) : body;
     try {
-      const data = await this.client.generateVideo(body);
+      const data = await this.client.generateVideo(sent);
       return { providerJobId: data.video_id };
     } catch (err) {
       // Avatar V can be refused where Avatar IV is not (a look's reference whose consent is missing), and a retry
@@ -190,6 +193,24 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       }
       throw err;
     }
+  }
+
+  /** A one-scene studio body as v3's `type: "avatar"` body with a WebM output (the schema refuses a background). */
+  private transparentBody(studio: { title: string; aspect_ratio: string; resolution?: string; callback_url?: string; scenes: Array<Record<string, unknown>> }) {
+    const scene = studio.scenes[0] as { type: string; input?: Record<string, unknown> };
+    if (studio.scenes.length !== 1 || scene.type !== "avatar_video" || !scene.input) {
+      throw new ValidationError("A transparent background is for a one-scene video that shows the presenter");
+    }
+    const { background: _background, type: _type, ...input } = scene.input;
+    return {
+      type: "avatar",
+      title: studio.title,
+      aspect_ratio: studio.aspect_ratio,
+      resolution: studio.resolution,
+      ...(studio.callback_url ? { callback_url: studio.callback_url } : {}),
+      output_format: "webm",
+      ...input,
+    };
   }
 
   private sleep(ms: number) {

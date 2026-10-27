@@ -45,7 +45,7 @@ export default function BatchPage() {
   // Set only by a saved template: the batch API takes them, the page has no controls of its own for them.
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle | undefined>();
   const [background, setBackground] = useState<Background | undefined>();
-  const [carried, setCarried] = useState<{ expressiveness?: PhotoExpressiveness; motionPrompt?: string; accent?: VoiceAccent; avatarEngine?: AvatarEngine }>({});
+  const [carried, setCarried] = useState<{ expressiveness?: PhotoExpressiveness; motionPrompt?: string; accent?: VoiceAccent; avatarEngine?: AvatarEngine; transparent?: true }>({});
   const [startedFrom, setStartedFrom] = useState("");
   // A template's presenter and voice, held until both lists have loaded (a template can be picked first).
   // Each holds the ids to try in order: the first scene's own, then the template's.
@@ -133,7 +133,7 @@ export default function BatchPage() {
     setPitch(t.pitch ?? 0);
     setEmotion(t.emotion ?? "");
     setBackground(t.scenes[0]?.background);
-    setCarried({ ...(t.expressiveness ? { expressiveness: t.expressiveness } : {}), ...(t.motionPrompt ? { motionPrompt: t.motionPrompt } : {}), ...(t.accent ? { accent: t.accent } : {}), ...(t.avatarEngine ? { avatarEngine: t.avatarEngine } : {}) });
+    setCarried({ ...(t.expressiveness ? { expressiveness: t.expressiveness } : {}), ...(t.motionPrompt ? { motionPrompt: t.motionPrompt } : {}), ...(t.accent ? { accent: t.accent } : {}), ...(t.avatarEngine ? { avatarEngine: t.avatarEngine } : {}), ...(t.transparent ? { transparent: true as const } : {}) });
   }
 
   function onFile(file: File | undefined) {

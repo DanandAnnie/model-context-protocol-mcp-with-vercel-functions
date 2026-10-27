@@ -89,6 +89,7 @@ export class DidAvatarProvider implements AvatarProvider {
     const other = req.scenes?.find((sc) => (sc.avatarId && sc.avatarId !== req.avatarId) || (sc.voiceId && sc.voiceId !== req.voiceId));
     if (other) throw new Error("D-ID renders one presenter and one voice per video; remove the per-scene presenter or switch to HeyGen.");
     if (req.scenes?.some((sc) => sc.hidePresenter)) throw new ValidationError("D-ID shows its presenter in every scene; show the presenter again or switch to HeyGen.");
+    if (req.transparent) throw new ValidationError("D-ID renders an MP4 with a background; turn off the transparent background or switch to HeyGen.");
     // One talk speaks either text or one audio file, so recorded audio needs a video of a single scene.
     const audioScene = req.scenes?.find((sc) => sc.audioId);
     if (audioScene && (req.scenes?.length ?? 0) > 1) throw new Error("D-ID renders one clip per video; use recorded audio in a single-scene video or switch to HeyGen.");

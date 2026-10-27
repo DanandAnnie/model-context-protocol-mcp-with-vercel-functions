@@ -553,6 +553,36 @@ test("Avatar V is chosen for presenters whose look supports it, kept with the vi
   expect("avatarEngine" in ((await again).postDataJSON() as Record<string, unknown>)).toBe(false);
 });
 
+test("a one-scene video can render over a transparent background, kept with the video and its copy", async ({ page }) => {
+  await page.locator("input[placeholder='Video title']").fill("Overlay");
+  await page.locator("textarea").fill("Welcome to the open house.");
+  await page.getByRole("button", { name: "Settings" }).click();
+  const alpha = page.getByLabel("Transparent background", { exact: true });
+  await expect(alpha).toBeEnabled();
+  await alpha.check();
+  // The stage previews the transparency instead of the scene background.
+  await expect(page.getByTestId("stage")).toHaveAttribute("data-transparent", "");
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
+  await page.getByRole("button", { name: "Generate video" }).click();
+  expect((await sent).postDataJSON()).toMatchObject({ transparent: true });
+  await page.waitForURL(/\/videos\/vid_/);
+  const id = page.url().split("/").pop()!;
+  expect((await (await page.request.get(`/api/videos/${id}`)).json()).video.transparent).toBe(true);
+  await expect(page.getByText("Transparent (WebM, the presenter alone) (not applied by this renderer)")).toBeVisible();
+  await page.goto(`/create?from=${id}`);
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByLabel("Transparent background", { exact: true })).toBeChecked();
+  // A second scene cannot be transparent: the choice stays on screen but is not sent.
+  await page.getByRole("button", { name: "Add scene" }).click();
+  await page.locator("textarea").fill("And here is the kitchen.");
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.locator("#transparent-hint")).toContainText("For a one-scene video that shows the presenter");
+  await expect(page.getByTestId("stage")).not.toHaveAttribute("data-transparent", "");
+  const again = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
+  await page.getByRole("button", { name: "Generate video" }).click();
+  expect("transparent" in ((await again).postDataJSON() as Record<string, unknown>)).toBe(false);
+});
+
 test("a scene can leave the presenter out and let its picture fill the frame", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Kitchen tour");
   await page.locator("textarea").fill("Welcome in, let me show you around.");

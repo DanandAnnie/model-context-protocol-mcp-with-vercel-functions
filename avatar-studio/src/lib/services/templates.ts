@@ -57,6 +57,10 @@ export const templateInputSchema = z.object({
   motionPrompt: motionPromptSchema,
   accent: accentSchema,
   avatarEngine: avatarEngineSchema,
+  transparent: z.literal(true).optional(),
+}).refine((t) => !t.transparent || !t.scenes || (t.scenes.length === 1 && !t.scenes[0].hidePresenter), {
+  path: ["transparent"],
+  message: "A transparent background is for a one-scene template that shows the presenter",
 });
 export type TemplateInput = z.infer<typeof templateInputSchema>;
 
@@ -106,6 +110,7 @@ export async function createTemplate(input: TemplateInput, ownerId: string = LOC
       ...(video.motionPrompt ? { motionPrompt: video.motionPrompt } : {}),
       ...(video.accent ? { accent: video.accent } : {}),
       ...(video.avatarEngine ? { avatarEngine: video.avatarEngine } : {}),
+      ...(video.transparent ? { transparent: true as const } : {}),
       sourceVideoId: video.id,
     };
   } else {
@@ -127,6 +132,7 @@ export async function createTemplate(input: TemplateInput, ownerId: string = LOC
       ...(input.motionPrompt ? { motionPrompt: input.motionPrompt } : {}),
       ...(input.accent ? { accent: input.accent } : {}),
       ...(input.avatarEngine ? { avatarEngine: input.avatarEngine } : {}),
+      ...(input.transparent ? { transparent: true as const } : {}),
     };
   }
   // An uploaded background image must be the owner's and still there, as a render would check. Copied from a video,

@@ -54,6 +54,7 @@ interface Draft {
   motionPrompt?: string;
   accent?: VoiceAccent;
   avatarEngine?: AvatarEngine;
+  transparent?: boolean;
   avatarId?: string;
   voiceId?: string;
   savedAt: string;
@@ -588,6 +589,10 @@ function CreateInner() {
   });
   const [accent, setAccent] = useState<VoiceAccent | "">("");
   const [avatarEngine, setAvatarEngine] = useState<AvatarEngine>("avatar_iv");
+  const [transparent, setTransparent] = useState(false);
+  // A transparent background is HeyGen's single-presenter WebM: one scene that shows the presenter.
+  const canTransparent = scenes.length === 1 && !scenes[0].hidePresenter;
+  const sentTransparent = transparent && canTransparent;
   // Whether gestures reach a video avatar: one whose look supports Avatar V takes them there, and not on Avatar IV.
   const videoLookOnV = scenes.some((sc) => {
     if (sc.hidePresenter) return false;
@@ -732,6 +737,7 @@ function CreateInner() {
     setMotionPrompt(asMotionPrompt(d.motionPrompt));
     setAccent(asAccent(d.accent));
     setAvatarEngine(asAvatarEngine(d.avatarEngine));
+    setTransparent(d.transparent === true);
     setPrefill({ avatarId: d.avatarId, voiceId: d.voiceId });
     setDraftRestored(d.savedAt);
   }, [draftSource, params, editKey, spacesKnown]);
@@ -741,10 +747,10 @@ function CreateInner() {
     if (!hydrated.current || !editKey) return;
     const empty = !scenes.some(hasContent) && title === "Untitled video";
     const t = setTimeout(() => {
-      writeDraft(editKey, empty ? null : { title, scenes, aspect, resolution, captions, ...(isDefaultCaptionStyle ? {} : { captionStyle }), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...(expressiveness !== "low" ? { expressiveness } : {}), ...(motionPrompt ? { motionPrompt } : {}), ...(accent ? { accent } : {}), ...(avatarEngine !== "avatar_iv" ? { avatarEngine } : {}), avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
+      writeDraft(editKey, empty ? null : { title, scenes, aspect, resolution, captions, ...(isDefaultCaptionStyle ? {} : { captionStyle }), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...(expressiveness !== "low" ? { expressiveness } : {}), ...(motionPrompt ? { motionPrompt } : {}), ...(accent ? { accent } : {}), ...(avatarEngine !== "avatar_iv" ? { avatarEngine } : {}), ...(transparent ? { transparent } : {}), avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
     }, 400);
     return () => clearTimeout(t);
-  }, [title, scenes, aspect, resolution, captions, captionStyle, isDefaultCaptionStyle, speed, pitch, emotion, expressiveness, motionPrompt, accent, avatarEngine, avatar, voice, editKey]);
+  }, [title, scenes, aspect, resolution, captions, captionStyle, isDefaultCaptionStyle, speed, pitch, emotion, expressiveness, motionPrompt, accent, avatarEngine, transparent, avatar, voice, editKey]);
 
   function discardDraft() {
     if (editKey) writeDraft(editKey, null);
@@ -766,6 +772,7 @@ function CreateInner() {
     setMotionPrompt("");
     setAccent("");
     setAvatarEngine("avatar_iv");
+    setTransparent(false);
     setCaptionStyle(DEFAULT_CAPTION_STYLE);
     // Back to a fresh editor's presenter and voice: the first ones, then the brand kit's defaults on top.
     setAvatar(null);
@@ -826,6 +833,7 @@ function CreateInner() {
         setMotionPrompt(asMotionPrompt(template.motionPrompt));
         setAccent(asAccent(template.accent));
         setAvatarEngine(asAvatarEngine(template.avatarEngine));
+        setTransparent(template.transparent === true);
         setPrefill({ avatarId: template.avatarId, voiceId: template.voiceId });
       })
       .catch((e) => setErr(e instanceof Error ? e.message : "Could not load the template"));
@@ -852,6 +860,7 @@ function CreateInner() {
         setMotionPrompt(asMotionPrompt(video.motionPrompt));
         setAccent(asAccent(video.accent));
         setAvatarEngine(asAvatarEngine(video.avatarEngine));
+        setTransparent(video.transparent === true);
         setPrefill({ avatarId: video.avatarId, voiceId: video.voiceId });
       })
       .catch((e) => setErr(e instanceof Error ? e.message : "Could not load the original video"));
@@ -928,7 +937,7 @@ function CreateInner() {
     try {
       const { video } = await api<{ video: Video }>("/api/videos", {
         method: "POST",
-        body: JSON.stringify({ title, scenes: scenes.map(sentScene), avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...motion, ...(sentAccent ? { accent: sentAccent } : {}), ...(avatarEngine !== "avatar_iv" && avatarVInUse ? { avatarEngine } : {}) }),
+        body: JSON.stringify({ title, scenes: scenes.map(sentScene), avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...motion, ...(sentAccent ? { accent: sentAccent } : {}), ...(avatarEngine !== "avatar_iv" && avatarVInUse ? { avatarEngine } : {}), ...(sentTransparent ? { transparent: true } : {}) }),
       });
       if (editKey) writeDraft(editKey, null);
       router.push(`/videos/${video.id}`);
@@ -996,9 +1005,9 @@ function CreateInner() {
 
           <Card className="overflow-hidden">
             {/* A portrait stage is sized by its height and takes its width from the ratio, so it really is 9:16 (a width-first box capped in height came out near square and cropped portrait slides); the height is also capped by the screen's width, so a narrow phone keeps the shape. */}
-            <div data-testid="stage" className={`relative mx-auto ${aspect === "9:16" ? "h-[min(520px,70vh,calc((100vw_-_5rem)*16/9))] max-w-full" : "w-full"} ${stageAspect} flex items-end justify-center overflow-hidden [container-type:size]`} style={background.type === "color" ? { background: background.value } : background.type === "image" ? { backgroundImage: `url(${background.value})`, backgroundSize: background.fit ?? "cover", backgroundPosition: "center", backgroundRepeat: "no-repeat", backgroundColor: "#000" } : { background: background.fit ? "#000" : "#0f172a" }} data-fit={background.type === "color" ? undefined : (background.fit ?? "cover")}>
+            <div data-testid="stage" className={`relative mx-auto ${aspect === "9:16" ? "h-[min(520px,70vh,calc((100vw_-_5rem)*16/9))] max-w-full" : "w-full"} ${stageAspect} flex items-end justify-center overflow-hidden [container-type:size]`} style={sentTransparent ? { backgroundColor: "#fff", backgroundImage: "repeating-conic-gradient(#e2e8f0 0 25%, #fff 0 50%)", backgroundSize: "24px 24px" } : background.type === "color" ? { background: background.value } : background.type === "image" ? { backgroundImage: `url(${background.value})`, backgroundSize: background.fit ?? "cover", backgroundPosition: "center", backgroundRepeat: "no-repeat", backgroundColor: "#000" } : { background: background.fit ? "#000" : "#0f172a" }} data-fit={background.type === "color" ? undefined : (background.fit ?? "cover")} data-transparent={sentTransparent ? "" : undefined}>
               {/* Only a complete URL is previewed, so a half-typed one is not requested keystroke by keystroke. */}
-              {background.type === "video" && /^https?:\/\/\S+\.\S+/.test(background.value) && (
+              {!sentTransparent && background.type === "video" && /^https?:\/\/\S+\.\S+/.test(background.value) && (
                 <video key={background.value} src={background.value} muted loop autoPlay playsInline aria-hidden="true" data-testid="stage-video" className={`absolute inset-0 h-full w-full ${background.fit === "contain" ? "object-contain" : "object-cover"}`} />
               )}
               {active.hidePresenter ? null : sceneAvatar ? (
@@ -1720,6 +1729,17 @@ function CreateInner() {
                     <option value="avatar_v">{!avatarData || avatarVInUse ? "Avatar V (higher quality)" : "Avatar V (not sent: no presenter here renders on it)"}</option>
                   </select>
                 </Field>
+                <label className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 px-3 py-3">
+                  <span>
+                    <span className="block text-sm font-medium text-slate-800">Transparent background</span>
+                    <span id="transparent-hint" className="block text-xs text-slate-500">
+                      {canTransparent
+                        ? "HeyGen renders the presenter alone as a WebM with an alpha channel, for compositing over your own footage; the scene background and burned-in captions are left out. The avatar must be trained with matting (most recent digital twins and studio avatars); HeyGen refuses others, and D-ID cannot render one."
+                        : "For a one-scene video that shows the presenter; this one has more scenes or a scene without the presenter, so it renders with its backgrounds."}
+                    </span>
+                  </span>
+                  <input type="checkbox" checked={transparent} onChange={(e) => setTransparent(e.target.checked)} disabled={!canTransparent && !transparent} aria-label="Transparent background" aria-describedby="transparent-hint" className="mt-1 h-5 w-5 shrink-0 accent-brand-600" />
+                </label>
                 <div role="group" aria-labelledby="photo-motion-title" className="space-y-2 rounded-lg border border-slate-200 px-3 py-3" data-testid="photo-motion">
                   <div id="photo-motion-title" className="text-sm font-medium text-slate-800">Avatar motion</div>
                   <p id="photo-motion-hint" className="text-xs text-slate-500">

@@ -67,6 +67,7 @@ export const batchRequestSchema = z.object({
   motionPrompt: motionPromptSchema,
   accent: accentSchema,
   avatarEngine: avatarEngineSchema,
+  transparent: z.literal(true).optional(),
 });
 
 export interface BatchResult {
@@ -139,6 +140,7 @@ export async function createBatch(input: z.infer<typeof batchRequestSchema>, own
         ...(input.motionPrompt ? { motionPrompt: input.motionPrompt } : {}),
         ...(input.accent ? { accent: input.accent } : {}),
         ...(input.avatarEngine ? { avatarEngine: input.avatarEngine } : {}),
+        ...(input.transparent ? { transparent: true as const } : {}),
       },
       ownerId,
       ctx,

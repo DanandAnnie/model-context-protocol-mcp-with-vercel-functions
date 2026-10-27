@@ -75,8 +75,13 @@ export const videoRequestSchema = z
     motionPrompt: motionPromptSchema,
     accent: accentSchema,
     avatarEngine: avatarEngineSchema,
+    transparent: z.literal(true).optional(),
   })
   .transform((v, ctx) => {
+    if (v.transparent && v.scenes && (v.scenes.length > 1 || v.scenes[0]?.hidePresenter)) {
+      ctx.addIssue({ code: "custom", path: ["transparent"], message: "A transparent background is for a one-scene video that shows the presenter" });
+      return z.NEVER;
+    }
     if (v.scenes) {
       const script = v.scenes.map((s) => s.script).join("\n\n");
       if (script.length > 5000) {
@@ -310,6 +315,7 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
   if (!base.motionPrompt) delete base.motionPrompt;
   if (!base.accent) delete base.accent;
   if (!base.avatarEngine) delete base.avatarEngine;
+  if (!base.transparent) delete base.transparent;
 
   try {
     if (provider.prepareAvatar) {
@@ -1173,6 +1179,7 @@ function requestOf(video: Video): VideoRequest {
     ...(video.motionPrompt ? { motionPrompt: video.motionPrompt } : {}),
     ...(video.accent ? { accent: video.accent } : {}),
     ...(video.avatarEngine ? { avatarEngine: video.avatarEngine } : {}),
+    ...(video.transparent ? { transparent: true as const } : {}),
   };
 }
 

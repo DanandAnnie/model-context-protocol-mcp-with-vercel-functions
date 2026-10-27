@@ -104,6 +104,7 @@ export interface VideoTemplate {
   motionPrompt?: string;
   accent?: VoiceAccent;
   avatarEngine?: AvatarEngine;
+  transparent?: true;
   /** The video it was saved from, when it was. */
   sourceVideoId?: string;
   createdAt: string;
@@ -316,6 +317,12 @@ export interface VideoRequest {
    * supports it (`avatarV`); absent is HeyGen's default, Avatar IV. Other renderers ignore it.
    */
   avatarEngine?: AvatarEngine;
+  /**
+   * Render the presenter alone over a transparent background, as a WebM with an alpha channel for compositing
+   * (HeyGen's `output_format: "webm"`). One scene showing the presenter only; its background is left out, and the
+   * avatar must be trained with matting. Absent is a normal video.
+   */
+  transparent?: true;
 }
 
 /** HeyGen's avatar engines a video can choose; "avatar_iv" is its default and is stored as absent. */

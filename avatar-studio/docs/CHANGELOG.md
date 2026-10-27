@@ -218,3 +218,9 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The panel and the row are now titled "Avatar motion". On Avatar IV, the panel says to choose Avatar V when a presenter's look would take gestures there.
     - The README and code comments no longer say gestures are for photo avatars only.
     - The unit tests now cover a video avatar on Avatar V given both settings (gestures, never expressiveness). They also cover a look that supports Avatar V left on Avatar IV (no gestures), which fails if the rule tests the look alone, and a scene's own presenter on Avatar V.
+- Transparent background (HeyGen v3 `output_format: "webm"`). A one-scene video that shows the presenter can render the presenter alone over a transparent background, as a WebM with an alpha channel for compositing.
+  - HeyGen's studio type has no WebM output, so such a video is sent as v3's single-avatar video (`type: "avatar"`) with the scene's voice or clip, speed, accent, motion, and engine. It is sent without the scene background, which HeyGen refuses with WebM, and without burned-in captions; the share page subtitles it.
+  - The avatar must be trained with matting. HeyGen checks this and refuses other avatars with a clear error, and the look listing gives no way to know beforehand, so the editor's hint says so. D-ID refuses the setting.
+  - The editor's Settings tab has a "Transparent background" checkbox for one-scene videos. The stage previews a checkerboard in place of the background. A video with more scenes keeps the choice on screen but does not send it.
+  - Templates, retries, other sizes, and batches keep it. The video page shows it in the Background row.
+  - New `transparent.test.ts` and an e2e test.

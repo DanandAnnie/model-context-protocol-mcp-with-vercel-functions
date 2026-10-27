@@ -890,7 +890,9 @@ export default function VideoDetailPage() {
                   ) : null}
                   <Row label="Captions">{video.captions ? `On${video.captionStyle ? ` · ${video.captionStyle.position}, ${video.captionStyle.size}${video.captionStyle.look ? `, ${video.captionStyle.look}` : ""}${video.captionStyle.font ? `, ${video.captionStyle.font} type` : ""}` : ""}` : "Off"}</Row>
                   <Row label="Background">
-                    {video.background.type === "color" ? (
+                    {video.transparent ? (
+                      `Transparent (WebM, the presenter alone)${video.provider !== "heygen" ? " (not applied by this renderer)" : ""}`
+                    ) : video.background.type === "color" ? (
                       <span className="inline-flex items-center gap-2"><span className="h-4 w-4 rounded border border-slate-200" style={{ background: video.background.value }} />{video.background.value}</span>
                     ) : (
                       `${video.background.type === "video" ? "Video" : "Image"}${video.background.fit === "contain" ? ", shown whole (preview only)" : ""}`

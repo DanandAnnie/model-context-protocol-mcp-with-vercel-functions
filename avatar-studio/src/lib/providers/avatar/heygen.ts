@@ -729,7 +729,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
    * A whole video HeyGen's Video Agent writes, casts, and renders from the brief (v3 `POST /v3/video-agents`, one-shot).
    * The session is followed until it names the video it renders, then that video (see `getStatus`).
    */
-  async startDirected(req: VideoRequest, avatar: Avatar | null, voice: Voice | null) {
+  async startDirected(req: VideoRequest, avatar: Avatar | null, voice: Voice | null, videoId: string) {
     const directed = req.directed;
     if (!directed) throw new ValidationError("Nothing to direct");
     const body = {
@@ -738,6 +738,8 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       orientation: directed.orientation,
       ...(avatar ? { avatar_id: this.lookId(avatar) } : {}),
       ...(voice ? { voice_id: this.voiceId(voice, voice.id) } : {}),
+      // Its webhooks name the render it starts, which the studio does not know yet: the studio's video id comes back.
+      ...(webhookUrl("heygen") ? { callback_url: webhookUrl("heygen"), callback_id: videoId } : {}),
     };
     let data;
     try {
@@ -779,11 +781,20 @@ export class HeyGenAvatarProvider implements AvatarProvider {
   }
 
   parseWebhook(body: unknown) {
-    const b = body as { event_type?: string; event_data?: { video_id?: string; url?: string; gif_download_url?: string; msg?: string } };
-    const id = b?.event_data?.video_id;
+    const b = body as { event_type?: string; event_data?: { video_id?: string; url?: string; gif_download_url?: string; msg?: string; callback_id?: string | null; failure_message?: string } };
+    const data = b?.event_data;
+    const id = data?.video_id ?? undefined;
+    const callbackId = typeof data?.callback_id === "string" && data.callback_id ? { callbackId: data.callback_id } : {};
+    // A Video Agent session that failed may name no render.
+    if (b?.event_type === "video_agent.fail") return id || callbackId.callbackId ? { providerJobId: id ?? "", update: { status: "failed" as const, error: data?.failure_message || data?.msg || "HeyGen's Video Agent could not make that video" }, ...callbackId } : null;
     if (!id) return null;
-    if (b.event_type === "avatar_video.success") return { providerJobId: id, update: stripEmpty({ status: "completed" as const, videoUrl: b.event_data?.url, gifUrl: httpsOnly(b.event_data?.gif_download_url) }) };
-    if (b.event_type === "avatar_video.fail") return { providerJobId: id, update: { status: "failed" as const, error: b.event_data?.msg ?? "Render failed" } };
+    if (b.event_type === "avatar_video.success") return { providerJobId: id, update: stripEmpty({ status: "completed" as const, videoUrl: b.event_data?.url, gifUrl: httpsOnly(b.event_data?.gif_download_url) }), ...callbackId };
+    if (b.event_type === "avatar_video.fail") return { providerJobId: id, update: { status: "failed" as const, error: b.event_data?.msg ?? "Render failed" }, ...callbackId };
+    // The session finished its work: its render is the one to follow from now on (done, if the link came with it).
+    if (b.event_type === "video_agent.success") {
+      const url = httpsOnly(data?.url);
+      return { providerJobId: id, update: url ? { status: "completed" as const, videoUrl: url, providerJobId: id } : { status: "processing" as const, providerJobId: id }, ...callbackId };
+    }
     return null;
   }
 }

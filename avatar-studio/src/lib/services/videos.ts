@@ -1331,7 +1331,7 @@ async function createDirectedVideo(req: VideoRequest & { directed: NonNullable<V
   };
   return startReserved(base, ownerId, !!extras.id, async () => {
     const prepared = avatar && avatar.source === "custom" && provider.prepareAvatar ? await prepareOnce(provider, avatar) : avatar;
-    return provider.startDirected!(req, prepared, voice);
+    return provider.startDirected!(req, prepared, voice, base.id);
   }, onStarted);
 }
 
@@ -1504,19 +1504,32 @@ export function restoreVideo(id: string, ownerId: string = LOCAL_OWNER): Promise
   });
 }
 
+/**
+ * A directed video a webhook names by the studio's own id while the studio still follows the agent's session (so the
+ * render's id matches nothing yet): only one of this renderer's, and only while it is a session.
+ */
+async function awaitingRender(providerName: string, videoId: string | undefined): Promise<Video | null> {
+  if (!videoId) return null;
+  const video = await getStore().get<Video>("video", videoId);
+  return video && video.directed && video.provider === providerName && /^(?:mock)?agent_/.test(video.providerJobId ?? "") ? video : null;
+}
+
 export async function applyAvatarWebhook(providerName: string, body: unknown): Promise<Video | null> {
   const provider = getAvatarProviderByName(providerName);
   const parsed = provider.parseWebhook?.(body);
   if (!parsed) return null;
-  const video = await getStore().findBy<Video>("video", "providerJobId", parsed.providerJobId);
+  const byJob = parsed.providerJobId ? await getStore().findBy<Video>("video", "providerJobId", parsed.providerJobId) : null;
+  const video = byJob ?? (await awaitingRender(providerName, parsed.callbackId));
   if (!video) return null;
+  // Found by its own id, it is still following the agent's session: from now on it follows the render the webhook names.
+  const update: Partial<Video> = !byJob && parsed.providerJobId ? { ...parsed.update, providerJobId: parsed.providerJobId } : parsed.update;
   // A late or repeated terminal webhook must not overwrite a recorded outcome (and the counts
   // that landed on it since), nor announce the completion twice. The record is read again under the
   // video's lock, so an edit, review, or beacon that landed after the lookup is kept.
   const result = await withCounterLock(video.id, async () => {
     const current = await getStore().get<Video>("video", video.id);
     if (!current || !isPending(current)) return { next: current ?? video };
-    const next: Video = { ...current, ...stripUndefined(stampGif(parsed.update)), updatedAt: nowIso() };
+    const next: Video = { ...current, ...stripUndefined(stampGif(update)), updatedAt: nowIso() };
     await getStore().put("video", next);
     return { next, before: current };
   });

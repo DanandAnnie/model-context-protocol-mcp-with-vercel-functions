@@ -87,7 +87,7 @@ export interface AvatarProvider {
    * Starts a request's `directed` video from its brief (HeyGen's Video Agent), with the presenter (prepared) and voice
    * only when the request names them; HeyGen chooses otherwise. Absent when the renderer cannot.
    */
-  startDirected?(req: VideoRequest, avatar: Avatar | null, voice: Voice | null): Promise<{ providerJobId: string }>;
+  startDirected?(req: VideoRequest, avatar: Avatar | null, voice: Voice | null, videoId: string): Promise<{ providerJobId: string }>;
   /**
    * Make an audio clip usable by this renderer, e.g. by uploading it. Returns the clip with
    * `providerAssetIds[provider]` set; the caller persists it. Renderers without it cannot use audio scenes.
@@ -187,7 +187,11 @@ export interface AvatarProvider {
   /** One template's variables (with their defaults) and scenes. */
   getStudioTemplate?(id: string): Promise<StudioTemplateDetail>;
   /** Parse an inbound webhook body into a job update, or null if unrecognised. */
-  parseWebhook?(body: unknown): { providerJobId: string; update: AvatarJobStatus } | null;
+  /**
+   * A webhook's render and its news. `callbackId` is the studio's video id the start was given (a directed video's), for
+   * a webhook naming a render the studio does not follow yet (it still follows the agent's session).
+   */
+  parseWebhook?(body: unknown): { providerJobId: string; update: AvatarJobStatus; callbackId?: string } | null;
 }
 
 export type ScriptAction = "shorten" | "expand" | "tone" | "translate" | "polish";

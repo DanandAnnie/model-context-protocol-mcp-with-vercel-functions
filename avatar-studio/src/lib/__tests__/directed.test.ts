@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
-import { addSubtitles, createTemplate, directAgentVideo, getAvatar, getVideo, queryVideos, resizeVideo, retryVideo, saveCaptionCues, videoAgentSchema, videoQuerySchema } from "../services";
+import { addSubtitles, applyAvatarWebhook, createTemplate, directAgentVideo, getAvatar, getVideo, queryVideos, resizeVideo, retryVideo, saveCaptionCues, videoAgentSchema, videoQuerySchema } from "../services";
 import { asksForPortrait } from "../services/video-agent";
 import { NotFoundError, ValidationError } from "../errors";
 import { shareBodyFor } from "../share-body";
@@ -150,10 +150,10 @@ describe("videos HeyGen's Video Agent directs", () => {
       const photo: Avatar = { id: "av_photo", name: "Dana", imageUrl: "https://93.184.216.34/d.png", source: "custom", provider: "heygen", ownerId: "u1", providerAssetIds: { [HEYGEN_LOOK_KEY]: "look_dana" }, createdAt: new Date().toISOString() };
       const req = { title: "x", script: "", avatarId: "av_photo", voiceId: "hg_voice", aspect: "9:16" as const, resolution: "1080p" as const, background: { type: "color" as const, value: "#000000" }, captions: false, speed: 1, directed: { brief: "The brief.", prompt: "The brief.", orientation: "portrait" as const, lengthSec: 60, language: "English" } };
       const voice = { id: "hg_voice", name: "June", provider: "heygen", gender: "female" as const, language: "English" };
-      const started = await provider.startDirected(req, photo, voice);
+      const started = await provider.startDirected(req, photo, voice, "vid_studio_1");
       assert.match(started.providerJobId, /^agent_\d+_sess_1$/, "the session, with when it started");
       assert.deepEqual(calls[0].body, { prompt: "The brief.", mode: "generate", orientation: "portrait", avatar_id: "look_dana", voice_id: "hg_voice" }, "the photo avatar's HeyGen look, and HeyGen's own voice id");
-      await provider.startDirected({ ...req, directed: { ...req.directed, orientation: "landscape" } }, null, null);
+      await provider.startDirected({ ...req, directed: { ...req.directed, orientation: "landscape" } }, null, null, "vid_studio_2");
       assert.deepEqual(calls[1].body, { prompt: "The brief.", mode: "generate", orientation: "landscape" }, "HeyGen chooses the presenter and voice when none is named");
       assert.deepEqual(await provider.getStatus(started.providerJobId), { status: "processing" });
       session = { ...session, status: "generating", video_id: "hg_vid_1" };
@@ -167,9 +167,48 @@ describe("videos HeyGen's Video Agent directs", () => {
       session = { session_id: "sess_1", status: "thinking", video_id: null };
       assert.match((await provider.getStatus(`agent_${Date.now() - 4 * 60 * 60 * 1000}_sess_1`)).error ?? "", /did not start a render in three hours/);
       refuse = true;
-      await assert.rejects(provider.startDirected(req, null, null), (e: unknown) => e instanceof ValidationError && /HeyGen's Video Agent could not take that brief: prompt is too vague/.test((e as Error).message));
+      await assert.rejects(provider.startDirected(req, null, null, "vid_studio_3"), (e: unknown) => e instanceof ValidationError && /HeyGen's Video Agent could not take that brief: prompt is too vague/.test((e as Error).message));
     } finally {
       globalThis.fetch = realFetch;
+    }
+  });
+
+  it("finds a directed video by its own id when HeyGen's webhook names a render it does not follow yet", async () => {
+    const { config } = await import("../config");
+    const saved = { avatar: config.avatarProvider, key: config.heygenApiKey, secret: config.webhookSecret };
+    const realFetch = globalThis.fetch;
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      return Response.json({ data: { session_id: "sess_9", status: "thinking", video_id: null } });
+    }) as typeof fetch;
+    Object.assign(config, { avatarProvider: "heygen", heygenApiKey: "hg_key", webhookSecret: "s3cret" });
+    try {
+      const video = await directAgentVideo(videoAgentSchema.parse(ASK), "u1");
+      assert.match(video.providerJobId ?? "", /^agent_\d+_sess_9$/);
+      assert.equal(bodies[0].callback_id, video.id, "HeyGen is told the studio's video id");
+      assert.match(String(bodies[0].callback_url), /\/api\/webhooks\/heygen\?secret=s3cret$/);
+      // The session's webhook names its render: the video follows it from now on, still processing.
+      const moved = await applyAvatarWebhook("heygen", { event_type: "video_agent.success", event_data: { session_id: "sess_9", video_id: "hg_v9", callback_id: video.id } });
+      assert.deepEqual([moved?.status, moved?.providerJobId], ["processing", "hg_v9"]);
+      // The render's own webhook then matches it by its job, and finishes it.
+      const done = await applyAvatarWebhook("heygen", { event_type: "avatar_video.success", event_data: { video_id: "hg_v9", url: "https://cdn/v9.mp4" } });
+      assert.deepEqual([done?.id, done?.status, done?.videoUrl], [video.id, "completed", "https://cdn/v9.mp4"]);
+      // A render's webhook that comes first finishes it straight away.
+      const other = await directAgentVideo(videoAgentSchema.parse(ASK), "u1");
+      const finished = await applyAvatarWebhook("heygen", { event_type: "avatar_video.success", event_data: { video_id: "hg_v10", url: "https://cdn/v10.mp4", callback_id: other.id } });
+      assert.deepEqual([finished?.status, finished?.providerJobId], ["completed", "hg_v10"]);
+      // A failed session fails it.
+      const third = await directAgentVideo(videoAgentSchema.parse(ASK), "u1");
+      const failed = await applyAvatarWebhook("heygen", { event_type: "video_agent.fail", event_data: { session_id: "sess_9", callback_id: third.id, failure_message: "Brief refused" } });
+      assert.deepEqual([failed?.status, failed?.error], ["failed", "Brief refused"]);
+      // The id of a video that is not a directed one waiting on its session matches nothing.
+      await getStore().put("video", { ...other, id: "vid_plain", directed: undefined, providerJobId: "agent_1_sess_x", status: "processing" } as Video);
+      assert.equal(await applyAvatarWebhook("heygen", { event_type: "avatar_video.success", event_data: { video_id: "hg_v11", url: "https://cdn/v.mp4", callback_id: "vid_plain" } }), null);
+      assert.equal(await applyAvatarWebhook("heygen", { event_type: "avatar_video.success", event_data: { video_id: "hg_v12", url: "https://cdn/v.mp4", callback_id: done!.id } }), null, "one that follows its render already");
+    } finally {
+      globalThis.fetch = realFetch;
+      Object.assign(config, { avatarProvider: saved.avatar, heygenApiKey: saved.key, webhookSecret: saved.secret });
     }
   });
 });

@@ -30,6 +30,11 @@ export const motionPromptSchema = z
   .transform((v) => v || undefined)
   .optional();
 /** HeyGen's avatar engine; the default, Avatar IV, is stored as absent. Optional where it is used. */
+/** A transparent background: `true`; `false` (or absent) is a normal video, stored as absent. */
+export const transparentSchema = z
+  .boolean({ error: "transparent is true or false" })
+  .transform((v): true | undefined => (v ? true : undefined))
+  .optional();
 export const avatarEngineSchema = z
   .enum(AVATAR_ENGINES)
   .transform((v) => (v === "avatar_iv" ? undefined : v))

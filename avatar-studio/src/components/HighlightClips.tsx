@@ -58,11 +58,17 @@ export function HighlightClips({ video, canEdit }: { video: Video; canEdit: bool
   // A set that finishes or fails while the page is open is announced.
   const seen = useRef<Map<string, Highlight["status"]>>(new Map());
   useEffect(() => {
+    // Sets that finish in the same check are announced together.
+    let ready = 0;
+    const failed: string[] = [];
     for (const h of data?.highlights ?? []) {
       const before = seen.current.get(h.id);
-      if (before === "processing" && h.status !== "processing") setNote(h.status === "completed" ? `${h.clips.length === 1 ? "1 clip is" : `${h.clips.length} clips are`} ready.` : `The clips could not be cut: ${h.error ?? "the renderer failed"}.`);
+      if (before === "processing" && h.status === "completed") ready += h.clips.length;
+      if (before === "processing" && h.status === "failed") failed.push(h.error ?? "the renderer failed");
       seen.current.set(h.id, h.status);
     }
+    const parts = [...(ready ? [`${ready === 1 ? "1 clip is" : `${ready} clips are`} ready.`] : []), ...failed.map((e) => `Some clips could not be cut: ${e}.`)];
+    if (parts.length) setNote(parts.join(" "));
   }, [data]);
   const listRef = useRef<HTMLUListElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -122,7 +128,7 @@ export function HighlightClips({ video, canEdit }: { video: Video; canEdit: bool
           {sets.map((h) => (
             <li key={h.id} data-highlight={h.id} tabIndex={-1} className="rounded-lg border border-slate-200 p-3 outline-none focus:ring-2 focus:ring-brand-500">
               <div className="flex items-start justify-between gap-2">
-                <p className="text-xs text-slate-600">
+                <p className="min-w-0 break-words text-xs text-slate-600">
                   {h.lengths.map((l) => LENGTH_NAMES[l]).join(", ")} · {h.frame} · {h.captions ? "captions" : "no captions"}
                   {h.prompt ? ` · “${h.prompt}”` : ""}
                 </p>

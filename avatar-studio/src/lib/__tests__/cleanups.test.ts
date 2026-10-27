@@ -111,6 +111,7 @@ describe("cleaned recordings", () => {
       const other = await startCleanup(input, "u2", { key: "retry-key-1" });
       assert.notEqual(other.id, first.id, "the same key from another account is another cleanup");
       assert.notEqual((await startCleanup(input, "u1")).id, first.id, "without a key every start is new");
+      await assert.rejects(startCleanup(cleanupRequestSchema.parse({ sourceUrl: "https://93.184.216.34/other.mp4" }), "u1", { key: "retry-key-1" }), ConflictError, "the same key for another recording is refused");
       assert.throws(() => cleanupKeySchema.parse("short"), /8 to 100/);
       assert.throws(() => cleanupKeySchema.parse("has spaces in it"), /8 to 100/);
       // A start that is refused is not admitted.
@@ -159,7 +160,9 @@ describe("cleaned recordings", () => {
       await getStore().put("cleanup", { id: `cu_old${i}`, ownerId: "u1", title: "Old", provider: "mock", providerJobId: "x", status: "failed", createdAt: now(), updatedAt: now() } satisfies CleanupJob);
     }
     await assert.rejects(startCleanup(cleanupRequestSchema.parse({ sourceUrl: PUBLIC }), "u1"), ConflictError);
-    assert.equal((await exportOwnerData("u1")).cleanup.length, MAX_CLEANUPS);
+    const exported = (await exportOwnerData("u1")).cleanup;
+    assert.equal(exported.length, MAX_CLEANUPS);
+    assert.deepEqual(Object.keys(exported[0]).filter((k) => k === "provider" || k === "providerJobId"), [], "the renderer and its job id stay out of the export");
     assert.equal((await deleteOwnerData("u1")).cleanup, MAX_CLEANUPS);
   });
 

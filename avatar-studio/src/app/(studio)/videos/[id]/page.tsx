@@ -485,7 +485,7 @@ export default function VideoDetailPage() {
 
   async function remove(permanent = false) {
     if (!video) return;
-    if (!confirm(permanent ? "Delete this video for good? This cannot be undone." : `Move this video to the trash? You can restore it for ${TRASH_RETENTION_DAYS} days.`)) return;
+    if (!confirm(permanent ? "Delete this video for good? Its short clips and the recordings cleaned from it go too. This cannot be undone." : `Move this video to the trash? You can restore it for ${TRASH_RETENTION_DAYS} days.`)) return;
     setDeleting(true);
     try {
       await api(`/api/videos/${video.id}${permanent ? "?permanent=true" : ""}`, { method: "DELETE" });
@@ -718,7 +718,7 @@ export default function VideoDetailPage() {
             }
           />
 
-          <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-[2fr_1fr]">
             <Card className="overflow-hidden">
               <div className="flex items-center justify-center bg-slate-950 p-0">
                <div className={`relative flex items-center justify-center ${video.aspect === "9:16" ? "aspect-[9/16] h-[70vh]" : video.aspect === "1:1" ? "aspect-square w-full max-w-[560px]" : "aspect-video w-full"}`}>

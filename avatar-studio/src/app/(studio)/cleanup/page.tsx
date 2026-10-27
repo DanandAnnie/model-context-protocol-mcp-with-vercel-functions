@@ -52,11 +52,14 @@ export default function CleanupPage() {
   // A cleanup that finishes or fails while the page is open is announced.
   const seen = useRef<Map<string, Cleanup["status"]>>(new Map());
   useEffect(() => {
+    // Cleanups that finish in the same check are announced together.
+    const parts: string[] = [];
     for (const c of data?.cleanups ?? []) {
       const before = seen.current.get(c.id);
-      if (before === "processing" && c.status !== "processing") setNote(c.status === "completed" ? `${c.title} is cleaned up.` : `${c.title} could not be cleaned up: ${c.error ?? "the renderer failed"}.`);
+      if (before === "processing" && c.status !== "processing") parts.push(c.status === "completed" ? `${c.title} is cleaned up.` : `${c.title} could not be cleaned up: ${c.error ?? "the renderer failed"}.`);
       seen.current.set(c.id, c.status);
     }
+    if (parts.length) setNote(parts.join(" "));
   }, [data]);
   // A page left open past the links' lifetime asks again when it is looked at, so the players and links still work.
   const loadedAt = useRef(Date.now());
@@ -72,6 +75,12 @@ export default function CleanupPage() {
   }, [refetch]);
 
   const items = data?.cleanups ?? [];
+  // A different source is a different start: its own key, and an error about the last one no longer applies.
+  function switchTo(next: "link" | "library") {
+    setFrom(next);
+    setErr(null);
+    setRequestKey(newKey());
+  }
   const ready = from === "link" ? /^https:\/\/\S+$/i.test(sourceUrl.trim()) : !!videoId;
   const canStart = canEdit !== false && data?.available !== false;
 
@@ -120,11 +129,13 @@ export default function CleanupPage() {
     <>
       <SectionTitle title="Clean up a recording" subtitle="Cut the filler words (“um”, “uh”) and long silences out of a recording, and get one cleaned video back." />
       {canEdit === false && <ViewOnlyNotice what="clean up recordings" />}
-      <ErrorBanner message={error ?? err} />
+      {/* A failed list load and a refused start are both shown; neither hides the other. */}
+      <ErrorBanner message={error} />
+      <ErrorBanner message={err} />
       <p role="status" className="sr-only">
         {note ?? ""}
       </p>
-      <div className="grid gap-6 lg:grid-cols-[1fr_1.4fr]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_1.4fr]">
         <Card className="p-5">
           {data?.available === false ? (
             <p className="text-sm text-slate-600">Cleaning up recordings needs the HeyGen renderer; the current renderer has no such feature.</p>
@@ -134,19 +145,20 @@ export default function CleanupPage() {
                 <legend className="mb-1.5 block text-sm font-medium text-slate-700">Recording</legend>
                 <div className="flex flex-wrap gap-4 text-sm text-slate-700">
                   <label className="flex items-center gap-2">
-                    <input type="radio" name="cleanup-from" className="accent-brand-600" checked={from === "link"} onChange={() => setFrom("link")} />
+                    <input type="radio" name="cleanup-from" className="accent-brand-600" checked={from === "link"} disabled={canEdit === false} onChange={() => switchTo("link")} />
                     A link
                   </label>
                   <label className="flex items-center gap-2">
-                    <input type="radio" name="cleanup-from" className="accent-brand-600" checked={from === "library"} onChange={() => setFrom("library")} />
+                    <input type="radio" name="cleanup-from" className="accent-brand-600" checked={from === "library"} disabled={canEdit === false} onChange={() => switchTo("library")} />
                     One of my videos
                   </label>
                 </div>
               </fieldset>
               {from === "link" ? (
                 <Field label="Recording URL" hint="A public https link to a video with speech, up to 2 hours long: a webinar, a screen recording, an interview.">
-                  <input ref={sourceInput} className={inputClass} value={sourceUrl} onChange={(e) => {
+                  <input ref={sourceInput} className={inputClass} value={sourceUrl} disabled={canEdit === false} onChange={(e) => {
                       setSourceUrl(e.target.value);
+                      setErr(null);
                       setRequestKey(newKey());
                     }} placeholder="https://…/webinar.mp4" />
                 </Field>
@@ -155,8 +167,10 @@ export default function CleanupPage() {
                   <select
                     className={inputClass}
                     value={videoId}
+                    disabled={canEdit === false}
                     onChange={(e) => {
                       setVideoId(e.target.value);
+                      setErr(null);
                       setRequestKey(newKey());
                     }}
                   >
@@ -170,7 +184,7 @@ export default function CleanupPage() {
                 </Field>
               )}
               <Field label="Title (optional)">
-                <input className={inputClass} value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} placeholder={from === "library" ? "The video's title, marked cleaned" : "Cleaned recording"} />
+                <input className={inputClass} value={title} maxLength={120} disabled={canEdit === false} onChange={(e) => setTitle(e.target.value)} placeholder={from === "library" ? "The video's title, marked cleaned" : "Cleaned recording"} />
               </Field>
               <Button onClick={submit} loading={busy} disabled={!ready || !canStart} className="w-full">
                 <Eraser className="h-4 w-4" /> Clean up recording

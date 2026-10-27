@@ -9,7 +9,7 @@ import { LOCAL_OWNER } from "../owner-id";
 import { LimitError, NotFoundError, ValidationError } from "../errors";
 import { owned } from "./shared";
 import { getBackdrop, plainScene } from "./backdrops";
-import { accentSchema, avatarEngineSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema } from "./videos";
+import { accentSchema, avatarEngineSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema } from "./videos";
 
 export const MAX_TEMPLATES = 50;
 
@@ -57,7 +57,7 @@ export const templateInputSchema = z.object({
   motionPrompt: motionPromptSchema,
   accent: accentSchema,
   avatarEngine: avatarEngineSchema,
-  transparent: z.literal(true).optional(),
+  transparent: transparentSchema,
 }).refine((t) => !t.transparent || !t.scenes || (t.scenes.length === 1 && !t.scenes[0].hidePresenter), {
   path: ["transparent"],
   message: "A transparent background is for a one-scene template that shows the presenter",

@@ -632,8 +632,11 @@ test("a recording can be cleaned of filler words, from a link or the library, an
   await page.getByLabel("Recording URL").fill("https://127.0.0.1/webinar.mp4");
   await page.getByRole("button", { name: "Clean up recording" }).click();
   await expect(page.getByText("must point to a public host")).toBeVisible();
-  // From the library: the video's title, marked cleaned.
+  // Focus stays on the button rather than dropping to the page.
+  await expect(page.getByRole("button", { name: "Clean up recording" })).toBeFocused();
+  // From the library: the video's title, marked cleaned. The link's error no longer applies.
   await page.getByLabel("One of my videos").check();
+  await expect(page.getByText("must point to a public host")).toHaveCount(0);
   // The picker is named by its label and its hint ("Video A finished video of your library.").
   await page.getByRole("combobox", { name: /^Video\b/ }).selectOption(v.id);
   const sent = page.waitForRequest((r) => r.url().endsWith("/api/cleanups") && r.method() === "POST");
@@ -1725,7 +1728,10 @@ test("no page scrolls sideways at phone width", async ({ browser }) => {
     const v = await createVideoViaApi(page, "Phone width check");
     // A shared presenter makes the Interactive page render its widest row (six actions per presenter).
     agentId = ((await (await page.request.post("/api/agents", { data: { name: "Phone width presenter", avatarId: "stock_1" } })).json()).agent as { id: string }).id;
-    const pages = ["/home", "/create", "/agent", "/videos", `/videos/${v.id}`, "/templates", "/avatars", "/voices", "/batch", "/brand", "/interactive", "/workspace", "/settings", "/translate", "/cleanup", `/share/${v.id}`];
+    // A transparent video's Background row and a cleaned recording with a long title are the widest content of their pages.
+    const clear = await createVideoViaApi(page, "Phone width transparent", { transparent: true });
+    expect((await page.request.post("/api/cleanups", { data: { sourceUrl: "https://93.184.216.34/webinar.mp4", title: "Team webinar on pricing and the spring roadmap (cleaned)" } })).status()).toBe(202);
+    const pages = ["/home", "/create", "/agent", "/videos", `/videos/${v.id}`, `/videos/${clear.id}`, "/templates", "/avatars", "/voices", "/batch", "/brand", "/interactive", "/workspace", "/settings", "/translate", "/cleanup", `/share/${v.id}`];
     for (const path of pages) {
       await page.goto(path);
       await expect(page.locator("h1").first()).toBeVisible();

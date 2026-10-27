@@ -24,7 +24,7 @@ import { clearCover, setCover } from "../cover";
 import { shareOffline } from "../client";
 import { bumpViewsByDay } from "../insights";
 
-import { accentSchema, avatarEngineSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema } from "./schemas";
+import { accentSchema, avatarEngineSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema } from "./schemas";
 import { getBrandKit } from "./brand";
 import { spokenCopy } from "../pronounce";
 import { clearComments } from "./comments";
@@ -32,7 +32,7 @@ import { clearVideoLeads } from "./leads";
 import { clearHighlights } from "./highlights";
 import { clearCleanups } from "./cleanups";
 import { reviseScript } from "./scripts";
-export { accentSchema, avatarEngineSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema };
+export { accentSchema, avatarEngineSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema };
 
 export const videoRequestSchema = z
   .object({
@@ -77,7 +77,7 @@ export const videoRequestSchema = z
     motionPrompt: motionPromptSchema,
     accent: accentSchema,
     avatarEngine: avatarEngineSchema,
-    transparent: z.literal(true).optional(),
+    transparent: transparentSchema,
   })
   .transform((v, ctx) => {
     if (v.transparent && v.scenes && (v.scenes.length > 1 || v.scenes[0]?.hidePresenter)) {

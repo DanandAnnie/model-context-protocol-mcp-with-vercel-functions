@@ -41,7 +41,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     // A request that would be refused anyway does not use up the hour's starts.
     await assertCanStartHighlights(id, input, owner);
     const limit = rateLimitPair(`highlight:${owner}`, PER_OWNER, "highlight:*", PER_INSTANCE, WINDOW_MS);
-    if (!limit.allowed) return json({ error: "Too many clipping jobs for now; try again later" }, { status: 429, headers: { "Retry-After": String(limit.retryAfterSec) } });
+    if (!limit.allowed) return json({ error: `Too many clipping jobs for now; try again in ${Math.ceil(limit.retryAfterSec / 60)} minutes` }, { status: 429, headers: { "Retry-After": String(limit.retryAfterSec) } });
     return json({ highlight: publicHighlight(await startHighlights(id, input, owner)) }, { status: 202 });
   } catch (err) {
     return errorResponse(err);

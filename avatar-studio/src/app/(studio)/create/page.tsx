@@ -1775,7 +1775,7 @@ function CreateInner() {
                 <label className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-3">
                   <span>
                     <span className="block text-sm font-medium text-slate-800">Captions</span>
-                    <span className="block text-xs text-slate-500">Burn subtitles into the video.</span>
+                    <span className="block text-xs text-slate-500">{sentTransparent ? "Subtitles on the share page (nothing is burned over a transparent video)." : "Burn subtitles into the video."}</span>
                   </span>
                   <input type="checkbox" checked={captions} onChange={(e) => setCaptions(e.target.checked)} className="h-5 w-5 accent-brand-600" />
                 </label>

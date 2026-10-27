@@ -29,6 +29,11 @@ export async function exportOwnerData(ownerId: string = LOCAL_OWNER): Promise<Ow
       if (kind === "translation") delete copy.proofreadToken;
       // A drawn portrait's picture is in the photo avatar made from it; the job keeps only what it was.
       if (kind === "portrait") delete copy.imageUrl;
+      // The renderer and its job id never leave the server, in the export as on the page.
+      if (kind === "highlight" || kind === "cleanup") {
+        delete copy.provider;
+        delete copy.providerJobId;
+      }
       if (kind === "sharelock") {
         delete copy.hash;
         delete copy.salt;

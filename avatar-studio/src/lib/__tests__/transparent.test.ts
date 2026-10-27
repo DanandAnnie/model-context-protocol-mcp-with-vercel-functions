@@ -24,7 +24,8 @@ describe("transparent background", () => {
     assert.equal(videoRequestSchema.parse({ ...base, scenes: [{ script: "Hi.", background: bg }], script: undefined, transparent: true }).transparent, true);
     assert.match(issues(videoRequestSchema.safeParse({ ...base, script: undefined, transparent: true, scenes: [{ script: "Hi.", background: bg }, { script: "Bye.", background: bg }] })), /one-scene video that shows the presenter/);
     assert.match(issues(videoRequestSchema.safeParse({ ...base, script: undefined, transparent: true, scenes: [{ script: "The view.", background: image, hidePresenter: true }] })), /one-scene video/);
-    assert.equal(videoRequestSchema.safeParse({ ...base, transparent: false }).success, false, "only true is a choice");
+    assert.equal(videoRequestSchema.parse({ ...base, transparent: false }).transparent, undefined, "false is a normal video, as absent is");
+    assert.equal(videoRequestSchema.safeParse({ ...base, transparent: "yes" }).success, false);
     assert.match(issues(templateInputSchema.safeParse({ title: "T", transparent: true, scenes: [{ script: "Hi.", background: bg }, { script: "Bye.", background: bg }] })), /one-scene template/);
   });
 

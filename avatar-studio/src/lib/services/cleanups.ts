@@ -91,7 +91,12 @@ export const cleanupKeySchema = z.string().regex(/^[A-Za-z0-9_-]{8,100}$/, "The 
 export async function startCleanup(input: z.infer<typeof cleanupRequestSchema>, ownerId: string = LOCAL_OWNER, opts: { key?: string; admit?: () => void } = {}): Promise<CleanupJob> {
   const id = opts.key ? `cu_${createHash("sha256").update(`${ownerId}\0${opts.key}`).digest("base64url").slice(0, 32)}` : newId("cu");
   const existing = opts.key ? await getStore().get<CleanupJob>("cleanup", id) : null;
-  if (existing && existing.ownerId === ownerId) return existing;
+  if (existing && existing.ownerId === ownerId) {
+    // The same key with another recording is a mistake to say, not a start to repeat.
+    const same = input.videoId ? existing.videoId === input.videoId : existing.sourceUrl === input.sourceUrl;
+    if (!same) throw new ConflictError("This Idempotency-Key was already used to clean another recording; send a new key");
+    return existing;
+  }
   const source = await resolveCleanupSource(input, ownerId);
   opts.admit?.();
   const provider = getAvatarProvider();

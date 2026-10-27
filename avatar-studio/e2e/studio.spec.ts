@@ -448,7 +448,7 @@ test("photo avatar motion is set in the editor, kept with the video and its copy
   await page.getByRole("button", { name: "Settings" }).click();
   const group = page.getByTestId("photo-motion");
   // A library presenter is not a photo avatar, so the panel says nothing applies yet.
-  await expect(group).toContainText("no scene shows one now");
+  await expect(group).toContainText("no scene shows either now");
   await group.getByLabel("Expressiveness").selectOption("high");
   await group.getByLabel("Gestures (optional)").fill("  Nods warmly and   gestures toward the room ");
   const sent = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");

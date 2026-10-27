@@ -310,10 +310,11 @@ describe("voice changer", () => {
     // A title is cut at a word, by characters as a reader counts them, and punctuation alone is kept.
     const long = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: `${"👋🏽".repeat(39)} hi there` }), "u1");
     assert.equal(long.title, `${"👋🏽".repeat(39)}… in Narrator`);
+    assert.equal((await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Hi there!" }), "u1")).title, "Hi there in Narrator", "a whole text loses its closing punctuation");
     const dashes = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "-".repeat(50) }), "u1");
     assert.equal(dashes.title, `${"-".repeat(40)}… in Narrator`);
     const out = (await exportOwnerData("u1")) as unknown as Record<string, Array<Record<string, unknown>>>;
-    assert.deepEqual(out.voicechange.map((c) => c.text).sort(), ["-".repeat(50), "Hi.", text, `${"👋🏽".repeat(39)} hi there`].sort());
+    assert.deepEqual(out.voicechange.map((c) => c.text).sort(), ["-".repeat(50), "Hi there!", "Hi.", text, `${"👋🏽".repeat(39)} hi there`].sort());
   });
 
   it("asks HeyGen to speak text in an instant voice once, dropping one not done in time and telling a refusal apart", async () => {

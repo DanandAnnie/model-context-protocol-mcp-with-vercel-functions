@@ -144,6 +144,8 @@ export default function VoiceChangerPage() {
   const voicesRef = useRef<HTMLUListElement>(null);
   const changesHeading = useRef<HTMLHeadingElement>(null);
   const voicesHeading = useRef<HTMLHeadingElement>(null);
+  const changeVoiceRef = useRef<HTMLSelectElement>(null);
+  const speechVoiceRef = useRef<HTMLSelectElement>(null);
   const focusAfterRender = useFocusAfterRender();
 
   // A voice or recording that finishes or fails while the page is open is announced.
@@ -174,8 +176,15 @@ export default function VoiceChangerPage() {
     if (!(e instanceof Error)) return;
     if (/audio clip is no longer available/.test(e.message)) void refetchClips();
     if (/voice is no longer available/.test(e.message)) {
-      if (at === "change") setVoiceId("");
-      if (at === "speech") setSpeechVoiceId("");
+      // The card's button goes disabled with the choice, so the focus moves to the choice rather than being lost.
+      if (at === "change") {
+        setVoiceId("");
+        focusAfterRender(() => changeVoiceRef.current);
+      }
+      if (at === "speech") {
+        setSpeechVoiceId("");
+        focusAfterRender(() => speechVoiceRef.current);
+      }
       void refetch();
     }
   }
@@ -199,7 +208,7 @@ export default function VoiceChangerPage() {
 
   async function changeVoice() {
     setChanging(true);
-    setErr(null);
+    fail("change")(null);
     setNote(null);
     try {
       const body = { voiceId, clipId, removeNoise, ...(title.trim() ? { title: title.trim() } : {}) };
@@ -224,7 +233,7 @@ export default function VoiceChangerPage() {
 
   async function speakText() {
     setSpeaking(true);
-    setErr(null);
+    fail("speech")(null);
     setNote(null);
     try {
       const body = { voiceId: speechVoiceId, text: speechText.trim(), ...(speechTitle.trim() ? { title: speechTitle.trim() } : {}) };
@@ -247,7 +256,7 @@ export default function VoiceChangerPage() {
 
   async function makeVoice() {
     setMaking(true);
-    setErr(null);
+    fail("voice")(null);
     setNote(null);
     try {
       const { voice } = await api<{ voice: Voice }>("/api/voice-changer/voices", { method: "POST", body: JSON.stringify({ name: voiceName.trim(), clipId: sampleId, agreed }), headers: { "Idempotency-Key": voiceKey } });
@@ -270,7 +279,7 @@ export default function VoiceChangerPage() {
 
   async function removeVoice(v: Voice) {
     if (!window.confirm(`Delete the voice “${v.name}”? It is deleted at HeyGen too; recordings already spoken in it are kept.`)) return;
-    setErr(null);
+    fail("lists")(null);
     const next = voices[voices.indexOf(v) + 1] ?? voices[voices.indexOf(v) - 1];
     try {
       seen.current.delete(v.id);
@@ -290,7 +299,7 @@ export default function VoiceChangerPage() {
 
   async function removeChange(c: Change) {
     if (!window.confirm(`Delete “${c.title}”? Making it again speaks it again.`)) return;
-    setErr(null);
+    fail("lists")(null);
     const next = changes[changes.indexOf(c) + 1] ?? changes[changes.indexOf(c) - 1];
     try {
       seen.current.delete(c.id);
@@ -331,7 +340,7 @@ export default function VoiceChangerPage() {
               <h2 className="text-sm font-semibold text-slate-900">Change a recording&apos;s voice</h2>
               <ErrorBanner message={errAt === "change" ? err : null} />
               <Field label="Voice" hint={voiceHint}>
-                <select className={inputClass} value={voiceId} disabled={!editable} onChange={(e) => (setVoiceId(e.target.value), setChangeKey(newKey()), setErr(null))}>
+                <select ref={changeVoiceRef} className={inputClass} value={voiceId} disabled={!editable} onChange={(e) => (setVoiceId(e.target.value), setChangeKey(newKey()), fail("change")(null))}>
                   <option value="">{voicePlaceholder}</option>
                   {ready.map((v) => (
                     <option key={v.id} value={v.id}>
@@ -347,7 +356,7 @@ export default function VoiceChangerPage() {
                 clips={clips}
                 value={clipId}
                 disabled={!editable}
-                onChange={(id) => (setClipId(id), setChangeKey(newKey()), setErr(null))}
+                onChange={(id) => (setClipId(id), setChangeKey(newKey()), fail("change")(null))}
                 onUploaded={(clip) => (uploaded(clip), setClipId(clip.id), setChangeKey(newKey()))}
                 onDeleted={clipDeleted}
                 onError={fail("change")}
@@ -378,7 +387,7 @@ export default function VoiceChangerPage() {
                 <h2 className="text-sm font-semibold text-slate-900">Speak text in a voice</h2>
                 <ErrorBanner message={errAt === "speech" ? err : null} />
                 <Field label="Speaking voice" hint={voiceHint}>
-                  <select className={inputClass} value={speechVoiceId} disabled={!editable} onChange={(e) => (setSpeechVoiceId(e.target.value), setSpeechKey(newKey()), errAt === "speech" && setErr(null))}>
+                  <select ref={speechVoiceRef} className={inputClass} value={speechVoiceId} disabled={!editable || speaking} onChange={(e) => (setSpeechVoiceId(e.target.value), setSpeechKey(newKey()), fail("speech")(null))}>
                     <option value="">{voicePlaceholder}</option>
                     {ready.map((v) => (
                       <option key={v.id} value={v.id}>
@@ -389,25 +398,27 @@ export default function VoiceChangerPage() {
                 </Field>
                 <div>
                   <Field label="Text" hint={`Plain prose, up to ${MAX_SPEECH_CHARS.toLocaleString("en-US")} characters; the language is worked out from the text.`}>
-                    <textarea className={`${inputClass} min-h-28`} value={speechText} maxLength={MAX_SPEECH_CHARS} disabled={!editable} onChange={(e) => (setSpeechText(e.target.value), setSpeechKey(newKey()), errAt === "speech" && setErr(null))} placeholder="Welcome to the team. Here is what your first week looks like." />
+                    <textarea className={`${inputClass} min-h-28`} value={speechText} maxLength={MAX_SPEECH_CHARS} disabled={!editable || speaking} aria-describedby="speech-count" onChange={(e) => (setSpeechText(e.target.value), setSpeechKey(newKey()), fail("speech")(null))} placeholder="Welcome to the team. Here is what your first week looks like." />
                   </Field>
-                  <p className="mt-1 text-right text-xs text-slate-400" aria-hidden>
-                    {speechText.length.toLocaleString("en-US")} / {MAX_SPEECH_CHARS.toLocaleString("en-US")}
+                  {/* Read with the field, and announced when the limit is reached (a longer paste is cut there). */}
+                  <p id="speech-count" className={`mt-1 text-right text-xs ${speechText.length >= MAX_SPEECH_CHARS ? "font-medium text-amber-700" : "text-slate-500"}`} aria-live={speechText.length >= MAX_SPEECH_CHARS ? "polite" : "off"}>
+                    {speechText.length.toLocaleString("en-US")} of {MAX_SPEECH_CHARS.toLocaleString("en-US")} characters
+                    {speechText.length >= MAX_SPEECH_CHARS ? "; the limit, so anything past it was not kept" : ""}
                   </p>
                 </div>
                 <Field label="Title for the text (optional)">
-                  <input className={inputClass} value={speechTitle} maxLength={120} disabled={!editable} onChange={(e) => (setSpeechTitle(e.target.value), setSpeechKey(newKey()), errAt === "speech" && setErr(null))} placeholder="The text's first words, in the voice" />
+                  <input className={inputClass} value={speechTitle} maxLength={120} disabled={!editable || speaking} onChange={(e) => (setSpeechTitle(e.target.value), setSpeechKey(newKey()), fail("speech")(null))} placeholder="The text's first words, in the voice" />
                 </Field>
                 {editable && speechNeeds !== null && (
                   <p id="speech-needs" className="text-xs text-slate-500">
                     {speechNeeds}
                   </p>
-            )}
-              <Button onClick={speakText} loading={speaking} disabled={!editable || speechNeeds !== null} className="w-full" aria-describedby={editable && speechNeeds !== null ? "speech-needs" : undefined}>
-                <Type className="h-4 w-4" /> Speak the text
-              </Button>
-              <p className="text-xs text-slate-500">Most texts are ready in a few seconds; one not done within a minute is dropped, to try again.</p>
-            </Card>
+                )}
+                <Button onClick={speakText} loading={speaking} disabled={!editable || speechNeeds !== null} className="w-full" aria-describedby={editable && speechNeeds !== null ? "speech-needs" : undefined}>
+                  <Type className="h-4 w-4" /> Speak the text
+                </Button>
+                <p className="text-xs text-slate-500">Most texts are ready in a few seconds; one not done within a minute is dropped, to try again.</p>
+              </Card>
             )}
 
             <Card className="space-y-4 p-5">
@@ -423,7 +434,7 @@ export default function VoiceChangerPage() {
                 clips={clips}
                 value={sampleId}
                 disabled={!editable}
-                onChange={(id) => (setSampleId(id), setVoiceKey(newKey()), setErr(null))}
+                onChange={(id) => (setSampleId(id), setVoiceKey(newKey()), fail("voice")(null))}
                 onUploaded={(clip) => (uploaded(clip), setSampleId(clip.id), setVoiceKey(newKey()))}
                 onDeleted={clipDeleted}
                 onError={fail("voice")}
@@ -477,7 +488,7 @@ export default function VoiceChangerPage() {
                 Recordings in other voices
               </h2>
               {!data ? null : changes.length === 0 ? (
-                <EmptyState icon={<Wand2 className="h-8 w-8" />} title="No recordings yet" body="Choose a voice and a recording, or write a text, on the left." />
+                <EmptyState icon={<Wand2 className="h-8 w-8" />} title="No recordings yet" body="Choose a voice and a recording, or write a text, to make one." />
               ) : (
                 <div className="space-y-3">
                   {changes.map((c) => (

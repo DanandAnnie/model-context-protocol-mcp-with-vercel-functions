@@ -840,10 +840,23 @@ test("an instant voice is made from a recording with the speaker's agreement, an
   const saidRequest = await said;
   expect(saidRequest.postDataJSON()).toEqual({ voiceId: expect.stringMatching(/^iv_/), text: "Welcome to the team." });
   expect(saidRequest.headers()["idempotency-key"]).toMatch(/^[A-Za-z0-9_-]{8,100}$/);
-  const spokenCard = page.getByTestId("voice-change").filter({ hasText: `Welcome to the team. in ${name}` });
+  const spokenCard = page.getByTestId("voice-change").filter({ hasText: `Welcome to the team in ${name}` });
   await expect(spokenCard).toBeFocused();
   await expect(spokenCard.getByTestId("voice-change-meta")).toContainText("from text");
   await expect(spokenCard.getByRole("link", { name: /^Download / })).toHaveAttribute("href", /\/demo\/revoiced\.mp3$/);
+  // The count is read with the field; a message stays in its own card when another card's choice changes.
+  await expect(page.getByText("20 of 2,000 characters", { exact: true })).toBeVisible();
+  const speechCard = page.getByRole("heading", { name: "Speak text in a voice", exact: true }).locator("..");
+  const late = "HeyGen did not finish speaking the text in time; try again, or try a shorter text";
+  await page.route("**/api/voice-changer/speech", (r) => r.fulfill({ status: 502, json: { error: late } }));
+  await speak.click();
+  await expect(speechCard.getByRole("alert")).toHaveText(late);
+  await page.getByRole("combobox", { name: /^Voice\b/ }).selectOption({ index: 0 });
+  await expect(speechCard.getByRole("alert")).toHaveText(late);
+  await page.unroute("**/api/voice-changer/speech");
+  await page.getByRole("textbox", { name: /^Text\b/ }).press("End");
+  await page.getByRole("textbox", { name: /^Text\b/ }).pressSequentially(" ");
+  await expect(speechCard.getByRole("alert")).toHaveCount(0);
   const withText = (await (await page.request.get("/api/voice-changer")).json()) as { changes: Array<Record<string, unknown>> };
   const spokenRow = withText.changes.find((c) => c.text === "Welcome to the team.")!;
   for (const key of ["provider", "providerVoiceId", "providerAudio", "ownerId", "clipId"]) expect(Object.keys(spokenRow)).not.toContain(key);

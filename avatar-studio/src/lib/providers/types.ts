@@ -104,6 +104,14 @@ export interface AvatarProvider {
   startLipsync?(input: LipsyncInput): Promise<{ jobId: string }>;
   /** Where a lip sync stands, with the video once it is ready (its link signed for a limited time). */
   lipsyncStatus?(jobId: string): Promise<LipsyncStatus>;
+  /**
+   * Starts a set of new looks for a custom photo avatar already prepared for rendering (HeyGen Look Packs): its face in a
+   * pack's wardrobe and setting. `key` makes a retried start return the same looks. Each look is followed with
+   * `portraitStatus` (a look id, as for a drawn presenter). Absent when the provider cannot.
+   */
+  startLookPack?(input: { avatar: Avatar; pack: string; gender: "female" | "male"; aspect: "16:9" | "9:16"; key: string }): Promise<{ lookIds: string[] }>;
+  /** What a photo avatar made of one of those looks carries, so a render uses the look as it is. */
+  lookAssetIds?(lookId: string): Record<string, string>;
   /** The account's HeyGen Studio templates ready to fill. Absent when the provider has none. */
   listStudioTemplates?(): Promise<StudioTemplate[]>;
   /** One template's variables (with their defaults) and scenes. */

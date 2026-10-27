@@ -1,5 +1,6 @@
 import { STUDIO_VARIABLE_TYPES, backdropIdOf, isPhotoAvatar, rendersOnAvatarV, type AudioClip, type Avatar, type Backdrop, type Background, type Scene, type StudioTemplate, type StudioTemplateDetail, type StudioVariable, type VideoRequest, type Voice } from "../../types";
 import { silentSeconds, withBreakTags } from "../../pauses";
+import type { LookPackKey } from "../../look-packs";
 import { heygenBurnsCaptions } from "../../captions";
 import { voiceTakesAccent } from "../../language";
 import { webhookUrl } from "../../config";
@@ -22,6 +23,17 @@ const PENDING = "heygen:pending";
 const ASSET = "heygen:asset";
 /** HeyGen's answer (409) to an idempotency key whose first request it is still working on. */
 const STILL_SENDING = "This start is still being sent to HeyGen; try again in a moment";
+/** HeyGen's Look Pack template ids, a female and a male variant of each pack (its gallery, as documented). */
+const LOOK_PACK_TEMPLATES: Record<LookPackKey, { female: string; male: string }> = {
+  "modern-corporate": { female: "5a8e6be843ee4321a014946bf62aa322", male: "5e659e76755d47fd9160a2d7dedce124" },
+  "business-casual": { female: "e1650a9029d04ea1a350421c163295fd", male: "a5f8e0c0cb654c1a83c695629b173af5" },
+  "scandinavian-minimal": { female: "e7b000e2cb0d44f1a2d2f291a38b395a", male: "9600f78f27bb49d792e1c56ce624b929" },
+  "cool-tech": { female: "d7ad40ec97d4459a92b33398b57caf4e", male: "fbd03fc3603a4e3caff594f5743a1733" },
+  healthcare: { female: "14f4070bd5a04eb6b1f82ae087cd0f30", male: "ce706bfa8556401e8c4401765102a455" },
+  keynote: { female: "b0cae4fbae384ab9ab9a8e73ba504be8", male: "71e84769162d4f4186563ad9e0fc45b8" },
+  fitness: { female: "935ea0b7cdde4e6eb5a198a3d666f677", male: "daeb8b15c92a4acf9ffb437ba5534458" },
+  "car-dealership": { female: "6f183d726933457c9035fc0aa4e9c0c3", male: "8595c78b466c4e51802731229c59b6e7" },
+};
 /** How often, and how long, a new photo avatar is waited for before its first render: about ten seconds. */
 const PHOTO_CHECKS = 4;
 const PHOTO_CHECK_MS = 3000;
@@ -381,6 +393,31 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       cuts: job.num_cuts ?? undefined,
       reductionPct: job.reduction_pct ?? undefined,
     });
+  }
+
+  /**
+   * New looks for a prepared photo avatar (v3 Look Packs): its HeyGen look is the identity reference, and the pack's
+   * template for the avatar's gender sets the wardrobe and setting. The looks join the avatar's character at HeyGen.
+   */
+  async startLookPack({ avatar, pack, gender, aspect, key }: { avatar: Avatar; pack: string; gender: "female" | "male"; aspect: "16:9" | "9:16"; key: string }) {
+    const reference = avatar.providerAssetIds?.[LOOK];
+    if (!reference) throw new ValidationError(`"${avatar.name}" has not been made into a HeyGen photo avatar yet`);
+    if (avatar.providerAssetIds?.[PENDING]) throw new ConflictError(`HeyGen is still preparing "${avatar.name}"; try again in a minute`);
+    const template = LOOK_PACK_TEMPLATES[pack as LookPackKey];
+    if (!template) throw new ValidationError("Unknown look pack");
+    try {
+      return { lookIds: await this.client.createLooks({ type: "look_pack", reference_look_id: reference, template_id: template[gender], aspect_ratio: aspect }, key) };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      if (/ failed: 409 /.test(message)) throw new ConflictError(STILL_SENDING);
+      // A pack the workspace may not use (403), a look HeyGen will not restyle, or one past the plan is the account's to change.
+      if (/ failed: (400|402|403|404|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not make new looks of "${avatar.name}": ${heygenReason(message, "try another photo avatar or pack")}`);
+      throw err;
+    }
+  }
+
+  lookAssetIds(lookId: string): Record<string, string> {
+    return { [LOOK]: lookId, [PENDING]: "" };
   }
 
   /** A video given a new audio track, the speaker's mouth redrawn to match (v3 lip sync). */

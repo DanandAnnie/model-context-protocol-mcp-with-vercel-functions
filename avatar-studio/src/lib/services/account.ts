@@ -5,8 +5,9 @@ import { getStore } from "../store";
 import { LOCAL_OWNER } from "../owner-id";
 import { assertNoRenewingPlan } from "../billing";
 import { ConflictError } from "../errors";
+import { madeLooksOf, rememberMadeLooks } from "./avatars";
 
-const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip", "videolead", "backdrop", "portrait", "highlight", "cleanup", "lipsync"] as const;
+const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip", "videolead", "backdrop", "portrait", "highlight", "cleanup", "lipsync", "lookpack"] as const;
 /**
  * Cover rows hold image bytes; the export describes each cover from its video (`cover.mimeType`, `cover.bytes`) instead
  * of loading them. Clip audio is never listed (each `clip` row names its own `clipaudio_<id>` row), so the export and
@@ -33,6 +34,10 @@ export async function exportOwnerData(ownerId: string = LOCAL_OWNER): Promise<Ow
       if (kind === "highlight" || kind === "cleanup" || kind === "lipsync") {
         delete copy.provider;
         delete copy.providerJobId;
+      }
+      if (kind === "lookpack") {
+        delete copy.provider;
+        delete copy.lookIds;
       }
       if (kind === "sharelock") {
         delete copy.hash;
@@ -84,6 +89,8 @@ export async function deleteOwnerData(ownerId: string = LOCAL_OWNER, opts: { bil
         // The clip's audio sits in its own row, removed by id so it is never loaded.
         if (kind === "clip") await getStore().remove("clipaudio", `clipaudio_${item.id}`);
         if (kind === "backdrop") await getStore().remove("backdropdata", `backdropdata_${item.id}`);
+        // Looks made at the renderer stay there; they stay the studio's, never offered to other accounts.
+        await rememberMadeLooks(madeLooksOf(kind, item));
         await getStore().remove(kind, item.id);
         removed.add(item.id);
       }

@@ -1,7 +1,7 @@
 "use client";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
-import { Camera, Pencil, Trash2, Upload, Users, Video as VideoIcon } from "lucide-react";
+import { Camera, Pencil, Shirt, Trash2, Upload, Users, Video as VideoIcon } from "lucide-react";
 import { AvatarTile } from "@/components/AvatarPicker";
 import { FavoriteStar } from "@/components/FavoriteStar";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -9,6 +9,8 @@ import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { PortraitGenerator } from "@/components/PortraitGenerator";
+import { LookPackList, LookPackPanel, type LookPack } from "@/components/LookPacks";
+import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { api } from "@/lib/client";
 import type { Avatar, ProviderStatus, Voice } from "@/lib/types";
@@ -28,6 +30,36 @@ function AvatarsInner() {
   const { data: voiceData } = useApi<{ voices: Voice[] }>("/api/voices");
   const { data: status } = useApi<ProviderStatus>("/api/status");
   const voices = voiceData?.voices ?? [];
+  const { data: packData, setData: setPackData, refetch: refetchPacks } = useApi<{ lookPacks: LookPack[]; available: boolean }>("/api/look-packs");
+  const packs = packData?.lookPacks ?? [];
+  // While a pack is being made the list is asked again, only while the tab is visible; each look that is ready brings
+  // its photo avatar into the library.
+  const making = packs.some((p) => p.status === "processing");
+  useEffect(() => {
+    if (!making) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void refetchPacks();
+    }, 10_000);
+    return () => clearInterval(timer);
+  }, [making, refetchPacks]);
+  const readyLooks = packs.reduce((n, p) => n + p.looks.filter((l) => l.status === "completed").length, 0);
+  const seenReady = useRef<number | null>(null);
+  const [packNote, setPackNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!packData) return;
+    if (seenReady.current !== null && readyLooks > seenReady.current) {
+      refetch();
+      setPackNote(`${readyLooks - seenReady.current} new ${readyLooks - seenReady.current === 1 ? "look is" : "looks are"} ready in your avatars.`);
+    }
+    seenReady.current = readyLooks;
+  }, [packData, readyLooks, refetch]);
+  const [looksFor, setLooksFor] = useState<Avatar | null>(null);
+  const focusAfterRender = useFocusAfterRender();
+  /** Closes the new-looks panel and gives the focus back to the button that opened it. */
+  const closeLooks = (a: Avatar) => {
+    setLooksFor(null);
+    focusAfterRender(() => document.querySelector<HTMLElement>(`[data-new-looks="${CSS.escape(a.id)}"]`));
+  };
   const [open, setOpen] = useState(params.get("new") === "1");
   const newButton = useRef<HTMLButtonElement>(null);
   /** Closes the panel and gives the focus back to the button that opened it, rather than losing it with the panel. */
@@ -122,6 +154,35 @@ function AvatarsInner() {
         {data && <span className="text-xs text-slate-500">{avatars.length} of {data.avatars.length}</span>}
       </div>
 
+      <p role="status" className="sr-only">
+        {packNote ?? ""}
+      </p>
+      {looksFor && (
+        <LookPackPanel
+          key={looksFor.id}
+          avatar={looksFor}
+          onClose={() => closeLooks(looksFor)}
+          onStarted={(p) => {
+            setLooksFor(null);
+            setPackData((prev) => ({ available: prev?.available ?? true, lookPacks: [p, ...(prev?.lookPacks ?? []).filter((x) => x.id !== p.id)] }));
+            // A check that left before this pack was started would answer without it; asking again retires it.
+            void refetchPacks();
+            setPackNote(`Making new looks of ${p.avatarName}; they appear in your avatars when ready.`);
+            focusAfterRender(() => document.querySelector<HTMLElement>(`[data-look-pack="${CSS.escape(p.id)}"]`));
+          }}
+        />
+      )}
+      <LookPackList
+        packs={packs}
+        avatars={data?.avatars ?? []}
+        canEdit={canEdit !== false}
+        onForget={async (p) => {
+          await api(`/api/look-packs/${p.id}`, { method: "DELETE" });
+          setPackData((prev) => (prev ? { ...prev, lookPacks: prev.lookPacks.filter((x) => x.id !== p.id) } : prev));
+          void refetchPacks();
+        }}
+      />
+
       {open && <CreateAvatarPanel voices={voices} canGenerate={!!status?.portraitGeneration} demo={status?.avatar === "mock"} onClose={closePanel} onCreated={() => { closePanel(); refetch(); }} />}
 
       {loading ? (
@@ -142,6 +203,17 @@ function AvatarsInner() {
               )}
               {a.source === "custom" && (
                 <span className="absolute right-2 top-2 flex gap-1">
+                  {packData?.available && canEdit !== false && (
+                    <button
+                      onClick={() => setLooksFor(a)}
+                      aria-label={`New looks of ${a.name}`}
+                      title="Dress this presenter in a pack of new looks"
+                      data-new-looks={a.id}
+                      className="rounded-full bg-white/90 p-1.5 text-slate-600 shadow hover:text-brand-700"
+                    >
+                      <Shirt className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                   <button
                     onClick={() => rename(a)}
                     aria-label={`Rename ${a.name}`}

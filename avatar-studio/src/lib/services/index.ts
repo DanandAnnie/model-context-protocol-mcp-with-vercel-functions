@@ -21,4 +21,5 @@ export * from "./backdrops";
 export * from "./highlights";
 export * from "./cleanups";
 export * from "./lipsyncs";
+export * from "./lookpacks";
 export * from "./studio-templates";

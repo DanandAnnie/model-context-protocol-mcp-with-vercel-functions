@@ -724,6 +724,47 @@ test("a video is lip-synced to an uploaded clip or a linked track, at the chosen
   expect((await page.request.delete(`/api/clips/${clipId}`)).status()).toBe(204);
 });
 
+test("a photo avatar is dressed in a look pack, each look kept as a presenter of its own", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const name = `Looks ${tag}`;
+  const svg = "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%2F%3E";
+  const avatar = (await (await page.request.post("/api/avatars", { data: { name, imageUrl: svg, gender: "neutral" } })).json()).avatar as { id: string };
+  await page.goto("/avatars");
+  const open = page.getByRole("button", { name: `New looks of ${name}` });
+  await open.click();
+  const panel = page.getByTestId("look-pack-panel");
+  await expect(panel.getByRole("heading", { name: `New looks of ${name}` })).toBeFocused();
+  // A presenter of no stated gender needs the pack's women's or men's looks chosen first.
+  await expect(panel.getByRole("button", { name: "Make new looks" })).toBeDisabled();
+  await panel.getByLabel("Men's", { exact: true }).check();
+  await panel.getByLabel(/^Healthcare/).check();
+  await panel.getByLabel("Portrait 9:16").check();
+  await expect(panel.getByText("cut from the middle of landscape ones")).toBeVisible();
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/look-packs") && r.method() === "POST");
+  await panel.getByRole("button", { name: "Make new looks" }).click();
+  const request = await sent;
+  expect(request.postDataJSON()).toEqual({ avatarId: avatar.id, pack: "healthcare", gender: "male", aspect: "9:16" });
+  expect(request.headers()["idempotency-key"]).toMatch(/^[A-Za-z0-9_-]{8,100}$/);
+  // The pack is listed and focused; the demo renderer's five looks are ready at once and join the library.
+  const pack = page.getByTestId("look-pack").filter({ hasText: `Healthcare looks of ${name}` });
+  await expect(pack).toBeFocused();
+  await expect(pack.getByTestId("look-pack-meta")).toContainText("5 of 5 ready · 9:16");
+  await expect(pack.getByRole("img")).toHaveCount(5);
+  await expect(page.getByTestId("avatar-library").getByText(`${name} · Healthcare 1`)).toBeVisible();
+  const listed = (await (await page.request.get("/api/look-packs")).json()).lookPacks as Array<Record<string, unknown>>;
+  const mine = listed.find((p) => p.avatarId === avatar.id)!;
+  expect(Object.keys(mine)).not.toContain("lookIds");
+  const made = (mine.looks as Array<{ avatarId: string }>).map((l) => l.avatarId);
+  const all = (await (await page.request.get("/api/avatars")).json()).avatars as Array<{ id: string; name: string; gender?: string; source: string }>;
+  expect(made.map((id) => all.find((a) => a.id === id))).toEqual([1, 2, 3, 4, 5].map((n) => expect.objectContaining({ name: `${name} · Healthcare ${n}`, gender: "male", source: "custom" })));
+  // Forgetting the pack asks first and keeps its presenters.
+  page.once("dialog", (d) => d.accept());
+  await pack.getByRole("button", { name: `Forget the Healthcare looks of ${name}` }).click();
+  await expect(pack).toHaveCount(0);
+  await expect(page.getByTestId("avatar-library").getByText(`${name} · Healthcare 1`)).toBeVisible();
+  for (const id of [avatar.id, ...made]) expect((await page.request.delete(`/api/avatars/${id}`)).status()).toBe(200);
+});
+
 test("a HeyGen Studio template is filled in and rendered as a library video", async ({ page }) => {
   await page.goto("/templates");
   const section = page.getByTestId("studio-templates");

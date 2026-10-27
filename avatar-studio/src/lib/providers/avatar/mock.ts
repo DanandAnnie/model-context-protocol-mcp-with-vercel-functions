@@ -75,6 +75,21 @@ export class MockAvatarProvider implements AvatarProvider {
     return { status: "completed", progress: 100, videoUrl: demoAssetUrl(SAMPLE_VIDEO), thumbnailUrl: SAMPLE_THUMB, originalSec: 64, outputSec: 58.5, cuts: 7, reductionPct: 8.6 };
   }
 
+  /**
+   * Demo look pack: five drawn stand-ins, each a demo portrait of the avatar's name in its own colours, ready at once;
+   * nothing is generated. They are followed like drawn presenters.
+   */
+  async startLookPack({ avatar, pack }: { avatar: Avatar; pack: string }) {
+    let hash = 0;
+    for (const ch of `${avatar.id}:${pack}`) hash = (hash * 31 + ch.codePointAt(0)!) >>> 0;
+    const name = Buffer.from(Array.from(avatar.name).slice(0, 40).join("")).toString("base64url");
+    return { lookIds: Array.from({ length: 5 }, (_, i) => `mockportrait_${(hash + i * 197) % 1000}_${name}`) };
+  }
+
+  lookAssetIds(lookId: string): Record<string, string> {
+    return { [this.name]: lookId };
+  }
+
   /** Demo lip sync: the sample video stands in for the synced one a few seconds later; nothing is redrawn. */
   async startLipsync() {
     return { jobId: `mockls_${Date.now()}` };

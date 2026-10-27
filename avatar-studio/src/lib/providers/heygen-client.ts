@@ -162,6 +162,17 @@ export class HeyGenClient {
     }>(`${V3}/filler-word-removals/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(10_000) });
   }
 
+  /**
+   * New looks for a look the account owns (`POST /v3/avatars/looks`), from a Look Pack or a single look template; `key`
+   * makes a retried start replay the first answer. Returns one id per look being generated.
+   */
+  async createLooks(body: Record<string, unknown>, key: string): Promise<string[]> {
+    const out = await this.request<{ group_id?: string; looks?: Array<{ id?: string }> }>(`${V3}/avatars/looks`, { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": key }, signal: AbortSignal.timeout(20_000) });
+    const ids = (out?.looks ?? []).map((l) => l.id).filter((id): id is string => typeof id === "string" && id.length > 0);
+    if (!ids.length) throw new Error("HeyGen returned no looks for the look pack");
+    return ids;
+  }
+
   /** Starts a lip sync (`POST /v3/lipsyncs`); `key` makes a retried start return the same job. */
   async createLipsync(body: Record<string, unknown>, key: string): Promise<string> {
     const out = await this.request<{ lipsync_id?: string }>(`${V3}/lipsyncs`, { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": key }, signal: AbortSignal.timeout(20_000) });

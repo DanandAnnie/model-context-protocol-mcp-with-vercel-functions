@@ -647,7 +647,7 @@ export function isRefreshDeferred(videoId: string, now = Date.now()): boolean {
 const preparing = new Map<string, Promise<Avatar>>();
 
 /** Makes a custom portrait usable by the provider (uploading it once) and persists the result. */
-function prepareOnce(provider: AvatarProvider, avatar: Avatar): Promise<Avatar> {
+export function prepareOnce(provider: AvatarProvider, avatar: Avatar): Promise<Avatar> {
   const running = preparing.get(avatar.id);
   if (running) return running;
   const run = (async () => {

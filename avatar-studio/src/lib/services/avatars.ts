@@ -3,7 +3,8 @@ import { z } from "zod";
 import { newId, nowIso } from "../ids";
 import { getAvatarProvider } from "../providers";
 import { getStore } from "../store";
-import type { Agent, Avatar, PortraitJob } from "../types";
+import type { Agent, Avatar, LookPackJob, MadeLook, PortraitJob } from "../types";
+import { createHash } from "node:crypto";
 import { LOCAL_OWNER } from "../owner-id";
 import { memo } from "../cache";
 import { LIST_TTL_MS, owned } from "./shared";
@@ -19,13 +20,35 @@ export function providerAvatars(): Promise<Avatar[]> {
 }
 
 /**
- * Looks the studio made in the renderer's account for any account: the photo avatars made from uploaded portraits and
- * the presenters drawn from a description. The renderer lists them with its own library, to every account that shares
- * its key; they are an account's own and are never offered to another (each account sees its portraits instead).
+ * Looks the studio made in the renderer's account for any account: the photo avatars made from uploaded portraits, the
+ * presenters drawn from a description, and the looks of look packs. The renderer lists them with its own library, to
+ * every account that shares its key; they are an account's own and are never offered to another (each account sees its
+ * photo avatars instead). A look stays left out after the avatar, portrait, or account that made it is deleted, as the
+ * renderer keeps it (see `rememberMadeLooks`).
  */
 async function studioMadeLooks(): Promise<Set<string>> {
-  const [avatars, portraits] = await Promise.all([getStore().list<Avatar>("avatar"), getStore().list<PortraitJob>("portrait")]);
-  return new Set([...avatars.flatMap((a) => Object.values(a.providerAssetIds ?? {})), ...portraits.map((p) => p.providerJobId)].filter(Boolean));
+  const [avatars, portraits, packs, made] = await Promise.all([getStore().list<Avatar>("avatar"), getStore().list<PortraitJob>("portrait"), getStore().list<LookPackJob>("lookpack"), getStore().list<MadeLook>("madelook")]);
+  return new Set(
+    [...avatars.flatMap((a) => Object.values(a.providerAssetIds ?? {})), ...portraits.map((p) => p.providerJobId), ...packs.flatMap((p) => p.lookIds), ...made.map((m) => m.lookId)].filter(Boolean),
+  );
+}
+
+/**
+ * Notes looks the studio made in the renderer's shared account, kept whatever becomes of the record that made them (one
+ * row per look, by a hash of its id, with no owner, so deleting an account keeps them too).
+ */
+export async function rememberMadeLooks(lookIds: Iterable<string | undefined>): Promise<void> {
+  const ids = [...new Set([...lookIds].filter((id): id is string => !!id))];
+  await Promise.all(ids.map((lookId) => getStore().put<MadeLook>("madelook", { id: `ml_${createHash("sha256").update(lookId).digest("base64url").slice(0, 32)}`, lookId })));
+}
+
+/** The looks a stored record made at the renderer: an avatar's uploads, a drawn portrait, or a pack's looks. */
+export function madeLooksOf(kind: string, item: unknown): string[] {
+  const row = item as Partial<Avatar & PortraitJob & LookPackJob>;
+  if (kind === "avatar") return Object.values(row.providerAssetIds ?? {});
+  if (kind === "portrait") return row.providerJobId ? [row.providerJobId] : [];
+  if (kind === "lookpack") return row.lookIds ?? [];
+  return [];
 }
 
 /** The renderer's library without the looks made for accounts here (see `studioMadeLooks`). */
@@ -193,6 +216,8 @@ export async function updateAvatar(id: string, patch: z.infer<typeof updateAvata
 }
 
 export async function deleteAvatar(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
-  owned(await getStore().get<Avatar>("avatar", id), ownerId, `Avatar ${id}`);
+  const avatar = owned(await getStore().get<Avatar>("avatar", id), ownerId, `Avatar ${id}`);
+  // The renderer keeps the look; it stays the studio's, never offered to other accounts.
+  await rememberMadeLooks(madeLooksOf("avatar", avatar));
   await getStore().remove("avatar", id);
 }

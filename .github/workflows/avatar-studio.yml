@@ -13,7 +13,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     # Official Playwright image: Node 22 plus Chromium and its system libraries are
     # preinstalled, so no apt-get or browser download runs in CI. Keep the tag in
     # step with the @playwright/test version in avatar-studio/package.json.
@@ -34,7 +34,10 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run e2e
-        timeout-minutes: 8
+        # The suite runs one test at a time (the demo store is shared) and takes about
+        # 8.5 minutes; the limit leaves room for a slower runner without letting a hung
+        # browser hold the job for long.
+        timeout-minutes: 14
         env:
           HOME: /root
       - uses: actions/upload-artifact@v4

@@ -112,6 +112,9 @@ describe("voice changer", () => {
     const own = await ready("u1");
     await assert.rejects(startVoiceChange(voiceChangeSchema.parse({ voiceId: own.id, clipId: theirClip.id }), "u1"), /audio clip is no longer available/);
     await assert.rejects(createInstantVoice(instantVoiceSchema.parse({ name: " narrator ", clipId: mine.id, agreed: true }), "u1"), (e: unknown) => e instanceof ConflictError && /already have a voice named/.test((e as Error).message));
+    // One that failed is never offered, so its name may be used again.
+    await getStore().put<InstantVoice>("instantvoice", { ...(await getStore().get<InstantVoice>("instantvoice", own.id))!, status: "failed" });
+    assert.equal((await createInstantVoice(instantVoiceSchema.parse({ name: "Narrator", clipId: mine.id, agreed: true }), "u1")).name, "Narrator");
     await ready("u2", "Later");
     const making = await createInstantVoice(instantVoiceSchema.parse({ name: "Later", clipId: mine.id, agreed: true }), "u1");
     await assert.rejects(startVoiceChange(voiceChangeSchema.parse({ voiceId: making.id, clipId: mine.id }), "u1"), /still being made/);

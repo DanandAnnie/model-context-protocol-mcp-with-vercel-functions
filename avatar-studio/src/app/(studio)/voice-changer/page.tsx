@@ -20,6 +20,7 @@ const VOICE_STATUS: Record<Voice["status"], string> = { processing: "Being made"
 /** A choice of one of the account's audio clips, with an upload that saves a file as a new clip and chooses it. */
 function ClipChoice(props: { label: string; hint: string; uploadLabel: string; clips: AudioClip[]; value: string; disabled: boolean; onChange: (id: string) => void; onUploaded: (clip: AudioClip) => void; onDeleted: (clip: AudioClip) => void; onError: (message: string | null) => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const selectRef = useRef<HTMLSelectElement>(null);
   const [uploading, setUploading] = useState(false);
   const chosen = props.clips.find((c) => c.id === props.value);
   async function upload(file: File) {
@@ -37,7 +38,7 @@ function ClipChoice(props: { label: string; hint: string; uploadLabel: string; c
     }
   }
   async function remove(clip: AudioClip) {
-    if (!window.confirm(`Delete the audio clip “${clip.name}”? Scenes, lip syncs, voices, and recordings already made from it are kept.`)) return;
+    if (!window.confirm(`Delete the audio clip “${clip.name}”? Videos, lip syncs, voices, and recordings already made from it are kept, but a scene or draft still using it will need another clip.`)) return;
     props.onError(null);
     try {
       await api(`/api/clips/${clip.id}`, { method: "DELETE" });
@@ -45,13 +46,15 @@ function ClipChoice(props: { label: string; hint: string; uploadLabel: string; c
     } catch (e) {
       // One deleted elsewhere is gone all the same.
       if (e instanceof ApiError && e.status === 404) props.onDeleted(clip);
-      else props.onError(e instanceof Error ? e.message : "The audio clip could not be deleted");
+      else return props.onError(e instanceof Error ? e.message : "The audio clip could not be deleted");
     }
+    // The delete button goes with the clip; the focus goes to the choice rather than being lost.
+    selectRef.current?.focus();
   }
   return (
     <div>
       <Field label={props.label} hint={props.hint}>
-        <select className={inputClass} value={props.value} disabled={props.disabled || uploading} onChange={(e) => props.onChange(e.target.value)}>
+        <select ref={selectRef} className={inputClass} value={props.value} disabled={props.disabled || uploading} onChange={(e) => props.onChange(e.target.value)}>
           <option value="">{props.clips.length ? "Choose a clip" : "No clips yet"}</option>
           {props.clips.map((c) => (
             <option key={c.id} value={c.id}>
@@ -80,7 +83,7 @@ function ClipChoice(props: { label: string; hint: string; uploadLabel: string; c
         {chosen && <audio controls preload="none" src={`/api/clips/${chosen.id}`} className="h-8 min-w-0 flex-1" aria-label={`Play ${chosen.name}`} />}
         {/* Clips are made by every upload; one no longer needed can go from here. */}
         {chosen && !props.disabled && (
-          <button type="button" onClick={() => void remove(chosen)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-rose-600" aria-label={`Delete the audio clip ${chosen.name}`}>
+          <button type="button" onClick={() => void remove(chosen)} disabled={uploading} className="rounded p-1 disabled:opacity-50 text-slate-400 hover:bg-slate-100 hover:text-rose-600" aria-label={`Delete the audio clip ${chosen.name}`}>
             <Trash2 className="h-4 w-4" />
           </button>
         )}
@@ -126,7 +129,8 @@ export default function VoiceChangerPage() {
   const [err, setErr] = useState<string | null>(null);
   // Where the message shows: in the card whose action it answers, so it is seen wherever the page is scrolled to.
   const [errAt, setErrAt] = useState<"change" | "voice" | "lists">("lists");
-  const fail = (at: typeof errAt) => (message: string | null) => (setErrAt(at), setErr(message));
+  // A message is shown in one card; clearing from a card leaves another card's message (or the lists') alone.
+  const fail = (at: typeof errAt) => (message: string | null) => (message === null ? errAt === at && setErr(null) : (setErrAt(at), setErr(message)));
   const [note, setNote] = useState<string | null>(null);
   const changesRef = useRef<HTMLDivElement>(null);
   const voicesRef = useRef<HTMLUListElement>(null);

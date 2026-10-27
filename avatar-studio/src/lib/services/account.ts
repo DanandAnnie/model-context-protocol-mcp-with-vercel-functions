@@ -6,7 +6,6 @@ import { LOCAL_OWNER } from "../owner-id";
 import { assertNoRenewingPlan } from "../billing";
 import { ConflictError } from "../errors";
 import { madeLooksOf, rememberMadeLooks } from "./avatars";
-import { rememberMadeVoices } from "./voices";
 import { dropTwinVoice } from "./twins";
 import type { TwinJob } from "../types";
 
@@ -105,10 +104,7 @@ export async function deleteOwnerData(ownerId: string = LOCAL_OWNER, opts: { bil
         // Looks made at the renderer stay there; they stay the studio's, never offered to other accounts. A twin's
         // voice that never became the account's (those went with the voices) is deleted there.
         await rememberMadeLooks(madeLooksOf(kind, item));
-        if (kind === "twin") {
-          await rememberMadeVoices([(item as TwinJob).voiceId]);
-          await dropTwinVoice(item as TwinJob);
-        }
+        if (kind === "twin") await dropTwinVoice(item as TwinJob);
         await getStore().remove(kind, item.id);
         removed.add(item.id);
       }

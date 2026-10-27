@@ -5,7 +5,7 @@ import { nowIso } from "../ids";
 import { getTtsProvider } from "../providers";
 import { decodeDataUrl } from "../providers/image";
 import { getStore } from "../store";
-import type { Avatar, MadeLook, TwinJob, Voice } from "../types";
+import type { Avatar, MadeVoice, Voice } from "../types";
 import { createHash } from "node:crypto";
 import { LOCAL_OWNER } from "../owner-id";
 import { memo } from "../cache";
@@ -13,20 +13,25 @@ import { ValidationError } from "../errors";
 import { LIST_TTL_MS, owned } from "./shared";
 
 /**
- * Voices the renderer cloned for accounts here (a digital twin's, from its footage). The renderer lists them with the
- * account's own voices, to every account that shares its key; only the account whose twin made one sees it (as its own
- * voice), and it stays left out after the twin is forgotten.
+ * Voices the renderer cloned for accounts here (a digital twin's, from its footage). The renderer may list them with
+ * the account's own voices, to every account that shares its key (HeyGen's listing also leaves out its twins' voices);
+ * only the account whose twin made one sees it (as its own voice), and it stays left out after the twin is forgotten.
  */
 export async function studioMadeVoices(): Promise<Set<string>> {
-  const [twins, made] = await Promise.all([getStore().list<TwinJob>("twin"), getStore().list<MadeLook>("madelook")]);
-  return new Set([...twins.map((t) => t.voiceId), ...made.filter((m) => m.voice).map((m) => m.lookId)].filter((id): id is string => !!id));
+  return new Set((await getStore().list<MadeVoice>("madevoice")).map((m) => m.voiceId));
 }
 
-/** Notes voices the renderer cloned for accounts here, kept as made looks are (see `rememberMadeLooks`). */
+/**
+ * Notes voices the renderer cloned for accounts here, one ownerless row per voice by a hash of its id, kept whatever
+ * becomes of the twin or account (as `rememberMadeLooks` does for looks). Written as soon as a twin's answer is stored.
+ */
 export async function rememberMadeVoices(voiceIds: Iterable<string | undefined>): Promise<void> {
   const ids = [...new Set([...voiceIds].filter((id): id is string => !!id))];
-  await Promise.all(ids.map((voiceId) => getStore().put<MadeLook>("madelook", { id: `mv_${createHash("sha256").update(voiceId).digest("base64url").slice(0, 32)}`, lookId: voiceId, voice: true })));
+  await Promise.all(ids.map((voiceId) => getStore().put<MadeVoice>("madevoice", { id: `mv_${createHash("sha256").update(voiceId).digest("base64url").slice(0, 32)}`, voiceId })));
 }
+
+/** A voice kept from a digital twin, which does not take one of the account's cloned or designed voice places. */
+export const isTwinVoice = (v: Voice) => !!v.tags?.includes("digital twin");
 
 /**
  * Provider voices (memoised) plus the owner's own voices (cloned, designed, or a digital twin's), which are listed first.
@@ -119,7 +124,7 @@ export const saveDesignedVoiceSchema = z.object({
 /** Refuses, naming what to do, when the owner already keeps as many voices of its own (cloned or designed) as it may. */
 export async function assertVoiceRoom(ownerId: string, action = "design another"): Promise<void> {
   const provider = getTtsProvider();
-  const mine = (await getStore().list<Voice>("voice", ownerId)).filter((v) => v.provider === provider.name);
+  const mine = (await getStore().list<Voice>("voice", ownerId)).filter((v) => v.provider === provider.name && !isTwinVoice(v));
   if (mine.length >= MAX_CLONED_VOICES) throw new ValidationError(`At most ${MAX_CLONED_VOICES} voices of your own (cloned or designed) per account; delete one to ${action}`);
 }
 

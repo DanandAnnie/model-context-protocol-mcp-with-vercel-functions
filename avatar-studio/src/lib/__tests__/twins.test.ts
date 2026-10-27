@@ -274,8 +274,11 @@ function heygenStub() {
       state.deleted.push(voiceId);
       return Response.json({ data: { voice_id: voiceId } });
     }
-    if (url.includes("/v3/voices?type=private")) return Response.json({ data: [1, 2, 3].map((n) => ({ voice_id: `voice_${n}`, name: `Clone ${n}` })).concat([{ voice_id: "operator_voice", name: "Operator" }]), has_more: false });
+    if (voiceId) return Response.json({ data: { voice_id: voiceId, language: "English", gender: "female", preview_audio_url: `https://93.184.216.34/${voiceId}.mp3`, support_pause: true } });
+    if (url.includes("/v3/voices?type=private"))
+      return Response.json({ data: [1, 2, 3, 4, 5].map((n) => ({ voice_id: `voice_${n}`, name: `Clone ${n}` })).concat([{ voice_id: "operator_voice", name: "Operator" }, { voice_id: "operator_twin_voice", name: "Operator's twin" }]), has_more: false });
     if (url.includes("/v3/voices?type=public")) return Response.json({ data: [{ voice_id: "public_voice", name: "Nadine" }], has_more: false });
+    if (url.includes("/v3/avatars/looks?ownership=private&avatar_type=digital_twin")) return Response.json({ data: state.listed.filter((l) => l.avatar_type === "digital_twin"), has_more: false });
     if (url.includes("/v3/avatars/looks?ownership=")) return Response.json({ data: url.includes("private") ? state.listed : [], has_more: false });
     return new Response("unexpected", { status: 500 });
   }) as typeof fetch;
@@ -305,6 +308,10 @@ describe("digital twins with HeyGen: voices, lost answers, and the shared librar
       const dana = await startTwin(input(), "u1");
       assert.equal(ids(await listVoices("u2")).includes("voice_1"), false, "the clone is never offered to another account, even while it trains");
       assert.ok(ids(await listVoices("u2")).includes("operator_voice"), "the operator's own HeyGen voices are listed as before");
+      // HeyGen's listing leaves out the voice of any twin of its account too, whether or not the studio knows of it.
+      hg.listed = [{ id: "look_op", name: "Operator's twin", avatar_type: "digital_twin", default_voice_id: "operator_twin_voice", preview_image_url: "https://93.184.216.34/op.png", status: "completed" }];
+      forgetMemo();
+      assert.equal(ids(await listVoices("u2")).includes("operator_twin_voice"), false);
       // Trained, and a workspace HeyGen lets skip consent has it given already: no link is needed.
       hg.looks.look_1 = { status: "completed", preview_image_url: "https://93.184.216.34/twin.png" };
       hg.groups.group_1 = { consent_status: "accepted" };
@@ -313,6 +320,7 @@ describe("digital twins with HeyGen: voices, lost answers, and the shared librar
       assert.equal((await getAvatar(twin.avatarId!, "u1")).defaultVoiceId, "voice_1", "the presenter opens with its own voice");
       const mine = (await listVoices("u1")).find((v) => v.id === "voice_1")!;
       assert.deepEqual([mine.name, mine.source, mine.tags], ["Dana Ruiz (twin)", "custom", ["digital twin"]]);
+      assert.deepEqual([mine.language, mine.gender, mine.previewUrl], ["English", "female", "https://93.184.216.34/voice_1.mp3"], "with its language and preview as HeyGen describes it");
       assert.equal(ids(await listVoices("u2")).includes("voice_1"), false);
       // A twin forgotten before it became anything takes its clone with it; one that did keeps its voice.
       const lee = await startTwin(input({ name: "Lee" }), "u1");
@@ -326,7 +334,7 @@ describe("digital twins with HeyGen: voices, lost answers, and the shared librar
       await startTwin(input({ name: "Kim" }), "u1");
       await deleteOwnerData("u1");
       assert.deepEqual(hg.deleted.slice().sort(), ["voice_1", "voice_2", "voice_3"]);
-      assert.equal(ids(await listVoices("u2")).some((v) => /^voice_/.test(v)), false);
+      assert.equal(ids(await listVoices("u2")).some((v) => /^voice_[123]$/.test(v)), false);
     }));
 
   it("keeps the twin before HeyGen is asked, so an answer lost on the way back is asked for again with the same key", () =>
@@ -365,7 +373,52 @@ describe("digital twins with HeyGen: voices, lost answers, and the shared librar
       hg.refuse = { status: 400, message: "The footage must be at least 15 seconds long." };
       await assert.rejects(startTwin(input({ name: "Short" }), "u1"), ValidationError);
       assert.equal((await getStore().list<TwinJob>("twin", "u1")).some((t) => t.name === "Short"), false);
+      // Asked again and refused, the twin fails with HeyGen's reason.
+      hg.refuse = null;
+      hg.fail = 1;
+      await assert.rejects(startTwin(input({ name: "Ola" }), "u1"), /fetch failed/);
+      const ola = (await getStore().list<TwinJob>("twin", "u1")).find((t) => t.name === "Ola")!;
+      await getStore().put("twin", { ...ola, createdAt: old(3 * 60_000) });
+      hg.refuse = { status: 422, message: "More than one person was found in the footage." };
+      forgetTwinChecks();
+      const refused = (await listTwins("u1")).find((t) => t.id === ola.id)!;
+      assert.equal(refused.status, "failed");
+      assert.match(refused.error!, /More than one person/);
     }));
+
+  it("asks again for a lost start at most every few minutes, and before the twin is forgotten", () =>
+    inHeygen(async () => {
+      const hg = heygenStub();
+      hg.fail = 2;
+      await assert.rejects(startTwin(input(), "u1"), /fetch failed/);
+      const [lost] = await getStore().list<TwinJob>("twin", "u1");
+      await getStore().put("twin", { ...lost, createdAt: old(3 * 60_000) });
+      forgetTwinChecks();
+      await listTwins("u1");
+      assert.equal(hg.posts.length, 2, "asked again once, and that answer was lost too");
+      assert.ok((await getStore().get<TwinJob>("twin", lost.id))!.resentAt);
+      for (let i = 0; i < 3; i++) {
+        forgetTwinChecks();
+        await listTwins("u1");
+      }
+      assert.equal(hg.posts.length, 2, "not again within a few minutes, however often the twins are listed");
+      // Forgotten while its answer is unknown: it is asked for once more, so the voice it made is known and deleted.
+      const posts = hg.posts.length;
+      await deleteTwin(lost.id, "u1");
+      assert.equal(hg.posts.length, posts + 1);
+      assert.ok(hg.deleted.includes("voice_1"));
+      assert.equal(ids(await listVoices("u2")).includes("voice_1"), false);
+    }));
+
+  it("does not count a twin's voice against the account's own voices", async () => {
+    const { assertVoiceRoom, MAX_CLONED_VOICES } = await import("../services");
+    const at = new Date().toISOString();
+    for (let i = 0; i < MAX_CLONED_VOICES - 1; i++) await getStore().put<Voice>("voice", { id: `clone_${i}`, name: `Clone ${i}`, provider: "mock", source: "custom", ownerId: "u1", createdAt: at });
+    await getStore().put<Voice>("voice", { id: "twin_voice", name: "Dana (twin)", provider: "mock", source: "custom", ownerId: "u1", tags: ["digital twin"], createdAt: at });
+    await assertVoiceRoom("u1");
+    await getStore().put<Voice>("voice", { id: "clone_last", name: "Clone last", provider: "mock", source: "custom", ownerId: "u1", createdAt: at });
+    await assert.rejects(assertVoiceRoom("u1"), /At most/);
+  });
 
   it("never lists a digital twin from HeyGen's account to anyone, ends a twin HeyGen lost, and hides the link from viewers", () =>
     inHeygen(async () => {
@@ -377,8 +430,6 @@ describe("digital twins with HeyGen: voices, lost answers, and the shared librar
       const shown = (await listAvatars("u2")).map((a) => a.id);
       assert.deepEqual([shown.includes("look_stranger"), shown.includes("look_studio")], [false, true], "a twin of the account the studio does not know of is a real person all the same");
       const job = await startTwin(input(), "u1");
-      const asked = await requestTwinConsent(job.id, "u1").catch(() => null);
-      assert.equal(asked, null, "HeyGen's consent call is not stubbed here");
       await getStore().put("twin", { ...(await getStore().get<TwinJob>("twin", job.id))!, consent: "pending", consentUrl: "https://heygen.com/consent/abc", consentUrlAt: new Date().toISOString() });
       const stored = (await getStore().get<TwinJob>("twin", job.id))!;
       assert.equal(publicTwin(stored).consentUrl, "https://heygen.com/consent/abc");

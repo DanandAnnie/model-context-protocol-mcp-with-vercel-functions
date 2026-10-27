@@ -26,6 +26,8 @@ export const CONSENT_LINK_MS = 24 * 60 * 60 * 1000;
 export const TWIN_RESERVATION_MS = 2 * 60 * 1000;
 /** The renderer replays a start's answer for its key this long; a start still unanswered after it is given up. */
 export const TWIN_REPLAY_MS = 24 * 60 * 60 * 1000;
+/** A start whose answer was lost is asked for again at most this often, however often the twins are listed. */
+export const TWIN_RESEND_MS = 5 * 60 * 1000;
 const STILL_SENDING = "This twin is still being sent to the renderer; try again in a moment";
 
 export const twinRequestSchema = z.object({
@@ -99,7 +101,7 @@ export async function startTwin(input: z.infer<typeof twinRequestSchema>, ownerI
   if (existing && existing.ownerId === ownerId) {
     if (existing.footageUrl !== input.footageUrl || existing.name !== input.name) throw new ConflictError("This Idempotency-Key was already used for another twin; send a new key");
     if (existing.lookId || existing.status !== "processing") return existing;
-    if (Date.now() - Date.parse(existing.createdAt) < TWIN_RESERVATION_MS) throw new ConflictError(STILL_SENDING);
+    if (!dueForResend(existing)) throw new ConflictError(STILL_SENDING);
     return (await resend(existing)) ?? existing;
   }
   const provider = getAvatarProvider();
@@ -155,9 +157,15 @@ async function keepStart(job: TwinJob, out: { lookId: string; groupId: string; v
   return null;
 }
 
+/** Whether a start whose answer was never stored may be asked for again: past the first request's time, and not too often. */
+function dueForResend(job: TwinJob, now = Date.now()): boolean {
+  return now - Date.parse(job.createdAt) >= TWIN_RESERVATION_MS && (!job.resentAt || now - Date.parse(job.resentAt) >= TWIN_RESEND_MS);
+}
+
 /**
  * Asks the renderer again for a start whose answer was never stored, with the same key, so it answers with the twin it
- * made, or makes it now. Past the renderer's replay window, or when it refuses, the twin is marked failed.
+ * made, or makes it now. Past the renderer's replay window, or when it refuses, the twin is marked failed; any other
+ * failure is noted (`resentAt`), so it is asked again only a few minutes later, and thrown.
  */
 async function resend(job: TwinJob): Promise<TwinJob | null> {
   const failed = (error: string): TwinJob => ({ ...job, training: "failed", status: "failed", error, updatedAt: nowIso() });
@@ -170,9 +178,32 @@ async function resend(job: TwinJob): Promise<TwinJob | null> {
   try {
     return await keepStart(job, await provider.startTwin({ name: job.name, footageUrl: job.footageUrl, key: job.id }));
   } catch (err) {
-    if (!(err instanceof ValidationError)) throw err;
+    if (!(err instanceof ValidationError)) {
+      const at = nowIso();
+      await getStore().putIf("twin", { ...job, resentAt: at, updatedAt: at }, "updatedAt", job.updatedAt);
+      throw err;
+    }
     const next = failed(err.message);
     return (await getStore().putIf("twin", next, "updatedAt", job.updatedAt)) ? next : null;
+  }
+}
+
+/**
+ * A twin whose start answer was never stored is asked for once more (at once, while the renderer still replays its
+ * key) before it is forgotten, so the voice it made is known and can be deleted; never throws.
+ */
+async function settle(job: TwinJob): Promise<TwinJob> {
+  if (job.lookId || job.status !== "processing" || Date.now() - Date.parse(job.createdAt) > TWIN_REPLAY_MS) return job;
+  const provider = getAvatarProviderByName(job.provider);
+  try {
+    const out = await provider.startTwin?.({ name: job.name, footageUrl: job.footageUrl, key: job.id });
+    if (!out) return job;
+    await Promise.all([rememberMadeLooks([out.lookId]), rememberMadeVoices([out.voiceId])]);
+    return { ...job, lookId: out.lookId, groupId: out.groupId, ...(out.voiceId ? { voiceId: out.voiceId } : {}) };
+  } catch (err) {
+    // A refusal made nothing; otherwise the renderer's own listings still leave a twin and its voice out.
+    if (!(err instanceof ValidationError)) console.error(`twin ${job.id} was not confirmed before it was forgotten:`, err);
+    return job;
   }
 }
 
@@ -219,14 +250,19 @@ export async function requestTwinConsent(id: string, ownerId: string = LOCAL_OWN
  * the studio's and is never offered to another account.
  */
 export async function deleteTwin(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
-  const job = owned(await getStore().get<TwinJob>("twin", twinIdSchema.parse(id)), ownerId, "Digital twin");
+  const job = await settle(owned(await getStore().get<TwinJob>("twin", twinIdSchema.parse(id)), ownerId, "Digital twin"));
   await Promise.all([rememberMadeLooks([job.lookId]), rememberMadeVoices([job.voiceId])]);
   await getStore().remove("twin", job.id);
   await dropVoice(job.provider, job.voiceId, ownerId);
 }
 
-/** Deletes at the renderer the voice a twin cloned that never became the account's (account deletion). Never throws. */
-export async function dropTwinVoice(job: TwinJob): Promise<void> {
+/**
+ * For account deletion: notes the look and voice a twin made (asking once more for a start whose answer was lost) and
+ * deletes at the renderer the voice that never became the account's. Never throws.
+ */
+export async function dropTwinVoice(stored: TwinJob): Promise<void> {
+  const job = await settle(stored);
+  await Promise.all([rememberMadeLooks([job.lookId]), rememberMadeVoices([job.voiceId])]);
   await dropVoice(job.provider, job.voiceId, job.ownerId);
 }
 
@@ -249,7 +285,7 @@ async function refreshTwin(read: TwinJob): Promise<TwinJob> {
   let job = read;
   try {
     if (!job.lookId) {
-      if (Date.now() - Date.parse(job.createdAt) < TWIN_RESERVATION_MS) return job;
+      if (!dueForResend(job)) return job;
       const sent = await resend(job);
       if (!sent?.lookId) return sent ?? job;
       job = sent;
@@ -318,7 +354,19 @@ async function refreshTwin(read: TwinJob): Promise<TwinJob> {
 async function keepVoice(job: TwinJob): Promise<string | undefined> {
   const tts = getTtsProvider();
   if (!job.voiceId || tts.name !== job.provider) return undefined;
-  const voice: Voice = { id: job.voiceId, name: withSuffix(job.name, " (twin)", 60), provider: tts.name, source: "custom", ownerId: job.ownerId, tags: ["digital twin"], createdAt: nowIso() };
+  // Its language and preview as the provider knows them (its listing leaves the clone out); a failure keeps it plain.
+  const known = await Promise.resolve(tts.describeVoice?.(job.voiceId)).catch((err: unknown) => (console.error(`twin voice ${job.voiceId}:`, err), undefined));
+  const voice: Voice = {
+    id: job.voiceId,
+    name: withSuffix(job.name, " (twin)", 60),
+    provider: tts.name,
+    ...(job.gender ? { gender: job.gender } : {}),
+    ...known,
+    source: "custom",
+    ownerId: job.ownerId,
+    tags: ["digital twin"],
+    createdAt: nowIso(),
+  };
   await getStore().insert("voice", voice);
   return job.voiceId;
 }

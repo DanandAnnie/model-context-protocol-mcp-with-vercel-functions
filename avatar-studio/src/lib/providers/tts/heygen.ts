@@ -22,6 +22,15 @@ export class HeyGenTtsProvider implements TtsProvider {
     }));
   }
 
+  async describeVoice(voiceId: string) {
+    const v = await this.client.getVoice(voiceId);
+    return {
+      ...(v.language ? { language: v.language } : {}),
+      ...(v.gender ? { gender: v.gender.toLowerCase() as Voice["gender"] } : {}),
+      ...(v.preview_audio_url ? { previewUrl: v.preview_audio_url } : {}),
+    };
+  }
+
   /** A voice of an account here (a digital twin's clone); one HeyGen no longer has counts as deleted. */
   async deleteVoice(voiceId: string) {
     try {

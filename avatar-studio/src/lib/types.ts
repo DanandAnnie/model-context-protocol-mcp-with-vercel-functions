@@ -186,6 +186,8 @@ export interface TwinJob {
   lookId: string;
   groupId: string;
   voiceId?: string;
+  /** When a start whose answer was lost was last asked for again (at most every few minutes). */
+  resentAt?: string;
   training: "processing" | "completed" | "failed";
   /** Where the person's consent stands: not asked yet, asked (a link sent, or under review), given, or refused. */
   consent: "not_requested" | "pending" | "accepted" | "rejected";
@@ -210,8 +212,12 @@ export interface TwinJob {
 export interface MadeLook {
   id: string;
   lookId: string;
-  /** The id is a voice the studio made there (a digital twin's), kept out of the voice library the same way. */
-  voice?: true;
+}
+
+/** A voice the renderer cloned for an account here (a digital twin's), kept as made looks are (see `MadeLook`). */
+export interface MadeVoice {
+  id: string;
+  voiceId: string;
 }
 
 /** How closely a lip sync redraws the mouth: fast, or slower and truer to the face (HeyGen avatar inference). */

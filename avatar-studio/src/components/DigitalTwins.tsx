@@ -30,16 +30,20 @@ function stepOf(t: Twin): string {
 export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; onReady: () => void }) {
   const { data, error, setData, refetch } = useApi<{ twins: Twin[]; available: boolean }>("/api/twins");
   const twins = data?.twins ?? [];
-  // While a twin is trained or waits for consent the list is asked again, only while the tab is visible; a link past its
-  // day waits for a new one to be asked for.
+  // While a twin is trained or waits for consent the list is asked again, only while the tab is visible. A consent whose
+  // link is past its day may still be under review, so it is asked about too, once a minute.
   const following = twins.some((t) => t.status === "processing" && (t.training === "processing" || (t.consent === "pending" && !t.consentLinkExpired)));
+  const reviewing = twins.some((t) => t.status === "processing" && t.consent === "pending");
   useEffect(() => {
-    if (!following) return;
-    const timer = setInterval(() => {
-      if (document.visibilityState === "visible") void refetch();
-    }, 10_000);
+    if (!following && !reviewing) return;
+    const timer = setInterval(
+      () => {
+        if (document.visibilityState === "visible") void refetch();
+      },
+      following ? 10_000 : 60_000,
+    );
     return () => clearInterval(timer);
-  }, [following, refetch]);
+  }, [following, reviewing, refetch]);
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [footageUrl, setFootageUrl] = useState("");
@@ -135,8 +139,8 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
   }
 
   async function forget(t: Twin) {
-    const kept = t.avatarId ? " The presenter it became stays in your avatars, as does the voice it became in your voices." : " The voice HeyGen cloned from the footage is deleted.";
-    if (!window.confirm(`Forget the digital twin “${t.name}”?${kept} HeyGen keeps the trained twin in its account; it is never offered to anyone else.`)) return;
+    const kept = t.avatarId ? " The presenter it became stays in your avatars, and a voice it became stays in your voices." : "";
+    if (!window.confirm(`Forget the digital twin “${t.name}”?${kept} A voice HeyGen cloned from the footage that is not one of your voices is deleted. HeyGen keeps the trained twin in its account; it is never offered to anyone else.`)) return;
     setErr(null);
     const next = twins[twins.indexOf(t) + 1] ?? twins[twins.indexOf(t) - 1];
     seen.current.delete(t.id);

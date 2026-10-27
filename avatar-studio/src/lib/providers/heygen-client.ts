@@ -69,11 +69,20 @@ export class HeyGenClient {
     return unique([...own.map((l) => ({ ...l, own: true as const })), ...preset.map((l) => ({ ...l, own: undefined }))], (l) => l.id);
   }
 
-  /** Voices (v3): the account's own (cloned in HeyGen) first, then the shared library; v3 lists only one kind per call. */
+  /**
+   * Voices (v3): the account's own (cloned in HeyGen) first, then the shared library; v3 lists only one kind per call.
+   * The voices of the account's own digital twins are left out: each is a real person's voice, cloned from their
+   * footage for one account here (that account keeps it as its own voice).
+   */
   async listVoices() {
     type V = { voice_id: string; name: string; language?: string; gender?: string; preview_audio_url?: string; support_locale?: boolean };
-    const [own, shared] = await Promise.all([this.listAll<V>("/voices?type=private", 100, 100), this.listAll<V>("/voices?type=public", 100)]);
-    return unique([...own, ...shared], (v) => v.voice_id);
+    const [own, shared, twins] = await Promise.all([
+      this.listAll<V>("/voices?type=private", 100, 100),
+      this.listAll<V>("/voices?type=public", 100),
+      this.listAll<{ default_voice_id?: string | null }>("/avatars/looks?ownership=private&avatar_type=digital_twin", 50, 100),
+    ]);
+    const twinVoices = new Set(twins.map((t) => t.default_voice_id).filter(Boolean));
+    return unique([...own.filter((v) => !twinVoices.has(v.voice_id)), ...shared], (v) => v.voice_id);
   }
 
   /**
@@ -138,6 +147,12 @@ export class HeyGenClient {
       headers: { "Idempotency-Key": key },
     });
     return { url: out?.url, consentStatus: out?.avatar_group?.consent_status };
+  }
+
+  /** One voice (`GET /v3/voices/{voice_id}`): its language, gender, and preview once HeyGen has finished it. */
+  async getVoice(voiceId: string): Promise<{ language?: string | null; gender?: string | null; preview_audio_url?: string | null }> {
+    const out = await this.envelope<{ language?: string | null; gender?: string | null; preview_audio_url?: string | null }>(`${V3}/voices/${encodeURIComponent(voiceId)}`);
+    return (out.data ?? out) as { language?: string | null; gender?: string | null; preview_audio_url?: string | null };
   }
 
   /** Deletes a cloned voice (`DELETE /v3/voices/{voice_id}`); HeyGen answers 404 for one it no longer has. */

@@ -11,6 +11,8 @@ export interface TtsProvider {
   /** Clone a voice from audio samples; returns the provider's voice id. Absent when the provider cannot clone. */
   cloneVoice?(input: { name: string; samples: Array<{ bytes: Uint8Array; mimeType: string; filename: string }> }): Promise<{ voiceId: string }>;
   deleteVoice?(voiceId: string): Promise<void>;
+  /** What the provider says of one voice (a twin's clone, left out of its listing): language, gender, preview. */
+  describeVoice?(voiceId: string): Promise<Pick<Voice, "language" | "gender" | "previewUrl">>;
   /**
    * Design voices from a written description (ElevenLabs text-to-voice): a few previews of the sample `text` (written
    * for the description when none is given), each with its audio when the provider makes it server-side. Absent when the

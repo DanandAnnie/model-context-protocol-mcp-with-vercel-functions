@@ -1,0 +1,274 @@
+// The voice changer: instant voices made at the renderer from one recording of a person (HeyGen Voice's instant clone),
+// and recordings spoken again in one of them, the words and timing kept (HeyGen's speech to speech). Each voice is the
+// account's own: the renderer's shared account holds it under the studio's mark, and no other account is offered it.
+// Used by API routes only.
+import { z } from "zod";
+import { createHash } from "node:crypto";
+import { newId, nowIso } from "../ids";
+import { getStore } from "../store";
+import { getAvatarProvider, getAvatarProviderByName } from "../providers";
+import type { AudioClip, InstantVoice, VoiceChange } from "../types";
+import { LOCAL_OWNER } from "../owner-id";
+import { ConflictError, NotFoundError, ValidationError } from "../errors";
+import { owned, stripUndefined } from "./shared";
+import { getClip } from "./clips";
+import { prepareClipOnce } from "./videos";
+import { rememberMadeVoices } from "./voices";
+import { jobChecker } from "./job-checks";
+import { withSuffix } from "../text";
+
+/** Instant voices an account keeps; another needs one deleted first. */
+export const MAX_INSTANT_VOICES = 10;
+/** Recordings spoken again that an account keeps. */
+export const MAX_VOICE_CHANGES = 50;
+/** How long a start waits for the renderer's answer; one not done by then is asked for again while the list is open. */
+const START_WAIT_MS = 45_000;
+const CHECK_WAIT_MS = 8_000;
+/**
+ * A conversion still unanswered this long is given up: the renderer keeps a key's answer for a day, and asking after
+ * that would speak (and charge for) the recording again.
+ */
+const GIVE_UP_MS = 30 * 60 * 1000;
+
+const keySchema = z.string().regex(/^[A-Za-z0-9_-]{8,100}$/, "The Idempotency-Key header takes 8 to 100 letters, digits, - or _");
+export const voiceChangerKeySchema = keySchema;
+
+export const instantVoiceSchema = z.object({
+  name: z.string({ error: "Name the voice" }).trim().min(1, "Name the voice").max(60, "Keep the name to 60 characters"),
+  /** The recording it is made from: one of the account's audio clips. */
+  clipId: z.string({ error: "Choose a recording of the voice" }).trim().min(1, "Choose a recording of the voice"),
+  /** The person whose voice it is agreed to it being cloned. */
+  agreed: z.literal(true, { error: "Confirm that the speaker agreed to have their voice cloned" }),
+});
+
+export const voiceChangeSchema = z.object({
+  voiceId: z.string({ error: "Choose one of your instant voices" }).regex(/^iv_[A-Za-z0-9_-]{1,64}$/, "Choose one of your instant voices"),
+  clipId: z.string({ error: "Choose the recording to speak again" }).trim().min(1, "Choose the recording to speak again"),
+  removeNoise: z.boolean().default(false),
+  title: z.string().trim().max(120, "Keep the title to 120 characters").optional(),
+});
+
+export const instantVoiceIdSchema = z.string().regex(/^iv_[A-Za-z0-9_-]{1,64}$/, "Unknown instant voice");
+export const voiceChangeIdSchema = z.string().regex(/^vc_[A-Za-z0-9_-]{1,64}$/, "Unknown recording");
+
+export function voiceChangerAvailable(): boolean {
+  return typeof getAvatarProvider().changeVoice === "function";
+}
+
+/** What the account sees: never the renderer, its ids, or the upload sent to it. */
+export type PublicInstantVoice = Omit<InstantVoice, "ownerId" | "provider" | "providerVoiceId">;
+export type PublicVoiceChange = Omit<VoiceChange, "ownerId" | "provider" | "providerVoiceId" | "providerAudio">;
+export function publicInstantVoice(v: InstantVoice): PublicInstantVoice {
+  const { ownerId: _o, provider: _p, providerVoiceId: _v, ...rest } = v;
+  void _o;
+  void _p;
+  void _v;
+  return rest;
+}
+export function publicVoiceChange(c: VoiceChange): PublicVoiceChange {
+  const { ownerId: _o, provider: _p, providerVoiceId: _v, providerAudio: _a, ...rest } = c;
+  void _o;
+  void _p;
+  void _v;
+  void _a;
+  return rest;
+}
+
+const keyedId = (prefix: string, ownerId: string, key: string) => `${prefix}_${createHash("sha256").update(`${ownerId}\0${prefix}\0${key}`).digest("base64url").slice(0, 32)}`;
+
+/** One of the account's clips, as the form names it when it is gone. */
+async function clipOf(clipId: string, ownerId: string): Promise<AudioClip> {
+  try {
+    return await getClip(clipId, ownerId);
+  } catch (err) {
+    if (err instanceof NotFoundError) throw new ValidationError("That audio clip is no longer available; choose another or upload it again");
+    throw err;
+  }
+}
+
+/** The clip's upload at the renderer (made once, as for an audio scene). */
+async function assetOf(clip: AudioClip, ownerId: string): Promise<string> {
+  const provider = getAvatarProvider();
+  if (!provider.prepareAudio) throw new ValidationError(`Audio clips cannot be sent to the ${provider.name} renderer`);
+  const prepared = await prepareClipOnce(provider, clip, ownerId);
+  const assetId = prepared.providerAssetIds?.[provider.assetKey ?? provider.name];
+  if (!assetId) throw new Error(`The ${provider.name} renderer kept no upload of audio clip ${clip.id}`);
+  return assetId;
+}
+
+const voiceChecks = jobChecker<InstantVoice>((v) => refreshInstantVoice(v));
+const changeChecks = jobChecker<VoiceChange>((c) => refreshVoiceChange(c));
+
+/** Forgets when voices and conversions were last asked about (tests). */
+export function forgetVoiceChangerChecks(): void {
+  voiceChecks.forget();
+  changeChecks.forget();
+}
+
+/** The account's instant voices, newest first; one still being made is asked about first. */
+export async function listInstantVoices(ownerId: string = LOCAL_OWNER): Promise<InstantVoice[]> {
+  const voices = await getStore().list<InstantVoice>("instantvoice", ownerId);
+  // A made voice is asked about only while it is being made: it has no link to renew.
+  const due = voices.filter((v) => v.status === "processing");
+  const checked = new Map((await voiceChecks.follow(due)).map((v) => [v.id, v]));
+  return voices.map((v) => checked.get(v.id) ?? v).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+/**
+ * Makes an instant voice from one of the account's audio clips. With a client `key`, the voice's id is derived from the
+ * account and the key, so a start retried after a lost answer returns the voice already made, and the renderer gets the
+ * same idempotency key. `admit` runs once everything is checked, before the renderer is asked (the hourly limit).
+ */
+export async function createInstantVoice(input: z.infer<typeof instantVoiceSchema>, ownerId: string = LOCAL_OWNER, opts: { key?: string; admit?: () => void } = {}): Promise<InstantVoice> {
+  const id = opts.key ? keyedId("iv", ownerId, opts.key) : newId("iv");
+  const existing = opts.key ? await getStore().get<InstantVoice>("instantvoice", id) : null;
+  if (existing && existing.ownerId === ownerId) {
+    if (existing.clipId !== input.clipId || existing.name !== input.name) throw new ConflictError("This Idempotency-Key was already used for another voice; send a new key");
+    return existing;
+  }
+  const provider = getAvatarProvider();
+  if (!provider.createInstantVoice) throw new ValidationError(`Instant voices are not available with the ${provider.name} renderer`);
+  // Read then written: two starts at the same moment can between them pass the cap.
+  if ((await getStore().list<InstantVoice>("instantvoice", ownerId)).length >= MAX_INSTANT_VOICES) throw new ConflictError(`An account keeps at most ${MAX_INSTANT_VOICES} instant voices; delete one to make another`);
+  const clip = await clipOf(input.clipId, ownerId);
+  opts.admit?.();
+  const assetId = await assetOf(clip, ownerId);
+  const { voiceId } = await provider.createInstantVoice({ name: input.name, assetId, key: id });
+  // Noted at once, whatever becomes of this record, so the renderer's voice listings never offer it to another account.
+  await rememberMadeVoices([voiceId]);
+  const now = nowIso();
+  const voice: InstantVoice = { id, ownerId, name: input.name, clipId: clip.id, provider: provider.name, providerVoiceId: voiceId, status: "processing", createdAt: now, updatedAt: now };
+  await getStore().put("instantvoice", voice);
+  return voice;
+}
+
+/** Deletes an instant voice at the renderer and here; a voice the renderer would not delete is kept, to try again. */
+export async function deleteInstantVoice(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
+  const voice = owned(await getStore().get<InstantVoice>("instantvoice", instantVoiceIdSchema.parse(id)), ownerId, "Instant voice");
+  await dropInstantVoice(voice);
+  await getStore().remove("instantvoice", voice.id);
+}
+
+/** Deletes a voice at the renderer, as its record goes (with the account too): it is a real person's voice. */
+export async function dropInstantVoice(voice: InstantVoice): Promise<void> {
+  try {
+    await getAvatarProviderByName(voice.provider).deleteInstantVoice?.(voice.providerVoiceId);
+  } catch (err) {
+    console.error(`instant voice ${voice.id} was not deleted at the renderer:`, err);
+    throw new ConflictError(`The renderer would not delete the voice "${voice.name}" just now; try again in a moment`);
+  }
+}
+
+async function refreshInstantVoice(voice: InstantVoice): Promise<InstantVoice> {
+  try {
+    const provider = getAvatarProviderByName(voice.provider);
+    if (!provider.instantVoiceStatus) return voice;
+    const out = await provider.instantVoiceStatus(voice.providerVoiceId);
+    const now = nowIso();
+    const { error: _e, ...kept } = voice;
+    void _e;
+    const next: InstantVoice = { ...kept, ...stripUndefined(out), checkedAt: now, updatedAt: out.status !== voice.status ? now : voice.updatedAt };
+    return (await getStore().putIf("instantvoice", next, "updatedAt", voice.updatedAt)) ? next : voice;
+  } catch (err) {
+    console.error(`instant voice check failed for ${voice.id}:`, err);
+    return voice;
+  }
+}
+
+/** The account's recordings spoken again, newest first; one still being spoken is asked for again first. */
+export async function listVoiceChanges(ownerId: string = LOCAL_OWNER): Promise<VoiceChange[]> {
+  const changes = await getStore().list<VoiceChange>("voicechange", ownerId);
+  // A finished one is never asked about again: asking for an answer the renderer no longer keeps would pay again.
+  const due = changes.filter((c) => c.status === "processing");
+  const checked = new Map((await changeChecks.follow(due)).map((c) => [c.id, c]));
+  return changes.map((c) => checked.get(c.id) ?? c).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+/**
+ * Speaks one of the account's audio clips again in one of its instant voices. The renderer answers within a couple of
+ * minutes; the start waits for most of that, and a conversion not done by then is asked for again (with the same key, so
+ * it is not paid for twice) while the list is open. With a client `key`, a start retried after a lost answer returns the
+ * conversion already started. `admit` runs once everything is checked, before the renderer is asked.
+ */
+export async function startVoiceChange(input: z.infer<typeof voiceChangeSchema>, ownerId: string = LOCAL_OWNER, opts: { key?: string; admit?: () => void } = {}): Promise<VoiceChange> {
+  const id = opts.key ? keyedId("vc", ownerId, opts.key) : newId("vc");
+  const existing = opts.key ? await getStore().get<VoiceChange>("voicechange", id) : null;
+  if (existing && existing.ownerId === ownerId) {
+    const same = existing.voiceId === input.voiceId && existing.clipId === input.clipId && !!existing.removeNoise === input.removeNoise && (!input.title || existing.title === input.title);
+    if (!same) throw new ConflictError("This Idempotency-Key was already used for another recording; send a new key");
+    return existing;
+  }
+  const provider = getAvatarProvider();
+  if (!provider.changeVoice) throw new ValidationError(`The voice changer is not available with the ${provider.name} renderer`);
+  if ((await getStore().list<VoiceChange>("voicechange", ownerId)).length >= MAX_VOICE_CHANGES) throw new ConflictError(`An account keeps at most ${MAX_VOICE_CHANGES} recordings spoken again; delete one to make another`);
+  let voice: InstantVoice;
+  try {
+    voice = owned(await getStore().get<InstantVoice>("instantvoice", input.voiceId), ownerId, "Instant voice");
+  } catch (err) {
+    if (err instanceof NotFoundError) throw new ValidationError("That voice is no longer available; choose another");
+    throw err;
+  }
+  if (voice.status !== "completed") throw new ValidationError(voice.status === "failed" ? `The voice "${voice.name}" could not be made; choose another` : `The voice "${voice.name}" is still being made; try again in a moment`);
+  const clip = await clipOf(input.clipId, ownerId);
+  opts.admit?.();
+  const assetId = await assetOf(clip, ownerId);
+  const now = nowIso();
+  const change: VoiceChange = stripUndefined({
+    id,
+    ownerId,
+    title: input.title || withSuffix(clip.name, ` in ${voice.name}`, 120),
+    voiceId: voice.id,
+    voiceName: voice.name,
+    clipId: clip.id,
+    removeNoise: input.removeNoise ? (true as const) : undefined,
+    provider: provider.name,
+    providerVoiceId: voice.providerVoiceId,
+    providerAudio: assetId,
+    status: "processing" as const,
+    durationSec: clip.durationSec,
+    createdAt: now,
+    updatedAt: now,
+  });
+  // Stored before the renderer is asked, so a start whose answer is lost is followed rather than forgotten.
+  await getStore().put("voicechange", change);
+  try {
+    const out = await provider.changeVoice({ voiceId: voice.providerVoiceId, assetId, removeNoise: input.removeNoise, key: id, waitMs: START_WAIT_MS });
+    if (out.status === "processing") return change;
+    const done: VoiceChange = { ...change, status: "completed", audioUrl: out.audioUrl, durationSec: out.durationSec || clip.durationSec, checkedAt: nowIso(), updatedAt: nowIso() };
+    return (await getStore().putIf("voicechange", done, "updatedAt", change.updatedAt)) ? done : change;
+  } catch (err) {
+    // Refused: nothing was made, so nothing is kept.
+    await getStore().remove("voicechange", change.id);
+    throw err;
+  }
+}
+
+/** Forgets one recording spoken again (the renderer's copy expires on its own). */
+export async function deleteVoiceChange(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
+  const change = owned(await getStore().get<VoiceChange>("voicechange", voiceChangeIdSchema.parse(id)), ownerId, "Recording");
+  await getStore().remove("voicechange", change.id);
+}
+
+/** Asks the renderer again for a conversion still running (same key, so not paid twice). Never throws. */
+async function refreshVoiceChange(change: VoiceChange): Promise<VoiceChange> {
+  const now = nowIso();
+  let next: VoiceChange;
+  try {
+    if (Date.now() - Date.parse(change.createdAt) > GIVE_UP_MS) {
+      next = { ...change, status: "failed", error: "The renderer did not finish speaking this recording; try again", checkedAt: now, updatedAt: now };
+    } else {
+      const provider = getAvatarProviderByName(change.provider);
+      if (!provider.changeVoice) return change;
+      const out = await provider.changeVoice({ voiceId: change.providerVoiceId, assetId: change.providerAudio, removeNoise: !!change.removeNoise, key: change.id, waitMs: CHECK_WAIT_MS });
+      if (out.status === "processing") next = { ...change, checkedAt: now };
+      else next = { ...change, status: "completed", audioUrl: out.audioUrl, durationSec: out.durationSec || change.durationSec, checkedAt: now, updatedAt: now };
+    }
+  } catch (err) {
+    if (!(err instanceof ValidationError)) {
+      console.error(`voice change check failed for ${change.id}:`, err);
+      return change;
+    }
+    next = { ...change, status: "failed", error: err.message, checkedAt: now, updatedAt: now };
+  }
+  return (await getStore().putIf("voicechange", next, "updatedAt", change.updatedAt)) ? next : change;
+}

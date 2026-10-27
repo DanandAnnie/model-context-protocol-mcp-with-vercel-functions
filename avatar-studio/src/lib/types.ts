@@ -263,6 +263,52 @@ export interface MusicTrack {
 export const MUSIC_VOLUMES = { quiet: 0.12, low: 0.25, medium: 0.4, high: 0.6 } as const;
 export type MusicVolume = keyof typeof MUSIC_VOLUMES;
 
+/**
+ * A voice made at the renderer from one recording of a person (HeyGen's instant voice clone), for the voice changer:
+ * the account's own, never offered to another. "processing" while the renderer checks the recording.
+ */
+export interface InstantVoice {
+  id: string;
+  ownerId: string;
+  name: string;
+  /** The audio clip it was made from. */
+  clipId: string;
+  /** Renderer that holds it, and its voice id there; neither is shown to the account. */
+  provider: string;
+  providerVoiceId: string;
+  status: "processing" | "completed" | "failed";
+  language?: string;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+  checkedAt?: string;
+}
+
+/** A recording spoken again in one of the account's instant voices, the words and timing kept (speech to speech). */
+export interface VoiceChange {
+  id: string;
+  ownerId: string;
+  title: string;
+  /** The instant voice it speaks in, and its name then. */
+  voiceId: string;
+  voiceName: string;
+  /** The audio clip spoken again. */
+  clipId: string;
+  removeNoise?: true;
+  /** Renderer, the voice there, and the recording as it was sent, so a conversion still running is asked for again. */
+  provider: string;
+  providerVoiceId: string;
+  providerAudio: string;
+  status: "processing" | "completed" | "failed";
+  /** The spoken result (a WAV); the renderer's link is signed for a limited time. */
+  audioUrl?: string;
+  durationSec?: number;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+  checkedAt?: string;
+}
+
 /** A library video with a background-music track mixed under its sound (a render of the renderer's own). */
 export interface MusicJob {
   id: string;
@@ -1095,6 +1141,8 @@ export interface ProviderStatus {
   voiceCloneOneRecording?: true;
   /** Whether the renderer can mix a background-music track under a finished video. */
   backgroundMusic: boolean;
+  /** Whether the renderer makes instant voices and speaks recordings again in them (the voice changer). */
+  voiceChanger: boolean;
   /** Whether the renderer can draw a presenter from a description. */
   portraitGeneration: boolean;
   /** Whether the renderer can cut a finished video into short highlight clips. */

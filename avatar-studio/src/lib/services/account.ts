@@ -7,10 +7,11 @@ import { assertNoRenewingPlan } from "../billing";
 import { ConflictError } from "../errors";
 import { madeLooksOf, rememberMadeLooks } from "./avatars";
 import { dropTwinVoice } from "./twins";
-import type { MusicJob, TwinJob } from "../types";
+import type { InstantVoice, MusicJob, TwinJob } from "../types";
 import { dropMusicRender } from "./music";
+import { dropInstantVoice } from "./voice-changer";
 
-const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip", "videolead", "backdrop", "portrait", "highlight", "cleanup", "lipsync", "lookpack", "twin", "music"] as const;
+const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip", "videolead", "backdrop", "portrait", "highlight", "cleanup", "lipsync", "lookpack", "twin", "music", "instantvoice", "voicechange"] as const;
 /**
  * Cover rows hold image bytes; the export describes each cover from its video (`cover.mimeType`, `cover.bytes`) instead
  * of loading them. Clip audio is never listed (each `clip` row names its own `clipaudio_<id>` row), so the export and
@@ -38,6 +39,12 @@ export async function exportOwnerData(ownerId: string = LOCAL_OWNER): Promise<Ow
         delete copy.provider;
         delete copy.providerJobId;
       }
+      // The renderer, the voice there, and the upload sent to it stay on the server.
+      if (kind === "instantvoice" || kind === "voicechange") {
+        delete copy.provider;
+        delete copy.providerVoiceId;
+        delete copy.providerAudio;
+      }
       if (kind === "lookpack") {
         delete copy.provider;
         delete copy.lookIds;
@@ -63,10 +70,10 @@ export async function exportOwnerData(ownerId: string = LOCAL_OWNER): Promise<Ow
 }
 
 /**
- * Kinds in deletion order: keys first so no script keeps writing while the rest goes, then voices, whose
- * provider call is the step most likely to fail, so a failure stops the run before anything else is lost.
+ * Kinds in deletion order: keys first so no script keeps writing while the rest goes, then voices (cloned and instant),
+ * whose provider call is the step most likely to fail, so a failure stops the run before anything else is lost.
  */
-const DELETE_ORDER = ["apikey", "voice", ...OWNER_KINDS.filter((k) => k !== "apikey" && k !== "voice")] as const;
+const DELETE_ORDER = ["apikey", "voice", "instantvoice", ...OWNER_KINDS.filter((k) => k !== "apikey" && k !== "voice" && k !== "instantvoice")] as const;
 
 /**
  * Deletes everything stored under an owner id (cloned voices are removed at the provider too). Returns counts per kind.
@@ -108,6 +115,8 @@ export async function deleteOwnerData(ownerId: string = LOCAL_OWNER, opts: { bil
         if (kind === "twin") await dropTwinVoice(item as TwinJob);
         // A mix is a full copy of the account's footage at the renderer.
         if (kind === "music") await dropMusicRender(item as MusicJob);
+        // An instant voice is a real person's voice in the renderer's shared account: deleted there, or the account is kept.
+        if (kind === "instantvoice") await dropInstantVoice(item as InstantVoice);
         await getStore().remove(kind, item.id);
         removed.add(item.id);
       }

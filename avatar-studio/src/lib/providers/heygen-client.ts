@@ -288,6 +288,33 @@ export class HeyGenClient {
     });
   }
 
+  /** Starts an instant voice from one recording (`POST /v3/models/audio/voices`, `mode: "instant"`); `key` replays a retried start. */
+  async createInstantVoice(body: Record<string, unknown>, key: string): Promise<string> {
+    const out = await this.request<{ voice_id?: string }>(`${V3}/models/audio/voices`, { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": key }, signal: AbortSignal.timeout(20_000) });
+    if (!out?.voice_id) throw new Error("HeyGen returned no voice id");
+    return out.voice_id;
+  }
+
+  /** An instant voice and where it stands (`GET /v3/models/audio/voices/{id}`). */
+  instantVoice(id: string) {
+    return this.request<{ status?: "PENDING" | "ACTIVE" | "FAILED" | string; failure_reason?: string | null; language?: string | null }>(`${V3}/models/audio/voices/${encodeURIComponent(id)}`, {
+      signal: AbortSignal.timeout(10_000),
+    });
+  }
+
+  /** Deletes an instant voice (`DELETE /v3/models/audio/voices/{id}`). */
+  async deleteInstantVoice(id: string): Promise<void> {
+    await this.request(`${V3}/models/audio/voices/${encodeURIComponent(id)}`, { method: "DELETE", signal: AbortSignal.timeout(10_000) });
+  }
+
+  /**
+   * Speaks a recording again in an instant voice (`POST /v3/models/audio/sts`), waiting at most `waitMs` for the answer.
+   * With the same key and body, HeyGen returns a conversion already made without charging again.
+   */
+  speechToSpeech(body: Record<string, unknown>, key: string, waitMs: number) {
+    return this.request<{ audio_url?: string | null; duration?: number | null }>(`${V3}/models/audio/sts`, { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": key }, signal: AbortSignal.timeout(waitMs) });
+  }
+
   /** Deletes a HyperFrames render and its video (`DELETE /v3/hyperframes/renders/{id}`). */
   async deleteHyperframesRender(id: string): Promise<void> {
     await this.request(`${V3}/hyperframes/renders/${encodeURIComponent(id)}`, { method: "DELETE", signal: AbortSignal.timeout(10_000) });

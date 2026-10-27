@@ -124,6 +124,21 @@ export interface AvatarProvider {
    * video. `key` makes a retried start return the same job. Absent when the provider cannot.
    */
   startMusicMix?(input: MusicMixInput): Promise<{ jobId: string }>;
+  /**
+   * Makes an instant voice from one recording (an uploaded asset), named and marked as the studio's. `key` makes a
+   * retried start return the same voice. Absent when the provider cannot.
+   */
+  createInstantVoice?(input: { name: string; assetId: string; key: string }): Promise<{ voiceId: string }>;
+  /** Where an instant voice stands; one the renderer no longer has has failed. */
+  instantVoiceStatus?(voiceId: string): Promise<{ status: "processing" | "completed" | "failed"; language?: string; error?: string }>;
+  /** Deletes an instant voice at the renderer; one already gone is no error. */
+  deleteInstantVoice?(voiceId: string): Promise<void>;
+  /**
+   * Speaks a recording (an uploaded asset) again in an instant voice, keeping its words and timing. Waits up to
+   * `waitMs`; a conversion not done by then is "processing", and asking again with the same `key` returns its result
+   * once done, without paying twice.
+   */
+  changeVoice?(input: { voiceId: string; assetId: string; removeNoise: boolean; key: string; waitMs: number }): Promise<{ status: "processing" } | { status: "completed"; audioUrl: string; durationSec: number }>;
   /** Where a music mix stands, with the video once it is ready (its link signed for a limited time). */
   musicMixStatus?(jobId: string): Promise<LipsyncStatus>;
   /** Deletes a music mix and its video at the renderer; one it no longer has counts as deleted. */

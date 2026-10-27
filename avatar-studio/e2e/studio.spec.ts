@@ -768,6 +768,54 @@ test("a catalog track found by describing it is mixed under a finished video, fo
   await expect(page.locator('[data-testid="mix"]:focus, h2:focus')).toHaveCount(1);
 });
 
+test("an instant voice is made from a recording with the speaker's agreement, and a recording is spoken again in it", async ({ page }) => {
+  await page.goto("/voice-changer");
+  await expect(page.getByRole("heading", { name: "Voice changer", exact: true })).toBeVisible();
+  const make = page.getByRole("button", { name: "Make the voice" });
+  const change = page.getByRole("button", { name: "Change the voice" });
+  await expect(make).toBeDisabled();
+  await expect(change).toBeDisabled();
+  // A voice needs a name, a recording of it, and the speaker's agreement.
+  const name = `Narrator ${Date.now().toString(36)}`;
+  await page.getByLabel("Voice name").fill(name);
+  await page.getByLabel("Upload a recording of the voice").setInputFiles("e2e/fixtures/voice-over.mp3");
+  await expect(page.getByRole("combobox", { name: /^Recording of the voice\b/ }).locator("option:checked")).toHaveText("voice-over (3s)");
+  await expect(make).toBeDisabled();
+  await page.getByLabel(/agreed to have their voice cloned/).check();
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/voice-changer/voices") && r.method() === "POST");
+  await make.click();
+  const request = await sent;
+  expect(request.postDataJSON()).toEqual({ name, clipId: expect.stringMatching(/^clip_/), agreed: true });
+  expect(request.headers()["idempotency-key"]).toMatch(/^[A-Za-z0-9_-]{8,100}$/);
+  const voiceRow = page.getByTestId("instant-voices").locator("li").filter({ hasText: name });
+  await expect(voiceRow).toBeFocused();
+  // The demo renderer makes it in a moment; the page checks again on its own.
+  await expect(voiceRow).toContainText("Ready", { timeout: 20_000 });
+  await page.getByRole("combobox", { name: /^Voice\b/ }).selectOption({ label: name });
+  await page.getByLabel("Upload the recording to change").setInputFiles("e2e/fixtures/voice-over.mp3");
+  await page.getByLabel("Clean up background noise first").check();
+  const spoken = page.waitForRequest((r) => r.url().endsWith("/api/voice-changer/changes") && r.method() === "POST");
+  await change.click();
+  expect((await spoken).postDataJSON()).toEqual({ voiceId: expect.stringMatching(/^iv_/), clipId: expect.stringMatching(/^clip_/), removeNoise: true });
+  const card = page.getByTestId("voice-change").first();
+  await expect(card).toBeFocused();
+  await expect(card).toContainText(`voice-over in ${name}`);
+  await expect(card.getByTestId("voice-change-meta")).toContainText(`In “${name}”`);
+  await expect(card.getByTestId("voice-change-meta")).toContainText("noise removed");
+  await expect(card.getByRole("link", { name: /^Download / })).toHaveAttribute("href", /\/demo\/revoiced\.mp3$/);
+  const listed = (await (await page.request.get("/api/voice-changer")).json()) as { voices: Array<Record<string, unknown>>; changes: Array<Record<string, unknown>> };
+  for (const key of ["provider", "providerVoiceId", "ownerId"]) expect(Object.keys(listed.voices[0])).not.toContain(key);
+  expect(Object.keys(listed.changes[0])).not.toContain("providerAudio");
+  // Deleting asks first; the recording spoken already stays when its voice is deleted.
+  page.once("dialog", (d) => d.accept());
+  await voiceRow.getByRole("button", { name: `Delete the voice ${name}` }).click();
+  await expect(page.getByTestId("instant-voices").locator("li").filter({ hasText: name })).toHaveCount(0);
+  await expect(page.getByTestId("voice-change").filter({ hasText: name })).toHaveCount(1);
+  page.once("dialog", (d) => d.accept());
+  await card.getByRole("button", { name: /^Delete / }).click();
+  await expect(page.getByTestId("voice-change").filter({ hasText: name })).toHaveCount(0);
+});
+
 test("a cinematic shot is directed from a description with chosen presenters, kept in the library, and made again", async ({ page }) => {
   // A presenter of the account's own, newest first in the library, and three more whose names no other has.
   const tag = Date.now().toString(36);
@@ -2050,7 +2098,7 @@ test("no page scrolls sideways at phone width", async ({ browser }) => {
     // A transparent video's Background row and a cleaned recording with a long title are the widest content of their pages.
     const clear = await createVideoViaApi(page, "Phone width transparent", { transparent: true });
     expect((await page.request.post("/api/cleanups", { data: { sourceUrl: "https://93.184.216.34/webinar.mp4", title: "Team webinar on pricing and the spring roadmap (cleaned)" } })).status()).toBe(202);
-    const pages = ["/home", "/create", "/agent", "/videos", `/videos/${v.id}`, `/videos/${clear.id}`, "/templates", "/avatars", "/voices", "/batch", "/brand", "/interactive", "/workspace", "/settings", "/translate", "/cleanup", "/lipsync", "/music", "/cinematic", `/share/${v.id}`];
+    const pages = ["/home", "/create", "/agent", "/videos", `/videos/${v.id}`, `/videos/${clear.id}`, "/templates", "/avatars", "/voices", "/batch", "/brand", "/interactive", "/workspace", "/settings", "/translate", "/cleanup", "/lipsync", "/music", "/cinematic", "/voice-changer", `/share/${v.id}`];
     for (const path of pages) {
       await page.goto(path);
       await expect(page.locator("h1").first()).toBeVisible();
@@ -2511,7 +2559,7 @@ test("webhook settings reject private hosts and show the signing secret", async 
 test("pages have no WCAG 2.1 AA violations", async ({ page }) => {
   const v = await createVideoViaApi(page, "Accessible video");
   const agent = (await (await page.request.post("/api/agents", { data: { name: "Axe agent", avatarId: "stock_1" } })).json()).agent as { id: string };
-  const paths = ["/", "/login", "/home", "/create", "/agent", "/videos", `/videos/${v.id}`, "/templates", "/batch", "/avatars", "/voices", "/translate", "/cleanup", "/lipsync", "/music", "/cinematic", "/interactive", "/brand", "/settings", `/share/${v.id}`, `/talk/${agent.id}`, "/demo-consent"];
+  const paths = ["/", "/login", "/home", "/create", "/agent", "/videos", `/videos/${v.id}`, "/templates", "/batch", "/avatars", "/voices", "/translate", "/cleanup", "/lipsync", "/music", "/cinematic", "/voice-changer", "/interactive", "/brand", "/settings", `/share/${v.id}`, `/talk/${agent.id}`, "/demo-consent"];
   const report: string[] = [];
   for (const path of paths) {
     await page.goto(path);
@@ -2606,6 +2654,7 @@ test("a workspace viewer sees view-only notices instead of create controls", asy
     ["/lipsync", "lip-sync videos"],
     ["/music", "add music to videos"],
     ["/cinematic", "make cinematic shots"],
+    ["/voice-changer", "change voices or make new ones"],
     ["/avatars", "add or change avatars"],
     ["/voices", "clone, design, or change voices"],
     ["/brand", "change the brand kit"],

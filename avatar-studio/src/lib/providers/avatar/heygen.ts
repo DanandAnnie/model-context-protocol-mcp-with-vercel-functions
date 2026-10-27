@@ -10,6 +10,7 @@ import { ConflictError, NotFoundError, ValidationError } from "../../errors";
 import type { AvatarJobStatus, AvatarProvider, CleanupStatus, HighlightInput, HighlightStatus, LipsyncInput, LipsyncStatus, MusicMixInput, RenderCast } from "../types";
 import { musicComposition } from "../../music-mix";
 import { strToU8, zipSync } from "fflate";
+import { randomBytes } from "node:crypto";
 
 /**
  * Where a custom portrait's v3 photo avatar look is kept (`providerAssetIds`). Portraits uploaded as v1 talking photos
@@ -34,6 +35,14 @@ function consentOf(status: string | null | undefined): "not_requested" | "pendin
 }
 
 /** HeyGen's Look Pack template ids, a female and a male variant of each pack (its gallery, as documented). */
+/** What HeyGen's reasons for an instant voice it could not make mean, for the account. */
+const INSTANT_VOICE_FAILURES: Record<string, string> = {
+  INVALID_AUDIO: "HeyGen could not read that recording; try another file",
+  PREPROCESSING_FAILED: "The recording did not pass HeyGen's checks; try a clearer recording of one person speaking",
+  DESIGN_FAILED: "HeyGen could not make a voice from that recording; try a longer or clearer one",
+  INTERNAL_ERROR: "HeyGen failed while making the voice; try again",
+};
+
 const LOOK_PACK_TEMPLATES: Record<LookPackKey, { female: string; male: string }> = {
   "modern-corporate": { female: "5a8e6be843ee4321a014946bf62aa322", male: "5e659e76755d47fd9160a2d7dedce124" },
   "business-casual": { female: "e1650a9029d04ea1a350421c163295fd", male: "a5f8e0c0cb654c1a83c695629b173af5" },
@@ -561,6 +570,66 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       const message = err instanceof Error ? err.message : "";
       if (/ failed: 409 /.test(message)) throw new ConflictError(STILL_SENDING);
       if (/ failed: (400|402|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not add music to that video: ${heygenReason(message, "try another track")}`);
+      throw err;
+    }
+  }
+
+  /**
+   * An instant voice from one recording (HeyGen Voice's instant clone), its background noise removed. The name carries
+   * the studio's mark, so HeyGen's voice listings never offer it to another account.
+   */
+  async createInstantVoice(input: { name: string; assetId: string; key: string }) {
+    try {
+      const mark = ` ·st_${randomBytes(6).toString("hex")}`;
+      const name = `${Array.from(input.name).slice(0, 64 - mark.length).join("")}${mark}`;
+      const voiceId = await this.client.createInstantVoice({ mode: "instant", name, audio: [{ type: "asset_id", asset_id: input.assetId }], remove_background_noise: true }, input.key);
+      return { voiceId };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      if (/ failed: 409 /.test(message)) throw new ConflictError(STILL_SENDING);
+      if (/ failed: 403 /.test(message)) throw new ValidationError("The HeyGen account behind this studio may not make voices; ask its operator");
+      if (/ failed: (400|402|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not make a voice from that recording: ${heygenReason(message, "try a clearer recording")}`);
+      throw err;
+    }
+  }
+
+  async instantVoiceStatus(voiceId: string): Promise<{ status: "processing" | "completed" | "failed"; language?: string; error?: string }> {
+    let voice;
+    try {
+      voice = await this.client.instantVoice(voiceId);
+    } catch (err) {
+      if (err instanceof Error && / failed: 404 /.test(err.message)) return { status: "failed", error: "HeyGen no longer has this voice; make it again" };
+      throw err;
+    }
+    if (voice.status === "ACTIVE") return stripEmpty({ status: "completed" as const, language: voice.language ?? undefined });
+    if (voice.status === "FAILED") return { status: "failed", error: INSTANT_VOICE_FAILURES[voice.failure_reason ?? ""] ?? "HeyGen could not make a voice from that recording" };
+    return { status: "processing" };
+  }
+
+  async deleteInstantVoice(voiceId: string) {
+    try {
+      await this.client.deleteInstantVoice(voiceId);
+    } catch (err) {
+      if (!/ failed: 404\b/.test(err instanceof Error ? err.message : "")) throw err;
+    }
+  }
+
+  async changeVoice(input: { voiceId: string; assetId: string; removeNoise: boolean; key: string; waitMs: number }): Promise<{ status: "processing" } | { status: "completed"; audioUrl: string; durationSec: number }> {
+    const body = { voice_id: input.voiceId, audio: { type: "asset_id", asset_id: input.assetId }, ...(input.removeNoise ? { remove_background_noise: true } : {}) };
+    try {
+      const out = await this.client.speechToSpeech(body, input.key, input.waitMs);
+      const audioUrl = httpsOnly(out?.audio_url);
+      if (!audioUrl) throw new Error("HeyGen finished without the audio");
+      return { status: "completed", audioUrl, durationSec: Math.max(0, Number(out?.duration) || 0) };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      // Not done in time: still running at HeyGen, so asked again with the same key until it answers.
+      const timedOut = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+      const stillRunning = / failed: (409|503|504) /.test(message) && !/voice_training_failed|"conflict"/.test(message);
+      if (timedOut || stillRunning) return { status: "processing" };
+      if (/voice_training_failed/.test(message)) throw new ValidationError("HeyGen could not make this voice; make it again from another recording");
+      if (/ failed: 404 /.test(message)) throw new ValidationError("HeyGen no longer has this voice; make it again");
+      if (/ failed: (400|402|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not speak that recording again: ${heygenReason(message, "try a clearer recording")}`);
       throw err;
     }
   }

@@ -151,6 +151,24 @@ export class MockAvatarProvider implements AvatarProvider {
 
   async deleteMusicMix() {}
 
+  /** A demo instant voice: ready a moment after it is made. The job id carries the time, so following it needs no state. */
+  async createInstantVoice() {
+    return { voiceId: `mockiv_${Date.now()}` };
+  }
+
+  async instantVoiceStatus(voiceId: string): Promise<{ status: "processing" | "completed" | "failed"; language?: string; error?: string }> {
+    const m = /^mockiv_(\d+)$/.exec(voiceId);
+    if (!m) return { status: "failed", error: "No such voice" };
+    return Date.now() - Number(m[1]) < MockAvatarProvider.CLIP_MS / 2 ? { status: "processing" } : { status: "completed", language: "en" };
+  }
+
+  async deleteInstantVoice() {}
+
+  /** A demo conversion: a short sample recording stands in for the recording spoken again, at once. */
+  async changeVoice(): Promise<{ status: "completed"; audioUrl: string; durationSec: number }> {
+    return { status: "completed", audioUrl: demoAssetUrl("/demo/revoiced.mp3"), durationSec: 0 };
+  }
+
   async musicMixStatus(jobId: string): Promise<LipsyncStatus> {
     const m = /^mockmm_(\d+)$/.exec(jobId);
     if (!m) return { status: "failed", error: "No such video with music" };

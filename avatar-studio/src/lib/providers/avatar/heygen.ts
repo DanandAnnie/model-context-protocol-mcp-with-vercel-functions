@@ -1,11 +1,11 @@
-import { backdropIdOf, isPhotoAvatar, rendersOnAvatarV, type AudioClip, type Avatar, type Backdrop, type Background, type Scene, type VideoRequest, type Voice } from "../../types";
+import { STUDIO_VARIABLE_TYPES, backdropIdOf, isPhotoAvatar, rendersOnAvatarV, type AudioClip, type Avatar, type Backdrop, type Background, type Scene, type StudioTemplate, type StudioTemplateDetail, type StudioVariable, type VideoRequest, type Voice } from "../../types";
 import { silentSeconds, withBreakTags } from "../../pauses";
 import { heygenBurnsCaptions } from "../../captions";
 import { voiceTakesAccent } from "../../language";
 import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
 import { HeyGenClient } from "../heygen-client";
-import { ValidationError } from "../../errors";
+import { NotFoundError, ValidationError } from "../../errors";
 import type { AvatarJobStatus, AvatarProvider, CleanupStatus, HighlightInput, HighlightStatus, RenderCast } from "../types";
 
 /**
@@ -117,6 +117,16 @@ export class HeyGenAvatarProvider implements AvatarProvider {
    * `image` or `video` scene of its background, narrated by its voice or clip, or silent.
    */
   async createVideo(req: VideoRequest, avatar: Avatar, voice: Voice | null, cast?: RenderCast) {
+    // A Studio template owns its scenes, presenter, and voice: only its variables, the title, and captions are sent.
+    if (req.studioTemplate) {
+      const { video_id } = await this.client.generateFromTemplate(req.studioTemplate.id, {
+        variables: req.studioTemplate.variables,
+        title: req.title,
+        caption: req.captions,
+        ...(webhookUrl("heygen") ? { callback_url: webhookUrl("heygen") } : {}),
+      });
+      return { providerJobId: video_id };
+    }
     const scenes: Scene[] = req.scenes?.length ? req.scenes : [{ script: req.script, background: req.background }];
     // Every scene's presenter, clip, voice, and background is checked before anything is uploaded for the render.
     const sceneAvatarOf = (scene: Scene) => (scene.avatarId && cast?.avatars[scene.avatarId]) || avatar;
@@ -367,6 +377,36 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       outputSec: job.output_duration ?? undefined,
       cuts: job.num_cuts ?? undefined,
       reductionPct: job.reduction_pct ?? undefined,
+    });
+  }
+
+  /** The account's API-ready HeyGen Studio templates (made in HeyGen Studio and marked for the API). */
+  async listStudioTemplates(): Promise<StudioTemplate[]> {
+    return (await this.client.listTemplates()).map((t) => stripEmpty({ id: t.id, name: t.name || "Untitled template", thumbnailUrl: httpsOnly(t.thumbnail_url), aspect: t.aspect_ratio ?? undefined }));
+  }
+
+  /** A template's variables in HeyGen's own shape (types this studio does not know are left out) and its scenes. */
+  async getStudioTemplate(id: string): Promise<StudioTemplateDetail> {
+    let t;
+    try {
+      t = await this.client.template(id);
+    } catch (err) {
+      if (err instanceof Error && / failed: (400|404) /.test(err.message)) throw new NotFoundError("Template not found");
+      throw err;
+    }
+    const variables: Record<string, StudioVariable> = {};
+    for (const [name, v] of Object.entries(t.variables ?? {})) {
+      if (!v || !(STUDIO_VARIABLE_TYPES as readonly string[]).includes(String(v.type))) continue;
+      // A presenter's look is `avatar_id`; older templates still answer with its former names.
+      variables[name] = (v.type === "character" ? { type: "character", avatar_id: String(v.avatar_id ?? v.avatar_look_id ?? v.character_id ?? "") } : v) as StudioVariable;
+    }
+    return stripEmpty({
+      id: t.id,
+      name: t.name || "Untitled template",
+      thumbnailUrl: httpsOnly(t.thumbnail_url),
+      aspect: t.aspect_ratio ?? undefined,
+      variables,
+      scenes: (t.scenes ?? []).map((sc, i) => ({ id: sc.scene_id ?? `scene_${i + 1}`, script: sc.script ?? "", variables: (sc.variables ?? []).map((v) => v.name ?? "").filter(Boolean) })),
     });
   }
 

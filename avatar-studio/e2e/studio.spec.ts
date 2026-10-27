@@ -664,6 +664,34 @@ test("a recording can be cleaned of filler words, from a link or the library, an
   await expect(page.getByTestId("cleanup")).toHaveCount(listed.length - 1);
 });
 
+test("a HeyGen Studio template is filled in and rendered as a library video", async ({ page }) => {
+  await page.goto("/templates");
+  const section = page.getByTestId("studio-templates");
+  await expect(section.getByRole("heading", { name: "HeyGen templates" })).toBeVisible();
+  await section.getByRole("button", { name: "Fill in Open house invitation" }).click();
+  const form = page.getByTestId("studio-template-form");
+  await expect(form.getByRole("heading", { name: /Open house invitation/ })).toBeFocused();
+  // Each slot starts from the template's own; a text with no default must be filled in before rendering.
+  await expect(form.getByRole("textbox", { name: /^Agent name/ })).toHaveValue("Ava");
+  await expect(form.getByText("Fill in Open time to render.")).toBeVisible();
+  await expect(form.getByRole("button", { name: "Render video" })).toBeDisabled();
+  await form.getByRole("textbox", { name: /^Open time/ }).fill("Saturday at 10");
+  await form.getByRole("textbox", { name: /^Video title/ }).fill("Harbor Lane invite");
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/studio-templates/demo_open_house/videos") && r.method() === "POST");
+  await form.getByRole("button", { name: "Render video" }).click();
+  const body = (await sent).postDataJSON() as { title: string; captions: boolean; variables: Record<string, unknown> };
+  expect(body.title).toBe("Harbor Lane invite");
+  expect(body.variables.open_time).toEqual({ type: "text", content: "Saturday at 10" });
+  expect(body.variables.cover_image, "a link left empty keeps the template's").toBeUndefined();
+  await page.waitForURL(/\/videos\/vid_/);
+  await expect(page.getByText("Open house invitation", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Edit a copy" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Save as template" })).toHaveCount(0);
+  // The template can be used again from the video, opening its form directly.
+  await page.getByRole("link", { name: "Use the template again" }).click();
+  await expect(page.getByTestId("studio-template-form").getByRole("heading", { name: /Open house invitation/ })).toBeVisible();
+});
+
 test("a scene can leave the presenter out and let its picture fill the frame", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Kitchen tour");
   await page.locator("textarea").fill("Welcome in, let me show you around.");

@@ -394,6 +394,43 @@ export interface VideoRequest {
    * avatar must be trained with matting. Absent is a normal video.
    */
   transparent?: true;
+  /**
+   * Rendered from a HeyGen Studio template rather than composed here: the template and the variables it was filled
+   * with. The template owns the layout, presenter, and voice; `script`, `avatarId`, and `voiceId` only describe it.
+   */
+  studioTemplate?: StudioTemplateUse;
+}
+
+/** A filled-in variable of a HeyGen Studio template, in HeyGen's own shape. */
+export type StudioAsset = { type: "url"; url: string } | { type: "asset_id"; asset_id: string };
+export type StudioVariable =
+  | { type: "text"; content: string }
+  | { type: "image"; asset: StudioAsset; fit?: "cover" | "contain" | "crop" | "none" }
+  | { type: "video"; asset: StudioAsset; fit?: "cover" | "contain" | "crop" | "none"; play_style?: string; volume?: number }
+  | { type: "audio"; asset: StudioAsset }
+  | { type: "voice"; voice_id: string; locale?: string }
+  | { type: "character"; avatar_id: string };
+export const STUDIO_VARIABLE_TYPES = ["text", "image", "video", "audio", "voice", "character"] as const;
+
+/** A HeyGen Studio template the account's renderer offers (an "API-ready" template made in HeyGen Studio). */
+export interface StudioTemplate {
+  id: string;
+  name: string;
+  thumbnailUrl?: string;
+  aspect?: string;
+}
+
+/** A template with its variables (their current defaults) and its scenes' scripts, `{{name}}` left in. */
+export interface StudioTemplateDetail extends StudioTemplate {
+  variables: Record<string, StudioVariable>;
+  scenes: Array<{ id: string; script: string; variables: string[] }>;
+}
+
+/** The template a video was rendered from and the values sent. */
+export interface StudioTemplateUse {
+  id: string;
+  name: string;
+  variables: Record<string, StudioVariable>;
 }
 
 /** HeyGen's avatar engines a video can choose; "avatar_iv" is its default and is stored as absent. */
@@ -883,6 +920,8 @@ export interface ProviderStatus {
   highlightClips: boolean;
   /** Whether the renderer can clean filler words and long silences out of a recording. */
   fillerRemoval: boolean;
+  /** Whether the renderer offers HeyGen Studio templates to fill and render. */
+  studioTemplates: boolean;
   /** Whether the TTS provider can design a voice from a description. */
   voiceDesign: boolean;
   /** Present when the request carried an owner (signed in, or open/password mode). */

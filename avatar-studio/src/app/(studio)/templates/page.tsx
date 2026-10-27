@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useMemo, useRef, useState } from "react";
+import { Suspense, useMemo, useRef, useState } from "react";
 import { LayoutTemplate, Trash2 } from "lucide-react";
 import { Card, ErrorBanner, SectionTitle } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
@@ -9,6 +9,7 @@ import { refocusIfLost } from "@/lib/focus";
 import { SCRIPT_TEMPLATES, type ScriptTemplate } from "@/lib/templates";
 import type { VideoTemplate } from "@/lib/types";
 import { stripPauses } from "@/lib/pauses";
+import { StudioTemplates } from "@/components/StudioTemplates";
 
 const CATEGORIES = ["All", ...Array.from(new Set(SCRIPT_TEMPLATES.map((t) => t.category)))];
 
@@ -72,6 +73,9 @@ export default function TemplatesPage() {
           </div>
         )}
       </section>
+      <Suspense>
+        <StudioTemplates />
+      </Suspense>
       <h2 className="mb-3 text-sm font-semibold text-slate-900">Script templates</h2>
       <div className="mb-5 flex flex-wrap gap-2">
         {CATEGORIES.map((c) => (

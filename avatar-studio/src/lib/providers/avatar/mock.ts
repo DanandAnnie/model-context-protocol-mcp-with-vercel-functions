@@ -2,7 +2,8 @@ import { spokenWords } from "../../captions";
 import { pauseSeconds, stripPauses } from "../../pauses";
 import { SAMPLE_PREVIEW_VIDEO, STOCK_AVATARS, portraitSvg } from "../../stock";
 import { demoAssetUrl } from "../../config";
-import type { AudioClip, Avatar, VideoRequest } from "../../types";
+import { NotFoundError } from "../../errors";
+import type { AudioClip, Avatar, StudioTemplate, StudioTemplateDetail, VideoRequest } from "../../types";
 import type { AvatarJobStatus, AvatarProvider, CleanupStatus, HighlightInput, HighlightStatus } from "../types";
 
 /** Labeled, self-hosted stand-in; no avatar synthesis or paid operation occurs. */
@@ -74,6 +75,17 @@ export class MockAvatarProvider implements AvatarProvider {
     return { status: "completed", progress: 100, videoUrl: demoAssetUrl(SAMPLE_VIDEO), thumbnailUrl: SAMPLE_THUMB, originalSec: 64, outputSec: 58.5, cuts: 7, reductionPct: 8.6 };
   }
 
+  /** Demo Studio templates: two layouts to fill in; rendering one is a demo render of its filled-in script. */
+  async listStudioTemplates(): Promise<StudioTemplate[]> {
+    return DEMO_STUDIO_TEMPLATES.map(({ id, name, thumbnailUrl, aspect }) => ({ id, name, thumbnailUrl, aspect }));
+  }
+
+  async getStudioTemplate(id: string): Promise<StudioTemplateDetail> {
+    const t = DEMO_STUDIO_TEMPLATES.find((x) => x.id === id);
+    if (!t) throw new NotFoundError("Template not found");
+    return structuredClone(t);
+  }
+
   /** Demo presenter from a description: an illustrated portrait whose colours follow the description; nothing is generated. */
   async generatePortrait({ name, prompt }: { name: string; prompt: string }) {
     let hash = 0;
@@ -101,3 +113,37 @@ export class MockAvatarProvider implements AvatarProvider {
     };
   }
 }
+
+/** Stand-ins for templates made in HeyGen Studio, so the demo shows the flow; nothing is fetched from HeyGen. */
+const DEMO_STUDIO_TEMPLATES: StudioTemplateDetail[] = [
+  {
+    id: "demo_open_house",
+    name: "Open house invitation",
+    thumbnailUrl: SAMPLE_THUMB,
+    aspect: "16:9",
+    variables: {
+      agent_name: { type: "text", content: "Ava" },
+      address: { type: "text", content: "12 Harbor Lane" },
+      open_time: { type: "text", content: "" },
+      cover_image: { type: "image", asset: { type: "url", url: "https://images.example.com/house.jpg" }, fit: "cover" },
+      presenter: { type: "character", avatar_id: "stock_1" },
+      narrator: { type: "voice", voice_id: "stock_voice_1" },
+    },
+    scenes: [
+      { id: "scene_1", script: "Hi, I'm {{agent_name}}. You're invited to an open house at {{address}}.", variables: ["agent_name", "address"] },
+      { id: "scene_2", script: "Doors open {{open_time}}. See you there!", variables: ["open_time"] },
+    ],
+  },
+  {
+    id: "demo_product_update",
+    name: "Product update",
+    thumbnailUrl: SAMPLE_THUMB,
+    aspect: "9:16",
+    variables: {
+      headline: { type: "text", content: "What's new this month" },
+      details: { type: "text", content: "" },
+      presenter: { type: "character", avatar_id: "stock_2" },
+    },
+    scenes: [{ id: "scene_1", script: "{{headline}}. {{details}}", variables: ["headline", "details"] }],
+  },
+];

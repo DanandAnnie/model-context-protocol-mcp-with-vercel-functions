@@ -162,6 +162,37 @@ export class HeyGenClient {
     }>(`${V3}/filler-word-removals/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(10_000) });
   }
 
+  /** The account's API-ready Studio templates (`GET /v3/templates`; its page sits inside `data`), up to five pages. */
+  async listTemplates() {
+    type Row = { id: string; name?: string; thumbnail_url?: string | null; aspect_ratio?: string | null };
+    const out: Row[] = [];
+    let token: string | undefined;
+    for (let page = 0; page < 5; page++) {
+      const data = await this.request<{ templates?: Row[]; has_more?: boolean; next_token?: string | null }>(`${V3}/templates?limit=100${token ? `&token=${encodeURIComponent(token)}` : ""}`, { signal: AbortSignal.timeout(10_000) });
+      out.push(...(data?.templates ?? []));
+      token = data?.has_more && data.next_token ? data.next_token : undefined;
+      if (!token) break;
+    }
+    return out;
+  }
+
+  /** A template's variables (with their current defaults) and scenes (`GET /v3/templates/{id}`). */
+  template(id: string) {
+    return this.request<{
+      id: string;
+      name?: string;
+      aspect_ratio?: string | null;
+      thumbnail_url?: string | null;
+      variables?: Record<string, Record<string, unknown> & { type?: string }>;
+      scenes?: Array<{ scene_id?: string; script?: string | null; variables?: Array<{ name?: string }> }>;
+    }>(`${V3}/templates/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(10_000) });
+  }
+
+  /** Renders a video from a template with its variables replaced (`POST /v3/templates/{id}`). */
+  generateFromTemplate(id: string, body: Record<string, unknown>) {
+    return this.request<{ video_id: string }>(`${V3}/templates/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify(body) });
+  }
+
   /** A video (v3, `POST /v3/videos`); a studio request composes its scenes into one render. */
   generateVideo(body: Record<string, unknown>) {
     return this.request<{ video_id: string; status?: string }>(`${V3}/videos`, { method: "POST", body: JSON.stringify(body) });

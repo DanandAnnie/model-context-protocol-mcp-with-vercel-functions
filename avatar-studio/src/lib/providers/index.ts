@@ -91,6 +91,7 @@ export function providerStatus(): ProviderStatus {
     portraitGeneration: typeof getAvatarProvider().generatePortrait === "function",
     highlightClips: typeof getAvatarProvider().startHighlights === "function",
     fillerRemoval: typeof getAvatarProvider().startCleanup === "function",
+    studioTemplates: typeof getAvatarProvider().listStudioTemplates === "function",
     authEnabled: authEnabled(),
     authMode: authMode(),
     renderLimitPerMonth: config.renderLimitPerMonth ?? null,

@@ -1,4 +1,4 @@
-import type { AudioClip, Avatar, Backdrop, CaptionCue, HighlightClip, HighlightFrame, HighlightLength, Translation, TranslationRequest, Video, VideoRequest, Voice } from "../types";
+import type { AudioClip, Avatar, Backdrop, CaptionCue, HighlightClip, HighlightFrame, HighlightLength, StudioTemplate, StudioTemplateDetail, Translation, TranslationRequest, Video, VideoRequest, Voice } from "../types";
 
 export interface TtsProvider {
   readonly name: string;
@@ -97,6 +97,10 @@ export interface AvatarProvider {
   startCleanup?(input: { videoUrl: string; title: string; key: string }): Promise<{ jobId: string }>;
   /** Where a cleanup stands, with the cleaned cut once it is ready (its link signed for a limited time). */
   cleanupStatus?(jobId: string): Promise<CleanupStatus>;
+  /** The account's HeyGen Studio templates ready to fill. Absent when the provider has none. */
+  listStudioTemplates?(): Promise<StudioTemplate[]>;
+  /** One template's variables (with their defaults) and scenes. */
+  getStudioTemplate?(id: string): Promise<StudioTemplateDetail>;
   /** Parse an inbound webhook body into a job update, or null if unrecognised. */
   parseWebhook?(body: unknown): { providerJobId: string; update: AvatarJobStatus } | null;
 }

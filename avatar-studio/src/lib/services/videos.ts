@@ -266,6 +266,7 @@ export async function resolveRenderContext(
 export type VideoExtras = Partial<Pick<Video, "folder" | "description" | "batchId" | "rowLabel" | "retryOf" | "resizedFrom" | "captionCues" | "subtitles">>;
 
 export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWNER, ctx?: RenderContext, skipLimit = false, extras: VideoExtras = {}): Promise<Video> {
+  if (req.studioTemplate) return createStudioTemplateVideo({ ...req, studioTemplate: req.studioTemplate }, ownerId, skipLimit, extras);
   if (!skipLimit) await enforceRenderLimit(ownerId);
   const resolved = ctx ?? (await resolveRenderContext(req, ownerId));
   let avatar = resolved.avatar;
@@ -1165,6 +1166,37 @@ export async function retryVideo(id: string, ownerId: string = LOCAL_OWNER): Pro
   return createVideo(req, ownerId, undefined, false, { folder: failed.folder, description: failed.description, batchId: failed.batchId, rowLabel: failed.rowLabel, retryOf: failed.id, resizedFrom: failed.resizedFrom });
 }
 
+/**
+ * A render of a HeyGen Studio template: the template owns its scenes, presenter, and voice, so nothing is resolved or
+ * prepared here; the renderer gets the template and its variables. Counted, stored, and followed like any render.
+ */
+async function createStudioTemplateVideo(req: VideoRequest & { studioTemplate: NonNullable<VideoRequest["studioTemplate"]> }, ownerId: string, skipLimit: boolean, extras: VideoExtras): Promise<Video> {
+  if (!skipLimit) await enforceRenderLimit(ownerId);
+  const provider = getAvatarProvider();
+  if (!provider.listStudioTemplates) throw new ValidationError(`HeyGen Studio templates are not available with the ${provider.name} renderer`);
+  const base: Video = {
+    ...req,
+    ...stripUndefined(extras),
+    id: newId("vid"),
+    ownerId,
+    status: "queued",
+    provider: provider.name,
+    avatarName: req.studioTemplate.name,
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  };
+  try {
+    const { providerJobId } = await provider.createVideo(req, { id: req.avatarId, name: req.studioTemplate.name, provider: provider.name, source: "provider" } as Avatar, null);
+    base.providerJobId = providerJobId;
+    base.status = "processing";
+  } catch (err) {
+    base.status = "failed";
+    base.error = err instanceof Error ? err.message : String(err);
+  }
+  if (base.status !== "failed") await countRender(base, ownerId);
+  return getStore().put("video", base);
+}
+
 /** The request a stored video was rendered from, to render it again (a retry, another size). */
 function requestOf(video: Video): VideoRequest {
   return {
@@ -1186,6 +1218,7 @@ function requestOf(video: Video): VideoRequest {
     ...(video.accent ? { accent: video.accent } : {}),
     ...(video.avatarEngine ? { avatarEngine: video.avatarEngine } : {}),
     ...(video.transparent ? { transparent: true as const } : {}),
+    ...(video.studioTemplate ? { studioTemplate: video.studioTemplate } : {}),
   };
 }
 
@@ -1248,6 +1281,8 @@ export async function resizeVideo(id: string, input: z.infer<typeof resizeSchema
   const source = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
   if (purgeDue(source, Date.now())) throw new NotFoundError(`Video ${id} not found`);
   if (source.deletedAt) throw new ConflictError("Restore the video from the trash before making other sizes");
+  // A HeyGen Studio template has one shape, its own.
+  if (source.studioTemplate) throw new ValidationError("A video made from a HeyGen template keeps the template's shape; make the other size in HeyGen Studio");
   // A shape the video already has is not made again: the original's (even in the trash, as it can be restored) and
   // each size made from it that is not in the trash. A size whose render could not be started used no render and holds
   // nothing to watch, so its shape can be made again.

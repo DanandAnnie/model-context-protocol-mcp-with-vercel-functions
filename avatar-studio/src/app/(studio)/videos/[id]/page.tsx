@@ -696,10 +696,17 @@ export default function VideoDetailPage() {
                     <Languages className="h-4 w-4" /> Translate
                   </Link>
                 )}
-                <Link href={`/create?from=${video.id}`} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50">
-                  <Copy className="h-4 w-4" /> Edit a copy
-                </Link>
-                {savedTemplate ? (
+                {/* A HeyGen template's scenes live in HeyGen Studio, so it is remade from the template, not copied or saved here. */}
+                {!video.studioTemplate && (
+                  <Link href={`/create?from=${video.id}`} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50">
+                    <Copy className="h-4 w-4" /> Edit a copy
+                  </Link>
+                )}
+                {video.studioTemplate ? (
+                  <Link href={`/templates?studio=${encodeURIComponent(video.studioTemplate.id)}`} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50">
+                    <LayoutTemplate className="h-4 w-4" /> Use the template again
+                  </Link>
+                ) : savedTemplate ? (
                   <Link ref={savedTemplateLink} href="/templates" className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100">
                     <Check className="h-4 w-4" /> Saved · View templates
                   </Link>
@@ -845,6 +852,9 @@ export default function VideoDetailPage() {
                       </>
                     )}
                   </Row>
+                  {video.studioTemplate && <Row label="HeyGen template">{video.studioTemplate.name}</Row>}
+                  {!video.studioTemplate && (
+                  <>
                   <Row label="Avatar">
                     {video.scenes?.length && video.scenes.every((sc) => sc.hidePresenter)
                       ? "None: every scene shows its picture or video"
@@ -855,7 +865,9 @@ export default function VideoDetailPage() {
                       ? `Recorded audio${video.scenes.length === 1 && video.scenes[0].audioName ? ` (${video.scenes[0].audioName})` : ""}`
                       : `${video.voiceName ?? video.voiceId}${video.scenes?.some((sc) => sc.audioId) ? ", plus recorded audio" : ""}`}
                   </Row>
-                  <Row label="Speed">{video.speed}x{video.speed !== 1 && video.provider !== "heygen" && video.provider !== "mock" ? " (not applied by this renderer)" : ""}</Row>
+                  </>
+                  )}
+                  {!video.studioTemplate && <Row label="Speed">{video.speed}x{video.speed !== 1 && video.provider !== "heygen" && video.provider !== "mock" ? " (not applied by this renderer)" : ""}</Row>}
                   {video.pitch ? <Row label="Pitch">{`${video.pitch > 0 ? `+${video.pitch}` : video.pitch}${video.provider !== "heygen" ? " (not applied by this renderer)" : ""}`}</Row> : null}
                   {video.emotion ? (
                     <Row label="Voice emotion">{`${video.emotion} (not applied: no renderer takes an emotion since HeyGen's v3 API)`}</Row>
@@ -890,6 +902,7 @@ export default function VideoDetailPage() {
                     </Row>
                   ) : null}
                   <Row label="Captions">{video.captions ? `On${video.captionStyle ? ` · ${video.captionStyle.position}, ${video.captionStyle.size}${video.captionStyle.look ? `, ${video.captionStyle.look}` : ""}${video.captionStyle.font ? `, ${video.captionStyle.font} type` : ""}` : ""}` : "Off"}</Row>
+                  {!video.studioTemplate && (
                   <Row label="Background">
                     {video.transparent ? (
                       `Transparent (WebM, the presenter alone)${video.provider !== "heygen" ? " (not applied by this renderer)" : ""}`
@@ -899,6 +912,7 @@ export default function VideoDetailPage() {
                       `${video.background.type === "video" ? "Video" : "Image"}${video.background.fit === "contain" ? ", shown whole (preview only)" : ""}`
                     )}
                   </Row>
+                  )}
                 </dl>
               </Card>
               <Card className="p-4" data-testid="cover-card">
@@ -1101,7 +1115,7 @@ export default function VideoDetailPage() {
               </Card>
               <VideoChapters video={video} />
               {/* Offered once the role is known to allow it, so a viewer never sees a button the server would refuse. */}
-              {(canEdit === true || video.resizedFrom) && <OtherSizes video={video} canEdit={canEdit === true} />}
+              {(canEdit === true || video.resizedFrom) && !video.studioTemplate && <OtherSizes video={video} canEdit={canEdit === true} />}
               {video.status === "completed" && canEdit !== null && <HighlightClips video={video} canEdit={canEdit === true} />}
               <ReviewPanel video={video} onChange={(next) => setData({ video: next })} />
               <VideoComments videoId={video.id} player={video.status === "completed" && video.videoUrl ? player : undefined} />

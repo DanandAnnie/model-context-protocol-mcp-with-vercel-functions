@@ -846,6 +846,11 @@ function CreateInner() {
     if (!fromId || !spacesKnown || keptEdits()) return;
     api<{ video: Video }>(`/api/videos/${fromId}`)
       .then(({ video }) => {
+        // A HeyGen template's scenes are not here to copy; its form is the way to make another.
+        if (video.studioTemplate) {
+          setErr(`"${video.title}" was made from the HeyGen template "${video.studioTemplate.name}"; use the template again from the Templates page to make another.`);
+          return;
+        }
         setTitle(`${video.title} (copy)`);
         setScenes(video.scenes?.length ? video.scenes.map((sc) => newScene(sc.script, sc.background, sc)) : [newScene(video.script, video.background)]);
         setActiveIdx(0);

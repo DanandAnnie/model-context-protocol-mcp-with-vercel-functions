@@ -20,3 +20,4 @@ export * from "./clips";
 export * from "./backdrops";
 export * from "./highlights";
 export * from "./cleanups";
+export * from "./studio-templates";

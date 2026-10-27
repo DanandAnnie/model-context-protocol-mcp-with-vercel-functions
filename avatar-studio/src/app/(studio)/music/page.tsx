@@ -38,11 +38,14 @@ export default function MusicPage() {
     return () => clearInterval(timer);
   }, [running, refetch]);
   const { data: library, refetch: refetchLibrary } = useApi<{ videos: Video[]; hasMore?: boolean; rendering?: number }>("/api/videos?status=completed&limit=200");
-  // A video that finishes while the page is open joins the choices: the list is asked again while renders are in flight.
+  // A video that finishes while the page is open joins the choices: the list is asked again while renders are in flight,
+  // for up to ten minutes (a render whose start never came back stays "queued"), and whenever the tab comes back.
   const libraryRendering = (library?.rendering ?? 0) > 0;
   useEffect(() => {
     if (!libraryRendering) return;
+    let checks = 0;
     const timer = setInterval(() => {
+      if (++checks > 60) return clearInterval(timer);
       if (document.visibilityState === "visible") void refetchLibrary();
     }, 10_000);
     return () => clearInterval(timer);
@@ -265,7 +268,7 @@ export default function MusicPage() {
                 <p className="mt-1 text-xs text-slate-500">Under the speech; Low suits most talking videos.</p>
               </fieldset>
               <Field label="Title (optional)">
-                <input className={inputClass} value={title} maxLength={120} disabled={canEdit !== true} onChange={(e) => setTitle(e.target.value)} placeholder="The video's title, marked with music" />
+                <input className={inputClass} value={title} maxLength={120} disabled={canEdit !== true} onChange={(e) => (setTitle(e.target.value), changed())} placeholder="The video's title, marked with music" />
               </Field>
               <Button onClick={submit} loading={busy} disabled={!videoId || !track || !canStart} className="w-full">
                 <Music className="h-4 w-4" /> Add music

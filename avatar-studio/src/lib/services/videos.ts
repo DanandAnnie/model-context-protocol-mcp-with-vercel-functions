@@ -272,9 +272,12 @@ export type VideoExtras = Partial<Pick<Video, "folder" | "description" | "batchI
   onStarted?: () => void;
 };
 
-export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWNER, ctx?: RenderContext, skipLimit = false, extras: VideoExtras = {}): Promise<Video> {
-  if (req.studioTemplate) return createStudioTemplateVideo({ ...req, studioTemplate: req.studioTemplate }, ownerId, skipLimit, extras);
-  if (req.cinematic) return createCinematicVideo({ ...req, cinematic: req.cinematic }, ownerId, skipLimit, extras);
+export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWNER, ctx?: RenderContext, skipLimit = false, allExtras: VideoExtras = {}): Promise<Video> {
+  if (req.studioTemplate) return createStudioTemplateVideo({ ...req, studioTemplate: req.studioTemplate }, ownerId, skipLimit, allExtras);
+  if (req.cinematic) return createCinematicVideo({ ...req, cinematic: req.cinematic }, ownerId, skipLimit, allExtras);
+  // A callback is never part of the stored video; the studio's own renders do not report starting.
+  const { onStarted: _started, ...extras } = allExtras;
+  void _started;
   if (!skipLimit) await enforceRenderLimit(ownerId);
   const resolved = ctx ?? (await resolveRenderContext(req, ownerId));
   let avatar = resolved.avatar;

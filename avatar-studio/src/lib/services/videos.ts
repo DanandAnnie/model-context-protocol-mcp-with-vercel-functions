@@ -17,7 +17,7 @@ import { isWorkspaceId, type User } from "../workspaces";
 import { getAvatar, madeLooksOf, rememberMadeLooks } from "./avatars";
 import { getClip, getClipAudio, saveClipAssetIds } from "./clips";
 import { getBackdrop, getBackdropImage, saveBackdropAssetIds } from "./backdrops";
-import { footageForRender } from "./footage";
+import { footageForRender, rendersFootage } from "./footage";
 import { listVoices } from "./voices";
 import { PUBLIC_ACCESS, owned, scheduleNotification, stripUndefined } from "./shared";
 import { SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, clearShareLock, setShareLock, shareUnlocked } from "../share-lock";
@@ -246,7 +246,8 @@ export async function resolveRenderContext(
   const avatarIds = Array.from(new Set([req.avatarId, ...(req.scenes ?? []).map((s) => s.avatarId).filter((id): id is string => !!id)]));
   const clipIds = Array.from(new Set((req.scenes ?? []).map((s) => s.audioId).filter((id): id is string => !!id)));
   const backdropIds = backdropIdsOf(req);
-  const footageIds = footageIdsOf(req);
+  // A renderer that shows its own background whatever it is given (D-ID) has no clip to loop, so none is looked up.
+  const footageIds = rendersFootage(getAvatarProvider()) ? footageIdsOf(req) : [];
   const [avatarList, voices, clipList, backdropList, footageList] = await Promise.all([
     Promise.all(avatarIds.map((id) => getAvatar(id, ownerId))),
     listVoices(ownerId),
@@ -370,7 +371,7 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
     for (const id of backdropIdsOf(req)) {
       if (!cast.backdrops?.[id]) cast.backdrops = { ...cast.backdrops, [id]: await getBackdrop(id, ownerId) };
     }
-    for (const id of footageIdsOf(req)) {
+    for (const id of rendersFootage(provider) ? footageIdsOf(req) : []) {
       if (!cast.footage?.[id]) cast.footage = { ...cast.footage, [id]: await footageForRender(id, ownerId) };
     }
     if (cast.backdrops && provider.prepareBackdrop) {

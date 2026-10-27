@@ -92,9 +92,46 @@ describe("generated clips", () => {
     assert.equal((await footageForRender(job.id, "u1")).videoUrl, "https://files.heygen.ai/old.mp4", "a recent link is used as it is");
     // An old link is asked for again (the demo renderer hands back its sample clip).
     await getStore().put("footage", { ...(await finished(job, 60 * 60 * 1000)), providerJobId: `mockft_${Date.now() - 10_000}_5` });
+    forgetFootageChecks();
     assert.match((await footageForRender(job.id, "u1")).videoUrl, /\/demo\//);
     await deleteFootage(job.id, "u1");
     await assert.rejects(footageForRender(job.id, "u1"), (e: unknown) => e instanceof ValidationError && /was deleted/.test((e as Error).message));
+  });
+
+  it("are asked about when a render needs one still being made, without waiting for a listing", async () => {
+    const job = await startFootage(ask(), "u1");
+    await getStore().put("footage", { ...job, providerJobId: `mockft_${Date.now() - 10_000}_5` });
+    forgetFootageChecks();
+    assert.match((await footageForRender(job.id, "u1")).videoUrl, /\/demo\//, "the clip HeyGen finished meanwhile is found ready");
+    assert.equal((await getStore().get<FootageJob>("footage", job.id))!.status, "completed", "and stored as such");
+  });
+
+  it("leave the brand kit and templates when deleted, which then render with a plain background", async () => {
+    const { saveBrandKit, getBrandKit, createTemplate, getTemplate, brandKitSchema } = await import("../services");
+    const job = await finished(await startFootage(ask(), "u1"));
+    const loop = { type: "video" as const, value: footagePath(job.id) };
+    await saveBrandKit(brandKitSchema.parse({ name: "Acme", primaryColor: "#112233", defaultBackground: loop }), "u1");
+    const tpl = await createTemplate({ title: "Kitchen tour", scenes: [{ script: "Welcome in.", background: loop, hidePresenter: true }] } as never, "u1");
+    // A kit or template may only name a clip of the account that exists.
+    await assert.rejects(saveBrandKit(brandKitSchema.parse({ name: "Acme", primaryColor: "#112233", defaultBackground: loop }), "u2"), /not found/i);
+    await assert.rejects(saveBrandKit(brandKitSchema.parse({ name: "Acme", primaryColor: "#112233", defaultBackground: { type: "video", value: footagePath("ft_nope") } }), "u1"), /not found/i);
+    await assert.rejects(createTemplate({ title: "Other", scenes: [{ script: "Hi.", background: loop }] } as never, "u2"), /not found/i);
+    await deleteFootage(job.id, "u1");
+    assert.equal((await getBrandKit("u1"))!.defaultBackground, undefined, "the kit falls back to its plain background");
+    const after = await getTemplate(tpl.id, "u1");
+    assert.equal(after.scenes[0].background.type, "color");
+    assert.equal(after.scenes[0].hidePresenter, undefined, "the presenter comes back, as a colour cannot stand in for it");
+  });
+
+  it("are not looked up for a renderer that shows its own background", async () => {
+    const { rendersFootage } = await import("../services");
+    const { DidAvatarProvider } = await import("../providers/avatar/did");
+    const { HeyGenAvatarProvider } = await import("../providers/avatar/heygen");
+    const { MockAvatarProvider } = await import("../providers/avatar/mock");
+    // A D-ID render never loops the clip, so one gone or not ready does not refuse it.
+    assert.equal(rendersFootage(new DidAvatarProvider("did_key")), false);
+    assert.equal(rendersFootage(new HeyGenAvatarProvider("key")), true);
+    assert.equal(rendersFootage(new MockAvatarProvider()), true);
   });
 
   it("loop as a scene's video background by their fixed address, and only a finished clip of the account", async () => {

@@ -92,7 +92,13 @@ export default function FootagePage() {
   async function choosePicture(input: HTMLInputElement) {
     const file = input.files?.[0];
     input.value = "";
-    if (!file || busy || reading) return;
+    if (!file) return;
+    // The control stays enabled while busy (disabling it would drop its focus); a pick made then is not taken, and the
+    // page says so.
+    if (busy || reading) {
+      setErr(reading ? "Still reading the picture added before; add this one again in a moment." : "Wait for the clip to be started, then add the picture again.");
+      return;
+    }
     setReading(true);
     changed();
     try {

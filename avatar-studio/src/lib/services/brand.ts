@@ -2,12 +2,13 @@
 import { z } from "zod";
 import { nowIso } from "../ids";
 import { getStore } from "../store";
-import { WATERMARK_CORNERS, backdropIdOf, type BrandKit } from "../types";
+import { WATERMARK_CORNERS, backdropIdOf, footageIdOf, type BrandKit } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ValidationError } from "../errors";
 import { getAvatar } from "./avatars";
 import { listVoices } from "./voices";
 import { getBackdrop } from "./backdrops";
+import { getFootage } from "./footage";
 import { backgroundSchema } from "./schemas";
 import { MAX_PRONUNCIATIONS } from "../pronounce";
 import { MAX_FORCED_TRANSLATIONS, MAX_FORCED_TRANSLATION_LENGTH, MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH, MIN_GLOSSARY_TERM_LENGTH } from "../glossary";
@@ -75,6 +76,8 @@ export async function saveBrandKit(input: z.infer<typeof brandKitSchema>, ownerI
   if (input.defaultAvatarId) await getAvatar(input.defaultAvatarId, ownerId); // throws NotFound for foreign or unknown ids
   const backdropId = backdropIdOf(input.defaultBackground);
   if (backdropId) await getBackdrop(backdropId, ownerId); // likewise for an uploaded background image
+  const footageId = footageIdOf(input.defaultBackground);
+  if (footageId) await getFootage(footageId, ownerId); // and for a generated clip
   if (input.defaultVoiceId && !(await listVoices(ownerId)).some((v) => v.id === input.defaultVoiceId)) {
     throw new ValidationError(`Voice ${input.defaultVoiceId} is not available`);
   }

@@ -2,13 +2,14 @@
 import { z } from "zod";
 import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
-import { MAX_SCENES, backdropIdOf } from "../types";
+import { MAX_SCENES, backdropIdOf, footageIdOf } from "../types";
 import { silentProblem, silentSeconds } from "../pauses";
 import type { Video, VideoTemplate } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { LimitError, NotFoundError, ValidationError } from "../errors";
 import { owned } from "./shared";
 import { getBackdrop, plainScene } from "./backdrops";
+import { getFootage } from "./footage";
 import { accentSchema, avatarEngineSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema } from "./videos";
 
 export const MAX_TEMPLATES = 50;
@@ -151,7 +152,16 @@ export async function createTemplate(input: TemplateInput, ownerId: string = LOC
       gone.add(id);
     }
   }
-  if (gone.size) base = { ...base, scenes: base.scenes.map((sc) => (gone.has(backdropIdOf(sc.background) ?? "") ? plainScene(sc) : sc)) };
+  // A generated clip likewise, kept or swapped for a plain background.
+  for (const id of new Set(base.scenes.map((sc) => footageIdOf(sc.background)).filter((id): id is string => !!id))) {
+    try {
+      await getFootage(id, ownerId);
+    } catch (err) {
+      if (!input.fromVideoId || !(err instanceof NotFoundError)) throw err;
+      gone.add(id);
+    }
+  }
+  if (gone.size) base = { ...base, scenes: base.scenes.map((sc) => (gone.has(backdropIdOf(sc.background) ?? footageIdOf(sc.background) ?? "") ? plainScene(sc) : sc)) };
   return getStore().put("template", { ...base, id: newId("tpl"), ownerId, createdAt: nowIso(), updatedAt: nowIso() });
 }
 

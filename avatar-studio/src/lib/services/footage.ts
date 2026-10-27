@@ -6,13 +6,14 @@ import { createHash } from "node:crypto";
 import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
-import { FOOTAGE_ASPECTS, FOOTAGE_MAX_SEC, FOOTAGE_MIN_SEC, type FootageJob } from "../types";
+import type { AvatarProvider } from "../providers/types";
+import { FOOTAGE_ASPECTS, FOOTAGE_MAX_SEC, FOOTAGE_MIN_SEC, footageIdOf, type Background, type BrandKit, type FootageJob, type VideoTemplate } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { decodeDataUrl } from "../providers/image";
 import { owned, stripUndefined } from "./shared";
-import { jobChecker, RELINK_MS } from "./job-checks";
-import { sniff } from "./backdrops";
+import { jobChecker } from "./job-checks";
+import { plainScene, rewriteIfNamed, sniff } from "./backdrops";
 import { promptExcerpt } from "./lookpacks";
 
 /** Generated clips an account keeps; another needs one deleted first. */
@@ -131,10 +132,33 @@ export async function startFootage(input: FootageRequest, ownerId: string = LOCA
   return getStore().put("footage", job);
 }
 
-/** Forgets one generated clip (the renderer's copy expires on its own). Scenes that loop it can no longer render. */
+/**
+ * Forgets one generated clip (the renderer's copy expires on its own). Videos already rendered keep their footage; a
+ * retry or copy that loops it is refused. The owner's brand kit and templates stop naming it first (a plain background
+ * takes its place, as for a deleted image), so a batch or a video started from them still renders.
+ */
 export async function deleteFootage(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
   const job = owned(await getStore().get<FootageJob>("footage", footageIdSchema.parse(id)), ownerId, "Clip");
+  const names = (bg: Background | undefined) => footageIdOf(bg) === job.id;
+  for (const kit of await getStore().list<BrandKit>("brand", ownerId)) {
+    await rewriteIfNamed<BrandKit>("brand", kit, (k) => names(k.defaultBackground), (k) => {
+      const { defaultBackground: _gone, ...rest } = k;
+      void _gone;
+      return rest as BrandKit;
+    });
+  }
+  for (const tpl of await getStore().list<VideoTemplate>("template", ownerId)) {
+    await rewriteIfNamed<VideoTemplate>("template", tpl, (t) => t.scenes.some((sc) => names(sc.background)), (t) => ({
+      ...t,
+      scenes: t.scenes.map((sc) => (names(sc.background) ? plainScene(sc) : sc)),
+    }));
+  }
   await getStore().remove("footage", job.id);
+}
+
+/** One of the owner's clips, for a record that will loop it later (a brand kit, a template): a foreign or unknown id reads as not found. */
+export async function getFootage(id: string, ownerId: string = LOCAL_OWNER): Promise<FootageJob> {
+  return owned(await getStore().get<FootageJob>("footage", footageIdSchema.parse(id)), ownerId, "Clip");
 }
 
 /**
@@ -142,15 +166,19 @@ export async function deleteFootage(id: string, ownerId: string = LOCAL_OWNER): 
  * preview. An old link is renewed first; one the renderer cannot renew is tried as it is.
  */
 export async function footageLink(id: string, ownerId: string = LOCAL_OWNER): Promise<{ job: FootageJob; videoUrl: string }> {
-  let job = owned(await getStore().get<FootageJob>("footage", footageIdSchema.parse(id)), ownerId, "Clip");
-  if (job.status === "completed" && Date.now() - Date.parse(job.checkedAt ?? job.updatedAt) > RELINK_MS) job = await refreshFootage(job);
+  // A clip still being made is asked about here too (a render may come before any listing does), and an old link is
+  // renewed; both through the shared checker, so lookups side by side make one renderer call, at most every few seconds.
+  const [job] = await checks.follow([owned(await getStore().get<FootageJob>("footage", footageIdSchema.parse(id)), ownerId, "Clip")]);
   if (job.status !== "completed" || !job.videoUrl) {
     throw new ValidationError(job.status === "failed" ? `The generated clip "${job.title}" could not be made; choose another background` : `The generated clip "${job.title}" is not ready yet; wait for it, or choose another background`);
   }
   return { job, videoUrl: job.videoUrl };
 }
 
-/** A generated clip a scene loops, or a missing one, said as a render's error rather than the store's. */
+/**
+ * A generated clip a scene loops, or a missing one, said as a render's error rather than the store's (another
+ * account's clip reads the same as a deleted one, so whether it exists is not told).
+ */
 export async function footageForRender(id: string, ownerId: string): Promise<{ videoUrl: string }> {
   try {
     return { videoUrl: (await footageLink(id, ownerId)).videoUrl };
@@ -158,6 +186,11 @@ export async function footageForRender(id: string, ownerId: string): Promise<{ v
     if (err instanceof NotFoundError) throw new ValidationError("A scene loops a generated clip that was deleted; choose another background");
     throw err;
   }
+}
+
+/** Whether a renderer loops video backgrounds at all (D-ID shows its own background whatever it is given). */
+export function rendersFootage(provider: AvatarProvider): boolean {
+  return typeof provider.footageStatus === "function";
 }
 
 /** Asks the renderer where a clip stands and stores the answer. Never throws: a failed check keeps what was known. */

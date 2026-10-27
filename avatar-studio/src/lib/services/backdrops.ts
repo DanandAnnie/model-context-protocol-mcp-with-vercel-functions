@@ -135,7 +135,7 @@ export async function deleteBackdrop(id: string, ownerId: string = LOCAL_OWNER):
  * Rewrites a record that still names the image, conditionally on its `updatedAt`, so a save that lands meanwhile
  * (new glossary terms in the brand kit, say) is read again and kept rather than overwritten.
  */
-async function rewriteIfNamed<T extends { id: string; updatedAt: string }>(kind: "brand" | "template", first: T, named: (item: T) => boolean, rewrite: (item: T) => T): Promise<void> {
+export async function rewriteIfNamed<T extends { id: string; updatedAt: string }>(kind: "brand" | "template", first: T, named: (item: T) => boolean, rewrite: (item: T) => T): Promise<void> {
   let current: T | null = first;
   for (let attempt = 0; attempt < 5 && current; attempt++) {
     if (!named(current)) return;

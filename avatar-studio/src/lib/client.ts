@@ -74,9 +74,10 @@ function escapeHtml(text: string): string {
  */
 export function emailSnippet(video: { id: string; title: string; aspect?: string }, base: string): { html: string; text: string } {
   const share = `${base.replace(/\/$/, "")}/share/${video.id}`;
-  const width = video.aspect === "9:16" ? 270 : video.aspect === "1:1" ? 360 : 480;
+  // Sized in the video's shape: a mail client that ignores the style (Outlook) still keeps it.
+  const [width, height] = video.aspect === "9:16" ? [270, 480] : video.aspect === "1:1" ? [360, 360] : [480, 270];
   const alt = escapeHtml(`Watch the video: ${video.title}`);
-  const html = `<a href="${escapeHtml(share)}"><img src="${escapeHtml(`${share}/preview.gif`)}" alt="${alt}" width="${width}" style="display:block;max-width:100%;height:auto;border:0"></a>`;
+  const html = `<a href="${escapeHtml(share)}"><img src="${escapeHtml(`${share}/preview.gif`)}" alt="${alt}" width="${width}" height="${height}" style="display:block;max-width:100%;height:auto;border:0"></a>`;
   return { html, text: share };
 }
 

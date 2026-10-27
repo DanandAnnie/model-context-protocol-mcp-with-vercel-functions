@@ -44,6 +44,11 @@ export default function VideoDetailPage() {
   const [copied, setCopied] = useState(false);
   const [embedCopied, setEmbedCopied] = useState(false);
   const [emailCopied, setEmailCopied] = useState(false);
+  const [copyNote, setCopyNote] = useState("");
+  function announceCopy(note: string) {
+    setCopyNote(note);
+    setTimeout(() => setCopyNote((n) => (n === note ? "" : n)), 2000);
+  }
   const [embedAutoplay, setEmbedAutoplay] = useState(false);
   const [embedLoop, setEmbedLoop] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -201,6 +206,7 @@ export default function VideoDetailPage() {
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
+      announceCopy("Share link copied");
       setTimeout(() => setCopied(false), 2000);
     } catch {
       window.prompt("Copy this link", url);
@@ -233,6 +239,8 @@ export default function VideoDetailPage() {
     }
   }
   const shareLive = !(shareDraft.shareDisabled ?? !!video?.shareDisabled);
+  // A picture for an email loads only from a live, unprotected share link.
+  const emailReady = !!video && shareLive && !shareExpired(video) && !video.shareLocked;
   // Expiry: the owner types a local date and time; the API stores it as an instant.
   const [expiryDraft, setExpiryDraft] = useState("");
   const expiryInput = (iso?: string) => {
@@ -457,6 +465,7 @@ export default function VideoDetailPage() {
     try {
       await navigator.clipboard.writeText(snippet);
       setEmbedCopied(true);
+      announceCopy("Embed code copied");
       setTimeout(() => setEmbedCopied(false), 2000);
     } catch {
       window.prompt("Copy this embed code", snippet);
@@ -472,10 +481,11 @@ export default function VideoDetailPage() {
       await navigator.clipboard.write([new ClipboardItem({ "text/html": new Blob([html], { type: "text/html" }), "text/plain": new Blob([text], { type: "text/plain" }) })]);
       copied = true;
     } catch {
-      copied = copyRendered(html);
+      copied = copyRendered(html, text);
     }
     if (copied) {
       setEmailCopied(true);
+      announceCopy("Email preview copied");
       setTimeout(() => setEmailCopied(false), 2000);
     } else window.prompt("Copy this HTML into your email", html);
   }
@@ -607,6 +617,10 @@ export default function VideoDetailPage() {
                 )}
                 {video.status === "completed" && !video.deletedAt && (
                   <>
+                    {/* The copy buttons' labels change too, but a changed label is seldom read out. */}
+                    <span className="sr-only" role="status">
+                      {copyNote}
+                    </span>
                     {/* A cinematic shot has no script, so no captions to download. */}
                     {!video.cinematic && (
                       <a href={`/api/videos/${video.id}/captions`} download className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50" title="Also available as WebVTT with ?format=vtt">
@@ -616,22 +630,23 @@ export default function VideoDetailPage() {
                     <Button variant="secondary" onClick={copyShareLink}>
                       {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Link2 className="h-4 w-4" />} {copied ? "Link copied" : "Share"}
                     </Button>
-                    <Button variant="secondary" onClick={copyEmbed} title="Copy an iframe snippet for your site">
-                      {embedCopied ? <Check className="h-4 w-4 text-emerald-600" /> : <Code2 className="h-4 w-4" />} {embedCopied ? "Embed copied" : "Embed"}
-                    </Button>
                     <Button
                       variant="secondary"
                       onClick={copyEmail}
-                      disabled={!!video.shareLocked}
-                      title={
-                        video.shareLocked
-                          ? "A password-protected video has no preview for an email"
-                          : !shareLive || shareExpired(video)
-                            ? "The share link is off, so the preview shows only once it is live again"
-                            : "Copy a moving preview, linked to the share page, to paste into an email"
-                      }
+                      disabled={!emailReady}
+                      aria-describedby={emailReady ? undefined : "email-preview-note"}
+                      className="min-w-36"
+                      title={emailReady ? "Copy a moving preview, linked to the share page, to paste into an email" : undefined}
                     >
                       {emailCopied ? <Check className="h-4 w-4 text-emerald-600" /> : <Mail className="h-4 w-4" />} {emailCopied ? "Email copied" : "Email"}
+                    </Button>
+                    {!emailReady && (
+                      <span id="email-preview-note" className="text-xs text-slate-500">
+                        {video.shareLocked ? "No email preview behind a password." : "The email preview shows once the share link is live again."}
+                      </span>
+                    )}
+                    <Button variant="secondary" onClick={copyEmbed} title="Copy an iframe snippet for your site">
+                      {embedCopied ? <Check className="h-4 w-4 text-emerald-600" /> : <Code2 className="h-4 w-4" />} {embedCopied ? "Embed copied" : "Embed"}
                     </Button>
                     <span className="inline-flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700" title="Options for the embed snippet; the share link itself is unchanged">
                       <label className="inline-flex items-center gap-1.5">
@@ -655,7 +670,7 @@ export default function VideoDetailPage() {
                       <input type="checkbox" checked={shareDraft.shareGate ?? !!video.shareGate} onChange={(e) => patchShare({ shareGate: e.target.checked })} className="accent-brand-600" />
                       Ask for an email before playing
                     </label>
-                    {!shareLive && <span className="text-xs text-slate-500" data-testid="share-off-note">Share link off: the share page and embed answer “not found”.</span>}
+                    {!shareLive && <span className="text-xs text-slate-500" data-testid="share-off-note">Share link off: the share page, embed, and email preview answer “not found”.</span>}
                     <form
                       className="inline-flex flex-wrap items-center gap-2"
                       data-testid="share-expiry"
@@ -1187,12 +1202,23 @@ function Row({ label, children, wrap = false }: { label: string; children: React
 }
 
 /**
- * Copies HTML as the picture and link it draws, for a browser without rich clipboard writes: the HTML is drawn off
- * screen, selected, and copied the old way. False when the browser refuses that too.
+ * Copies HTML and its plain-text form for a browser without rich clipboard writes, the old way: a copy command whose
+ * event is given both forms (so neither the page's styles nor the picture's alt text end up in the email). False when
+ * the browser refuses that too.
  */
-function copyRendered(html: string): boolean {
-  const holder = document.createElement("div");
-  holder.innerHTML = html;
+function copyRendered(html: string, text: string): boolean {
+  let filled = false;
+  const fill = (e: ClipboardEvent) => {
+    if (!e.clipboardData) return;
+    e.clipboardData.setData("text/html", html);
+    e.clipboardData.setData("text/plain", text);
+    e.preventDefault();
+    filled = true;
+  };
+  document.addEventListener("copy", fill);
+  // A copy command needs a selection to fire on.
+  const holder = document.createElement("span");
+  holder.textContent = text;
   holder.style.cssText = "position:fixed;left:-9999px;top:0";
   holder.setAttribute("aria-hidden", "true");
   document.body.appendChild(holder);
@@ -1203,10 +1229,11 @@ function copyRendered(html: string): boolean {
   selection?.addRange(range);
   let done = false;
   try {
-    done = document.execCommand("copy");
+    done = document.execCommand("copy") && filled;
   } catch {
     done = false;
   }
+  document.removeEventListener("copy", fill);
   selection?.removeAllRanges();
   holder.remove();
   return done;

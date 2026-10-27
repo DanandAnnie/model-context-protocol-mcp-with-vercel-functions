@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
-import { MAX_MUSIC_EFFECTS, MUSIC_VOLUMES, type MusicEffect, type MusicJob, type MusicTrack, type MusicVolume, type Video } from "../types";
+import { MAX_MUSIC_EFFECTS, MAX_MUSIC_VIDEO_SEC, MUSIC_VOLUMES, type MusicEffect, type MusicJob, type MusicTrack, type MusicVolume, type Video } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { owned, stripUndefined } from "./shared";
@@ -17,8 +17,7 @@ import { withSuffix } from "../text";
 
 /** Videos with music an account keeps; another needs one deleted first. */
 export const MAX_MUSIC_MIXES = 50;
-/** The longest video music is mixed under (a render's length is the video's). */
-export const MAX_MUSIC_VIDEO_SEC = 30 * 60;
+export { MAX_MUSIC_VIDEO_SEC };
 
 export const musicQuerySchema = z.string().trim().min(2, "Describe the music in a few words").max(200, "Describe the music in at most 200 characters");
 export const effectQuerySchema = z.string().trim().min(2, "Describe the sound effect in a few words").max(200, "Describe the sound effect in at most 200 characters");
@@ -145,7 +144,7 @@ export async function startMusic(input: z.infer<typeof musicRequestSchema>, owne
   const found = new Map<string, MusicTrack[]>(queries.map((q, i) => [q, effectHits[i]]));
   const effects = wanted.map((e) => {
     const hit = found.get(e.query)?.find((t) => t.id === e.trackId);
-    if (!hit) throw new ValidationError(`A sound effect is no longer offered for “${e.query}”; search again and choose one`);
+    if (!hit) throw new ValidationError(`A sound effect is no longer offered for “${e.query}”; remove it, then search again and choose one`);
     return { ...e, track: hit };
   });
   opts.admit?.();

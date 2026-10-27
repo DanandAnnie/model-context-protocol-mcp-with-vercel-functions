@@ -7,7 +7,7 @@ import { useCanEdit } from "@/hooks/useCanEdit";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api, formatDate, formatSeconds, isRefusal } from "@/lib/client";
-import { MAX_MUSIC_EFFECTS, MUSIC_VOLUMES, type MusicJob, type MusicTrack, type MusicVolume, type Video } from "@/lib/types";
+import { MAX_MUSIC_EFFECTS, MAX_MUSIC_VIDEO_SEC, MUSIC_VOLUMES, type MusicJob, type MusicTrack, type MusicVolume, type Video } from "@/lib/types";
 
 /** A mix as the server lists it: never the renderer or its job id. */
 type Mix = Omit<MusicJob, "ownerId" | "provider" | "providerJobId">;
@@ -29,8 +29,8 @@ function atClock(sec: number): string {
   const tenths = Math.round(sec * 10);
   return `${Math.floor(tenths / 600)}:${((tenths % 600) / 10).toFixed(1).padStart(4, "0")}`;
 }
-/** The longest moment a "plays at" field takes: the longest video music is added to (half an hour). */
-const MAX_AT_SEC = 30 * 60;
+/** The longest moment a "plays at" field takes: the longest video music is added to. */
+const MAX_AT_SEC = MAX_MUSIC_VIDEO_SEC;
 /**
  * The seconds a "plays at" field holds, to a tenth (a decimal comma read as a point); null for an empty or partial
  * entry, and "invalid" for anything else that is not a number of seconds up to half an hour.
@@ -38,7 +38,7 @@ const MAX_AT_SEC = 30 * 60;
 function readSeconds(draft: string): number | null | "invalid" {
   const text = draft.trim().replace(",", ".");
   if (!/\d/.test(text)) return /^\.?$/.test(text) ? null : "invalid";
-  if (!/^\d{1,4}(\.\d*)?$|^\.\d+$/.test(text)) return "invalid";
+  if (!/^\d+(\.\d*)?$|^\.\d+$/.test(text)) return "invalid";
   const sec = Math.round(Number(text) * 10) / 10;
   return sec <= MAX_AT_SEC ? sec : "invalid";
 }
@@ -153,21 +153,29 @@ export default function MusicPage() {
   const late = effects.filter(isLate);
   const unreadable = effects.filter((e) => e.atSec === "invalid");
   const unset = effects.filter((e) => e.atSec === null);
-  const effectProblem =
-    late.length && length !== null
-      ? `${listed(late.map((e) => `${effectLabel(e)} (${atClock(e.atSec as number)})`))} ${late.length === 1 ? "plays" : "play"} at or after the end of the video (${atClock(length)}); move ${late.length === 1 ? "it" : "them"} earlier.`
-      : unreadable.length
-        ? `Write when ${listed(unreadable.map(effectLabel))} ${unreadable.length === 1 ? "plays" : "play"} as seconds from the start, such as 12.5 (at most ${MAX_AT_SEC / 60} minutes).`
-        : unset.length
-          ? `Say when ${listed(unset.map(effectLabel))} ${unset.length === 1 ? "plays" : "play"}, in seconds from the start.`
-          : null;
+  // Every kind of problem, each in a sentence of its own, as every field it concerns points at this one message.
+  const problems = [
+    late.length && length !== null ? `${listed(late.map((e) => `${effectLabel(e)} (${atClock(e.atSec as number)})`))} ${late.length === 1 ? "plays" : "play"} at or after the end of the video (${atClock(length)}); move ${late.length === 1 ? "it" : "them"} earlier.` : "",
+    unreadable.length ? `Write when ${listed(unreadable.map(effectLabel))} ${unreadable.length === 1 ? "plays" : "play"} as seconds from the start, such as 12.5 (at most ${MAX_AT_SEC / 60} minutes).` : "",
+    unset.length ? `Say when ${listed(unset.map(effectLabel))} ${unset.length === 1 ? "plays" : "play"}, in seconds from the start.` : "",
+  ].filter(Boolean);
+  const effectProblem = problems.length ? problems.join(" ") : null;
   // Effects newly at or past the end are announced when they become so (not at every key), as they are why "Add music"
   // is no longer available; a field left empty or unreadable is announced when it is left (see the field's blur).
   const effectProblemRef = useRef<string | null>(null);
   effectProblemRef.current = effectProblem;
   const lateKeys = late.map((e) => e.key).join(" ");
+  // The note is emptied once nothing is late, so the same message, should it come back, is announced again.
+  const lateNote = useRef<string | null>(null);
   useEffect(() => {
-    if (lateKeys) setNote(effectProblemRef.current);
+    if (lateKeys) {
+      lateNote.current = effectProblemRef.current;
+      setNote(lateNote.current);
+    } else if (lateNote.current) {
+      const was = lateNote.current;
+      lateNote.current = null;
+      setNote((n) => (n === was ? null : n));
+    }
   }, [lateKeys]);
   const canStart = canEdit === true && data?.available !== false;
 
@@ -231,7 +239,7 @@ export default function MusicPage() {
     const next = effects[at + 1] ?? effects[at - 1];
     setEffects((prev) => prev.filter((x) => x.key !== e.key));
     changed();
-    setNote(`Removed ${e.track.name}.`);
+    setNote(`Removed ${effectLabel(e)}.`);
     focusAfterRender(() => (next ? effectsRef.current?.querySelector<HTMLInputElement>(`[data-effect="${next.key}"] input`) : document.getElementById("effect-query")));
   }
 
@@ -263,6 +271,9 @@ export default function MusicPage() {
       // A track or effect the catalog no longer offers needs a new search: the old results are dropped so they are not
       // chosen again (the effects already placed stay, to be removed or kept), and the focus goes to that search.
       if (e instanceof Error && /sound effect is no longer offered/.test(e.message)) {
+        // Said beside the effects, where the focus goes, rather than at the top of the page.
+        setErr(null);
+        setEffectErr(e.message);
         setEffectResults(null);
         focusAfterRender(() => document.getElementById("effect-query"));
       } else if (e instanceof Error && /track is no longer offered/.test(e.message)) {
@@ -400,7 +411,7 @@ export default function MusicPage() {
                   </Button>
                 </form>
                 {effectErr && (
-                  <p id="effect-search-error" role="alert" className="-mt-3 mb-2 text-xs text-rose-700">
+                  <p id="effect-search-error" role="alert" className="mb-2 mt-1 text-xs text-rose-700">
                     {effectErr}
                   </p>
                 )}

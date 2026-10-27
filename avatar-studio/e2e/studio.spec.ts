@@ -765,7 +765,6 @@ test("a catalog track found by describing it is mixed under a finished video, fo
   await expect(page.getByTestId("music-effects")).toContainText("Write when Pop plays as seconds from the start");
   await pop.fill("2,5");
   await expect(start).toBeEnabled();
-  await expect(start).toBeDisabled();
   // Typed one key at a time, a partial number is left as it is, and an empty field asks for a moment.
   await pop.fill("");
   await expect(page.getByTestId("music-effects")).toContainText("Say when Pop plays");

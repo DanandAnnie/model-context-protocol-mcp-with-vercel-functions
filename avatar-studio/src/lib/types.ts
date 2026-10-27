@@ -249,6 +249,9 @@ export interface LipsyncJob {
   checkedAt?: string;
 }
 
+/** The longest video music is mixed into (a render's length is the video's), and so the latest moment of an effect. */
+export const MAX_MUSIC_VIDEO_SEC = 30 * 60;
+
 /** Sound effects one video with music may place at moments of the video. */
 export const MAX_MUSIC_EFFECTS = 5;
 

@@ -1097,6 +1097,20 @@ test("a photo avatar is given a look described in words, with a picture of the c
   const prompt = "A camel coat over a black turtleneck, on a city street at dusk, warm light";
   await panel.getByLabel("Describe the look").fill(prompt);
   await expect(draw).toBeEnabled();
+  // Escape asks before a typed description is thrown away; declining keeps it.
+  const discard = new Promise<string>((resolve) =>
+    page.once("dialog", (d) => {
+      resolve(d.message());
+      void d.dismiss();
+    }),
+  );
+  await panel.getByLabel("Describe the look").press("Escape");
+  expect(await discard).toBe("Discard this look? The description and pictures are not saved.");
+  await expect(panel.getByLabel("Describe the look")).toHaveValue(prompt);
+  // A file that only claims to be a picture is refused as it is added, not when the look is drawn.
+  await panel.locator("#look-pictures").setInputFiles({ name: "fake.png", mimeType: "image/png", buffer: Buffer.from("not a picture at all") });
+  await expect(panel.getByText("That file is not an image the browser can read")).toBeVisible();
+  await expect(panel.getByRole("img")).toHaveCount(0);
   // Two pictures are added; the first is taken off again, and the focus stays on the pictures rather than being lost.
   await panel.locator("#look-pictures").setInputFiles([
     { name: "coat.png", mimeType: "image/png", buffer: pixel },
@@ -1123,8 +1137,8 @@ test("a photo avatar is given a look described in words, with a picture of the c
   // The look is listed with its description, and the demo renderer's look is ready at once and joins the library.
   const look = page.getByTestId("look-pack").filter({ hasText: `A described look of ${name}` });
   await expect(look).toBeFocused();
-  await expect(look.getByTestId("look-prompt")).toHaveText(`${prompt} (with 3 pictures)`);
-  await expect(look.getByTestId("look-pack-meta")).toContainText("1 of 1 ready · 16:9");
+  await expect(look.getByTestId("look-prompt")).toHaveText(prompt);
+  await expect(look.getByTestId("look-pack-meta")).toContainText("1 of 1 ready · 16:9 · 3 pictures");
   await expect(page.getByTestId("avatar-library").getByText(`${name} · Described look`)).toBeVisible();
   const listed = (await (await page.request.get("/api/look-packs")).json()).lookPacks as Array<Record<string, unknown>>;
   const mine = listed.find((p) => p.avatarId === avatar.id)!;

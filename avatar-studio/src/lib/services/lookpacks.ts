@@ -32,7 +32,10 @@ export const lookPackRequestSchema = z.discriminatedUnion("pack", [
     /** Which of the pack's two variants to use; by default the avatar's own gender, when it is female or male. */
     gender: z.enum(["female", "male"]).optional(),
     aspect: z.enum(LOOK_PACK_ASPECTS).default("16:9"),
-  }),
+  })
+    // Strict, both: a field of the other kind (a pack's gender on a described look, a description on a pack) is
+    // refused rather than dropped without a word.
+    .strict(),
   z.object({
     avatarId: z.string().trim().min(1).max(100),
     pack: z.literal(DESCRIBED),
@@ -44,7 +47,8 @@ export const lookPackRequestSchema = z.discriminatedUnion("pack", [
       .array(z.string().max(Math.ceil((MAX_REFERENCE_BYTES * 4) / 3) + 100, "A picture is larger than 1 MB"))
       .max(MAX_LOOK_REFERENCES, `Send at most ${MAX_LOOK_REFERENCES} pictures`)
       .default([]),
-  }),
+  })
+    .strict(),
 ]);
 type LookPackRequest = z.infer<typeof lookPackRequestSchema>;
 
@@ -142,14 +146,16 @@ export async function startLookPack(input: LookPackRequest, ownerId: string = LO
   if (described ? !provider.startDescribedLook : !provider.startLookPack) throw new ValidationError(`${described ? "Looks from a description are" : "New looks are"} not available with the ${provider.name} renderer`);
   const stored = await getStore().get<Avatar>("avatar", input.avatarId);
   // Only the account's own photo avatars; a library presenter is the renderer's, not the account's to restyle.
-  if (!stored) throw new NotFoundError("That photo avatar no longer exists");
+  // A photo avatar's id is the studio's own (`av_…`); any other is a library presenter, which is not the account's.
+  if (!stored) throw new NotFoundError(input.avatarId.startsWith("av_") ? "That photo avatar no longer exists" : "Only your own photo avatars can be given new looks");
   if ((stored.ownerId ?? LOCAL_OWNER) !== ownerId || stored.source !== "custom") throw new NotFoundError("Only your own photo avatars can be given new looks");
   if (stored.provider !== provider.name) throw new ValidationError(`"${stored.name}" was made for another renderer`);
   const own = stored.gender === "female" || stored.gender === "male" ? stored.gender : undefined;
   const gender = input.pack === DESCRIBED ? own : (input.gender ?? own);
   if (!described && !gender) throw new ValidationError("Choose the women's or the men's looks of the pack");
   // Read then written: two starts at the same moment can between them pass the cap.
-  if ((await getStore().list<LookPackJob>("lookpack", ownerId)).length >= MAX_LOOK_PACKS) throw new ConflictError(`An account keeps at most ${MAX_LOOK_PACKS} look packs and described looks; forget one to make another`);
+  const jobs = await getStore().list<LookPackJob>("lookpack", ownerId);
+  if (jobs.length >= MAX_LOOK_PACKS) throw new ConflictError(`An account keeps at most ${MAX_LOOK_PACKS} look packs and described looks; forget one to make another`);
   opts.admit?.();
   const avatar = provider.prepareAvatar ? await prepareOnce(provider, stored) : stored;
   const { lookIds } = described
@@ -164,7 +170,13 @@ export async function startLookPack(input: LookPackRequest, ownerId: string = LO
     pack: input.pack,
     ...(gender ? { gender } : {}),
     aspect: input.aspect,
-    ...(described ? { prompt: described.prompt, ...(pictures.length ? { references: pictures.length, referenceDigest: digest } : {}) } : {}),
+    ...(described
+      ? {
+          prompt: described.prompt,
+          ...(pictures.length ? { references: pictures.length, referenceDigest: digest } : {}),
+          ordinal: jobs.filter((j) => j.pack === DESCRIBED && j.avatarId === stored.id).length + 1,
+        }
+      : {}),
     provider: provider.name,
     lookIds,
     looks: lookIds.map(() => ({ status: "processing" as const })),
@@ -207,6 +219,16 @@ async function refreshLookPack(job: LookPackJob): Promise<LookPackJob> {
     if (!provider.portraitStatus || !provider.lookAssetIds) return job;
     const source = await getStore().get<Avatar>("avatar", job.avatarId);
     const name = lookPackName(job.pack);
+    // A described look has no number of its own; a second of the same avatar is numbered, so pickers tell them apart.
+    const taken = job.pack === DESCRIBED ? new Set((await getStore().list<Avatar>("avatar", job.ownerId)).map((a) => a.name)) : null;
+    // Numbered by when the look was started (looks checked side by side then never take the same number), and moved
+    // on past a name the account already has.
+    const describedName = () => {
+      let n = job.ordinal ?? 1;
+      const named = () => withSuffix(job.avatarName, n > 1 ? ` · ${name} ${n}` : ` · ${name}`, 80);
+      while (taken?.has(named())) n++;
+      return named();
+    };
     const looks: LookPackLook[] = [];
     for (const [i, look] of job.looks.entries()) {
       if (look.status !== "processing") {
@@ -248,7 +270,7 @@ async function refreshLookPack(job: LookPackJob): Promise<LookPackJob> {
         id: avatarId,
         ownerId: job.ownerId,
         // A long name is shortened, never the pack and number that tell the looks apart.
-        name: withSuffix(job.avatarName, job.pack === DESCRIBED ? ` · ${name}` : ` · ${name} ${i + 1}`, 80),
+        name: job.pack === DESCRIBED ? describedName() : withSuffix(job.avatarName, ` · ${name} ${i + 1}`, 80),
         imageUrl,
         // A described look has no variant of its own: it keeps the gender the avatar had.
         ...((job.gender ?? source?.gender) ? { gender: job.gender ?? source?.gender } : {}),

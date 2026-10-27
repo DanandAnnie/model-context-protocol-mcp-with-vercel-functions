@@ -40,6 +40,11 @@ describe("looks from a description", () => {
     assert.deepEqual([ok.pack, ok.aspect, ok.pack === "described" && ok.prompt, ok.pack === "described" && ok.references], ["described", "4:5", PROMPT, []], "portrait 4:5 unless asked, trimmed");
     assert.equal(lookPackRequestSchema.parse({ avatarId: "av_1", pack: "healthcare" }).aspect, "16:9", "a pack is unchanged");
     assert.throws(() => lookPackRequestSchema.parse({ avatarId: "av_1", pack: "healthcare", aspect: "4:5" }), "a pack keeps its two frames");
+    // A field of the other kind is refused, not dropped.
+    assert.throws(() => described("av_1", { gender: "male" }), /gender/);
+    assert.throws(() => lookPackRequestSchema.parse({ avatarId: "av_1", pack: "cool-tech", prompt: PROMPT }), /prompt/);
+    assert.throws(() => lookPackRequestSchema.parse({ avatarId: "av_1", pack: "cool-tech", references: [png()] }), /references/);
+    assert.throws(() => described("av_1", { foo: 1 }), /foo/);
   });
 
   it("draws one look in demo mode, kept as a photo avatar named after the avatar, with no women's or men's choice", async () => {
@@ -59,6 +64,16 @@ describe("looks from a description", () => {
     assert.ok(made.tags?.includes("Described look"));
     const exported = JSON.stringify(await exportOwnerData("u1"));
     assert.equal(exported.includes(job.referenceDigest!), false, "nor goes with an export");
+    // Further described looks of the same avatar are numbered, so pickers tell them apart.
+    await startLookPack(described(sam.id, { prompt: `${PROMPT}, evening` }), "u1");
+    await startLookPack(described(sam.id, { prompt: `${PROMPT}, morning` }), "u1");
+    forgetLookPackChecks();
+    await listLookPacks("u1");
+    const names = (await getStore().list<Avatar>("avatar", "u1")).map((a) => a.name).filter((n) => n.startsWith("Sam · ")).sort();
+    assert.deepEqual(names, ["Sam · Described look", "Sam · Described look 2", "Sam · Described look 3"]);
+    // A library presenter is not the account's to restyle, and is told so rather than called deleted.
+    await assert.rejects(startLookPack(described("stock_1"), "u1"), /Only your own photo avatars/);
+    await assert.rejects(startLookPack(described("av_gone"), "u1"), /no longer exists/);
   });
 
   it("refuses pictures that are not PNG or JPEG, or larger than 1 MB, before the renderer is asked", async () => {

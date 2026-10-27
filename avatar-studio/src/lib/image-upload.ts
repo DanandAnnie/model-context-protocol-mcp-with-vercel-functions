@@ -15,11 +15,12 @@ function readAsDataUrl(file: Blob): Promise<string> {
  */
 export async function toUploadable(file: File, { maxBytes, maxEdge }: { maxBytes: number; maxEdge: number }): Promise<string> {
   const mb = `${Math.round(maxBytes / (1024 * 1024))} MB`;
-  if ((file.type === "image/png" || file.type === "image/jpeg") && file.size <= maxBytes) return readAsDataUrl(file);
+  // Decoded first, whatever its name or type says, so a file that only claims to be a picture is refused here.
   const bitmap = await createImageBitmap(file).catch(() => {
     throw new Error("That file is not an image the browser can read");
   });
   try {
+    if ((file.type === "image/png" || file.type === "image/jpeg") && file.size <= maxBytes) return await readAsDataUrl(file);
     let scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
     for (let attempt = 0; attempt < 4; attempt++) {
       const canvas = document.createElement("canvas");

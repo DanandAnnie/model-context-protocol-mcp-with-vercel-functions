@@ -163,6 +163,8 @@ export interface LookPackJob {
   references?: number;
   /** A digest of those pictures, so a retried start with the same key is known to be the same one. Server only. */
   referenceDigest?: string;
+  /** Which described look of the avatar this is (1 for the first), numbering the photo avatar made of it. */
+  ordinal?: number;
   /** Renderer generating them, and each look's id there, never shown to the account. */
   provider: string;
   lookIds: string[];

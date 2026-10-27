@@ -50,9 +50,11 @@ export function LookPackPanel({ avatar, canPack = true, canDescribe = false, onC
 
   async function addPictures(input: HTMLInputElement) {
     const picked = Array.from(input.files ?? []);
-    // The control stays enabled while busy (disabling it would drop its focus); a pick made then is ignored.
+    // The control stays enabled while busy (disabling it would drop its focus); a pick made then is not taken, and
+    // the page says so.
     if (!picked.length || busy || reading) {
       input.value = "";
+      if (picked.length && reading) setErr("Still reading the pictures added before; add this one again in a moment.");
       return;
     }
     const room = MAX_LOOK_REFERENCES - pictures.length;
@@ -82,6 +84,14 @@ export function LookPackPanel({ avatar, canPack = true, canDescribe = false, onC
     focusAfterRender(() => document.querySelector<HTMLElement>(`[data-look-reference="${i}"]`) ?? document.querySelector<HTMLElement>(`[data-look-reference="${i - 1}"]`) ?? fileRef.current);
   }
 
+  /** Escape closes the panel, asking first when a description or pictures would be lost with it. */
+  function onPanelKey(e: React.KeyboardEvent) {
+    if (e.key !== "Escape" || e.defaultPrevented || busy) return;
+    e.stopPropagation();
+    if (described && (prompt.trim() || pictures.length) && !window.confirm("Discard this look? The description and pictures are not saved.")) return;
+    onClose();
+  }
+
   async function submit() {
     setBusy(true);
     setErr(null);
@@ -101,7 +111,7 @@ export function LookPackPanel({ avatar, canPack = true, canDescribe = false, onC
   }
 
   return (
-    <Card className="mb-6 p-5" data-testid="look-pack-panel" onKeyDown={(e) => e.key === "Escape" && !busy && onClose()}>
+    <Card className="mb-6 p-5" data-testid="look-pack-panel" onKeyDown={onPanelKey}>
       <div className="flex items-start justify-between gap-3">
         <h2 ref={headingRef} tabIndex={-1} className="min-w-0 break-words text-sm font-semibold text-slate-900 outline-none">
           New looks of {avatar.name}
@@ -159,7 +169,7 @@ export function LookPackPanel({ avatar, canPack = true, canDescribe = false, onC
                   <li key={`${i}-${p.name}`} className="relative">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={p.url} alt={p.name} title={p.name} className="h-16 w-16 rounded-md bg-slate-100 object-cover" />
-                    <button type="button" data-look-reference={i} onClick={() => removePicture(i)} disabled={busy} className="absolute -right-1.5 -top-1.5 rounded-full bg-white p-0.5 text-slate-500 shadow hover:text-rose-600" aria-label={`Remove ${p.name}`}>
+                    <button type="button" data-look-reference={i} onClick={() => removePicture(i)} disabled={busy} className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-white text-slate-500 shadow hover:text-rose-600" aria-label={`Remove ${p.name}`}>
                       <X className="h-3.5 w-3.5" />
                     </button>
                   </li>
@@ -304,13 +314,13 @@ export function LookPackList({ packs, avatars, canEdit, onForget, fallbackFocus 
                 <div className="min-w-0">
                   <div className="truncate text-sm font-medium text-slate-900">{lookJobTitle(p)}</div>
                   {p.prompt && (
-                    <div className="mt-0.5 line-clamp-2 break-words text-xs text-slate-600" data-testid="look-prompt">
+                    <div className="mt-0.5 line-clamp-2 break-words text-xs text-slate-600" data-testid="look-prompt" title={p.prompt}>
                       {p.prompt}
-                      {p.references ? ` (with ${p.references} ${p.references === 1 ? "picture" : "pictures"})` : ""}
                     </div>
                   )}
                   <div className="mt-0.5 text-xs text-slate-500" data-testid="look-pack-meta">
-                    {ready} of {p.looks.length} ready · {p.aspect} · {formatDate(p.createdAt)}
+                    {ready} of {p.looks.length} ready · {p.aspect}
+                    {p.references ? ` · ${p.references} ${p.references === 1 ? "picture" : "pictures"}` : ""} · {formatDate(p.createdAt)}
                     {failed.length ? ` · ${failed.length} could not be made` : ""}
                     {deleted ? ` · ${deleted} since deleted` : ""}
                   </div>

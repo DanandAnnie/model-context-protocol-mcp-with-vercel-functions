@@ -78,9 +78,14 @@ export async function joinAsWav(blobs: Blob[], maxSeconds = VOICE_SAMPLE_SECONDS
   const ctx = new Ctx();
   const decoded: AudioBuffer[] = [];
   try {
+    let seconds = 0;
     for (const blob of blobs) {
+      // Samples past the cut are never decoded (a decoded minute takes about 20 MB).
+      if (seconds >= maxSeconds) break;
       try {
-        decoded.push(await ctx.decodeAudioData(await blob.arrayBuffer()));
+        const buffer = await ctx.decodeAudioData(await blob.arrayBuffer());
+        decoded.push(buffer);
+        seconds += buffer.duration;
       } catch {
         throw new Error("This browser cannot read one of the samples; try MP3, WAV, or M4A");
       }

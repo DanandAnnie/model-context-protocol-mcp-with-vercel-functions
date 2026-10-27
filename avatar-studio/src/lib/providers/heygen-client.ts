@@ -1,4 +1,10 @@
 // Thin HTTP client for the HeyGen public API (https://docs.heygen.com).
+/**
+ * The mark the studio puts at the end of the name of every voice it clones in HeyGen's account (` ·st_` and a nonce):
+ * HeyGen lists the key's clones to every account, so marked ones are never listed (the account that made one keeps its
+ * own record of it), even one whose clone answer was lost before the studio could note its id.
+ */
+export const STUDIO_VOICE_MARK = / ·st_[0-9a-f]{8,}$/;
 type VoiceDetail = { language?: string | null; gender?: string | null; preview_audio_url?: string | null; status?: "processing" | "complete" | "failed" | null; failure_message?: string | null };
 const V2 = "https://api.heygen.com/v2";
 const V3 = "https://api.heygen.com/v3";
@@ -83,7 +89,12 @@ export class HeyGenClient {
       this.listAll<{ default_voice_id?: string | null }>("/avatars/looks?ownership=private&avatar_type=digital_twin", 50, 100),
     ]);
     const twinVoices = new Set(twins.map((t) => t.default_voice_id).filter(Boolean));
-    return unique([...own.filter((v) => !twinVoices.has(v.voice_id)), ...shared], (v) => v.voice_id);
+    return unique([...own.filter((v) => !twinVoices.has(v.voice_id) && !STUDIO_VOICE_MARK.test(v.name)), ...shared], (v) => v.voice_id);
+  }
+
+  /** The key's own voices with the studio's mark (the clones it made), to find one whose clone answer was lost. */
+  async studioClones(): Promise<Array<{ voice_id: string; name: string }>> {
+    return (await this.listAll<{ voice_id: string; name: string }>("/voices?type=private", 100, 100)).filter((v) => STUDIO_VOICE_MARK.test(v.name));
   }
 
   /**
@@ -163,10 +174,10 @@ export class HeyGenClient {
    * Clones a voice from one recording already uploaded as an asset (`POST /v3/voices/clone`), background noise removed;
    * returns its id, usable as a video's `voice_id` once `getVoice` says it is complete.
    */
-  async cloneVoice(name: string, assetId: string): Promise<string> {
+  async cloneVoice(name: string, assetId: string, language?: string): Promise<string> {
     const out = await this.request<{ voice_clone_id?: string }>(`${V3}/voices/clone`, {
       method: "POST",
-      body: JSON.stringify({ voice_name: name, audio: { type: "asset_id", asset_id: assetId }, remove_background_noise: true }),
+      body: JSON.stringify({ voice_name: name, audio: { type: "asset_id", asset_id: assetId }, ...(language ? { language } : {}), remove_background_noise: true }),
       signal: AbortSignal.timeout(25_000),
     });
     if (!out?.voice_clone_id) throw new Error("HeyGen returned no id for the cloned voice");

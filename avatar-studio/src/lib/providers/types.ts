@@ -12,7 +12,7 @@ export interface TtsProvider {
    * Clone a voice from audio samples; returns the provider's voice id (and its preview once the provider has one).
    * `oneRecording` providers take exactly one WAV or MP3 recording. Absent when the provider cannot clone.
    */
-  cloneVoice?(input: { name: string; samples: Array<{ bytes: Uint8Array; mimeType: string; filename: string }> }): Promise<{ voiceId: string; previewUrl?: string }>;
+  cloneVoice?(input: { name: string; samples: Array<{ bytes: Uint8Array; mimeType: string; filename: string }>; language?: string; onCreated?: (voiceId: string) => Promise<void> }): Promise<{ voiceId: string; previewUrl?: string }>;
   /** The provider clones from one WAV or MP3 recording only (the page joins the samples into one before sending). */
   readonly oneRecording?: true;
   deleteVoice?(voiceId: string): Promise<void>;

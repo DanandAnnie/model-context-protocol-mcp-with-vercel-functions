@@ -2923,18 +2923,34 @@ test("a voice provider that clones from one recording is sent the samples joined
   await page.goto("/voices");
   const cloner = page.getByTestId("voice-cloner");
   await expect(cloner).toContainText("HeyGen clones from one recording");
-  const mp3 = "e2e/fixtures/voice-over.mp3";
-  await cloner.locator('input[type="file"]').setInputFiles([mp3, mp3]);
+  // A second of silence, then about three seconds of speech: joined in that order.
+  await cloner.locator('input[type="file"]').setInputFiles(["e2e/fixtures/silence-1s.mp3", "e2e/fixtures/voice-over.mp3"]);
   await expect(cloner.getByRole("list", { name: "Samples" }).getByRole("listitem")).toHaveCount(2);
   await cloner.getByLabel("Voice name").fill("Joined");
   await cloner.getByRole("button", { name: "Clone voice" }).click();
   await expect.poll(() => sent.length).toBe(1);
   expect(sent[0]).toMatch(/^data:audio\/wav;base64,/);
-  // 16 kHz mono 16-bit: two three-second samples joined are about six seconds, 32 kB a second after the header.
-  const bytes = Buffer.from(sent[0].split(",")[1], "base64");
-  expect(bytes.subarray(0, 4).toString()).toBe("RIFF");
-  expect((bytes.length - 44) / 32_000).toBeGreaterThan(5.5);
-  expect((bytes.length - 44) / 32_000).toBeLessThan(6.8);
+  // 16 kHz mono 16-bit: 32 kB a second after the 44-byte header.
+  const pcm = (url: string) => {
+    const bytes = Buffer.from(url.split(",")[1], "base64");
+    expect(bytes.subarray(0, 4).toString()).toBe("RIFF");
+    return new Int16Array(bytes.buffer.slice(bytes.byteOffset + 44, bytes.byteOffset + bytes.length));
+  };
+  const joined = pcm(sent[0]);
+  expect(joined.length / 16_000).toBeGreaterThan(3.8);
+  expect(joined.length / 16_000).toBeLessThan(4.6);
+  const loudness = (from: number, to: number) => joined.subarray(from * 16_000, to * 16_000).reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+  expect(loudness(0, 0.9)).toBeLessThan(200);
+  expect(loudness(1.3, 3.5)).toBeGreaterThan(2000);
+  // A long sample is cut at a minute and a half, so the request stays within one upload.
+  sent = [];
+  await cloner.locator('input[type="file"]').setInputFiles("e2e/fixtures/tone-95s.mp3");
+  await cloner.getByLabel("Voice name").fill("Long");
+  await cloner.getByRole("button", { name: "Clone voice" }).click();
+  await expect.poll(() => sent.length).toBe(1);
+  const long = pcm(sent[0]).length / 16_000;
+  expect(long).toBeGreaterThan(89.9);
+  expect(long).toBeLessThanOrEqual(90.01);
 });
 
 test("voice cloning saves a private voice that renders and can be deleted", async ({ page }) => {

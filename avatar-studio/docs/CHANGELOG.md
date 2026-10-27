@@ -224,3 +224,10 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
   - The editor's Settings tab has a "Transparent background" checkbox for one-scene videos. The stage previews a checkerboard in place of the background. A video with more scenes keeps the choice on screen but does not send it.
   - Templates, retries, other sizes, and batches keep it. The video page shows it in the Background row.
   - New `transparent.test.ts` and an e2e test.
+  - An independent review of `1a60204` found every body valid against HeyGen's v3 schema. Its findings are fixed:
+    - A transparent video with default captions was treated as having them burned in, though none are sent. The share page's subtitle track stayed off by default, and the caption editor said the picture kept the original wording. Transparent videos now count as not burned in, with a unit test on the share page body.
+    - The API docs said D-ID answers `400`. It answers `502` with the failed video, because the renderer refuses the request after the video is stored, as it does for its other refusals. The docs now say so.
+    - The background was still looked up and uploaded though it is never sent. An uploaded image deleted since could fail a retry or a resize, and a colour HeyGen could not take failed the render. Neither happens now, with unit tests.
+    - The link preview typed a HeyGen WebM as MP4, because a signed link's query hid the extension. It now reads the path, and a transparent HeyGen video is always WebM.
+    - The stage's label used the hidden background's contrast on the checkerboard. The hint no longer claims which avatars are trained with matting, says photo avatars and uploaded portraits are likely refused, and names which rule stops a video.
+    - A batch started from a transparent template says so and offers to use the background instead, with an e2e test.

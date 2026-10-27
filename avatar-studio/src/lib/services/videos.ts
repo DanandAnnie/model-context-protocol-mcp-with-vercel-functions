@@ -211,7 +211,9 @@ export async function enforceRenderLimit(ownerId: string): Promise<void> {
 }
 
 /** The uploaded background images a request names, on the video or on any scene. */
-function backdropIdsOf(req: { background?: Background; scenes?: Array<{ background?: Background }> }): string[] {
+function backdropIdsOf(req: { background?: Background; scenes?: Array<{ background?: Background }>; transparent?: true }): string[] {
+  // A transparent video has no background, so its image is neither looked up nor uploaded.
+  if (req.transparent) return [];
   const ids = [req.background, ...(req.scenes ?? []).map((s) => s.background)].map(backdropIdOf).filter((id): id is string => !!id);
   return Array.from(new Set(ids));
 }
@@ -224,7 +226,7 @@ export interface RenderContext {
 }
 
 export async function resolveRenderContext(
-  req: Pick<VideoRequest, "avatarId" | "voiceId"> & { background?: Background; scenes?: Array<Pick<Scene, "avatarId" | "voiceId" | "audioId"> & { background?: Background }> },
+  req: Pick<VideoRequest, "avatarId" | "voiceId" | "transparent"> & { background?: Background; scenes?: Array<Pick<Scene, "avatarId" | "voiceId" | "audioId"> & { background?: Background }> },
   ownerId: string,
 ): Promise<RenderContext> {
   const avatarIds = Array.from(new Set([req.avatarId, ...(req.scenes ?? []).map((s) => s.avatarId).filter((id): id is string => !!id)]));

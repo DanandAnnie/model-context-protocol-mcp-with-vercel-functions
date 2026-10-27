@@ -190,6 +190,15 @@ export default function BatchPage() {
                 </select>
               </Field>
             )}
+            {carried.transparent && (
+              // A transparent template changes the output (a WebM of the presenter alone), so the choice is shown and can be dropped.
+              <p data-testid="batch-transparent" className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                <span>Transparent background, from the template: each video is a WebM of the presenter alone, without the background.</span>
+                <button type="button" className="shrink-0 font-medium text-brand-700 hover:underline" onClick={() => setCarried(({ transparent: _t, ...rest }) => rest)}>
+                  Use the background
+                </button>
+              </p>
+            )}
             <Field label="Batch title" hint="Each video is titled with this plus the first column of its row.">
               <input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} />
             </Field>

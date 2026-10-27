@@ -132,7 +132,8 @@ export class HeyGenAvatarProvider implements AvatarProvider {
         silent: scene.audioId ? 0 : silentSeconds(scene.script),
         voiceId: scene.audioId ? undefined : this.voiceId(sceneVoice, req.voiceId),
         accent: voiceTakesAccent(sceneVoice, req.accent) ? req.accent : undefined,
-        background: this.background(scene.background, cast),
+        // A transparent video sends no background (HeyGen refuses one with WebM), so none is resolved.
+        background: req.transparent && !hidden ? undefined : this.background(scene.background, cast),
       };
     });
     // HeyGen's v3 studio has no silence input: a scene of only pauses lip-syncs to an uploaded clip of silence that long.
@@ -180,7 +181,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       }),
     };
     // A transparent video is HeyGen's single-avatar video as a WebM: the presenter alone, its background removed
-    // (HeyGen refuses a background with WebM) and no captions burned over the alpha; the share page subtitles it.
+    // (HeyGen refuses a background with WebM) and no captions burned over the alpha (heygenBurnsCaptions); the share page subtitles it.
     const sent = req.transparent ? this.transparentBody(body) : body;
     try {
       const data = await this.client.generateVideo(sent);

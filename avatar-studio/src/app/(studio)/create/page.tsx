@@ -963,7 +963,8 @@ function CreateInner() {
   }, [canGenerate]);
 
   const stageAspect = aspect === "9:16" ? "aspect-[9/16]" : aspect === "1:1" ? "aspect-square" : "aspect-video";
-  const bgIsDark = (background.type === "color" && isDarkHex(background.value)) || background.type === "video";
+  // A transparent stage is drawn as a light checkerboard, whatever background the scene keeps.
+  const bgIsDark = !sentTransparent && ((background.type === "color" && isDarkHex(background.value)) || background.type === "video");
 
   return (
     <>
@@ -1734,8 +1735,10 @@ function CreateInner() {
                     <span className="block text-sm font-medium text-slate-800">Transparent background</span>
                     <span id="transparent-hint" className="block text-xs text-slate-500">
                       {canTransparent
-                        ? "HeyGen renders the presenter alone as a WebM with an alpha channel, for compositing over your own footage; the scene background and burned-in captions are left out. The avatar must be trained with matting (most recent digital twins and studio avatars); HeyGen refuses others, and D-ID cannot render one."
-                        : "For a one-scene video that shows the presenter; this one has more scenes or a scene without the presenter, so it renders with its backgrounds."}
+                        ? "HeyGen renders the presenter alone as a WebM with an alpha channel, for compositing over your own footage; the scene background and burned-in captions are left out. The avatar must be trained with matting, which HeyGen checks: it refuses others (likely photo avatars and uploaded portraits), and D-ID cannot render one. Captions stay on the share page's subtitle track."
+                        : scenes.length > 1
+                          ? "For a one-scene video that shows the presenter; this one has more than one scene, so it renders with its backgrounds."
+                          : "For a one-scene video that shows the presenter; this scene leaves the presenter out, so it renders with its background."}
                     </span>
                   </span>
                   <input type="checkbox" checked={transparent} onChange={(e) => setTransparent(e.target.checked)} disabled={!canTransparent && !transparent} aria-label="Transparent background" aria-describedby="transparent-hint" className="mt-1 h-5 w-5 shrink-0 accent-brand-600" />

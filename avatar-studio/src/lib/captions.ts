@@ -90,13 +90,16 @@ export function spokenWords(text: string): number {
   return t ? weight(t) : 0;
 }
 
-/** HeyGen writes captions into the file itself unless a caption style asks for the share page's track alone. */
-export function heygenBurnsCaptions(req: { captions?: boolean; captionStyle?: unknown }): boolean {
-  return !!req.captions && !req.captionStyle;
+/**
+ * HeyGen writes captions into the file itself unless a caption style asks for the share page's track alone, or the
+ * video is transparent (nothing is burned over the alpha).
+ */
+export function heygenBurnsCaptions(req: { captions?: boolean; captionStyle?: unknown; transparent?: true }): boolean {
+  return !!req.captions && !req.captionStyle && !req.transparent;
 }
 
 /** True when the rendered file already carries captions, so the share page's track must stay off until asked for. */
-export function captionsBurnedIn(video: { captions?: boolean; captionStyle?: unknown; provider?: string }): boolean {
+export function captionsBurnedIn(video: { captions?: boolean; captionStyle?: unknown; transparent?: true; provider?: string }): boolean {
   return video.provider === "heygen" && heygenBurnsCaptions(video);
 }
 

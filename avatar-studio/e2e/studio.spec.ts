@@ -569,6 +569,13 @@ test("a one-scene video can render over a transparent background, kept with the 
   const id = page.url().split("/").pop()!;
   expect((await (await page.request.get(`/api/videos/${id}`)).json()).video.transparent).toBe(true);
   await expect(page.getByText("Transparent (WebM, the presenter alone) (not applied by this renderer)")).toBeVisible();
+  // A batch started from a transparent template says so, and can go back to the background.
+  const tpl = await (await page.request.post("/api/templates", { data: { fromVideoId: id } })).json();
+  await page.goto("/batch");
+  await page.getByLabel("Start from a saved template").selectOption(tpl.template.id);
+  await expect(page.getByTestId("batch-transparent")).toContainText("Transparent background, from the template");
+  await page.getByRole("button", { name: "Use the background" }).click();
+  await expect(page.getByTestId("batch-transparent")).toHaveCount(0);
   await page.goto(`/create?from=${id}`);
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByLabel("Transparent background", { exact: true })).toBeChecked();
@@ -576,7 +583,7 @@ test("a one-scene video can render over a transparent background, kept with the 
   await page.getByRole("button", { name: "Add scene" }).click();
   await page.locator("textarea").fill("And here is the kitchen.");
   await page.getByRole("button", { name: "Settings" }).click();
-  await expect(page.locator("#transparent-hint")).toContainText("For a one-scene video that shows the presenter");
+  await expect(page.locator("#transparent-hint")).toContainText("this one has more than one scene");
   await expect(page.getByTestId("stage")).not.toHaveAttribute("data-transparent", "");
   const again = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
   await page.getByRole("button", { name: "Generate video" }).click();

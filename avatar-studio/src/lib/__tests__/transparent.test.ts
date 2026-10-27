@@ -73,4 +73,41 @@ describe("transparent background", () => {
     const { DidAvatarProvider } = await import("../providers/avatar/did");
     await assert.rejects(new DidAvatarProvider("key").createVideo(videoRequestSchema.parse({ ...base, transparent: true }), STOCK_AVATARS[0], STOCK_VOICES[0]), /D-ID renders an MP4 with a background/);
   });
+
+  it("keeps its captions on the share page's track, which plays by default, and is typed as a WebM", async () => {
+    const { captionsBurnedIn } = await import("../captions");
+    const { isWebm, shareBodyFor } = await import("../share-body");
+    const now = new Date().toISOString();
+    const video: Video = { ...videoRequestSchema.parse({ ...base, captions: true, transparent: true }), id: "vid_alpha_cc", ownerId: "alpha", status: "completed", provider: "heygen", videoUrl: "https://files.heygen.ai/v/alpha.webm?Expires=1&Signature=x", createdAt: now, updatedAt: now };
+    assert.equal(captionsBurnedIn(video), false, "nothing is burned over the alpha");
+    assert.equal(shareBodyFor(video, null).player?.trackDefault, true);
+    assert.equal(captionsBurnedIn({ ...video, transparent: undefined }), true, "an opaque HeyGen video still burns them in");
+    assert.equal(isWebm(video), true);
+    assert.equal(isWebm({ ...video, transparent: undefined }), true, "a signed link's query does not hide the extension");
+    assert.equal(isWebm({ ...video, transparent: undefined, videoUrl: "https://files.heygen.ai/v/a.mp4?x=.webm" }), false);
+  });
+
+  it("neither looks up nor uploads a background it never sends", async () => {
+    // An uploaded image that no longer exists would be a 404 for an opaque video; a transparent one renders without it.
+    const gone = { type: "image" as const, value: "/api/backdrops/bd_missing1" };
+    const video = await createVideo(videoRequestSchema.parse({ ...base, script: undefined, transparent: true, scenes: [{ script: "Hi.", background: gone }] }), "alpha");
+    assert.equal(video.status, "processing");
+    await assert.rejects(createVideo(videoRequestSchema.parse({ ...base, script: undefined, scenes: [{ script: "Hi.", background: gone }] }), "alpha"), /not found/i);
+    const { HeyGenAvatarProvider } = await import("../providers/avatar/heygen");
+    const heygen = new HeyGenAvatarProvider("key");
+    const last: { body?: Record<string, unknown> } = {};
+    const client = (heygen as unknown as { client: Record<string, (...a: unknown[]) => Promise<unknown>> }).client;
+    client.generateVideo = async (b) => {
+      last.body = b as Record<string, unknown>;
+      return { video_id: "hg_2" };
+    };
+    const twin: Avatar = { ...STOCK_AVATARS[0], id: "look_twin", provider: "heygen", source: "provider" };
+    const voice = { ...STOCK_VOICES[0], provider: "heygen" };
+    const cast = { avatars: { [twin.id]: twin }, voices: { [voice.id]: voice }, clips: { clip_1: { id: "clip_1", providerAssetIds: { "heygen:asset": "asset_clip" } } } } as unknown as Parameters<typeof heygen.createVideo>[3];
+    // A colour HeyGen could not take (it is never sent) and a recorded clip: the clip is the sound, with no voice settings.
+    await heygen.createVideo(videoRequestSchema.parse({ ...base, avatarId: twin.id, voiceId: voice.id, script: undefined, transparent: true, scenes: [{ script: "Hi.", background: { type: "color", value: "white" }, audioId: "clip_1" }] }), twin, voice, cast);
+    assert.equal(last.body?.audio_asset_id, "asset_clip");
+    assert.equal("voice_settings" in (last.body ?? {}), false);
+    assert.equal("background" in (last.body ?? {}), false);
+  });
 });

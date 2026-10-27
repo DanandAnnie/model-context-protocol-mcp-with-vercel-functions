@@ -36,6 +36,17 @@ export interface ShareBody {
   script?: string;
 }
 
+/** A video's file is a WebM when HeyGen rendered it transparent or its address says so (a signed link's query aside). */
+export function isWebm(video: { videoUrl?: string; transparent?: true; provider?: string }): boolean {
+  if (video.transparent && video.provider === "heygen") return true;
+  if (!video.videoUrl) return false;
+  try {
+    return new URL(video.videoUrl, "http://local").pathname.toLowerCase().endsWith(".webm");
+  } catch {
+    return false;
+  }
+}
+
 export function shareBodyFor(video: Video, brand: BrandKit | null): ShareBody {
   const rendered = video.status === "completed" && !!video.videoUrl;
   const background = brand?.accentColor ?? brand?.primaryColor ?? "#4f46e5";

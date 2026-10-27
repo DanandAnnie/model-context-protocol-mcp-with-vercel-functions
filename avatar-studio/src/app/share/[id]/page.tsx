@@ -20,7 +20,7 @@ import { ShareUnlock } from "@/components/ShareUnlock";
 import { shareCookieName, shareGateCookieName, shareGatePassed, shareUnlocked } from "@/lib/share-lock";
 import { ShareLeadGate } from "@/components/ShareLeadGate";
 import { ShareWatch } from "@/components/ShareWatch";
-import { shareBodyFor } from "@/lib/share-body";
+import { isWebm, shareBodyFor } from "@/lib/share-body";
 
 export const dynamic = "force-dynamic";
 
@@ -83,7 +83,7 @@ export async function generateMetadata({
       images,
       videos:
         ready && video.videoUrl
-          ? [{ url: video.videoUrl, type: video.videoUrl.endsWith(".webm") ? "video/webm" : "video/mp4", width, height }]
+          ? [{ url: video.videoUrl, type: isWebm(video) ? "video/webm" : "video/mp4", width, height }]
           : undefined,
     },
     twitter: {

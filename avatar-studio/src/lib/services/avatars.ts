@@ -18,18 +18,32 @@ export function providerAvatars(): Promise<Avatar[]> {
   return memo(`avatars:${p.name}`, LIST_TTL_MS, () => p.listAvatars());
 }
 
+/**
+ * Looks the studio made in the renderer's account for any account: the photo avatars made from uploaded portraits and
+ * the presenters drawn from a description. The renderer lists them with its own library, to every account that shares
+ * its key; they are an account's own and are never offered to another (each account sees its portraits instead).
+ */
+async function studioMadeLooks(): Promise<Set<string>> {
+  const [avatars, portraits] = await Promise.all([getStore().list<Avatar>("avatar"), getStore().list<PortraitJob>("portrait")]);
+  return new Set([...avatars.flatMap((a) => Object.values(a.providerAssetIds ?? {})), ...portraits.map((p) => p.providerJobId)].filter(Boolean));
+}
+
+/** The renderer's library without the looks made for accounts here (see `studioMadeLooks`). */
+async function sharedProviderAvatars(): Promise<Avatar[]> {
+  const [provider, made] = await Promise.all([providerAvatars(), studioMadeLooks()]);
+  return provider.filter((a) => !made.has(a.id));
+}
+
 export async function listAvatars(ownerId: string = LOCAL_OWNER): Promise<Avatar[]> {
-  const [provider, custom] = await Promise.all([providerAvatars(), getStore().list<Avatar>("avatar", ownerId)]);
+  const [provider, custom] = await Promise.all([sharedProviderAvatars(), getStore().list<Avatar>("avatar", ownerId)]);
   custom.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
-  // A renderer may list what it made from a custom portrait (HeyGen's photo avatar looks); the portrait stands for it.
-  const made = new Set(custom.flatMap((a) => Object.values(a.providerAssetIds ?? {})).filter(Boolean));
-  return [...custom, ...provider.filter((a) => !made.has(a.id))];
+  return [...custom, ...provider];
 }
 
 export async function getAvatar(id: string, ownerId: string = LOCAL_OWNER): Promise<Avatar> {
   const custom = await getStore().get<Avatar>("avatar", id);
   if (custom) return owned(custom, ownerId, `Avatar ${id}`);
-  const match = (await providerAvatars()).find((a) => a.id === id);
+  const match = (await sharedProviderAvatars()).find((a) => a.id === id);
   if (!match) throw new NotFoundError(`Avatar ${id} not found`);
   return match;
 }

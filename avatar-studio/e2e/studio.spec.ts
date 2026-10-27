@@ -690,6 +690,10 @@ test("a HeyGen Studio template is filled in and rendered as a library video", as
   // The template can be used again from the video, opening its form directly.
   await page.getByRole("link", { name: "Use the template again" }).click();
   await expect(page.getByTestId("studio-template-form").getByRole("heading", { name: /Open house invitation/ })).toBeVisible();
+  // Closing goes back to its card, and the link no longer reopens the form.
+  await page.getByTestId("studio-template-form").getByRole("button", { name: "Close" }).click();
+  await expect(page.getByRole("button", { name: "Fill in Open house invitation" })).toBeFocused();
+  await expect(page).toHaveURL(/\/templates$/);
 });
 
 test("a scene can leave the presenter out and let its picture fill the frame", async ({ page }) => {

@@ -7,6 +7,9 @@ import { LOCAL_OWNER } from "../owner-id";
 import { ValidationError } from "../errors";
 import { assertPublicHttpUrl } from "../safe-url";
 import { createVideo } from "./videos";
+import { listAvatars } from "./avatars";
+import { listVoices } from "./voices";
+import { forgetMemo, memo } from "../cache";
 
 /** How long a listing of the renderer's templates is reused (they change when someone edits them in HeyGen Studio). */
 const LIST_TTL_MS = 2 * 60 * 1000;
@@ -56,20 +59,37 @@ export async function listStudioTemplates(): Promise<StudioTemplate[]> {
 /** Forgets the cached listing (tests). */
 export function forgetStudioTemplates(): void {
   listed.clear();
+  forgetMemo("studio-template:");
 }
+
+/** A template's detail is reused this long, so opening its form again (or by several people) does not ask the renderer each time. */
+const DETAIL_TTL_MS = 60 * 1000;
 
 export async function getStudioTemplate(id: string): Promise<StudioTemplateDetail> {
   const provider = getAvatarProvider();
   if (!provider.getStudioTemplate) throw new ValidationError(`HeyGen Studio templates are not available with the ${provider.name} renderer`);
-  return provider.getStudioTemplate(studioTemplateIdSchema.parse(id));
+  const key = studioTemplateIdSchema.parse(id);
+  // A failed read is not kept, so a template fixed in HeyGen Studio (or a passing error) is asked about again.
+  return memo(`studio-template:${provider.name}:${key}`, DETAIL_TTL_MS, () => provider.getStudioTemplate!(key)).then((t) => structuredClone(t));
+}
+
+/** What a presenter or voice given for a template may be: the template's own, or one the account may use. */
+export interface StudioChoices {
+  avatarIds: Set<string>;
+  voiceIds: Set<string>;
 }
 
 /**
- * The variables to send: each value given replaces the template's (it must be one of the template's variables, of the
- * same type); one left out keeps the template's. HeyGen fills no text the request leaves out, so every text variable is
- * sent, and one with no text either way is refused. A link must be a public https address, as HeyGen downloads it.
+ * The variables to send: every text (HeyGen fills no text a request leaves out), and each other value given; one not
+ * given is left out so the template keeps its own. A value given must be one of the template's variables, of the same
+ * type; a text with no content either way is refused; a link must be a public https address, as HeyGen downloads it;
+ * a given picture, video, or audio keeps the template's fit and playback unless they are given too; a presenter or voice
+ * must be the template's own or one the account may use.
  */
-export async function fillStudioVariables(template: StudioTemplateDetail, given: Record<string, StudioVariable>): Promise<Record<string, StudioVariable>> {
+export async function fillStudioVariables(template: StudioTemplateDetail, given: Record<string, StudioVariable>, choicesOf?: () => Promise<StudioChoices>): Promise<Record<string, StudioVariable>> {
+  // Asked for only when a presenter or voice other than the template's own is given.
+  let choices: StudioChoices | undefined;
+  const allowed = async () => (choices ??= choicesOf ? await choicesOf() : undefined);
   for (const [name, value] of Object.entries(given)) {
     const own = template.variables[name];
     if (!own) throw new ValidationError(`The template has no variable "${name}"`);
@@ -77,15 +97,15 @@ export async function fillStudioVariables(template: StudioTemplateDetail, given:
   }
   const out: Record<string, StudioVariable> = {};
   for (const [name, own] of Object.entries(template.variables)) {
-    const value = given[name] ?? own;
-    if (value.type === "text") {
-      const content = value.content.trim();
+    const value = given[name];
+    if (own.type === "text") {
+      const content = (value?.type === "text" ? value.content : own.content).trim();
       if (!content) throw new ValidationError(`Fill in "${name}"`);
       out[name] = { type: "text", content };
       continue;
     }
-    // Only links reach here from a request (the schema takes no asset ids); the template's own assets are kept as they are.
-    if (given[name] && "asset" in value && value.asset.type === "url") {
+    if (!value) continue;
+    if ((value.type === "image" || value.type === "video" || value.type === "audio") && value.asset?.type === "url") {
       const url = value.asset.url;
       if (!/^https:\/\/\S+$/i.test(url)) throw new ValidationError(`"${name}" needs a public https link`);
       try {
@@ -93,6 +113,14 @@ export async function fillStudioVariables(template: StudioTemplateDetail, given:
       } catch (err) {
         throw new ValidationError(err instanceof Error ? err.message : `"${name}" needs a public https link`);
       }
+      out[name] = { ...own, ...value } as StudioVariable;
+      continue;
+    }
+    if (value.type === "character" && own.type === "character" && value.avatar_id !== own.avatar_id && (await allowed()) && !choices!.avatarIds.has(value.avatar_id)) {
+      throw new ValidationError(`"${name}" names a presenter that is not available`);
+    }
+    if (value.type === "voice" && own.type === "voice" && value.voice_id !== own.voice_id && (await allowed()) && !choices!.voiceIds.has(value.voice_id)) {
+      throw new ValidationError(`"${name}" names a voice that is not available`);
     }
     out[name] = value;
   }
@@ -117,15 +145,23 @@ const ASPECTS: AspectRatio[] = ["16:9", "9:16", "1:1"];
 /** Renders one of the renderer's templates with the account's values, as a library video counted like any render. */
 export async function renderStudioTemplate(id: string, input: z.infer<typeof studioRenderSchema>, ownerId: string = LOCAL_OWNER): Promise<Video> {
   const template = await getStudioTemplate(id);
-  const variables = await fillStudioVariables(template, input.variables);
-  const first = <T extends StudioVariable["type"]>(type: T) => Object.values(variables).find((v): v is Extract<StudioVariable, { type: T }> => v.type === type);
+  // A presenter given must be one of the renderer's library looks the account sees (never a look made for another
+  // account), and a voice one the account's voice list has.
+  const choices = async () => {
+    const [avatars, voices] = await Promise.all([listAvatars(ownerId), listVoices(ownerId)]);
+    return { avatarIds: new Set(avatars.filter((a) => a.source !== "custom").map((a) => a.id)), voiceIds: new Set(voices.map((v) => v.id)) };
+  };
+  const variables = await fillStudioVariables(template, input.variables, choices);
+  // The presenter and voice the video shows: the one given, else the template's own (for the library's labels).
+  const all = { ...template.variables, ...variables };
+  const first = <T extends StudioVariable["type"]>(type: T) => Object.values(all).find((v): v is Extract<StudioVariable, { type: T }> => v.type === type);
   return createVideo(
     {
       title: input.title,
       script: filledScript(template, variables),
       // The template's own presenter and voice, for the library's labels; the template decides what renders.
-      avatarId: first("character")?.avatar_id ?? "studio-template",
-      voiceId: first("voice")?.voice_id ?? "studio-template",
+      avatarId: first("character")?.avatar_id || "studio-template",
+      voiceId: first("voice")?.voice_id || "studio-template",
       aspect: ASPECTS.includes(template.aspect as AspectRatio) ? (template.aspect as AspectRatio) : "16:9",
       background: { type: "color", value: "#000000" },
       captions: input.captions,

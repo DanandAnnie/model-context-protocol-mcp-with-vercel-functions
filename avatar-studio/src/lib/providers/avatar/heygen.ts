@@ -397,8 +397,8 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     const variables: Record<string, StudioVariable> = {};
     for (const [name, v] of Object.entries(t.variables ?? {})) {
       if (!v || !(STUDIO_VARIABLE_TYPES as readonly string[]).includes(String(v.type))) continue;
-      // A presenter's look is `avatar_id`; older templates still answer with its former names.
-      variables[name] = (v.type === "character" ? { type: "character", avatar_id: String(v.avatar_id ?? v.avatar_look_id ?? v.character_id ?? "") } : v) as StudioVariable;
+      const own = studioVariableOf(v);
+      if (own) variables[name] = own;
     }
     return stripEmpty({
       id: t.id,
@@ -426,6 +426,38 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     if (b.event_type === "avatar_video.success") return { providerJobId: id, update: { status: "completed" as const, videoUrl: b.event_data?.url } };
     if (b.event_type === "avatar_video.fail") return { providerJobId: id, update: { status: "failed" as const, error: b.event_data?.msg ?? "Render failed" } };
     return null;
+  }
+}
+
+/**
+ * A template variable as HeyGen answers it, kept to the fields this studio shows and sends: text `content` (empty when
+ * the template leaves it unfilled), a media `asset` given by link or asset id (another form is left out) with its fit and
+ * playback, a voice's id and locale, a presenter's look (`avatar_id`, or its former names on older templates).
+ */
+function studioVariableOf(v: Record<string, unknown>): StudioVariable | null {
+  const str = (x: unknown) => (typeof x === "string" ? x : "");
+  const asset = (a: unknown) => {
+    const o = (a ?? {}) as Record<string, unknown>;
+    if (o.type === "url" && str(o.url)) return { asset: { type: "url" as const, url: str(o.url) } };
+    if (o.type === "asset_id" && str(o.asset_id)) return { asset: { type: "asset_id" as const, asset_id: str(o.asset_id) } };
+    return {};
+  };
+  const fit = ["cover", "contain", "crop", "none"].includes(str(v.fit)) ? { fit: v.fit as "cover" } : {};
+  switch (v.type) {
+    case "text":
+      return { type: "text", content: str(v.content) };
+    case "image":
+      return { type: "image", ...asset(v.asset), ...fit };
+    case "video":
+      return { type: "video", ...asset(v.asset), ...fit, ...(str(v.play_style) ? { play_style: str(v.play_style) } : {}), ...(typeof v.volume === "number" ? { volume: v.volume } : {}) };
+    case "audio":
+      return { type: "audio", ...asset(v.asset) };
+    case "voice":
+      return { type: "voice", voice_id: str(v.voice_id), ...(str(v.locale) ? { locale: str(v.locale) } : {}) };
+    case "character":
+      return { type: "character", avatar_id: str(v.avatar_id) || str(v.avatar_look_id) || str(v.character_id) };
+    default:
+      return null;
   }
 }
 

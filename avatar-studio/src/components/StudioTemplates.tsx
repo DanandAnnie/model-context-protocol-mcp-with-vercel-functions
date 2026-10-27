@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useId, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { LayoutTemplate } from "lucide-react";
 import { Button, Card, ErrorBanner, Field, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
@@ -23,14 +23,30 @@ const MEDIA: Record<string, string> = { image: "image", video: "video", audio: "
  */
 export function StudioTemplates() {
   const params = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
   const { data, error } = useApi<{ templates: StudioTemplate[]; available: boolean }>("/api/studio-templates");
   const [open, setOpen] = useState<string | null>(params.get("studio"));
+  const listRef = useRef<HTMLDivElement>(null);
+  const focusAfterRender = useFocusAfterRender();
+  // A link to another template (a video's "Use the template again") opens that one.
+  const linked = params.get("studio");
+  useEffect(() => {
+    if (linked) setOpen(linked);
+  }, [linked]);
   if (!data?.available && !error) return null;
   const templates = data?.templates ?? [];
 
+  // Closing goes back to the card it was opened from (or the section), and the link no longer reopens it on a reload.
+  function close(id: string) {
+    setOpen(null);
+    if (params.get("studio")) router.replace(pathname, { scroll: false });
+    focusAfterRender(() => listRef.current?.querySelector<HTMLElement>(`[data-studio-template="${CSS.escape(id)}"]`) ?? listRef.current?.querySelector<HTMLElement>("h2"));
+  }
+
   return (
-    <section className="mb-8" data-testid="studio-templates">
-      <h2 className="mb-1 text-sm font-semibold text-slate-900">HeyGen templates</h2>
+    <section ref={listRef} className="mb-8" data-testid="studio-templates">
+      <h2 tabIndex={-1} className="mb-1 text-sm font-semibold text-slate-900 outline-none">HeyGen templates</h2>
       <p className="mb-4 text-xs text-slate-500">Layouts made in HeyGen Studio and marked for the API: fill in their text, pictures, presenter, and voice, and render them here.</p>
       <ErrorBanner message={error} />
       {data && templates.length === 0 ? (
@@ -51,14 +67,14 @@ export function StudioTemplates() {
                 {t.aspect && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">{t.aspect}</span>}
               </div>
               <h3 className="mt-3 break-words text-sm font-semibold text-slate-900">{t.name}</h3>
-              <Button variant={open === t.id ? "secondary" : "primary"} className="mt-4" onClick={() => setOpen(t.id)} aria-label={`Fill in ${t.name}`} aria-expanded={open === t.id}>
+              <Button variant={open === t.id ? "secondary" : "primary"} className="mt-4" onClick={() => setOpen(t.id)} aria-label={`Fill in ${t.name}`} aria-expanded={open === t.id} aria-controls={open === t.id ? "studio-template-form" : undefined} data-studio-template={t.id}>
                 Fill in
               </Button>
             </Card>
           ))}
         </div>
       )}
-      {open && <StudioTemplateForm key={open} id={open} onClose={() => setOpen(null)} />}
+      {open && <StudioTemplateForm key={open} id={open} onClose={() => close(open)} />}
     </section>
   );
 }
@@ -93,8 +109,23 @@ function StudioTemplateForm({ id, onClose }: { id: string; onClose: () => void }
     });
   }, [template]);
 
-  if (error) return <ErrorBanner message={error} />;
-  if (!template) return <p className="mt-4 text-sm text-slate-500">Loading the template…</p>;
+  if (error) {
+    return (
+      <div id="studio-template-form" className="mt-4">
+        <ErrorBanner message={error} />
+        <button type="button" className="text-xs text-slate-500 hover:underline" onClick={onClose}>
+          Close
+        </button>
+      </div>
+    );
+  }
+  if (!template) {
+    return (
+      <p id="studio-template-form" role="status" className="mt-4 text-sm text-slate-500">
+        Loading the template…
+      </p>
+    );
+  }
   const entries = Object.entries(template.variables);
   const missing = entries.filter(([name, v]) => v.type === "text" && !(values[name] ?? "").trim()).map(([name]) => labelOf(name));
 
@@ -120,7 +151,7 @@ function StudioTemplateForm({ id, onClose }: { id: string; onClose: () => void }
   }
 
   return (
-    <Card className="mt-4 p-5" data-testid="studio-template-form">
+    <Card id="studio-template-form" className="mt-4 p-5" data-testid="studio-template-form">
       <div className="flex items-start justify-between gap-3">
         <h3 ref={headingRef} tabIndex={-1} className="min-w-0 break-words text-sm font-semibold text-slate-900 outline-none">
           {template.name}
@@ -152,11 +183,11 @@ function StudioTemplateForm({ id, onClose }: { id: string; onClose: () => void }
               </Field>
             );
           }
-          if (own.type in MEDIA) {
-            const current = "asset" in own && own.asset.type === "url" ? own.asset.url : "";
+          if (own.type === "image" || own.type === "video" || own.type === "audio") {
+            const current = own.asset?.type === "url" ? own.asset.url : own.asset ? "The template's own" : "";
             return (
               <Field key={name} label={`${label} (${MEDIA[own.type]} link)`} hint="A public https link; leave empty to keep the template's.">
-                <input className={inputClass} value={values[name] ?? ""} placeholder={current || `https://…`} onChange={(e) => setValues((v) => ({ ...v, [name]: e.target.value }))} disabled={canEdit === false} />
+                <input type="url" inputMode="url" className={inputClass} value={values[name] ?? ""} placeholder={current || `https://…`} onChange={(e) => setValues((v) => ({ ...v, [name]: e.target.value }))} disabled={canEdit === false} />
               </Field>
             );
           }
@@ -193,7 +224,8 @@ function StudioTemplateForm({ id, onClose }: { id: string; onClose: () => void }
         <input type="checkbox" className="accent-brand-600" checked={captions} onChange={(e) => setCaptions(e.target.checked)} disabled={canEdit === false} />
         Burn in captions
       </label>
-      {missing.length > 0 && (
+      {canEdit === false && <p className="mt-3 text-xs text-slate-500">You are a viewer in this workspace, so you can look at the template but not render it.</p>}
+      {missing.length > 0 && canEdit !== false && (
         <p id={`${formId}-missing`} className="mt-3 text-xs text-amber-700">
           Fill in {missing.join(", ")} to render.
         </p>

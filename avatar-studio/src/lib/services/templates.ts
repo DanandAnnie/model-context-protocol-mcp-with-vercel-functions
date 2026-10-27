@@ -81,9 +81,9 @@ export async function createTemplate(input: TemplateInput, ownerId: string = LOC
   if (input.fromVideoId) {
     const video = await getStore().get<Video>("video", input.fromVideoId);
     if (!video) throw new NotFoundError(`Video ${input.fromVideoId} not found`);
+    owned(video, ownerId, `Video ${input.fromVideoId}`);
     // Its scenes, presenter, and voice live in the HeyGen template, so there is nothing here to keep as a template.
     if (video.studioTemplate) throw new ValidationError("A video made from a HeyGen template is remade from that template, not saved as one here");
-    owned(video, ownerId, `Video ${input.fromVideoId}`);
     // Scenes keep their presenter ids but not the display names, which are filled in again at render time.
     const scenes = (video.scenes?.length ? video.scenes : [{ script: video.script, background: video.background }]).map((sc) => ({
       script: sc.script,

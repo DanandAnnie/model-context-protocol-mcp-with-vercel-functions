@@ -9,7 +9,7 @@ import { ValidationError } from "../errors";
 import type { Avatar } from "../types";
 import { MemoryStore } from "../store/memory";
 import { getStore } from "../store";
-import { createAvatar, listAvatars } from "../services";
+import { createAvatar, getAvatar, listAvatars } from "../services";
 import { STOCK_AVATARS } from "../stock";
 
 const realFetch = globalThis.fetch;
@@ -208,7 +208,7 @@ describe("HeyGen v3", () => {
     assert.equal(gone.status, "failed", "a retired v2 answers 410 and the job stops being asked about");
   });
 
-  it("lists a portrait once, not again as the look the renderer made from it", async () => {
+  it("lists a portrait once, not again as the look the renderer made from it, and never to another account", async () => {
     globalThis.__avatarStudioStore = new MemoryStore();
     const before = await listAvatars("owner_dup");
     const look = STOCK_AVATARS[0].id;
@@ -218,6 +218,13 @@ describe("HeyGen v3", () => {
     const after = await listAvatars("owner_dup");
     assert.equal(after[0].id, mine.id);
     assert.equal(after.some((a) => a.id === look), false, "the look stands behind the portrait, not beside it");
-    assert.ok((await listAvatars("someone_else")).some((a) => a.id === look), "another account still sees the library look");
+    // The renderer lists the looks it made for any account to every account sharing its key; another account never gets
+    // this one (it is made from someone's own portrait), nor can it render with it by id.
+    assert.equal((await listAvatars("someone_else")).some((a) => a.id === look), false, "another account does not see a look made for this one");
+    await assert.rejects(getAvatar(look, "someone_else"), /not found/);
+    // A presenter drawn from a description is a look in the renderer's account too.
+    const drawn = STOCK_AVATARS[1].id;
+    await getStore().put("portrait", { id: "pt_drawn", ownerId: "owner_dup", provider: "mock", providerJobId: drawn, status: "completed", createdAt: new Date().toISOString() });
+    assert.equal((await listAvatars("someone_else")).some((a) => a.id === drawn), false);
   });
 });

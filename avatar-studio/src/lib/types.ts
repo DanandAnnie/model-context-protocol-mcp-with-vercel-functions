@@ -405,9 +405,9 @@ export interface VideoRequest {
 export type StudioAsset = { type: "url"; url: string } | { type: "asset_id"; asset_id: string };
 export type StudioVariable =
   | { type: "text"; content: string }
-  | { type: "image"; asset: StudioAsset; fit?: "cover" | "contain" | "crop" | "none" }
-  | { type: "video"; asset: StudioAsset; fit?: "cover" | "contain" | "crop" | "none"; play_style?: string; volume?: number }
-  | { type: "audio"; asset: StudioAsset }
+  | { type: "image"; asset?: StudioAsset; fit?: "cover" | "contain" | "crop" | "none" }
+  | { type: "video"; asset?: StudioAsset; fit?: "cover" | "contain" | "crop" | "none"; play_style?: string; volume?: number }
+  | { type: "audio"; asset?: StudioAsset }
   | { type: "voice"; voice_id: string; locale?: string }
   | { type: "character"; avatar_id: string };
 export const STUDIO_VARIABLE_TYPES = ["text", "image", "video", "audio", "voice", "character"] as const;

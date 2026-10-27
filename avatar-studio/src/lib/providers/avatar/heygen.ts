@@ -259,7 +259,6 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     return new Promise((r) => setTimeout(r, ms));
   }
 
-  /** The look a presenter renders as: a provider avatar's own id, or the photo avatar made from a custom portrait. */
   /**
    * A Cinematic Avatar shot (v3 `POST /v3/videos`, `type: "cinematic_avatar"`): HeyGen composes the scene, motion, and
    * framing from the description, featuring each presenter's look. It takes no script, voice, background, or captions,
@@ -286,6 +285,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     return { providerJobId: data.video_id };
   }
 
+  /** The look a presenter renders as: a provider avatar's own id, or the photo avatar made from a custom portrait. */
   private lookId(avatar: Avatar): string {
     if (avatar.source !== "custom") return avatar.id;
     const id = avatar.providerAssetIds?.[LOOK];

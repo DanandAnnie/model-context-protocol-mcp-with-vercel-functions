@@ -769,7 +769,13 @@ test("a catalog track found by describing it is mixed under a finished video, fo
 });
 
 test("a cinematic shot is directed from a description with chosen presenters, kept in the library, and made again", async ({ page }) => {
-  const avatars = ((await (await page.request.get("/api/avatars")).json()).avatars as Array<{ id: string; name: string }>).slice(0, 4);
+  // A presenter of the account's own, newest first in the library, and three more whose names no other has.
+  const tag = Date.now().toString(36);
+  const svg = "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%2F%3E";
+  const own = (await (await page.request.post("/api/avatars", { data: { name: `Shot ${tag}`, imageUrl: svg, gender: "neutral" } })).json()).avatar as { id: string; name: string };
+  const all = (await (await page.request.get("/api/avatars")).json()).avatars as Array<{ id: string; name: string }>;
+  const unique = all.filter((a) => all.filter((b) => b.name === a.name).length === 1);
+  const avatars = [own, ...unique.filter((a) => a.id !== own.id).slice(0, 3)];
   await page.goto("/cinematic");
   await expect(page.getByRole("heading", { name: "Cinematic", exact: true })).toBeVisible();
   const start = page.getByRole("button", { name: "Make the shot" });
@@ -818,6 +824,18 @@ test("a cinematic shot is directed from a description with chosen presenters, ke
   await expect(presenters.getByRole("checkbox", { checked: true })).toHaveCount(2);
   await expect(page.getByRole("combobox", { name: "Shape" })).toHaveValue("9:16");
   await expect(page.getByRole("combobox", { name: "Length" })).toHaveValue("6");
+  await expect(page.getByTestId("cinematic-notice")).toContainText("is filled in");
+  // Shared, the shot has no transcript to read along with.
+  const videoId = new URL(page.url()).searchParams.get("from")!;
+  await page.goto(`/share/${videoId}`);
+  await expect(page.locator("video")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Transcript" })).toHaveCount(0);
+  // A presenter deleted since is left out when the shot is made again, and the page says so.
+  expect((await page.request.delete(`/api/avatars/${own.id}`)).ok()).toBe(true);
+  await page.goto(`/cinematic?from=${videoId}`);
+  await expect(page.getByTestId("cinematic-notice")).toContainText(`${own.name} is no longer in your library and was left out`);
+  await expect(presenters.getByRole("checkbox", { checked: true })).toHaveCount(1);
+  await expect(start).toBeEnabled();
 });
 
 test("a photo avatar is dressed in a look pack, each look kept as a presenter of its own", async ({ page }) => {

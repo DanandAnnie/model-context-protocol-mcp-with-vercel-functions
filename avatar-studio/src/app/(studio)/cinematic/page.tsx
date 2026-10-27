@@ -57,6 +57,8 @@ function CinematicInner() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  // What the form was filled from, and the presenters of it the library no longer has, shown above the form.
+  const [notice, setNotice] = useState<string | null>(null);
   // One key per start: a retry of the same start (after a timeout, say) sends it again and gets the same video back.
   const [requestKey, setRequestKey] = useState(() => newKey());
   const promptRef = useRef<HTMLTextAreaElement>(null);
@@ -75,22 +77,30 @@ function CinematicInner() {
     if (source.video.resolution) setResolution(source.video.resolution);
     setDuration(shot.durationSec ?? "auto");
     setEnhance(!!shot.enhancePrompt);
-    setNote(`The shot of “${source.video.title}” is filled in; change it and make it again.`);
+    setNotice(`The shot of “${source.video.title}” is filled in; change it and make it again.`);
   }, [source]);
 
   const avatars = library?.avatars ?? [];
   const byId = useMemo(() => new Map(avatars.map((a) => [a.id, a])), [avatars]);
   const matching = useMemo(() => {
     const words = filter.trim().toLowerCase();
-    const found = words ? avatars.filter((a) => a.name.toLowerCase().includes(words)) : avatars;
-    // The chosen presenters stay listed whatever the search, so they can be unticked.
-    const extra = chosen.map((id) => byId.get(id)).filter((a): a is Avatar => !!a && !found.includes(a));
-    return [...extra, ...found.slice(0, SHOWN)];
+    const shown = (words ? avatars.filter((a) => a.name.toLowerCase().includes(words)) : avatars).slice(0, SHOWN);
+    // The chosen presenters stay listed whatever the search and however long the library, so they can be unticked.
+    const extra = chosen.map((id) => byId.get(id)).filter((a): a is Avatar => !!a && !shown.includes(a));
+    return [...extra, ...shown];
   }, [avatars, byId, chosen, filter]);
   const full = chosen.length >= CINEMATIC_MAX_LOOKS;
   const available = status?.cinematicShots;
-  // Chosen presenters the library no longer lists (deleted since the shot was made) cannot be sent.
-  const missing = library ? chosen.filter((id) => !byId.has(id)) : [];
+  // Presenters of a shot filled in that the library no longer lists (deleted since) are left out, and the page says so.
+  useEffect(() => {
+    if (!library) return;
+    const gone = chosen.filter((id) => !byId.has(id));
+    if (!gone.length) return;
+    setChosen((prev) => prev.filter((id) => byId.has(id)));
+    const names = source?.video.cinematic ? gone.map((id) => source.video.cinematic!.avatarNames[source.video.cinematic!.avatarIds.indexOf(id)] ?? "A presenter") : [];
+    const who = names.length ? names.join(", ") : gone.length === 1 ? "One presenter" : `${gone.length} presenters`;
+    setNotice((prev) => `${prev ? `${prev} ` : ""}${who} ${gone.length === 1 ? "is" : "are"} no longer in your library and ${gone.length === 1 ? "was" : "were"} left out; choose another if you like.`);
+  }, [library, byId, chosen, source]);
 
   function changed() {
     setErr(null);
@@ -99,6 +109,13 @@ function CinematicInner() {
 
   function toggle(id: string) {
     setChosen((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : prev.length >= CINEMATIC_MAX_LOOKS ? prev : [...prev, id]));
+    changed();
+  }
+
+  // An example fills the description; one already written is replaced only once confirmed.
+  function pickExample(text: string) {
+    if (prompt.trim() && prompt.trim() !== text && !window.confirm("Replace the description with this example?")) return;
+    setPrompt(text);
     changed();
   }
 
@@ -134,6 +151,11 @@ function CinematicInner() {
       <p role="status" className="sr-only">
         {note ?? ""}
       </p>
+      {notice && (
+        <p className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700" role="status" data-testid="cinematic-notice">
+          {notice}
+        </p>
+      )}
       {available === false ? (
         <Card className="p-5">
           <p className="text-sm text-slate-600">Cinematic shots need the HeyGen renderer; the current renderer has no such feature.</p>
@@ -141,7 +163,7 @@ function CinematicInner() {
       ) : (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.3fr_1fr]">
           <Card className="space-y-4 p-5">
-            <Field label="Describe the shot" hint={`What happens, where, and how the camera moves; there is no script. ${prompt.length}/${MAX_PROMPT}`}>
+            <Field label="Describe the shot" hint="What happens, where, and how the camera moves; there is no script.">
               <textarea
                 ref={promptRef}
                 className={`${inputClass} min-h-32`}
@@ -150,13 +172,18 @@ function CinematicInner() {
                 disabled={locked}
                 onChange={(e) => (setPrompt(e.target.value), changed())}
                 placeholder="Walks through a sunlit office toward the camera, gesturing at a whiteboard; handheld, documentary style."
+                aria-describedby="prompt-count"
               />
             </Field>
+            {/* Outside the label, so the count is not part of the field's name. */}
+            <p id="prompt-count" className="-mt-3 text-right text-xs text-slate-500">
+              {prompt.length}/{MAX_PROMPT}
+            </p>
             <div>
               <p className="mb-1.5 text-xs text-slate-500">Examples</p>
               <div className="flex flex-wrap gap-2">
                 {EXAMPLES.map((ex, i) => (
-                  <button key={ex} type="button" disabled={locked} title={ex} onClick={() => (setPrompt(ex), changed())} className="rounded-full border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:border-brand-300 hover:text-brand-700 disabled:opacity-50">
+                  <button key={ex} type="button" disabled={locked} title={ex} onClick={() => pickExample(ex)} className="rounded-full border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:border-brand-300 hover:text-brand-700 disabled:opacity-50">
                     {["Office walkthrough", "Rooftop at golden hour", "Rainy café"][i]}
                   </button>
                 ))}
@@ -197,10 +224,10 @@ function CinematicInner() {
               </Field>
             </div>
             <Field label="Title (optional)">
-              <input className={inputClass} value={title} maxLength={120} disabled={locked} onChange={(e) => setTitle(e.target.value)} placeholder="The description's first words" />
+              <input className={inputClass} value={title} maxLength={120} disabled={locked} onChange={(e) => (setTitle(e.target.value), changed())} placeholder="The description's first words" />
             </Field>
-            {missing.length > 0 && <p className="text-xs text-rose-600">{missing.length === 1 ? "One presenter of the shot is" : `${missing.length} presenters of the shot are`} no longer in your library; untick it or choose another.</p>}
-            <Button onClick={submit} loading={busy} disabled={canEdit !== true || available !== true || !chosen.length || missing.length > 0} className="w-full">
+            {canEdit === true && !chosen.length && <p className="text-xs text-slate-500" id="shot-needs">Choose at least one presenter to make the shot.</p>}
+            <Button onClick={submit} loading={busy} disabled={canEdit !== true || available !== true || !chosen.length} className="w-full" aria-describedby={!chosen.length ? "shot-needs" : undefined}>
               <Film className="h-4 w-4" /> Make the shot
             </Button>
             <p className="text-xs text-slate-500">The shot is added to your library and counts as one render. It has no captions, as nothing is scripted.</p>

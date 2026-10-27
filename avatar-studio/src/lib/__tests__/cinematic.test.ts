@@ -5,8 +5,9 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
-import { addSubtitles, cinematicSchema, createTemplate, getAvatar, resizeVideo, retryVideo, saveCaptionCues, startCinematic } from "../services";
-import { ConflictError, NotFoundError } from "../errors";
+import { addSubtitles, cinematicSchema, createTemplate, deleteVideo, getAvatar, queryVideos, rememberMadeLooks, resizeVideo, retryVideo, saveCaptionCues, startCinematic, videoQuerySchema } from "../services";
+import { ConflictError, NotFoundError, ValidationError } from "../errors";
+import { shareBodyFor } from "../share-body";
 import { providerStatus } from "../providers";
 import { HEYGEN_LOOK_KEY } from "../providers/avatar/heygen";
 import { getStore } from "../store";
@@ -75,8 +76,41 @@ describe("cinematic shots", () => {
     assert.equal(again.id, first.id);
     assert.equal((await getStore().list<Video>("video", "u1")).length, 1);
     await assert.rejects(startCinematic(cinematicSchema.parse({ ...SHOT, prompt: `${SHOT.prompt} At dusk.` }), "u1", { key: "shot-key-1" }), ConflictError);
+    await assert.rejects(startCinematic(cinematicSchema.parse({ ...SHOT, duration: 6 }), "u1", { key: "shot-key-1" }), ConflictError, "every setting of the shot is compared");
+    await assert.rejects(startCinematic(cinematicSchema.parse({ ...SHOT, title: "Another title" }), "u1", { key: "shot-key-1" }), ConflictError);
     const theirs = await startCinematic(cinematicSchema.parse(SHOT), "u2", { key: "shot-key-1" });
     assert.notEqual(theirs.id, first.id, "another account's key is its own");
+    await deleteVideo(first.id, "u1");
+    await assert.rejects(startCinematic(cinematicSchema.parse(SHOT), "u1", { key: "shot-key-1" }), /in the trash; send a new key/);
+  });
+
+  it("is found by its description, shows no transcript when shared, and is named after its presenters as they are now", async () => {
+    const video = await startCinematic(cinematicSchema.parse({ ...SHOT, title: "Office" }), "u1");
+    const found = await queryVideos("u1", videoQuerySchema.parse({ q: "whiteboard" }));
+    assert.deepEqual(found.videos.map((v) => v.id), [video.id]);
+    await getStore().put("video", { ...video, status: "completed", videoUrl: "https://93.184.216.34/v.mp4" });
+    const body = shareBodyFor((await getStore().get<Video>("video", video.id))!, null) as unknown as Record<string, unknown>;
+    assert.equal("transcripts" in body, false, "a shot has no script to read along with");
+    assert.equal("script" in body, false);
+    // A retry names the presenters as they are when it starts.
+    const mine: Avatar = { id: "av_mine", name: "Rae", imageUrl: "https://93.184.216.34/r.png", source: "custom", provider: "mock", ownerId: "u1", createdAt: new Date().toISOString() };
+    await getStore().put("avatar", mine);
+    const shot = await startCinematic(cinematicSchema.parse({ ...SHOT, avatarIds: ["av_mine"] }), "u1");
+    await getStore().put("avatar", { ...mine, name: "Rae Lin" });
+    await getStore().put("video", { ...shot, id: "vid_shot_renamed", status: "failed", providerJobId: undefined });
+    const retried = await retryVideo("vid_shot_renamed", "u1");
+    assert.deepEqual([retried.avatarName, retried.cinematic?.avatarNames], ["Rae Lin", ["Rae Lin"]]);
+  });
+
+  it("is refused by a renderer that does not direct shots", async () => {
+    const { config } = await import("../config");
+    const saved = { avatar: config.avatarProvider, key: config.didApiKey };
+    Object.assign(config, { avatarProvider: "did", didApiKey: "did_key" });
+    try {
+      await assert.rejects(startCinematic(cinematicSchema.parse(SHOT), "u1"), (e: unknown) => e instanceof ValidationError && /not available with the did renderer/.test((e as Error).message));
+    } finally {
+      Object.assign(config, { avatarProvider: saved.avatar, didApiKey: saved.key });
+    }
   });
 
   it("asks HeyGen for a Cinematic Avatar video with the presenters' looks and the studio's video id as its key", async () => {
@@ -89,7 +123,8 @@ describe("cinematic shots", () => {
       const url = String(input);
       calls.push({ url, method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : null, idem: new Headers(init?.headers).get("idempotency-key") });
       if (url.startsWith("https://api.heygen.com/v3/avatars/looks?ownership=public")) return Response.json({ data: [{ id: "look_lib", name: "Library Lena", preview_image_url: "https://r.heygen.ai/l.png" }] });
-      if (url.startsWith("https://api.heygen.com/v3/avatars/looks?ownership=private")) return Response.json({ data: [] });
+      // The shared key's own looks include one made for another account (its photo avatar) and one the studio recorded.
+      if (url.startsWith("https://api.heygen.com/v3/avatars/looks?ownership=private")) return Response.json({ data: [{ id: "look_u2", name: "Their photo", avatar_type: "photo_avatar" }, { id: "look_made", name: "Made here", avatar_type: "photo_avatar" }] });
       if (url === "https://api.heygen.com/v3/videos" && init?.method === "POST") {
         if (refuse) return Response.json({ error: { code: "invalid_parameter", message: "prompt is not allowed" } }, { status: 400 });
         return Response.json({ data: { video_id: "hg_cine_1", status: "pending" } });
@@ -98,6 +133,12 @@ describe("cinematic shots", () => {
     }) as typeof fetch;
     Object.assign(config, { avatarProvider: "heygen", heygenApiKey: "hg_key" });
     try {
+      // Another account's look, passed straight as a presenter, reads as not found, as does one the studio made.
+      await getStore().put("avatar", { id: "av_u2", name: "Theirs", imageUrl: "https://93.184.216.34/t.png", source: "custom", provider: "heygen", ownerId: "u2", providerAssetIds: { [HEYGEN_LOOK_KEY]: "look_u2" }, createdAt: new Date().toISOString() } satisfies Avatar);
+      await rememberMadeLooks(["look_made"]);
+      await assert.rejects(startCinematic(cinematicSchema.parse({ ...SHOT, avatarIds: ["look_u2"] }), "u1"), NotFoundError);
+      await assert.rejects(startCinematic(cinematicSchema.parse({ ...SHOT, avatarIds: ["look_made"] }), "u1"), NotFoundError);
+      assert.equal(calls.filter((c) => c.method === "POST").length, 0, "HeyGen is not asked");
       const photo: Avatar = { id: "av_photo", name: "Dana", imageUrl: "https://93.184.216.34/d.png", source: "custom", provider: "heygen", ownerId: "u1", providerAssetIds: { [HEYGEN_LOOK_KEY]: "look_dana" }, createdAt: new Date().toISOString() };
       await getStore().put("avatar", photo);
       const video = await startCinematic(cinematicSchema.parse({ ...SHOT, avatarIds: ["av_photo", "look_lib"], aspect: "9:16", resolution: "720p", duration: 6, enhancePrompt: true, title: "Office walk" }), "u1", { key: "shot-key-hg" });

@@ -1216,6 +1216,8 @@ async function startReserved(base: Video, ownerId: string, keyed: boolean, send:
   if (keyed) {
     if (!(await getStore().insert("video", base))) {
       const held = await getStore().get<Video>("video", base.id);
+      // The id is derived from the account and its key, so a row of another account's is a collision to refuse, not an answer.
+      if (held && held.ownerId !== base.ownerId) throw new ConflictError("This Idempotency-Key cannot be used; send a new key");
       if (held && (held.status !== "queued" || held.providerJobId)) return held;
       if (held && Date.now() - Date.parse(held.createdAt) < RESERVATION_MS) throw new ConflictError("This render is still being sent; try again in a moment");
     }
@@ -1241,8 +1243,10 @@ async function createCinematicVideo(req: VideoRequest & { cinematic: NonNullable
   if (!skipLimit) await enforceRenderLimit(ownerId);
   const provider = getAvatarProvider();
   if (!provider.cinematicShots) throw new ValidationError(`Cinematic shots are not available with the ${provider.name} renderer`);
-  // Another account's presenter reads as not found, like any record the caller does not own.
+  // Another account's presenter reads as not found, like any record the caller does not own. Their names are taken
+  // now, so a retry after a presenter was renamed shows the names it renders with.
   const avatars = await Promise.all(req.cinematic.avatarIds.map((id) => getAvatar(id, ownerId)));
+  req = { ...req, avatarId: avatars[0].id, cinematic: { ...req.cinematic, avatarNames: avatars.map((a) => a.name) } };
   const base: Video = {
     ...req,
     ...stripUndefined(extras),
@@ -1508,7 +1512,7 @@ export function filterVideos(videos: Video[], query: VideoQuery): Video[] {
       if (query.review !== "all" && (v.review?.status ?? "none") !== query.review) return false;
       if (query.folder !== undefined && (v.folder ?? "") !== query.folder) return false;
       if (query.status === "processing" ? v.status !== "processing" && v.status !== "queued" : query.status !== "all" && v.status !== query.status) return false;
-      return !needle || `${v.title} ${v.description ?? ""} ${stripPauses(v.script)} ${v.avatarName ?? ""} ${v.voiceName ?? ""}`.toLowerCase().includes(needle);
+      return !needle || `${v.title} ${v.description ?? ""} ${stripPauses(v.script)} ${v.cinematic?.prompt ?? ""} ${v.avatarName ?? ""} ${v.voiceName ?? ""}`.toLowerCase().includes(needle);
     })
     .sort(SORTERS[query.sort]);
 }

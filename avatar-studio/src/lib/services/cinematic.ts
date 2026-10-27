@@ -7,8 +7,7 @@ import { getStore } from "../store";
 import { CINEMATIC_MAX_LOOKS, CINEMATIC_MAX_SEC, CINEMATIC_MIN_SEC, type Video } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError } from "../errors";
-import { createVideo } from "./videos";
-import { getAvatar } from "./avatars";
+import { MAX_FOLDER_NAME, createVideo } from "./videos";
 import { withSuffix } from "../text";
 
 /** Longest description sent (HeyGen takes up to 10,000 characters; a shot is best described in a paragraph or two). */
@@ -27,7 +26,7 @@ export const cinematicSchema = z.object({
   /** Seconds, or "auto" for the renderer to choose. */
   duration: z.union([z.literal("auto"), z.number().int().min(CINEMATIC_MIN_SEC, `A shot lasts at least ${CINEMATIC_MIN_SEC} seconds`).max(CINEMATIC_MAX_SEC, `A shot lasts at most ${CINEMATIC_MAX_SEC} seconds`)]).default("auto"),
   enhancePrompt: z.boolean().default(false),
-  folder: z.string().trim().max(60).optional(),
+  folder: z.string().trim().max(MAX_FOLDER_NAME).optional(),
 });
 
 /** A client's key for one shot (`Idempotency-Key`): letters, digits, `-` and `_`. */
@@ -54,21 +53,30 @@ export async function startCinematic(input: z.infer<typeof cinematicSchema>, own
     const existing = await getStore().get<Video>("video", videoId);
     if (existing && existing.ownerId === ownerId) {
       // The same key for another shot is a mistake to say, not a render to replay.
-      const same = existing.cinematic?.prompt === input.prompt && existing.cinematic.avatarIds.join("\0") === input.avatarIds.join("\0") && existing.aspect === input.aspect;
+      const shot = existing.cinematic;
+      const same =
+        !!shot &&
+        shot.prompt === input.prompt &&
+        shot.avatarIds.join("\0") === input.avatarIds.join("\0") &&
+        existing.aspect === input.aspect &&
+        existing.resolution === input.resolution &&
+        (shot.durationSec ?? "auto") === input.duration &&
+        !!shot.enhancePrompt === input.enhancePrompt &&
+        existing.title === (input.title || titleOf(input.prompt));
       if (!same) throw new ConflictError("This Idempotency-Key was already used for another shot; send a new key");
       if (existing.deletedAt) throw new ConflictError("The video this key started is in the trash; send a new key to make the shot again");
       // A row reserved by a start still being sent is not an answer yet.
       if (!(existing.status === "queued" && !existing.providerJobId)) return existing;
     }
   }
-  // The presenters as the account sees them: another account's reads as not found.
-  const avatars = await Promise.all(input.avatarIds.map((id) => getAvatar(id, ownerId)));
+  // The presenters are looked up (as the account's own: another account's reads as not found) and named where the
+  // shot is started, so a retry resolves them again.
   return createVideo(
     {
       title: input.title || titleOf(input.prompt),
       // A shot has no script: the description directs it and is kept with `cinematic`, never spoken or captioned.
       script: "",
-      avatarId: avatars[0].id,
+      avatarId: input.avatarIds[0],
       voiceId: "cinematic",
       aspect: input.aspect,
       resolution: input.resolution,
@@ -77,8 +85,8 @@ export async function startCinematic(input: z.infer<typeof cinematicSchema>, own
       speed: 1,
       cinematic: {
         prompt: input.prompt,
-        avatarIds: avatars.map((a) => a.id),
-        avatarNames: avatars.map((a) => a.name),
+        avatarIds: input.avatarIds,
+        avatarNames: [],
         ...(input.duration === "auto" ? {} : { durationSec: input.duration }),
         ...(input.enhancePrompt ? { enhancePrompt: true as const } : {}),
       },

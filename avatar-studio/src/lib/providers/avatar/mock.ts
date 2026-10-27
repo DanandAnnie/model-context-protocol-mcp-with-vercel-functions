@@ -90,6 +90,31 @@ export class MockAvatarProvider implements AvatarProvider {
     return { [this.name]: lookId };
   }
 
+  /**
+   * Demo digital twin: a drawn stand-in of the name, trained at once; consent is "given" a few seconds after its link is
+   * asked for (the link is the studio's own page saying so). Nothing is trained and no one is recorded.
+   */
+  async startTwin({ name }: { name: string }) {
+    let hash = 0;
+    for (const ch of name) hash = (hash * 31 + ch.codePointAt(0)!) >>> 0;
+    const look = `mockportrait_${hash % 1000}_${Buffer.from(Array.from(name).slice(0, 40).join("")).toString("base64url")}`;
+    return { lookId: look, groupId: `mockgroup_${Date.now()}` };
+  }
+
+  async requestTwinConsent(groupId: string) {
+    MockAvatarProvider.consentAskedAt.set(groupId, Date.now());
+    return { url: "/demo-consent", consent: "pending" as const };
+  }
+
+  async twinConsentStatus(groupId: string) {
+    const asked = MockAvatarProvider.consentAskedAt.get(groupId);
+    if (asked === undefined) return { consent: "not_requested" as const };
+    return { consent: Date.now() - asked >= MockAvatarProvider.CLIP_MS ? ("accepted" as const) : ("pending" as const) };
+  }
+
+  /** When each demo twin's consent link was asked for (consent follows a few seconds later). */
+  private static consentAskedAt = new Map<string, number>();
+
   /** Demo lip sync: the sample video stands in for the synced one a few seconds later; nothing is redrawn. */
   async startLipsync() {
     return { jobId: `mockls_${Date.now()}` };

@@ -167,6 +167,38 @@ export interface LookPackJob {
 }
 
 /**
+ * A digital twin being trained from footage of a real person (HeyGen digital twin): the renderer trains a look from the
+ * footage, and the person in it must record their consent on the renderer's page before the twin may render.
+ */
+export interface TwinJob {
+  id: string;
+  ownerId: string;
+  name: string;
+  gender?: "female" | "male";
+  /** The footage: a public https link to a video of the person speaking to camera. */
+  footageUrl: string;
+  /** Renderer training it, its look and character there, never shown to the account. */
+  provider: string;
+  lookId: string;
+  groupId: string;
+  training: "processing" | "completed" | "failed";
+  /** Where the person's consent stands: not asked yet, asked (a link sent, or under review), given, or refused. */
+  consent: "not_requested" | "pending" | "accepted" | "rejected";
+  /** The renderer's page for the person to record consent on, and when it was made (it lasts a day). */
+  consentUrl?: string;
+  consentUrlAt?: string;
+  /** The twin's picture once trained, kept for the photo avatar it becomes. */
+  imageUrl?: string;
+  /** The photo avatar the twin became once trained and consented to. */
+  avatarId?: string;
+  status: "processing" | "completed" | "failed";
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+  checkedAt?: string;
+}
+
+/**
  * A look the studio made in the renderer's shared account (a photo avatar, a drawn presenter, a look of a pack). Kept
  * after the avatar, portrait, or account that made it is deleted, so the renderer's listing never offers it to anyone.
  */
@@ -993,6 +1025,8 @@ export interface ProviderStatus {
   lipsync: boolean;
   /** Whether the renderer can generate a pack of new looks for a photo avatar. */
   lookPacks: boolean;
+  /** Whether the renderer can train a digital twin from footage. */
+  digitalTwins: boolean;
   /** Whether the renderer offers HeyGen Studio templates to fill and render. */
   studioTemplates: boolean;
   /** Whether the TTS provider can design a voice from a description. */

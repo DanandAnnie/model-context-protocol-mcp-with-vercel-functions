@@ -100,6 +100,7 @@ export function providerStatus(): ProviderStatus {
     fillerRemoval: typeof getAvatarProvider().startCleanup === "function",
     lipsync: typeof getAvatarProvider().startLipsync === "function",
     lookPacks: typeof getAvatarProvider().startLookPack === "function",
+    digitalTwins: typeof getAvatarProvider().startTwin === "function",
     studioTemplates: typeof getAvatarProvider().listStudioTemplates === "function",
     authEnabled: authEnabled(),
     authMode: authMode(),

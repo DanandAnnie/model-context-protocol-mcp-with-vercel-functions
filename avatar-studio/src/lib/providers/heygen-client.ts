@@ -112,6 +112,38 @@ export class HeyGenClient {
     return id;
   }
 
+  /**
+   * A digital twin trained from footage (`POST /v3/avatars`, `type: "digital_twin"`): its look, the new character it
+   * belongs to, and the voice cloned from the footage. `key` makes a retried start replay the first answer.
+   */
+  async createDigitalTwin(name: string, footageUrl: string, key: string): Promise<{ lookId: string; groupId: string; voiceId?: string }> {
+    const out = await this.request<{ avatar_item?: { id?: string; default_voice_id?: string | null }; avatar_group?: { id?: string } }>(`${V3}/avatars`, {
+      method: "POST",
+      body: JSON.stringify({ type: "digital_twin", name, file: { type: "url", url: footageUrl } }),
+      headers: { "Idempotency-Key": key },
+      signal: AbortSignal.timeout(25_000),
+    });
+    const lookId = out?.avatar_item?.id;
+    const groupId = out?.avatar_group?.id;
+    if (!lookId || !groupId) throw new Error("HeyGen returned no look or character for the digital twin");
+    return { lookId, groupId, ...(out.avatar_item?.default_voice_id ? { voiceId: out.avatar_item.default_voice_id } : {}) };
+  }
+
+  /** Starts the consent flow for a character (`POST /v3/avatars/{group_id}/consent`): a page for the person, for a day. */
+  async createConsent(groupId: string, key: string): Promise<{ url?: string; consentStatus?: string | null }> {
+    const out = await this.request<{ url?: string; avatar_group?: { consent_status?: string | null } }>(`${V3}/avatars/${encodeURIComponent(groupId)}/consent`, {
+      method: "POST",
+      body: JSON.stringify({}),
+      headers: { "Idempotency-Key": key },
+    });
+    return { url: out?.url, consentStatus: out?.avatar_group?.consent_status };
+  }
+
+  /** A character (`GET /v3/avatars/{group_id}`): its consent status, and why it failed when it did. */
+  avatarGroup(groupId: string) {
+    return this.request<{ consent_status?: string | null; status?: string | null; error?: { code?: string; message?: string } | null }>(`${V3}/avatars/${encodeURIComponent(groupId)}`);
+  }
+
   /** A photo avatar (v3) from an uploaded image asset; returns its look id. HeyGen prepares it before it can render. */
   async createPhotoAvatar(name: string, assetId: string): Promise<{ id: string; status?: string }> {
     const out = await this.request<{ avatar_item?: { id?: string; status?: string } }>(`${V3}/avatars`, {

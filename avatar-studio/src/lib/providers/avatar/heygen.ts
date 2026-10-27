@@ -25,6 +25,12 @@ const PENDING = "heygen:pending";
 const ASSET = "heygen:asset";
 /** HeyGen's answer (409) to an idempotency key whose first request it is still working on. */
 const STILL_SENDING = "This start is still being sent to HeyGen; try again in a moment";
+/** HeyGen's consent status for a character, as the studio names it (`null` until the flow is started). */
+function consentOf(status: string | null | undefined): "not_requested" | "pending" | "accepted" | "rejected" {
+  if (status === "accepted" || status === "rejected" || status === "pending") return status;
+  return "not_requested";
+}
+
 /** HeyGen's Look Pack template ids, a female and a male variant of each pack (its gallery, as documented). */
 const LOOK_PACK_TEMPLATES: Record<LookPackKey, { female: string; male: string }> = {
   "modern-corporate": { female: "5a8e6be843ee4321a014946bf62aa322", male: "5e659e76755d47fd9160a2d7dedce124" },
@@ -422,6 +428,45 @@ export class HeyGenAvatarProvider implements AvatarProvider {
 
   lookAssetIds(lookId: string): Record<string, string> {
     return { [LOOK]: lookId, [PENDING]: "" };
+  }
+
+  /** A digital twin trained from footage of a person (v3), its look followed like any; its voice clone is HeyGen's. */
+  async startTwin({ name, footageUrl, key }: { name: string; footageUrl: string; key: string }) {
+    try {
+      const { lookId, groupId } = await this.client.createDigitalTwin(name.slice(0, 80), footageUrl, key);
+      return { lookId, groupId };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      if (/ failed: 409 /.test(message)) throw new ConflictError(STILL_SENDING);
+      // Footage HeyGen will not train (too short or long, more than one person, no speech, or past the plan) is the account's to change.
+      if (/ failed: (400|402|403|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not train a twin from that footage: ${heygenReason(message, "use 15 seconds to 10 minutes of one person speaking to camera")}`);
+      throw err;
+    }
+  }
+
+  async requestTwinConsent(groupId: string, key: string) {
+    try {
+      const out = await this.client.createConsent(groupId, key);
+      return { ...(out.url ? { url: out.url } : {}), consent: consentOf(out.consentStatus) === "accepted" ? ("accepted" as const) : consentOf(out.consentStatus) === "rejected" ? ("rejected" as const) : ("pending" as const) };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      if (/ failed: 409 /.test(message)) throw new ConflictError(STILL_SENDING);
+      // HeyGen answers 400 while a consent is under review, and once it is given.
+      if (/ failed: (400|403|404|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not make a consent link: ${heygenReason(message, "try again in a few minutes")}`);
+      throw err;
+    }
+  }
+
+  async twinConsentStatus(groupId: string) {
+    let group;
+    try {
+      group = await this.client.avatarGroup(groupId);
+    } catch (err) {
+      if (/ failed: (404|410)\b/.test(err instanceof Error ? err.message : "")) return { consent: "rejected" as const, error: "HeyGen no longer has this twin" };
+      throw err;
+    }
+    const consent = consentOf(group.consent_status);
+    return consent === "rejected" ? { consent, error: group.error?.message || "HeyGen did not accept the consent; record it again" } : { consent };
   }
 
   /** A video given a new audio track, the speaker's mouth redrawn to match (v3 lip sync). */

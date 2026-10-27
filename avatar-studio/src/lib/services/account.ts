@@ -7,7 +7,7 @@ import { assertNoRenewingPlan } from "../billing";
 import { ConflictError } from "../errors";
 import { madeLooksOf, rememberMadeLooks } from "./avatars";
 
-const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip", "videolead", "backdrop", "portrait", "highlight", "cleanup", "lipsync", "lookpack"] as const;
+const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip", "videolead", "backdrop", "portrait", "highlight", "cleanup", "lipsync", "lookpack", "twin"] as const;
 /**
  * Cover rows hold image bytes; the export describes each cover from its video (`cover.mimeType`, `cover.bytes`) instead
  * of loading them. Clip audio is never listed (each `clip` row names its own `clipaudio_<id>` row), so the export and
@@ -38,6 +38,13 @@ export async function exportOwnerData(ownerId: string = LOCAL_OWNER): Promise<Ow
       if (kind === "lookpack") {
         delete copy.provider;
         delete copy.lookIds;
+      }
+      // The twin's picture is in the photo avatar it became; the renderer's look and character stay on the server.
+      if (kind === "twin") {
+        delete copy.provider;
+        delete copy.lookId;
+        delete copy.groupId;
+        delete copy.imageUrl;
       }
       if (kind === "sharelock") {
         delete copy.hash;

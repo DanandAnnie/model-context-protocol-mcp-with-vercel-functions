@@ -770,6 +770,53 @@ test("a photo avatar is dressed in a look pack, each look kept as a presenter of
   for (const id of [avatar.id, ...made]) expect((await page.request.delete(`/api/avatars/${id}`)).status()).toBe(200);
 });
 
+test("a digital twin is trained from footage, waits for the person's consent, then is a presenter", async ({ page }) => {
+  const name = `Twin ${Date.now().toString(36)}`;
+  await page.goto("/avatars");
+  const section = page.getByTestId("digital-twins");
+  await section.getByRole("button", { name: "New digital twin" }).click();
+  const panel = page.getByTestId("twin-panel");
+  await expect(panel.getByRole("heading", { name: "New digital twin" })).toBeFocused();
+  await panel.getByLabel("Name").fill(name);
+  await panel.getByRole("textbox", { name: /^Footage URL/ }).fill("https://93.184.216.34/footage.mp4");
+  // Training needs the account's word that the person agreed, besides the consent they record themselves.
+  const train = panel.getByRole("button", { name: "Train the twin" });
+  await expect(train).toBeDisabled();
+  await panel.getByLabel(/agreed to be made into a digital twin/).check();
+  await panel.getByLabel("Female").check();
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/twins") && r.method() === "POST");
+  await train.click();
+  const request = await sent;
+  expect(request.postDataJSON()).toEqual({ name, footageUrl: "https://93.184.216.34/footage.mp4", gender: "female", agreed: true });
+  expect(request.headers()["idempotency-key"]).toMatch(/^[A-Za-z0-9_-]{8,100}$/);
+  const twin = page.getByTestId("twin").filter({ hasText: name });
+  await expect(twin).toBeFocused();
+  // The demo renderer trains at once; the twin is not a presenter until the person consents.
+  await expect(twin.getByTestId("twin-step")).toContainText("consent not asked for yet");
+  await expect(page.getByTestId("avatar-library").getByText(name, { exact: true })).toHaveCount(0);
+  await twin.getByRole("button", { name: "Get the consent link" }).click();
+  const link = twin.getByRole("textbox", { name: `Consent link for ${name}` });
+  await expect(link).toBeFocused();
+  await expect(link).toHaveValue(/\/demo-consent$/);
+  await expect(twin.getByTestId("twin-step")).toContainText("waiting for the person's consent");
+  // The page checks again on its own; the demo counts consent as given a few seconds after the link was made.
+  await expect(twin.getByTestId("twin-step")).toContainText("Ready: it is in your avatars", { timeout: 30_000 });
+  await expect(page.getByTestId("avatar-library").getByText(name, { exact: true })).toBeVisible();
+  const listed = (await (await page.request.get("/api/twins")).json()).twins as Array<Record<string, unknown>>;
+  const mine = listed.find((t) => t.name === name)!;
+  expect(Object.keys(mine)).not.toContain("lookId");
+  expect(Object.keys(mine)).not.toContain("groupId");
+  // The demo consent page opens without signing in (it stands in for HeyGen's own page).
+  const consent = await page.request.get("/demo-consent");
+  expect(consent.status()).toBe(200);
+  // Forgetting the twin asks first and keeps its presenter.
+  page.once("dialog", (d) => d.accept());
+  await twin.getByRole("button", { name: `Forget the digital twin ${name}` }).click();
+  await expect(twin).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "New digital twin" })).toBeFocused();
+  expect((await page.request.delete(`/api/avatars/${mine.avatarId}`)).status()).toBe(200);
+});
+
 test("a HeyGen Studio template is filled in and rendered as a library video", async ({ page }) => {
   await page.goto("/templates");
   const section = page.getByTestId("studio-templates");
@@ -2336,7 +2383,7 @@ test("webhook settings reject private hosts and show the signing secret", async 
 test("pages have no WCAG 2.1 AA violations", async ({ page }) => {
   const v = await createVideoViaApi(page, "Accessible video");
   const agent = (await (await page.request.post("/api/agents", { data: { name: "Axe agent", avatarId: "stock_1" } })).json()).agent as { id: string };
-  const paths = ["/", "/login", "/home", "/create", "/agent", "/videos", `/videos/${v.id}`, "/templates", "/batch", "/avatars", "/voices", "/translate", "/cleanup", "/lipsync", "/interactive", "/brand", "/settings", `/share/${v.id}`, `/talk/${agent.id}`];
+  const paths = ["/", "/login", "/home", "/create", "/agent", "/videos", `/videos/${v.id}`, "/templates", "/batch", "/avatars", "/voices", "/translate", "/cleanup", "/lipsync", "/interactive", "/brand", "/settings", `/share/${v.id}`, `/talk/${agent.id}`, "/demo-consent"];
   const report: string[] = [];
   for (const path of paths) {
     await page.goto(path);
@@ -2463,6 +2510,7 @@ test("a workspace viewer sees view-only notices instead of create controls", asy
   await expect(page.getByTestId("avatar-library").getByText(photo.name)).toBeVisible();
   await expect(page.getByRole("button", { name: /^(Rename |New looks of |Delete avatar)/ })).toHaveCount(0);
   await expect(page.getByLabel(/^Default voice for /)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "New digital twin" })).toHaveCount(0);
   expect((await page.request.delete(`/api/avatars/${photo.id}`)).status()).toBe(200);
   // The workspace's settings show, but only owners and editors can change them.
   await page.goto("/settings");

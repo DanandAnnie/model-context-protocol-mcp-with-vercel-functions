@@ -110,6 +110,15 @@ export interface AvatarProvider {
    * `portraitStatus` (a look id, as for a drawn presenter). Absent when the provider cannot.
    */
   startLookPack?(input: { avatar: Avatar; pack: string; gender: "female" | "male"; aspect: "16:9" | "9:16"; key: string }): Promise<{ lookIds: string[] }>;
+  /**
+   * Starts training a digital twin from footage of a real person (HeyGen digital twin). `key` makes a retried start
+   * return the same twin. Its look is followed with `portraitStatus`, and its consent with `twinConsentStatus`.
+   */
+  startTwin?(input: { name: string; footageUrl: string; key: string }): Promise<{ lookId: string; groupId: string }>;
+  /** A page for the person in the footage to record their consent on (valid for a day), and where consent stands. */
+  requestTwinConsent?(groupId: string, key: string): Promise<{ url?: string; consent: "pending" | "accepted" | "rejected" }>;
+  /** Where the person's consent to a twin stands, with the reason when it was refused. */
+  twinConsentStatus?(groupId: string): Promise<{ consent: "not_requested" | "pending" | "accepted" | "rejected"; error?: string }>;
   /** What a photo avatar made of one of those looks carries, so a render uses the look as it is. */
   lookAssetIds?(lookId: string): Record<string, string>;
   /** The account's HeyGen Studio templates ready to fill. Absent when the provider has none. */

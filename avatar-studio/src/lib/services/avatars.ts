@@ -3,7 +3,7 @@ import { z } from "zod";
 import { newId, nowIso } from "../ids";
 import { LOOK_KEYS, getAvatarProvider } from "../providers";
 import { getStore } from "../store";
-import type { Agent, Avatar, LookPackJob, MadeLook, PortraitJob } from "../types";
+import type { Agent, Avatar, LookPackJob, MadeLook, PortraitJob, TwinJob } from "../types";
 import { createHash } from "node:crypto";
 import { LOCAL_OWNER } from "../owner-id";
 import { memo } from "../cache";
@@ -27,9 +27,9 @@ export function providerAvatars(): Promise<Avatar[]> {
  * renderer keeps it (see `rememberMadeLooks`).
  */
 async function studioMadeLooks(): Promise<Set<string>> {
-  const [avatars, portraits, packs, made] = await Promise.all([getStore().list<Avatar>("avatar"), getStore().list<PortraitJob>("portrait"), getStore().list<LookPackJob>("lookpack"), getStore().list<MadeLook>("madelook")]);
+  const [avatars, portraits, packs, twins, made] = await Promise.all([getStore().list<Avatar>("avatar"), getStore().list<PortraitJob>("portrait"), getStore().list<LookPackJob>("lookpack"), getStore().list<TwinJob>("twin"), getStore().list<MadeLook>("madelook")]);
   return new Set(
-    [...avatars.flatMap((a) => madeLooksOf("avatar", a)), ...portraits.map((p) => p.providerJobId), ...packs.flatMap((p) => p.lookIds), ...made.map((m) => m.lookId)].filter(Boolean),
+    [...avatars.flatMap((a) => madeLooksOf("avatar", a)), ...portraits.map((p) => p.providerJobId), ...packs.flatMap((p) => p.lookIds), ...twins.map((t) => t.lookId), ...made.map((m) => m.lookId)].filter(Boolean),
   );
 }
 
@@ -50,6 +50,7 @@ export function madeLooksOf(kind: string, item: unknown): string[] {
   if (kind === "avatar") return LOOK_KEYS.map((k) => row.providerAssetIds?.[k]).filter((id): id is string => !!id);
   if (kind === "portrait") return row.providerJobId ? [row.providerJobId] : [];
   if (kind === "lookpack") return row.lookIds ?? [];
+  if (kind === "twin") return (row as { lookId?: string }).lookId ? [(row as { lookId: string }).lookId] : [];
   return [];
 }
 

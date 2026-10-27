@@ -22,4 +22,5 @@ export * from "./highlights";
 export * from "./cleanups";
 export * from "./lipsyncs";
 export * from "./lookpacks";
+export * from "./twins";
 export * from "./studio-templates";

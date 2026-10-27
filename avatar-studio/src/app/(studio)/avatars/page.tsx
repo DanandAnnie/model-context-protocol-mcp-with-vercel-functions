@@ -10,6 +10,7 @@ import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { PortraitGenerator } from "@/components/PortraitGenerator";
 import { LookPackList, LookPackPanel, type LookPack } from "@/components/LookPacks";
+import { DigitalTwins } from "@/components/DigitalTwins";
 import { lookPackName } from "@/lib/look-packs";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
@@ -181,6 +182,7 @@ function AvatarsInner() {
           }}
         />
       )}
+      <DigitalTwins canEdit={canEdit} onReady={refetch} />
       <LookPackList
         packs={packs}
         avatars={data?.avatars ?? []}

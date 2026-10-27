@@ -57,10 +57,11 @@ export class HeyGenAvatarProvider implements AvatarProvider {
   async listAvatars(): Promise<Avatar[]> {
     const looks = await this.client.listAvatarLooks();
     return looks
-      // A photo avatar HeyGen is still preparing, or could not prepare, cannot render yet. A digital twin is a real
-      // person trained for one account, so none is ever offered from the shared library (an account's own twins are
-      // its photo avatars), whether or not the studio knows it made it.
-      .filter((l) => (!l.status || l.status === "completed") && l.preview_image_url && l.avatar_type !== "digital_twin")
+      // A photo avatar HeyGen is still preparing, or could not prepare, cannot render yet. A digital twin of the key's
+      // own account is a real person trained for one account here, so none is ever offered from the shared library (an
+      // account's own twins are its photo avatars), whether or not the studio knows it made it. HeyGen's preset
+      // presenters, digital twins among them, are offered as before.
+      .filter((l) => (!l.status || l.status === "completed") && l.preview_image_url && !(l.own && l.avatar_type === "digital_twin"))
       .map((l) => ({
         id: l.id,
         name: l.name,

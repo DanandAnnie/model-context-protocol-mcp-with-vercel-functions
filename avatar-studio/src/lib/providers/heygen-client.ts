@@ -65,7 +65,8 @@ export class HeyGenClient {
       status?: string;
     };
     const [own, preset] = await Promise.all([this.listAll<Look>("/avatars/looks?ownership=private", 50, 100), this.listAll<Look>("/avatars/looks?ownership=public", 50)]);
-    return unique([...own, ...preset], (l) => l.id);
+    // `own` marks the account's own looks, made with this key, apart from HeyGen's preset library.
+    return unique([...own.map((l) => ({ ...l, own: true as const })), ...preset.map((l) => ({ ...l, own: undefined }))], (l) => l.id);
   }
 
   /** Voices (v3): the account's own (cloned in HeyGen) first, then the shared library; v3 lists only one kind per call. */

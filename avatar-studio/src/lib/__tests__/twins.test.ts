@@ -375,7 +375,7 @@ describe("digital twins with HeyGen: voices, lost answers, and the shared librar
         { id: "look_studio", name: "Studio presenter", avatar_type: "studio_avatar", preview_image_url: "https://93.184.216.34/b.png", status: "completed" },
       ];
       const shown = (await listAvatars("u2")).map((a) => a.id);
-      assert.deepEqual([shown.includes("look_stranger"), shown.includes("look_studio")], [false, true], "a twin the studio does not know of is a real person all the same");
+      assert.deepEqual([shown.includes("look_stranger"), shown.includes("look_studio")], [false, true], "a twin of the account the studio does not know of is a real person all the same");
       const job = await startTwin(input(), "u1");
       const asked = await requestTwinConsent(job.id, "u1").catch(() => null);
       assert.equal(asked, null, "HeyGen's consent call is not stubbed here");

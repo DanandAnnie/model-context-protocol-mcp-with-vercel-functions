@@ -64,7 +64,8 @@ describe("avatar engine", () => {
     const { HeyGenAvatarProvider } = await import("../providers/avatar/heygen");
     const heygen = new HeyGenAvatarProvider("key");
     let sent: { scenes: Array<{ type: string; input?: Record<string, unknown> }> } | null = null;
-    (heygen as unknown as { client: Record<string, (...a: unknown[]) => Promise<unknown>> }).client.generateVideo = async (b) => {
+    const client = (heygen as unknown as { client: Record<string, (...a: unknown[]) => Promise<unknown>> }).client;
+    client.generateVideo = async (b) => {
       sent = b as typeof sent;
       return { video_id: "hg_1" };
     };
@@ -85,7 +86,25 @@ describe("avatar engine", () => {
     assert.deepEqual(engines(), ["avatar_v", undefined, "avatar_v", undefined]);
     await heygen.createVideo(videoRequestSchema.parse({ title: "E", avatarId: twin.id, voiceId: voice.id, avatarEngine: "avatar_v", motionPrompt: "Waves", scenes }), twin, voice, cast);
     assert.deepEqual(engines(), ["avatar_v", undefined, undefined, undefined], "Avatar V can refuse a photo avatar's gestures, so that scene stays on Avatar IV");
+    await heygen.createVideo(videoRequestSchema.parse({ title: "E", avatarId: twin.id, voiceId: voice.id, avatarEngine: "avatar_v", expressiveness: "medium", scenes }), twin, voice, cast);
+    assert.deepEqual(engines(), ["avatar_v", undefined, undefined, undefined], "Avatar V rejects expressiveness, so a photo avatar given it stays on Avatar IV");
+    assert.equal(sent!.scenes[2].input?.expressiveness, "medium");
     await heygen.createVideo(videoRequestSchema.parse({ title: "E", avatarId: twin.id, voiceId: voice.id, scenes }), twin, voice, cast);
     assert.deepEqual(engines(), [undefined, undefined, undefined, undefined], "nothing is sent by default");
+    // A refusal of a render that asked for Avatar V says how to get past it; one that did not is passed on as it is.
+    client.generateVideo = async () => {
+      throw new Error("HeyGen error: avatar_consent_required");
+    };
+    await assert.rejects(heygen.createVideo(videoRequestSchema.parse({ title: "E", avatarId: twin.id, voiceId: voice.id, avatarEngine: "avatar_v", scenes }), twin, voice, cast), /avatar_consent_required \(this video asked for Avatar V; .*Avatar IV\)/);
+    await assert.rejects(heygen.createVideo(videoRequestSchema.parse({ title: "E", avatarId: twin.id, voiceId: voice.id, scenes }), twin, voice, cast), /^Error: HeyGen error: avatar_consent_required$/);
+  });
+
+  it("is decided by one rule in the editor and the renderer", async () => {
+    const { rendersOnAvatarV } = await import("../types");
+    assert.equal(rendersOnAvatarV({ avatarV: true }, {}), true);
+    assert.equal(rendersOnAvatarV({ avatarV: true, tags: ["photo avatar"] }, { expressiveness: "high" }), false);
+    assert.equal(rendersOnAvatarV({ avatarV: true, tags: ["photo avatar"] }, { motionPrompt: "Waves" }), false);
+    assert.equal(rendersOnAvatarV({ avatarV: true }, { motionPrompt: "Waves" }), true, "a video avatar's look is not a photo avatar");
+    assert.equal(rendersOnAvatarV({ source: "custom" }, {}), false, "an uploaded portrait's look is not known to support it");
   });
 });

@@ -1,4 +1,4 @@
-import { backdropIdOf, isPhotoAvatar, type AudioClip, type Avatar, type Backdrop, type Background, type Scene, type VideoRequest, type Voice } from "../../types";
+import { backdropIdOf, isPhotoAvatar, rendersOnAvatarV, type AudioClip, type Avatar, type Backdrop, type Background, type Scene, type VideoRequest, type Voice } from "../../types";
 import { silentSeconds, withBreakTags } from "../../pauses";
 import { heygenBurnsCaptions } from "../../captions";
 import { voiceTakesAccent } from "../../language";
@@ -168,14 +168,22 @@ export class HeyGenAvatarProvider implements AvatarProvider {
         // A photo avatar moves as asked (Avatar IV); HeyGen refuses a motion prompt for a video avatar on that engine.
         const photo = isPhotoAvatar(sceneAvatarOf(scene));
         const motion = photo ? { ...(req.expressiveness ? { expressiveness: req.expressiveness } : {}), ...(req.motionPrompt ? { motion_prompt: req.motionPrompt } : {}) } : {};
-        // Avatar V where the look supports it. A photo avatar asked for gestures stays on Avatar IV: Avatar V refuses
-        // a motion prompt for a photo avatar it renders without a reference look, which the request cannot know.
-        const engine = req.avatarEngine === "avatar_v" && sceneAvatarOf(scene).avatarV && !(photo && req.motionPrompt) ? { engine: { type: "avatar_v" } } : {};
+        // Avatar V where the look supports it (a photo avatar given motion settings stays on Avatar IV; see rendersOnAvatarV).
+        const engine = req.avatarEngine === "avatar_v" && rendersOnAvatarV(sceneAvatarOf(scene), req) ? { engine: { type: "avatar_v" } } : {};
         return { type: "avatar_video", input: { type: "avatar", avatar_id: avatarId, ...sound, ...motion, ...engine, background } };
       }),
     };
-    const data = await this.client.generateVideo(body);
-    return { providerJobId: data.video_id };
+    try {
+      const data = await this.client.generateVideo(body);
+      return { providerJobId: data.video_id };
+    } catch (err) {
+      // Avatar V can be refused where Avatar IV is not (a look's reference whose consent is missing), and a retry
+      // asks again, so the error says how to get past it.
+      if (err instanceof Error && body.scenes.some((sc) => "input" in sc && sc.input && "engine" in sc.input)) {
+        throw new Error(`${err.message} (this video asked for Avatar V; if HeyGen refused it, make a copy with Avatar engine set to Avatar IV)`);
+      }
+      throw err;
+    }
   }
 
   private sleep(ms: number) {

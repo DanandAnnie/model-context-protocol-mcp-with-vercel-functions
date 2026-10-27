@@ -866,7 +866,7 @@ export default function VideoDetailPage() {
                     </Row>
                   ) : null}
                   {video.avatarEngine === "avatar_v" ? (
-                    <Row label="Avatar engine">{`Avatar V${video.provider !== "heygen" ? " (not applied by this renderer)" : " (where the presenter's look supports it)"}`}</Row>
+                    <Row label="Avatar engine">{`Avatar V${video.provider !== "heygen" ? " (not applied by this renderer)" : " (asked for; HeyGen uses it where the presenter's look supports it)"}`}</Row>
                   ) : null}
                   {video.expressiveness || video.motionPrompt ? (
                     <Row label="Photo avatar motion">

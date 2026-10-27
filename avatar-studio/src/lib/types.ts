@@ -145,6 +145,13 @@ export interface SceneLayout {
 
 /** A presenter made from a photo (an uploaded portrait or a provider photo avatar): HeyGen frames it square or in a circle, never close up. */
 export const isPhotoAvatar = (a: { source?: string; tags?: string[] }) => a.source === "custom" || !!a.tags?.includes("photo avatar");
+/**
+ * Whether a scene's presenter renders on Avatar V when the video asks for it: its look supports the engine, and it is
+ * not a photo avatar given expressiveness or gestures. Avatar V rejects expressiveness outright, and a motion prompt
+ * for a photo avatar it renders without a reference look, which the request cannot know, so those stay on Avatar IV.
+ */
+export const rendersOnAvatarV = (a: { source?: string; tags?: string[]; avatarV?: true }, req: { expressiveness?: string; motionPrompt?: string }) =>
+  !!a.avatarV && !(isPhotoAvatar(a) && (req.expressiveness || req.motionPrompt));
 
 /** The framing a presenter actually gets: a photo avatar's close-up shows its full frame. */
 export const framingFor = (framing: PresenterFraming | undefined, avatar?: { source?: string; tags?: string[] }): PresenterFraming =>

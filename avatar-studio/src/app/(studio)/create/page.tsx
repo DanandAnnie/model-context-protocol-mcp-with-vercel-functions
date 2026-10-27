@@ -25,7 +25,7 @@ import { findTemplate } from "@/lib/templates";
 import { capSceneText, fitSceneTextEdit, sceneTextLength } from "@/lib/scene-text";
 import { graphemes } from "@/lib/text";
 import { takeAgentDraft, type AgentDraft } from "@/lib/agent-draft";
-import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, framingFor, isDefaultLayout, isPhotoAvatar, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, type PhotoExpressiveness, VOICE_ACCENTS, type VoiceAccent, AVATAR_ENGINES, type AvatarEngine } from "@/lib/types";
+import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, framingFor, isDefaultLayout, isPhotoAvatar, rendersOnAvatarV, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, type PhotoExpressiveness, VOICE_ACCENTS, type VoiceAccent, AVATAR_ENGINES, type AvatarEngine } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -506,12 +506,6 @@ function CreateInner() {
     const a = (sc.avatarId && avatarData?.avatars.find((x) => x.id === sc.avatarId)) || avatar;
     return !!a && isPhotoAvatar(a);
   });
-  // Whether any scene shows a presenter whose look supports Avatar V, the only scenes the engine choice reaches.
-  const avatarVInUse = scenes.some((sc) => {
-    if (sc.hidePresenter) return false;
-    const a = (sc.avatarId && avatarData?.avatars.find((x) => x.id === sc.avatarId)) || avatar;
-    return !!a?.avatarV;
-  });
   // The voice an accent is chosen for: the first voice that speaks a scene (its own, else the video's) and offers
   // accents of its language. An accent no speaking voice takes is not sent.
   const accentVoice = scenes
@@ -586,6 +580,12 @@ function CreateInner() {
   const [emotion, setEmotion] = useState<VoiceEmotion | "">("");
   const [expressiveness, setExpressiveness] = useState<PhotoExpressiveness>("low");
   const [motionPrompt, setMotionPrompt] = useState("");
+  // Whether any scene's presenter would render on Avatar V, the only scenes the engine choice reaches.
+  const avatarVInUse = scenes.some((sc) => {
+    if (sc.hidePresenter) return false;
+    const a = (sc.avatarId && avatarData?.avatars.find((x) => x.id === sc.avatarId)) || avatar;
+    return !!a && rendersOnAvatarV(a, { ...(expressiveness !== "low" ? { expressiveness } : {}), motionPrompt: motionPrompt.trim() });
+  });
   const [accent, setAccent] = useState<VoiceAccent | "">("");
   const [avatarEngine, setAvatarEngine] = useState<AvatarEngine>("avatar_iv");
   const sentAccent = accent && accentOptions.includes(accent) ? accent : undefined;
@@ -1703,8 +1703,8 @@ function CreateInner() {
                   hintId="avatar-engine-hint"
                   hint={
                     !avatarData || avatarVInUse
-                      ? "Avatar V is HeyGen's higher-quality engine, for looks that support it; other presenters, and photo avatars given gestures, stay on Avatar IV. Other renderers ignore it."
-                      : "No presenter in this video supports Avatar V, so every scene renders on Avatar IV."
+                      ? "Avatar V is HeyGen's higher-quality engine, for looks that support it; other presenters, and photo avatars given expressiveness or gestures, stay on Avatar IV. Other renderers ignore it."
+                      : "No presenter in this video renders on Avatar V (none supports it, or a photo avatar has motion settings), so every scene uses Avatar IV."
                   }
                 >
                   <select value={avatarEngine} onChange={(e) => setAvatarEngine(asAvatarEngine(e.target.value))} disabled={!!avatarData && !avatarVInUse && avatarEngine === "avatar_iv"} aria-label="Avatar engine" aria-describedby="avatar-engine-hint" className={inputClass}>

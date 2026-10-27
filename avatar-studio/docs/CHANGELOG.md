@@ -200,3 +200,7 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
   - The editor's Settings tab has an "Avatar engine" choice that says when no presenter in the video supports Avatar V, and sends nothing then. Drafts, copies, templates, retries, other sizes, and batches keep it. The video page lists it.
   - Two of the demo presenters are marked as supporting it, so the choice can be tried without a key.
   - New `avatar-engine.test.ts` and an e2e test.
+  - An independent review of `4b20e03` found the engine body valid against HeyGen's v3 schema and the setting kept through every path. Its findings are fixed:
+    - A photo avatar given expressiveness without gestures was sent both `expressiveness` and Avatar V, which HeyGen rejects, failing the whole render. One rule, `rendersOnAvatarV`, now keeps a photo avatar with either motion setting on Avatar IV, in the renderer and in the editor alike. The editor no longer sends Avatar V when no scene would use it. A unit test fails without the fix.
+    - Avatar V can be refused where Avatar IV is not, for instance a reference look whose consent is missing, and a retry asks again. The stored error now says the video asked for Avatar V and that a copy set to Avatar IV renders.
+    - The video page says Avatar V was asked for, and the API docs say that two demo presenters carry `avatarV`.

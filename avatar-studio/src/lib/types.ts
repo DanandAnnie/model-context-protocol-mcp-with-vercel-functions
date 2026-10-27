@@ -1028,6 +1028,8 @@ export interface ProviderStatus {
   streaming: string;
   /** Whether the voice provider can clone a voice from samples. */
   voiceCloning: boolean;
+  /** The voice provider clones from one WAV or MP3 recording (HeyGen): the page joins the samples into one WAV first. */
+  voiceCloneOneRecording?: true;
   /** Whether the renderer can draw a presenter from a description. */
   portraitGeneration: boolean;
   /** Whether the renderer can cut a finished video into short highlight clips. */

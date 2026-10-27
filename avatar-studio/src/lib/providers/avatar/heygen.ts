@@ -608,7 +608,7 @@ function stripEmpty<T extends Record<string, unknown>>(o: T): T {
 }
 
 /** The reason in a HeyGen error ("…failed: 400 {"error":{"message":"…"}}" or "HeyGen error: …"), kept short. */
-function heygenReason(message: string, fallback = "try describing them differently"): string {
+export function heygenReason(message: string, fallback = "try describing them differently"): string {
   const body = message.match(/ failed: \d+ (.*)$/s)?.[1];
   if (body) {
     try {

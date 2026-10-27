@@ -8,8 +8,13 @@ export interface TtsProvider {
    * server-side (demo mode); the client then falls back to browser TTS.
    */
   synthesize(voiceId: string, text: string, speed: number): Promise<{ audio: Uint8Array; mimeType: string } | null>;
-  /** Clone a voice from audio samples; returns the provider's voice id. Absent when the provider cannot clone. */
-  cloneVoice?(input: { name: string; samples: Array<{ bytes: Uint8Array; mimeType: string; filename: string }> }): Promise<{ voiceId: string }>;
+  /**
+   * Clone a voice from audio samples; returns the provider's voice id (and its preview once the provider has one).
+   * `oneRecording` providers take exactly one WAV or MP3 recording. Absent when the provider cannot clone.
+   */
+  cloneVoice?(input: { name: string; samples: Array<{ bytes: Uint8Array; mimeType: string; filename: string }> }): Promise<{ voiceId: string; previewUrl?: string }>;
+  /** The provider clones from one WAV or MP3 recording only (the page joins the samples into one before sending). */
+  readonly oneRecording?: true;
   deleteVoice?(voiceId: string): Promise<void>;
   /** What the provider says of one voice (a twin's clone, left out of its listing): language, gender, preview. */
   describeVoice?(voiceId: string): Promise<Pick<Voice, "language" | "gender" | "previewUrl">>;

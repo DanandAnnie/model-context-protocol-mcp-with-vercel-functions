@@ -94,6 +94,7 @@ export function providerStatus(): ProviderStatus {
     billing: getBillingProvider().name,
     streaming: getStreamingProvider().name,
     voiceCloning: typeof getTtsProvider().cloneVoice === "function",
+    ...(getTtsProvider().oneRecording ? { voiceCloneOneRecording: true as const } : {}),
     voiceDesign: typeof getTtsProvider().designVoice === "function",
     portraitGeneration: typeof getAvatarProvider().generatePortrait === "function",
     highlightClips: typeof getAvatarProvider().startHighlights === "function",

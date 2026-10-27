@@ -62,3 +62,48 @@ export async function toWavDataUrl(blob: Blob): Promise<{ dataUrl: string; secon
   for (let i = 0; i < wav.length; i += 0x8000) binary += String.fromCharCode(...wav.subarray(i, i + 0x8000));
   return { dataUrl: `data:audio/wav;base64,${btoa(binary)}`, seconds: rendered.duration };
 }
+
+/**
+ * The most of a voice sample joined into one recording: 90 seconds of 16 kHz mono WAV is under 3 MB, so with its
+ * encoding it fits one request to the studio (4.5 MB). A clone needs about a minute of clear speech.
+ */
+export const VOICE_SAMPLE_SECONDS = 90;
+
+/**
+ * Joins audio files the browser can play into one mono WAV recording, in order, cut at `maxSeconds` (for a voice
+ * provider that clones from one recording). Returns it as a data URL with its length in seconds.
+ */
+export async function joinAsWav(blobs: Blob[], maxSeconds = VOICE_SAMPLE_SECONDS): Promise<{ dataUrl: string; seconds: number }> {
+  const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+  const ctx = new Ctx();
+  const decoded: AudioBuffer[] = [];
+  try {
+    for (const blob of blobs) {
+      try {
+        decoded.push(await ctx.decodeAudioData(await blob.arrayBuffer()));
+      } catch {
+        throw new Error("This browser cannot read one of the samples; try MP3, WAV, or M4A");
+      }
+    }
+  } finally {
+    void ctx.close();
+  }
+  const total = Math.min(decoded.reduce((sum, b) => sum + b.duration, 0), maxSeconds);
+  const frames = Math.max(1, Math.ceil(total * CLIP_SAMPLE_RATE));
+  // Each sample is mixed to mono and resampled in one offline render, one after another.
+  const offline = new OfflineAudioContext(1, frames, CLIP_SAMPLE_RATE);
+  let at = 0;
+  for (const buffer of decoded) {
+    if (at >= total) break;
+    const source = offline.createBufferSource();
+    source.buffer = buffer;
+    source.connect(offline.destination);
+    source.start(at);
+    at += buffer.duration;
+  }
+  const rendered = await offline.startRendering();
+  const wav = encodeWav(rendered.getChannelData(0), CLIP_SAMPLE_RATE);
+  let binary = "";
+  for (let i = 0; i < wav.length; i += 0x8000) binary += String.fromCharCode(...wav.subarray(i, i + 0x8000));
+  return { dataUrl: `data:audio/wav;base64,${btoa(binary)}`, seconds: rendered.duration };
+}

@@ -2909,6 +2909,34 @@ test("website embed script adds a launcher that opens the talk page", async ({ p
   }
 });
 
+test("a voice provider that clones from one recording is sent the samples joined into one WAV", async ({ page }) => {
+  // HeyGen clones from one WAV or MP3 recording; the page says so and joins the samples in order before sending.
+  await page.route("**/api/status", async (route) => {
+    const res = await route.fetch();
+    await route.fulfill({ response: res, json: { ...(await res.json()), voiceCloneOneRecording: true } });
+  });
+  let sent: string[] = [];
+  await page.route("**/api/voices/clone", async (route) => {
+    sent = route.request().postDataJSON().samples;
+    await route.fulfill({ status: 201, json: { voice: { id: "joined_voice", name: "Joined", provider: "mock", source: "custom" } } });
+  });
+  await page.goto("/voices");
+  const cloner = page.getByTestId("voice-cloner");
+  await expect(cloner).toContainText("HeyGen clones from one recording");
+  const mp3 = "e2e/fixtures/voice-over.mp3";
+  await cloner.locator('input[type="file"]').setInputFiles([mp3, mp3]);
+  await expect(cloner.getByRole("list", { name: "Samples" }).getByRole("listitem")).toHaveCount(2);
+  await cloner.getByLabel("Voice name").fill("Joined");
+  await cloner.getByRole("button", { name: "Clone voice" }).click();
+  await expect.poll(() => sent.length).toBe(1);
+  expect(sent[0]).toMatch(/^data:audio\/wav;base64,/);
+  // 16 kHz mono 16-bit: two three-second samples joined are about six seconds, 32 kB a second after the header.
+  const bytes = Buffer.from(sent[0].split(",")[1], "base64");
+  expect(bytes.subarray(0, 4).toString()).toBe("RIFF");
+  expect((bytes.length - 44) / 32_000).toBeGreaterThan(5.5);
+  expect((bytes.length - 44) / 32_000).toBeLessThan(6.8);
+});
+
 test("voice cloning saves a private voice that renders and can be deleted", async ({ page }) => {
   const sample = "data:audio/webm;base64," + Buffer.from("tiny sample bytes for the demo clone").toString("base64");
   const created = await page.request.post("/api/voices/clone", { data: { name: "My voice", samples: [sample] } });

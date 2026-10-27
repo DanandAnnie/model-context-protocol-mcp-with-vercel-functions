@@ -83,7 +83,7 @@ export default function VoicesPage() {
       <ErrorBanner message={error ?? previewErr ?? actionErr} />
       {canEdit !== false && (
         <div className={`mb-6 grid gap-4 ${canEdit === true && status?.voiceDesign ? "lg:grid-cols-2" : ""}`}>
-          <VoiceCloner available={status?.tts !== "mock"} onCloned={() => refetch()} />
+          <VoiceCloner available={status?.tts !== "mock"} oneRecording={!!status?.voiceCloneOneRecording} onCloned={() => refetch()} />
           {/* Shown once the role is known: a viewer never sees it while the workspace is still loading. */}
           {canEdit === true && status?.voiceDesign && <VoiceDesigner available={status.tts !== "mock"} ownCount={data?.own?.count ?? 0} limit={data?.own?.limit ?? 5} onSaved={() => refetch()} />}
         </div>

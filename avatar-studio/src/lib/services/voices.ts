@@ -96,8 +96,11 @@ export async function cloneVoice(input: z.infer<typeof cloneVoiceSchema>, ownerI
   });
   return withVoiceLock(ownerId, async () => {
     await assertVoiceRoom(ownerId, "clone another");
-    const { voiceId } = await provider.cloneVoice!({ name: input.name, samples });
-    const voice: Voice = { id: voiceId, name: input.name, provider: provider.name, language: input.language, source: "custom", ownerId, tags: ["your voice"], createdAt: nowIso() };
+    const { voiceId, previewUrl } = await provider.cloneVoice!({ name: input.name, samples });
+    // The clone is the studio's in the provider's shared account from now on: the provider may list it with its own
+    // voices to every account, so it is left out of their lists, whatever becomes of this row.
+    await rememberMadeVoices([voiceId]);
+    const voice: Voice = { id: voiceId, name: input.name, provider: provider.name, language: input.language, ...(previewUrl ? { previewUrl } : {}), source: "custom", ownerId, tags: ["your voice"], createdAt: nowIso() };
     return getStore().put("voice", voice);
   });
 }

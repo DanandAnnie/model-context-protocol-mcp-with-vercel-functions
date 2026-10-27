@@ -1,4 +1,5 @@
 // Thin HTTP client for the HeyGen public API (https://docs.heygen.com).
+type VoiceDetail = { language?: string | null; gender?: string | null; preview_audio_url?: string | null; status?: "processing" | "complete" | "failed" | null; failure_message?: string | null };
 const V2 = "https://api.heygen.com/v2";
 const V3 = "https://api.heygen.com/v3";
 
@@ -149,10 +150,27 @@ export class HeyGenClient {
     return { url: out?.url, consentStatus: out?.avatar_group?.consent_status };
   }
 
-  /** One voice (`GET /v3/voices/{voice_id}`): its language, gender, and preview once HeyGen has finished it. */
-  async getVoice(voiceId: string): Promise<{ language?: string | null; gender?: string | null; preview_audio_url?: string | null }> {
-    const out = await this.envelope<{ language?: string | null; gender?: string | null; preview_audio_url?: string | null }>(`${V3}/voices/${encodeURIComponent(voiceId)}`);
-    return (out.data ?? out) as { language?: string | null; gender?: string | null; preview_audio_url?: string | null };
+  /**
+   * One voice (`GET /v3/voices/{voice_id}`): its language, gender, and preview once HeyGen has finished it, and for a
+   * clone where it stands (`processing`, `complete`, or `failed` with `failure_message`).
+   */
+  async getVoice(voiceId: string): Promise<VoiceDetail> {
+    const out = await this.envelope<VoiceDetail>(`${V3}/voices/${encodeURIComponent(voiceId)}`);
+    return (out.data ?? out) as VoiceDetail;
+  }
+
+  /**
+   * Clones a voice from one recording already uploaded as an asset (`POST /v3/voices/clone`), background noise removed;
+   * returns its id, usable as a video's `voice_id` once `getVoice` says it is complete.
+   */
+  async cloneVoice(name: string, assetId: string): Promise<string> {
+    const out = await this.request<{ voice_clone_id?: string }>(`${V3}/voices/clone`, {
+      method: "POST",
+      body: JSON.stringify({ voice_name: name, audio: { type: "asset_id", asset_id: assetId }, remove_background_noise: true }),
+      signal: AbortSignal.timeout(25_000),
+    });
+    if (!out?.voice_clone_id) throw new Error("HeyGen returned no id for the cloned voice");
+    return out.voice_clone_id;
   }
 
   /** Deletes a cloned voice (`DELETE /v3/voices/{voice_id}`); HeyGen answers 404 for one it no longer has. */

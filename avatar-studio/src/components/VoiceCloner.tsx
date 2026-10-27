@@ -3,13 +3,17 @@ import { useEffect, useRef, useState } from "react";
 import { Mic, Square, Upload } from "lucide-react";
 import { Button, Card, ErrorBanner, Field, inputClass } from "@/components/ui";
 import { api } from "@/lib/client";
+import { VOICE_SAMPLE_SECONDS, joinAsWav } from "@/lib/wav-client";
 import type { Voice } from "@/lib/types";
 
 const MAX_SECONDS = 60;
 const SCRIPT = "Read this in your natural voice: Hi, thanks for stopping by. I'm excited to walk you through what we do and how it can help you. Let's get started.";
 
-/** Record or upload samples and clone a voice with the configured TTS provider. */
-export function VoiceCloner({ onCloned, available }: { onCloned: (v: Voice) => void; available: boolean }) {
+/**
+ * Record or upload samples and clone a voice with the configured TTS provider. A provider that clones from one recording
+ * (`oneRecording`, HeyGen) is sent the samples joined into one WAV, cut at a minute and a half.
+ */
+export function VoiceCloner({ onCloned, available, oneRecording = false }: { onCloned: (v: Voice) => void; available: boolean; oneRecording?: boolean }) {
   const [name, setName] = useState("");
   const [samples, setSamples] = useState<Array<{ dataUrl: string; label: string }>>([]);
   const [recording, setRecording] = useState(false);
@@ -92,7 +96,9 @@ export function VoiceCloner({ onCloned, available }: { onCloned: (v: Voice) => v
     setBusy(true);
     setErr(null);
     try {
-      const { voice } = await api<{ voice: Voice }>("/api/voices/clone", { method: "POST", body: JSON.stringify({ name, samples: samples.map((s) => s.dataUrl) }) });
+      let sent = samples.map((s) => s.dataUrl);
+      if (oneRecording) sent = [(await joinAsWav(await Promise.all(sent.map(async (url) => (await fetch(url)).blob())))).dataUrl];
+      const { voice } = await api<{ voice: Voice }>("/api/voices/clone", { method: "POST", body: JSON.stringify({ name, samples: sent }) });
       onCloned(voice);
       setName("");
       setSamples([]);
@@ -110,7 +116,8 @@ export function VoiceCloner({ onCloned, available }: { onCloned: (v: Voice) => v
       </h3>
       <p className="mt-1 text-xs text-slate-500">
         Record about a minute of clear speech, or upload one to five audio files (10 MB total). The clone is private to your account and usable in every video.
-        {!available && " Cloning needs TTS_PROVIDER=elevenlabs; in demo mode the clone is saved and previews use the browser voice."}
+        {oneRecording && ` HeyGen clones from one recording, so the samples are joined in order (the first ${VOICE_SAMPLE_SECONDS} seconds are used).`}
+        {!available && " Cloning needs HeyGen or ElevenLabs voices; in demo mode the clone is saved and previews use the browser voice."}
       </p>
       <ErrorBanner message={err} />
       <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto]">

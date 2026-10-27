@@ -1081,6 +1081,60 @@ test("a photo avatar is dressed in a look pack, each look kept as a presenter of
   for (const id of [avatar.id, ...made]) expect((await page.request.delete(`/api/avatars/${id}`)).status()).toBe(200);
 });
 
+test("a photo avatar is given a look described in words, with a picture of the clothes to go by", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const name = `Described ${tag}`;
+  const svg = "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%2F%3E";
+  const avatar = (await (await page.request.post("/api/avatars", { data: { name, imageUrl: svg, gender: "female" } })).json()).avatar as { id: string };
+  const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+  await page.goto("/avatars");
+  await page.getByRole("button", { name: `New looks of ${name}` }).click();
+  const panel = page.getByTestId("look-pack-panel");
+  await panel.getByLabel("A look you describe").check();
+  const draw = panel.getByRole("button", { name: "Draw the look" });
+  await expect(draw).toBeDisabled();
+  await expect(draw).toHaveAccessibleDescription("Describe the outfit and setting in a few words first.");
+  const prompt = "A camel coat over a black turtleneck, on a city street at dusk, warm light";
+  await panel.getByLabel("Describe the look").fill(prompt);
+  await expect(draw).toBeEnabled();
+  // Two pictures are added; the first is taken off again, and the focus stays on the pictures rather than being lost.
+  await panel.locator("#look-pictures").setInputFiles([
+    { name: "coat.png", mimeType: "image/png", buffer: pixel },
+    { name: "street.png", mimeType: "image/png", buffer: pixel },
+  ]);
+  await expect(panel.getByRole("img")).toHaveCount(2);
+  await panel.getByRole("button", { name: "Remove coat.png" }).click();
+  await expect(panel.getByRole("img")).toHaveCount(1);
+  await expect(panel.getByRole("button", { name: "Remove street.png" })).toBeFocused();
+  await panel.getByLabel("Landscape 16:9").check();
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/look-packs") && r.method() === "POST");
+  await draw.click();
+  const request = await sent;
+  expect(request.postDataJSON()).toEqual({ avatarId: avatar.id, pack: "described", prompt, aspect: "16:9", references: [`data:image/png;base64,${pixel.toString("base64")}`] });
+  // The look is listed with its description, and the demo renderer's look is ready at once and joins the library.
+  const look = page.getByTestId("look-pack").filter({ hasText: `A described look of ${name}` });
+  await expect(look).toBeFocused();
+  await expect(look.getByTestId("look-prompt")).toHaveText(`${prompt} (with 1 picture)`);
+  await expect(look.getByTestId("look-pack-meta")).toContainText("1 of 1 ready · 16:9");
+  await expect(page.getByTestId("avatar-library").getByText(`${name} · Described look`)).toBeVisible();
+  const listed = (await (await page.request.get("/api/look-packs")).json()).lookPacks as Array<Record<string, unknown>>;
+  const mine = listed.find((p) => p.avatarId === avatar.id)!;
+  expect(Object.keys(mine)).not.toContain("referenceDigest");
+  const made = (mine.looks as Array<{ avatarId: string }>).map((l) => l.avatarId);
+  // Forgetting it asks first and keeps its presenter.
+  const asked = new Promise<string>((resolve) =>
+    page.once("dialog", (d) => {
+      resolve(d.message());
+      void d.accept();
+    }),
+  );
+  await look.getByRole("button", { name: `Forget the described look of ${name}` }).click();
+  expect(await asked).toBe(`Forget the described look of “${name}”? The photo avatar made of it stays.`);
+  await expect(look).toHaveCount(0);
+  await expect(page.getByTestId("avatar-library").getByText(`${name} · Described look`)).toBeVisible();
+  for (const id of [avatar.id, ...made]) expect((await page.request.delete(`/api/avatars/${id}`)).status()).toBe(200);
+});
+
 test("a digital twin is trained from footage, waits for the person's consent, then is a presenter", async ({ page }) => {
   const name = `Twin ${Date.now().toString(36)}`;
   await page.goto("/avatars");

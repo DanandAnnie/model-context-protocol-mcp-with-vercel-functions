@@ -98,13 +98,28 @@ export class HeyGenClient {
   }
 
   /**
-   * Prompt to avatar (v3): a synthetic presenter drawn from a description, as a look to follow with `getLook`. Read
-   * from `data` when the answer is wrapped as the other v3 calls are, else from the answer itself.
+   * Prompt to avatar (v3): a synthetic presenter drawn from a description, as a look to follow with `getLook`. With
+   * `avatarId` (a look of the account's), the description restyles that person instead: their outfit and setting
+   * change, the face stays, and the look joins their character. Up to three `references` (asset ids) guide the
+   * wardrobe or setting; `key` makes a retried start replay the first answer. Read from `data` when the answer is
+   * wrapped as the other v3 calls are, else from the answer itself.
    */
-  async createPromptAvatar(name: string, prompt: string): Promise<{ look_id: string; status?: string }> {
+  async createPromptAvatar(
+    name: string,
+    prompt: string,
+    opts: { avatarId?: string; aspect?: "4:5" | "16:9" | "9:16"; references?: string[]; key?: string } = {},
+  ): Promise<{ look_id: string; status?: string }> {
     const out = await this.envelope<{ look_id: string; status?: string }>(`${V3}/avatars`, {
       method: "POST",
-      body: JSON.stringify({ type: "prompt", name, prompt, aspect_ratio: "4:5" }),
+      body: JSON.stringify({
+        type: "prompt",
+        name,
+        prompt,
+        aspect_ratio: opts.aspect ?? "4:5",
+        ...(opts.avatarId ? { avatar_id: opts.avatarId } : {}),
+        ...(opts.references?.length ? { reference_images: opts.references.map((id) => ({ type: "asset_id", asset_id: id })) } : {}),
+      }),
+      ...(opts.key ? { headers: { "Idempotency-Key": opts.key }, signal: AbortSignal.timeout(20_000) } : {}),
     });
     // The look's id is `avatar_item.id` in the v3 schema; `look_id` is read too, as some answers carry it.
     const data = (out.data ?? out) as { look_id?: string; status?: string; avatar_item?: { id?: string; status?: string } };

@@ -48,6 +48,7 @@ export async function exportOwnerData(ownerId: string = LOCAL_OWNER): Promise<Ow
       if (kind === "lookpack") {
         delete copy.provider;
         delete copy.lookIds;
+        delete copy.referenceDigest;
       }
       // The twin's picture is in the photo avatar it became; the renderer's look, character, and voice stay on the
       // server, and the consent link is the person's to record with, not part of the account's data.

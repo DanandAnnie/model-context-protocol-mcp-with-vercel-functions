@@ -103,6 +103,7 @@ export function providerStatus(): ProviderStatus {
     voiceChanger: typeof getAvatarProvider().changeVoice === "function",
     lipsync: typeof getAvatarProvider().startLipsync === "function",
     lookPacks: typeof getAvatarProvider().startLookPack === "function",
+    describedLooks: typeof getAvatarProvider().startDescribedLook === "function",
     digitalTwins: typeof getAvatarProvider().startTwin === "function",
     studioTemplates: typeof getAvatarProvider().listStudioTemplates === "function",
     cinematicShots: getAvatarProvider().cinematicShots === true,

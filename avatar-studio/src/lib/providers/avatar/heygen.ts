@@ -474,6 +474,29 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     }
   }
 
+  /**
+   * One new look of a prepared photo avatar from a description (v3 prompt to avatar with the avatar's look as
+   * `avatar_id`): HeyGen keeps the face and draws the outfit and setting described, guided by the pictures sent, which
+   * are uploaded as assets first. The look joins the avatar's character at HeyGen.
+   */
+  async startDescribedLook({ avatar, prompt, aspect, references, key }: { avatar: Avatar; prompt: string; aspect: "4:5" | "16:9" | "9:16"; references: Array<{ bytes: Uint8Array; mimeType: string }>; key: string }) {
+    const reference = avatar.providerAssetIds?.[LOOK];
+    if (!reference) throw new ValidationError(`"${avatar.name}" has not been made into a HeyGen photo avatar yet`);
+    if (avatar.providerAssetIds?.[PENDING]) throw new ConflictError(`HeyGen is still preparing "${avatar.name}"; try again in a minute`);
+    try {
+      const assets: string[] = [];
+      for (const [i, r] of references.entries()) assets.push(await this.client.uploadAsset(r.bytes, r.mimeType, `look-reference-${i + 1}.${r.mimeType === "image/png" ? "png" : "jpg"}`));
+      const { look_id } = await this.client.createPromptAvatar(avatar.name.slice(0, 80), prompt, { avatarId: reference, aspect, references: assets, key });
+      return { lookIds: [look_id] };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      if (/ failed: 409 /.test(message)) throw new ConflictError(STILL_SENDING);
+      // A description HeyGen will not draw (moderation), a look it cannot restyle, or one past the plan is the account's to change.
+      if (/ failed: (400|402|403|404|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not draw that look of "${avatar.name}": ${heygenReason(message, "describe the outfit and setting another way")}`);
+      throw err;
+    }
+  }
+
   lookAssetIds(lookId: string): Record<string, string> {
     return { [LOOK]: lookId, [PENDING]: "" };
   }

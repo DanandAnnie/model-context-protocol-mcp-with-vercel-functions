@@ -1,4 +1,4 @@
-import type { LookPackAspect, LookPackKey } from "./look-packs";
+import type { DescribedAspect, LookPackAspect, LookPackKey } from "./look-packs";
 import { graphemes } from "./text";
 // Shared domain types for Avatar Studio.
 
@@ -153,9 +153,16 @@ export interface LookPackJob {
   /** The photo avatar the looks were made from, and its name then (the looks are named after it). */
   avatarId: string;
   avatarName: string;
-  pack: LookPackKey;
-  gender: "female" | "male";
-  aspect: LookPackAspect;
+  /** A pack, or `described` for one look drawn from `prompt` (and the pictures sent with it). */
+  pack: LookPackKey | "described";
+  /** The pack's variant; for a described look, the avatar's own gender when it is known. */
+  gender?: "female" | "male";
+  aspect: LookPackAspect | DescribedAspect;
+  /** A described look's description, and how many wardrobe or setting pictures were sent with it (not kept). */
+  prompt?: string;
+  references?: number;
+  /** A digest of those pictures, so a retried start with the same key is known to be the same one. Server only. */
+  referenceDigest?: string;
   /** Renderer generating them, and each look's id there, never shown to the account. */
   provider: string;
   lookIds: string[];
@@ -1213,6 +1220,8 @@ export interface ProviderStatus {
   lipsync: boolean;
   /** Whether the renderer can generate a pack of new looks for a photo avatar. */
   lookPacks: boolean;
+  /** A new look of a photo avatar drawn from a description (HeyGen prompt to avatar on the avatar's look). */
+  describedLooks: boolean;
   /** Whether the renderer can train a digital twin from footage. */
   digitalTwins: boolean;
   /** Whether the renderer offers HeyGen Studio templates to fill and render. */

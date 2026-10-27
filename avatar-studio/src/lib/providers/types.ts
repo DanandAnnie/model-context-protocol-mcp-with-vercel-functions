@@ -166,6 +166,11 @@ export interface AvatarProvider {
    */
   startLookPack?(input: { avatar: Avatar; pack: string; gender: "female" | "male"; aspect: "16:9" | "9:16"; key: string }): Promise<{ lookIds: string[] }>;
   /**
+   * One new look of a prepared photo avatar drawn from a description of its outfit and setting, guided by up to three
+   * wardrobe or setting pictures; the face is the avatar's. Followed with `portraitStatus`, like a pack's looks.
+   */
+  startDescribedLook?(input: { avatar: Avatar; prompt: string; aspect: "4:5" | "16:9" | "9:16"; references: Array<{ bytes: Uint8Array; mimeType: string }>; key: string }): Promise<{ lookIds: string[] }>;
+  /**
    * Starts training a digital twin from footage of a real person (HeyGen digital twin). `key` makes a retried start
    * return the same twin (for a day). Its look is followed with `portraitStatus`, and its consent with
    * `twinConsentStatus`. `voiceId` is the voice the renderer cloned from the footage, when it made one.

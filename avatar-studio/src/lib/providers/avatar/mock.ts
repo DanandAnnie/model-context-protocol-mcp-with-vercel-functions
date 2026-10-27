@@ -102,6 +102,14 @@ export class MockAvatarProvider implements AvatarProvider {
     return { lookIds: Array.from({ length: 5 }, (_, i) => `mockportrait_${(hash + i * 197) % 1000}_${name}`) };
   }
 
+  /** Demo described look: one drawn stand-in of the avatar's name, its colours from the description; nothing is generated. */
+  async startDescribedLook({ avatar, prompt }: { avatar: Avatar; prompt: string }) {
+    let hash = 0;
+    for (const ch of `${avatar.id}:${prompt}`) hash = (hash * 31 + ch.codePointAt(0)!) >>> 0;
+    const name = Buffer.from(Array.from(avatar.name).slice(0, 40).join("")).toString("base64url");
+    return { lookIds: [`mockportrait_${hash % 1000}_${name}`] };
+  }
+
   lookAssetIds(lookId: string): Record<string, string> {
     return { [this.name]: lookId };
   }

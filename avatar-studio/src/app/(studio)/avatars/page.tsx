@@ -11,7 +11,7 @@ import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { PortraitGenerator } from "@/components/PortraitGenerator";
 import { LookPackList, LookPackPanel, type LookPack } from "@/components/LookPacks";
 import { DigitalTwins } from "@/components/DigitalTwins";
-import { lookPackName } from "@/lib/look-packs";
+import { lookJobTitle } from "@/lib/look-packs";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { api } from "@/lib/client";
@@ -32,7 +32,7 @@ function AvatarsInner() {
   const { data: voiceData } = useApi<{ voices: Voice[] }>("/api/voices");
   const { data: status } = useApi<ProviderStatus>("/api/status");
   const voices = voiceData?.voices ?? [];
-  const { data: packData, setData: setPackData, refetch: refetchPacks } = useApi<{ lookPacks: LookPack[]; available: boolean }>("/api/look-packs");
+  const { data: packData, setData: setPackData, refetch: refetchPacks } = useApi<{ lookPacks: LookPack[]; available: boolean; described?: boolean }>("/api/look-packs");
   const packs = packData?.lookPacks ?? [];
   // While a pack is being made the list is asked again, only while the tab is visible; each look that is ready brings
   // its photo avatar into the library.
@@ -54,7 +54,7 @@ function AvatarsInner() {
     seenReady.current = new Set([...(seenReady.current ?? []), ...ready.map((r) => r.id)]);
     if (!fresh.length) return;
     refetch();
-    const names = [...new Set(fresh.map((r) => `${lookPackName(r.pack.pack)} looks of ${r.pack.avatarName}`))].join(", ");
+    const names = [...new Set(fresh.map((r) => lookJobTitle(r.pack)))].join(", ");
     setPackNote(`${fresh.length} new ${fresh.length === 1 ? "look is" : "looks are"} ready in your avatars (${names}).`);
   }, [packData, refetch]);
   const [looksFor, setLooksFor] = useState<Avatar | null>(null);
@@ -171,13 +171,15 @@ function AvatarsInner() {
         <LookPackPanel
           key={looksFor.id}
           avatar={looksFor}
+          canPack={!!packData?.available}
+          canDescribe={!!packData?.described}
           onClose={() => closeLooks(looksFor)}
           onStarted={(p) => {
             setLooksFor(null);
-            setPackData((prev) => ({ available: prev?.available ?? true, lookPacks: [p, ...(prev?.lookPacks ?? []).filter((x) => x.id !== p.id)] }));
+            setPackData((prev) => ({ ...prev, available: prev?.available ?? true, lookPacks: [p, ...(prev?.lookPacks ?? []).filter((x) => x.id !== p.id)] }));
             // A check that left before this pack was started would answer without it; asking again retires it.
             void refetchPacks();
-            setPackNote(`Making new looks of ${p.avatarName}; they appear in your avatars when ready.`);
+            setPackNote(p.pack === "described" ? `Drawing a new look of ${p.avatarName}; it appears in your avatars when ready.` : `Making new looks of ${p.avatarName}; they appear in your avatars when ready.`);
             focusAfterRender(() => document.querySelector<HTMLElement>(`[data-look-pack="${CSS.escape(p.id)}"]`));
           }}
         />
@@ -215,11 +217,11 @@ function AvatarsInner() {
               )}
               {a.source === "custom" && canEdit !== false && (
                 <span className="absolute right-2 top-2 flex gap-1" data-avatar-controls={a.id}>
-                  {packData?.available && (
+                  {(packData?.available || packData?.described) && (
                     <button
                       onClick={() => setLooksFor(a)}
                       aria-label={`New looks of ${a.name}`}
-                      title="Dress this presenter in a pack of new looks"
+                      title="Dress this presenter in new looks: a pack, or one you describe"
                       data-new-looks={a.id}
                       className="rounded-full bg-white/90 p-1.5 text-slate-600 shadow hover:text-brand-700"
                     >

@@ -1,7 +1,7 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { requireEditor, requireOwner } from "@/lib/owner";
 import { rateLimit, rateLimitPair } from "@/lib/rate-limit";
-import { LimitError, listLookPacks, lookPackKeySchema, lookPackRequestSchema, lookPacksAvailable, publicLookPack, startLookPack } from "@/lib/services";
+import { describedLooksAvailable, LimitError, listLookPacks, lookPackKeySchema, lookPackRequestSchema, lookPacksAvailable, publicLookPack, startLookPack } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 /** A first start may make the photo avatar first (an upload, then a wait for HeyGen) before asking for the looks. */
@@ -23,13 +23,16 @@ export async function GET() {
     const owner = await requireOwner();
     const limit = rateLimit(`lookpacklist:${owner}`, LISTS_PER_OWNER, WINDOW_MS);
     if (!limit.allowed) return json({ error: "Too many checks for now; try again later" }, { status: 429, headers: { "Retry-After": String(limit.retryAfterSec) } });
-    return json({ lookPacks: (await listLookPacks(owner)).map(publicLookPack), available: lookPacksAvailable() });
+    return json({ lookPacks: (await listLookPacks(owner)).map(publicLookPack), available: lookPacksAvailable(), described: describedLooksAvailable() });
   } catch (err) {
     return errorResponse(err);
   }
 }
 
-/** New looks for one of the account's photo avatars: `{ avatarId, pack, gender?, aspect? }`. */
+/**
+ * New looks for one of the account's photo avatars: a pack, `{ avatarId, pack, gender?, aspect? }`, or one look in
+ * words, `{ avatarId, pack: "described", prompt, aspect?, references? }`.
+ */
 export async function POST(req: Request) {
   try {
     const owner = await requireEditor();

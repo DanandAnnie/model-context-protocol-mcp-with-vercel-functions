@@ -9,18 +9,28 @@ function readAsDataUrl(file: Blob): Promise<string> {
   });
 }
 
+/** PNG or JPEG by the file's first bytes, as the server checks them. */
+function sniffPicture(b: Uint8Array): "image/png" | "image/jpeg" | null {
+  if (b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 && b[4] === 0x0d && b[5] === 0x0a && b[6] === 0x1a && b[7] === 0x0a) return "image/png";
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
+  return null;
+}
+
 /**
  * The picture as a data URL of at most `maxBytes` decoded: a PNG or JPEG that fits as it is, anything else (WebP,
  * GIF, a large photo) redrawn on a canvas as a JPEG no wider or taller than `maxEdge`, shrunk until it fits.
  */
 export async function toUploadable(file: File, { maxBytes, maxEdge }: { maxBytes: number; maxEdge: number }): Promise<string> {
   const mb = `${Math.round(maxBytes / (1024 * 1024))} MB`;
-  // Decoded first, whatever its name or type says, so a file that only claims to be a picture is refused here.
+  // The file's first bytes, not its name or type (which browsers take from the extension), say whether it is a PNG
+  // or JPEG to send as it is; anything else is decoded and redrawn, so a text file fails here and a WebP named .png
+  // is converted.
+  const kind = sniffPicture(new Uint8Array(await file.slice(0, 8).arrayBuffer()));
+  if (kind && file.size <= maxBytes) return readAsDataUrl(kind === file.type ? file : file.slice(0, file.size, kind));
   const bitmap = await createImageBitmap(file).catch(() => {
     throw new Error("That file is not an image the browser can read");
   });
   try {
-    if ((file.type === "image/png" || file.type === "image/jpeg") && file.size <= maxBytes) return await readAsDataUrl(file);
     let scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
     for (let attempt = 0; attempt < 4; attempt++) {
       const canvas = document.createElement("canvas");

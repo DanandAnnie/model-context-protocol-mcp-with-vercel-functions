@@ -154,8 +154,7 @@ export async function startLookPack(input: LookPackRequest, ownerId: string = LO
   const gender = input.pack === DESCRIBED ? own : (input.gender ?? own);
   if (!described && !gender) throw new ValidationError("Choose the women's or the men's looks of the pack");
   // Read then written: two starts at the same moment can between them pass the cap.
-  const jobs = await getStore().list<LookPackJob>("lookpack", ownerId);
-  if (jobs.length >= MAX_LOOK_PACKS) throw new ConflictError(`An account keeps at most ${MAX_LOOK_PACKS} look packs and described looks; forget one to make another`);
+  if ((await getStore().list<LookPackJob>("lookpack", ownerId)).length >= MAX_LOOK_PACKS) throw new ConflictError(`An account keeps at most ${MAX_LOOK_PACKS} look packs and described looks; forget one to make another`);
   opts.admit?.();
   const avatar = provider.prepareAvatar ? await prepareOnce(provider, stored) : stored;
   const { lookIds } = described
@@ -170,13 +169,7 @@ export async function startLookPack(input: LookPackRequest, ownerId: string = LO
     pack: input.pack,
     ...(gender ? { gender } : {}),
     aspect: input.aspect,
-    ...(described
-      ? {
-          prompt: described.prompt,
-          ...(pictures.length ? { references: pictures.length, referenceDigest: digest } : {}),
-          ordinal: jobs.filter((j) => j.pack === DESCRIBED && j.avatarId === stored.id).length + 1,
-        }
-      : {}),
+    ...(described ? { prompt: described.prompt, ...(pictures.length ? { references: pictures.length, referenceDigest: digest } : {}) } : {}),
     provider: provider.name,
     lookIds,
     looks: lookIds.map(() => ({ status: "processing" as const })),
@@ -194,6 +187,15 @@ export async function deleteLookPack(id: string, ownerId: string = LOCAL_OWNER):
   const job = owned(await getStore().get<LookPackJob>("lookpack", lookPackIdSchema.parse(id)), ownerId, "Look pack");
   await rememberMadeLooks(job.lookIds);
   await getStore().remove("lookpack", job.id);
+}
+
+/** The start of a description, cut at a word and marked when cut: "A navy blazer over a white…". */
+export function promptExcerpt(prompt: string, max = 32): string {
+  const flat = prompt.replace(/\s+/g, " ").trim();
+  if (flat.length <= max) return flat.replace(/[\s,;:.]+$/, "");
+  const cut = flat.slice(0, max + 1);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > max / 2 ? cut.slice(0, space) : flat.slice(0, max)).replace(/[\s,;:.]+$/, "")}…`;
 }
 
 class PictureTooLarge extends Error {}
@@ -219,16 +221,7 @@ async function refreshLookPack(job: LookPackJob): Promise<LookPackJob> {
     if (!provider.portraitStatus || !provider.lookAssetIds) return job;
     const source = await getStore().get<Avatar>("avatar", job.avatarId);
     const name = lookPackName(job.pack);
-    // A described look has no number of its own; a second of the same avatar is numbered, so pickers tell them apart.
-    const taken = job.pack === DESCRIBED ? new Set((await getStore().list<Avatar>("avatar", job.ownerId)).map((a) => a.name)) : null;
-    // Numbered by when the look was started (looks checked side by side then never take the same number), and moved
-    // on past a name the account already has.
-    const describedName = () => {
-      let n = job.ordinal ?? 1;
-      const named = () => withSuffix(job.avatarName, n > 1 ? ` · ${name} ${n}` : ` · ${name}`, 80);
-      while (taken?.has(named())) n++;
-      return named();
-    };
+
     const looks: LookPackLook[] = [];
     for (const [i, look] of job.looks.entries()) {
       if (look.status !== "processing") {
@@ -270,7 +263,9 @@ async function refreshLookPack(job: LookPackJob): Promise<LookPackJob> {
         id: avatarId,
         ownerId: job.ownerId,
         // A long name is shortened, never the pack and number that tell the looks apart.
-        name: job.pack === DESCRIBED ? describedName() : withSuffix(job.avatarName, ` · ${name} ${i + 1}`, 80),
+        // A described look is named after its own description, so several of one avatar are told apart in pickers
+        // without a number to hand out (which two checks side by side could give twice).
+        name: withSuffix(job.avatarName, job.pack === DESCRIBED ? ` · ${promptExcerpt(job.prompt ?? "") || name}` : ` · ${name} ${i + 1}`, 80),
         imageUrl,
         // A described look has no variant of its own: it keeps the gender the avatar had.
         ...((job.gender ?? source?.gender) ? { gender: job.gender ?? source?.gender } : {}),

@@ -1107,6 +1107,19 @@ test("a photo avatar is given a look described in words, with a picture of the c
   await panel.getByLabel("Describe the look").press("Escape");
   expect(await discard).toBe("Discard this look? The description and pictures are not saved.");
   await expect(panel.getByLabel("Describe the look")).toHaveValue(prompt);
+  // It asks after a switch to the packs too, as the description is kept for switching back.
+  await panel.getByLabel("A pack of about five looks").check();
+  const discardFromPack = new Promise<void>((resolve) =>
+    page.once("dialog", (d) => {
+      resolve();
+      void d.dismiss();
+    }),
+  );
+  await panel.getByLabel("A pack of about five looks").press("Escape");
+  await discardFromPack;
+  await expect(panel).toBeVisible();
+  await panel.getByLabel("A look you describe").check();
+  await expect(panel.getByLabel("Describe the look")).toHaveValue(prompt);
   // A file that only claims to be a picture is refused as it is added, not when the look is drawn.
   await panel.locator("#look-pictures").setInputFiles({ name: "fake.png", mimeType: "image/png", buffer: Buffer.from("not a picture at all") });
   await expect(panel.getByText("That file is not an image the browser can read")).toBeVisible();
@@ -1139,7 +1152,7 @@ test("a photo avatar is given a look described in words, with a picture of the c
   await expect(look).toBeFocused();
   await expect(look.getByTestId("look-prompt")).toHaveText(prompt);
   await expect(look.getByTestId("look-pack-meta")).toContainText("1 of 1 ready · 16:9 · 3 pictures");
-  await expect(page.getByTestId("avatar-library").getByText(`${name} · Described look`)).toBeVisible();
+  await expect(page.getByTestId("avatar-library").getByText(`${name} · A camel coat over a black…`)).toBeVisible();
   const listed = (await (await page.request.get("/api/look-packs")).json()).lookPacks as Array<Record<string, unknown>>;
   const mine = listed.find((p) => p.avatarId === avatar.id)!;
   expect(Object.keys(mine)).not.toContain("referenceDigest");
@@ -1154,7 +1167,7 @@ test("a photo avatar is given a look described in words, with a picture of the c
   await look.getByRole("button", { name: `Forget the described look of ${name}` }).click();
   expect(await asked).toBe(`Forget the described look of “${name}”? The photo avatar made of it stays.`);
   await expect(look).toHaveCount(0);
-  await expect(page.getByTestId("avatar-library").getByText(`${name} · Described look`)).toBeVisible();
+  await expect(page.getByTestId("avatar-library").getByText(`${name} · A camel coat over a black…`)).toBeVisible();
   for (const id of [avatar.id, ...made]) expect((await page.request.delete(`/api/avatars/${id}`)).status()).toBe(200);
 });
 

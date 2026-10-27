@@ -86,9 +86,11 @@ export function LookPackPanel({ avatar, canPack = true, canDescribe = false, onC
 
   /** Escape closes the panel, asking first when a description or pictures would be lost with it. */
   function onPanelKey(e: React.KeyboardEvent) {
-    if (e.key !== "Escape" || e.defaultPrevented || busy) return;
+    // An Escape that ends a composition (an input method's candidate list) is the input method's, not the panel's.
+    if (e.key !== "Escape" || e.defaultPrevented || e.nativeEvent.isComposing || busy) return;
     e.stopPropagation();
-    if (described && (prompt.trim() || pictures.length) && !window.confirm("Discard this look? The description and pictures are not saved.")) return;
+    // Asked in either mode: the description and pictures are kept when switching to a pack and back.
+    if ((prompt.trim() || pictures.length || reading) && !window.confirm("Discard this look? The description and pictures are not saved.")) return;
     onClose();
   }
 

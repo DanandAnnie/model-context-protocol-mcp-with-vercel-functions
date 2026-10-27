@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
-import { createAvatar, exportOwnerData, forgetLookPackChecks, getAvatar, listLookPacks, lookPackRequestSchema, publicLookPack, setLookPictureFetch, startLookPack } from "../services";
+import { createAvatar, exportOwnerData, forgetLookPackChecks, getAvatar, listLookPacks, lookPackRequestSchema, promptExcerpt, publicLookPack, setLookPictureFetch, startLookPack } from "../services";
 import { ConflictError, ValidationError } from "../errors";
 import { providerStatus } from "../providers";
 import { getStore } from "../store";
@@ -60,20 +60,28 @@ describe("looks from a description", () => {
     const [done] = await listLookPacks("u1");
     assert.equal(done.status, "completed");
     const made = await getAvatar(done.looks[0].avatarId!, "u1");
-    assert.deepEqual([made.name, made.gender, made.defaultVoiceId, made.source], ["Sam · Described look", "neutral", "stock_voice_1", "custom"], "it keeps the avatar's gender and voice");
+    assert.deepEqual([made.name, made.gender, made.defaultVoiceId, made.source], ["Sam · A navy blazer over a white…", "neutral", "stock_voice_1", "custom"], "named after the start of its description; it keeps the avatar's gender and voice");
     assert.ok(made.tags?.includes("Described look"));
     const exported = JSON.stringify(await exportOwnerData("u1"));
     assert.equal(exported.includes(job.referenceDigest!), false, "nor goes with an export");
-    // Further described looks of the same avatar are numbered, so pickers tell them apart.
-    await startLookPack(described(sam.id, { prompt: `${PROMPT}, evening` }), "u1");
-    await startLookPack(described(sam.id, { prompt: `${PROMPT}, morning` }), "u1");
+    // Further described looks of the same avatar are told apart by their descriptions, also when checked side by side.
+    await startLookPack(described(sam.id, { prompt: "A short red dress at a gala dinner" }), "u1");
+    await startLookPack(described(sam.id, { prompt: "Running gear on a beach at sunrise" }), "u1");
     forgetLookPackChecks();
     await listLookPacks("u1");
     const names = (await getStore().list<Avatar>("avatar", "u1")).map((a) => a.name).filter((n) => n.startsWith("Sam · ")).sort();
-    assert.deepEqual(names, ["Sam · Described look", "Sam · Described look 2", "Sam · Described look 3"]);
+    assert.deepEqual(names, ["Sam · A navy blazer over a white…", "Sam · A short red dress at a gala…", "Sam · Running gear on a beach at…"]);
+    assert.equal("ordinal" in view, false, "no number is handed out or returned");
     // A library presenter is not the account's to restyle, and is told so rather than called deleted.
     await assert.rejects(startLookPack(described("stock_1"), "u1"), /Only your own photo avatars/);
     await assert.rejects(startLookPack(described("av_gone"), "u1"), /no longer exists/);
+  });
+
+  it("cuts a description to its first words for the look's name", () => {
+    assert.equal(promptExcerpt("A navy blazer, studio light."), "A navy blazer, studio light");
+    assert.equal(promptExcerpt("A navy blazer over a white shirt, in a bright office"), "A navy blazer over a white…");
+    assert.equal(promptExcerpt("  Two   spaces\nand a line  "), "Two spaces and a line");
+    assert.equal(promptExcerpt("Supercalifragilisticexpialidocious-and-more-words"), "Supercalifragilisticexpialidocio…", "a word too long is cut inside");
   });
 
   it("refuses pictures that are not PNG or JPEG, or larger than 1 MB, before the renderer is asked", async () => {
@@ -160,7 +168,7 @@ describe("looks from a description", () => {
       const [done] = await listLookPacks("u1");
       assert.equal(done.status, "completed");
       const made = await getAvatar(done.looks[0].avatarId!, "u1");
-      assert.deepEqual([made.name, made.providerAssetIds], ["Dana · Described look", { "heygen:look": "look_new", "heygen:pending": "" }]);
+      assert.deepEqual([made.name, made.providerAssetIds], ["Dana · A navy blazer over a white…", { "heygen:look": "look_new", "heygen:pending": "" }]);
       assert.match(made.imageUrl, /^data:image\/png;base64,/);
 
       // A failed look says why; a description HeyGen will not draw comes back with HeyGen's reason.

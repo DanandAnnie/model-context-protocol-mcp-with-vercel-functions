@@ -855,7 +855,7 @@ export default function VideoDetailPage() {
                       : `${video.voiceName ?? video.voiceId}${video.scenes?.some((sc) => sc.audioId) ? ", plus recorded audio" : ""}`}
                   </Row>
                   <Row label="Speed">{video.speed}x{video.speed !== 1 && video.provider !== "heygen" && video.provider !== "mock" ? " (not applied by this renderer)" : ""}</Row>
-                  {video.pitch ? <Row label="Pitch">{video.pitch > 0 ? `+${video.pitch}` : video.pitch}</Row> : null}
+                  {video.pitch ? <Row label="Pitch">{`${video.pitch > 0 ? `+${video.pitch}` : video.pitch}${video.provider !== "heygen" ? " (not applied by this renderer)" : ""}`}</Row> : null}
                   {video.emotion ? (
                     <Row label="Voice emotion">{`${video.emotion} (not applied: no renderer takes an emotion since HeyGen's v3 API)`}</Row>
                   ) : null}
@@ -866,7 +866,15 @@ export default function VideoDetailPage() {
                     </Row>
                   ) : null}
                   {video.avatarEngine === "avatar_v" ? (
-                    <Row label="Avatar engine">{`Avatar V${video.provider !== "heygen" ? " (not applied by this renderer)" : " (asked for; HeyGen uses it where the presenter's look supports it)"}`}</Row>
+                    <Row label="Avatar engine">
+                      {`Avatar V${
+                        video.provider !== "heygen"
+                          ? " (not applied by this renderer)"
+                          : video.scenes?.length && video.scenes.every((sc) => sc.hidePresenter)
+                            ? " (not applied: no scene shows the presenter)"
+                            : " (asked for; HeyGen uses it where the presenter's look supports it, except photo avatars given expressiveness or gestures)"
+                      }`}
+                    </Row>
                   ) : null}
                   {video.expressiveness || video.motionPrompt ? (
                     <Row label="Photo avatar motion">

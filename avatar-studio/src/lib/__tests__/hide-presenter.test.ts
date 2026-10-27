@@ -102,6 +102,32 @@ describe("scenes without the presenter", () => {
   });
 });
 
+describe("scenes without the presenter, and the presenters they leave out", () => {
+  it("do not prepare a presenter no scene shows", async () => {
+    const { MockAvatarProvider } = await import("../providers/avatar/mock");
+    const { createAvatar } = await import("../services");
+    const proto = MockAvatarProvider.prototype as unknown as { prepareAvatar?: (a: Avatar) => Promise<Avatar> };
+    const prepared: string[] = [];
+    proto.prepareAvatar = async (a) => {
+      prepared.push(a.name);
+      return a;
+    };
+    try {
+      const main = await createAvatar({ name: "Main", imageUrl: "https://example.com/main.jpg" }, "shown");
+      const guest = await createAvatar({ name: "Guest", imageUrl: "https://example.com/guest.jpg" }, "shown");
+      const base = { title: "Tour", avatarId: main.id, voiceId: STOCK_VOICES[0].id };
+      await createVideo(videoRequestSchema.parse({ ...base, scenes: [{ script: "Just the view.", background: image, hidePresenter: true }] }), "shown");
+      assert.deepEqual(prepared, [], "every scene leaves the presenter out");
+      await createVideo(videoRequestSchema.parse({ ...base, scenes: [{ script: "The view.", background: image, hidePresenter: true }, { script: "Hi.", background: image, avatarId: guest.id }] }), "shown");
+      assert.deepEqual(prepared, ["Guest"], "only the presenter a scene shows, not the video's own one");
+      await createVideo(videoRequestSchema.parse({ ...base, script: "Hello." }), "shown");
+      assert.deepEqual(prepared, ["Guest", "Main"], "a one-scene video shows its presenter");
+    } finally {
+      delete proto.prepareAvatar;
+    }
+  });
+});
+
 describe("scenes without the presenter, when their picture goes", () => {
   it("name no presenter of their own once accepted, so none is looked up or prepared", () => {
     const req = videoRequestSchema.parse(request([{ script: "Just the view.", background: image, hidePresenter: true, avatarId: "av_portrait", layout: { scale: 1.2, x: 0, y: 0 } }, { script: "Hi.", background: image, avatarId: "stock_2" }]));

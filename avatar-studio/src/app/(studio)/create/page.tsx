@@ -13,7 +13,7 @@ import { BackdropPicker } from "@/components/BackdropPicker";
 import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib/client";
-import { accentsFor, languageLabel } from "@/lib/language";
+import { accentsFor, languageLabel, voiceTakesAccent } from "@/lib/language";
 import { silentProblem, silentSeconds, stripPauses } from "@/lib/pauses";
 import { countMatches, replaceAll } from "@/lib/find-replace";
 import { MAX_IMPORT_BYTES, MAX_SCRIPT_CHARS, decodeScript, legacyEncodingFor, scenesFromText } from "@/lib/script-import";
@@ -506,13 +506,13 @@ function CreateInner() {
     const a = (sc.avatarId && avatarData?.avatars.find((x) => x.id === sc.avatarId)) || avatar;
     return !!a && isPhotoAvatar(a);
   });
-  // The voice an accent is chosen for: the first voice that speaks a scene (its own, else the video's) and offers
-  // accents of its language. An accent no speaking voice takes is not sent.
-  const accentVoice = scenes
-    .filter((sc) => !sc.audioId)
-    .map((sc) => (sc.voiceId && voiceData?.voices.find((v) => v.id === sc.voiceId)) || voice)
-    .find((v) => !!v?.accents && accentsFor(v.language).length > 0);
-  const accentOptions = accentVoice ? accentsFor(accentVoice.language) : [];
+  // The voices an accent can be chosen for: each that speaks a scene (its own, else the video's; not a recorded clip
+  // or a silent scene) and offers accents of its language. The renderer gives each scene the accent only when its
+  // voice takes it, so every such voice's accents are offered, and one that no speaking voice takes is not sent.
+  const accentVoices = [
+    ...new Set(scenes.filter((sc) => !sc.audioId && !silentSeconds(sc.script)).map((sc) => (sc.voiceId && voiceData?.voices.find((v) => v.id === sc.voiceId)) || voice)),
+  ].filter((v): v is Voice => !!v?.accents && accentsFor(v.language).length > 0);
+  const accentOptions = VOICE_ACCENTS.filter((a) => accentVoices.some((v) => accentsFor(v.language).includes(a)));
   // What the scene's presenter will get: a photo avatar has no close-up, so it is previewed and listed in full.
   const framing: PresenterFraming = framingFor(layout.framing, sceneAvatar ?? undefined);
   const photoPresenter = !!sceneAvatar && isPhotoAvatar(sceneAvatar);
@@ -588,7 +588,8 @@ function CreateInner() {
   });
   const [accent, setAccent] = useState<VoiceAccent | "">("");
   const [avatarEngine, setAvatarEngine] = useState<AvatarEngine>("avatar_iv");
-  const sentAccent = accent && accentOptions.includes(accent) ? accent : undefined;
+  const sentAccent = accent && accentVoices.some((v) => voiceTakesAccent(v, accent)) ? accent : undefined;
+  const accentTakers = accent ? accentVoices.filter((v) => voiceTakesAccent(v, accent)) : accentVoices;
   /** Both apply to photo avatars only; anything else is sent as none. */
   const motion = { ...(expressiveness !== "low" ? { expressiveness } : {}), ...(motionPrompt.trim() ? { motionPrompt: motionPrompt.trim() } : {}) };
   const [tab, setTab] = useState<Tab>("avatar");
@@ -1681,13 +1682,13 @@ function CreateInner() {
                   hint={
                     !voiceData
                       ? "For voices that speak several accents of their language; HeyGen applies it."
-                      : accentVoice
-                        ? `How ${accentVoice.name} pronounces the script. HeyGen applies it; other renderers, and scenes whose voice offers no accents or speaks another language, keep the voice's own.`
+                      : accentVoices.length
+                        ? `How ${(accentTakers.length ? accentTakers : accentVoices).map((v) => v.name).join(" and ")} ${(accentTakers.length ? accentTakers : accentVoices).length > 1 ? "pronounce" : "pronounces"} the script. HeyGen applies it; other renderers, and scenes whose voice offers no accents or speaks another language, keep the voice's own.`
                         : "For voices that speak several accents of their language; no voice in this video offers one, so none is sent."
                   }
                 >
-                  <select value={accent} onChange={(e) => setAccent(asAccent(e.target.value))} disabled={!!voiceData && !accentVoice && !accent} aria-label="Accent" aria-describedby="accent-hint" className={inputClass}>
-                    <option value="">{accentVoice || !voiceData ? "The voice's own" : "None to choose"}</option>
+                  <select value={accent} onChange={(e) => setAccent(asAccent(e.target.value))} disabled={!!voiceData && !accentVoices.length && !accent} aria-label="Accent" aria-describedby="accent-hint" className={inputClass}>
+                    <option value="">{accentVoices.length || !voiceData ? "The voice's own" : "None to choose"}</option>
                     {accentOptions.map((a) => (
                       <option key={a} value={a}>
                         {languageLabel(a)} ({a})
@@ -1709,7 +1710,7 @@ function CreateInner() {
                 >
                   <select value={avatarEngine} onChange={(e) => setAvatarEngine(asAvatarEngine(e.target.value))} disabled={!!avatarData && !avatarVInUse && avatarEngine === "avatar_iv"} aria-label="Avatar engine" aria-describedby="avatar-engine-hint" className={inputClass}>
                     <option value="avatar_iv">Avatar IV (standard)</option>
-                    <option value="avatar_v">{!avatarData || avatarVInUse ? "Avatar V (higher quality)" : "Avatar V (not sent: no presenter here supports it)"}</option>
+                    <option value="avatar_v">{!avatarData || avatarVInUse ? "Avatar V (higher quality)" : "Avatar V (not sent: no presenter here renders on it)"}</option>
                   </select>
                 </Field>
                 <div role="group" aria-labelledby="photo-motion-title" className="space-y-2 rounded-lg border border-slate-200 px-3 py-3" data-testid="photo-motion">

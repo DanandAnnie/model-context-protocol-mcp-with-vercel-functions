@@ -313,10 +313,12 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
 
   try {
     if (provider.prepareAvatar) {
-      // Side by side, so several presenters waiting on the renderer wait once, not one after another.
+      // Side by side, so several presenters waiting on the renderer wait once, not one after another. Only the
+      // presenters some scene shows: one every scene leaves out, or replaces with its own, is never rendered.
+      const shown = new Set(req.scenes?.length ? req.scenes.filter((sc) => !sc.hidePresenter).map((sc) => sc.avatarId ?? req.avatarId) : [req.avatarId]);
       await Promise.all(
         Object.values(cast.avatars)
-          .filter((a) => a.source === "custom")
+          .filter((a) => a.source === "custom" && shown.has(a.id))
           .map(async (a) => {
             cast.avatars[a.id] = await prepareOnce(provider, a);
           }),

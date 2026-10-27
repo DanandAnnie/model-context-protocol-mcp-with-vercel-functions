@@ -504,6 +504,19 @@ test("a voice that speaks several accents can be given one, kept with the video 
   const again = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
   await page.getByRole("button", { name: "Generate video" }).click();
   expect("accent" in ((await again).postDataJSON() as Record<string, unknown>)).toBe(false);
+  // With two voices that offer accents, each is offered its own, and a copy keeps an accent the second one takes.
+  const bg = { type: "color", value: "#0f172a" };
+  const two = await createVideoViaApi(page, "Two voices", { voiceId: "stock_voice_1", accent: "es-MX", script: undefined, scenes: [{ script: "Welcome in.", background: bg }, { script: "Bienvenidos.", background: bg, voiceId: "stock_voice_4" }] });
+  await page.goto(`/create?from=${two.id}`);
+  await page.getByRole("button", { name: "Settings" }).click();
+  const both = page.getByLabel("Accent", { exact: true });
+  await expect(both).toHaveValue("es-MX");
+  await expect(both.locator("option:checked")).toHaveText("Mexican Spanish (es-MX)");
+  await expect(both.locator("option[value='en-GB']")).toHaveCount(1);
+  await expect(page.locator("#accent-hint")).toContainText("How Mateo pronounces the script");
+  const kept = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
+  await page.getByRole("button", { name: "Generate video" }).click();
+  expect((await kept).postDataJSON()).toMatchObject({ accent: "es-MX" });
 });
 
 test("Avatar V is chosen for presenters whose look supports it, kept with the video and its copy", async ({ page }) => {

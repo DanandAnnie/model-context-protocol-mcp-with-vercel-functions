@@ -883,7 +883,7 @@ export default function VideoDetailPage() {
                         ? " (not applied by this renderer)"
                         : video.scenes?.length && video.scenes.every((sc) => sc.hidePresenter)
                           ? " (not applied: no scene shows the presenter)"
-                          : " (photo avatars only)"}
+                          : video.avatarEngine === "avatar_v" ? " (photo avatars; gestures also for video avatars on Avatar V)" : " (photo avatars only)"}
                     </Row>
                   ) : null}
                   <Row label="Captions">{video.captions ? `On${video.captionStyle ? ` · ${video.captionStyle.position}, ${video.captionStyle.size}${video.captionStyle.look ? `, ${video.captionStyle.look}` : ""}${video.captionStyle.font ? `, ${video.captionStyle.font} type` : ""}` : ""}` : "Off"}</Row>

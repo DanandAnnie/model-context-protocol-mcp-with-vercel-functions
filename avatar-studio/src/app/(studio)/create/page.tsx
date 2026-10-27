@@ -588,6 +588,14 @@ function CreateInner() {
   });
   const [accent, setAccent] = useState<VoiceAccent | "">("");
   const [avatarEngine, setAvatarEngine] = useState<AvatarEngine>("avatar_iv");
+  // Whether gestures reach a video avatar: one rendering on Avatar V takes them (a photo avatar given them stays on IV).
+  const gesturesOnV =
+    avatarEngine === "avatar_v" &&
+    scenes.some((sc) => {
+      if (sc.hidePresenter) return false;
+      const a = (sc.avatarId && avatarData?.avatars.find((x) => x.id === sc.avatarId)) || avatar;
+      return !!a && !isPhotoAvatar(a) && !!a.avatarV;
+    });
   const sentAccent = accent && accentVoices.some((v) => voiceTakesAccent(v, accent)) ? accent : undefined;
   const accentTakers = accent ? accentVoices.filter((v) => voiceTakesAccent(v, accent)) : accentVoices;
   /** Both apply to photo avatars only; anything else is sent as none. */
@@ -1717,8 +1725,10 @@ function CreateInner() {
                   <div id="photo-motion-title" className="text-sm font-medium text-slate-800">Photo avatar motion</div>
                   <p id="photo-motion-hint" className="text-xs text-slate-500">
                     {photoInUse || !avatarData
-                      ? "How a photo avatar moves as it speaks, on HeyGen (Avatar IV). Other presenters keep their own motion, and D-ID and the demo renderer ignore it."
-                      : "For photo avatars only (an uploaded portrait or a HeyGen photo avatar); no scene shows one now, so nothing here applies yet."}
+                      ? `How a photo avatar moves as it speaks, on HeyGen (Avatar IV).${gesturesOnV ? " Gestures also reach the video avatars rendering on Avatar V." : ""} Other presenters keep their own motion, and D-ID and the demo renderer ignore it.`
+                      : gesturesOnV
+                        ? "Gestures reach the video avatars rendering on Avatar V, on HeyGen; expressiveness is for photo avatars (an uploaded portrait or a HeyGen photo avatar), and no scene shows one now."
+                        : "For photo avatars (an uploaded portrait or a HeyGen photo avatar), and gestures also for video avatars on Avatar V; no scene shows either now, so nothing here applies yet."}
                   </p>
                   <Field label="Expressiveness">
                     <select value={expressiveness} onChange={(e) => setExpressiveness(asExpressiveness(e.target.value))} aria-describedby="photo-motion-hint" className={inputClass}>

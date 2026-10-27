@@ -165,11 +165,17 @@ export class HeyGenAvatarProvider implements AvatarProvider {
             ? { type: "image", source, ...(silent && !clip ? { duration: silent } : sound) }
             : { type: "video", source, playback: { mode: "loop", mute: true }, ...sound };
         }
-        // A photo avatar moves as asked (Avatar IV); HeyGen refuses a motion prompt for a video avatar on that engine.
-        const photo = isPhotoAvatar(sceneAvatarOf(scene));
-        const motion = photo ? { ...(req.expressiveness ? { expressiveness: req.expressiveness } : {}), ...(req.motionPrompt ? { motion_prompt: req.motionPrompt } : {}) } : {};
         // Avatar V where the look supports it (a photo avatar given motion settings stays on Avatar IV; see rendersOnAvatarV).
-        const engine = req.avatarEngine === "avatar_v" && rendersOnAvatarV(sceneAvatarOf(scene), req) ? { engine: { type: "avatar_v" } } : {};
+        const onV = req.avatarEngine === "avatar_v" && rendersOnAvatarV(sceneAvatarOf(scene), req);
+        const engine = onV ? { engine: { type: "avatar_v" } } : {};
+        // A photo avatar moves as asked (on Avatar IV). A video avatar takes gestures on Avatar V only, as HeyGen refuses a
+        // motion prompt for one on Avatar IV; expressiveness is for photo avatars alone.
+        const photo = isPhotoAvatar(sceneAvatarOf(scene));
+        const motion = photo
+          ? { ...(req.expressiveness ? { expressiveness: req.expressiveness } : {}), ...(req.motionPrompt ? { motion_prompt: req.motionPrompt } : {}) }
+          : onV && req.motionPrompt
+            ? { motion_prompt: req.motionPrompt }
+            : {};
         return { type: "avatar_video", input: { type: "avatar", avatar_id: avatarId, ...sound, ...motion, ...engine, background } };
       }),
     };

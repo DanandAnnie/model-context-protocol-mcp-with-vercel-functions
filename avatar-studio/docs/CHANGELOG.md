@@ -210,3 +210,6 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - A presenter that no scene shows (every scene hides it, or brings its own) is no longer uploaded to HeyGen and waited for before the render, with a unit test.
     - The video page's Pitch row says when the renderer does not apply it. Its Avatar engine row covers videos with no presenter and photo avatars given motion settings. The editor's Avatar V option gives the right reason when nothing renders on it.
     - The API docs say which HeyGen scene type each scene becomes, and that a narrated scene without the presenter takes the accent.
+- Gestures for video avatars on Avatar V. HeyGen's v3 API takes a motion prompt for a video avatar when it renders on Avatar V, though not on Avatar IV, so `motionPrompt` now reaches those scenes too.
+  - Photo avatars get it as before, on Avatar IV. Expressiveness stays photo-only.
+  - The editor's motion panel says when gestures will reach a video avatar, and the video page notes it. A unit test checks that a video avatar on Avatar V gets the prompt and one on Avatar IV never does. The e2e test checks the panel's wording.

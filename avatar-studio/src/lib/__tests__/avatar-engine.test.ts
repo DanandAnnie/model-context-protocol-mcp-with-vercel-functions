@@ -86,6 +86,8 @@ describe("avatar engine", () => {
     assert.deepEqual(engines(), ["avatar_v", undefined, "avatar_v", undefined]);
     await heygen.createVideo(videoRequestSchema.parse({ title: "E", avatarId: twin.id, voiceId: voice.id, avatarEngine: "avatar_v", motionPrompt: "Waves", scenes }), twin, voice, cast);
     assert.deepEqual(engines(), ["avatar_v", undefined, undefined, undefined], "Avatar V can refuse a photo avatar's gestures, so that scene stays on Avatar IV");
+    const prompts = () => sent!.scenes.map((sc) => sc.input?.motion_prompt);
+    assert.deepEqual(prompts(), ["Waves", undefined, "Waves", undefined], "a video avatar on Avatar V takes gestures; one on Avatar IV, never");
     await heygen.createVideo(videoRequestSchema.parse({ title: "E", avatarId: twin.id, voiceId: voice.id, avatarEngine: "avatar_v", expressiveness: "medium", scenes }), twin, voice, cast);
     assert.deepEqual(engines(), ["avatar_v", undefined, undefined, undefined], "Avatar V rejects expressiveness, so a photo avatar given it stays on Avatar IV");
     assert.equal(sent!.scenes[2].input?.expressiveness, "medium");

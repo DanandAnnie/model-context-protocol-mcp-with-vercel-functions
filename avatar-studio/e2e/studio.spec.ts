@@ -529,7 +529,10 @@ test("Avatar V is chosen for presenters whose look supports it, kept with the vi
   await page.getByRole("button", { name: "Settings" }).click();
   const engine = page.getByLabel("Avatar engine", { exact: true });
   await expect(engine).toBeEnabled();
+  await expect(page.locator("#photo-motion-hint")).toContainText("gestures also for video avatars on Avatar V");
   await engine.selectOption("avatar_v");
+  // Ava is a video avatar, so on Avatar V she takes gestures too.
+  await expect(page.locator("#photo-motion-hint")).toContainText("Gestures reach the video avatars rendering on Avatar V");
   const sent = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
   await page.getByRole("button", { name: "Generate video" }).click();
   expect((await sent).postDataJSON()).toMatchObject({ avatarEngine: "avatar_v" });

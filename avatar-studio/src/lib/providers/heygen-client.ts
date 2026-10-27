@@ -123,6 +123,23 @@ export class HeyGenClient {
     return { id, status: out.avatar_item?.status };
   }
 
+  /** Starts cutting a video into short highlight clips (v3 AI Clipping, `POST /v3/ai-clipping`). */
+  async createClipping(body: Record<string, unknown>): Promise<string> {
+    const out = await this.request<{ ai_clipping_id?: string }>(`${V3}/ai-clipping`, { method: "POST", body: JSON.stringify(body), signal: AbortSignal.timeout(20_000) });
+    if (!out?.ai_clipping_id) throw new Error("HeyGen returned no clipping job id");
+    return out.ai_clipping_id;
+  }
+
+  /** A clipping job and the clips made so far (`GET /v3/ai-clipping/{id}`). */
+  clipping(id: string) {
+    return this.request<{
+      status: "pending" | "running" | "completed" | "failed" | "cancelled" | string;
+      progress?: number;
+      failure_message?: string | null;
+      clips?: Array<{ id: string; status?: string; title?: string | null; duration_seconds?: number | null; virality_score?: number | null; thumbnail_url?: string | null; video_url?: string | null }>;
+    }>(`${V3}/ai-clipping/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(10_000) });
+  }
+
   /** A video (v3, `POST /v3/videos`); a studio request composes its scenes into one render. */
   generateVideo(body: Record<string, unknown>) {
     return this.request<{ video_id: string; status?: string }>(`${V3}/videos`, { method: "POST", body: JSON.stringify(body) });

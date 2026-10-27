@@ -6,7 +6,7 @@ import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
 import { HeyGenClient } from "../heygen-client";
 import { ValidationError } from "../../errors";
-import type { AvatarJobStatus, AvatarProvider, RenderCast } from "../types";
+import type { AvatarJobStatus, AvatarProvider, HighlightInput, HighlightStatus, RenderCast } from "../types";
 
 /**
  * Where a custom portrait's v3 photo avatar look is kept (`providerAssetIds`). Portraits uploaded as v1 talking photos
@@ -282,6 +282,50 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     return { status: "processing" };
   }
 
+  /**
+   * Short highlight clips cut from a finished video (v3 AI Clipping): one per length, framed as asked, with captions
+   * burned in or not. HeyGen picks the moments, guided by the prompt when there is one.
+   */
+  async startHighlights(input: HighlightInput) {
+    try {
+      const jobId = await this.client.createClipping({
+        video: { type: "url", url: input.videoUrl },
+        title: input.title,
+        output_settings: {
+          duration_types: input.lengths,
+          aspect_ratio: CLIP_FRAMES[input.frame],
+          captions: input.captions,
+          ...(input.prompt ? { prompt: input.prompt } : {}),
+        },
+        // No callback: the studio follows the job when its clips are looked at, as it does a portrait.
+      });
+      return { jobId };
+    } catch (err) {
+      // A video HeyGen will not clip (too short, unreadable, or past the plan) is the account's to change.
+      const message = err instanceof Error ? err.message : "";
+      if (/ failed: (400|402|403|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not clip that video: ${heygenReason(message)}`);
+      throw err;
+    }
+  }
+
+  async highlightsStatus(jobId: string): Promise<HighlightStatus> {
+    const job = await this.client.clipping(jobId);
+    const clips = (job.clips ?? []).map((c) =>
+      stripEmpty({
+        id: c.id,
+        status: c.status === "completed" ? ("completed" as const) : c.status === "failed" ? ("failed" as const) : ("pending" as const),
+        title: c.title ?? undefined,
+        durationSec: c.duration_seconds ?? undefined,
+        viralityScore: c.virality_score ?? undefined,
+        thumbnailUrl: c.thumbnail_url ?? undefined,
+        videoUrl: c.video_url ?? undefined,
+      }),
+    );
+    if (job.status === "completed") return { status: "completed", progress: 100, clips };
+    if (job.status === "failed" || job.status === "cancelled") return { status: "failed", clips, error: job.failure_message || (job.status === "cancelled" ? "The clipping job was cancelled" : "HeyGen could not clip that video") };
+    return { status: "processing", progress: typeof job.progress === "number" ? job.progress : undefined, clips };
+  }
+
   async getStatus(providerJobId: string): Promise<AvatarJobStatus> {
     const s = await this.client.videoStatus(providerJobId);
     if (s.status === "completed") {
@@ -299,6 +343,14 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     if (b.event_type === "avatar_video.fail") return { providerJobId: id, update: { status: "failed" as const, error: b.event_data?.msg ?? "Render failed" } };
     return null;
   }
+}
+
+/** HeyGen's names for the clip framings. */
+const CLIP_FRAMES = { "9:16": "portrait", "16:9": "landscape", "1:1": "square" } as const;
+
+/** The object without its undefined fields, so a clip stores only what HeyGen said. */
+function stripEmpty<T extends Record<string, unknown>>(o: T): T {
+  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
 }
 
 /** The reason in a HeyGen error ("…failed: 400 {"error":{"message":"…"}}" or "HeyGen error: …"), kept short. */

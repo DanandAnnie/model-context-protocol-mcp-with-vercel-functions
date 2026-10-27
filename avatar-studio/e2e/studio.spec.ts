@@ -590,6 +590,32 @@ test("a one-scene video can render over a transparent background, kept with the 
   expect("transparent" in ((await again).postDataJSON() as Record<string, unknown>)).toBe(false);
 });
 
+test("a finished video can be cut into short clips, listed with the video until deleted", async ({ page }) => {
+  // About 75 seconds long (the pauses count), so 30-second and 1-minute clips are offered and 3-minute ones are not.
+  const v = await createVideoViaApi(page, `Clips ${Date.now().toString(36)}`, { script: `Welcome to the open house. ${"[pause 10s] ".repeat(7)}Thanks for watching.` });
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  await page.goto(`/videos/${v.id}`);
+  const card = page.getByTestId("highlight-clips");
+  await expect(card.getByRole("heading", { name: "Short clips" })).toBeVisible();
+  await expect(card.getByLabel("3 minutes")).toHaveCount(0);
+  await card.getByLabel("1 minute").check();
+  await card.getByLabel("Framing").selectOption("1:1");
+  await card.getByLabel("Burn in captions").uncheck();
+  await card.getByLabel("What to look for (optional)").fill("the welcome");
+  const sent = page.waitForRequest((r) => r.url().endsWith(`/api/videos/${v.id}/highlights`) && r.method() === "POST");
+  await card.getByRole("button", { name: "Cut 2 clips" }).click();
+  expect((await sent).postDataJSON()).toEqual({ lengths: ["30", "60"], frame: "1:1", captions: false, prompt: "the welcome" });
+  await expect(card.getByText("30 seconds, 1 minute · 1:1 · no captions · “the welcome”")).toBeVisible();
+  // The demo renderer finishes a few seconds later; the card checks again on its own.
+  await expect(card.getByTestId("highlight-clip")).toHaveCount(2, { timeout: 20_000 });
+  await expect(card.getByRole("link", { name: "Download" }).first()).toHaveAttribute("href", /\/demo\/render\.webm$/);
+  await page.reload();
+  await expect(page.getByTestId("highlight-clip")).toHaveCount(2);
+  await page.getByRole("button", { name: /^Delete these clips/ }).click();
+  await expect(page.getByTestId("highlight-clip")).toHaveCount(0);
+  expect((await (await page.request.get(`/api/videos/${v.id}/highlights`)).json()).highlights).toEqual([]);
+});
+
 test("a scene can leave the presenter out and let its picture fill the frame", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Kitchen tour");
   await page.locator("textarea").fill("Welcome in, let me show you around.");

@@ -1,4 +1,4 @@
-import type { AudioClip, Avatar, Backdrop, CaptionCue, Translation, TranslationRequest, Video, VideoRequest, Voice } from "../types";
+import type { AudioClip, Avatar, Backdrop, CaptionCue, HighlightClip, HighlightFrame, HighlightLength, Translation, TranslationRequest, Video, VideoRequest, Voice } from "../types";
 
 export interface TtsProvider {
   readonly name: string;
@@ -83,6 +83,13 @@ export interface AvatarProvider {
   generatePortrait?(input: { name: string; prompt: string }): Promise<{ jobId: string }>;
   /** Where a portrait job stands; a finished one gives the image's URL (https, or a data URL in demo mode). */
   portraitStatus?(jobId: string): Promise<{ status: "processing" | "completed" | "failed"; imageUrl?: string; error?: string }>;
+  /**
+   * Starts cutting a finished video into short highlight clips (HeyGen AI Clipping), one per length, framed as asked.
+   * Returns a job id to follow with `highlightsStatus`. Absent when the provider cannot clip videos.
+   */
+  startHighlights?(input: HighlightInput): Promise<{ jobId: string }>;
+  /** Where a clipping job stands, with the clips made so far (each link signed for a limited time). */
+  highlightsStatus?(jobId: string): Promise<HighlightStatus>;
   /** Parse an inbound webhook body into a job update, or null if unrecognised. */
   parseWebhook?(body: unknown): { providerJobId: string; update: AvatarJobStatus } | null;
 }
@@ -187,4 +194,21 @@ export interface StreamingProvider {
   /** Keeps a session from ending as idle while the page shows it. */
   keepAlive?(session: ProviderLiveSession): Promise<void>;
   stop(session: ProviderLiveSession): Promise<void>;
+}
+
+export interface HighlightInput {
+  /** The finished video, as an address the renderer can download. */
+  videoUrl: string;
+  title: string;
+  lengths: HighlightLength[];
+  frame: HighlightFrame;
+  captions: boolean;
+  prompt?: string;
+}
+
+export interface HighlightStatus {
+  status: "processing" | "completed" | "failed";
+  progress?: number;
+  clips: HighlightClip[];
+  error?: string;
 }

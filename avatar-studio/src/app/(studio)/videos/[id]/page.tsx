@@ -12,6 +12,7 @@ import { CaptionEditor } from "@/components/CaptionEditor";
 import { ViewerEmails } from "@/components/ViewerEmails";
 import { VideoChapters } from "@/components/VideoChapters";
 import { OtherSizes } from "@/components/OtherSizes";
+import { HighlightClips } from "@/components/HighlightClips";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { captionsBurnedIn } from "@/lib/captions";
@@ -1101,6 +1102,7 @@ export default function VideoDetailPage() {
               <VideoChapters video={video} />
               {/* Offered once the role is known to allow it, so a viewer never sees a button the server would refuse. */}
               {(canEdit === true || video.resizedFrom) && <OtherSizes video={video} canEdit={canEdit === true} />}
+              {video.status === "completed" && canEdit !== null && <HighlightClips video={video} canEdit={canEdit === true} />}
               <ReviewPanel video={video} onChange={(next) => setData({ video: next })} />
               <VideoComments videoId={video.id} player={video.status === "completed" && video.videoUrl ? player : undefined} />
             </div>

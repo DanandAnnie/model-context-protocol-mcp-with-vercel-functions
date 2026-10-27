@@ -3,7 +3,7 @@ import { pauseSeconds, stripPauses } from "../../pauses";
 import { SAMPLE_PREVIEW_VIDEO, STOCK_AVATARS, portraitSvg } from "../../stock";
 import { demoAssetUrl } from "../../config";
 import type { AudioClip, Avatar, VideoRequest } from "../../types";
-import type { AvatarJobStatus, AvatarProvider } from "../types";
+import type { AvatarJobStatus, AvatarProvider, HighlightInput, HighlightStatus } from "../types";
 
 /** Labeled, self-hosted stand-in; no avatar synthesis or paid operation occurs. */
 const SAMPLE_VIDEO = SAMPLE_PREVIEW_VIDEO;
@@ -13,6 +13,8 @@ const SAMPLE_THUMB = "/demo/poster.svg";
 export class MockAvatarProvider implements AvatarProvider {
   readonly name = "mock";
   private static RENDER_MS = 12_000;
+  /** How long a demo clipping job takes. */
+  private static CLIP_MS = 4_000;
 
   async listAvatars(): Promise<Avatar[]> {
     return STOCK_AVATARS;
@@ -32,6 +34,31 @@ export class MockAvatarProvider implements AvatarProvider {
     const durationSec = Math.max(3, Math.round(seconds));
     // Encode submission time + duration in the job id so status needs no state.
     return { providerJobId: `mock_${Date.now()}_${durationSec}` };
+  }
+
+  /**
+   * Demo highlight clips: the sample video stands in for each clip, ready a few seconds after the job starts. The job id
+   * carries the start time, lengths, and framing, so following it needs no state; nothing is cut.
+   */
+  async startHighlights(input: HighlightInput) {
+    return { jobId: `mockhl_${Date.now()}_${input.lengths.join("-")}_${input.frame.replace(":", "x")}` };
+  }
+
+  async highlightsStatus(jobId: string): Promise<HighlightStatus> {
+    const m = /^mockhl_(\d+)_([\d-]+)_(\d+x\d+)$/.exec(jobId);
+    if (!m) return { status: "failed", clips: [], error: "No such clipping job" };
+    const elapsed = Date.now() - Number(m[1]);
+    if (elapsed < MockAvatarProvider.CLIP_MS) return { status: "processing", progress: Math.min(95, Math.round((elapsed / MockAvatarProvider.CLIP_MS) * 100)), clips: [] };
+    const clips = m[2].split("-").map((len, i) => ({
+      id: `${jobId}_${i}`,
+      status: "completed" as const,
+      title: `Demo highlight ${i + 1} (${len}s)`,
+      durationSec: Number(len),
+      viralityScore: 60 + ((Number(m[1]) + i * 17) % 35),
+      thumbnailUrl: SAMPLE_THUMB,
+      videoUrl: demoAssetUrl(SAMPLE_VIDEO),
+    }));
+    return { status: "completed", progress: 100, clips };
   }
 
   /** Demo presenter from a description: an illustrated portrait whose colours follow the description; nothing is generated. */

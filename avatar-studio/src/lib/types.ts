@@ -66,6 +66,49 @@ export interface PortraitJob {
   createdAt: string;
 }
 
+/** Lengths a highlight clip can be cut to, in seconds (HeyGen AI Clipping's `duration_types`). */
+export const HIGHLIGHT_LENGTHS = ["30", "60", "180"] as const;
+export type HighlightLength = (typeof HIGHLIGHT_LENGTHS)[number];
+/** How the clips are framed: 9:16, 16:9, or 1:1 (HeyGen's `portrait`, `landscape`, `square`). */
+export const HIGHLIGHT_FRAMES = ["9:16", "16:9", "1:1"] as const;
+export type HighlightFrame = (typeof HIGHLIGHT_FRAMES)[number];
+
+/** One short clip cut from a video. Its links are signed by the renderer and refreshed when they get old. */
+export interface HighlightClip {
+  id: string;
+  status: "pending" | "completed" | "failed";
+  title?: string;
+  durationSec?: number;
+  /** The renderer's guess at how well it would do on social media, 0 to 100. */
+  viralityScore?: number;
+  thumbnailUrl?: string;
+  videoUrl?: string;
+}
+
+/** A request to cut a finished video into short highlight clips (HeyGen AI Clipping), kept with the video. */
+export interface HighlightJob {
+  id: string;
+  ownerId: string;
+  videoId: string;
+  /** Renderer cutting it, and its job id there, never shown to the account. */
+  provider: string;
+  providerJobId: string;
+  status: "processing" | "completed" | "failed";
+  lengths: HighlightLength[];
+  frame: HighlightFrame;
+  captions: boolean;
+  /** What to look for ("the moments about pricing"); absent lets the renderer choose. */
+  prompt?: string;
+  /** Rough progress, 0 to 100, while it runs. */
+  progress?: number;
+  clips: HighlightClip[];
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+  /** When the renderer was last asked, so finished clips' signed links are renewed before they expire. */
+  checkedAt?: string;
+}
+
 export interface Voice {
   id: string;
   name: string;
@@ -808,6 +851,8 @@ export interface ProviderStatus {
   voiceCloning: boolean;
   /** Whether the renderer can draw a presenter from a description. */
   portraitGeneration: boolean;
+  /** Whether the renderer can cut a finished video into short highlight clips. */
+  highlightClips: boolean;
   /** Whether the TTS provider can design a voice from a description. */
   voiceDesign: boolean;
   /** Present when the request carried an owner (signed in, or open/password mode). */

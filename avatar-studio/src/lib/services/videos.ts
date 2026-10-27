@@ -30,6 +30,7 @@ import { spokenCopy } from "../pronounce";
 import { clearComments } from "./comments";
 import { clearVideoLeads } from "./leads";
 import { clearHighlights } from "./highlights";
+import { clearCleanups } from "./cleanups";
 import { reviseScript } from "./scripts";
 export { accentSchema, avatarEngineSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema };
 
@@ -707,6 +708,7 @@ async function purgeVideo(id: string, ownerId: string): Promise<void> {
   await clearComments(id, ownerId);
   await clearVideoLeads(id, ownerId);
   await clearHighlights(id, ownerId);
+  await clearCleanups(id, ownerId);
   await getStore().remove("video", id);
 }
 

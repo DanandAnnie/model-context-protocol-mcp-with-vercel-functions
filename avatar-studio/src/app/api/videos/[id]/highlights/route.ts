@@ -12,8 +12,11 @@ export const maxDuration = 30;
  */
 const PER_OWNER = 10;
 const PER_INSTANCE = 40;
-/** Listings an account may make per hour: a set being cut is followed every few seconds, and each may ask the renderer. */
-const LISTS_PER_OWNER = 300;
+/**
+ * Listings an account may make per hour: the card asks every ten seconds while a set is cut (a long video takes a
+ * while), and the renderer is asked at most every few seconds per set whatever the listings.
+ */
+const LISTS_PER_OWNER = 1500;
 const WINDOW_MS = 60 * 60 * 1000;
 
 /** The video's highlight clips, newest set first; sets still being cut are checked on the way. */

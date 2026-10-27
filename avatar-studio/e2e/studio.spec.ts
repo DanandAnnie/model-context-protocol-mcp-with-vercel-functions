@@ -637,15 +637,23 @@ test("a recording can be cleaned of filler words, from a link or the library, an
   await page.getByLabel("Video", { exact: true }).selectOption(v.id);
   const sent = page.waitForRequest((r) => r.url().endsWith("/api/cleanups") && r.method() === "POST");
   await page.getByRole("button", { name: "Clean up recording" }).click();
-  expect((await sent).postDataJSON()).toEqual({ videoId: v.id });
+  const request = await sent;
+  expect(request.postDataJSON()).toEqual({ videoId: v.id });
+  // The start carries a key, so the same start sent again returns the same cleanup instead of paying for another.
+  const key = request.headers()["idempotency-key"];
+  expect(key).toMatch(/^[A-Za-z0-9_-]{8,100}$/);
+  const again = await page.request.post("/api/cleanups", { data: { videoId: v.id }, headers: { "Idempotency-Key": key } });
+  expect(again.status()).toBe(202);
   const item = page.getByTestId("cleanup").first();
   await expect(item).toContainText("(cleaned)");
   await expect(item).toContainText("From the library");
   // The demo renderer finishes a few seconds later; the page checks again on its own.
-  await expect(item.getByTestId("cleanup-stats")).toContainText("7 filler words cut · 1m 04s → 59s (8.6% shorter)", { timeout: 20_000 });
+  await expect(item.getByTestId("cleanup-stats")).toContainText("7 filler cuts · 1m 04s → 59s (8.6% shorter)", { timeout: 20_000 });
   await expect(item.getByRole("link", { name: /^Download / })).toHaveAttribute("href", /\/demo\/render\.webm$/);
   const listed = (await (await page.request.get("/api/cleanups")).json()).cleanups as Array<Record<string, unknown>>;
   expect(Object.keys(listed[0])).not.toContain("providerJobId");
+  expect(listed.filter((c) => c.videoId === v.id)).toHaveLength(1);
+  expect((await again.json()).cleanup.id).toBe(listed[0].id);
   // Deleting asks first, then focus stays on the page.
   page.once("dialog", (d) => d.accept());
   await item.getByRole("button", { name: /^Delete / }).click();

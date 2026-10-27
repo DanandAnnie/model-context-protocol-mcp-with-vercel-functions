@@ -303,7 +303,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     } catch (err) {
       // A video HeyGen will not clip (too short, unreadable, or past the plan) is the account's to change; a refused key is not.
       const message = err instanceof Error ? err.message : "";
-      if (/ failed: (400|402|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not clip that video: ${heygenReason(message)}`);
+      if (/ failed: (400|402|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not clip that video: ${heygenReason(message, "check that the video is longer than the clips and has speech")}`);
       throw err;
     }
   }
@@ -341,7 +341,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     } catch (err) {
       // A recording HeyGen will not clean (no speech, unreadable, too long, or past the plan) is the account's to change.
       const message = err instanceof Error ? err.message : "";
-      if (/ failed: (400|402|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not clean that recording: ${heygenReason(message)}`);
+      if (/ failed: (400|402|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not clean that recording: ${heygenReason(message, "check that the recording has speech and is at most two hours long")}`);
       throw err;
     }
   }
@@ -402,7 +402,7 @@ function stripEmpty<T extends Record<string, unknown>>(o: T): T {
 }
 
 /** The reason in a HeyGen error ("…failed: 400 {"error":{"message":"…"}}" or "HeyGen error: …"), kept short. */
-function heygenReason(message: string): string {
+function heygenReason(message: string, fallback = "try describing them differently"): string {
   const body = message.match(/ failed: \d+ (.*)$/s)?.[1];
   if (body) {
     try {
@@ -414,7 +414,7 @@ function heygenReason(message: string): string {
     }
   }
   if (message.startsWith("HeyGen error:")) return message.slice("HeyGen error:".length).trim().slice(0, 300);
-  return "try describing them differently";
+  return fallback;
 }
 
 /** A WAV clip of silence (8 kHz, 8-bit mono, about 8 KB a second), for a scene that holds the presenter quiet. */

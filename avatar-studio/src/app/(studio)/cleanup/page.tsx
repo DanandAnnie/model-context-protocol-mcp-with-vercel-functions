@@ -1,7 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { Download, Eraser, Trash2 } from "lucide-react";
-import { refocusIfLost } from "@/lib/focus";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
@@ -12,6 +11,8 @@ import type { CleanupJob, Video } from "@/lib/types";
 
 /** A cleanup as the server lists it: never the renderer or its job id. */
 type Cleanup = Omit<CleanupJob, "ownerId" | "provider" | "providerJobId">;
+/** A fresh key for one start (a UUID where the browser has one, as it does over https and on localhost). */
+const newKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`);
 /** Cleaned recordings' links are renewed by the server once this old; a page left open asks again when it is looked at. */
 const RELINK_MS = 30 * 60 * 1000;
 
@@ -22,11 +23,18 @@ const RELINK_MS = 30 * 60 * 1000;
  */
 export default function CleanupPage() {
   const canEdit = useCanEdit();
-  const { data, error, setData, refetch } = useApi<{ cleanups: Cleanup[]; available: boolean }>("/api/cleanups", {
-    pollMs: 5000,
-    pollWhile: (d) => d.cleanups.some((c) => c.status === "processing"),
-  });
-  const { data: library } = useApi<{ videos: Video[] }>("/api/videos?status=completed&limit=200");
+  const { data, error, setData, refetch } = useApi<{ cleanups: Cleanup[]; available: boolean }>("/api/cleanups");
+  // While a cleanup runs the list is asked again, only while the tab is visible (nobody is reading it otherwise), and a
+  // failed check does not stop the next one.
+  const running = (data?.cleanups ?? []).some((c) => c.status === "processing");
+  useEffect(() => {
+    if (!running) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void refetch();
+    }, 10_000);
+    return () => clearInterval(timer);
+  }, [running, refetch]);
+  const { data: library } = useApi<{ videos: Video[]; hasMore?: boolean }>("/api/videos?status=completed&limit=200");
   const videos = (library?.videos ?? []).filter((v) => v.videoUrl && !v.deletedAt);
   const [from, setFrom] = useState<"link" | "library">("link");
   const [sourceUrl, setSourceUrl] = useState("");
@@ -35,6 +43,8 @@ export default function CleanupPage() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  // One key per start: a retry of the same start (after a timeout, say) sends it again and gets the same cleanup back.
+  const [requestKey, setRequestKey] = useState(() => newKey());
   const sourceInput = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -71,14 +81,17 @@ export default function CleanupPage() {
     setNote(null);
     try {
       const body = from === "link" ? { sourceUrl: sourceUrl.trim(), ...(title.trim() ? { title: title.trim() } : {}) } : { videoId, ...(title.trim() ? { title: title.trim() } : {}) };
-      const { cleanup } = await api<{ cleanup: Cleanup }>("/api/cleanups", { method: "POST", body: JSON.stringify(body) });
-      setData((prev) => ({ available: prev?.available ?? true, cleanups: [cleanup, ...(prev?.cleanups ?? [])] }));
+      const { cleanup } = await api<{ cleanup: Cleanup }>("/api/cleanups", { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": requestKey } });
+      setData((prev) => ({ available: prev?.available ?? true, cleanups: [cleanup, ...(prev?.cleanups ?? []).filter((c) => c.id !== cleanup.id)] }));
       // A check that left before this cleanup was started would answer without it; asking again retires it.
       void refetch();
+      setRequestKey(newKey());
       setSourceUrl("");
+      setVideoId("");
       setTitle("");
       setNote(`Cleaning up ${cleanup.title}; it appears here when it is ready.`);
-      refocusIfLost(sourceInput.current);
+      // Focus goes to the new cleanup, rather than being lost with the cleared form.
+      focusAfterRender(() => listRef.current?.querySelector<HTMLElement>(`[data-cleanup="${cleanup.id}"]`) ?? sourceInput.current);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "The recording could not be cleaned up");
     } finally {
@@ -132,11 +145,21 @@ export default function CleanupPage() {
               </fieldset>
               {from === "link" ? (
                 <Field label="Recording URL" hint="A public https link to a video with speech, up to 2 hours long: a webinar, a screen recording, an interview.">
-                  <input ref={sourceInput} className={inputClass} value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} placeholder="https://…/webinar.mp4" />
+                  <input ref={sourceInput} className={inputClass} value={sourceUrl} onChange={(e) => {
+                      setSourceUrl(e.target.value);
+                      setRequestKey(newKey());
+                    }} placeholder="https://…/webinar.mp4" />
                 </Field>
               ) : (
-                <Field label="Video" hint={videos.length ? "A finished video of your library." : "No finished videos yet."}>
-                  <select className={inputClass} value={videoId} onChange={(e) => setVideoId(e.target.value)}>
+                <Field label="Video" hint={!library ? "Loading your videos…" : videos.length ? (library.hasMore ? "Your 200 newest finished videos." : "A finished video of your library.") : "No finished videos yet."}>
+                  <select
+                    className={inputClass}
+                    value={videoId}
+                    onChange={(e) => {
+                      setVideoId(e.target.value);
+                      setRequestKey(newKey());
+                    }}
+                  >
                     <option value="">Choose a video</option>
                     {videos.map((v) => (
                       <option key={v.id} value={v.id}>
@@ -161,7 +184,7 @@ export default function CleanupPage() {
           <h2 ref={headingRef} tabIndex={-1} className="mb-3 text-sm font-semibold text-slate-900 outline-none">
             Cleaned recordings
           </h2>
-          {items.length === 0 ? (
+          {!data ? null : items.length === 0 ? (
             <EmptyState icon={<Eraser className="h-8 w-8" />} title="No cleaned recordings yet" body="Clean up a recording on the left to get started." />
           ) : (
             <div className="space-y-3">
@@ -176,7 +199,7 @@ export default function CleanupPage() {
                       </div>
                       {c.status === "completed" && (
                         <div className="mt-1 text-xs text-slate-600" data-testid="cleanup-stats">
-                          {typeof c.cuts === "number" ? `${c.cuts} filler ${c.cuts === 1 ? "word" : "words"} cut` : "Cleaned"}
+                          {typeof c.cuts === "number" ? `${c.cuts} filler ${c.cuts === 1 ? "cut" : "cuts"}` : "Cleaned"}
                           {typeof c.originalSec === "number" && typeof c.outputSec === "number" ? ` · ${formatSeconds(Math.round(c.originalSec))} → ${formatSeconds(Math.round(c.outputSec))}` : ""}
                           {typeof c.reductionPct === "number" ? ` (${c.reductionPct}% shorter)` : ""}
                         </div>

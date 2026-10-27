@@ -4,9 +4,10 @@ import { z } from "zod";
 import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
-import type { CleanupJob } from "../types";
+import type { CleanupJob, Video } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
-import { ConflictError, ValidationError } from "../errors";
+import { createHash } from "node:crypto";
+import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { assertPublicHttpUrl } from "../safe-url";
 import { owned, stripUndefined } from "./shared";
 import { getVideo } from "./videos";
@@ -21,7 +22,7 @@ export const cleanupRequestSchema = z
     title: z.string().trim().max(120).optional(),
     /** One of the account's finished videos, or a public https link to a recording. */
     videoId: z.string().trim().min(1).optional(),
-    sourceUrl: z.string().trim().optional(),
+    sourceUrl: z.string().trim().max(2000, "The link is too long").optional(),
   })
   .refine((v) => !!v.videoId !== !!v.sourceUrl, { message: "Choose one of your videos or paste a link to a recording", path: ["sourceUrl"] });
 
@@ -55,7 +56,7 @@ export async function listCleanups(ownerId: string = LOCAL_OWNER): Promise<Clean
 }
 
 /** What a start would clean, and its title: checked before it counts against the hourly limit. */
-export async function resolveCleanupSource(input: z.infer<typeof cleanupRequestSchema>, ownerId: string = LOCAL_OWNER) {
+export async function resolveCleanupSource(input: z.infer<typeof cleanupRequestSchema>, ownerId: string = LOCAL_OWNER): Promise<{ title: string; video?: Video; url?: string }> {
   const provider = getAvatarProvider();
   if (!provider.startCleanup) throw new ValidationError(`Cleaning up recordings is not available with the ${provider.name} renderer`);
   // Read then written: two starts at the same moment can between them pass the cap.
@@ -68,7 +69,7 @@ export async function resolveCleanupSource(input: z.infer<typeof cleanupRequestS
   }
   // The renderer downloads the link itself, so it must be a public https address (not this network's, say).
   const url = input.sourceUrl!;
-  if (!/^https:\/\//i.test(url)) throw new ValidationError("Paste a public https link to the recording");
+  if (!/^https:\/\/[^\s]+$/i.test(url) || !URL.canParse(url)) throw new ValidationError("Paste a public https link to the recording");
   try {
     await assertPublicHttpUrl(url, "The recording's link");
   } catch (err) {
@@ -77,28 +78,51 @@ export async function resolveCleanupSource(input: z.infer<typeof cleanupRequestS
   return { url, title: input.title || "Cleaned recording" };
 }
 
-/** Starts cleaning one recording; the renderer keeps the job and the studio follows it. */
-export async function startCleanup(input: z.infer<typeof cleanupRequestSchema>, ownerId: string = LOCAL_OWNER): Promise<CleanupJob> {
+/** A client's key for one start (`Idempotency-Key`): letters, digits, `-` and `_`. */
+export const cleanupKeySchema = z.string().regex(/^[A-Za-z0-9_-]{8,100}$/, "The Idempotency-Key header takes 8 to 100 letters, digits, - or _");
+
+/**
+ * Starts cleaning one recording; the renderer keeps the job and the studio follows it. With a client `key`, the job's id
+ * is derived from the account and the key: a start retried with the same key (after a timeout, say) returns the job
+ * already stored, or, when the first try reached the renderer but was never stored, sends the renderer the same
+ * idempotency key, so it is not cleaned or paid for twice. `admit` runs once everything is checked, before the renderer
+ * is asked (the hourly limit), so a refused or repeated start does not count.
+ */
+export async function startCleanup(input: z.infer<typeof cleanupRequestSchema>, ownerId: string = LOCAL_OWNER, opts: { key?: string; admit?: () => void } = {}): Promise<CleanupJob> {
+  const id = opts.key ? `cu_${createHash("sha256").update(`${ownerId}\0${opts.key}`).digest("base64url").slice(0, 32)}` : newId("cu");
+  const existing = opts.key ? await getStore().get<CleanupJob>("cleanup", id) : null;
+  if (existing && existing.ownerId === ownerId) return existing;
   const source = await resolveCleanupSource(input, ownerId);
+  opts.admit?.();
   const provider = getAvatarProvider();
-  const id = newId("cu");
-  // The studio's id doubles as the renderer's idempotency key, so a retried start never pays twice.
-  const videoUrl = "video" in source && source.video ? await freshVideoUrl(source.video) : source.url!;
+  const videoUrl = source.video ? await freshVideoUrl(source.video) : source.url!;
   const { jobId } = await provider.startCleanup!({ videoUrl, title: source.title, key: id });
   const now = nowIso();
   const job: CleanupJob = stripUndefined({
     id,
     ownerId,
     title: source.title,
-    videoId: "video" in source ? source.video?.id : undefined,
-    sourceUrl: "url" in source ? source.url : undefined,
+    videoId: source.video?.id,
+    sourceUrl: source.url,
     provider: provider.name,
     providerJobId: jobId,
     status: "processing" as const,
     createdAt: now,
     updatedAt: now,
   });
-  return getStore().put("cleanup", job);
+  await getStore().put("cleanup", job);
+  // A video deleted for good while the job was being started has already had its cleanups cleared; this one goes too.
+  if (source.video && !(await getStore().get<Video>("video", source.video.id))) {
+    await getStore().remove("cleanup", job.id);
+    throw new NotFoundError(`Video ${source.video.id} not found`);
+  }
+  return job;
+}
+
+/** Removes every cleanup of a library video, when the video is deleted for good (the cleaned copy is its content too). */
+export async function clearCleanups(videoId: string, ownerId: string): Promise<void> {
+  const all = await getStore().list<CleanupJob>("cleanup", ownerId);
+  await Promise.all(all.filter((j) => j.videoId === videoId).map((j) => getStore().remove("cleanup", j.id)));
 }
 
 /** Forgets one cleaned recording (the renderer's copy expires on its own). */
@@ -119,9 +143,11 @@ async function refreshCleanup(job: CleanupJob): Promise<CleanupJob> {
     void _v;
     void _t;
     void _e;
+    // The share removed is worked out from the two lengths when both are known (the renderer's own figure otherwise).
+    const reductionPct = out.originalSec && out.outputSec !== undefined ? Math.round((1 - out.outputSec / out.originalSec) * 1000) / 10 : out.reductionPct;
     const next: CleanupJob = {
       ...kept,
-      ...stripUndefined({ ...out, progress: out.status === "processing" ? out.progress : undefined }),
+      ...stripUndefined({ ...out, reductionPct, progress: out.status === "processing" ? out.progress : undefined }),
       checkedAt: now,
       updatedAt: out.status !== job.status ? now : job.updatedAt,
     };

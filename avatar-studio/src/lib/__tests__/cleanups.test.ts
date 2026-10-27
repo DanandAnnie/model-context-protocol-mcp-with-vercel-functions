@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
-import { MAX_CLEANUPS, cleanupRequestSchema, deleteCleanup, deleteOwnerData, exportOwnerData, forgetCleanupChecks, listCleanups, publicCleanup, startCleanup } from "../services";
+import { MAX_CLEANUPS, cleanupKeySchema, cleanupRequestSchema, deleteCleanup, deleteOwnerData, deleteVideo, exportOwnerData, forgetCleanupChecks, listCleanups, publicCleanup, startCleanup } from "../services";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { providerStatus } from "../providers";
 import { MockAvatarProvider } from "../providers/avatar/mock";
@@ -50,6 +50,8 @@ describe("cleaned recordings", () => {
     await assert.rejects(startCleanup(cleanupRequestSchema.parse({ sourceUrl: "http://93.184.216.34/a.mp4" }), "u1"), /public https link/);
     await assert.rejects(startCleanup(cleanupRequestSchema.parse({ sourceUrl: "https://127.0.0.1/a.mp4" }), "u1"), (e: unknown) => e instanceof ValidationError && /public host/.test((e as Error).message));
     await assert.rejects(startCleanup(cleanupRequestSchema.parse({ sourceUrl: "https://10.0.0.5/a.mp4" }), "u1"), ValidationError);
+    assert.throws(() => cleanupRequestSchema.parse({ sourceUrl: `https://93.184.216.34/${"a".repeat(2000)}` }), /too long/);
+    await assert.rejects(startCleanup(cleanupRequestSchema.parse({ sourceUrl: "https://exa mple.com/a.mp4" }), "u1"), /public https link/);
   });
 
   it("cleans a recording in demo mode, followed until ready, for the account that asked only", async () => {
@@ -87,6 +89,69 @@ describe("cleaned recordings", () => {
     const trashed = await finished("u1", { deletedAt: now() });
     await assert.rejects(startCleanup(cleanupRequestSchema.parse({ videoId: trashed.id }), "u1"), /Restore the video/);
     await assert.rejects(startCleanup(cleanupRequestSchema.parse({ videoId: video.id }), "u2"), NotFoundError);
+  });
+
+  it("returns the same cleanup for a start retried with the same key, without asking the renderer again", async () => {
+    const proto = MockAvatarProvider.prototype as unknown as { startCleanup: (...a: unknown[]) => Promise<{ jobId: string }> };
+    const real = proto.startCleanup;
+    const keys: unknown[] = [];
+    proto.startCleanup = async function (this: unknown, ...a: unknown[]) {
+      keys.push((a[0] as { key: string }).key);
+      return real.apply(this, a);
+    };
+    try {
+      const input = cleanupRequestSchema.parse({ sourceUrl: PUBLIC });
+      let admitted = 0;
+      const admit = () => void admitted++;
+      const first = await startCleanup(input, "u1", { key: "retry-key-1", admit });
+      const again = await startCleanup(input, "u1", { key: "retry-key-1", admit });
+      assert.equal(again.id, first.id);
+      assert.deepEqual([keys.length, admitted], [1, 1], "a repeat neither asks the renderer nor counts against the limit");
+      assert.equal(keys[0], first.id, "the renderer's idempotency key is the cleanup's id");
+      const other = await startCleanup(input, "u2", { key: "retry-key-1" });
+      assert.notEqual(other.id, first.id, "the same key from another account is another cleanup");
+      assert.notEqual((await startCleanup(input, "u1")).id, first.id, "without a key every start is new");
+      assert.throws(() => cleanupKeySchema.parse("short"), /8 to 100/);
+      assert.throws(() => cleanupKeySchema.parse("has spaces in it"), /8 to 100/);
+      // A start that is refused is not admitted.
+      await assert.rejects(startCleanup(cleanupRequestSchema.parse({ sourceUrl: "https://127.0.0.1/a.mp4" }), "u1", { key: "retry-key-2", admit }), ValidationError);
+      assert.equal(admitted, 1);
+    } finally {
+      proto.startCleanup = real;
+    }
+  });
+
+  it("goes with its library video when the video is deleted for good, and is not kept for one deleted while it started", async () => {
+    const video = await finished("u1");
+    const link = await startCleanup(cleanupRequestSchema.parse({ sourceUrl: PUBLIC }), "u1");
+    await startCleanup(cleanupRequestSchema.parse({ videoId: video.id }), "u1");
+    await deleteVideo(video.id, "u1");
+    assert.equal((await getStore().list("cleanup", "u1")).length, 2, "the trash keeps it, as it keeps the video");
+    await deleteVideo(video.id, "u1", true);
+    assert.deepEqual((await getStore().list<CleanupJob>("cleanup", "u1")).map((c) => c.id), [link.id], "a cleanup of a link stays");
+    const gone = await finished("u1");
+    const proto = MockAvatarProvider.prototype as unknown as { startCleanup: (...a: unknown[]) => Promise<{ jobId: string }> };
+    const real = proto.startCleanup;
+    proto.startCleanup = async function (this: unknown, ...a: unknown[]) {
+      await getStore().remove("video", gone.id);
+      return real.apply(this, a);
+    };
+    try {
+      await assert.rejects(startCleanup(cleanupRequestSchema.parse({ videoId: gone.id }), "u1"), NotFoundError);
+      assert.equal((await getStore().list<CleanupJob>("cleanup", "u1")).filter((c) => c.videoId === gone.id).length, 0);
+    } finally {
+      proto.startCleanup = real;
+    }
+  });
+
+  it("asks the renderer about at most five cleanups per listing, the least recently checked first", async () => {
+    const old = new Date(Date.now() - 31 * 60 * 1000).toISOString();
+    for (let i = 0; i < 8; i++) {
+      await getStore().put("cleanup", { id: `cu_relink${i}`, ownerId: "u1", title: `Old ${i}`, provider: "mock", providerJobId: "mockcu_1", status: "completed", videoUrl: "https://r.example/x.mp4", createdAt: old, updatedAt: old, checkedAt: new Date(Date.parse(old) - i * 1000).toISOString() } satisfies CleanupJob);
+    }
+    const list = await listCleanups("u1");
+    const renewed = list.filter((c) => c.checkedAt && Date.parse(c.checkedAt) > Date.now() - 60_000).map((c) => c.id).sort();
+    assert.deepEqual(renewed, ["cu_relink3", "cu_relink4", "cu_relink5", "cu_relink6", "cu_relink7"]);
   });
 
   it("keeps at most the account's limit, and goes with the account", async () => {

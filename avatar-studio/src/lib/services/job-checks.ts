@@ -1,6 +1,6 @@
 // Following renderer jobs the studio does not get webhooks for (highlight clips, cleaned recordings): each job is asked
 // about at most every few seconds while it runs, one check at a time however many pages follow it, and a finished
-// job's signed links are renewed once old, with a pause after a failed try so a dead job does not cost a call per look.
+// job's signed links are renewed once old, waiting a few minutes between tries so a dead job does not cost a call per look.
 
 /** Finished jobs' links are signed for a limited time, so they are renewed once this old. */
 export const RELINK_MS = 30 * 60 * 1000;
@@ -8,6 +8,8 @@ export const RELINK_MS = 30 * 60 * 1000;
 export const RECHECK_MS = 4_000;
 /** After a check of a finished job, the next waits this long, so a dead job does not cost a call per page view. */
 export const RETRY_FINISHED_MS = 5 * 60 * 1000;
+/** Renderer checks one listing makes at most. */
+export const MAX_CHECKS_PER_CALL = 5;
 
 interface Followed {
   id: string;
@@ -40,9 +42,19 @@ export function jobChecker<T extends Followed>(refresh: (job: T) => Promise<T>) 
   }
 
   return {
-    /** The jobs, each asked about first when it is due. */
-    follow(jobs: T[], now = Date.now()): Promise<T[]> {
-      return Promise.all(jobs.map((j) => (needsCheck(j, now) ? checkOnce(j, now) : j)));
+    /**
+     * The jobs, those due asked about first: at most `max` per call, the least recently checked first, so a list of many
+     * old links cannot hold one request open on dozens of renderer calls (the rest are asked on the next look).
+     */
+    follow(jobs: T[], now = Date.now(), max = MAX_CHECKS_PER_CALL): Promise<T[]> {
+      const due = new Set(
+        jobs
+          .filter((j) => needsCheck(j, now))
+          .sort((a, b) => (a.checkedAt ?? a.updatedAt).localeCompare(b.checkedAt ?? b.updatedAt))
+          .slice(0, max)
+          .map((j) => j.id),
+      );
+      return Promise.all(jobs.map((j) => (due.has(j.id) ? checkOnce(j, now) : j)));
     },
     /** Forgets when jobs were last asked about (tests). */
     forget(): void {

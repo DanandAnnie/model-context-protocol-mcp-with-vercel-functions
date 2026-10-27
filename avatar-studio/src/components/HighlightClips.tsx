@@ -31,7 +31,7 @@ export function HighlightClips({ video, canEdit }: { video: Video; canEdit: bool
     // Not while the tab is hidden: nobody is reading it, and each check asks the renderer.
     const timer = setInterval(() => {
       if (document.visibilityState === "visible") void refetch();
-    }, 5000);
+    }, 10_000);
     return () => clearInterval(timer);
   }, [running, refetch]);
   // A page left open past the clips' link lifetime asks again when it is looked at, so the player and links still work.

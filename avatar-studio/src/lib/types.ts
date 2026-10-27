@@ -109,6 +109,34 @@ export interface HighlightJob {
   checkedAt?: string;
 }
 
+/** A recording cleaned of filler words ("um", "uh") and overlong silences by the renderer (HeyGen filler word removal). */
+export interface CleanupJob {
+  id: string;
+  ownerId: string;
+  title: string;
+  /** What was cleaned: one of the account's videos, or a public https link. */
+  videoId?: string;
+  sourceUrl?: string;
+  /** Renderer cleaning it, and its job id there, never shown to the account. */
+  provider: string;
+  providerJobId: string;
+  status: "processing" | "completed" | "failed";
+  progress?: number;
+  /** The cleaned cut, signed by the renderer for a limited time and renewed when it gets old. */
+  videoUrl?: string;
+  thumbnailUrl?: string;
+  originalSec?: number;
+  outputSec?: number;
+  /** Filler words cut (silences trimmed are not counted). */
+  cuts?: number;
+  /** How much shorter the cleaned cut is, in percent. */
+  reductionPct?: number;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+  checkedAt?: string;
+}
+
 export interface Voice {
   id: string;
   name: string;
@@ -853,6 +881,8 @@ export interface ProviderStatus {
   portraitGeneration: boolean;
   /** Whether the renderer can cut a finished video into short highlight clips. */
   highlightClips: boolean;
+  /** Whether the renderer can clean filler words and long silences out of a recording. */
+  fillerRemoval: boolean;
   /** Whether the TTS provider can design a voice from a description. */
   voiceDesign: boolean;
   /** Present when the request carried an owner (signed in, or open/password mode). */

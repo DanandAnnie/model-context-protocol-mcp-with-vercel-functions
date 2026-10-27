@@ -623,6 +623,35 @@ test("a finished video can be cut into short clips, listed with the video until 
   expect((await (await page.request.get(`/api/videos/${v.id}/highlights`)).json()).highlights).toEqual([]);
 });
 
+test("a recording can be cleaned of filler words, from a link or the library, and deleted", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Cleanup source ${Date.now().toString(36)}`);
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  await page.goto("/cleanup");
+  await expect(page.getByRole("heading", { name: "Clean up a recording" })).toBeVisible();
+  // A link must be a public https address; a private one is refused with the reason.
+  await page.getByLabel("Recording URL").fill("https://127.0.0.1/webinar.mp4");
+  await page.getByRole("button", { name: "Clean up recording" }).click();
+  await expect(page.getByText("must point to a public host")).toBeVisible();
+  // From the library: the video's title, marked cleaned.
+  await page.getByLabel("One of my videos").check();
+  await page.getByLabel("Video", { exact: true }).selectOption(v.id);
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/cleanups") && r.method() === "POST");
+  await page.getByRole("button", { name: "Clean up recording" }).click();
+  expect((await sent).postDataJSON()).toEqual({ videoId: v.id });
+  const item = page.getByTestId("cleanup").first();
+  await expect(item).toContainText("(cleaned)");
+  await expect(item).toContainText("From the library");
+  // The demo renderer finishes a few seconds later; the page checks again on its own.
+  await expect(item.getByTestId("cleanup-stats")).toContainText("7 filler words cut · 1m 04s → 59s (8.6% shorter)", { timeout: 20_000 });
+  await expect(item.getByRole("link", { name: /^Download / })).toHaveAttribute("href", /\/demo\/render\.webm$/);
+  const listed = (await (await page.request.get("/api/cleanups")).json()).cleanups as Array<Record<string, unknown>>;
+  expect(Object.keys(listed[0])).not.toContain("providerJobId");
+  // Deleting asks first, then focus stays on the page.
+  page.once("dialog", (d) => d.accept());
+  await item.getByRole("button", { name: /^Delete / }).click();
+  await expect(page.getByTestId("cleanup")).toHaveCount(listed.length - 1);
+});
+
 test("a scene can leave the presenter out and let its picture fill the frame", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Kitchen tour");
   await page.locator("textarea").fill("Welcome in, let me show you around.");
@@ -1687,7 +1716,7 @@ test("no page scrolls sideways at phone width", async ({ browser }) => {
     const v = await createVideoViaApi(page, "Phone width check");
     // A shared presenter makes the Interactive page render its widest row (six actions per presenter).
     agentId = ((await (await page.request.post("/api/agents", { data: { name: "Phone width presenter", avatarId: "stock_1" } })).json()).agent as { id: string }).id;
-    const pages = ["/home", "/create", "/agent", "/videos", `/videos/${v.id}`, "/templates", "/avatars", "/voices", "/batch", "/brand", "/interactive", "/workspace", "/settings", "/translate", `/share/${v.id}`];
+    const pages = ["/home", "/create", "/agent", "/videos", `/videos/${v.id}`, "/templates", "/avatars", "/voices", "/batch", "/brand", "/interactive", "/workspace", "/settings", "/translate", "/cleanup", `/share/${v.id}`];
     for (const path of pages) {
       await page.goto(path);
       await expect(page.locator("h1").first()).toBeVisible();
@@ -2148,7 +2177,7 @@ test("webhook settings reject private hosts and show the signing secret", async 
 test("pages have no WCAG 2.1 AA violations", async ({ page }) => {
   const v = await createVideoViaApi(page, "Accessible video");
   const agent = (await (await page.request.post("/api/agents", { data: { name: "Axe agent", avatarId: "stock_1" } })).json()).agent as { id: string };
-  const paths = ["/", "/login", "/home", "/create", "/agent", "/videos", `/videos/${v.id}`, "/templates", "/batch", "/avatars", "/voices", "/translate", "/interactive", "/brand", "/settings", `/share/${v.id}`, `/talk/${agent.id}`];
+  const paths = ["/", "/login", "/home", "/create", "/agent", "/videos", `/videos/${v.id}`, "/templates", "/batch", "/avatars", "/voices", "/translate", "/cleanup", "/interactive", "/brand", "/settings", `/share/${v.id}`, `/talk/${agent.id}`];
   const report: string[] = [];
   for (const path of paths) {
     await page.goto(path);
@@ -2239,6 +2268,7 @@ test("a workspace viewer sees view-only notices instead of create controls", asy
     ["/agent", "make videos"],
     ["/batch", "start batches"],
     ["/translate", "start translations"],
+    ["/cleanup", "clean up recordings"],
     ["/avatars", "add or change avatars"],
     ["/voices", "clone, design, or change voices"],
     ["/brand", "change the brand kit"],

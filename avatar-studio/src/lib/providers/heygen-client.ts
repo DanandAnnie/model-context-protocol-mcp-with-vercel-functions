@@ -140,6 +140,28 @@ export class HeyGenClient {
     }>(`${V3}/ai-clipping/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(10_000) });
   }
 
+  /** Starts cleaning filler words and long silences out of a video (v3, `POST /v3/filler-word-removals`); `key` makes a retry return the same job. */
+  async createFillerRemoval(body: Record<string, unknown>, key: string): Promise<string> {
+    const out = await this.request<{ filler_word_removal_id?: string }>(`${V3}/filler-word-removals`, { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": key }, signal: AbortSignal.timeout(20_000) });
+    if (!out?.filler_word_removal_id) throw new Error("HeyGen returned no filler removal job id");
+    return out.filler_word_removal_id;
+  }
+
+  /** A filler removal job and, once done, the cleaned video (`GET /v3/filler-word-removals/{id}`). */
+  fillerRemoval(id: string) {
+    return this.request<{
+      status: "pending" | "running" | "completed" | "failed" | string;
+      progress?: number;
+      video_url?: string | null;
+      thumbnail_url?: string | null;
+      original_duration?: number | null;
+      output_duration?: number | null;
+      num_cuts?: number | null;
+      reduction_pct?: number | null;
+      failure_message?: string | null;
+    }>(`${V3}/filler-word-removals/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(10_000) });
+  }
+
   /** A video (v3, `POST /v3/videos`); a studio request composes its scenes into one render. */
   generateVideo(body: Record<string, unknown>) {
     return this.request<{ video_id: string; status?: string }>(`${V3}/videos`, { method: "POST", body: JSON.stringify(body) });

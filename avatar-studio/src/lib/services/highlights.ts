@@ -8,16 +8,11 @@ import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { owned } from "./shared";
 import { getVideo } from "./videos";
+import { jobChecker } from "./job-checks";
 
 /** Clipping jobs kept per video; another needs one deleted first. */
 export const MAX_HIGHLIGHT_JOBS = 5;
 
-/** Finished clips' links are signed for a limited time, so they are renewed once this old. */
-const RELINK_MS = 30 * 60 * 1000;
-/** A set being cut is asked about at most this often, however many pages follow it. */
-const RECHECK_MS = 4_000;
-/** After a check of a finished set fails, the next waits this long, so a dead job does not cost a call per page view. */
-const RETRY_FINISHED_MS = 5 * 60 * 1000;
 /** How long the renderer is given to say where the source video is. */
 const SOURCE_TIMEOUT_MS = 10_000;
 
@@ -31,13 +26,12 @@ export function publicHighlight(job: HighlightJob): PublicHighlight {
   return rest;
 }
 
-/** When each set was last asked about (this instance), and the checks under way, shared by everyone following it. */
-const attempted = new Map<string, number>();
-const inFlight = new Map<string, Promise<HighlightJob>>();
+/** Follows sets being cut, and renews finished sets' links, without asking the renderer more than it needs. */
+const checks = jobChecker<HighlightJob>((job) => refreshHighlights(job));
 
 /** Forgets when sets were last asked about (tests). */
 export function forgetHighlightChecks(): void {
-  attempted.clear();
+  checks.forget();
 }
 
 export const highlightRequestSchema = z.object({
@@ -67,8 +61,7 @@ export function highlightsAvailable(): boolean {
 export async function listHighlights(videoId: string, ownerId: string = LOCAL_OWNER): Promise<HighlightJob[]> {
   await getVideo(videoId, ownerId, false);
   const jobs = (await getStore().list<HighlightJob>("highlight", ownerId)).filter((j) => j.videoId === videoId);
-  const now = Date.now();
-  const fresh = await Promise.all(jobs.map((j) => (needsCheck(j, now) ? checkOnce(j, now) : j)));
+  const fresh = await checks.follow(jobs);
   return fresh.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
@@ -97,7 +90,7 @@ export async function assertCanStartHighlights(videoId: string, input: z.infer<t
 export async function startHighlights(videoId: string, input: z.infer<typeof highlightRequestSchema>, ownerId: string = LOCAL_OWNER): Promise<HighlightJob> {
   const video = await assertCanStartHighlights(videoId, input, ownerId);
   const provider = getAvatarProvider();
-  const { jobId } = await provider.startHighlights!({ videoUrl: await sourceUrl(video), title: video.title, ...input });
+  const { jobId } = await provider.startHighlights!({ videoUrl: await freshVideoUrl(video), title: video.title, ...input });
   const now = nowIso();
   const job: HighlightJob = {
     id: newId("hl"),
@@ -136,24 +129,6 @@ export async function clearHighlights(videoId: string, ownerId: string): Promise
   await Promise.all(all.filter((j) => j.videoId === videoId).map((j) => getStore().remove("highlight", j.id)));
 }
 
-function needsCheck(job: HighlightJob, now: number): boolean {
-  const since = now - (attempted.get(job.id) ?? 0);
-  if (job.status === "processing") return since >= RECHECK_MS;
-  return job.status === "completed" && now - Date.parse(job.checkedAt ?? job.updatedAt) > RELINK_MS && since >= RETRY_FINISHED_MS;
-}
-
-/** One check per set at a time: pages following the same set share it, and the attempt is noted whether or not it works. */
-function checkOnce(job: HighlightJob, now: number): Promise<HighlightJob> {
-  const running = inFlight.get(job.id);
-  if (running) return running;
-  attempted.set(job.id, now);
-  // Forgotten once old, so the map does not grow without bound.
-  for (const [id, at] of attempted) if (now - at > RETRY_FINISHED_MS * 2) attempted.delete(id);
-  const run = refreshHighlights(job).finally(() => inFlight.delete(job.id));
-  inFlight.set(job.id, run);
-  return run;
-}
-
 /** Asks the renderer where a job stands and stores the answer. Never throws: a failed check keeps what was known. */
 async function refreshHighlights(job: HighlightJob): Promise<HighlightJob> {
   try {
@@ -181,7 +156,7 @@ async function refreshHighlights(job: HighlightJob): Promise<HighlightJob> {
 }
 
 /** A link the renderer can download the video from now: asked afresh from the renderer that made it, when that is the clipping one. */
-async function sourceUrl(video: Video): Promise<string> {
+export async function freshVideoUrl(video: Video): Promise<string> {
   if (video.providerJobId && video.provider === getAvatarProvider().name && video.provider !== "mock") {
     try {
       const status = await Promise.race([

@@ -90,6 +90,13 @@ export interface AvatarProvider {
   startHighlights?(input: HighlightInput): Promise<{ jobId: string }>;
   /** Where a clipping job stands, with the clips made so far (each link signed for a limited time). */
   highlightsStatus?(jobId: string): Promise<HighlightStatus>;
+  /**
+   * Starts cleaning filler words and overlong silences out of a recording (HeyGen filler word removal). `key` makes a
+   * retried start return the same job. Absent when the provider cannot clean recordings.
+   */
+  startCleanup?(input: { videoUrl: string; title: string; key: string }): Promise<{ jobId: string }>;
+  /** Where a cleanup stands, with the cleaned cut once it is ready (its link signed for a limited time). */
+  cleanupStatus?(jobId: string): Promise<CleanupStatus>;
   /** Parse an inbound webhook body into a job update, or null if unrecognised. */
   parseWebhook?(body: unknown): { providerJobId: string; update: AvatarJobStatus } | null;
 }
@@ -210,5 +217,17 @@ export interface HighlightStatus {
   status: "processing" | "completed" | "failed";
   progress?: number;
   clips: HighlightClip[];
+  error?: string;
+}
+
+export interface CleanupStatus {
+  status: "processing" | "completed" | "failed";
+  progress?: number;
+  videoUrl?: string;
+  thumbnailUrl?: string;
+  originalSec?: number;
+  outputSec?: number;
+  cuts?: number;
+  reductionPct?: number;
   error?: string;
 }

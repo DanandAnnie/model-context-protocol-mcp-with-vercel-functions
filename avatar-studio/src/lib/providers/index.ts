@@ -90,6 +90,7 @@ export function providerStatus(): ProviderStatus {
     voiceDesign: typeof getTtsProvider().designVoice === "function",
     portraitGeneration: typeof getAvatarProvider().generatePortrait === "function",
     highlightClips: typeof getAvatarProvider().startHighlights === "function",
+    fillerRemoval: typeof getAvatarProvider().startCleanup === "function",
     authEnabled: authEnabled(),
     authMode: authMode(),
     renderLimitPerMonth: config.renderLimitPerMonth ?? null,

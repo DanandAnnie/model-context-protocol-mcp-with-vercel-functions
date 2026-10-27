@@ -3,7 +3,7 @@ import { pauseSeconds, stripPauses } from "../../pauses";
 import { SAMPLE_PREVIEW_VIDEO, STOCK_AVATARS, portraitSvg } from "../../stock";
 import { demoAssetUrl } from "../../config";
 import type { AudioClip, Avatar, VideoRequest } from "../../types";
-import type { AvatarJobStatus, AvatarProvider, HighlightInput, HighlightStatus } from "../types";
+import type { AvatarJobStatus, AvatarProvider, CleanupStatus, HighlightInput, HighlightStatus } from "../types";
 
 /** Labeled, self-hosted stand-in; no avatar synthesis or paid operation occurs. */
 const SAMPLE_VIDEO = SAMPLE_PREVIEW_VIDEO;
@@ -59,6 +59,19 @@ export class MockAvatarProvider implements AvatarProvider {
       videoUrl: demoAssetUrl(SAMPLE_VIDEO),
     }));
     return { status: "completed", progress: 100, clips };
+  }
+
+  /** Demo cleanup: the sample video stands in for the cleaned cut a few seconds later, with made-up statistics; nothing is cut. */
+  async startCleanup() {
+    return { jobId: `mockcu_${Date.now()}` };
+  }
+
+  async cleanupStatus(jobId: string): Promise<CleanupStatus> {
+    const m = /^mockcu_(\d+)$/.exec(jobId);
+    if (!m) return { status: "failed", error: "No such cleanup" };
+    const elapsed = Date.now() - Number(m[1]);
+    if (elapsed < MockAvatarProvider.CLIP_MS) return { status: "processing", progress: Math.min(95, Math.round((elapsed / MockAvatarProvider.CLIP_MS) * 100)) };
+    return { status: "completed", progress: 100, videoUrl: demoAssetUrl(SAMPLE_VIDEO), thumbnailUrl: SAMPLE_THUMB, originalSec: 64, outputSec: 58.5, cuts: 7, reductionPct: 8.6 };
   }
 
   /** Demo presenter from a description: an illustrated portrait whose colours follow the description; nothing is generated. */

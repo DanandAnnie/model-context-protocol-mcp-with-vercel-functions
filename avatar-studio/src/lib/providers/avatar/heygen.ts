@@ -6,7 +6,7 @@ import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
 import { HeyGenClient } from "../heygen-client";
 import { ValidationError } from "../../errors";
-import type { AvatarJobStatus, AvatarProvider, HighlightInput, HighlightStatus, RenderCast } from "../types";
+import type { AvatarJobStatus, AvatarProvider, CleanupStatus, HighlightInput, HighlightStatus, RenderCast } from "../types";
 
 /**
  * Where a custom portrait's v3 photo avatar look is kept (`providerAssetIds`). Portraits uploaded as v1 talking photos
@@ -332,6 +332,42 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     if (job.status === "completed") return { status: "completed", progress: 100, clips };
     if (job.status === "failed" || job.status === "cancelled") return { status: "failed", clips, error: job.failure_message || (job.status === "cancelled" ? "The clipping job was cancelled" : "HeyGen could not clip that video") };
     return { status: "processing", progress: typeof job.progress === "number" ? job.progress : undefined, clips };
+  }
+
+  /** A recording with its filler words ("um", "uh") and overlong silences cut out (v3 filler word removal), one cleaned cut back. */
+  async startCleanup({ videoUrl, title, key }: { videoUrl: string; title: string; key: string }) {
+    try {
+      return { jobId: await this.client.createFillerRemoval({ video: { type: "url", url: videoUrl }, title }, key) };
+    } catch (err) {
+      // A recording HeyGen will not clean (no speech, unreadable, too long, or past the plan) is the account's to change.
+      const message = err instanceof Error ? err.message : "";
+      if (/ failed: (400|402|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not clean that recording: ${heygenReason(message)}`);
+      throw err;
+    }
+  }
+
+  async cleanupStatus(jobId: string): Promise<CleanupStatus> {
+    let job;
+    try {
+      job = await this.client.fillerRemoval(jobId);
+    } catch (err) {
+      if (err instanceof Error && / failed: 404 /.test(err.message)) return { status: "failed", error: "This cleaned recording is no longer available from HeyGen; clean it again" };
+      throw err;
+    }
+    if (job.status === "failed") return { status: "failed", error: job.failure_message || "HeyGen could not clean that recording" };
+    if (job.status !== "completed") return { status: "processing", ...(typeof job.progress === "number" ? { progress: job.progress } : {}) };
+    const videoUrl = httpsOnly(job.video_url);
+    if (!videoUrl) return { status: "failed", error: "HeyGen finished without a cleaned video" };
+    return stripEmpty({
+      status: "completed" as const,
+      progress: 100,
+      videoUrl,
+      thumbnailUrl: httpsOnly(job.thumbnail_url),
+      originalSec: job.original_duration ?? undefined,
+      outputSec: job.output_duration ?? undefined,
+      cuts: job.num_cuts ?? undefined,
+      reductionPct: job.reduction_pct ?? undefined,
+    });
   }
 
   async getStatus(providerJobId: string): Promise<AvatarJobStatus> {

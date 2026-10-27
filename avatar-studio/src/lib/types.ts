@@ -232,9 +232,14 @@ export interface LipsyncJob {
   /** The footage: one of the account's videos, or a public https link. */
   videoId?: string;
   sourceUrl?: string;
-  /** The new audio: one of the account's audio clips, or a public https link. */
+  /**
+   * The new audio: one of the account's audio clips, a public https link, or one of its recordings or texts spoken in an
+   * instant voice (the voice changer's), named as it was then.
+   */
   clipId?: string;
   audioUrl?: string;
+  voiceChangeId?: string;
+  audioName?: string;
   mode: LipsyncMode;
   /** Renderer syncing it, and its job id there, never shown to the account. */
   provider: string;

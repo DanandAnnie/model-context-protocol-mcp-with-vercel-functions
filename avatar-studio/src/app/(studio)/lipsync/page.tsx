@@ -8,8 +8,10 @@ import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api, formatDate, formatSeconds, isRefusal } from "@/lib/client";
 import { clipBody as clipFrom } from "@/lib/clip-upload";
-import { type AudioClip, type LipsyncJob, type LipsyncMode, type Video } from "@/lib/types";
+import { type AudioClip, type LipsyncJob, type LipsyncMode, type Video, type VoiceChange } from "@/lib/types";
 
+/** A recording or text spoken in one of the account's instant voices, as the voice changer lists it. */
+type Voiced = Pick<VoiceChange, "id" | "title" | "status" | "audioUrl" | "durationSec">;
 /** A lip sync as the server lists it: never the renderer or its job id. */
 type Lipsync = Omit<LipsyncJob, "ownerId" | "provider" | "providerJobId">;
 /** A fresh key for one start (a UUID where the browser has one, as it does over https and on localhost). */
@@ -20,7 +22,8 @@ const MODE_LABEL: Record<LipsyncMode, string> = { speed: "Fast", precision: "Pre
 /**
  * "Lip sync": a video given a new audio track, the speaker's mouth redrawn to match (HeyGen lip sync). For a line
  * re-recorded after the shoot, a voice-over replaced, or a dub of one's own. The footage is a video of the library or a
- * link; the audio is a saved audio clip (uploaded here or recorded for a scene) or a link.
+ * link; the audio is a saved audio clip (uploaded here or recorded for a scene), a recording or text spoken in one of the
+ * account's instant voices (`?voiceChange=` chooses one, from the voice changer), or a link.
  */
 export default function LipsyncPage() {
   const canEdit = useCanEdit();
@@ -38,10 +41,21 @@ export default function LipsyncPage() {
   const videos = (library?.videos ?? []).filter((v) => v.videoUrl && !v.deletedAt);
   const { data: clipData, setData: setClipData, refetch: refetchClips } = useApi<{ clips: AudioClip[] }>("/api/clips");
   const clips = clipData?.clips ?? [];
+  const { data: voiceData } = useApi<{ changes: Voiced[] }>("/api/voice-changer");
+  const voiced = (voiceData?.changes ?? []).filter((c) => c.status === "completed" && c.audioUrl);
   const [from, setFrom] = useState<"link" | "library">("library");
   const [sourceUrl, setSourceUrl] = useState("");
   const [videoId, setVideoId] = useState("");
-  const [audioFrom, setAudioFrom] = useState<"clip" | "link">("clip");
+  const [audioFrom, setAudioFrom] = useState<"clip" | "link" | "voice">("clip");
+  const [voiceChangeId, setVoiceChangeId] = useState("");
+  // Sent here from the voice changer with one of its recordings chosen.
+  useEffect(() => {
+    const chosen = new URLSearchParams(window.location.search).get("voiceChange");
+    if (chosen && /^vc_[A-Za-z0-9_-]{1,64}$/.test(chosen)) {
+      setAudioFrom("voice");
+      setVoiceChangeId(chosen);
+    }
+  }, []);
   const [clipId, setClipId] = useState("");
   const [audioUrl, setAudioUrl] = useState("");
   const [mode, setMode] = useState<LipsyncMode>("speed");
@@ -96,7 +110,7 @@ export default function LipsyncPage() {
     setRequestKey(newKey());
   }
   const videoReady = from === "link" ? /^https:\/\/\S+$/i.test(sourceUrl.trim()) : !!videoId;
-  const audioReady = audioFrom === "link" ? /^https:\/\/\S+$/i.test(audioUrl.trim()) : !!clipId;
+  const audioReady = audioFrom === "link" ? /^https:\/\/\S+$/i.test(audioUrl.trim()) : audioFrom === "voice" ? !!voiceChangeId : !!clipId;
   const canStart = canEdit !== false && data?.available !== false;
 
   async function upload(file: File) {
@@ -125,7 +139,7 @@ export default function LipsyncPage() {
     try {
       const body = {
         ...(from === "link" ? { sourceUrl: sourceUrl.trim() } : { videoId }),
-        ...(audioFrom === "link" ? { audioUrl: audioUrl.trim() } : { clipId }),
+        ...(audioFrom === "link" ? { audioUrl: audioUrl.trim() } : audioFrom === "voice" ? { voiceChangeId } : { clipId }),
         mode,
         ...(title.trim() ? { title: title.trim() } : {}),
       };
@@ -138,6 +152,7 @@ export default function LipsyncPage() {
       setVideoId("");
       setAudioUrl("");
       setClipId("");
+      setVoiceChangeId("");
       setTitle("");
       setNote(`Lip-syncing ${lipsync.title}; it appears here when it is ready.`);
       // Focus goes to the new lip sync, rather than being lost with the cleared form.
@@ -149,6 +164,7 @@ export default function LipsyncPage() {
         setClipId("");
         void refetchClips();
       }
+      if (e instanceof Error && /recording in another voice is no longer available/.test(e.message)) setVoiceChangeId("");
       // A refusal is an answer: trying again (after topping up, say) is a new start. A lost answer, or one HeyGen is still
       // working on, keeps its key, so a retry returns the start that may have gone through.
       if (isRefusal(e)) setRequestKey(newKey());
@@ -230,13 +246,31 @@ export default function LipsyncPage() {
                     <input type="radio" name="lipsync-audio" className="accent-brand-600" checked={audioFrom === "clip"} disabled={canEdit === false} onChange={() => (setAudioFrom("clip"), changed())} />
                     An audio clip
                   </label>
+                  {(voiced.length > 0 || audioFrom === "voice") && (
+                    <label className="flex items-center gap-2">
+                      <input type="radio" name="lipsync-audio" className="accent-brand-600" checked={audioFrom === "voice"} disabled={canEdit === false} onChange={() => (setAudioFrom("voice"), changed())} />
+                      In one of my voices
+                    </label>
+                  )}
                   <label className="flex items-center gap-2">
                     <input type="radio" name="lipsync-audio" className="accent-brand-600" checked={audioFrom === "link"} disabled={canEdit === false} onChange={() => (setAudioFrom("link"), changed())} />
                     A link
                   </label>
                 </div>
               </fieldset>
-              {audioFrom === "link" ? (
+              {audioFrom === "voice" ? (
+                <Field label="Recording in your voice" hint={voiced.length ? "A recording or text spoken in one of your instant voices, from the voice changer." : voiceData ? "None is ready; make one in the voice changer." : "Loading your recordings…"}>
+                  <select className={inputClass} value={voiceChangeId} disabled={canEdit === false} onChange={(e) => (setVoiceChangeId(e.target.value), changed())}>
+                    <option value="">{voiced.length ? "Choose a recording" : "No recordings yet"}</option>
+                    {voiced.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.title}
+                        {typeof c.durationSec === "number" && c.durationSec > 0 ? ` (${formatSeconds(Math.max(1, Math.round(c.durationSec)))})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              ) : audioFrom === "link" ? (
                 <Field label="Audio URL" hint="A public https link to an MP3 or WAV file with the new speech.">
                   <input type="url" inputMode="url" className={inputClass} value={audioUrl} disabled={canEdit === false} onChange={(e) => (setAudioUrl(e.target.value), changed())} placeholder="https://…/new-voice-over.mp3" />
                 </Field>
@@ -315,7 +349,7 @@ export default function LipsyncPage() {
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium text-slate-900">{l.title}</div>
                       <div className="mt-0.5 text-xs text-slate-500" data-testid="lipsync-meta">
-                        {l.videoId ? "A library video" : "A linked video"} · {l.clipId ? (clipName(l.clipId) ? `audio clip “${clipName(l.clipId)}”` : "an audio clip") : "linked audio"} · {MODE_LABEL[l.mode]} · {formatDate(l.createdAt)}
+                        {l.videoId ? "A library video" : "A linked video"} · {l.voiceChangeId ? `“${l.audioName ?? "a recording"}” in your voice` : l.clipId ? (clipName(l.clipId) ? `audio clip “${clipName(l.clipId)}”` : "an audio clip") : "linked audio"} · {MODE_LABEL[l.mode]} · {formatDate(l.createdAt)}
                         {l.status === "completed" && typeof l.durationSec === "number" ? ` · ${formatSeconds(Math.max(1, Math.round(l.durationSec)))}` : ""}
                       </div>
                       {l.error && <div className="mt-1 text-xs text-rose-600">{l.error}</div>}

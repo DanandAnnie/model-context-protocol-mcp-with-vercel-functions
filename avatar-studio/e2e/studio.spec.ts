@@ -923,6 +923,14 @@ test("an instant voice is made from a recording with the speaker's agreement, an
   await expect(speechCard.getByRole("alert")).toHaveCount(0);
   const withText = (await (await page.request.get("/api/voice-changer")).json()) as { changes: Array<Record<string, unknown>> };
   const spokenRow = withText.changes.find((c) => c.text === "Welcome to the team.")!;
+  // It can go straight onto a video: the lip sync page opens with it chosen as the new audio.
+  const lipsyncLink = spokenCard.getByRole("link", { name: /^Lip-sync a video to Welcome to the team in / });
+  await expect(lipsyncLink).toHaveAttribute("href", `/lipsync?voiceChange=${spokenRow.id}`);
+  const lipsyncPage = await page.context().newPage();
+  await lipsyncPage.goto(`/lipsync?voiceChange=${spokenRow.id}`);
+  await expect(lipsyncPage.getByLabel("In one of my voices")).toBeChecked();
+  await expect(lipsyncPage.getByRole("combobox", { name: /^Recording in your voice\b/ })).toHaveValue(String(spokenRow.id));
+  await lipsyncPage.close();
   for (const key of ["provider", "providerVoiceId", "providerAudio", "ownerId", "clipId"]) expect(Object.keys(spokenRow)).not.toContain(key);
   page.once("dialog", (d) => d.accept());
   await spokenCard.getByRole("button", { name: /^Delete / }).click();

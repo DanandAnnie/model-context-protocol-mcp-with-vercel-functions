@@ -10,7 +10,7 @@ import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { providerStatus } from "../providers";
 import { MockAvatarProvider } from "../providers/avatar/mock";
 import { getStore } from "../store";
-import type { AudioClip, LipsyncJob, Video } from "../types";
+import type { AudioClip, LipsyncJob, Video, VoiceChange } from "../types";
 
 beforeEach(() => {
   globalThis.__avatarStudioStore = new MemoryStore();
@@ -71,7 +71,7 @@ describe("lip syncs", () => {
   it("takes one footage and one audio, each a library item or a public https link, at a known quality", async () => {
     assert.throws(() => lipsyncRequestSchema.parse({ audioUrl: AUDIO }), /Choose one of your videos or paste a link to a video/);
     assert.throws(() => lipsyncRequestSchema.parse({ videoId: "vid_1", sourceUrl: VIDEO, audioUrl: AUDIO }), /Choose one of your videos/);
-    assert.throws(() => lipsyncRequestSchema.parse({ sourceUrl: VIDEO }), /Choose one of your audio clips or paste a link/);
+    assert.throws(() => lipsyncRequestSchema.parse({ sourceUrl: VIDEO }), /Choose one of your audio clips or recordings in another voice, or paste a link/);
     assert.throws(() => lipsyncRequestSchema.parse({ sourceUrl: VIDEO, clipId: "clip_1", audioUrl: AUDIO }), /Choose one of your audio clips/);
     assert.throws(() => lipsyncRequestSchema.parse({ sourceUrl: VIDEO, audioUrl: AUDIO, mode: "turbo" }));
     assert.equal(lipsyncRequestSchema.parse({ sourceUrl: VIDEO, audioUrl: AUDIO }).mode, "speed", "fast unless asked otherwise");
@@ -120,6 +120,53 @@ describe("lip syncs", () => {
     await assert.rejects(startLipsync(lipsyncRequestSchema.parse({ sourceUrl: VIDEO, clipId: clip.id }), "u2"), /no longer available/, "another account's clip is not offered");
     await deleteClip(clip.id, "u1");
     await assert.rejects(startLipsync(lipsyncRequestSchema.parse({ sourceUrl: VIDEO, clipId: clip.id }), "u1"), /no longer available/);
+  });
+
+  it("syncs a video to a recording spoken in one of the account's voices, sending the renderer's own link", async () => {
+    const change = (id: string, owner: string, extra: Partial<VoiceChange> = {}): VoiceChange => ({
+      id,
+      ownerId: owner,
+      title: "Welcome in Narrator",
+      voiceId: "iv_1",
+      voiceName: "Narrator",
+      text: "Welcome.",
+      provider: "mock",
+      providerVoiceId: "mockiv_1",
+      status: "completed",
+      audioUrl: "https://files.heygen.ai/generated/speech.wav?sig=1",
+      createdAt: now(),
+      updatedAt: now(),
+      ...extra,
+    });
+    await getStore().put("voicechange", change("vc_ready", "u1"));
+    await getStore().put("voicechange", change("vc_busy", "u1", { status: "processing", audioUrl: undefined }));
+    await getStore().put("voicechange", change("vc_theirs", "u2"));
+    const proto = MockAvatarProvider.prototype as unknown as { startLipsync: (...a: unknown[]) => Promise<{ jobId: string }> };
+    const real = proto.startLipsync;
+    const sent: Array<{ audio: unknown }> = [];
+    proto.startLipsync = async function (this: unknown, ...a: unknown[]) {
+      sent.push(a[0] as { audio: unknown });
+      return real.apply(this, a);
+    };
+    try {
+      const video = await finished("u1");
+      const job = await startLipsync(lipsyncRequestSchema.parse({ videoId: video.id, voiceChangeId: "vc_ready" }), "u1", { key: "voice-lipsync-1" });
+      assert.deepEqual([job.voiceChangeId, job.audioName, job.audioUrl, job.clipId], ["vc_ready", "Welcome in Narrator", undefined, undefined]);
+      assert.deepEqual(sent[0].audio, { type: "url", url: "https://files.heygen.ai/generated/speech.wav?sig=1" });
+      // Retried with the same key it is the same lip sync; with other audio it is not.
+      assert.equal((await startLipsync(lipsyncRequestSchema.parse({ videoId: video.id, voiceChangeId: "vc_ready" }), "u1", { key: "voice-lipsync-1" })).id, job.id);
+      await assert.rejects(startLipsync(lipsyncRequestSchema.parse({ videoId: video.id, audioUrl: AUDIO }), "u1", { key: "voice-lipsync-1" }), ConflictError);
+      // One still being spoken, another account's, or one deleted is refused before the renderer is asked.
+      await assert.rejects(startLipsync(lipsyncRequestSchema.parse({ videoId: video.id, voiceChangeId: "vc_busy" }), "u1"), /still being spoken/);
+      await assert.rejects(startLipsync(lipsyncRequestSchema.parse({ videoId: video.id, voiceChangeId: "vc_theirs" }), "u1"), /recording in another voice is no longer available/);
+      await assert.rejects(startLipsync(lipsyncRequestSchema.parse({ videoId: video.id, voiceChangeId: "vc_gone" }), "u1"), /no longer available/);
+      assert.equal(sent.length, 1);
+      // Exactly one audio source.
+      assert.throws(() => lipsyncRequestSchema.parse({ videoId: video.id, voiceChangeId: "vc_ready", audioUrl: AUDIO }), /Choose one of your audio clips or recordings/);
+      assert.throws(() => lipsyncRequestSchema.parse({ videoId: video.id, voiceChangeId: "nope" }), /recordings in another voice/);
+    } finally {
+      proto.startLipsync = real;
+    }
   });
 
   it("returns the same lip sync for a start retried with the same key, without asking the renderer again", async () => {

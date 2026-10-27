@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Download, Mic2, Trash2, Type, Upload, Wand2 } from "lucide-react";
+import Link from "next/link";
+import { AudioLines, Download, Mic2, Trash2, Type, Upload, Wand2 } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
@@ -523,6 +524,12 @@ export default function VoiceChangerPage() {
                           <a href={c.audioUrl} download target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:underline" aria-label={`Download ${c.title}, ${formatDate(c.createdAt)}`}>
                             <Download className="h-3 w-3" aria-hidden /> Download
                           </a>
+                          {canEdit === true && (
+                            // Its voice on a video: the lip sync page with this recording chosen as the new audio.
+                            <Link href={`/lipsync?voiceChange=${c.id}`} className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:underline" aria-label={`Lip-sync a video to ${c.title}, ${formatDate(c.createdAt)}`}>
+                              <AudioLines className="h-3 w-3" aria-hidden /> Lip-sync a video
+                            </Link>
+                          )}
                         </div>
                       )}
                     </Card>

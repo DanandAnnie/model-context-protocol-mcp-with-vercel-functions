@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
-import { LIPSYNC_MODES, type AudioClip, type LipsyncJob, type Video } from "../types";
+import { LIPSYNC_MODES, type AudioClip, type LipsyncJob, type Video, type VoiceChange } from "../types";
 import type { LipsyncInput } from "../providers/types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
@@ -26,13 +26,17 @@ export const lipsyncRequestSchema = z
     /** The footage: one of the account's finished videos, or a public https link to a video. */
     videoId: z.string().trim().min(1).optional(),
     sourceUrl: z.string().trim().max(2000, "The link is too long").optional(),
-    /** The new audio: one of the account's audio clips, or a public https link to an audio file. */
+    /**
+     * The new audio: one of the account's audio clips, a public https link to an audio file, or one of its recordings or
+     * texts spoken in an instant voice (the voice changer's).
+     */
     clipId: z.string().trim().min(1).optional(),
     audioUrl: z.string().trim().max(2000, "The link is too long").optional(),
+    voiceChangeId: z.string().regex(/^vc_[A-Za-z0-9_-]{1,64}$/, "Choose one of your recordings in another voice").optional(),
     mode: z.enum(LIPSYNC_MODES).default("speed"),
   })
   .refine((v) => !!v.videoId !== !!v.sourceUrl, { message: "Choose one of your videos or paste a link to a video", path: ["sourceUrl"] })
-  .refine((v) => !!v.clipId !== !!v.audioUrl, { message: "Choose one of your audio clips or paste a link to the new audio", path: ["audioUrl"] });
+  .refine((v) => [v.clipId, v.audioUrl, v.voiceChangeId].filter(Boolean).length === 1, { message: "Choose one of your audio clips or recordings in another voice, or paste a link to the new audio", path: ["audioUrl"] });
 
 export const lipsyncIdSchema = z.string().regex(/^ls_[A-Za-z0-9_-]{1,64}$/, "Unknown lip sync");
 
@@ -78,7 +82,7 @@ async function publicLink(url: string, what: string): Promise<string> {
 }
 
 /** What a start would sync, and its title: checked before it counts against the hourly limit. */
-export async function resolveLipsyncSources(input: z.infer<typeof lipsyncRequestSchema>, ownerId: string = LOCAL_OWNER): Promise<{ title: string; video?: Video; url?: string; clip?: AudioClip; audioUrl?: string }> {
+export async function resolveLipsyncSources(input: z.infer<typeof lipsyncRequestSchema>, ownerId: string = LOCAL_OWNER): Promise<{ title: string; video?: Video; url?: string; clip?: AudioClip; audioUrl?: string; voiceChange?: VoiceChange }> {
   const provider = getAvatarProvider();
   if (!provider.startLipsync) throw new ValidationError(`Lip sync is not available with the ${provider.name} renderer`);
   // Read then written: two starts at the same moment can between them pass the cap.
@@ -94,7 +98,17 @@ export async function resolveLipsyncSources(input: z.infer<typeof lipsyncRequest
   }
   let clip: AudioClip | undefined;
   let audioUrl: string | undefined;
-  if (input.clipId) {
+  let voiceChange: VoiceChange | undefined;
+  if (input.voiceChangeId) {
+    // The renderer's own output, so its link is sent as it is (it is the renderer's, signed for a limited time).
+    try {
+      voiceChange = owned(await getStore().get<VoiceChange>("voicechange", input.voiceChangeId), ownerId, "Recording");
+    } catch (err) {
+      if (err instanceof NotFoundError) throw new ValidationError("That recording in another voice is no longer available; choose another");
+      throw err;
+    }
+    if (voiceChange.status !== "completed" || !voiceChange.audioUrl) throw new ValidationError(voiceChange.status === "failed" ? `“${voiceChange.title}” could not be made; choose another recording` : `“${voiceChange.title}” is still being spoken; try again once it is ready`);
+  } else if (input.clipId) {
     try {
       clip = await getClip(input.clipId, ownerId);
     } catch (err) {
@@ -105,7 +119,7 @@ export async function resolveLipsyncSources(input: z.infer<typeof lipsyncRequest
     audioUrl = await publicLink(input.audioUrl!, "the new audio");
   }
   const title = input.title || (video ? withSuffix(video.title, " (lip-synced)", 120) : "Lip-synced video");
-  return { title, video, url, clip, audioUrl };
+  return { title, video, url, clip, audioUrl, voiceChange };
 }
 
 /**
@@ -121,7 +135,7 @@ export async function startLipsync(input: z.infer<typeof lipsyncRequestSchema>, 
   if (existing && existing.ownerId === ownerId) {
     // The same key with other footage, audio, or mode is a mistake to say, not a start to repeat.
     const sameVideo = input.videoId ? existing.videoId === input.videoId : existing.sourceUrl === input.sourceUrl;
-    const sameAudio = input.clipId ? existing.clipId === input.clipId : existing.audioUrl === input.audioUrl;
+    const sameAudio = input.voiceChangeId ? existing.voiceChangeId === input.voiceChangeId : input.clipId ? existing.clipId === input.clipId : !!input.audioUrl && existing.audioUrl === input.audioUrl;
     if (!sameVideo || !sameAudio || existing.mode !== input.mode) throw new ConflictError("This Idempotency-Key was already used for another lip sync; send a new key");
     return existing;
   }
@@ -137,7 +151,7 @@ export async function startLipsync(input: z.infer<typeof lipsyncRequestSchema>, 
     if (!assetId) throw new Error(`The ${provider.name} renderer kept no upload of audio clip ${source.clip.id}`);
     audio = { type: "asset", assetId };
   } else {
-    audio = { type: "url", url: source.audioUrl! };
+    audio = { type: "url", url: source.voiceChange?.audioUrl ?? source.audioUrl! };
   }
   const videoUrl = source.video ? await freshVideoUrl(source.video) : source.url!;
   const { jobId } = await provider.startLipsync!({ videoUrl, audio, mode: input.mode, title: source.title, key: id });
@@ -150,6 +164,8 @@ export async function startLipsync(input: z.infer<typeof lipsyncRequestSchema>, 
     sourceUrl: source.url,
     clipId: source.clip?.id,
     audioUrl: source.audioUrl,
+    voiceChangeId: source.voiceChange?.id,
+    audioName: source.voiceChange?.title,
     mode: input.mode,
     provider: provider.name,
     providerJobId: jobId,

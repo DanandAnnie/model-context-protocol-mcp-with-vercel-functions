@@ -475,6 +475,10 @@ test("photo avatar motion is set in the editor, kept with the video and its copy
 test("a voice that speaks several accents can be given one, kept with the video and its copy", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Accented tour");
   await page.locator("textarea").fill("Welcome to the open house.");
+  // Other tests may change the editor's first voice, so Emma is picked.
+  await expect(page.getByText(/ · 16:9 · 1 scene · /)).not.toContainText("No voice");
+  await page.getByRole("button", { name: "Voice", exact: true }).click();
+  await page.getByRole("button", { name: /^Emma en-US/ }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   const accent = page.getByLabel("Accent", { exact: true });
   // Emma speaks English in several accents, so only English ones are offered.
@@ -492,7 +496,11 @@ test("a voice that speaks several accents can be given one, kept with the video 
   await page.goto(`/create?from=${id}`);
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByLabel("Accent", { exact: true })).toHaveValue("en-GB");
-  await page.getByLabel("Accent", { exact: true }).selectOption("");
+  // James speaks one accent, so the copy's accent is kept on screen but not sent.
+  await page.getByRole("button", { name: "Voice", exact: true }).click();
+  await page.getByRole("button", { name: /^James en-US/ }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByLabel("Accent", { exact: true }).locator("option:checked")).toHaveText("British English (en-GB), not sent: no voice here takes it");
   const again = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
   await page.getByRole("button", { name: "Generate video" }).click();
   expect("accent" in ((await again).postDataJSON() as Record<string, unknown>)).toBe(false);

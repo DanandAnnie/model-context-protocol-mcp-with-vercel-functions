@@ -862,7 +862,7 @@ export default function VideoDetailPage() {
                   {video.accent ? (
                     <Row label="Accent">
                       {`${languageLabel(video.accent)} (${video.accent})`}
-                      {video.provider !== "heygen" ? " (not applied by this renderer)" : " (voices that offer accents)"}
+                      {video.provider !== "heygen" ? " (not applied by this renderer)" : " (where the voice offers it)"}
                     </Row>
                   ) : null}
                   {video.expressiveness || video.motionPrompt ? (

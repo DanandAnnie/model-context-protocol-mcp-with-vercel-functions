@@ -51,12 +51,17 @@ export function SectionTitle({ title, subtitle, action }: { title: ReactNode; su
   );
 }
 
-export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+/** `hintId` names the hint, for a control whose own aria-label would otherwise leave the hint unannounced. */
+export function Field({ label, hint, hintId, children }: { label: string; hint?: string; hintId?: string; children: ReactNode }) {
   return (
     <label className="block">
       <span className="mb-1.5 block text-sm font-medium text-slate-700">{label}</span>
       {children}
-      {hint && <span className="mt-1 block text-xs text-slate-500">{hint}</span>}
+      {hint && (
+        <span id={hintId} className="mt-1 block text-xs text-slate-500">
+          {hint}
+        </span>
+      )}
     </label>
   );
 }

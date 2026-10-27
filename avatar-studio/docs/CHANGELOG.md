@@ -188,3 +188,9 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
   - HeyGen gets the accent on every spoken scene whose voice offers accents and speaks the accent's language, narrated pictures included. Scenes with recorded audio or silence, voices of one accent, and voices of another language keep their own.
   - Drafts, copies, templates, retries, other sizes, and batches keep it. The batch page carries a template's accent. The video page lists it.
   - New `accent.test.ts`, a voice-list check in `heygen-v3.test.ts`, and an e2e test.
+  - An independent review of `48732df` found the request bodies valid against HeyGen's v3 schema and the accent kept through every path. Its findings are fixed:
+    - A voice of a known language with no listed accents (Swedish, Polish, Cantonese) was treated as a voice of no single language. It was offered every accent and, as a scene voice, sent the video's English one. Such a voice is now offered none and sent none, with a unit test that fails without the fix.
+    - The editor picks the accent's voice from the voices that actually speak a scene, and sends no accent that no speaking voice takes. A copy's accent kept for a voice with one accent says so, and the e2e test covers it.
+    - While the voice list loads, the control no longer says that no voice offers an accent. Its hint is announced with it (`aria-describedby`), so a disabled control explains itself.
+    - The hint and the video page say that HeyGen applies the accent where the voice offers it. The unit test covers recorded-audio and silent scenes, and the e2e test picks Emma itself.
+    - The API docs list the voice list's `accents` field and say that the accent follows the voice's language. They also note that HeyGen documents `locale` as a free tag, so the list is unconfirmed against a live account.

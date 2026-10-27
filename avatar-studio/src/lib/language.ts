@@ -64,11 +64,13 @@ export function languageLabel(value: string): string {
   }
 }
 
-/** The accents offered for a voice's language, all of them when the language is not known ("Multilingual"). */
+/**
+ * The accents offered for a voice's language: all of them when the language is not known ("Multilingual"), none for
+ * a known language the list has no accents for (Swedish), so no voice is sent another language's accent.
+ */
 export function accentsFor(language?: string | null): VoiceAccent[] {
   const code = languageCode(language);
-  const mine = VOICE_ACCENTS.filter((a) => a.split("-")[0] === code);
-  return mine.length ? mine : [...VOICE_ACCENTS];
+  return code ? VOICE_ACCENTS.filter((a) => a.split("-")[0] === code) : [...VOICE_ACCENTS];
 }
 
 /** Whether a voice takes the accent: it offers accents, and the accent is one of its language's. */

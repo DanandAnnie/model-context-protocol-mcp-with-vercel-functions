@@ -503,8 +503,12 @@ function CreateInner() {
     const a = (sc.avatarId && avatarData?.avatars.find((x) => x.id === sc.avatarId)) || avatar;
     return !!a && isPhotoAvatar(a);
   });
-  // The voice an accent is chosen for: the video's when it offers accents, else the first scene voice that does.
-  const accentVoice = [voice, ...scenes.map((sc) => (sc.voiceId && !sc.audioId ? voiceData?.voices.find((v) => v.id === sc.voiceId) : undefined))].find((v) => v?.accents);
+  // The voice an accent is chosen for: the first voice that speaks a scene (its own, else the video's) and offers
+  // accents of its language. An accent no speaking voice takes is not sent.
+  const accentVoice = scenes
+    .filter((sc) => !sc.audioId)
+    .map((sc) => (sc.voiceId && voiceData?.voices.find((v) => v.id === sc.voiceId)) || voice)
+    .find((v) => !!v?.accents && accentsFor(v.language).length > 0);
   const accentOptions = accentVoice ? accentsFor(accentVoice.language) : [];
   // What the scene's presenter will get: a photo avatar has no close-up, so it is previewed and listed in full.
   const framing: PresenterFraming = framingFor(layout.framing, sceneAvatar ?? undefined);
@@ -574,6 +578,7 @@ function CreateInner() {
   const [expressiveness, setExpressiveness] = useState<PhotoExpressiveness>("low");
   const [motionPrompt, setMotionPrompt] = useState("");
   const [accent, setAccent] = useState<VoiceAccent | "">("");
+  const sentAccent = accent && accentOptions.includes(accent) ? accent : undefined;
   /** Both apply to photo avatars only; anything else is sent as none. */
   const motion = { ...(expressiveness !== "low" ? { expressiveness } : {}), ...(motionPrompt.trim() ? { motionPrompt: motionPrompt.trim() } : {}) };
   const [tab, setTab] = useState<Tab>("avatar");
@@ -901,7 +906,7 @@ function CreateInner() {
     try {
       const { video } = await api<{ video: Video }>("/api/videos", {
         method: "POST",
-        body: JSON.stringify({ title, scenes: scenes.map(sentScene), avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...motion, ...(accent ? { accent } : {}) }),
+        body: JSON.stringify({ title, scenes: scenes.map(sentScene), avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...motion, ...(sentAccent ? { accent: sentAccent } : {}) }),
       });
       if (editKey) writeDraft(editKey, null);
       router.push(`/videos/${video.id}`);
@@ -1658,20 +1663,25 @@ function CreateInner() {
                 </Field>
                 <Field
                   label="Accent"
+                  hintId="accent-hint"
                   hint={
-                    accentVoice
-                      ? `How ${accentVoice.name} pronounces the script, on HeyGen; scenes whose voice offers no accents, or speaks another language, keep their own.`
-                      : "For voices that speak several accents; no voice in this video offers one."
+                    !voiceData
+                      ? "For voices that speak several accents of their language; HeyGen applies it."
+                      : accentVoice
+                        ? `How ${accentVoice.name} pronounces the script. HeyGen applies it; other renderers, and scenes whose voice offers no accents or speaks another language, keep the voice's own.`
+                        : "For voices that speak several accents of their language; no voice in this video offers one, so none is sent."
                   }
                 >
-                  <select value={accent} onChange={(e) => setAccent(asAccent(e.target.value))} disabled={!accentVoice && !accent} aria-label="Accent" className={inputClass}>
-                    <option value="">{accentVoice ? "The voice's own" : "None to choose"}</option>
+                  <select value={accent} onChange={(e) => setAccent(asAccent(e.target.value))} disabled={!!voiceData && !accentVoice && !accent} aria-label="Accent" aria-describedby="accent-hint" className={inputClass}>
+                    <option value="">{accentVoice || !voiceData ? "The voice's own" : "None to choose"}</option>
                     {accentOptions.map((a) => (
                       <option key={a} value={a}>
                         {languageLabel(a)} ({a})
                       </option>
                     ))}
-                    {accent && !accentOptions.includes(accent) ? <option value={accent}>{`${languageLabel(accent)} (${accent}), not used by this voice`}</option> : null}
+                    {accent && !accentOptions.includes(accent) ? (
+                      <option value={accent}>{voiceData ? `${languageLabel(accent)} (${accent}), not sent: no voice here takes it` : `${languageLabel(accent)} (${accent})`}</option>
+                    ) : null}
                   </select>
                 </Field>
                 <div role="group" aria-labelledby="photo-motion-title" className="space-y-2 rounded-lg border border-slate-200 px-3 py-3" data-testid="photo-motion">

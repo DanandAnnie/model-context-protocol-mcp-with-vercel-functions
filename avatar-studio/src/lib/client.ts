@@ -21,11 +21,19 @@ export function errorMessage(body: Record<string, unknown>, status: number): str
 }
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
-    cache: "no-store",
-  });
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      ...init,
+      headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+      cache: "no-store",
+    });
+  } catch (err) {
+    // A page closing or a request it cancelled is not a failure to report.
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    // No answer at all (offline, the connection dropped): said plainly, not as the browser's "Failed to fetch".
+    throw new ApiError("The server could not be reached; check your connection and try again", 0, undefined, {});
+  }
   const text = await res.text();
   let body: Record<string, unknown> = {};
   try {

@@ -15,6 +15,7 @@ import { owned } from "./shared";
 import { MAX_PORTRAIT_BYTES, rememberMadeLooks } from "./avatars";
 import { prepareOnce } from "./videos";
 import { jobChecker } from "./job-checks";
+import { withSuffix } from "../text";
 
 /** Look packs an account keeps (each made up to five photo avatars); another needs one forgotten first. */
 export const MAX_LOOK_PACKS = 20;
@@ -84,7 +85,8 @@ export async function startLookPack(input: z.infer<typeof lookPackRequestSchema>
   if (!provider.startLookPack) throw new ValidationError(`New looks are not available with the ${provider.name} renderer`);
   const stored = await getStore().get<Avatar>("avatar", input.avatarId);
   // Only the account's own photo avatars; a library presenter is the renderer's, not the account's to restyle.
-  if (!stored || (stored.ownerId ?? LOCAL_OWNER) !== ownerId || stored.source !== "custom") throw new NotFoundError("Only your own photo avatars can be given new looks");
+  if (!stored) throw new NotFoundError("That photo avatar no longer exists");
+  if ((stored.ownerId ?? LOCAL_OWNER) !== ownerId || stored.source !== "custom") throw new NotFoundError("Only your own photo avatars can be given new looks");
   if (stored.provider !== provider.name) throw new ValidationError(`"${stored.name}" was made for another renderer`);
   const gender = input.gender ?? (stored.gender === "female" || stored.gender === "male" ? stored.gender : undefined);
   if (!gender) throw new ValidationError("Choose the women's or the men's looks of the pack");
@@ -184,7 +186,8 @@ async function refreshLookPack(job: LookPackJob): Promise<LookPackJob> {
       const avatar: Avatar = {
         id: avatarId,
         ownerId: job.ownerId,
-        name: `${job.avatarName} · ${name} ${i + 1}`.slice(0, 80),
+        // A long name is shortened, never the pack and number that tell the looks apart.
+        name: withSuffix(job.avatarName, ` · ${name} ${i + 1}`, 80),
         imageUrl,
         gender: job.gender,
         ...(source?.defaultVoiceId ? { defaultVoiceId: source.defaultVoiceId } : {}),

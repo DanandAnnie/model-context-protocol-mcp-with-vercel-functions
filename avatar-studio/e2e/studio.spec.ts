@@ -674,9 +674,12 @@ test("a video is lip-synced to an uploaded clip or a linked track, at the chosen
   await page.getByRole("combobox", { name: /^Library video\b/ }).selectOption(v.id);
   await expect(start).toBeDisabled();
   // An uploaded file is converted to WAV in the browser, saved as an audio clip, and chosen.
+  await page.getByRole("button", { name: "Upload audio" }).focus();
   await page.getByLabel("Upload the new audio").setInputFiles({ name: "retake.wav", mimeType: "audio/wav", buffer: toneWav(2) });
   const clipPicker = page.getByRole("combobox", { name: /^Audio clip\b/ });
   await expect(clipPicker.locator("option:checked")).toHaveText("retake (2s)");
+  // The button is busy, not disabled, while it uploads, so a keyboard user's focus stays on it.
+  await expect(page.getByRole("button", { name: "Upload audio" })).toBeFocused();
   const clipId = await clipPicker.inputValue();
   await page.getByLabel(/^Precise/).check();
   const sent = page.waitForRequest((r) => r.url().endsWith("/api/lipsyncs") && r.method() === "POST");
@@ -782,11 +785,17 @@ test("a HeyGen Studio template is filled in and rendered as a library video", as
   await form.getByRole("textbox", { name: /^Video title/ }).fill("Harbor Lane invite");
   const sent = page.waitForRequest((r) => r.url().endsWith("/api/studio-templates/demo_open_house/videos") && r.method() === "POST");
   await form.getByRole("button", { name: "Render video" }).click();
-  const body = (await sent).postDataJSON() as { title: string; captions: boolean; variables: Record<string, unknown> };
+  const request = await sent;
+  const body = request.postDataJSON() as { title: string; captions: boolean; variables: Record<string, unknown> };
   expect(body.title).toBe("Harbor Lane invite");
   expect(body.variables.open_time).toEqual({ type: "text", content: "Saturday at 10" });
   expect(body.variables.cover_image, "a link left empty keeps the template's").toBeUndefined();
   await page.waitForURL(/\/videos\/vid_/);
+  // The render carries a key, so the same render sent again (after a lost answer) returns this video, not a second.
+  const key = request.headers()["idempotency-key"];
+  expect(key).toMatch(/^[A-Za-z0-9_-]{8,100}$/);
+  const again = await page.request.post("/api/studio-templates/demo_open_house/videos", { data: body, headers: { "Idempotency-Key": key } });
+  expect(page.url()).toContain(`/videos/${(await again.json()).video.id}`);
   await expect(page.getByText("Open house invitation", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Edit a copy" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Save as template" })).toHaveCount(0);
@@ -2444,10 +2453,17 @@ test("a workspace viewer sees view-only notices instead of create controls", asy
   await expect(page.getByTestId("voice-designer")).toHaveCount(0);
   await expect(page.getByText("Emma", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /to favourites$/ })).toHaveCount(0);
+  // A photo avatar of the space is shown, but a viewer gets no rename, delete, new looks, or default voice for it.
+  const svg = "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%2F%3E";
+  const photo = (await (await page.request.post("/api/avatars", { data: { name: `Viewer sees ${Date.now().toString(36)}`, imageUrl: svg } })).json()).avatar as { id: string; name: string };
   await page.goto("/avatars");
   await expect(page.getByTestId("view-only")).toBeVisible();
   await expect(page.getByTestId("avatar-library")).toBeVisible();
   await expect(page.getByRole("button", { name: /to favourites$/ })).toHaveCount(0);
+  await expect(page.getByTestId("avatar-library").getByText(photo.name)).toBeVisible();
+  await expect(page.getByRole("button", { name: /^(Rename |New looks of |Delete avatar)/ })).toHaveCount(0);
+  await expect(page.getByLabel(/^Default voice for /)).toHaveCount(0);
+  expect((await page.request.delete(`/api/avatars/${photo.id}`)).status()).toBe(200);
   // The workspace's settings show, but only owners and editors can change them.
   await page.goto("/settings");
   await expect(page.getByTestId("settings-read-only")).toHaveCount(2);

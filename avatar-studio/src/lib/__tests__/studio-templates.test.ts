@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import { createTemplate, fillStudioVariables, filledScript, forgetStudioTemplates, getStudioTemplate, listStudioTemplates, renderStudioTemplate, resizeVideo, retryVideo, studioRenderSchema } from "../services";
-import { NotFoundError, ValidationError } from "../errors";
+import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { providerStatus } from "../providers";
 import { getStore } from "../store";
 import type { Video } from "../types";
@@ -36,9 +36,9 @@ describe("HeyGen Studio templates", () => {
     assert.deepEqual(filled.open_time, { type: "text", content: "Saturday at 10" });
     assert.equal("presenter" in filled, false, "a presenter, voice, or picture not given is left out, so the template keeps its own");
     assert.equal("cover_image" in filled, false);
-    await assert.rejects(fillStudioVariables(t, {}), /Fill in "open_time"/, "a text with no default must be given");
+    await assert.rejects(fillStudioVariables(t, {}), /Fill in "Open time"/, "a text with no default must be given");
     await assert.rejects(fillStudioVariables(t, { ...filled, nickname: { type: "text", content: "x" } }), /no variable "nickname"/);
-    await assert.rejects(fillStudioVariables(t, { ...filled, address: { type: "image", asset: { type: "url", url: "https://93.184.216.34/a.png" } } }), /"address" is a text variable, not image/);
+    await assert.rejects(fillStudioVariables(t, { ...filled, address: { type: "image", asset: { type: "url", url: "https://93.184.216.34/a.png" } } }), /"Address" is a text slot, not image/);
     await assert.rejects(fillStudioVariables(t, { ...filled, cover_image: { type: "image", asset: { type: "url", url: "https://127.0.0.1/a.png" } } }), (e: unknown) => e instanceof ValidationError && /public host/.test((e as Error).message));
     await assert.rejects(fillStudioVariables(t, { ...filled, cover_image: { type: "image", asset: { type: "url", url: "http://93.184.216.34/a.png" } } }), /public https link/);
     const own = await fillStudioVariables(t, { ...filled, cover_image: { type: "image", asset: { type: "url", url: "https://93.184.216.34/a.png" } } });
@@ -74,9 +74,22 @@ describe("HeyGen Studio templates", () => {
     assert.deepEqual(retried.studioTemplate, video.studioTemplate);
     assert.equal(retried.status, "processing");
     // A template whose product has no default details needs them; the 9:16 template renders 9:16.
-    await assert.rejects(renderStudioTemplate("demo_product_update", studioRenderSchema.parse({ title: "Update" }), "u1"), /Fill in "details"/);
+    await assert.rejects(renderStudioTemplate("demo_product_update", studioRenderSchema.parse({ title: "Update" }), "u1"), /Fill in "Details"/);
     const upd = await renderStudioTemplate("demo_product_update", studioRenderSchema.parse({ title: "Update", variables: { details: { type: "text", content: "Faster search." } } }), "u1");
     assert.deepEqual([upd.aspect, upd.voiceId], ["9:16", "studio-template"]);
+  });
+
+  it("returns the same video for a render retried with the same key, without rendering or counting it twice", async () => {
+    const input = studioRenderSchema.parse(OPEN_HOUSE);
+    const first = await renderStudioTemplate("demo_open_house", input, "u1", { key: "render-key-1" });
+    const again = await renderStudioTemplate("demo_open_house", input, "u1", { key: "render-key-1" });
+    assert.equal(again.id, first.id);
+    assert.equal((await getStore().list<Video>("video", "u1")).length, 1, "one video, one render");
+    assert.notEqual((await renderStudioTemplate("demo_open_house", input, "u2", { key: "render-key-1" })).id, first.id, "another account's key is its own");
+    await assert.rejects(renderStudioTemplate("demo_product_update", studioRenderSchema.parse({ title: "Update", variables: { details: { type: "text", content: "Faster." } } }), "u1", { key: "render-key-1" }), ConflictError, "the same key for another template");
+    assert.notEqual((await renderStudioTemplate("demo_open_house", input, "u1")).id, first.id, "without a key every render is new");
+    // Messages name a slot as the form labels it.
+    await assert.rejects(renderStudioTemplate("demo_open_house", studioRenderSchema.parse({ ...OPEN_HOUSE, variables: { ...OPEN_HOUSE.variables, agent_name: { type: "text", content: " " } } }), "u1"), /Fill in "Agent name"/);
   });
 
   it("asks HeyGen for its templates and renders one with its variables", async () => {
@@ -134,7 +147,7 @@ describe("HeyGen Studio templates", () => {
         "unknown types are left out, old field names read, only known fields kept, and a missing text is empty",
       );
       await assert.rejects(getStudioTemplate("gone"), NotFoundError);
-      await assert.rejects(renderStudioTemplate("t1", studioRenderSchema.parse({ title: "Q3", variables: { headline: { type: "text", content: "Q4 plans" } } }), "u1"), /Fill in "subtitle"/, "a text with no content is a 400, not a crash");
+      await assert.rejects(renderStudioTemplate("t1", studioRenderSchema.parse({ title: "Q3", variables: { headline: { type: "text", content: "Q4 plans" } } }), "u1"), /Fill in "Subtitle"/, "a text with no content is a 400, not a crash");
       const video = await renderStudioTemplate("t1", studioRenderSchema.parse({ title: "Q3", captions: true, variables: { headline: { type: "text", content: "Q4 plans" }, subtitle: { type: "text", content: "Our plans" } } }), "u1");
       const post = calls.find((c) => c.method === "POST")!;
       assert.deepEqual(post.body, { variables: { headline: { type: "text", content: "Q4 plans" }, subtitle: { type: "text", content: "Our plans" } }, title: "Q3", caption: true }, "media, presenter, and voice not given are left to the template");

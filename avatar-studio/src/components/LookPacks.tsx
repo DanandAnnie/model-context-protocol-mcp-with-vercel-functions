@@ -147,6 +147,7 @@ export function LookPackList({ packs, avatars, canEdit, onForget, fallbackFocus 
                   <div className="mt-0.5 text-xs text-slate-500" data-testid="look-pack-meta">
                     {ready} of {p.looks.length} ready · {p.aspect} · {formatDate(p.createdAt)}
                     {failed.length ? ` · ${failed.length} could not be made` : ""}
+                    {avatars.length && ready > made.length ? ` · ${ready - made.length} since deleted` : ""}
                   </div>
                   {failed[0]?.error && <div className="mt-1 text-xs text-rose-600">{failed[0].error}</div>}
                 </div>

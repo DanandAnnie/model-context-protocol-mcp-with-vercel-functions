@@ -264,7 +264,10 @@ export async function resolveRenderContext(
  * best-effort under concurrent requests; batches reserve their rows up front.
  */
 /** Library fields a caller may set on a new video alongside the render request (batch row, folder, retry link). */
-export type VideoExtras = Partial<Pick<Video, "folder" | "description" | "batchId" | "rowLabel" | "retryOf" | "resizedFrom" | "captionCues" | "subtitles">>;
+export type VideoExtras = Partial<Pick<Video, "folder" | "description" | "batchId" | "rowLabel" | "retryOf" | "resizedFrom" | "captionCues" | "subtitles">> & {
+  /** The video's id, when a client key decides it (a template render retried after a lost answer). */
+  id?: string;
+};
 
 export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWNER, ctx?: RenderContext, skipLimit = false, extras: VideoExtras = {}): Promise<Video> {
   if (req.studioTemplate) return createStudioTemplateVideo({ ...req, studioTemplate: req.studioTemplate }, ownerId, skipLimit, extras);
@@ -1181,7 +1184,7 @@ async function createStudioTemplateVideo(req: VideoRequest & { studioTemplate: N
   const base: Video = {
     ...req,
     ...stripUndefined(extras),
-    id: newId("vid"),
+    id: extras.id ?? newId("vid"),
     ownerId,
     status: "queued",
     provider: provider.name,

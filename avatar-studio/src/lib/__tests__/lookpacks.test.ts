@@ -90,6 +90,25 @@ describe("look packs", () => {
     await assert.rejects(deleteLookPack("../x", "u1"), /Unknown look pack/);
   });
 
+  it("keeps the pack and number of each look when the avatar's name is long, and the cleaned and lip-synced marks on long titles", async () => {
+    const { withSuffix } = await import("../text");
+    const long = "Ms Bartholomew-Featherstonehaugh Wolfeschlegelsteinhausen the Third of Somewhere";
+    const dana = await mine("u1", { name: long } as Partial<Avatar>);
+    await startLookPack(lookPackRequestSchema.parse({ avatarId: dana.id, pack: "business-casual" }), "u1");
+    const [done] = await listLookPacks("u1");
+    const names = await Promise.all(done.looks.map(async (l) => (await getAvatar(l.avatarId!, "u1")).name));
+    assert.equal(new Set(names).size, 5, "five names, told apart");
+    assert.ok(names.every((n, i) => n.endsWith(` · Stylish business-casual ${i + 1}`) && [...n].length <= 80));
+    assert.equal(withSuffix("Q3 webinar", " (cleaned)", 120), "Q3 webinar (cleaned)");
+    assert.equal([...withSuffix("x".repeat(118), " (lip-synced)", 120)].length, 120);
+    assert.ok(withSuffix("x".repeat(118), " (lip-synced)", 120).endsWith(" (lip-synced)"));
+    assert.equal(withSuffix("🇫🇷".repeat(5), " 1", 4), "🇫🇷🇫🇷 1", "a flag is never split");
+  });
+
+  it("says a deleted photo avatar no longer exists", async () => {
+    await assert.rejects(startLookPack(lookPackRequestSchema.parse({ avatarId: "av_gone", pack: "fitness" }), "u1"), /no longer exists/);
+  });
+
   it("returns the same look pack for a start retried with the same key, without asking the renderer again", async () => {
     const proto = MockAvatarProvider.prototype as unknown as { startLookPack: (...a: unknown[]) => Promise<{ lookIds: string[] }> };
     const real = proto.startLookPack;

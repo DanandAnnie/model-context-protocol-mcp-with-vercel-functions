@@ -716,7 +716,7 @@ export default function VideoDetailPage() {
                   </Button>
                 )}
                 {templateErr && <span className="text-xs text-rose-600">{templateErr}</span>}
-                {!video.deletedAt && (
+                {!video.deletedAt && canEdit !== false && (
                   <Button variant="danger" onClick={() => remove()} loading={deleting} title={`Moves the video to the trash, where it can be restored for ${TRASH_RETENTION_DAYS} days`}>
                     <Trash2 className="h-4 w-4" /> Delete
                   </Button>

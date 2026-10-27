@@ -4,7 +4,9 @@ import { z } from "zod";
 import { getAvatarProvider } from "../providers";
 import type { AspectRatio, StudioTemplate, StudioTemplateDetail, StudioVariable, Video } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
-import { ValidationError } from "../errors";
+import { ConflictError, ValidationError } from "../errors";
+import { createHash } from "node:crypto";
+import { getStore } from "../store";
 import { assertPublicHttpUrl } from "../safe-url";
 import { createVideo } from "./videos";
 import { listAvatars } from "./avatars";
@@ -40,6 +42,15 @@ export const studioRenderSchema = z.object({
 });
 
 const listed = new Map<string, { at: number; templates: StudioTemplate[] }>();
+
+/** "agent_name" → "Agent name": a variable's name as the form labels it, for messages. */
+export function variableLabel(name: string): string {
+  const words = name.replace(/[_-]+/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").trim().toLowerCase();
+  return words ? words[0].toUpperCase() + words.slice(1) : name;
+}
+
+/** A client's key for one render (`Idempotency-Key`): letters, digits, `-` and `_`. */
+export const studioRenderKeySchema = z.string().regex(/^[A-Za-z0-9_-]{8,100}$/, "The Idempotency-Key header takes 8 to 100 letters, digits, - or _");
 
 export function studioTemplatesAvailable(): boolean {
   return typeof getAvatarProvider().listStudioTemplates === "function";
@@ -93,34 +104,35 @@ export async function fillStudioVariables(template: StudioTemplateDetail, given:
   for (const [name, value] of Object.entries(given)) {
     const own = template.variables[name];
     if (!own) throw new ValidationError(`The template has no variable "${name}"`);
-    if (own.type !== value.type) throw new ValidationError(`"${name}" is a ${own.type} variable, not ${value.type}`);
+    if (own.type !== value.type) throw new ValidationError(`"${variableLabel(name)}" is a ${own.type} slot, not ${value.type}`);
   }
   const out: Record<string, StudioVariable> = {};
   for (const [name, own] of Object.entries(template.variables)) {
     const value = given[name];
+    const label = variableLabel(name);
     if (own.type === "text") {
       const content = (value?.type === "text" ? value.content : own.content).trim();
-      if (!content) throw new ValidationError(`Fill in "${name}"`);
+      if (!content) throw new ValidationError(`Fill in "${label}"`);
       out[name] = { type: "text", content };
       continue;
     }
     if (!value) continue;
     if ((value.type === "image" || value.type === "video" || value.type === "audio") && value.asset?.type === "url") {
       const url = value.asset.url;
-      if (!/^https:\/\/\S+$/i.test(url)) throw new ValidationError(`"${name}" needs a public https link`);
+      if (!/^https:\/\/\S+$/i.test(url)) throw new ValidationError(`"${label}" needs a public https link`);
       try {
-        await assertPublicHttpUrl(url, `The link for "${name}"`);
+        await assertPublicHttpUrl(url, `The link for "${label}"`);
       } catch (err) {
-        throw new ValidationError(err instanceof Error ? err.message : `"${name}" needs a public https link`);
+        throw new ValidationError(err instanceof Error ? err.message : `"${label}" needs a public https link`);
       }
       out[name] = { ...own, ...value } as StudioVariable;
       continue;
     }
     if (value.type === "character" && own.type === "character" && value.avatar_id !== own.avatar_id && (await allowed()) && !choices!.avatarIds.has(value.avatar_id)) {
-      throw new ValidationError(`"${name}" names a presenter that is not available`);
+      throw new ValidationError(`"${label}" names a presenter that is not available`);
     }
     if (value.type === "voice" && own.type === "voice" && value.voice_id !== own.voice_id && (await allowed()) && !choices!.voiceIds.has(value.voice_id)) {
-      throw new ValidationError(`"${name}" names a voice that is not available`);
+      throw new ValidationError(`"${label}" names a voice that is not available`);
     }
     out[name] = value;
   }
@@ -143,7 +155,17 @@ export function filledScript(template: StudioTemplateDetail, variables: Record<s
 const ASPECTS: AspectRatio[] = ["16:9", "9:16", "1:1"];
 
 /** Renders one of the renderer's templates with the account's values, as a library video counted like any render. */
-export async function renderStudioTemplate(id: string, input: z.infer<typeof studioRenderSchema>, ownerId: string = LOCAL_OWNER): Promise<Video> {
+export async function renderStudioTemplate(id: string, input: z.infer<typeof studioRenderSchema>, ownerId: string = LOCAL_OWNER, opts: { key?: string } = {}): Promise<Video> {
+  // With a client key, the video's id is derived from the account and the key, so a render retried after a lost answer
+  // returns the video already made instead of rendering (and counting) a second one.
+  const videoId = opts.key ? `vid_${createHash("sha256").update(`${ownerId}\0studio-template\0${opts.key}`).digest("base64url").slice(0, 24)}` : undefined;
+  if (videoId) {
+    const existing = await getStore().get<Video>("video", videoId);
+    if (existing && existing.ownerId === ownerId) {
+      if (existing.studioTemplate?.id !== id) throw new ConflictError("This Idempotency-Key was already used for another render; send a new key");
+      return existing;
+    }
+  }
   const template = await getStudioTemplate(id);
   // A presenter given must be one of the renderer's library looks the account sees (never a look made for another
   // account), and a voice one the account's voice list has.
@@ -169,5 +191,8 @@ export async function renderStudioTemplate(id: string, input: z.infer<typeof stu
       studioTemplate: { id: template.id, name: template.name, variables },
     },
     ownerId,
+    undefined,
+    false,
+    videoId ? { id: videoId } : {},
   );
 }

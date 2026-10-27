@@ -15,6 +15,7 @@ import { getVideo, prepareClipOnce } from "./videos";
 import { getClip } from "./clips";
 import { freshVideoUrl } from "./highlights";
 import { jobChecker } from "./job-checks";
+import { withSuffix } from "../text";
 
 /** Lip-synced videos an account keeps; another needs one deleted first. */
 export const MAX_LIPSYNCS = 50;
@@ -103,7 +104,7 @@ export async function resolveLipsyncSources(input: z.infer<typeof lipsyncRequest
   } else {
     audioUrl = await publicLink(input.audioUrl!, "the new audio");
   }
-  const title = input.title || (video ? `${video.title} (lip-synced)`.slice(0, 120) : "Lip-synced video");
+  const title = input.title || (video ? withSuffix(video.title, " (lip-synced)", 120) : "Lip-synced video");
   return { title, video, url, clip, audioUrl };
 }
 

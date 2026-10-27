@@ -31,3 +31,13 @@ const segmenter = typeof Intl !== "undefined" && "Segmenter" in Intl ? new Intl.
 export function graphemes(text: string): string[] {
   return segmenter ? Array.from(segmenter.segment(text), (s) => s.segment) : Array.from(text);
 }
+
+/**
+ * `base` and `suffix` within `max` characters as a reader counts them: the base is shortened (and trimmed) to make
+ * room, so the suffix (a look's number, a "(cleaned)" mark) always survives a long name.
+ */
+export function withSuffix(base: string, suffix: string, max: number): string {
+  const room = Math.max(0, max - graphemes(suffix).length);
+  const kept = graphemes(base);
+  return (kept.length > room ? kept.slice(0, room).join("").trimEnd() : base) + suffix;
+}

@@ -6,7 +6,7 @@ import { Button, Card, ErrorBanner, Field, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
-import { api } from "@/lib/client";
+import { ApiError, api, isRefusal } from "@/lib/client";
 import type { Avatar, StudioTemplate, StudioTemplateDetail, StudioVariable, Video, Voice } from "@/lib/types";
 
 /** "agent_name" → "Agent name": a variable's name as a label. */
@@ -15,6 +15,8 @@ const labelOf = (name: string) => {
   return words ? words[0].toUpperCase() + words.slice(1) : name;
 };
 const MEDIA: Record<string, string> = { image: "image", video: "video", audio: "audio" };
+/** A fresh key for one render (a UUID where the browser has one, as it does over https and on localhost). */
+const newKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`);
 
 /**
  * HeyGen Studio templates: layouts made in HeyGen Studio with named slots, listed from the renderer's account. Choosing
@@ -93,6 +95,10 @@ function StudioTemplateForm({ id, onClose }: { id: string; onClose: () => void }
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // One key per render: a retry after a lost answer sends it again and gets the same video instead of a second render.
+  const [requestKey, setRequestKey] = useState(() => newKey());
+  // A change to what would be rendered makes the next try a new render.
+  useEffect(() => setRequestKey(newKey()), [title, captions, values]);
   // Once the template has loaded, focus moves to its form (opened from a card, or from a video's "Use the template again").
   const headingRef = useRef<HTMLHeadingElement>(null);
   const focusAfterRender = useFocusAfterRender();
@@ -142,16 +148,19 @@ function StudioTemplateForm({ id, onClose }: { id: string; onClose: () => void }
         else if (own.type === "voice" && typed && typed !== own.voice_id) variables[name] = { type: "voice", voice_id: typed };
         else if (own.type === "character" && typed && typed !== own.avatar_id) variables[name] = { type: "character", avatar_id: typed };
       }
-      const res = await api<{ video: Video }>(`/api/studio-templates/${encodeURIComponent(template.id)}/videos`, { method: "POST", body: JSON.stringify({ title: title.trim(), captions, variables }) });
+      const res = await api<{ video: Video }>(`/api/studio-templates/${encodeURIComponent(template.id)}/videos`, { method: "POST", body: JSON.stringify({ title: title.trim(), captions, variables }), headers: { "Idempotency-Key": requestKey } });
       router.push(`/videos/${res.video.id}`);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "The video could not be started");
+      // A refusal, or a render the renderer could not start (502, the video recorded as failed), makes the next try a
+      // new render; a lost answer keeps the key, so trying again returns the render that may have started.
+      if (isRefusal(e) || (e instanceof ApiError && e.status === 502)) setRequestKey(newKey());
       setBusy(false);
     }
   }
 
   return (
-    <Card id="studio-template-form" className="mt-4 p-5" data-testid="studio-template-form">
+    <Card id="studio-template-form" className="mt-4 p-5" data-testid="studio-template-form" onKeyDown={(e) => e.key === "Escape" && !busy && onClose()}>
       <div className="flex items-start justify-between gap-3">
         <h3 ref={headingRef} tabIndex={-1} className="min-w-0 break-words text-sm font-semibold text-slate-900 outline-none">
           {template.name}

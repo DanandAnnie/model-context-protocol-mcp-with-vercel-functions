@@ -102,13 +102,21 @@ export default function LipsyncPage() {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const focusAfterRender = useFocusAfterRender();
   // A lip sync that finishes or fails while the page is open is announced.
-  const seen = useRef<Map<string, Lipsync["status"]>>(new Map());
+  const seen = useRef<Map<string, { status: Lipsync["status"]; title: string }>>(new Map());
   useEffect(() => {
+    if (!data) return;
     const parts: string[] = [];
-    for (const l of data?.lipsyncs ?? []) {
-      const before = seen.current.get(l.id);
+    for (const l of data.lipsyncs) {
+      const before = seen.current.get(l.id)?.status;
       if (before === "processing" && l.status !== "processing") parts.push(l.status === "completed" ? `${l.title} is ready.` : `${l.title} could not be lip-synced: ${l.error ?? "the renderer failed"}.`);
-      seen.current.set(l.id, l.status);
+      seen.current.set(l.id, { status: l.status, title: l.title });
+    }
+    // One that leaves the list without being deleted here went with its video (deleted for good), or was deleted elsewhere.
+    const listed = new Set(data.lipsyncs.map((l) => l.id));
+    for (const [id, was] of seen.current) {
+      if (listed.has(id)) continue;
+      parts.push(`${was.title} is no longer listed; it went with its video, or was deleted elsewhere.`);
+      seen.current.delete(id);
     }
     if (parts.length) setNote(parts.join(" "));
   }, [data]);
@@ -180,6 +188,11 @@ export default function LipsyncPage() {
       focusAfterRender(() => listRef.current?.querySelector<HTMLElement>(`[data-lipsync="${lipsync.id}"]`) ?? firstInput.current);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "The video could not be lip-synced");
+      // A clip deleted meanwhile leaves the list and the choice, so a retry is not refused the same way.
+      if (e instanceof Error && /audio clip is no longer available/.test(e.message)) {
+        setClipId("");
+        void refetchClips();
+      }
       // A refusal is an answer: trying again (after topping up, say) is a new start. A lost answer, or one HeyGen is still
       // working on, keeps its key, so a retry returns the start that may have gone through.
       if (isRefusal(e)) setRequestKey(newKey());
@@ -195,6 +208,7 @@ export default function LipsyncPage() {
     const next = items[items.indexOf(l) + 1] ?? items[items.indexOf(l) - 1];
     try {
       await api(`/api/lipsyncs/${l.id}`, { method: "DELETE" });
+      seen.current.delete(l.id);
       setData((prev) => (prev ? { ...prev, lipsyncs: prev.lipsyncs.filter((x) => x.id !== l.id) } : prev));
       void refetch();
       setNote(`Deleted ${l.title}.`);
@@ -282,7 +296,8 @@ export default function LipsyncPage() {
                     </select>
                   </Field>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => fileRef.current?.click()} disabled={canEdit === false || uploading} loading={uploading}>
+                    {/* Busy, not disabled, while uploading, so the focus stays on it for a keyboard user. */}
+                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => !uploading && fileRef.current?.click()} disabled={canEdit === false} loading={uploading}>
                       <Upload className="h-3.5 w-3.5" /> Upload audio
                     </Button>
                     <input

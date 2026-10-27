@@ -13,6 +13,7 @@ import { owned, stripUndefined } from "./shared";
 import { getVideo } from "./videos";
 import { freshVideoUrl } from "./highlights";
 import { jobChecker } from "./job-checks";
+import { withSuffix } from "../text";
 
 /** Cleaned recordings an account keeps; another needs one deleted first. */
 export const MAX_CLEANUPS = 50;
@@ -65,7 +66,7 @@ export async function resolveCleanupSource(input: z.infer<typeof cleanupRequestS
     const video = await getVideo(input.videoId, ownerId, false);
     if (video.deletedAt) throw new ValidationError("Restore the video from the trash to clean it up");
     if (video.status !== "completed" || !video.videoUrl) throw new ValidationError("Only a finished video can be cleaned up; wait for this one to render");
-    return { video, title: input.title || `${video.title} (cleaned)`.slice(0, 120) };
+    return { video, title: input.title || withSuffix(video.title, " (cleaned)", 120) };
   }
   // The renderer downloads the link itself, so it must be a public https address (not this network's, say).
   const url = input.sourceUrl!;

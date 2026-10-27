@@ -112,10 +112,16 @@ function AvatarsInner() {
 
   async function remove(a: Avatar) {
     if (!confirm(`Delete avatar "${a.name}"?`)) return;
+    const mine = avatars.filter((x) => x.source === "custom");
+    const next = mine[mine.indexOf(a) + 1] ?? mine[mine.indexOf(a) - 1];
     try {
       await api(`/api/avatars/${a.id}`, { method: "DELETE" });
       setActionErr(null);
+      // A new-looks panel open for this avatar has nothing left to dress.
+      if (looksFor?.id === a.id) setLooksFor(null);
       refetch();
+      // Focus moves to the next photo avatar's first control, or to the page's own button, rather than being lost.
+      focusAfterRender(() => (next ? document.querySelector<HTMLElement>(`[data-avatar-controls="${CSS.escape(next.id)}"] button`) : null) ?? newButton.current);
     } catch (e) {
       setActionErr(e instanceof Error ? e.message : "Could not delete the avatar");
     }
@@ -205,9 +211,9 @@ function AvatarsInner() {
               {favorites.canToggle && (
                 <FavoriteStar name={a.name} on={favorites.avatarIds.has(a.id)} onToggle={() => favorites.toggle("avatar", a.id)} className="absolute left-2 top-2" />
               )}
-              {a.source === "custom" && (
-                <span className="absolute right-2 top-2 flex gap-1">
-                  {packData?.available && canEdit !== false && (
+              {a.source === "custom" && canEdit !== false && (
+                <span className="absolute right-2 top-2 flex gap-1" data-avatar-controls={a.id}>
+                  {packData?.available && (
                     <button
                       onClick={() => setLooksFor(a)}
                       aria-label={`New looks of ${a.name}`}
@@ -235,7 +241,7 @@ function AvatarsInner() {
                   </button>
                 </span>
               )}
-              {a.source === "custom" && voices.length > 0 && (
+              {a.source === "custom" && canEdit !== false && voices.length > 0 && (
                 <select
                   aria-label={`Default voice for ${a.name}`}
                   title="The editor switches to this voice when the avatar is picked"

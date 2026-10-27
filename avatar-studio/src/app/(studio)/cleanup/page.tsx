@@ -50,14 +50,22 @@ export default function CleanupPage() {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const focusAfterRender = useFocusAfterRender();
   // A cleanup that finishes or fails while the page is open is announced.
-  const seen = useRef<Map<string, Cleanup["status"]>>(new Map());
+  const seen = useRef<Map<string, { status: Cleanup["status"]; title: string }>>(new Map());
   useEffect(() => {
+    if (!data) return;
     // Cleanups that finish in the same check are announced together.
     const parts: string[] = [];
-    for (const c of data?.cleanups ?? []) {
-      const before = seen.current.get(c.id);
+    for (const c of data.cleanups) {
+      const before = seen.current.get(c.id)?.status;
       if (before === "processing" && c.status !== "processing") parts.push(c.status === "completed" ? `${c.title} is cleaned up.` : `${c.title} could not be cleaned up: ${c.error ?? "the renderer failed"}.`);
-      seen.current.set(c.id, c.status);
+      seen.current.set(c.id, { status: c.status, title: c.title });
+    }
+    // One that leaves the list without being deleted here went with its video (deleted for good), or was deleted elsewhere.
+    const listed = new Set(data.cleanups.map((c) => c.id));
+    for (const [id, was] of seen.current) {
+      if (listed.has(id)) continue;
+      parts.push(`${was.title} is no longer listed; it went with its video, or was deleted elsewhere.`);
+      seen.current.delete(id);
     }
     if (parts.length) setNote(parts.join(" "));
   }, [data]);
@@ -118,6 +126,7 @@ export default function CleanupPage() {
     const next = items[items.indexOf(c) + 1] ?? items[items.indexOf(c) - 1];
     try {
       await api(`/api/cleanups/${c.id}`, { method: "DELETE" });
+      seen.current.delete(c.id);
       setData((prev) => (prev ? { ...prev, cleanups: prev.cleanups.filter((x) => x.id !== c.id) } : prev));
       void refetch();
       setNote(`Deleted ${c.title}.`);

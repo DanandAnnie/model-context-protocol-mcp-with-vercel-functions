@@ -249,7 +249,6 @@ export interface LipsyncJob {
   checkedAt?: string;
 }
 
-/** A track of the renderer's background-music catalog, found by describing it (HeyGen's audio catalog). */
 /** Sound effects one video with music may place at moments of the video. */
 export const MAX_MUSIC_EFFECTS = 5;
 
@@ -261,6 +260,7 @@ export interface MusicEffect {
   atSec: number;
 }
 
+/** A track of the renderer's background-music or sound-effect catalog, found by describing it (HeyGen's audio catalog). */
 export interface MusicTrack {
   id: string;
   name: string;

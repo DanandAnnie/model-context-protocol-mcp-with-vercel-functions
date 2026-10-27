@@ -19,10 +19,21 @@ const VOLUME_LABEL: Record<MusicVolume, string> = { quiet: "Quiet", low: "Low", 
 /** A mix's name for its controls: its title, track, and day, as one video can be given music more than once. */
 const mixName = (m: Mix) => `${m.title}, “${m.trackName}”, ${formatDate(m.createdAt)}`;
 const SUGGESTIONS = ["Calm ambient corporate", "Upbeat and motivational", "Cinematic and inspiring"];
-/** A sound effect chosen for the mix: the track found, the description it was found with, and when it plays. */
-type ChosenEffect = { key: string; track: MusicTrack; query: string; atSec: number };
-/** Seconds as a short clock, for the moments effects play at. */
-const atClock = (sec: number) => `${Math.floor(sec / 60)}:${(sec % 60).toFixed(1).padStart(4, "0")}`;
+/**
+ * A sound effect chosen for the mix: the track found, the description it was found with, and when it plays, as typed
+ * (`draft`, left as it is while typing) and as read (`atSec`, null while the field holds no number).
+ */
+type ChosenEffect = { key: string; track: MusicTrack; query: string; draft: string; atSec: number | null };
+/** Seconds as a short clock to a tenth, for the moments effects play at (59.96 is 1:00.0). */
+function atClock(sec: number): string {
+  const tenths = Math.round(sec * 10);
+  return `${Math.floor(tenths / 600)}:${((tenths % 600) / 10).toFixed(1).padStart(4, "0")}`;
+}
+/** The seconds a "plays at" field holds, to a tenth; null for an empty, partial, or negative entry. */
+function readSeconds(draft: string): number | null {
+  if (!/^\s*\d*(\.\d*)?\s*$/.test(draft) || !/\d/.test(draft)) return null;
+  return Math.round(Number(draft) * 10) / 10;
+}
 
 /**
  * "Music": a track of the renderer's music catalog, found by describing it, mixed under a finished library video and
@@ -123,7 +134,15 @@ export default function MusicPage() {
   const video = videos.find((v) => v.id === videoId);
   const length = video?.durationSec && video.durationSec > 0 ? video.durationSec : null;
   // An effect is placed at a moment of the video: within it, once the video is known.
-  const lateEffect = length !== null ? effects.find((e) => e.atSec >= length) : undefined;
+  const lateEffect = length !== null ? effects.find((e) => e.atSec !== null && e.atSec >= length) : undefined;
+  const unsetEffect = effects.find((e) => e.atSec === null);
+  const effectProblem = lateEffect && length !== null ? `${lateEffect.track.name} at ${atClock(lateEffect.atSec!)} is past the end of the video (${atClock(length)}); move it earlier.` : unsetEffect ? `Say when ${unsetEffect.track.name} plays, in seconds from the start.` : null;
+  // A moment past the end is announced when it appears, as it is why "Add music" is no longer available (a field left
+  // empty is not, as it is empty while being typed in).
+  const lateProblem = lateEffect ? effectProblem : null;
+  useEffect(() => {
+    if (lateProblem) setNote(lateProblem);
+  }, [lateProblem]);
   const canStart = canEdit === true && data?.available !== false;
 
   async function search(text = query) {
@@ -175,7 +194,7 @@ export default function MusicPage() {
   function addEffect(t: MusicTrack) {
     if (!effectSearched || effects.length >= MAX_MUSIC_EFFECTS) return;
     const key = newKey();
-    setEffects((prev) => [...prev, { key, track: t, query: effectSearched, atSec: 0 }]);
+    setEffects((prev) => [...prev, { key, track: t, query: effectSearched, draft: "0", atSec: 0 }]);
     changed();
     setNote(`Added ${t.name} at 0:00.0; set when it plays below.`);
     focusAfterRender(() => effectsRef.current?.querySelector<HTMLInputElement>(`[data-effect="${key}"] input`));
@@ -201,7 +220,7 @@ export default function MusicPage() {
         trackId: track.id,
         query: searched,
         volume,
-        ...(effects.length ? { effects: effects.map((e) => ({ trackId: e.track.id, query: e.query, atSec: e.atSec })) } : {}),
+        ...(effects.length ? { effects: effects.map((e) => ({ trackId: e.track.id, query: e.query, atSec: e.atSec ?? 0 })) } : {}),
         ...(title.trim() ? { title: title.trim() } : {}),
       };
       const { mix } = await api<{ mix: Mix }>("/api/music", { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": requestKey } });
@@ -372,32 +391,34 @@ export default function MusicPage() {
                         <label className="flex items-center gap-1 text-xs text-slate-600">
                           Plays at
                           <input
-                            type="number"
-                            min={0}
-                            max={length ?? undefined}
-                            step={0.1}
+                            type="text"
+                            inputMode="decimal"
+                            autoComplete="off"
                             className={`${inputClass} w-20 py-1`}
-                            value={e.atSec}
+                            value={e.draft}
                             disabled={canEdit !== true}
                             aria-label={`When ${e.track.name} plays, in seconds from the start`}
+                            aria-invalid={e.atSec === null || (length !== null && e.atSec >= length) ? true : undefined}
+                            // Kept as typed ("", "1.", "1.25") so typing is never undone; read to a tenth.
                             onChange={(ev) => {
-                              const at = Math.max(0, Math.round((Number(ev.target.value) || 0) * 10) / 10);
-                              setEffects((prev) => prev.map((x) => (x.key === e.key ? { ...x, atSec: at } : x)));
+                              const draft = ev.target.value;
+                              setEffects((prev) => prev.map((x) => (x.key === e.key ? { ...x, draft, atSec: readSeconds(draft) } : x)));
                               changed();
                             }}
+                            onBlur={() => setEffects((prev) => prev.map((x) => (x.key === e.key && x.atSec !== null ? { ...x, draft: String(x.atSec) } : x)))}
                           />
                           s
                         </label>
-                        <button type="button" disabled={canEdit !== true} onClick={() => removeEffect(e)} className="rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-rose-600" aria-label={`Remove ${e.track.name} at ${atClock(e.atSec)}`}>
+                        <button type="button" disabled={canEdit !== true} onClick={() => removeEffect(e)} className="rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-rose-600" aria-label={e.atSec === null ? `Remove ${e.track.name}` : `Remove ${e.track.name} at ${atClock(e.atSec)}`}>
                           <X className="h-4 w-4" />
                         </button>
                       </li>
                     ))}
                   </ul>
                 )}
-                {lateEffect && length !== null && (
-                  <p id="effects-late" className="mt-1 text-xs text-amber-700">
-                    {lateEffect.track.name} at {atClock(lateEffect.atSec)} is past the end of the video ({atClock(length)}); move it earlier.
+                {effectProblem && (
+                  <p id="effects-problem" className="mt-1 text-xs text-amber-700">
+                    {effectProblem}
                   </p>
                 )}
                 {effects.length >= MAX_MUSIC_EFFECTS && <p className="mt-1 text-xs text-slate-500">{`That is ${MAX_MUSIC_EFFECTS} sound effects, the most one video takes.`}</p>}
@@ -405,7 +426,7 @@ export default function MusicPage() {
               <Field label="Title (optional)">
                 <input className={inputClass} value={title} maxLength={120} disabled={canEdit !== true} onChange={(e) => (setTitle(e.target.value), changed())} placeholder="The video's title, marked with music" />
               </Field>
-              <Button onClick={submit} loading={busy} disabled={!videoId || !track || !canStart || !!lateEffect} className="w-full" aria-describedby={lateEffect ? "effects-late" : undefined}>
+              <Button onClick={submit} loading={busy} disabled={!videoId || !track || !canStart || !!effectProblem} className="w-full" aria-describedby={effectProblem ? "effects-problem" : undefined}>
                 <Music className="h-4 w-4" /> Add music
               </Button>
               <p className="text-xs text-slate-500">The video with music is not added to the library; download it once it is ready. The music fades in at the start and out at the end.</p>

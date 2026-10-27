@@ -751,16 +751,23 @@ test("a catalog track found by describing it is mixed under a finished video, fo
   await expect(page.getByRole("button", { name: "Add Whoosh" })).toBeFocused();
   await expect(page.getByLabel("Hear Whoosh")).toHaveAttribute("src", /\/demo\/effect-whoosh\.mp3$/);
   await page.getByRole("button", { name: "Add Whoosh" }).click();
-  const whoosh = page.getByRole("spinbutton", { name: "When Whoosh plays, in seconds from the start" });
+  const whoosh = page.getByRole("textbox", { name: "When Whoosh plays, in seconds from the start" });
   await expect(whoosh).toBeFocused();
   await whoosh.fill("1.5");
   await page.getByRole("button", { name: "Add Pop" }).click();
-  const pop = page.getByRole("spinbutton", { name: "When Pop plays, in seconds from the start" });
+  const pop = page.getByRole("textbox", { name: "When Pop plays, in seconds from the start" });
   // A moment past the end of the video is caught before anything is sent.
   await pop.fill("999");
   await expect(page.getByTestId("music-effects")).toContainText("is past the end of the video");
   await expect(start).toBeDisabled();
-  await pop.fill("2");
+  // Typed one key at a time, a partial number is left as it is, and an empty field asks for a moment.
+  await pop.fill("");
+  await expect(page.getByTestId("music-effects")).toContainText("Say when Pop plays");
+  await expect(start).toBeDisabled();
+  await pop.pressSequentially("2.");
+  await expect(pop).toHaveValue("2.");
+  await pop.press("Tab");
+  await expect(pop).toHaveValue("2");
   await expect(start).toBeEnabled();
   // One taken out again leaves the focus on the one before it.
   await page.getByRole("button", { name: "Add Bright chime" }).click();

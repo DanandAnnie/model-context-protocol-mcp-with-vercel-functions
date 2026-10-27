@@ -165,12 +165,21 @@ describe("background music", () => {
       assert.equal(sent.length, 1);
       await assert.rejects(startMusic(request(video.id, { effects: [{ ...chosen[0], atSec: 13 }, chosen[1]] }), "u1", { key: "effects-key-1" }), ConflictError);
       await assert.rejects(startMusic(request(video.id), "u1", { key: "effects-key-1" }), ConflictError, "nor is the mix without them");
+      const twice = [
+        { trackId: "demo_effect_pop", query: "pop click", atSec: 5 },
+        { trackId: "demo_effect_pop", query: "bubble pop", atSec: 5 },
+      ];
+      const tie = await startMusic(request(video.id, { effects: twice }), "u1", { key: "effects-key-tie" });
+      assert.equal((await startMusic(request(video.id, { effects: [...twice].reverse() }), "u1", { key: "effects-key-tie" })).id, tie.id, "one effect twice at one moment, in either order");
       // One past the end, or no longer offered, is refused before the renderer is asked; more than five never arrives.
-      await assert.rejects(startMusic(request(video.id, { effects: [{ ...chosen[0], atSec: 40 }] }), "u1"), /at 0:40 is past the end of the video \(0:40\)/);
+      await assert.rejects(startMusic(request(video.id, { effects: [{ ...chosen[0], atSec: 40 }] }), "u1"), /at 0:40\.0 is past the end of the video \(0:40\.0\)/);
       await assert.rejects(startMusic(request(video.id, { effects: [{ ...chosen[0], trackId: "gone" }] }), "u1"), (e: unknown) => e instanceof ValidationError && /no longer offered for “pop click”/.test((e as Error).message));
       assert.throws(() => request(video.id, { effects: Array.from({ length: 6 }, (_, i) => ({ ...chosen[0], atSec: i })) }), /at most 5 sound effects/);
       assert.throws(() => request(video.id, { effects: [{ ...chosen[0], atSec: -1 }] }), /0 seconds or later/);
-      assert.equal(sent.length, 1);
+      // To a tenth, so the moment and the end are told apart (40.06 on a video of 40.04 reads 0:40.1 against 0:40.0).
+      await assert.rejects(startMusic(request((await finished("u1", { durationSec: 40.04 })).id, { effects: [{ ...chosen[0], atSec: 40.06 }] }), "u1"), /at 0:40\.1 is past the end of the video \(0:40\.0\)/);
+      await assert.rejects(startMusic(request((await finished("u1", { durationSec: 59.96 })).id, { effects: [{ ...chosen[0], atSec: 59.97 }] }), "u1"), /at 1:00\.0 is past the end of the video \(1:00\.0\)/);
+      assert.equal(sent.length, 2, "only the start of the effect twice reached the renderer");
       // Each description is asked again once, and each ask counts against the account's searches.
       let searched = 0;
       await startMusic(request(video.id, { effects: [chosen[0], { ...chosen[0], atSec: 20 }, chosen[1]] }), "u1", { search: () => void searched++ });

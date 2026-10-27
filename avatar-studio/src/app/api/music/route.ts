@@ -4,7 +4,7 @@ import { rateLimit, rateLimitPair } from "@/lib/rate-limit";
 import { LimitError, listMusicJobs, musicAvailable, musicKeySchema, musicRequestSchema, publicMusicJob, startMusic } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
-// The track is looked up again, the video's link renewed, and the render started, one after another.
+// The track and any sound effects are looked up again (together), the video's link renewed, and the render started.
 export const maxDuration = 60;
 
 /**
@@ -31,7 +31,7 @@ export async function GET() {
   }
 }
 
-/** Mix a catalog track under a finished video: `{ videoId, trackId, query, volume?, title? }`. */
+/** Mix a catalog track, and any sound effects, into a finished video: `{ videoId, trackId, query, volume?, title?, effects? }`. */
 export async function POST(req: Request) {
   try {
     const owner = await requireEditor();

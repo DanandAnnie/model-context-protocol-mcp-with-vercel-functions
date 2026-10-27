@@ -73,15 +73,18 @@ export async function searchMusicTracks(query: string, kind: "music" | "effects"
 
 /** Effects in the order they play, as compared and stored: one moment to the millisecond, then the track. */
 function effectsInOrder<T extends { trackId: string; query: string; atSec: number }>(effects: T[]): T[] {
-  return [...effects].map((e) => ({ ...e, atSec: Math.round(e.atSec * 1000) / 1000 })).sort((a, b) => a.atSec - b.atSec || a.trackId.localeCompare(b.trackId));
+  return [...effects].map((e) => ({ ...e, atSec: Math.round(e.atSec * 1000) / 1000 })).sort((a, b) => a.atSec - b.atSec || a.trackId.localeCompare(b.trackId) || a.query.localeCompare(b.query));
 }
 const sameEffects = (a: Array<{ trackId: string; query: string; atSec: number }>, b: Array<{ trackId: string; query: string; atSec: number }>) => {
   const [x, y] = [effectsInOrder(a), effectsInOrder(b)];
   return x.length === y.length && x.every((e, i) => e.trackId === y[i].trackId && e.query === y[i].query && e.atSec === y[i].atSec);
 };
 
-/** Formats seconds as the page shows them, for a message. */
-const clock = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, "0")}`;
+/** Seconds as the page shows them, to a tenth (59.96 is 1:00.0), for a message. */
+function clock(sec: number): string {
+  const tenths = Math.round(sec * 10);
+  return `${Math.floor(tenths / 600)}:${((tenths % 600) / 10).toFixed(1).padStart(4, "0")}`;
+}
 
 const checks = jobChecker<MusicJob>((job) => refreshMusic(job));
 
@@ -132,15 +135,14 @@ export async function startMusic(input: z.infer<typeof musicRequestSchema>, owne
   const wanted = effectsInOrder(input.effects);
   const late = wanted.find((e) => e.atSec >= video.durationSec!);
   if (late) throw new ValidationError(`A sound effect at ${clock(late.atSec)} is past the end of the video (${clock(video.durationSec!)}); move it earlier`);
-  opts.search?.();
-  const track = (await provider.searchMusic(input.query)).find((t) => t.id === input.trackId);
+  // The track's link, and each effect's (one search per description), are asked for again, as the links expire: all
+  // counted first, then asked together, so a slow catalog takes one search's time rather than six.
+  const queries = [...new Set(wanted.map((e) => e.query))];
+  for (let i = 0; i <= queries.length; i++) opts.search?.();
+  const [musicHits, ...effectHits] = await Promise.all([provider.searchMusic(input.query), ...queries.map((q) => provider.searchMusic!(q, "effects"))]);
+  const track = musicHits.find((t) => t.id === input.trackId);
   if (!track) throw new ValidationError("That track is no longer offered for this description; search again and choose one");
-  // Each effect's link is asked for again by its description (one search per description), as the links expire.
-  const found = new Map<string, MusicTrack[]>();
-  for (const q of new Set(wanted.map((e) => e.query))) {
-    opts.search?.();
-    found.set(q, await provider.searchMusic(q, "effects"));
-  }
+  const found = new Map<string, MusicTrack[]>(queries.map((q, i) => [q, effectHits[i]]));
   const effects = wanted.map((e) => {
     const hit = found.get(e.query)?.find((t) => t.id === e.trackId);
     if (!hit) throw new ValidationError(`A sound effect is no longer offered for “${e.query}”; search again and choose one`);

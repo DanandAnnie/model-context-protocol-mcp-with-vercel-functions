@@ -391,7 +391,8 @@ export class HeyGenClient {
       duration?: number;
       failure_code?: string;
       failure_message?: string;
-    }>(`${V3}/videos/${encodeURIComponent(videoId)}`);
+      // Bounded: a webhook's answer waits on it too (a directed video's render, checked as its agent names it).
+    }>(`${V3}/videos/${encodeURIComponent(videoId)}`, { signal: AbortSignal.timeout(10_000) });
   }
 
   /** Video Translate (v3): one id per output language. */

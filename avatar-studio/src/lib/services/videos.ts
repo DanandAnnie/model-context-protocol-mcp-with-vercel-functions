@@ -1547,7 +1547,8 @@ export async function applyAvatarWebhook(providerName: string, body: unknown): P
   });
   if (result.before) await afterTransition(result.before, result.next);
   // Moved to its render by the agent's webhook: the render is asked about at once, since its own webhook may have come
-  // first, without the studio's id, and matched nothing then.
+  // first, without the studio's id, and matched nothing then. A check that fails (or one already running) leaves it for
+  // the next look.
   if (!byJob && result.before && result.next.status === "processing" && result.next.providerJobId !== result.before.providerJobId) return refreshStatus(result.next);
   return result.next;
 }

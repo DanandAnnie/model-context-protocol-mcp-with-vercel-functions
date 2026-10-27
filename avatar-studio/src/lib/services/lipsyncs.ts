@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
-import { LIPSYNC_MODES, type AudioClip, type LipsyncJob, type Video, type VoiceChange } from "../types";
+import { LIPSYNC_MODES, VOICE_RESULT_LINK_MS, type AudioClip, type LipsyncJob, type Video, type VoiceChange } from "../types";
 import type { LipsyncInput } from "../providers/types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
@@ -32,7 +32,7 @@ export const lipsyncRequestSchema = z
      */
     clipId: z.string().trim().min(1).optional(),
     audioUrl: z.string().trim().max(2000, "The link is too long").optional(),
-    voiceChangeId: z.string().regex(/^vc_[A-Za-z0-9_-]{1,64}$/, "Choose one of your recordings in another voice").optional(),
+    voiceChangeId: z.string().trim().regex(/^vc_[A-Za-z0-9_-]{1,64}$/, "Choose one of your recordings in another voice").optional(),
     mode: z.enum(LIPSYNC_MODES).default("speed"),
   })
   .refine((v) => !!v.videoId !== !!v.sourceUrl, { message: "Choose one of your videos or paste a link to a video", path: ["sourceUrl"] })
@@ -108,6 +108,9 @@ export async function resolveLipsyncSources(input: z.infer<typeof lipsyncRequest
       throw err;
     }
     if (voiceChange.status !== "completed" || !voiceChange.audioUrl) throw new ValidationError(voiceChange.status === "failed" ? `“${voiceChange.title}” could not be made; choose another recording` : `“${voiceChange.title}” is still being spoken; try again once it is ready`);
+    // Its link is another renderer's, or past the time it is signed for: the renderer would fail the job after it started.
+    if (voiceChange.provider !== provider.name) throw new ValidationError(`“${voiceChange.title}” was made by another renderer; make it again in the voice changer`);
+    if (Date.now() - Date.parse(voiceChange.checkedAt ?? voiceChange.updatedAt) > VOICE_RESULT_LINK_MS) throw new ValidationError(`“${voiceChange.title}” was made over an hour ago, and its link from the renderer has expired; make it again in the voice changer`);
   } else if (input.clipId) {
     try {
       clip = await getClip(input.clipId, ownerId);

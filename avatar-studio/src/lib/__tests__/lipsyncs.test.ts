@@ -141,6 +141,8 @@ describe("lip syncs", () => {
     await getStore().put("voicechange", change("vc_ready", "u1"));
     await getStore().put("voicechange", change("vc_busy", "u1", { status: "processing", audioUrl: undefined }));
     await getStore().put("voicechange", change("vc_theirs", "u2"));
+    await getStore().put("voicechange", change("vc_old", "u1", { updatedAt: new Date(Date.now() - 61 * 60 * 1000).toISOString() }));
+    await getStore().put("voicechange", change("vc_other", "u1", { provider: "heygen" }));
     const proto = MockAvatarProvider.prototype as unknown as { startLipsync: (...a: unknown[]) => Promise<{ jobId: string }> };
     const real = proto.startLipsync;
     const sent: Array<{ audio: unknown }> = [];
@@ -160,6 +162,9 @@ describe("lip syncs", () => {
       await assert.rejects(startLipsync(lipsyncRequestSchema.parse({ videoId: video.id, voiceChangeId: "vc_busy" }), "u1"), /still being spoken/);
       await assert.rejects(startLipsync(lipsyncRequestSchema.parse({ videoId: video.id, voiceChangeId: "vc_theirs" }), "u1"), /recording in another voice is no longer available/);
       await assert.rejects(startLipsync(lipsyncRequestSchema.parse({ videoId: video.id, voiceChangeId: "vc_gone" }), "u1"), /no longer available/);
+      // Its link is good for about an hour, and only to the renderer that made it.
+      await assert.rejects(startLipsync(lipsyncRequestSchema.parse({ videoId: video.id, voiceChangeId: "vc_old" }), "u1"), /over an hour ago, and its link from the renderer has expired/);
+      await assert.rejects(startLipsync(lipsyncRequestSchema.parse({ videoId: video.id, voiceChangeId: "vc_other" }), "u1"), /made by another renderer/);
       assert.equal(sent.length, 1);
       // Exactly one audio source.
       assert.throws(() => lipsyncRequestSchema.parse({ videoId: video.id, voiceChangeId: "vc_ready", audioUrl: AUDIO }), /Choose one of your audio clips or recordings/);

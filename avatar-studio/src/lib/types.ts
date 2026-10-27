@@ -304,6 +304,12 @@ export interface InstantVoice {
 }
 
 /** A recording spoken again in one of the account's instant voices, the words and timing kept (speech to speech). */
+/**
+ * How long a recording spoken in an instant voice is offered as a lip sync's audio once it is ready: its link is the
+ * renderer's, signed for a limited time (HeyGen's are treated as good for about an hour, as the studio's other links are).
+ */
+export const VOICE_RESULT_LINK_MS = 60 * 60 * 1000;
+
 export interface VoiceChange {
   id: string;
   ownerId: string;

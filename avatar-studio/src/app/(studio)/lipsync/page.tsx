@@ -8,10 +8,10 @@ import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api, formatDate, formatSeconds, isRefusal } from "@/lib/client";
 import { clipBody as clipFrom } from "@/lib/clip-upload";
-import { type AudioClip, type LipsyncJob, type LipsyncMode, type Video, type VoiceChange } from "@/lib/types";
+import { VOICE_RESULT_LINK_MS, type AudioClip, type LipsyncJob, type LipsyncMode, type Video, type VoiceChange } from "@/lib/types";
 
 /** A recording or text spoken in one of the account's instant voices, as the voice changer lists it. */
-type Voiced = Pick<VoiceChange, "id" | "title" | "status" | "audioUrl" | "durationSec">;
+type Voiced = Pick<VoiceChange, "id" | "title" | "status" | "audioUrl" | "durationSec" | "updatedAt" | "checkedAt">;
 /** A lip sync as the server lists it: never the renderer or its job id. */
 type Lipsync = Omit<LipsyncJob, "ownerId" | "provider" | "providerJobId">;
 /** A fresh key for one start (a UUID where the browser has one, as it does over https and on localhost). */
@@ -41,8 +41,9 @@ export default function LipsyncPage() {
   const videos = (library?.videos ?? []).filter((v) => v.videoUrl && !v.deletedAt);
   const { data: clipData, setData: setClipData, refetch: refetchClips } = useApi<{ clips: AudioClip[] }>("/api/clips");
   const clips = clipData?.clips ?? [];
-  const { data: voiceData } = useApi<{ changes: Voiced[] }>("/api/voice-changer");
-  const voiced = (voiceData?.changes ?? []).filter((c) => c.status === "completed" && c.audioUrl);
+  const { data: voiceData, error: voiceError } = useApi<{ changes: Voiced[] }>("/api/voice-changer");
+  // Ready ones whose link from the renderer is still good (the server refuses the others).
+  const voiced = (voiceData?.changes ?? []).filter((c) => c.status === "completed" && c.audioUrl && Date.now() - Date.parse(c.checkedAt ?? c.updatedAt) <= VOICE_RESULT_LINK_MS);
   const [from, setFrom] = useState<"link" | "library">("library");
   const [sourceUrl, setSourceUrl] = useState("");
   const [videoId, setVideoId] = useState("");
@@ -55,7 +56,15 @@ export default function LipsyncPage() {
       setAudioFrom("voice");
       setVoiceChangeId(chosen);
     }
+    // Read once: a reload after a start does not choose it again.
+    if (chosen) window.history.replaceState(null, "", window.location.pathname);
   }, []);
+  // A chosen recording not on offer (deleted, another account's, or too old to send) is not chosen, and the page says so.
+  useEffect(() => {
+    if (!voiceData || !voiceChangeId || voiced.some((c) => c.id === voiceChangeId)) return;
+    setVoiceChangeId("");
+    setNote("That recording is no longer available, or was made over an hour ago; make it again in the voice changer.");
+  }, [voiceData, voiceChangeId, voiced]);
   const [clipId, setClipId] = useState("");
   const [audioUrl, setAudioUrl] = useState("");
   const [mode, setMode] = useState<LipsyncMode>("speed");
@@ -259,7 +268,7 @@ export default function LipsyncPage() {
                 </div>
               </fieldset>
               {audioFrom === "voice" ? (
-                <Field label="Recording in your voice" hint={voiced.length ? "A recording or text spoken in one of your instant voices, from the voice changer." : voiceData ? "None is ready; make one in the voice changer." : "Loading your recordings…"}>
+                <Field label="Recording in your voice" hint={voiced.length ? "A recording or text spoken in one of your instant voices within the last hour, from the voice changer." : voiceData ? "None made within the last hour is ready; make one in the voice changer." : voiceError ? "Your recordings could not be loaded." : "Loading your recordings…"}>
                   <select className={inputClass} value={voiceChangeId} disabled={canEdit === false} onChange={(e) => (setVoiceChangeId(e.target.value), changed())}>
                     <option value="">{voiced.length ? "Choose a recording" : "No recordings yet"}</option>
                     {voiced.map((c) => (

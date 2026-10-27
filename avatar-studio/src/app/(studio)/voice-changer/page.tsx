@@ -9,7 +9,7 @@ import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { ApiError, api, formatDate, formatSeconds, isRefusal } from "@/lib/client";
 import { clipBody } from "@/lib/clip-upload";
-import type { AudioClip, InstantVoice, VoiceChange } from "@/lib/types";
+import { VOICE_RESULT_LINK_MS, type AudioClip, type InstantVoice, type VoiceChange } from "@/lib/types";
 
 /** As the server lists them: never the renderer, its ids, or the upload sent to it. */
 type Voice = Omit<InstantVoice, "ownerId" | "provider" | "providerVoiceId">;
@@ -524,7 +524,7 @@ export default function VoiceChangerPage() {
                           <a href={c.audioUrl} download target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:underline" aria-label={`Download ${c.title}, ${formatDate(c.createdAt)}`}>
                             <Download className="h-3 w-3" aria-hidden /> Download
                           </a>
-                          {canEdit === true && (
+                          {canEdit === true && Date.now() - Date.parse(c.checkedAt ?? c.updatedAt) <= VOICE_RESULT_LINK_MS && (
                             // Its voice on a video: the lip sync page with this recording chosen as the new audio.
                             <Link href={`/lipsync?voiceChange=${c.id}`} className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:underline" aria-label={`Lip-sync a video to ${c.title}, ${formatDate(c.createdAt)}`}>
                               <AudioLines className="h-3 w-3" aria-hidden /> Lip-sync a video

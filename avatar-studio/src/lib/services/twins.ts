@@ -5,8 +5,8 @@ import { z } from "zod";
 import { createHash } from "node:crypto";
 import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
-import { getAvatarProvider, getAvatarProviderByName } from "../providers";
-import type { Avatar, TwinJob } from "../types";
+import { getAvatarProvider, getAvatarProviderByName, getTtsProvider } from "../providers";
+import type { Avatar, TwinJob, Voice } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { assertPublicHttpUrl } from "../safe-url";
@@ -15,11 +15,18 @@ import type { FetchLike } from "../safe-fetch";
 import { owned } from "./shared";
 import { MAX_PORTRAIT_BYTES, rememberMadeLooks } from "./avatars";
 import { jobChecker } from "./job-checks";
+import { rememberMadeVoices } from "./voices";
+import { withSuffix } from "../text";
 
 /** Digital twins an account keeps (each one becomes a presenter); another needs one forgotten first. */
 export const MAX_TWINS = 10;
 /** A consent page lasts this long at the renderer; a new one can be asked for after. */
 export const CONSENT_LINK_MS = 24 * 60 * 60 * 1000;
+/** A start whose answer is not stored yet is left to the request sending it for this long, then asked for again. */
+export const TWIN_RESERVATION_MS = 2 * 60 * 1000;
+/** The renderer replays a start's answer for its key this long; a start still unanswered after it is given up. */
+export const TWIN_REPLAY_MS = 24 * 60 * 60 * 1000;
+const STILL_SENDING = "This twin is still being sent to the renderer; try again in a moment";
 
 export const twinRequestSchema = z.object({
   name: z.string().trim().min(1, "Give the twin a name").max(80),
@@ -40,20 +47,25 @@ export function twinsAvailable(): boolean {
 }
 
 /** What the account sees of a twin: never the renderer, its look, or its character, which stay on the server. */
-export type PublicTwin = Omit<TwinJob, "ownerId" | "provider" | "lookId" | "groupId" | "imageUrl"> & { consentLinkExpired?: true };
-export function publicTwin(job: TwinJob, now = Date.now()): PublicTwin {
-  const { ownerId: _o, provider: _p, lookId: _l, groupId: _g, imageUrl: _i, ...rest } = job;
+export type PublicTwin = Omit<TwinJob, "ownerId" | "provider" | "lookId" | "groupId" | "voiceId" | "imageUrl"> & { consentLinkExpired?: true };
+/**
+ * What the account sees of a twin. The consent link is the person's to record consent with, so only an account that
+ * may edit sees it (`canEdit` false hides it from viewers of a workspace).
+ */
+export function publicTwin(job: TwinJob, now = Date.now(), canEdit = true): PublicTwin {
+  const { ownerId: _o, provider: _p, lookId: _l, groupId: _g, voiceId: _v, imageUrl: _i, ...rest } = job;
   void _o;
   void _p;
   void _l;
   void _g;
+  void _v;
   void _i;
   // A link past its day is not offered; a new one is asked for instead.
   const expired = !!job.consentUrlAt && now - Date.parse(job.consentUrlAt) > CONSENT_LINK_MS && job.consent !== "accepted";
-  if (!expired) return rest;
+  if (!expired && canEdit) return rest;
   const { consentUrl: _u, ...withoutLink } = rest;
   void _u;
-  return { ...withoutLink, consentLinkExpired: true };
+  return expired ? { ...withoutLink, consentLinkExpired: true } : withoutLink;
 }
 
 /** The finished twin's picture is fetched through this (tests swap it). */
@@ -77,15 +89,18 @@ export async function listTwins(ownerId: string = LOCAL_OWNER): Promise<TwinJob[
 
 /**
  * Starts training a twin from a public link to the footage. With a client `key`, the twin's id is derived from the
- * account and the key, so a retried start returns the twin already stored, or asks the renderer again with the same key.
- * `admit` runs once the request is checked (the hourly limit).
+ * account and the key, so a retried start returns the twin already stored. The row is kept before the renderer is asked
+ * (with the twin's id as its key), so an answer lost on the way back is asked for again, from a retry or a later check,
+ * and the look and voice it made are never left unknown. `admit` runs once the request is checked (the hourly limit).
  */
 export async function startTwin(input: z.infer<typeof twinRequestSchema>, ownerId: string = LOCAL_OWNER, opts: { key?: string; admit?: () => void } = {}): Promise<TwinJob> {
   const id = opts.key ? `tw_${createHash("sha256").update(`${ownerId}\0${opts.key}`).digest("base64url").slice(0, 32)}` : newId("tw");
   const existing = opts.key ? await getStore().get<TwinJob>("twin", id) : null;
   if (existing && existing.ownerId === ownerId) {
     if (existing.footageUrl !== input.footageUrl || existing.name !== input.name) throw new ConflictError("This Idempotency-Key was already used for another twin; send a new key");
-    return existing;
+    if (existing.lookId || existing.status !== "processing") return existing;
+    if (Date.now() - Date.parse(existing.createdAt) < TWIN_RESERVATION_MS) throw new ConflictError(STILL_SENDING);
+    return (await resend(existing)) ?? existing;
   }
   const provider = getAvatarProvider();
   if (!provider.startTwin) throw new ValidationError(`Digital twins are not available with the ${provider.name} renderer`);
@@ -100,9 +115,6 @@ export async function startTwin(input: z.infer<typeof twinRequestSchema>, ownerI
   // Read then written: two starts at the same moment can between them pass the cap.
   if ((await getStore().list<TwinJob>("twin", ownerId)).length >= MAX_TWINS) throw new ConflictError(`An account keeps at most ${MAX_TWINS} digital twins; forget one to train another`);
   opts.admit?.();
-  const { lookId, groupId } = await provider.startTwin({ name: input.name, footageUrl: url, key: id });
-  // The look is the studio's in the renderer's shared account from now on, whatever becomes of this twin.
-  await rememberMadeLooks([lookId]);
   const now = nowIso();
   const job: TwinJob = {
     id,
@@ -111,42 +123,111 @@ export async function startTwin(input: z.infer<typeof twinRequestSchema>, ownerI
     ...(input.gender ? { gender: input.gender } : {}),
     footageUrl: url,
     provider: provider.name,
-    lookId,
-    groupId,
+    lookId: "",
+    groupId: "",
     training: "processing",
     consent: "not_requested",
     status: "processing",
     createdAt: now,
     updatedAt: now,
   };
-  return getStore().put("twin", job);
+  // Kept first: a key some other account used maps to another id, and one sent twice at once is refused here.
+  if (!(await getStore().insert("twin", job))) throw new ConflictError(STILL_SENDING);
+  let out: Awaited<ReturnType<NonNullable<typeof provider.startTwin>>>;
+  try {
+    out = await provider.startTwin({ name: input.name, footageUrl: url, key: id });
+  } catch (err) {
+    // A refusal made nothing; any other failure may have been an answer lost, asked for again later.
+    if (err instanceof ValidationError) await getStore().remove("twin", id);
+    throw err;
+  }
+  return (await keepStart(job, out)) ?? job;
+}
+
+/** Stores what the renderer made for a start (the look, character, and voice), noted as the studio's first. */
+async function keepStart(job: TwinJob, out: { lookId: string; groupId: string; voiceId?: string }): Promise<TwinJob | null> {
+  // The look and voice are the studio's in the renderer's shared account from now on, whatever becomes of this twin.
+  await Promise.all([rememberMadeLooks([out.lookId]), rememberMadeVoices([out.voiceId])]);
+  const next: TwinJob = { ...job, lookId: out.lookId, groupId: out.groupId, ...(out.voiceId ? { voiceId: out.voiceId } : {}), updatedAt: nowIso() };
+  if (await getStore().putIf("twin", next, "updatedAt", job.updatedAt)) return next;
+  // Forgotten while it was being sent: the voice is nobody's, so it goes (the look stays the studio's, never offered).
+  if (!(await getStore().get<TwinJob>("twin", job.id))) await dropVoice(job.provider, out.voiceId);
+  return null;
+}
+
+/**
+ * Asks the renderer again for a start whose answer was never stored, with the same key, so it answers with the twin it
+ * made, or makes it now. Past the renderer's replay window, or when it refuses, the twin is marked failed.
+ */
+async function resend(job: TwinJob): Promise<TwinJob | null> {
+  const failed = (error: string): TwinJob => ({ ...job, training: "failed", status: "failed", error, updatedAt: nowIso() });
+  if (Date.now() - Date.parse(job.createdAt) > TWIN_REPLAY_MS) {
+    const next = failed("The renderer never confirmed this twin; train it again");
+    return (await getStore().putIf("twin", next, "updatedAt", job.updatedAt)) ? next : null;
+  }
+  const provider = getAvatarProviderByName(job.provider);
+  if (!provider.startTwin) return null;
+  try {
+    return await keepStart(job, await provider.startTwin({ name: job.name, footageUrl: job.footageUrl, key: job.id }));
+  } catch (err) {
+    if (!(err instanceof ValidationError)) throw err;
+    const next = failed(err.message);
+    return (await getStore().putIf("twin", next, "updatedAt", job.updatedAt)) ? next : null;
+  }
+}
+
+/** Deletes a voice the renderer cloned for a twin, unless it is kept as the account's voice; never throws. */
+async function dropVoice(providerName: string, voiceId: string | undefined, ownerId?: string): Promise<void> {
+  if (!voiceId) return;
+  try {
+    if (ownerId && (await getStore().get<Voice>("voice", voiceId))?.ownerId === ownerId) return;
+    await getAvatarProviderByName(providerName).deleteTwinVoice?.(voiceId);
+  } catch (err) {
+    // Still noted as the studio's, so no other account is offered it.
+    console.error(`twin voice ${voiceId} was not deleted:`, err);
+  }
 }
 
 /**
  * Asks the renderer for a page where the person in the footage records their consent (it lasts a day). A link still
  * valid is returned as it is; one past its day, or after a refusal, is replaced.
  */
-export async function requestTwinConsent(id: string, ownerId: string = LOCAL_OWNER): Promise<TwinJob> {
+export async function requestTwinConsent(id: string, ownerId: string = LOCAL_OWNER, opts: { admit?: () => void } = {}): Promise<TwinJob> {
   const job = owned(await getStore().get<TwinJob>("twin", twinIdSchema.parse(id)), ownerId, "Digital twin");
   if (job.status === "failed") throw new ValidationError(`"${job.name}" could not be trained${job.error ? `: ${job.error}` : ""}; train it again from other footage`);
   if (job.consent === "accepted") throw new ConflictError(`Consent for "${job.name}" is already given`);
+  if (!job.groupId) throw new ConflictError(STILL_SENDING);
   const fresh = job.consentUrl && job.consentUrlAt && Date.now() - Date.parse(job.consentUrlAt) < CONSENT_LINK_MS && job.consent !== "rejected";
   if (fresh) return job;
   const provider = getAvatarProviderByName(job.provider);
   if (!provider.requestTwinConsent) throw new ValidationError(`Consent links are not available with the ${job.provider} renderer`);
+  // Counted only when a new link is asked for; the one still valid is handed back as often as it is wanted.
+  opts.admit?.();
   // One key per minute: a double click asks once, a link asked for again later is a new one.
   const out = await provider.requestTwinConsent(job.groupId, `${job.id}.${Math.floor(Date.now() / 60_000)}`);
   const now = nowIso();
   const next: TwinJob = { ...job, consent: out.consent, ...(out.url ? { consentUrl: out.url, consentUrlAt: now } : {}), updatedAt: now };
   delete next.error;
-  return getStore().put("twin", next);
+  // Written only over the record that was read, so a forget meanwhile stays forgotten.
+  if (!(await getStore().putIf("twin", next, "updatedAt", job.updatedAt))) throw new ConflictError(`"${job.name}" changed meanwhile; try again`);
+  return next;
 }
 
-/** Forgets one twin; the presenter it became stays (deleted from the avatars, as any). */
+/**
+ * Forgets one twin. The presenter and voice it became stay (deleted from the avatars and voices, as any); a voice the
+ * renderer cloned that never became the account's is deleted there. The renderer keeps the trained look, which stays
+ * the studio's and is never offered to another account.
+ */
 export async function deleteTwin(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
   const job = owned(await getStore().get<TwinJob>("twin", twinIdSchema.parse(id)), ownerId, "Digital twin");
-  await rememberMadeLooks([job.lookId]);
+  await Promise.all([rememberMadeLooks([job.lookId]), rememberMadeVoices([job.voiceId])]);
   await getStore().remove("twin", job.id);
+  await dropVoice(job.provider, job.voiceId, ownerId);
+}
+
+/** Deletes at the renderer the voice a twin cloned that never became the account's (account deletion). Never throws. */
+export async function dropTwinVoice(job: TwinJob): Promise<void> {
+  await dropVoice(job.provider, job.voiceId, job.ownerId);
 }
 
 /** The trained twin's picture, kept as a data URL so the photo avatar keeps it after the renderer's link expires. */
@@ -159,15 +240,24 @@ async function keepPicture(url: string): Promise<string> {
 
 /**
  * Asks the renderer how training and consent stand; once the twin is trained and consented to, it is kept as a photo
- * avatar of the account (once: its id is derived from the twin). Never throws: a failed check keeps what was known.
+ * avatar of the account (once: its id is derived from the twin), opening the editor with the voice cloned from the
+ * footage when the voices come from the same renderer. A start whose answer was lost is asked for again first. Never
+ * throws: a failed check keeps what was known.
  */
-async function refreshTwin(job: TwinJob): Promise<TwinJob> {
-  if (job.status !== "processing") return job;
+async function refreshTwin(read: TwinJob): Promise<TwinJob> {
+  if (read.status !== "processing") return read;
+  let job = read;
   try {
+    if (!job.lookId) {
+      if (Date.now() - Date.parse(job.createdAt) < TWIN_RESERVATION_MS) return job;
+      const sent = await resend(job);
+      if (!sent?.lookId) return sent ?? job;
+      job = sent;
+    }
     const provider = getAvatarProviderByName(job.provider);
     let next: TwinJob = { ...job };
     if (next.training === "processing" && provider.portraitStatus) {
-      const look = await provider.portraitStatus(job.lookId);
+      const look = await provider.portraitStatus(job.lookId, "twin");
       if (look.status === "failed" || (look.status === "completed" && !look.imageUrl)) {
         next = { ...next, training: "failed", status: "failed", error: look.error ?? "The renderer could not train a twin from that footage" };
       } else if (look.status === "completed" && look.imageUrl) {
@@ -179,15 +269,20 @@ async function refreshTwin(job: TwinJob): Promise<TwinJob> {
         }
       }
     }
-    // Consent is asked about once its link has been asked for, until it is given.
-    if (next.status === "processing" && (next.consent === "pending" || next.consent === "rejected") && provider.twinConsentStatus) {
-      const out = await provider.twinConsentStatus(job.groupId);
-      if (out.consent !== "not_requested") next = { ...next, consent: out.consent };
-      if (out.consent === "rejected" && out.error) next.error = out.error;
-      else if (out.consent !== "rejected") delete next.error;
+    // Consent is asked about once its link has been asked for, or once the twin is trained (a workspace the renderer
+    // lets skip the step has it given already), until it is given.
+    if (next.status === "processing" && (next.consent !== "not_requested" || next.training === "completed") && next.consent !== "accepted" && provider.twinConsentStatus) {
+      const out = await provider.twinConsentStatus(job.groupId, job.consentUrlAt);
+      if (out.gone) next = { ...next, training: "failed", status: "failed", error: out.error ?? "The renderer no longer has this twin" };
+      else {
+        if (out.consent !== "not_requested") next = { ...next, consent: out.consent };
+        if (out.consent === "rejected" && out.error) next.error = out.error;
+        else if (out.consent !== "rejected") delete next.error;
+      }
     }
     if (next.status === "processing" && next.training === "completed" && next.consent === "accepted" && provider.lookAssetIds) {
       const avatarId = `av_${createHash("sha256").update(`${job.id}\0twin`).digest("base64url").slice(0, 20)}`;
+      const voice = await keepVoice(job);
       const avatar: Avatar = {
         id: avatarId,
         ownerId: job.ownerId,
@@ -198,6 +293,7 @@ async function refreshTwin(job: TwinJob): Promise<TwinJob> {
         provider: job.provider,
         tags: ["digital twin"],
         providerAssetIds: provider.lookAssetIds(job.lookId),
+        ...(voice ? { defaultVoiceId: voice } : {}),
         createdAt: nowIso(),
       };
       // Written once: a check repeated after a failed job write leaves a rename, or a delete, made meanwhile alone.
@@ -213,6 +309,18 @@ async function refreshTwin(job: TwinJob): Promise<TwinJob> {
     console.error(`twin check failed for ${job.id}:`, err);
     return job;
   }
+}
+
+/**
+ * The voice cloned from the twin's footage, kept as the account's own voice (once) when the studio's voices come from
+ * the same renderer; otherwise none, and the clone stays unused (deleted when the twin is forgotten).
+ */
+async function keepVoice(job: TwinJob): Promise<string | undefined> {
+  const tts = getTtsProvider();
+  if (!job.voiceId || tts.name !== job.provider) return undefined;
+  const voice: Voice = { id: job.voiceId, name: withSuffix(job.name, " (twin)", 60), provider: tts.name, source: "custom", ownerId: job.ownerId, tags: ["digital twin"], createdAt: nowIso() };
+  await getStore().insert("voice", voice);
+  return job.voiceId;
 }
 
 /** Throws NotFound for a twin that is not the account's (routes use it before acting on one). */

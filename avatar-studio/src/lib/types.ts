@@ -177,10 +177,15 @@ export interface TwinJob {
   gender?: "female" | "male";
   /** The footage: a public https link to a video of the person speaking to camera. */
   footageUrl: string;
-  /** Renderer training it, its look and character there, never shown to the account. */
+  /**
+   * Renderer training it, its look and character there, and the voice it cloned from the footage, never shown to the
+   * account. The look and character are empty while the start is being sent (the row is kept first, so a lost answer
+   * is asked for again with the same key).
+   */
   provider: string;
   lookId: string;
   groupId: string;
+  voiceId?: string;
   training: "processing" | "completed" | "failed";
   /** Where the person's consent stands: not asked yet, asked (a link sent, or under review), given, or refused. */
   consent: "not_requested" | "pending" | "accepted" | "rejected";
@@ -205,6 +210,8 @@ export interface TwinJob {
 export interface MadeLook {
   id: string;
   lookId: string;
+  /** The id is a voice the studio made there (a digital twin's), kept out of the voice library the same way. */
+  voice?: true;
 }
 
 /** How closely a lip sync redraws the mouth: fast, or slower and truer to the face (HeyGen avatar inference). */

@@ -6,6 +6,9 @@ import { LOCAL_OWNER } from "../owner-id";
 import { assertNoRenewingPlan } from "../billing";
 import { ConflictError } from "../errors";
 import { madeLooksOf, rememberMadeLooks } from "./avatars";
+import { rememberMadeVoices } from "./voices";
+import { dropTwinVoice } from "./twins";
+import type { TwinJob } from "../types";
 
 const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip", "videolead", "backdrop", "portrait", "highlight", "cleanup", "lipsync", "lookpack", "twin"] as const;
 /**
@@ -39,12 +42,15 @@ export async function exportOwnerData(ownerId: string = LOCAL_OWNER): Promise<Ow
         delete copy.provider;
         delete copy.lookIds;
       }
-      // The twin's picture is in the photo avatar it became; the renderer's look and character stay on the server.
+      // The twin's picture is in the photo avatar it became; the renderer's look, character, and voice stay on the
+      // server, and the consent link is the person's to record with, not part of the account's data.
       if (kind === "twin") {
         delete copy.provider;
         delete copy.lookId;
         delete copy.groupId;
+        delete copy.voiceId;
         delete copy.imageUrl;
+        delete copy.consentUrl;
       }
       if (kind === "sharelock") {
         delete copy.hash;
@@ -96,8 +102,13 @@ export async function deleteOwnerData(ownerId: string = LOCAL_OWNER, opts: { bil
         // The clip's audio sits in its own row, removed by id so it is never loaded.
         if (kind === "clip") await getStore().remove("clipaudio", `clipaudio_${item.id}`);
         if (kind === "backdrop") await getStore().remove("backdropdata", `backdropdata_${item.id}`);
-        // Looks made at the renderer stay there; they stay the studio's, never offered to other accounts.
+        // Looks made at the renderer stay there; they stay the studio's, never offered to other accounts. A twin's
+        // voice that never became the account's (those went with the voices) is deleted there.
         await rememberMadeLooks(madeLooksOf(kind, item));
+        if (kind === "twin") {
+          await rememberMadeVoices([(item as TwinJob).voiceId]);
+          await dropTwinVoice(item as TwinJob);
+        }
         await getStore().remove(kind, item.id);
         removed.add(item.id);
       }

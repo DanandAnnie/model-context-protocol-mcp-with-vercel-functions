@@ -22,7 +22,13 @@ export async function GET() {
     const owner = await requireOwner();
     const limit = rateLimit(`twinlist:${owner}`, LISTS_PER_OWNER, WINDOW_MS);
     if (!limit.allowed) return json({ error: "Too many checks for now; try again later" }, { status: 429, headers: { "Retry-After": String(limit.retryAfterSec) } });
-    return json({ twins: (await listTwins(owner)).map((t) => publicTwin(t)), available: twinsAvailable() });
+    // The consent link is the person's to record consent with, so a viewer of a workspace is not handed it.
+    const canEdit = await requireEditor().then(
+      () => true,
+      () => false,
+    );
+    const now = Date.now();
+    return json({ twins: (await listTwins(owner)).map((t) => publicTwin(t, now, canEdit)), available: twinsAvailable() });
   } catch (err) {
     return errorResponse(err);
   }

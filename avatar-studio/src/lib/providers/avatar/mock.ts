@@ -98,22 +98,20 @@ export class MockAvatarProvider implements AvatarProvider {
     let hash = 0;
     for (const ch of name) hash = (hash * 31 + ch.codePointAt(0)!) >>> 0;
     const look = `mockportrait_${hash % 1000}_${Buffer.from(Array.from(name).slice(0, 40).join("")).toString("base64url")}`;
-    return { lookId: look, groupId: `mockgroup_${Date.now()}` };
+    return { lookId: look, groupId: `mockgroup_${Date.now()}`, voiceId: `twinvoice_${hash % 1000}_${Date.now()}` };
   }
 
-  async requestTwinConsent(groupId: string) {
-    MockAvatarProvider.consentAskedAt.set(groupId, Date.now());
+  async requestTwinConsent() {
     return { url: "/demo-consent", consent: "pending" as const };
   }
 
-  async twinConsentStatus(groupId: string) {
-    const asked = MockAvatarProvider.consentAskedAt.get(groupId);
-    if (asked === undefined) return { consent: "not_requested" as const };
-    return { consent: Date.now() - asked >= MockAvatarProvider.CLIP_MS ? ("accepted" as const) : ("pending" as const) };
+  /** Consent is "given" a few seconds after its link was asked for (the studio keeps when, so any instance agrees). */
+  async twinConsentStatus(_groupId: string, askedAt?: string) {
+    if (!askedAt) return { consent: "not_requested" as const };
+    return { consent: Date.now() - Date.parse(askedAt) >= MockAvatarProvider.CLIP_MS ? ("accepted" as const) : ("pending" as const) };
   }
 
-  /** When each demo twin's consent link was asked for (consent follows a few seconds later). */
-  private static consentAskedAt = new Map<string, number>();
+  async deleteTwinVoice() {}
 
   /** Demo lip sync: the sample video stands in for the synced one a few seconds later; nothing is redrawn. */
   async startLipsync() {

@@ -804,17 +804,23 @@ test("a digital twin is trained from footage, waits for the person's consent, th
   await expect(page.getByTestId("avatar-library").getByText(name, { exact: true })).toBeVisible();
   const listed = (await (await page.request.get("/api/twins")).json()).twins as Array<Record<string, unknown>>;
   const mine = listed.find((t) => t.name === name)!;
-  expect(Object.keys(mine)).not.toContain("lookId");
-  expect(Object.keys(mine)).not.toContain("groupId");
-  // The demo consent page opens without signing in (it stands in for HeyGen's own page).
-  const consent = await page.request.get("/demo-consent");
-  expect(consent.status()).toBe(200);
-  // Forgetting the twin asks first and keeps its presenter.
-  page.once("dialog", (d) => d.accept());
+  for (const key of ["lookId", "groupId", "voiceId"]) expect(Object.keys(mine)).not.toContain(key);
+  // The voice cloned from the footage is the account's own, and the presenter opens the editor with it.
+  const voices = (await (await page.request.get("/api/voices")).json()).voices as Array<{ id: string; name: string; source?: string }>;
+  const voice = voices.find((v) => v.name === `${name} (twin)`)!;
+  expect(voice.source).toBe("custom");
+  const presenter = (await (await page.request.get("/api/avatars")).json()).avatars.find((a: { id: string }) => a.id === mine.avatarId);
+  expect(presenter.defaultVoiceId).toBe(voice.id);
+  // Forgetting the twin asks first, saying what stays, and keeps its presenter and voice.
+  const dialog = page.waitForEvent("dialog");
   await twin.getByRole("button", { name: `Forget the digital twin ${name}` }).click();
+  const asked = await dialog;
+  expect(asked.message()).toContain("The presenter it became stays in your avatars");
+  await asked.accept();
   await expect(twin).toHaveCount(0);
   await expect(page.getByRole("button", { name: "New digital twin" })).toBeFocused();
   expect((await page.request.delete(`/api/avatars/${mine.avatarId}`)).status()).toBe(200);
+  expect((await page.request.delete(`/api/voices/${voice.id}`)).status()).toBe(200);
 });
 
 test("a HeyGen Studio template is filled in and rendered as a library video", async ({ page }) => {
@@ -2510,6 +2516,8 @@ test("a workspace viewer sees view-only notices instead of create controls", asy
   await expect(page.getByTestId("avatar-library").getByText(photo.name)).toBeVisible();
   await expect(page.getByRole("button", { name: /^(Rename |New looks of |Delete avatar)/ })).toHaveCount(0);
   await expect(page.getByLabel(/^Default voice for /)).toHaveCount(0);
+  // Viewers see the workspace's twins, but cannot train one.
+  await expect(page.getByRole("heading", { name: "Digital twins" })).toBeVisible();
   await expect(page.getByRole("button", { name: "New digital twin" })).toHaveCount(0);
   expect((await page.request.delete(`/api/avatars/${photo.id}`)).status()).toBe(200);
   // The workspace's settings show, but only owners and editors can change them.

@@ -7,8 +7,8 @@ import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { api, formatDate, isRefusal } from "@/lib/client";
 import type { TwinJob } from "@/lib/types";
 
-/** A twin as the server lists it: never the renderer, its look, or its character. */
-type Twin = Omit<TwinJob, "ownerId" | "provider" | "lookId" | "groupId" | "imageUrl"> & { consentLinkExpired?: true };
+/** A twin as the server lists it: never the renderer, its look, its character, or its voice there. */
+type Twin = Omit<TwinJob, "ownerId" | "provider" | "lookId" | "groupId" | "voiceId" | "imageUrl"> & { consentLinkExpired?: true };
 /** A fresh key for one start (a UUID where the browser has one, as it does over https and on localhost). */
 const newKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`);
 
@@ -30,8 +30,9 @@ function stepOf(t: Twin): string {
 export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; onReady: () => void }) {
   const { data, error, setData, refetch } = useApi<{ twins: Twin[]; available: boolean }>("/api/twins");
   const twins = data?.twins ?? [];
-  // While a twin is trained or waits for consent the list is asked again, only while the tab is visible.
-  const following = twins.some((t) => t.status === "processing" && (t.training === "processing" || t.consent === "pending"));
+  // While a twin is trained or waits for consent the list is asked again, only while the tab is visible; a link past its
+  // day waits for a new one to be asked for.
+  const following = twins.some((t) => t.status === "processing" && (t.training === "processing" || (t.consent === "pending" && !t.consentLinkExpired)));
   useEffect(() => {
     if (!following) return;
     const timer = setInterval(() => {
@@ -52,19 +53,22 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
   const openButton = useRef<HTMLButtonElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const focusAfterRender = useFocusAfterRender();
-  // A twin that becomes ready, or fails, while the page is open is announced, and a ready one joins the avatars.
-  const seen = useRef<Map<string, Twin["status"]>>(new Map());
+  // A twin that becomes ready, fails, or has its consent refused while the page is open is announced, and a ready one
+  // joins the avatars.
+  const seen = useRef<Map<string, Pick<Twin, "status" | "consent">>>(new Map());
   useEffect(() => {
     if (!data) return;
     const parts: string[] = [];
     let ready = false;
     for (const t of data.twins) {
       const before = seen.current.get(t.id);
-      if (before === "processing" && t.status !== "processing") {
+      if (before?.status === "processing" && t.status !== "processing") {
         parts.push(t.status === "completed" ? `${t.name} is ready in your avatars.` : `${t.name} could not be trained: ${t.error ?? "the renderer failed"}.`);
         ready ||= t.status === "completed";
+      } else if (before && before.consent !== "rejected" && t.consent === "rejected" && t.status === "processing") {
+        parts.push(`The consent for ${t.name} was not accepted${t.error ? `: ${t.error}` : ""}. Get a new consent link to record it again.`);
       }
-      seen.current.set(t.id, t.status);
+      seen.current.set(t.id, { status: t.status, consent: t.consent });
     }
     if (ready) onReady();
     if (parts.length) setNote(parts.join(" "));
@@ -131,7 +135,8 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
   }
 
   async function forget(t: Twin) {
-    if (!window.confirm(`Forget the digital twin “${t.name}”?${t.avatarId ? " The presenter it became stays in your avatars." : " Its training is not kept."}`)) return;
+    const kept = t.avatarId ? " The presenter it became stays in your avatars, as does the voice it became in your voices." : " The voice HeyGen cloned from the footage is deleted.";
+    if (!window.confirm(`Forget the digital twin “${t.name}”?${kept} HeyGen keeps the trained twin in its account; it is never offered to anyone else.`)) return;
     setErr(null);
     const next = twins[twins.indexOf(t) + 1] ?? twins[twins.indexOf(t) - 1];
     seen.current.delete(t.id);
@@ -151,7 +156,7 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
     <section ref={listRef} className="mb-6" data-testid="digital-twins">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-slate-900">Digital twins</h2>
-        {canEdit !== false && !open && (
+        {canEdit !== false && !open && data?.available && (
           <Button ref={openButton} variant="secondary" className="px-3 py-1.5 text-xs" onClick={() => setOpen(true)}>
             <UserRound className="h-3.5 w-3.5" /> New digital twin
           </Button>

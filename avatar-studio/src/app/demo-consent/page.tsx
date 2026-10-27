@@ -1,12 +1,17 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
+import { getAvatarProvider } from "@/lib/providers";
 
 export const metadata = { title: "Consent (demo)" };
+export const dynamic = "force-dynamic";
 
 /**
  * The demo renderer's stand-in for HeyGen's consent page. With HeyGen, the person in the footage opens their link and
  * records a short statement on camera; in demo mode nothing is recorded and consent counts as given a few seconds later.
  */
 export default function DemoConsentPage() {
+  // Only the demo renderer hands out this page; with a real one the links are the renderer's own.
+  if (getAvatarProvider().name !== "mock") notFound();
   return (
     <main className="mx-auto max-w-lg px-4 py-16 text-slate-800">
       <h1 className="text-xl font-semibold">Consent for a digital twin (demo)</h1>

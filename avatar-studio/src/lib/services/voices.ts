@@ -5,16 +5,37 @@ import { nowIso } from "../ids";
 import { getTtsProvider } from "../providers";
 import { decodeDataUrl } from "../providers/image";
 import { getStore } from "../store";
-import type { Avatar, Voice } from "../types";
+import type { Avatar, MadeLook, TwinJob, Voice } from "../types";
+import { createHash } from "node:crypto";
 import { LOCAL_OWNER } from "../owner-id";
 import { memo } from "../cache";
 import { ValidationError } from "../errors";
 import { LIST_TTL_MS, owned } from "./shared";
 
-/** Provider voices (memoised) plus the owner's own voices (cloned or designed), which are listed first. */
+/**
+ * Voices the renderer cloned for accounts here (a digital twin's, from its footage). The renderer lists them with the
+ * account's own voices, to every account that shares its key; only the account whose twin made one sees it (as its own
+ * voice), and it stays left out after the twin is forgotten.
+ */
+export async function studioMadeVoices(): Promise<Set<string>> {
+  const [twins, made] = await Promise.all([getStore().list<TwinJob>("twin"), getStore().list<MadeLook>("madelook")]);
+  return new Set([...twins.map((t) => t.voiceId), ...made.filter((m) => m.voice).map((m) => m.lookId)].filter((id): id is string => !!id));
+}
+
+/** Notes voices the renderer cloned for accounts here, kept as made looks are (see `rememberMadeLooks`). */
+export async function rememberMadeVoices(voiceIds: Iterable<string | undefined>): Promise<void> {
+  const ids = [...new Set([...voiceIds].filter((id): id is string => !!id))];
+  await Promise.all(ids.map((voiceId) => getStore().put<MadeLook>("madelook", { id: `mv_${createHash("sha256").update(voiceId).digest("base64url").slice(0, 32)}`, lookId: voiceId, voice: true })));
+}
+
+/**
+ * Provider voices (memoised) plus the owner's own voices (cloned, designed, or a digital twin's), which are listed first.
+ * Voices the renderer cloned for an account's twin are left out of the provider's list (see `studioMadeVoices`).
+ */
 export async function listVoices(ownerId?: string): Promise<Voice[]> {
   const p = getTtsProvider();
-  const provider = await memo(`voices:${p.name}`, LIST_TTL_MS, () => p.listVoices());
+  const [listed, made] = await Promise.all([memo(`voices:${p.name}`, LIST_TTL_MS, () => p.listVoices()), studioMadeVoices()]);
+  const provider = listed.filter((v) => !made.has(v.id));
   if (!ownerId) return provider;
   const custom = (await getStore().list<Voice>("voice", ownerId)).filter((v) => v.provider === p.name);
   custom.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));

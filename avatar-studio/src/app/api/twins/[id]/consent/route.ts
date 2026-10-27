@@ -1,7 +1,7 @@
 import { errorResponse, json } from "@/lib/api-utils";
 import { requireEditor } from "@/lib/owner";
 import { rateLimit } from "@/lib/rate-limit";
-import { publicTwin, requestTwinConsent } from "@/lib/services";
+import { LimitError, publicTwin, requestTwinConsent } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 
@@ -13,10 +13,13 @@ const WINDOW_MS = 60 * 60 * 1000;
 export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     const owner = await requireEditor();
-    const limit = rateLimit(`twinconsent:${owner}`, PER_OWNER, WINDOW_MS);
-    if (!limit.allowed) return json({ error: "Too many consent links for now; try again later" }, { status: 429, headers: { "Retry-After": String(limit.retryAfterSec) } });
     const { id } = await ctx.params;
-    return json({ twin: publicTwin(await requestTwinConsent(id, owner)) });
+    // Counted only when a new link is asked for of the renderer; the one still valid is handed back as it is.
+    const admit = () => {
+      const limit = rateLimit(`twinconsent:${owner}`, PER_OWNER, WINDOW_MS);
+      if (!limit.allowed) throw new LimitError("Too many consent links for now; try again later");
+    };
+    return json({ twin: publicTwin(await requestTwinConsent(id, owner, { admit })) });
   } catch (err) {
     return errorResponse(err);
   }

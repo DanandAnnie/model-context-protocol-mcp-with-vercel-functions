@@ -78,11 +78,12 @@ export interface AvatarProvider {
   getStatus(providerJobId: string): Promise<AvatarJobStatus>;
   /**
    * Starts a portrait of a presenter who does not exist, drawn from a written description (HeyGen's prompt-to-avatar).
-   * Returns a job id to follow with `portraitStatus`. Absent when the provider cannot generate presenters.
+   * Returns a job id to follow with `portraitStatus` (`what` names the look in a failure the renderer gives no reason
+   * for). Absent when the provider cannot generate presenters.
    */
   generatePortrait?(input: { name: string; prompt: string }): Promise<{ jobId: string }>;
   /** Where a portrait job stands; a finished one gives the image's URL (https, or a data URL in demo mode). */
-  portraitStatus?(jobId: string): Promise<{ status: "processing" | "completed" | "failed"; imageUrl?: string; error?: string }>;
+  portraitStatus?(jobId: string, what?: "presenter" | "twin"): Promise<{ status: "processing" | "completed" | "failed"; imageUrl?: string; error?: string }>;
   /**
    * Starts cutting a finished video into short highlight clips (HeyGen AI Clipping), one per length, framed as asked.
    * Returns a job id to follow with `highlightsStatus`. Absent when the provider cannot clip videos.
@@ -112,13 +113,19 @@ export interface AvatarProvider {
   startLookPack?(input: { avatar: Avatar; pack: string; gender: "female" | "male"; aspect: "16:9" | "9:16"; key: string }): Promise<{ lookIds: string[] }>;
   /**
    * Starts training a digital twin from footage of a real person (HeyGen digital twin). `key` makes a retried start
-   * return the same twin. Its look is followed with `portraitStatus`, and its consent with `twinConsentStatus`.
+   * return the same twin (for a day). Its look is followed with `portraitStatus`, and its consent with
+   * `twinConsentStatus`. `voiceId` is the voice the renderer cloned from the footage, when it made one.
    */
-  startTwin?(input: { name: string; footageUrl: string; key: string }): Promise<{ lookId: string; groupId: string }>;
+  startTwin?(input: { name: string; footageUrl: string; key: string }): Promise<{ lookId: string; groupId: string; voiceId?: string }>;
   /** A page for the person in the footage to record their consent on (valid for a day), and where consent stands. */
   requestTwinConsent?(groupId: string, key: string): Promise<{ url?: string; consent: "pending" | "accepted" | "rejected" }>;
-  /** Where the person's consent to a twin stands, with the reason when it was refused. */
-  twinConsentStatus?(groupId: string): Promise<{ consent: "not_requested" | "pending" | "accepted" | "rejected"; error?: string }>;
+  /**
+   * Where the person's consent to a twin stands, with the reason when it was refused; `gone` when the renderer no
+   * longer has the twin. `askedAt` is when the consent link was last asked for.
+   */
+  twinConsentStatus?(groupId: string, askedAt?: string): Promise<{ consent: "not_requested" | "pending" | "accepted" | "rejected"; error?: string; gone?: true }>;
+  /** Deletes a voice the renderer cloned for a twin; one it no longer has counts as deleted. */
+  deleteTwinVoice?(voiceId: string): Promise<void>;
   /** What a photo avatar made of one of those looks carries, so a render uses the look as it is. */
   lookAssetIds?(lookId: string): Record<string, string>;
   /** The account's HeyGen Studio templates ready to fill. Absent when the provider has none. */

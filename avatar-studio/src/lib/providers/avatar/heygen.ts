@@ -57,8 +57,10 @@ export class HeyGenAvatarProvider implements AvatarProvider {
   async listAvatars(): Promise<Avatar[]> {
     const looks = await this.client.listAvatarLooks();
     return looks
-      // A photo avatar HeyGen is still preparing, or could not prepare, cannot render yet.
-      .filter((l) => (!l.status || l.status === "completed") && l.preview_image_url)
+      // A photo avatar HeyGen is still preparing, or could not prepare, cannot render yet. A digital twin is a real
+      // person trained for one account, so none is ever offered from the shared library (an account's own twins are
+      // its photo avatars), whether or not the studio knows it made it.
+      .filter((l) => (!l.status || l.status === "completed") && l.preview_image_url && l.avatar_type !== "digital_twin")
       .map((l) => ({
         id: l.id,
         name: l.name,
@@ -301,18 +303,19 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     }
   }
 
-  async portraitStatus(jobId: string): Promise<{ status: "processing" | "completed" | "failed"; imageUrl?: string; error?: string }> {
+  async portraitStatus(jobId: string, what: "presenter" | "twin" = "presenter"): Promise<{ status: "processing" | "completed" | "failed"; imageUrl?: string; error?: string }> {
+    const fallback = what === "twin" ? "HeyGen could not train a twin from that footage" : "HeyGen could not draw that presenter";
     let look;
     try {
       look = await this.client.getLook(jobId);
     } catch (err) {
       // A failed look answers with its error (moderation, or a training failure): that is the job's outcome.
       const message = err instanceof Error ? err.message : "";
-      if (message.startsWith("HeyGen error:")) return { status: "failed", error: message.slice("HeyGen error:".length).trim() || "HeyGen could not draw that presenter" };
+      if (message.startsWith("HeyGen error:")) return { status: "failed", error: message.slice("HeyGen error:".length).trim() || fallback };
       throw err;
     }
-    if (look.status === "completed") return look.preview_image_url ? { status: "completed", imageUrl: look.preview_image_url } : { status: "failed", error: "HeyGen finished the presenter without a picture" };
-    if (look.status === "failed") return { status: "failed", error: look.error?.message ?? "HeyGen could not draw that presenter" };
+    if (look.status === "completed") return look.preview_image_url ? { status: "completed", imageUrl: look.preview_image_url } : { status: "failed", error: `HeyGen finished the ${what} without a picture` };
+    if (look.status === "failed") return { status: "failed", error: look.error?.message ?? fallback };
     return { status: "processing" };
   }
 
@@ -430,11 +433,10 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     return { [LOOK]: lookId, [PENDING]: "" };
   }
 
-  /** A digital twin trained from footage of a person (v3), its look followed like any; its voice clone is HeyGen's. */
+  /** A digital twin trained from footage of a person (v3), its look followed like any, with the voice cloned from it. */
   async startTwin({ name, footageUrl, key }: { name: string; footageUrl: string; key: string }) {
     try {
-      const { lookId, groupId } = await this.client.createDigitalTwin(name.slice(0, 80), footageUrl, key);
-      return { lookId, groupId };
+      return await this.client.createDigitalTwin(name.slice(0, 80), footageUrl, key);
     } catch (err) {
       const message = err instanceof Error ? err.message : "";
       if (/ failed: 409 /.test(message)) throw new ConflictError(STILL_SENDING);
@@ -462,11 +464,19 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     try {
       group = await this.client.avatarGroup(groupId);
     } catch (err) {
-      if (/ failed: (404|410)\b/.test(err instanceof Error ? err.message : "")) return { consent: "rejected" as const, error: "HeyGen no longer has this twin" };
+      if (/ failed: (404|410)\b/.test(err instanceof Error ? err.message : "")) return { consent: "rejected" as const, error: "HeyGen no longer has this twin", gone: true as const };
       throw err;
     }
     const consent = consentOf(group.consent_status);
     return consent === "rejected" ? { consent, error: group.error?.message || "HeyGen did not accept the consent; record it again" } : { consent };
+  }
+
+  async deleteTwinVoice(voiceId: string) {
+    try {
+      await this.client.deleteVoice(voiceId);
+    } catch (err) {
+      if (!/ failed: 404\b/.test(err instanceof Error ? err.message : "")) throw err;
+    }
   }
 
   /** A video given a new audio track, the speaker's mouth redrawn to match (v3 lip sync). */

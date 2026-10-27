@@ -22,6 +22,15 @@ export class HeyGenTtsProvider implements TtsProvider {
     }));
   }
 
+  /** A voice of an account here (a digital twin's clone); one HeyGen no longer has counts as deleted. */
+  async deleteVoice(voiceId: string) {
+    try {
+      await this.client.deleteVoice(voiceId);
+    } catch (err) {
+      if (!/ failed: 404\b/.test(err instanceof Error ? err.message : "")) throw err;
+    }
+  }
+
   async synthesize() {
     return null; // HeyGen does not expose standalone TTS; the browser plays previewUrl instead.
   }

@@ -13,6 +13,7 @@ import {
   forgetTwinChecks,
   getAvatar,
   listAvatars,
+  listVoices,
   listTwins,
   publicTwin,
   requestTwinConsent,
@@ -25,7 +26,8 @@ import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { providerStatus } from "../providers";
 import { MockAvatarProvider } from "../providers/avatar/mock";
 import { getStore } from "../store";
-import type { Avatar, TwinJob } from "../types";
+import type { Avatar, TwinJob, Voice } from "../types";
+import { forgetMemo } from "../cache";
 
 const FOOTAGE = "https://93.184.216.34/dana-footage.mp4";
 const clipMs = MockAvatarProvider as unknown as { CLIP_MS: number };
@@ -33,6 +35,7 @@ const realFetch = globalThis.fetch;
 beforeEach(() => {
   globalThis.__avatarStudioStore = new MemoryStore();
   forgetTwinChecks();
+  forgetMemo();
 });
 afterEach(() => {
   globalThis.fetch = realFetch;
@@ -57,7 +60,7 @@ describe("digital twins", () => {
       const job = await startTwin(input({ gender: "female" }), "u1");
       assert.match(job.id, /^tw_/);
       assert.deepEqual([job.status, job.training, job.consent], ["processing", "processing", "not_requested"]);
-      assert.deepEqual(Object.keys(publicTwin(job)).filter((k) => ["ownerId", "provider", "lookId", "groupId", "imageUrl"].includes(k)), [], "the renderer, its look, and its character stay on the server");
+      assert.deepEqual(Object.keys(publicTwin(job)).filter((k) => ["ownerId", "provider", "lookId", "groupId", "voiceId", "imageUrl"].includes(k)), [], "the renderer, its look, character, and voice stay on the server");
       // Trained, but not a presenter before consent is given.
       let [twin] = await listTwins("u1");
       assert.deepEqual([twin.training, twin.consent, twin.status, twin.avatarId], ["completed", "not_requested", "processing", undefined]);
@@ -144,7 +147,7 @@ describe("digital twins", () => {
     assert.equal((await listAvatars("u2")).some((a) => a.id === look), false, "a twin's look is never offered to another account");
     const exported = (await exportOwnerData("u1")).twin;
     assert.equal(exported.length, MAX_TWINS);
-    assert.deepEqual(Object.keys(exported[0]).filter((k) => ["provider", "lookId", "groupId", "imageUrl"].includes(k)), []);
+    assert.deepEqual(Object.keys(exported[0]).filter((k) => ["provider", "lookId", "groupId", "voiceId", "imageUrl", "consentUrl"].includes(k)), []);
     assert.equal((await deleteOwnerData("u1")).twin, MAX_TWINS);
     assert.equal((await listAvatars("u2")).some((a) => a.id === look), false, "nor after the account is deleted");
   });
@@ -226,4 +229,163 @@ describe("digital twins", () => {
       Object.assign(config, { avatarProvider: saved.avatar, didApiKey: saved.key });
     }
   });
+});
+
+/**
+ * HeyGen as the tests need it: each start makes look_N, group_N, and voice_N (`fail` makes the next start's answer get
+ * lost, `refuse` refuses it); looks and characters answer from `looks` and `groups`; voices are listed and deleted.
+ */
+function heygenStub() {
+  const state = {
+    starts: 0,
+    posts: [] as Array<{ idem: string | null }>,
+    deleted: [] as string[],
+    fail: 0,
+    refuse: null as null | { status: number; message: string },
+    looks: {} as Record<string, Record<string, unknown>>,
+    groups: {} as Record<string, Record<string, unknown> | 404>,
+    listed: [] as Array<Record<string, unknown>>,
+  };
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    if (url === "https://api.heygen.com/v3/avatars" && method === "POST") {
+      state.posts.push({ idem: new Headers(init?.headers).get("idempotency-key") });
+      if (state.refuse) return Response.json({ error: { code: "x", message: state.refuse.message } }, { status: state.refuse.status });
+      // Each key is answered with the twin it first made, as HeyGen replays an idempotency key.
+      const idem = new Headers(init?.headers).get("idempotency-key")!;
+      const n = (state as unknown as { byKey: Map<string, number> }).byKey.get(idem) ?? ++state.starts;
+      (state as unknown as { byKey: Map<string, number> }).byKey.set(idem, n);
+      if (state.fail > 0) {
+        state.fail -= 1;
+        throw new TypeError("fetch failed");
+      }
+      return Response.json({ data: { avatar_item: { id: `look_${n}`, default_voice_id: `voice_${n}` }, avatar_group: { id: `group_${n}` } } });
+    }
+    const lookId = /\/v3\/avatars\/looks\/(look_\d+)$/.exec(url)?.[1];
+    if (lookId) return Response.json({ data: state.looks[lookId] ?? { status: "processing" } });
+    const groupId = /\/v3\/avatars\/(group_\d+)$/.exec(url)?.[1];
+    if (groupId) {
+      const group = state.groups[groupId] ?? { consent_status: null };
+      return group === 404 ? Response.json({ error: { code: "not_found", message: "Avatar group not found" } }, { status: 404 }) : Response.json({ data: group });
+    }
+    const voiceId = /\/v3\/voices\/([^/?]+)$/.exec(url)?.[1];
+    if (voiceId && method === "DELETE") {
+      state.deleted.push(voiceId);
+      return Response.json({ data: { voice_id: voiceId } });
+    }
+    if (url.includes("/v3/voices?type=private")) return Response.json({ data: [1, 2, 3].map((n) => ({ voice_id: `voice_${n}`, name: `Clone ${n}` })).concat([{ voice_id: "operator_voice", name: "Operator" }]), has_more: false });
+    if (url.includes("/v3/voices?type=public")) return Response.json({ data: [{ voice_id: "public_voice", name: "Nadine" }], has_more: false });
+    if (url.includes("/v3/avatars/looks?ownership=")) return Response.json({ data: url.includes("private") ? state.listed : [], has_more: false });
+    return new Response("unexpected", { status: 500 });
+  }) as typeof fetch;
+  (state as unknown as { byKey: Map<string, number> }).byKey = new Map();
+  setTwinPictureFetch((async () => new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]), { headers: { "content-type": "image/png" } })) as never);
+  return state;
+}
+
+async function inHeygen(fn: () => Promise<void>) {
+  const { config } = await import("../config");
+  const saved = { avatar: config.avatarProvider, key: config.heygenApiKey };
+  Object.assign(config, { avatarProvider: "heygen", heygenApiKey: "hg_key" });
+  try {
+    await fn();
+  } finally {
+    Object.assign(config, { avatarProvider: saved.avatar, heygenApiKey: saved.key });
+  }
+}
+
+const ids = (voices: Voice[]) => voices.map((v) => v.id);
+const old = (ms: number) => new Date(Date.now() - ms).toISOString();
+
+describe("digital twins with HeyGen: voices, lost answers, and the shared library", () => {
+  it("keeps the voice cloned from the footage the account's own, out of every other list, and deletes an unused one", () =>
+    inHeygen(async () => {
+      const hg = heygenStub();
+      const dana = await startTwin(input(), "u1");
+      assert.equal(ids(await listVoices("u2")).includes("voice_1"), false, "the clone is never offered to another account, even while it trains");
+      assert.ok(ids(await listVoices("u2")).includes("operator_voice"), "the operator's own HeyGen voices are listed as before");
+      // Trained, and a workspace HeyGen lets skip consent has it given already: no link is needed.
+      hg.looks.look_1 = { status: "completed", preview_image_url: "https://93.184.216.34/twin.png" };
+      hg.groups.group_1 = { consent_status: "accepted" };
+      const [twin] = await listTwins("u1");
+      assert.deepEqual([twin.status, twin.consent], ["completed", "accepted"]);
+      assert.equal((await getAvatar(twin.avatarId!, "u1")).defaultVoiceId, "voice_1", "the presenter opens with its own voice");
+      const mine = (await listVoices("u1")).find((v) => v.id === "voice_1")!;
+      assert.deepEqual([mine.name, mine.source, mine.tags], ["Dana Ruiz (twin)", "custom", ["digital twin"]]);
+      assert.equal(ids(await listVoices("u2")).includes("voice_1"), false);
+      // A twin forgotten before it became anything takes its clone with it; one that did keeps its voice.
+      const lee = await startTwin(input({ name: "Lee" }), "u1");
+      await deleteTwin(lee.id, "u1");
+      assert.deepEqual(hg.deleted, ["voice_2"]);
+      await deleteTwin(dana.id, "u1");
+      assert.deepEqual(hg.deleted, ["voice_2"], "the account's voice stays");
+      assert.ok(ids(await listVoices("u1")).includes("voice_1"));
+      assert.equal(ids(await listVoices("u2")).some((v) => v === "voice_1" || v === "voice_2"), false, "nor after the twins are forgotten");
+      // Deleting the account deletes the voice it kept, and a twin's unused clone.
+      await startTwin(input({ name: "Kim" }), "u1");
+      await deleteOwnerData("u1");
+      assert.deepEqual(hg.deleted.slice().sort(), ["voice_1", "voice_2", "voice_3"]);
+      assert.equal(ids(await listVoices("u2")).some((v) => /^voice_/.test(v)), false);
+    }));
+
+  it("keeps the twin before HeyGen is asked, so an answer lost on the way back is asked for again with the same key", () =>
+    inHeygen(async () => {
+      const hg = heygenStub();
+      hg.fail = 1;
+      await assert.rejects(startTwin(input(), "u1", { key: "lost-key-1" }), /fetch failed/);
+      const [kept] = await getStore().list<TwinJob>("twin", "u1");
+      assert.deepEqual([kept.lookId, kept.status], ["", "processing"]);
+      // A retry at once is told to wait; the first request may still be answered.
+      await assert.rejects(startTwin(input(), "u1", { key: "lost-key-1" }), /still being sent/);
+      await assert.rejects(requestTwinConsent(kept.id, "u1"), /still being sent/);
+      await getStore().put("twin", { ...kept, createdAt: old(3 * 60_000) });
+      await startTwin(input(), "u1", { key: "lost-key-1" });
+      const recovered = (await getStore().get<TwinJob>("twin", kept.id))!;
+      assert.deepEqual([recovered.lookId, recovered.groupId, recovered.voiceId], ["look_1", "group_1", "voice_1"]);
+      assert.deepEqual(hg.posts.map((p) => p.idem), [kept.id, kept.id], "asked again with the same key, so HeyGen answers with the twin it made");
+      assert.equal(hg.starts, 1);
+      // Without a client key the next check asks again; a start HeyGen never answered within its day is given up.
+      hg.fail = 1;
+      await assert.rejects(startTwin(input({ name: "Lee" }), "u1"), /fetch failed/);
+      const lee = (await getStore().list<TwinJob>("twin", "u1")).find((t) => t.name === "Lee")!;
+      await getStore().put("twin", { ...lee, createdAt: old(3 * 60_000) });
+      forgetTwinChecks();
+      await listTwins("u1");
+      assert.equal((await getStore().get<TwinJob>("twin", lee.id))!.lookId, "look_2");
+      assert.equal(ids(await listVoices("u2")).includes("voice_2"), false);
+      hg.fail = 1;
+      await assert.rejects(startTwin(input({ name: "Kim" }), "u1"), /fetch failed/);
+      const kim = (await getStore().list<TwinJob>("twin", "u1")).find((t) => t.name === "Kim")!;
+      await getStore().put("twin", { ...kim, createdAt: old(25 * 60 * 60_000) });
+      forgetTwinChecks();
+      const gaveUp = (await listTwins("u1")).find((t) => t.id === kim.id)!;
+      assert.deepEqual([gaveUp.status, gaveUp.error], ["failed", "The renderer never confirmed this twin; train it again"]);
+      // A refusal made nothing, so nothing is kept.
+      hg.refuse = { status: 400, message: "The footage must be at least 15 seconds long." };
+      await assert.rejects(startTwin(input({ name: "Short" }), "u1"), ValidationError);
+      assert.equal((await getStore().list<TwinJob>("twin", "u1")).some((t) => t.name === "Short"), false);
+    }));
+
+  it("never lists a digital twin from HeyGen's account to anyone, ends a twin HeyGen lost, and hides the link from viewers", () =>
+    inHeygen(async () => {
+      const hg = heygenStub();
+      hg.listed = [
+        { id: "look_stranger", name: "Someone", avatar_type: "digital_twin", preview_image_url: "https://93.184.216.34/a.png", status: "completed" },
+        { id: "look_studio", name: "Studio presenter", avatar_type: "studio_avatar", preview_image_url: "https://93.184.216.34/b.png", status: "completed" },
+      ];
+      const shown = (await listAvatars("u2")).map((a) => a.id);
+      assert.deepEqual([shown.includes("look_stranger"), shown.includes("look_studio")], [false, true], "a twin the studio does not know of is a real person all the same");
+      const job = await startTwin(input(), "u1");
+      const asked = await requestTwinConsent(job.id, "u1").catch(() => null);
+      assert.equal(asked, null, "HeyGen's consent call is not stubbed here");
+      await getStore().put("twin", { ...(await getStore().get<TwinJob>("twin", job.id))!, consent: "pending", consentUrl: "https://heygen.com/consent/abc", consentUrlAt: new Date().toISOString() });
+      const stored = (await getStore().get<TwinJob>("twin", job.id))!;
+      assert.equal(publicTwin(stored).consentUrl, "https://heygen.com/consent/abc");
+      assert.equal(publicTwin(stored, Date.now(), false).consentUrl, undefined, "a viewer of the workspace is not handed the person's link");
+      hg.groups.group_1 = 404;
+      forgetTwinChecks();
+      const [gone] = await listTwins("u1");
+      assert.deepEqual([gone.status, gone.error], ["failed", "HeyGen no longer has this twin"]);
+    }));
 });

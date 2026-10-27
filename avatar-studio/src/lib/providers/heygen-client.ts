@@ -139,6 +139,11 @@ export class HeyGenClient {
     return { url: out?.url, consentStatus: out?.avatar_group?.consent_status };
   }
 
+  /** Deletes a cloned voice (`DELETE /v3/voices/{voice_id}`); HeyGen answers 404 for one it no longer has. */
+  async deleteVoice(voiceId: string): Promise<void> {
+    await this.request(`${V3}/voices/${encodeURIComponent(voiceId)}`, { method: "DELETE" });
+  }
+
   /** A character (`GET /v3/avatars/{group_id}`): its consent status, and why it failed when it did. */
   avatarGroup(groupId: string) {
     return this.request<{ consent_status?: string | null; status?: string | null; error?: { code?: string; message?: string } | null }>(`${V3}/avatars/${encodeURIComponent(groupId)}`);

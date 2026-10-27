@@ -15,6 +15,10 @@ test("pages redirect, API rejects, public paths stay open", async ({ request }) 
   expect(media.status()).toBe(200);
   expect(media.headers()["content-type"]).toContain("video/webm");
   expect((await request.get("/demo/poster.svg")).status()).toBe(200);
+  // The demo consent page stands in for HeyGen's, which the person in the footage opens without an account here.
+  const consent = await request.get("/demo-consent", { maxRedirects: 0 });
+  expect(consent.status()).toBe(200);
+  expect(await consent.text()).toContain("Consent for a digital twin (demo)");
   // The dubbing provider reads proofread lines without a session; the job's secret guards them instead.
   expect((await request.get("/api/translate/tr_none/srt?token=nope")).status()).toBe(404);
   expect((await request.get("/api/translate/tr_none")).status()).toBe(401);

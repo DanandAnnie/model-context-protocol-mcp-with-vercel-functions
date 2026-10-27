@@ -29,7 +29,7 @@ export function providerAvatars(): Promise<Avatar[]> {
 async function studioMadeLooks(): Promise<Set<string>> {
   const [avatars, portraits, packs, twins, made] = await Promise.all([getStore().list<Avatar>("avatar"), getStore().list<PortraitJob>("portrait"), getStore().list<LookPackJob>("lookpack"), getStore().list<TwinJob>("twin"), getStore().list<MadeLook>("madelook")]);
   return new Set(
-    [...avatars.flatMap((a) => madeLooksOf("avatar", a)), ...portraits.map((p) => p.providerJobId), ...packs.flatMap((p) => p.lookIds), ...twins.map((t) => t.lookId), ...made.map((m) => m.lookId)].filter(Boolean),
+    [...avatars.flatMap((a) => madeLooksOf("avatar", a)), ...portraits.map((p) => p.providerJobId), ...packs.flatMap((p) => p.lookIds), ...twins.map((t) => t.lookId), ...made.filter((m) => !m.voice).map((m) => m.lookId)].filter(Boolean),
   );
 }
 

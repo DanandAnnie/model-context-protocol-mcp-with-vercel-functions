@@ -6,7 +6,7 @@ import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
-import { ApiError, api, formatDate, formatSeconds, isRefusal } from "@/lib/client";
+import { api, formatDate, formatSeconds, isRefusal } from "@/lib/client";
 import { clipBody } from "@/lib/clip-upload";
 import type { AudioClip, InstantVoice, VoiceChange } from "@/lib/types";
 
@@ -48,7 +48,7 @@ function ClipChoice(props: { label: string; hint: string; uploadLabel: string; c
       </Field>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         {/* Busy, not disabled, while uploading, so the focus stays on it for a keyboard user. */}
-        <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => !uploading && fileRef.current?.click()} disabled={props.disabled} loading={uploading}>
+        <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => !uploading && fileRef.current?.click()} disabled={props.disabled} loading={uploading} aria-label={`Upload audio for the ${props.label.toLowerCase()}`}>
           <Upload className="h-3.5 w-3.5" /> Upload audio
         </Button>
         <input
@@ -155,7 +155,10 @@ export default function VoiceChangerPage() {
     } catch (e) {
       setErr(e instanceof Error ? e.message : "The recording could not be spoken again");
       forgetGoneClip(e);
-      if (isRefusal(e) || (e instanceof ApiError && e.status >= 500 && e.status !== 504)) setChangeKey(newKey());
+      // A refusal is an answer: trying again is a new recording. Anything else (a server error, a start cut off) may
+      // still be running, so the key is kept and the list asked again, where a recording still being spoken shows.
+      if (isRefusal(e)) setChangeKey(newKey());
+      else void refetch();
     } finally {
       setChanging(false);
     }
@@ -178,6 +181,7 @@ export default function VoiceChangerPage() {
       setErr(e instanceof Error ? e.message : "The voice could not be made");
       forgetGoneClip(e);
       if (isRefusal(e)) setVoiceKey(newKey());
+      else void refetch();
     } finally {
       setMaking(false);
     }
@@ -263,7 +267,12 @@ export default function VoiceChangerPage() {
               <Field label="Title (optional)">
                 <input className={inputClass} value={title} maxLength={120} disabled={!editable} onChange={(e) => (setTitle(e.target.value), setChangeKey(newKey()))} placeholder="The recording's name, in the voice" />
               </Field>
-              <Button onClick={changeVoice} loading={changing} disabled={!editable || !voiceId || !clipId} className="w-full">
+              {editable && (!voiceId || !clipId) && (
+                <p id="change-needs" className="text-xs text-slate-500">
+                  Choose {!voiceId && !clipId ? "a voice and a recording" : !voiceId ? "a voice" : "a recording"} to change the voice.
+                </p>
+              )}
+              <Button onClick={changeVoice} loading={changing} disabled={!editable || !voiceId || !clipId} className="w-full" aria-describedby={editable && (!voiceId || !clipId) ? "change-needs" : undefined}>
                 <Wand2 className="h-4 w-4" /> Change the voice
               </Button>
               <p className="text-xs text-slate-500">HeyGen takes up to a couple of minutes. The result is a WAV to play and download; its link lasts a limited time, so download it soon.</p>
@@ -289,7 +298,12 @@ export default function VoiceChangerPage() {
                 <input type="checkbox" className="mt-0.5 accent-brand-600" checked={agreed} disabled={!editable} onChange={(e) => setAgreed(e.target.checked)} />
                 <span>The person speaking agreed to have their voice cloned, and to it speaking recordings for this account.</span>
               </label>
-              <Button onClick={makeVoice} loading={making} disabled={!editable || !voiceName.trim() || !sampleId || !agreed} variant="secondary" className="w-full">
+              {editable && (!voiceName.trim() || !sampleId || !agreed) && (
+                <p id="voice-needs" className="text-xs text-slate-500">
+                  {[!voiceName.trim() ? "name the voice" : "", !sampleId ? "choose a recording of it" : "", !agreed ? "confirm the speaker agreed" : ""].filter(Boolean).join(", ").replace(/^./, (c) => c.toUpperCase())} to make the voice.
+                </p>
+              )}
+              <Button onClick={makeVoice} loading={making} disabled={!editable || !voiceName.trim() || !sampleId || !agreed} variant="secondary" className="w-full" aria-describedby={editable && (!voiceName.trim() || !sampleId || !agreed) ? "voice-needs" : undefined}>
                 <Mic2 className="h-4 w-4" /> Make the voice
               </Button>
             </Card>

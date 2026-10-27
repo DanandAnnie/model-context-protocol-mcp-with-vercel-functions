@@ -125,7 +125,8 @@ export class HeyGenClient {
   async uploadAsset(bytes: Uint8Array, mimeType: string, filename = "upload"): Promise<string> {
     const form = new FormData();
     form.append("file", new Blob([bytes as BlobPart], { type: mimeType }), filename);
-    const res = await fetch(`${V3}/assets`, { method: "POST", headers: { "X-Api-Key": this.apiKey }, body: form, cache: "no-store" });
+    // Bounded, so a stuck upload cannot hold a request open past the platform's limit.
+    const res = await fetch(`${V3}/assets`, { method: "POST", headers: { "X-Api-Key": this.apiKey }, body: form, cache: "no-store", signal: AbortSignal.timeout(30_000) });
     const text = await res.text();
     if (!res.ok) throw new Error(`HeyGen asset upload failed: ${res.status} ${text}`);
     const json = JSON.parse(text) as { data?: { asset_id?: string } };

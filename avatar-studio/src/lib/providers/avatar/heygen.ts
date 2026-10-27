@@ -6,11 +6,11 @@ import { voiceTakesAccent } from "../../language";
 import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
 import { HeyGenClient } from "../heygen-client";
-import { ConflictError, NotFoundError, ValidationError } from "../../errors";
+import { ConflictError, LimitError, NotFoundError, ValidationError } from "../../errors";
 import type { AvatarJobStatus, AvatarProvider, CleanupStatus, HighlightInput, HighlightStatus, LipsyncInput, LipsyncStatus, MusicMixInput, RenderCast } from "../types";
 import { musicComposition } from "../../music-mix";
 import { strToU8, zipSync } from "fflate";
-import { randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 
 /**
  * Where a custom portrait's v3 photo avatar look is kept (`providerAssetIds`). Portraits uploaded as v1 talking photos
@@ -576,18 +576,21 @@ export class HeyGenAvatarProvider implements AvatarProvider {
 
   /**
    * An instant voice from one recording (HeyGen Voice's instant clone), its background noise removed. The name carries
-   * the studio's mark, so HeyGen's voice listings never offer it to another account.
+   * the studio's mark, so HeyGen's voice listings never offer it to another account; the mark is drawn from the key, so
+   * a start retried with the same key sends the same request and HeyGen replays its first answer.
    */
   async createInstantVoice(input: { name: string; assetId: string; key: string }) {
     try {
-      const mark = ` ·st_${randomBytes(6).toString("hex")}`;
+      const mark = ` ·st_${createHash("sha256").update(input.key).digest("hex").slice(0, 12)}`;
       const name = `${Array.from(input.name).slice(0, 64 - mark.length).join("")}${mark}`;
       const voiceId = await this.client.createInstantVoice({ mode: "instant", name, audio: [{ type: "asset_id", asset_id: input.assetId }], remove_background_noise: true }, input.key);
       return { voiceId };
     } catch (err) {
       const message = err instanceof Error ? err.message : "";
-      if (/ failed: 409 /.test(message)) throw new ConflictError(STILL_SENDING);
-      if (/ failed: 403 /.test(message)) throw new ValidationError("The HeyGen account behind this studio may not make voices; ask its operator");
+      if (/ failed: 409 /.test(message) && heygenCode(message) !== "conflict") throw new ConflictError(STILL_SENDING);
+      if (/ failed: 409 /.test(message)) throw new ValidationError("This voice was already asked for with other details; make it again");
+      if (/ failed: 429 /.test(message)) throw new LimitError("HeyGen is making too many voices just now; try again in a minute");
+      if (/ failed: (401|403) /.test(message)) throw new ValidationError("The HeyGen account behind this studio may not make voices; ask its operator");
       if (/ failed: (400|402|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not make a voice from that recording: ${heygenReason(message, "try a clearer recording")}`);
       throw err;
     }
@@ -616,22 +619,26 @@ export class HeyGenAvatarProvider implements AvatarProvider {
 
   async changeVoice(input: { voiceId: string; assetId: string; removeNoise: boolean; key: string; waitMs: number }): Promise<{ status: "processing" } | { status: "completed"; audioUrl: string; durationSec: number }> {
     const body = { voice_id: input.voiceId, audio: { type: "asset_id", asset_id: input.assetId }, ...(input.removeNoise ? { remove_background_noise: true } : {}) };
+    let out;
     try {
-      const out = await this.client.speechToSpeech(body, input.key, input.waitMs);
-      const audioUrl = httpsOnly(out?.audio_url);
-      if (!audioUrl) throw new Error("HeyGen finished without the audio");
-      return { status: "completed", audioUrl, durationSec: Math.max(0, Number(out?.duration) || 0) };
+      out = await this.client.speechToSpeech(body, input.key, input.waitMs);
     } catch (err) {
       const message = err instanceof Error ? err.message : "";
-      // Not done in time: still running at HeyGen, so asked again with the same key until it answers.
-      const timedOut = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
-      const stillRunning = / failed: (409|503|504) /.test(message) && !/voice_training_failed|"conflict"/.test(message);
-      if (timedOut || stillRunning) return { status: "processing" };
-      if (/voice_training_failed/.test(message)) throw new ValidationError("HeyGen could not make this voice; make it again from another recording");
-      if (/ failed: 404 /.test(message)) throw new ValidationError("HeyGen no longer has this voice; make it again");
-      if (/ failed: (400|402|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not speak that recording again: ${heygenReason(message, "try a clearer recording")}`);
-      throw err;
+      const status = Number(message.match(/ failed: (\d{3}) /)?.[1] ?? 0);
+      const code = heygenCode(message);
+      if (code === "voice_training_failed") throw new ValidationError("HeyGen could not make this voice; make it again from another recording");
+      if (code === "conflict") throw new ValidationError("This recording was already asked for with other details; make it again");
+      if (status === 404) throw new ValidationError("HeyGen no longer has this voice; make it again");
+      if (status === 429) throw new LimitError("HeyGen is speaking too many recordings just now; try again in a minute");
+      if (status === 401 || status === 403) throw new ValidationError("The HeyGen account behind this studio may not change voices; ask its operator");
+      if (status === 400 || status === 402 || status === 422 || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not speak that recording again: ${heygenReason(message, "try a clearer recording")}`);
+      // Anything else (not done in time, still running or the voice still being prepared, a server error, a dropped
+      // connection) may still be running at HeyGen: asked again with the same key, so it is paid for once.
+      return { status: "processing" };
     }
+    const audioUrl = httpsOnly(out?.audio_url);
+    if (!audioUrl) throw new ValidationError("HeyGen finished without the audio; make it again");
+    return { status: "completed", audioUrl, durationSec: Math.max(0, Number(out?.duration) || 0) };
   }
 
   async deleteMusicMix(jobId: string) {
@@ -766,6 +773,18 @@ function stripEmpty<T extends Record<string, unknown>>(o: T): T {
 }
 
 /** The reason in a HeyGen error ("…failed: 400 {"error":{"message":"…"}}" or "HeyGen error: …"), kept short. */
+/** HeyGen's error code in a failed request's message (`{ error: { code } }`), if any. */
+export function heygenCode(message: string): string | undefined {
+  const body = message.match(/ failed: \d+ (.*)$/s)?.[1];
+  if (!body) return undefined;
+  try {
+    const json = JSON.parse(body) as { error?: { code?: string } | string; code?: string };
+    return (typeof json.error === "object" ? json.error?.code : undefined) ?? json.code;
+  } catch {
+    return undefined;
+  }
+}
+
 export function heygenReason(message: string, fallback = "try describing them differently"): string {
   const body = message.match(/ failed: \d+ (.*)$/s)?.[1];
   if (body) {

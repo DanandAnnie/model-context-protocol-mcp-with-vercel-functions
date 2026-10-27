@@ -9,7 +9,7 @@ import { getStore } from "../store";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import type { AudioClip, InstantVoice, VoiceChange } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
-import { ConflictError, NotFoundError, ValidationError } from "../errors";
+import { ConflictError, LimitError, NotFoundError, ValidationError } from "../errors";
 import { owned, stripUndefined } from "./shared";
 import { getClip } from "./clips";
 import { prepareClipOnce } from "./videos";
@@ -21,14 +21,20 @@ import { withSuffix } from "../text";
 export const MAX_INSTANT_VOICES = 10;
 /** Recordings spoken again that an account keeps. */
 export const MAX_VOICE_CHANGES = 50;
-/** How long a start waits for the renderer's answer; one not done by then is asked for again while the list is open. */
-const START_WAIT_MS = 45_000;
-const CHECK_WAIT_MS = 8_000;
 /**
- * A conversion still unanswered this long is given up: the renderer keeps a key's answer for a day, and asking after
- * that would speak (and charge for) the recording again.
+ * How long after a start's request arrived it stops waiting for the renderer (the function is cut off at 60 seconds,
+ * and the clip's upload comes out of the same time); one not done by then is asked for again while the list is open.
  */
+const START_DEADLINE_MS = 50_000;
+const MIN_WAIT_MS = 5_000;
+const CHECK_WAIT_MS = 8_000;
+/** A conversion the renderer still says is running this long after it started is given up. */
 const GIVE_UP_MS = 30 * 60 * 1000;
+/**
+ * The renderer keeps a key's answer (a finished conversion, without charging again) for a day; past this it is never
+ * asked again, as that would speak, and charge for, the recording again.
+ */
+const KEY_KEPT_MS = 23 * 60 * 60 * 1000;
 
 const keySchema = z.string().regex(/^[A-Za-z0-9_-]{8,100}$/, "The Idempotency-Key header takes 8 to 100 letters, digits, - or _");
 export const voiceChangerKeySchema = keySchema;
@@ -155,7 +161,7 @@ export async function dropInstantVoice(voice: InstantVoice): Promise<void> {
     await getAvatarProviderByName(voice.provider).deleteInstantVoice?.(voice.providerVoiceId);
   } catch (err) {
     console.error(`instant voice ${voice.id} was not deleted at the renderer:`, err);
-    throw new ConflictError(`The renderer would not delete the voice "${voice.name}" just now; try again in a moment`);
+    throw new ConflictError(`The renderer would not delete the voice "${voice.name}" just now, so it was kept (and anything removed before it stays removed); try again in a moment, or ask the operator if this repeats`);
   }
 }
 
@@ -191,6 +197,7 @@ export async function listVoiceChanges(ownerId: string = LOCAL_OWNER): Promise<V
  * conversion already started. `admit` runs once everything is checked, before the renderer is asked.
  */
 export async function startVoiceChange(input: z.infer<typeof voiceChangeSchema>, ownerId: string = LOCAL_OWNER, opts: { key?: string; admit?: () => void } = {}): Promise<VoiceChange> {
+  const arrived = Date.now();
   const id = opts.key ? keyedId("vc", ownerId, opts.key) : newId("vc");
   const existing = opts.key ? await getStore().get<VoiceChange>("voicechange", id) : null;
   if (existing && existing.ownerId === ownerId) {
@@ -232,14 +239,20 @@ export async function startVoiceChange(input: z.infer<typeof voiceChangeSchema>,
   // Stored before the renderer is asked, so a start whose answer is lost is followed rather than forgotten.
   await getStore().put("voicechange", change);
   try {
-    const out = await provider.changeVoice({ voiceId: voice.providerVoiceId, assetId, removeNoise: input.removeNoise, key: id, waitMs: START_WAIT_MS });
+    const waitMs = Math.max(MIN_WAIT_MS, START_DEADLINE_MS - (Date.now() - arrived));
+    const out = await provider.changeVoice({ voiceId: voice.providerVoiceId, assetId, removeNoise: input.removeNoise, key: id, waitMs });
     if (out.status === "processing") return change;
     const done: VoiceChange = { ...change, status: "completed", audioUrl: out.audioUrl, durationSec: out.durationSec || clip.durationSec, checkedAt: nowIso(), updatedAt: nowIso() };
     return (await getStore().putIf("voicechange", done, "updatedAt", change.updatedAt)) ? done : change;
   } catch (err) {
-    // Refused: nothing was made, so nothing is kept.
-    await getStore().remove("voicechange", change.id);
-    throw err;
+    // Refused (the renderer says no to this request): nothing was made, so nothing is kept. Anything else may still be
+    // running at the renderer, so it is followed with the same key rather than forgotten.
+    if (err instanceof ValidationError || err instanceof LimitError) {
+      await getStore().remove("voicechange", change.id);
+      throw err;
+    }
+    console.error(`voice change ${change.id} start failed; it is followed:`, err);
+    return change;
   }
 }
 
@@ -254,14 +267,17 @@ async function refreshVoiceChange(change: VoiceChange): Promise<VoiceChange> {
   const now = nowIso();
   let next: VoiceChange;
   try {
-    if (Date.now() - Date.parse(change.createdAt) > GIVE_UP_MS) {
-      next = { ...change, status: "failed", error: "The renderer did not finish speaking this recording; try again", checkedAt: now, updatedAt: now };
+    const age = Date.now() - Date.parse(change.createdAt);
+    const giveUp: VoiceChange = { ...change, status: "failed", error: "The renderer did not finish speaking this recording; try again", checkedAt: now, updatedAt: now };
+    if (age > KEY_KEPT_MS) {
+      next = giveUp;
     } else {
+      // Asked even when long unanswered (a page closed meanwhile): a finished one is returned under its key, unpaid.
       const provider = getAvatarProviderByName(change.provider);
       if (!provider.changeVoice) return change;
       const out = await provider.changeVoice({ voiceId: change.providerVoiceId, assetId: change.providerAudio, removeNoise: !!change.removeNoise, key: change.id, waitMs: CHECK_WAIT_MS });
-      if (out.status === "processing") next = { ...change, checkedAt: now };
-      else next = { ...change, status: "completed", audioUrl: out.audioUrl, durationSec: out.durationSec || change.durationSec, checkedAt: now, updatedAt: now };
+      if (out.status === "completed") next = { ...change, status: "completed", audioUrl: out.audioUrl, durationSec: out.durationSec || change.durationSec, checkedAt: now, updatedAt: now };
+      else next = age > GIVE_UP_MS ? giveUp : { ...change, checkedAt: now };
     }
   } catch (err) {
     if (!(err instanceof ValidationError)) {

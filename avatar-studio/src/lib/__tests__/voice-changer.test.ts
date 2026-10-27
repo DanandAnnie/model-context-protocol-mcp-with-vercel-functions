@@ -162,7 +162,7 @@ describe("voice changer", () => {
     const calls: Array<{ url: string; method: string; body: Record<string, unknown> | null; idem: string | null }> = [];
     const realFetch = globalThis.fetch;
     let voiceState = "PENDING";
-    let sts: "slow" | "busy" | "done" | "refuse" = "slow";
+    let sts: "slow" | "busy" | "done" | "refuse" | "error" = "slow";
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const body = typeof init?.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : null;
@@ -180,6 +180,7 @@ describe("voice changer", () => {
         }
         if (sts === "busy") return Response.json({ error: { code: "request_in_progress" } }, { status: 409 });
         if (sts === "refuse") return Response.json({ error: { code: "invalid_parameter", message: "audio could not be read", param: "audio" } }, { status: 400 });
+        if (sts === "error") return Response.json({ error: { code: "internal_error" } }, { status: 502 });
         return Response.json({ data: { audio_url: "https://files.heygen.ai/generated/out.wav", duration: 1.02 } });
       }
       return new Response("unexpected", { status: 500 });
@@ -193,6 +194,11 @@ describe("voice changer", () => {
       assert.match(String(create.body?.name), /^Narrator ·st_[0-9a-f]{12}$/, "marked, so HeyGen's voice listings never offer it to another account");
       assert.deepEqual({ ...create.body, name: "…" }, { mode: "instant", name: "…", audio: [{ type: "asset_id", asset_id: "asset_take" }], remove_background_noise: true });
       assert.equal((await getStore().list<{ voiceId: string }>("madevoice")).some((m) => m.voiceId === "hv_1"), true);
+      // A start whose answer was lost, retried with the same key, sends the same request, so HeyGen replays its answer.
+      await getStore().remove("instantvoice", voice.id);
+      await createInstantVoice(instantVoiceSchema.parse({ name: "Narrator", clipId: sample.id, agreed: true }), "u1", { key: "voice-key-hg" });
+      const creates = calls.filter((c) => c.url.endsWith("/v3/models/audio/voices") && c.method === "POST");
+      assert.deepEqual(creates.map((c) => [c.body?.name, c.idem]), [[create.body?.name, voice.id], [create.body?.name, voice.id]]);
       assert.equal((await listInstantVoices("u1"))[0].status, "processing");
       voiceState = "ACTIVE";
       forgetVoiceChangerChecks();
@@ -216,6 +222,19 @@ describe("voice changer", () => {
       forgetVoiceChangerChecks();
       await listVoiceChanges("u1");
       assert.equal(calls.length, asked, "a finished one is never asked again");
+      // A server error or a dropped connection may still be running: kept and followed with the same key.
+      sts = "error";
+      const failedStart = await startVoiceChange(voiceChangeSchema.parse({ voiceId: voice.id, clipId: take.id, removeNoise: true }), "u1");
+      assert.equal(failedStart.status, "processing");
+      assert.deepEqual(calls.filter((c) => c.url.endsWith("/sts")).at(-1)!.body, { voice_id: "hv_1", audio: { type: "asset_id", asset_id: "asset_take" }, remove_background_noise: true });
+      // Long unanswered (the page was closed), it is still asked once under its key, and HeyGen's finished answer kept.
+      await getStore().put<VoiceChange>("voicechange", { ...(await getStore().get<VoiceChange>("voicechange", failedStart.id))!, createdAt: new Date(Date.now() - 40 * 60 * 1000).toISOString() });
+      sts = "done";
+      forgetVoiceChangerChecks();
+      const late = (await listVoiceChanges("u1")).find((c) => c.id === failedStart.id)!;
+      assert.equal(late.status, "completed");
+      assert.deepEqual(calls.filter((c) => c.url.endsWith("/sts")).at(-1)!.body, { voice_id: "hv_1", audio: { type: "asset_id", asset_id: "asset_take" }, remove_background_noise: true }, "the same body as the start, so not paid twice");
+      await deleteVoiceChange(failedStart.id, "u1");
       // A recording HeyGen refuses is a 400 with its reason, and nothing is kept.
       sts = "refuse";
       await assert.rejects(startVoiceChange(voiceChangeSchema.parse({ voiceId: voice.id, clipId: take.id }), "u1"), (e: unknown) => e instanceof ValidationError && /audio could not be read/.test((e as Error).message));
@@ -236,12 +255,41 @@ describe("voice changer", () => {
     }
   });
 
-  it("gives up on a conversion HeyGen has not answered for half an hour, without asking again", async () => {
+  it("gives up on a conversion still running after half an hour, and never asks once the renderer's key has expired", async () => {
     const voice = await ready("u1");
     const take = await clip("u1");
     const change = await startVoiceChange(voiceChangeSchema.parse({ voiceId: voice.id, clipId: take.id }), "u1");
-    await getStore().put<VoiceChange>("voicechange", { ...change, status: "processing", audioUrl: undefined, createdAt: new Date(Date.now() - 31 * 60 * 1000).toISOString() });
-    const [old] = await listVoiceChanges("u1");
-    assert.deepEqual([old.status, old.error], ["failed", "The renderer did not finish speaking this recording; try again"]);
+    const proto = MockAvatarProvider.prototype as unknown as { changeVoice: (...a: unknown[]) => Promise<unknown> };
+    const real = proto.changeVoice;
+    let asked = 0;
+    proto.changeVoice = async () => (asked++, { status: "processing" });
+    try {
+      await getStore().put<VoiceChange>("voicechange", { ...change, status: "processing", audioUrl: undefined, createdAt: new Date(Date.now() - 31 * 60 * 1000).toISOString() });
+      const [old] = await listVoiceChanges("u1");
+      assert.deepEqual([old.status, old.error, asked], ["failed", "The renderer did not finish speaking this recording; try again", 1]);
+      await getStore().put<VoiceChange>("voicechange", { ...change, status: "processing", audioUrl: undefined, createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString() });
+      forgetVoiceChangerChecks();
+      assert.equal((await listVoiceChanges("u1"))[0].status, "failed");
+      assert.equal(asked, 1, "a day old, it would be spoken and paid for again, so it is not asked");
+    } finally {
+      proto.changeVoice = real;
+    }
+  });
+
+  it("keeps the account when the renderer would not delete one of its voices", async () => {
+    const voice = await ready("u1");
+    const proto = MockAvatarProvider.prototype as unknown as { deleteInstantVoice: (id: string) => Promise<void> };
+    const real = proto.deleteInstantVoice;
+    proto.deleteInstantVoice = async () => {
+      throw new Error("HeyGen DELETE failed: 500 {}");
+    };
+    try {
+      await assert.rejects(deleteOwnerData("u1"), (e: unknown) => e instanceof ConflictError && /would not delete the voice "Narrator"/.test((e as Error).message));
+      await assert.rejects(deleteInstantVoice(voice.id, "u1"), ConflictError);
+    } finally {
+      proto.deleteInstantVoice = real;
+    }
+    assert.equal((await listInstantVoices("u1")).length, 1, "the voice is kept to try again");
+    assert.equal((await getStore().list("clip", "u1")).length, 1, "and so is the rest of the account");
   });
 });

@@ -138,7 +138,8 @@ export default function VoiceChangerPage() {
   // Where the message shows: in the card whose action it answers, so it is seen wherever the page is scrolled to.
   const [errAt, setErrAt] = useState<"change" | "speech" | "voice" | "lists">("lists");
   // A message is shown in one card; clearing from a card leaves another card's message (or the lists') alone.
-  const fail = (at: typeof errAt) => (message: string | null) => (message === null ? errAt === at && setErr(null) : (setErrAt(at), setErr(message)));
+  // A start in any card also clears the lists' message, which answers nothing still on screen.
+  const fail = (at: typeof errAt) => (message: string | null) => (message === null ? (errAt === at || errAt === "lists") && setErr(null) : (setErrAt(at), setErr(message)));
   const [note, setNote] = useState<string | null>(null);
   const changesRef = useRef<HTMLDivElement>(null);
   const voicesRef = useRef<HTMLUListElement>(null);
@@ -400,11 +401,14 @@ export default function VoiceChangerPage() {
                   <Field label="Text" hint={`Plain prose, up to ${MAX_SPEECH_CHARS.toLocaleString("en-US")} characters; the language is worked out from the text.`}>
                     <textarea className={`${inputClass} min-h-28`} value={speechText} maxLength={MAX_SPEECH_CHARS} disabled={!editable || speaking} aria-describedby="speech-count" onChange={(e) => (setSpeechText(e.target.value), setSpeechKey(newKey()), fail("speech")(null))} placeholder="Welcome to the team. Here is what your first week looks like." />
                   </Field>
-                  {/* Read with the field, and announced when the limit is reached (a longer paste is cut there). */}
-                  <p id="speech-count" className={`mt-1 text-right text-xs ${speechText.length >= MAX_SPEECH_CHARS ? "font-medium text-amber-700" : "text-slate-500"}`} aria-live={speechText.length >= MAX_SPEECH_CHARS ? "polite" : "off"}>
+                  {/* Read with the field; reaching the limit (where a longer paste is cut) is announced by a region always there. */}
+                  <p id="speech-count" className={`mt-1 text-right text-xs ${speechText.length >= MAX_SPEECH_CHARS ? "font-medium text-amber-700" : "text-slate-500"}`}>
                     {speechText.length.toLocaleString("en-US")} of {MAX_SPEECH_CHARS.toLocaleString("en-US")} characters
-                    {speechText.length >= MAX_SPEECH_CHARS ? "; the limit, so anything past it was not kept" : ""}
+                    {speechText.length >= MAX_SPEECH_CHARS ? `; ${MAX_SPEECH_CHARS.toLocaleString("en-US")} is the limit, and anything longer is cut there` : ""}
                   </p>
+                  <span role="status" className="sr-only">
+                    {speechText.length >= MAX_SPEECH_CHARS ? `The text is at the ${MAX_SPEECH_CHARS.toLocaleString("en-US")}-character limit; anything longer is cut there.` : ""}
+                  </span>
                 </div>
                 <Field label="Title for the text (optional)">
                   <input className={inputClass} value={speechTitle} maxLength={120} disabled={!editable || speaking} onChange={(e) => (setSpeechTitle(e.target.value), setSpeechKey(newKey()), fail("speech")(null))} placeholder="The text's first words, in the voice" />

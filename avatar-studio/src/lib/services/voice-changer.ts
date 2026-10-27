@@ -333,16 +333,19 @@ export async function startVoiceSpeech(input: z.infer<typeof voiceSpeechSchema>,
   }
 }
 
+/** Punctuation that closes a phrase: stops, ellipses, closing quotes and brackets, and the spaces before them. */
+const CLOSING = /[\s,.;:!?…"'”’»)\]}-]+$/u;
+
 /** The first words of a text, as a title: up to about 40 characters, cut at a word and marked when cut, without closing punctuation. */
 function speechTitle(text: string): string {
   const chars = graphemes(text.replace(/\s+/g, " ").trim());
   // A whole text keeps its words without the closing punctuation ("Hi there in Narrator", not "Hi there. in Narrator").
-  if (chars.length <= 40) return chars.join("").replace(/[\s,.;:!?-]+$/, "") || chars.join("");
+  if (chars.length <= 40) return chars.join("").replace(CLOSING, "") || chars.join("");
   const cut = chars.slice(0, 40);
   const space = cut.lastIndexOf(" ");
   const words = cut.slice(0, space > 20 ? space : 40).join("");
   // Cut back to the last word, without trailing punctuation; a text of punctuation alone keeps its first characters.
-  return `${words.replace(/[\s,.;:!?-]+$/, "") || words}…`;
+  return `${words.replace(CLOSING, "") || words}…`;
 }
 
 /** Forgets one recording spoken again (the renderer's copy expires on its own). */

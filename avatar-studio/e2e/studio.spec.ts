@@ -854,6 +854,16 @@ test("an instant voice is made from a recording with the speaker's agreement, an
   await page.getByRole("combobox", { name: /^Voice\b/ }).selectOption({ index: 0 });
   await expect(speechCard.getByRole("alert")).toHaveText(late);
   await page.unroute("**/api/voice-changer/speech");
+  // A voice gone meanwhile clears the choice, and the focus goes to it rather than with the button now disabled.
+  const gone = "That voice is no longer available; choose another";
+  await page.route("**/api/voice-changer/speech", (r) => r.fulfill({ status: 400, json: { error: gone } }));
+  await speak.focus();
+  await page.keyboard.press("Enter");
+  await expect(speechCard.getByRole("alert")).toHaveText(gone);
+  const speakingVoice = page.getByRole("combobox", { name: /^Speaking voice\b/ });
+  await expect(speakingVoice).toHaveValue("");
+  await expect(speakingVoice).toBeFocused();
+  await page.unroute("**/api/voice-changer/speech");
   await page.getByRole("textbox", { name: /^Text\b/ }).press("End");
   await page.getByRole("textbox", { name: /^Text\b/ }).pressSequentially(" ");
   await expect(speechCard.getByRole("alert")).toHaveCount(0);

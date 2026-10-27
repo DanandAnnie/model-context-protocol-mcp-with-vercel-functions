@@ -311,10 +311,11 @@ describe("voice changer", () => {
     const long = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: `${"👋🏽".repeat(39)} hi there` }), "u1");
     assert.equal(long.title, `${"👋🏽".repeat(39)}… in Narrator`);
     assert.equal((await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Hi there!" }), "u1")).title, "Hi there in Narrator", "a whole text loses its closing punctuation");
+    assert.equal((await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: 'Say "wait…"' }), "u1")).title, "Say \"wait in Narrator", "an ellipsis or closing quote too, so it is not taken for a cut");
     const dashes = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "-".repeat(50) }), "u1");
     assert.equal(dashes.title, `${"-".repeat(40)}… in Narrator`);
     const out = (await exportOwnerData("u1")) as unknown as Record<string, Array<Record<string, unknown>>>;
-    assert.deepEqual(out.voicechange.map((c) => c.text).sort(), ["-".repeat(50), "Hi there!", "Hi.", text, `${"👋🏽".repeat(39)} hi there`].sort());
+    assert.deepEqual(out.voicechange.map((c) => c.text).sort(), ["-".repeat(50), "Hi there!", "Hi.", 'Say "wait…"', text, `${"👋🏽".repeat(39)} hi there`].sort());
   });
 
   it("asks HeyGen to speak text in an instant voice once, dropping one not done in time and telling a refusal apart", async () => {

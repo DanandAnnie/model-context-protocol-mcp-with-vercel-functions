@@ -836,7 +836,7 @@ async function refreshNow(video: Video): Promise<Video> {
     const current = await getStore().get<Video>("video", video.id);
     if (!current) return { next: video }; // deleted meanwhile; do not bring it back
     if (!isPending(current)) return { next: current }; // someone else already recorded the outcome
-    const next: Video = { ...current, ...stripUndefined(update), updatedAt: nowIso() };
+    const next: Video = { ...current, ...stripUndefined(stampGif(update)), updatedAt: nowIso() };
     if (next.status === current.status && next.videoUrl === current.videoUrl) return { next };
     await getStore().put("video", next);
     return { next, before: current };
@@ -1471,7 +1471,7 @@ export async function applyAvatarWebhook(providerName: string, body: unknown): P
   const result = await withCounterLock(video.id, async () => {
     const current = await getStore().get<Video>("video", video.id);
     if (!current || !isPending(current)) return { next: current ?? video };
-    const next: Video = { ...current, ...stripUndefined(parsed.update), updatedAt: nowIso() };
+    const next: Video = { ...current, ...stripUndefined(stampGif(parsed.update)), updatedAt: nowIso() };
     await getStore().put("video", next);
     return { next, before: current };
   });
@@ -1566,65 +1566,91 @@ export async function queryVideos(ownerId: string = LOCAL_OWNER, query: VideoQue
 }
 
 // The picture an email shows for a shared video: the renderer's animated GIF of it, linked to the share page. The GIF's
-// link is the renderer's, signed for a limited time, so it is asked for again once old, at most once per video every
-// few minutes however many inboxes open the email.
+// link, and the renderer's thumbnail shown instead of it, are the renderer's, signed for a limited time, so they are
+// asked for again once old: at most once per video every few minutes on each server instance, however many inboxes
+// open the email.
+
+/** A renderer's link not renewed for this long (the renderer down, say) is taken as expired, and the still is shown. */
+const GIF_GIVE_UP_MS = 24 * 60 * 60 * 1000;
 
 const gifAttempted = new Map<string, number>();
-const gifInFlight = new Map<string, Promise<string | undefined>>();
+const gifInFlight = new Map<string, Promise<PreviewLinks>>();
+
+type PreviewLinks = Pick<Video, "gifUrl" | "thumbnailUrl">;
+
+/** A renderer's answer that carries a GIF is stamped with when it was asked, so the first open does not ask again. */
+function stampGif<T extends { gifUrl?: string }>(update: T): T & { gifCheckedAt?: string } {
+  return update.gifUrl ? { ...update, gifCheckedAt: nowIso() } : update;
+}
 
 /**
  * Where a shared video's email picture is, for the public: the animated GIF, or the cover (or the renderer's thumbnail)
  * when there is no GIF or the link asks for an email first, since moving footage would stand in for the form. Null for a
  * password-protected link, an unfinished video, or a video with no picture at all; not found like the share page.
+ * `expiresAt` is when the share link stops working, so a cached answer cannot outlive it.
  */
-export async function emailPreview(id: string, now = Date.now()): Promise<{ url: string; animated: boolean } | null> {
+export async function emailPreview(id: string, now = Date.now()): Promise<{ url: string; animated: boolean; expiresAt?: string } | null> {
   const video = await getVideo(id, PUBLIC_ACCESS, false);
   if (video.shareLocked || video.status !== "completed") return null;
-  const poster = posterUrl(video, config.appUrl.replace(/\/$/, ""));
-  const still = poster ? { url: poster, animated: false } : null;
-  if (video.shareGate) return still;
-  const gif = await freshGif(video, now);
-  return gif ? { url: gif, animated: true } : still;
+  const links = await freshLinks(video, now);
+  const poster = posterUrl({ ...video, thumbnailUrl: links.thumbnailUrl }, config.appUrl.replace(/\/$/, ""));
+  const expiresAt = video.shareExpiresAt ? { expiresAt: video.shareExpiresAt } : {};
+  if (links.gifUrl && !video.shareGate) return { url: links.gifUrl, animated: true, ...expiresAt };
+  return poster ? { url: poster, animated: false, ...expiresAt } : null;
 }
 
-async function freshGif(video: Video, now: number): Promise<string | undefined> {
-  // One that came with the finished render has no check time of its own (an edit moves `updatedAt`), so it is asked for once.
-  if (video.gifUrl && video.gifCheckedAt && now - Date.parse(video.gifCheckedAt) <= RELINK_MS) return video.gifUrl;
+async function freshLinks(video: Video, now: number): Promise<PreviewLinks> {
+  const stored: PreviewLinks = { gifUrl: video.gifUrl, thumbnailUrl: video.thumbnailUrl };
+  const age = video.gifCheckedAt ? now - Date.parse(video.gifCheckedAt) : Infinity;
+  if (age <= RELINK_MS) return stored;
+  // Kept while it may still work; once it surely has expired, the still is better than a broken picture.
+  const fallback: PreviewLinks = age <= GIF_GIVE_UP_MS ? stored : { thumbnailUrl: video.thumbnailUrl };
   let provider: AvatarProvider;
   try {
     provider = getAvatarProviderByName(video.provider);
   } catch {
-    return video.gifUrl;
+    return fallback;
   }
-  if (!provider.gifPreviews || !video.providerJobId) return video.gifUrl;
+  if (!provider.gifPreviews || !video.providerJobId) return fallback;
   const running = gifInFlight.get(video.id);
   if (running) return running;
-  // A renderer that could not answer (or had no GIF) is not asked again for a while, so a busy email cannot cost a call per open.
-  if (now - (gifAttempted.get(video.id) ?? 0) < RETRY_FINISHED_MS) return video.gifUrl;
+  // A renderer that could not answer is not asked again for a while, so a busy email cannot cost a call per open.
+  if (now - (gifAttempted.get(video.id) ?? 0) < RETRY_FINISHED_MS) return fallback;
   gifAttempted.set(video.id, now);
   for (const [vid, at] of gifAttempted) if (now - at > RETRY_FINISHED_MS * 2) gifAttempted.delete(vid);
-  const run = renewGif(provider, video).finally(() => gifInFlight.delete(video.id));
+  const run = renewLinks(provider, video, fallback).finally(() => gifInFlight.delete(video.id));
   gifInFlight.set(video.id, run);
   return run;
 }
 
-/** Asks the renderer for a fresh GIF link and stores it; never throws (the old link, if any, is the answer then). */
-async function renewGif(provider: AvatarProvider, video: Video): Promise<string | undefined> {
-  let gifUrl: string | undefined;
+/**
+ * Asks the renderer for fresh links and stores them. Never throws: a renderer that cannot answer leaves `fallback`, and
+ * one that answers without a GIF (or no longer has the render) has its old GIF link dropped, so the still is shown.
+ */
+async function renewLinks(provider: AvatarProvider, video: Video, fallback: PreviewLinks): Promise<PreviewLinks> {
+  let status;
   try {
-    const status = await provider.getStatus(video.providerJobId!);
-    gifUrl = status.status === "completed" ? status.gifUrl : undefined;
+    status = await provider.getStatus(video.providerJobId!);
   } catch (err) {
     console.error(`preview refresh failed for ${video.id}:`, err);
-    return video.gifUrl;
+    return fallback;
   }
-  if (!gifUrl) return video.gifUrl;
-  await withCounterLock(video.id, async () => {
-    const current = await getStore().get<Video>("video", video.id);
-    // Deleted meanwhile: never brought back.
-    if (current) await getStore().put("video", { ...current, gifUrl, gifCheckedAt: nowIso() });
-  });
-  return gifUrl;
+  const done = status.status === "completed";
+  const links: PreviewLinks = { gifUrl: done ? status.gifUrl : undefined, thumbnailUrl: (done && status.thumbnailUrl) || video.thumbnailUrl };
+  try {
+    await withCounterLock(video.id, async () => {
+      const current = await getStore().get<Video>("video", video.id);
+      // Deleted meanwhile: never brought back.
+      if (!current) return;
+      const next: Video = { ...current, gifCheckedAt: nowIso(), ...(links.thumbnailUrl ? { thumbnailUrl: links.thumbnailUrl } : {}) };
+      if (links.gifUrl) next.gifUrl = links.gifUrl;
+      else delete next.gifUrl;
+      await getStore().put("video", next);
+    });
+  } catch (err) {
+    console.error(`preview links for ${video.id} were not saved:`, err);
+  }
+  return links;
 }
 
 /** Forgets when previews were last asked for (tests). */

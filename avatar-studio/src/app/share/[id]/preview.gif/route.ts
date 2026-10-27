@@ -4,7 +4,10 @@ import { emailPreview } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 
-/** How long a mail client's image proxy (or a CDN) may keep the answer: well inside the renderer link's lifetime. */
+/**
+ * How long a mail client's image proxy (or a CDN) may keep the answer: well inside the renderer link's lifetime, and
+ * short, since switching the link off or adding a password reaches a kept answer only once it lapses.
+ */
 const MAX_AGE_SEC = 300;
 
 /**
@@ -18,9 +21,12 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   try {
     const preview = await emailPreview(id);
     if (!preview) return notFound();
+    // A kept answer may not outlive the share link's expiry.
+    const left = preview.expiresAt ? Math.floor((Date.parse(preview.expiresAt) - Date.now()) / 1000) : MAX_AGE_SEC;
+    const maxAge = Math.min(MAX_AGE_SEC, left);
     return new Response(null, {
       status: 302,
-      headers: { Location: new URL(preview.url, config.appUrl).href, "Cache-Control": `public, max-age=${MAX_AGE_SEC}` },
+      headers: { Location: new URL(preview.url, config.appUrl).href, "Cache-Control": maxAge > 0 ? `public, max-age=${maxAge}` : "no-store" },
     });
   } catch (err) {
     if (err instanceof NotFoundError) return notFound();

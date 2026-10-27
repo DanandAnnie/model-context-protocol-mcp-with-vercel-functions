@@ -4141,6 +4141,11 @@ test("a shared video is copied for an email as its moving preview, linked to the
   expect(preview.status()).toBe(302);
   expect(new URL(preview.headers().location).pathname).toBe("/demo/preview.gif");
   expect(preview.headers()["cache-control"]).toBe("public, max-age=300");
+  // A kept answer may not outlive the share link.
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareExpiresAt: new Date(Date.now() + 60_000).toISOString() } })).status()).toBe(200);
+  const expiring = await page.request.get(`/share/${v.id}/preview.gif`, { maxRedirects: 0 });
+  expect(Number(/max-age=(\d+)/.exec(expiring.headers()["cache-control"])?.[1])).toBeLessThanOrEqual(60);
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareExpiresAt: null } })).status()).toBe(200);
   await page.setContent(copied.html);
   await expect.poll(() => page.locator("img").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(320);
   // A link that asks for an email first shows the cover instead, so the footage does not stand in for the form.

@@ -466,14 +466,18 @@ export default function VideoDetailPage() {
   async function copyEmail() {
     if (!video) return;
     const { html, text } = emailSnippet(video, shareBase());
+    let copied = false;
     try {
       // As HTML a mail client pastes the linked picture itself; a plain-text field gets the link.
       await navigator.clipboard.write([new ClipboardItem({ "text/html": new Blob([html], { type: "text/html" }), "text/plain": new Blob([text], { type: "text/plain" }) })]);
+      copied = true;
+    } catch {
+      copied = copyRendered(html);
+    }
+    if (copied) {
       setEmailCopied(true);
       setTimeout(() => setEmailCopied(false), 2000);
-    } catch {
-      window.prompt("Copy this HTML into your email", html);
-    }
+    } else window.prompt("Copy this HTML into your email", html);
   }
 
   const [retrying, setRetrying] = useState(false);
@@ -619,7 +623,13 @@ export default function VideoDetailPage() {
                       variant="secondary"
                       onClick={copyEmail}
                       disabled={!!video.shareLocked}
-                      title={video.shareLocked ? "A password-protected video has no preview for an email" : "Copy a moving preview, linked to the share page, to paste into an email"}
+                      title={
+                        video.shareLocked
+                          ? "A password-protected video has no preview for an email"
+                          : !shareLive || shareExpired(video)
+                            ? "The share link is off, so the preview shows only once it is live again"
+                            : "Copy a moving preview, linked to the share page, to paste into an email"
+                      }
                     >
                       {emailCopied ? <Check className="h-4 w-4 text-emerald-600" /> : <Mail className="h-4 w-4" />} {emailCopied ? "Email copied" : "Email"}
                     </Button>
@@ -1175,3 +1185,30 @@ function Row({ label, children, wrap = false }: { label: string; children: React
     </div>
   );
 }
+
+/**
+ * Copies HTML as the picture and link it draws, for a browser without rich clipboard writes: the HTML is drawn off
+ * screen, selected, and copied the old way. False when the browser refuses that too.
+ */
+function copyRendered(html: string): boolean {
+  const holder = document.createElement("div");
+  holder.innerHTML = html;
+  holder.style.cssText = "position:fixed;left:-9999px;top:0";
+  holder.setAttribute("aria-hidden", "true");
+  document.body.appendChild(holder);
+  const selection = window.getSelection();
+  const range = document.createRange();
+  range.selectNodeContents(holder);
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  let done = false;
+  try {
+    done = document.execCommand("copy");
+  } catch {
+    done = false;
+  }
+  selection?.removeAllRanges();
+  holder.remove();
+  return done;
+}
+

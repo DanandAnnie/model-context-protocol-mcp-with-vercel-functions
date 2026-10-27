@@ -571,10 +571,10 @@ export default function VideoDetailPage() {
                     setDraftTitle(video.title);
                     setEditing(true);
                   }}
-                  className="group inline-flex items-center gap-2 text-left"
+                  className="group inline-flex min-w-0 max-w-full items-center gap-2 text-left"
                   title="Rename"
                 >
-                  {video.title}
+                  <span className="min-w-0 [overflow-wrap:anywhere]">{video.title}</span>
                   <Pencil className="h-4 w-4 text-slate-300 group-hover:text-slate-600" />
                 </button>
               )

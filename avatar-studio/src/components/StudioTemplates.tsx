@@ -160,7 +160,11 @@ function StudioTemplateForm({ id, onClose }: { id: string; onClose: () => void }
   }
 
   return (
-    <Card id="studio-template-form" className="mt-4 p-5" data-testid="studio-template-form" onKeyDown={(e) => e.key === "Escape" && !busy && onClose()}>
+    <Card id="studio-template-form" className="mt-4 p-5" data-testid="studio-template-form" onKeyDown={(e) => {
+        // Not while an input method composes, nor from a text box, where Escape would throw away what was typed.
+        if (e.key !== "Escape" || busy || e.nativeEvent.isComposing || (e.target as HTMLElement).tagName === "TEXTAREA") return;
+        onClose();
+      }}>
       <div className="flex items-start justify-between gap-3">
         <h3 ref={headingRef} tabIndex={-1} className="min-w-0 break-words text-sm font-semibold text-slate-900 outline-none">
           {template.name}

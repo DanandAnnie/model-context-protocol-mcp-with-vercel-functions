@@ -125,8 +125,9 @@ export default function CleanupPage() {
     setNote(null);
     const next = items[items.indexOf(c) + 1] ?? items[items.indexOf(c) - 1];
     try {
-      await api(`/api/cleanups/${c.id}`, { method: "DELETE" });
+      // Forgotten before the request, so a check landing meanwhile does not announce it as deleted elsewhere.
       seen.current.delete(c.id);
+      await api(`/api/cleanups/${c.id}`, { method: "DELETE" });
       setData((prev) => (prev ? { ...prev, cleanups: prev.cleanups.filter((x) => x.id !== c.id) } : prev));
       void refetch();
       setNote(`Deleted ${c.title}.`);

@@ -48,7 +48,7 @@ export function SectionTitle({ title, subtitle, action }: { title: ReactNode; su
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div className="min-w-0 max-w-full">
-        <h1 className="break-words text-2xl font-semibold tracking-tight text-slate-900">{title}</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-slate-900 [overflow-wrap:anywhere]">{title}</h1>
         {subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}
       </div>
       {action}

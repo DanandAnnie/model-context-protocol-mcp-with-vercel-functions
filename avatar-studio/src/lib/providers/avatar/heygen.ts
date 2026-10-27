@@ -135,12 +135,14 @@ export class HeyGenAvatarProvider implements AvatarProvider {
   async createVideo(req: VideoRequest, avatar: Avatar, voice: Voice | null, cast?: RenderCast) {
     // A Studio template owns its scenes, presenter, and voice: only its variables, the title, and captions are sent.
     if (req.studioTemplate) {
-      const { video_id } = await this.client.generateFromTemplate(req.studioTemplate.id, {
+      const body = {
         variables: req.studioTemplate.variables,
         title: req.title,
         caption: req.captions,
         ...(webhookUrl("heygen") ? { callback_url: webhookUrl("heygen") } : {}),
-      });
+      };
+      // The studio's video id as HeyGen's key: a render repeated after a lost answer is replayed, not rendered again.
+      const { video_id } = await this.client.generateFromTemplate(req.studioTemplate.id, body, req.idempotencyKey);
       return { providerJobId: video_id };
     }
     const scenes: Scene[] = req.scenes?.length ? req.scenes : [{ script: req.script, background: req.background }];

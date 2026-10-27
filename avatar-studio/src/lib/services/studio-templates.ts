@@ -162,8 +162,12 @@ export async function renderStudioTemplate(id: string, input: z.infer<typeof stu
   if (videoId) {
     const existing = await getStore().get<Video>("video", videoId);
     if (existing && existing.ownerId === ownerId) {
-      if (existing.studioTemplate?.id !== id) throw new ConflictError("This Idempotency-Key was already used for another render; send a new key");
-      return existing;
+      // The same key for another template, title, or captions is a mistake to say, not a render to replay.
+      if (existing.studioTemplate?.id !== id || existing.title !== input.title || existing.captions !== input.captions) throw new ConflictError("This Idempotency-Key was already used for another render; send a new key");
+      if (existing.deletedAt) throw new ConflictError("The video this key rendered is in the trash; send a new key to render again");
+      // A row reserved by a start still being sent (see `createStudioTemplateVideo`) is not an answer yet.
+      const reserved = existing.status === "queued" && !existing.providerJobId;
+      if (!reserved) return existing;
     }
   }
   const template = await getStudioTemplate(id);

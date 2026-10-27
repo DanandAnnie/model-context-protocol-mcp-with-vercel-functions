@@ -217,8 +217,8 @@ export class HeyGenClient {
   }
 
   /** Renders a video from a template with its variables replaced (`POST /v3/templates/{id}`). */
-  generateFromTemplate(id: string, body: Record<string, unknown>) {
-    return this.request<{ video_id: string }>(`${V3}/templates/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify(body) });
+  generateFromTemplate(id: string, body: Record<string, unknown>, key?: string) {
+    return this.request<{ video_id: string }>(`${V3}/templates/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify(body), ...(key ? { headers: { "Idempotency-Key": key } } : {}) });
   }
 
   /** A video (v3, `POST /v3/videos`); a studio request composes its scenes into one render. */

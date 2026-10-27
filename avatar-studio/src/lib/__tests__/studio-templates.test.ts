@@ -80,11 +80,43 @@ describe("HeyGen Studio templates", () => {
   });
 
   it("returns the same video for a render retried with the same key, without rendering or counting it twice", async () => {
+    const { MockAvatarProvider } = await import("../providers/avatar/mock");
+    const proto = MockAvatarProvider.prototype as unknown as { createVideo: (...a: unknown[]) => Promise<unknown> };
+    const real = proto.createVideo;
+    let renders = 0;
+    let gate: Promise<void> | null = null;
+    proto.createVideo = async function (this: unknown, ...a: unknown[]) {
+      renders++;
+      if (gate) await gate;
+      return real.apply(this, a);
+    };
+    try {
+      const input = studioRenderSchema.parse(OPEN_HOUSE);
+      const first = await renderStudioTemplate("demo_open_house", input, "u1", { key: "render-key-1" });
+      const again = await renderStudioTemplate("demo_open_house", input, "u1", { key: "render-key-1" });
+      assert.deepEqual([again.id, again.createdAt, renders], [first.id, first.createdAt, 1], "the same video, rendered once");
+      assert.equal((await getStore().list<Video>("video", "u1")).length, 1);
+      await assert.rejects(renderStudioTemplate("demo_open_house", { ...input, title: "Another invite" }, "u1", { key: "render-key-1" }), ConflictError, "the same key with another title");
+      // A retry arriving while the first is still being sent is told so (and the page keeps its key), not rendered twice.
+      let open!: () => void;
+      gate = new Promise((resolve) => (open = resolve));
+      const slow = renderStudioTemplate("demo_open_house", input, "u1", { key: "render-key-slow" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await assert.rejects(renderStudioTemplate("demo_open_house", input, "u1", { key: "render-key-slow" }), (e: unknown) => e instanceof ConflictError && /still being sent/.test((e as Error).message));
+      open();
+      gate = null;
+      const landed = await slow;
+      assert.equal(landed.status, "processing");
+      assert.equal(renders, 2, "one render per key");
+      assert.equal((await renderStudioTemplate("demo_open_house", input, "u1", { key: "render-key-slow" })).id, landed.id);
+      // A video moved to the trash is not handed back as the answer.
+      await getStore().put("video", { ...landed, deletedAt: new Date().toISOString() });
+      await assert.rejects(renderStudioTemplate("demo_open_house", input, "u1", { key: "render-key-slow" }), /in the trash/);
+    } finally {
+      proto.createVideo = real;
+    }
     const input = studioRenderSchema.parse(OPEN_HOUSE);
-    const first = await renderStudioTemplate("demo_open_house", input, "u1", { key: "render-key-1" });
-    const again = await renderStudioTemplate("demo_open_house", input, "u1", { key: "render-key-1" });
-    assert.equal(again.id, first.id);
-    assert.equal((await getStore().list<Video>("video", "u1")).length, 1, "one video, one render");
+    const first = (await getStore().list<Video>("video", "u1")).find((v) => !v.deletedAt)!;
     assert.notEqual((await renderStudioTemplate("demo_open_house", input, "u2", { key: "render-key-1" })).id, first.id, "another account's key is its own");
     await assert.rejects(renderStudioTemplate("demo_product_update", studioRenderSchema.parse({ title: "Update", variables: { details: { type: "text", content: "Faster." } } }), "u1", { key: "render-key-1" }), ConflictError, "the same key for another template");
     assert.notEqual((await renderStudioTemplate("demo_open_house", input, "u1")).id, first.id, "without a key every render is new");
@@ -95,11 +127,11 @@ describe("HeyGen Studio templates", () => {
   it("asks HeyGen for its templates and renders one with its variables", async () => {
     const { config } = await import("../config");
     const saved = { avatar: config.avatarProvider, key: config.heygenApiKey };
-    const calls: Array<{ url: string; method: string; body: unknown }> = [];
+    const calls: Array<{ url: string; method: string; body: unknown; idem: string | null }> = [];
     const realFetch = globalThis.fetch;
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      calls.push({ url, method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : null });
+      calls.push({ url, method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : null, idem: new Headers(init?.headers).get("idempotency-key") });
       if (url.startsWith("https://api.heygen.com/v3/templates?limit=100")) {
         return Response.json(url.includes("token=p2") ? { data: { templates: [{ id: "t2", name: "Second" }], has_more: false } } : { data: { templates: [{ id: "t1", name: "Quarterly Update", thumbnail_url: "https://r.heygen.ai/t1.png", aspect_ratio: "16:9" }], has_more: true, next_token: "p2" } });
       }
@@ -152,6 +184,10 @@ describe("HeyGen Studio templates", () => {
       const post = calls.find((c) => c.method === "POST")!;
       assert.deepEqual(post.body, { variables: { headline: { type: "text", content: "Q4 plans" }, subtitle: { type: "text", content: "Our plans" } }, title: "Q3", caption: true }, "media, presenter, and voice not given are left to the template");
       assert.deepEqual([video.providerJobId, video.status, video.script, video.avatarId], ["hg_tpl_1", "processing", "Welcome to the Q4 plans update.", "look_9"]);
+      assert.equal(post.idem, null, "without a client key HeyGen gets none");
+      // With one, HeyGen gets the studio's video id as its key, so a render repeated after a lost answer is replayed there.
+      const keyed = await renderStudioTemplate("t1", studioRenderSchema.parse({ title: "Q3", variables: { headline: { type: "text", content: "Q4 plans" }, subtitle: { type: "text", content: "Our plans" } } }), "u1", { key: "render-key-hg" });
+      assert.equal(calls.filter((c) => c.method === "POST").at(-1)!.idem, keyed.id);
       // The detail is reused for a while.
       const before = calls.length;
       await getStudioTemplate("t1");

@@ -418,6 +418,8 @@ export interface AudioClip {
 }
 
 export interface VideoRequest {
+  /** A key the renderer is asked with, so a request repeated after a lost answer starts nothing twice. Never stored. */
+  idempotencyKey?: string;
   title: string;
   /** Full spoken script. When `scenes` is present this is their scripts joined in order. */
   script: string;

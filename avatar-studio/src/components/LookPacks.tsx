@@ -111,6 +111,9 @@ export function LookPackList({ packs, avatars, canEdit, onForget, fallbackFocus 
   const listRef = useRef<HTMLDivElement>(null);
   const focusAfterRender = useFocusAfterRender();
   const [err, setErr] = useState<string | null>(null);
+  // A presenter counts as deleted only once it was listed and is gone, not while the avatars are still being asked for.
+  const listedOnce = useRef<Set<string>>(new Set());
+  for (const a of avatars) listedOnce.current.add(a.id);
   if (packs.length === 0) return null;
 
   async function forget(p: LookPack) {
@@ -137,6 +140,7 @@ export function LookPackList({ packs, avatars, canEdit, onForget, fallbackFocus 
           const ready = p.looks.filter((l) => l.status === "completed").length;
           const failed = p.looks.filter((l) => l.status === "failed");
           const made = p.looks.map((l) => avatars.find((a) => a.id === l.avatarId)).filter((a): a is Avatar => !!a);
+          const deleted = p.looks.filter((l) => l.avatarId && listedOnce.current.has(l.avatarId) && !avatars.some((a) => a.id === l.avatarId)).length;
           return (
             <Card key={p.id} className="p-3 outline-none focus:ring-2 focus:ring-brand-500" data-testid="look-pack" data-look-pack={p.id} tabIndex={-1}>
               <div className="flex items-start justify-between gap-3">
@@ -147,7 +151,7 @@ export function LookPackList({ packs, avatars, canEdit, onForget, fallbackFocus 
                   <div className="mt-0.5 text-xs text-slate-500" data-testid="look-pack-meta">
                     {ready} of {p.looks.length} ready · {p.aspect} · {formatDate(p.createdAt)}
                     {failed.length ? ` · ${failed.length} could not be made` : ""}
-                    {avatars.length && ready > made.length ? ` · ${ready - made.length} since deleted` : ""}
+                    {deleted ? ` · ${deleted} since deleted` : ""}
                   </div>
                   {failed[0]?.error && <div className="mt-1 text-xs text-rose-600">{failed[0].error}</div>}
                 </div>

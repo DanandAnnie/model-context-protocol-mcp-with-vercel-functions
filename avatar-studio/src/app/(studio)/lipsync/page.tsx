@@ -207,8 +207,9 @@ export default function LipsyncPage() {
     setNote(null);
     const next = items[items.indexOf(l) + 1] ?? items[items.indexOf(l) - 1];
     try {
-      await api(`/api/lipsyncs/${l.id}`, { method: "DELETE" });
+      // Forgotten before the request, so a check landing meanwhile does not announce it as deleted elsewhere.
       seen.current.delete(l.id);
+      await api(`/api/lipsyncs/${l.id}`, { method: "DELETE" });
       setData((prev) => (prev ? { ...prev, lipsyncs: prev.lipsyncs.filter((x) => x.id !== l.id) } : prev));
       void refetch();
       setNote(`Deleted ${l.title}.`);

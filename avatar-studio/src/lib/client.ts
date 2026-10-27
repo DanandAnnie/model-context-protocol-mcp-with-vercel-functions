@@ -53,7 +53,8 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
  * (5xx, a timeout) nor a `409` for a start the renderer is still working on, whose retry must keep the key.
  */
 export function isRefusal(e: unknown): boolean {
-  return e instanceof ApiError && e.status < 500 && !(e.status === 409 && /still being sent/.test(e.message));
+  // Status 0 is no answer at all (see `api`): the start may have gone through, so its key is kept.
+  return e instanceof ApiError && e.status >= 400 && e.status < 500 && !(e.status === 409 && /still being sent/.test(e.message));
 }
 
 /** The poster to show for a video: its custom cover (versioned so a replacement is never cached) or the provider thumbnail. */

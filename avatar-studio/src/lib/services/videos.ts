@@ -1177,6 +1177,9 @@ export async function retryVideo(id: string, ownerId: string = LOCAL_OWNER): Pro
  * A render of a HeyGen Studio template: the template owns its scenes, presenter, and voice, so nothing is resolved or
  * prepared here; the renderer gets the template and its variables. Counted, stored, and followed like any render.
  */
+/** How long a keyed render's reserved row stands for a start still being sent (a function is cut off well before). */
+const RESERVATION_MS = 2 * 60 * 1000;
+
 async function createStudioTemplateVideo(req: VideoRequest & { studioTemplate: NonNullable<VideoRequest["studioTemplate"]> }, ownerId: string, skipLimit: boolean, extras: VideoExtras): Promise<Video> {
   if (!skipLimit) await enforceRenderLimit(ownerId);
   const provider = getAvatarProvider();
@@ -1192,8 +1195,18 @@ async function createStudioTemplateVideo(req: VideoRequest & { studioTemplate: N
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
+  if (extras.id) {
+    // A render with a client key reserves its row before the renderer is asked, so a retry arriving while this one is
+    // still being sent is told so instead of starting a second render. One reserved long ago whose start never came
+    // back (the function died) is started again; the renderer gets the same key, so it is not rendered twice there.
+    if (!(await getStore().insert("video", base))) {
+      const held = await getStore().get<Video>("video", base.id);
+      if (held && (held.status !== "queued" || held.providerJobId)) return held;
+      if (held && Date.now() - Date.parse(held.createdAt) < RESERVATION_MS) throw new ConflictError("This render is still being sent; try again in a moment");
+    }
+  }
   try {
-    const { providerJobId } = await provider.createVideo(req, { id: req.avatarId, name: req.studioTemplate.name, provider: provider.name, source: "provider" } as Avatar, null);
+    const { providerJobId } = await provider.createVideo({ ...req, ...(extras.id ? { idempotencyKey: extras.id } : {}) }, { id: req.avatarId, name: req.studioTemplate.name, provider: provider.name, source: "provider" } as Avatar, null);
     base.providerJobId = providerJobId;
     base.status = "processing";
   } catch (err) {

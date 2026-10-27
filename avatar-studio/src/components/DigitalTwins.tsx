@@ -53,6 +53,8 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [asking, setAsking] = useState<string | null>(null);
+  /** Where the keyboard last was in the section, and in which twin's card, to put it back when that row goes. */
+  const lastFocus = useRef<{ el: Element; twin: string | null } | null>(null);
   /** Says `text`, even when it is what was said last (a second copy, say): cleared first, then set. */
   const say = (text: string) => {
     setNote(null);
@@ -70,13 +72,13 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
     if (!data) return;
     const parts: string[] = [];
     let ready = false;
-    let settled: string | null = null;
+    const settled: string[] = [];
     for (const t of data.twins) {
       const before = seen.current.get(t.id);
       if (before?.status === "processing" && t.status !== "processing") {
         parts.push(t.status === "completed" ? `${t.name} is ready in your avatars.` : `${t.name} could not be trained: ${t.error ?? "the renderer failed"}.`);
         ready ||= t.status === "completed";
-        settled ??= t.id;
+        settled.push(t.id);
       } else if (before && before.consent !== "rejected" && t.consent === "rejected" && t.status === "processing") {
         parts.push(`The consent for ${t.name} was not accepted${t.error ? `: ${t.error}` : ""}. Get a new consent link to record it again.`);
       }
@@ -84,9 +86,11 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
     }
     if (ready) onReady();
     if (parts.length) setNote(parts.join(" "));
-    // Its consent row is gone with it; a keyboard user who was in it is taken to the twin rather than to the page.
-    if (settled && (document.activeElement === document.body || !document.activeElement)) {
-      const id = settled;
+    // Its consent row is gone with it: a keyboard user who was in that row is taken to the twin rather than to the
+    // page. Anyone whose focus was elsewhere, or nowhere (scrolling with the mouse, say), is left where they are.
+    const last = lastFocus.current;
+    if (last?.twin && settled.includes(last.twin) && !last.el.isConnected && (document.activeElement === document.body || !document.activeElement)) {
+      const id = last.twin;
       requestAnimationFrame(() => listRef.current?.querySelector<HTMLElement>(`[data-twin="${CSS.escape(id)}"]`)?.focus());
     }
   }, [data, onReady]);
@@ -129,7 +133,7 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
   }
 
   async function askConsent(t: Twin) {
-    if (asking) return;
+    if (asking === t.id) return;
     setAsking(t.id);
     setErr(null);
     try {
@@ -174,7 +178,14 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
 
   const ready = name.trim() && /^https:\/\/\S+$/i.test(footageUrl.trim()) && agreed;
   return (
-    <section ref={listRef} className="mb-6" data-testid="digital-twins">
+    <section
+      ref={listRef}
+      className="mb-6"
+      data-testid="digital-twins"
+      onFocusCapture={(e) => {
+        lastFocus.current = { el: e.target, twin: e.target.closest("[data-twin]")?.getAttribute("data-twin") ?? null };
+      }}
+    >
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-slate-900">Digital twins</h2>
         {canEdit === true && !open && data?.available && (

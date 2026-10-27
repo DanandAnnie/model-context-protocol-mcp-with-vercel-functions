@@ -22,6 +22,12 @@ export function VoiceCloner({ onCloned, available, oneRecording = false }: { onC
   const [name, setName] = useState("");
   const [samples, setSamples] = useState<Array<{ dataUrl: string; label: string; bytes: number }>>([]);
   const [note, setNote] = useState("");
+  /** Says `text`, even when it is what was said last (a second removal, say): cleared first, then set. */
+  const say = (text: string) => {
+    setNote("");
+    requestAnimationFrame(() => setNote(text));
+  };
+  const recordings = useRef(0);
   const nameRef = useRef<HTMLInputElement>(null);
   const uploadRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
@@ -58,7 +64,19 @@ export function VoiceCloner({ onCloned, available, oneRecording = false }: { onC
         const blob = new Blob(chunks.current, { type: "audio/webm" });
         if (blob.size > 0) {
           const dataUrl = await toDataUrl(blob);
-          setSamples((s) => (s.length >= MAX_SAMPLES ? s : [...s, { dataUrl, label: `Recording ${s.length + 1}`, bytes: blob.size }]));
+          const label = `Recording ${++recordings.current}`;
+          setSamples((s) => {
+            // A recording counts against the same limits as an uploaded file.
+            if (s.length >= MAX_SAMPLES) {
+              setErr(`Up to ${MAX_SAMPLES} samples; ${label} was left out.`);
+              return s;
+            }
+            if (!oneRecording && s.reduce((sum, x) => sum + x.bytes, 0) + blob.size > MAX_TOTAL_BYTES) {
+              setErr(`Samples can be at most 3 MB in total; ${label} would pass that. Record a shorter one.`);
+              return s;
+            }
+            return [...s, { dataUrl, label, bytes: blob.size }];
+          });
         }
       };
       recorder.current = rec;
@@ -116,7 +134,7 @@ export function VoiceCloner({ onCloned, available, oneRecording = false }: { onC
   function removeSample(i: number) {
     const next = samples.filter((_, j) => j !== i);
     setSamples(next);
-    setNote(`${samples[i].label} removed.`);
+    say(`${samples[i].label} removed.`);
     // Focus moves to the sample that took its place, or to the one before, or to Upload when none is left.
     requestAnimationFrame(() => {
       const buttons = listRef.current?.querySelectorAll<HTMLButtonElement>("button");
@@ -134,7 +152,7 @@ export function VoiceCloner({ onCloned, available, oneRecording = false }: { onC
       onCloned(voice);
       setName("");
       setSamples([]);
-      setNote(`${voice.name} is cloned and listed with your voices.`);
+      say(`${voice.name} is cloned and listed with your voices.`);
       // The button is disabled once the form is empty, so focus goes back to the start of the form.
       requestAnimationFrame(() => nameRef.current?.focus());
     } catch (e) {

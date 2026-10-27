@@ -82,8 +82,9 @@ export default function VoicesPage() {
       {canEdit === false && <ViewOnlyNotice what="clone, design, or change voices" />}
       <ErrorBanner message={error ?? previewErr ?? actionErr} />
       {/* Shown once the role is known: a viewer never sees them while the workspace is still loading. */}
-      {canEdit === true && (
-        <div className={`mb-6 grid gap-4 ${status?.voiceDesign ? "lg:grid-cols-2" : ""}`}>
+      {/* And once the provider is known, as it decides how samples are sent. */}
+      {canEdit === true && status && (
+        <div className={`mb-6 grid gap-4 ${status.voiceDesign ? "lg:grid-cols-2" : ""}`}>
           <VoiceCloner available={status?.tts !== "mock"} oneRecording={!!status?.voiceCloneOneRecording} onCloned={() => refetch()} />
           {status?.voiceDesign && <VoiceDesigner available={status.tts !== "mock"} ownCount={data?.own?.count ?? 0} limit={data?.own?.limit ?? 5} onSaved={() => refetch()} />}
         </div>

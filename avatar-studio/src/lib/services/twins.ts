@@ -378,6 +378,15 @@ function twinVoiceName(name: string): string {
   let room = 60;
   let out = withSuffix(name, " (twin)", room);
   while (out.length > 60 && room > 8) out = withSuffix(name, " (twin)", --room);
+  // A first character longer than the room itself (heavy combining marks) is cut by code points as a last resort.
+  if (out.length > 60) {
+    let head = "";
+    for (const ch of name) {
+      if (head.length + ch.length > 53) break;
+      head += ch;
+    }
+    out = `${head} (twin)`;
+  }
   return out;
 }
 

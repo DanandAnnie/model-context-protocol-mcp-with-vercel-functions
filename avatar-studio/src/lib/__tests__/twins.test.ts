@@ -234,6 +234,15 @@ describe("digital twins", () => {
       assert.ok(voice.name.length <= 60, `${voice.name.length} UTF-16 units`);
       const { updateVoiceSchema } = await import("../services");
       assert.doesNotThrow(() => updateVoiceSchema.parse({ name: voice.name }));
+      // A first character longer than the room itself is cut by code points, never inside one.
+      const marks = `A${"\u0301".repeat(70)}`;
+      const odd = await startTwin(input({ name: marks.slice(0, 71) }), "u1");
+      await requestTwinConsent(odd.id, "u1");
+      forgetTwinChecks();
+      await listTwins("u1");
+      const oddVoice = (await getStore().list<Voice>("voice", "u1")).find((v) => v.name.startsWith("A\u0301"))!;
+      assert.ok(oddVoice.name.length <= 60 && oddVoice.name.endsWith(" (twin)"));
+      assert.doesNotThrow(() => updateVoiceSchema.parse({ name: oddVoice.name }));
     } finally {
       clipMs.CLIP_MS = saved;
     }

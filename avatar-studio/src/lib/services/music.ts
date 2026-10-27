@@ -27,7 +27,7 @@ export const effectQuerySchema = z.string().trim().min(2, "Describe the sound ef
 export const musicEffectSchema = z.object({
   trackId: z.string().trim().min(1, "Choose a sound effect").max(200),
   query: effectQuerySchema,
-  atSec: z.number({ error: "Say when the sound effect plays" }).min(0, "A sound effect plays from 0 seconds or later").max(MAX_MUSIC_VIDEO_SEC),
+  atSec: z.number({ error: "Say when the sound effect plays" }).min(0, "A sound effect plays from 0 seconds or later").max(MAX_MUSIC_VIDEO_SEC, `A sound effect plays within the first ${MAX_MUSIC_VIDEO_SEC / 60} minutes`),
 });
 
 export const musicRequestSchema = z.object({
@@ -134,7 +134,7 @@ export async function startMusic(input: z.infer<typeof musicRequestSchema>, owne
   const video = await resolveVideo(input.videoId, ownerId);
   const wanted = effectsInOrder(input.effects);
   const late = wanted.find((e) => e.atSec >= video.durationSec!);
-  if (late) throw new ValidationError(`A sound effect at ${clock(late.atSec)} is past the end of the video (${clock(video.durationSec!)}); move it earlier`);
+  if (late) throw new ValidationError(`A sound effect at ${clock(late.atSec)} plays at or after the end of the video (${clock(video.durationSec!)}); move it earlier`);
   // The track's link, and each effect's (one search per description), are asked for again, as the links expire: all
   // counted first, then asked together, so a slow catalog takes one search's time rather than six.
   const queries = [...new Set(wanted.map((e) => e.query))];

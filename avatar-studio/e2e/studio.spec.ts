@@ -737,7 +737,7 @@ test("a catalog track found by describing it is mixed under a finished video, fo
   // Nothing to add until a track is found and chosen.
   await expect(start).toBeDisabled();
   await page.getByLabel("Describe the music").fill("upbeat energetic");
-  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await page.getByRole("button", { name: "Search music" }).click();
   const tracks = page.getByTestId("music-tracks");
   // The best match is chosen and focused, and each track can be heard first.
   await expect(tracks.getByLabel("Bright steps", { exact: true })).toBeChecked();
@@ -758,7 +758,13 @@ test("a catalog track found by describing it is mixed under a finished video, fo
   const pop = page.getByRole("textbox", { name: "When Pop plays, in seconds from the start" });
   // A moment past the end of the video is caught before anything is sent.
   await pop.fill("999");
-  await expect(page.getByTestId("music-effects")).toContainText("is past the end of the video");
+  await expect(page.getByTestId("music-effects")).toContainText("Pop (16:39.0) plays at or after the end of the video");
+  await expect(pop).toHaveAttribute("aria-describedby", "effects-problem");
+  // Not a number of seconds says so, and a decimal comma is read as a point.
+  await pop.fill("soon");
+  await expect(page.getByTestId("music-effects")).toContainText("Write when Pop plays as seconds from the start");
+  await pop.fill("2,5");
+  await expect(start).toBeEnabled();
   await expect(start).toBeDisabled();
   // Typed one key at a time, a partial number is left as it is, and an empty field asks for a moment.
   await pop.fill("");
@@ -774,6 +780,12 @@ test("a catalog track found by describing it is mixed under a finished video, fo
   await page.getByRole("button", { name: /^Remove Bright chime at / }).click();
   await expect(pop).toBeFocused();
   await expect(page.getByTestId("chosen-effects").getByRole("listitem")).toHaveCount(2);
+  // The names stay readable, and nothing widens the page, on a phone.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByTestId("chosen-effects").getByText("Whoosh", { exact: true })).toBeVisible();
+  expect(await page.getByTestId("chosen-effects").getByText("Whoosh", { exact: true }).evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  expect(await page.locator("main").evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  await page.setViewportSize({ width: 1280, height: 720 });
   const sent = page.waitForRequest((r) => r.url().endsWith("/api/music") && r.method() === "POST");
   await start.click();
   const request = await sent;

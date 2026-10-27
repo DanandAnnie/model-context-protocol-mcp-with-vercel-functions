@@ -6,7 +6,7 @@ import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
-import { api, formatDate, formatSeconds, isRefusal } from "@/lib/client";
+import { ApiError, api, formatDate, formatSeconds, isRefusal } from "@/lib/client";
 import { clipBody } from "@/lib/clip-upload";
 import type { AudioClip, InstantVoice, VoiceChange } from "@/lib/types";
 
@@ -18,12 +18,14 @@ const newKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? 
 const VOICE_STATUS: Record<Voice["status"], string> = { processing: "Being made", completed: "Ready", failed: "Could not be made" };
 
 /** A choice of one of the account's audio clips, with an upload that saves a file as a new clip and chooses it. */
-function ClipChoice(props: { label: string; hint: string; uploadLabel: string; clips: AudioClip[]; value: string; disabled: boolean; onChange: (id: string) => void; onUploaded: (clip: AudioClip) => void; onError: (message: string) => void }) {
+function ClipChoice(props: { label: string; hint: string; uploadLabel: string; clips: AudioClip[]; value: string; disabled: boolean; onChange: (id: string) => void; onUploaded: (clip: AudioClip) => void; onDeleted: (clip: AudioClip) => void; onError: (message: string | null) => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const chosen = props.clips.find((c) => c.id === props.value);
   async function upload(file: File) {
     setUploading(true);
+    // A message about an earlier upload no longer applies.
+    props.onError(null);
     try {
       const name = file.name.replace(/\.[^.]+$/, "").slice(0, 80) || "Uploaded audio";
       const { clip } = await api<{ clip: AudioClip }>("/api/clips", { method: "POST", body: JSON.stringify(await clipBody(file, name, "the recording")) });
@@ -32,6 +34,18 @@ function ClipChoice(props: { label: string; hint: string; uploadLabel: string; c
       props.onError(e instanceof Error ? e.message : "The audio could not be uploaded");
     } finally {
       setUploading(false);
+    }
+  }
+  async function remove(clip: AudioClip) {
+    if (!window.confirm(`Delete the audio clip “${clip.name}”? Scenes, lip syncs, voices, and recordings already made from it are kept.`)) return;
+    props.onError(null);
+    try {
+      await api(`/api/clips/${clip.id}`, { method: "DELETE" });
+      props.onDeleted(clip);
+    } catch (e) {
+      // One deleted elsewhere is gone all the same.
+      if (e instanceof ApiError && e.status === 404) props.onDeleted(clip);
+      else props.onError(e instanceof Error ? e.message : "The audio clip could not be deleted");
     }
   }
   return (
@@ -64,6 +78,12 @@ function ClipChoice(props: { label: string; hint: string; uploadLabel: string; c
           }}
         />
         {chosen && <audio controls preload="none" src={`/api/clips/${chosen.id}`} className="h-8 min-w-0 flex-1" aria-label={`Play ${chosen.name}`} />}
+        {/* Clips are made by every upload; one no longer needed can go from here. */}
+        {chosen && !props.disabled && (
+          <button type="button" onClick={() => void remove(chosen)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-rose-600" aria-label={`Delete the audio clip ${chosen.name}`}>
+            <Trash2 className="h-4 w-4" />
+          </button>
+        )}
       </div>
     </div>
   );
@@ -104,6 +124,9 @@ export default function VoiceChangerPage() {
   const [voiceKey, setVoiceKey] = useState(() => newKey());
   const [making, setMaking] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Where the message shows: in the card whose action it answers, so it is seen wherever the page is scrolled to.
+  const [errAt, setErrAt] = useState<"change" | "voice" | "lists">("lists");
+  const fail = (at: typeof errAt) => (message: string | null) => (setErrAt(at), setErr(message));
   const [note, setNote] = useState<string | null>(null);
   const changesRef = useRef<HTMLDivElement>(null);
   const voicesRef = useRef<HTMLUListElement>(null);
@@ -134,9 +157,30 @@ export default function VoiceChangerPage() {
     void refetchClips();
     setNote(`Uploaded ${clip.name}.`);
   }
-  // A clip deleted meanwhile leaves the choices, so a retry is not refused the same way.
-  function forgetGoneClip(e: unknown) {
-    if (e instanceof Error && /audio clip is no longer available/.test(e.message)) void refetchClips();
+  // A clip or voice deleted meanwhile leaves the choices, so a retry is not refused the same way.
+  function forgetGone(e: unknown) {
+    if (!(e instanceof Error)) return;
+    if (/audio clip is no longer available/.test(e.message)) void refetchClips();
+    if (/voice is no longer available/.test(e.message)) {
+      setVoiceId("");
+      void refetch();
+    }
+  }
+  // A chosen clip that leaves the list (deleted here or elsewhere) is no longer chosen.
+  useEffect(() => {
+    if (!clipData) return;
+    const ids = new Set(clipData.clips.map((c) => c.id));
+    if (clipId && !ids.has(clipId)) setClipId("");
+    if (sampleId && !ids.has(sampleId)) setSampleId("");
+  }, [clipData, clipId, sampleId]);
+  // Likewise a chosen voice that is no longer ready.
+  useEffect(() => {
+    if (data && voiceId && !data.voices.some((v) => v.id === voiceId && v.status === "completed")) setVoiceId("");
+  }, [data, voiceId]);
+  function clipDeleted(clip: AudioClip) {
+    setClipData((prev) => (prev ? { clips: prev.clips.filter((c) => c.id !== clip.id) } : prev));
+    void refetchClips();
+    setNote(`Deleted the audio clip ${clip.name}.`);
   }
 
   async function changeVoice() {
@@ -153,8 +197,8 @@ export default function VoiceChangerPage() {
       setNote(change.status === "completed" ? `${change.title} is ready.` : `Speaking ${change.title}; it appears here when it is ready.`);
       focusAfterRender(() => changesRef.current?.querySelector<HTMLElement>(`[data-change="${change.id}"]`));
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "The recording could not be spoken again");
-      forgetGoneClip(e);
+      fail("change")(e instanceof Error ? e.message : "The recording could not be spoken again");
+      forgetGone(e);
       // A refusal is an answer: trying again is a new recording. Anything else (a server error, a start cut off) may
       // still be running, so the key is kept and the list asked again, where a recording still being spoken shows.
       if (isRefusal(e)) setChangeKey(newKey());
@@ -178,8 +222,8 @@ export default function VoiceChangerPage() {
       setNote(`Making the voice ${voice.name}; it is ready in a few seconds.`);
       focusAfterRender(() => voicesRef.current?.querySelector<HTMLElement>(`[data-voice="${voice.id}"]`));
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "The voice could not be made");
-      forgetGoneClip(e);
+      fail("voice")(e instanceof Error ? e.message : "The voice could not be made");
+      forgetGone(e);
       if (isRefusal(e)) setVoiceKey(newKey());
       else void refetch();
     } finally {
@@ -199,7 +243,11 @@ export default function VoiceChangerPage() {
       setNote(`Deleted the voice ${v.name}.`);
       focusAfterRender(() => (next ? voicesRef.current?.querySelector<HTMLElement>(`[data-voice="${next.id}"]`) : voicesHeading.current));
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "The voice could not be deleted");
+      // One deleted elsewhere (another tab) is gone all the same.
+      if (e instanceof ApiError && e.status === 404) {
+        setData((prev) => (prev ? { ...prev, voices: prev.voices.filter((x) => x.id !== v.id) } : prev));
+        setNote(`The voice ${v.name} was already deleted.`);
+      } else fail("lists")(e instanceof Error ? e.message : "The voice could not be deleted");
     }
   }
 
@@ -214,7 +262,10 @@ export default function VoiceChangerPage() {
       setNote(`Deleted ${c.title}.`);
       focusAfterRender(() => (next ? changesRef.current?.querySelector<HTMLElement>(`[data-change="${next.id}"]`) : changesHeading.current));
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "The recording could not be deleted");
+      if (e instanceof ApiError && e.status === 404) {
+        setData((prev) => (prev ? { ...prev, changes: prev.changes.filter((x) => x.id !== c.id) } : prev));
+        setNote(`${c.title} was already deleted.`);
+      } else fail("lists")(e instanceof Error ? e.message : "The recording could not be deleted");
     }
   }
 
@@ -223,7 +274,7 @@ export default function VoiceChangerPage() {
       <SectionTitle title="Voice changer" subtitle="Speak a recording again in another voice, keeping its words and timing." />
       {canEdit === false && <ViewOnlyNotice what="change voices or make new ones" />}
       <ErrorBanner message={error} />
-      <ErrorBanner message={err} />
+      <ErrorBanner message={errAt === "lists" ? err : null} />
       <p role="status" className="sr-only">
         {note ?? ""}
       </p>
@@ -236,9 +287,10 @@ export default function VoiceChangerPage() {
           <div className="space-y-6">
             <Card className="space-y-4 p-5">
               <h2 className="text-sm font-semibold text-slate-900">Change a recording&apos;s voice</h2>
-              <Field label="Voice" hint={ready.length ? "One of your instant voices." : "Make a voice below first."}>
+              <ErrorBanner message={errAt === "change" ? err : null} />
+              <Field label="Voice" hint={ready.length ? "One of your instant voices." : voices.some((v) => v.status === "processing") ? "Your voice is being made; it is ready in a few seconds." : "Make a voice below first."}>
                 <select className={inputClass} value={voiceId} disabled={!editable} onChange={(e) => (setVoiceId(e.target.value), setChangeKey(newKey()), setErr(null))}>
-                  <option value="">{ready.length ? "Choose a voice" : "No voices yet"}</option>
+                  <option value="">{ready.length ? "Choose a voice" : voices.some((v) => v.status === "processing") ? "Being made…" : "No voices yet"}</option>
                   {ready.map((v) => (
                     <option key={v.id} value={v.id}>
                       {v.name}
@@ -255,7 +307,8 @@ export default function VoiceChangerPage() {
                 disabled={!editable}
                 onChange={(id) => (setClipId(id), setChangeKey(newKey()), setErr(null))}
                 onUploaded={(clip) => (uploaded(clip), setClipId(clip.id), setChangeKey(newKey()))}
-                onError={setErr}
+                onDeleted={clipDeleted}
+                onError={fail("change")}
               />
               <label className="flex items-start gap-2 text-sm text-slate-700">
                 <input type="checkbox" className="mt-0.5 accent-brand-600" checked={removeNoise} disabled={!editable} onChange={(e) => (setRemoveNoise(e.target.checked), setChangeKey(newKey()))} />
@@ -280,6 +333,7 @@ export default function VoiceChangerPage() {
 
             <Card className="space-y-4 p-5">
               <h2 className="text-sm font-semibold text-slate-900">Make a voice</h2>
+              <ErrorBanner message={errAt === "voice" ? err : null} />
               <Field label="Voice name">
                 <input className={inputClass} value={voiceName} maxLength={60} disabled={!editable} onChange={(e) => (setVoiceName(e.target.value), setVoiceKey(newKey()))} placeholder="Narrator" />
               </Field>
@@ -292,7 +346,8 @@ export default function VoiceChangerPage() {
                 disabled={!editable}
                 onChange={(id) => (setSampleId(id), setVoiceKey(newKey()), setErr(null))}
                 onUploaded={(clip) => (uploaded(clip), setSampleId(clip.id), setVoiceKey(newKey()))}
-                onError={setErr}
+                onDeleted={clipDeleted}
+                onError={fail("voice")}
               />
               <label className="flex items-start gap-2 text-sm text-slate-700">
                 <input type="checkbox" className="mt-0.5 accent-brand-600" checked={agreed} disabled={!editable} onChange={(e) => setAgreed(e.target.checked)} />

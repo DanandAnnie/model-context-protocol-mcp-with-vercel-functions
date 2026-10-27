@@ -791,7 +791,23 @@ test("an instant voice is made from a recording with the speaker's agreement, an
   await expect(voiceRow).toBeFocused();
   // The demo renderer makes it in a moment; the page checks again on its own.
   await expect(voiceRow).toContainText("Ready", { timeout: 20_000 });
+  // A second voice of the same name is refused, with the reason in the card it was made from.
+  await page.getByLabel("Voice name").fill(name.toUpperCase());
+  await page.getByLabel(/agreed to have their voice cloned/).check();
+  await make.click();
+  await expect(page.getByRole("alert")).toContainText(`already have a voice named "${name.toUpperCase()}"`);
+  await page.getByLabel("Voice name").fill("");
+  await page.getByLabel(/agreed to have their voice cloned/).uncheck();
   await page.getByRole("combobox", { name: /^Voice\b/ }).selectOption({ label: name });
+  // A recording chosen and then deleted from the page is no longer chosen, and a good upload clears an old message.
+  const recording = page.getByRole("combobox", { name: /^Recording\b(?! of)/ });
+  await page.getByLabel("Upload the recording to change").setInputFiles("e2e/fixtures/voice-over.mp3");
+  await expect(recording.locator("option:checked")).toHaveText("voice-over (3s)");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: "Delete the audio clip voice-over" }).first().click();
+  await expect(recording).toHaveValue("");
+  await expect(change).toBeDisabled();
   await page.getByLabel("Upload the recording to change").setInputFiles("e2e/fixtures/voice-over.mp3");
   await page.getByLabel("Clean up background noise first").check();
   const spoken = page.waitForRequest((r) => r.url().endsWith("/api/voice-changer/changes") && r.method() === "POST");

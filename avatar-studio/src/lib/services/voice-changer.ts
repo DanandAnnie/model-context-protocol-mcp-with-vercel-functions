@@ -135,7 +135,11 @@ export async function createInstantVoice(input: z.infer<typeof instantVoiceSchem
   const provider = getAvatarProvider();
   if (!provider.createInstantVoice) throw new ValidationError(`Instant voices are not available with the ${provider.name} renderer`);
   // Read then written: two starts at the same moment can between them pass the cap.
-  if ((await getStore().list<InstantVoice>("instantvoice", ownerId)).length >= MAX_INSTANT_VOICES) throw new ConflictError(`An account keeps at most ${MAX_INSTANT_VOICES} instant voices; delete one to make another`);
+  const mine = await getStore().list<InstantVoice>("instantvoice", ownerId);
+  if (mine.length >= MAX_INSTANT_VOICES) throw new ConflictError(`An account keeps at most ${MAX_INSTANT_VOICES} instant voices; delete one to make another`);
+  // Two voices of one name cannot be told apart in the picker.
+  const name = input.name.trim().toLowerCase();
+  if (mine.some((v) => v.name.trim().toLowerCase() === name)) throw new ConflictError(`You already have a voice named "${input.name}"; pick another name`);
   const clip = await clipOf(input.clipId, ownerId);
   opts.admit?.();
   const assetId = await assetOf(clip, ownerId);

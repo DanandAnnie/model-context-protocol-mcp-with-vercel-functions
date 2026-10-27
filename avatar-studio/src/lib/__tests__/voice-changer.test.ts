@@ -57,9 +57,9 @@ function wavDataUrl(): string {
 
 const clipMs = MockAvatarProvider as unknown as { CLIP_MS: number };
 const clip = (owner: string, name = "Take") => createClip({ name, audio: wavDataUrl() }, owner);
-const ready = async (owner: string) => {
+const ready = async (owner: string, name = "Narrator") => {
   const sample = await clip(owner, "Sample");
-  const voice = await createInstantVoice(instantVoiceSchema.parse({ name: "Narrator", clipId: sample.id, agreed: true }), owner);
+  const voice = await createInstantVoice(instantVoiceSchema.parse({ name, clipId: sample.id, agreed: true }), owner);
   await getStore().put("instantvoice", { ...(await getStore().get<InstantVoice>("instantvoice", voice.id))!, status: "completed" });
   return voice;
 };
@@ -103,7 +103,7 @@ describe("voice changer", () => {
     }
   });
 
-  it("refuses what is not the account's, a voice not ready, and past the cap", async () => {
+  it("refuses what is not the account's, a voice not ready, a name already used, and past the cap", async () => {
     const theirs = await ready("u2");
     const mine = await clip("u1");
     await assert.rejects(startVoiceChange(voiceChangeSchema.parse({ voiceId: theirs.id, clipId: mine.id }), "u1"), (e: unknown) => e instanceof ValidationError && /no longer available/.test((e as Error).message));
@@ -111,6 +111,8 @@ describe("voice changer", () => {
     await assert.rejects(createInstantVoice(instantVoiceSchema.parse({ name: "Copy", clipId: theirClip.id, agreed: true }), "u1"), /audio clip is no longer available/);
     const own = await ready("u1");
     await assert.rejects(startVoiceChange(voiceChangeSchema.parse({ voiceId: own.id, clipId: theirClip.id }), "u1"), /audio clip is no longer available/);
+    await assert.rejects(createInstantVoice(instantVoiceSchema.parse({ name: " narrator ", clipId: mine.id, agreed: true }), "u1"), (e: unknown) => e instanceof ConflictError && /already have a voice named/.test((e as Error).message));
+    await ready("u2", "Later");
     const making = await createInstantVoice(instantVoiceSchema.parse({ name: "Later", clipId: mine.id, agreed: true }), "u1");
     await assert.rejects(startVoiceChange(voiceChangeSchema.parse({ voiceId: making.id, clipId: mine.id }), "u1"), /still being made/);
     assert.deepEqual(await listVoiceChanges("u1"), [], "nothing is kept for a refused start");
@@ -126,7 +128,7 @@ describe("voice changer", () => {
     const again = await createInstantVoice(instantVoiceSchema.parse({ name: "Narrator", clipId: sample.id, agreed: true }), "u1", { key: "voice-key-1", admit });
     assert.deepEqual([again.id, admitted], [first.id, 1]);
     await assert.rejects(createInstantVoice(instantVoiceSchema.parse({ name: "Other", clipId: sample.id, agreed: true }), "u1", { key: "voice-key-1" }), ConflictError);
-    const voice = await ready("u1");
+    const voice = await ready("u1", "Reader");
     const take = await clip("u1");
     const change = await startVoiceChange(voiceChangeSchema.parse({ voiceId: voice.id, clipId: take.id }), "u1", { key: "change-key-1", admit });
     const replay = await startVoiceChange(voiceChangeSchema.parse({ voiceId: voice.id, clipId: take.id }), "u1", { key: "change-key-1", admit });

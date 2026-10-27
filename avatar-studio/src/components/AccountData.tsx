@@ -13,7 +13,7 @@ export function AccountData({ canManage = true }: { canManage?: boolean } = {}) 
   const [done, setDone] = useState<string | null>(null);
 
   async function wipe() {
-    if (!window.confirm("Delete every video, avatar, cloned voice, presenter, transcript, key, and setting in this space? A Stripe subscription must be cancelled first. This cannot be undone.")) return;
+    if (!window.confirm("Delete every video, avatar, cloned and instant voice, recording, presenter, transcript, key, and setting in this space? A Stripe subscription must be cancelled first. This cannot be undone.")) return;
     setBusy(true);
     setErr(null);
     try {

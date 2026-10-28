@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import { MAX_SHOOTS, deleteShoot, exportOwnerData, forgetShootChecks, listShoots, publicShoot, shootRequestSchema, startShoot } from "../services";
-import { ConflictError, ValidationError } from "../errors";
+import { ConflictError, UpstreamError, ValidationError } from "../errors";
 import { providerStatus } from "../providers";
 import { getStore } from "../store";
 import type { ShootJob } from "../types";
@@ -48,8 +48,10 @@ describe("photo shoots", () => {
     assert.match(first({ seed: 4_294_967_296 })!, /at most 4294967295/);
     // A picture over 500 KB is named.
     const big = `data:image/png;base64,${"A".repeat(Math.ceil((500 * 1024 * 4) / 3) + 200)}`;
-    assert.match(first({ identity: [png(1), big] })!, /500 KB/);
-    assert.ok(shootRequestSchema.safeParse({ identity: [png(1), big], reference: jpeg(1), consent: true }).error!.issues.some((i) => i.message === "Photo 2 of the person must be at most 500 KB"));
+    // The one message the page shows names the photo, even beside another mistake.
+    assert.equal(first({ identity: [png(1), big] }), "Photo 2 of the person must be at most 500 KB");
+    assert.equal(first({ identity: [big] }), "The photo of the person must be at most 500 KB");
+    assert.equal(shootRequestSchema.safeParse({ identity: [png(1), big], reference: jpeg(1) }).error!.issues[0].message, "Photo 2 of the person must be at most 500 KB");
     assert.match(first({ reference: big })!, /scene picture must be at most 500 KB/);
   });
 
@@ -163,8 +165,19 @@ describe("photo shoots", () => {
         ],
       };
       forgetShootChecks();
+      const partial = (await listShoots("u1")).find((s) => s.id === job.id)!;
+      assert.deepEqual([partial.status, partial.photos, partial.error], ["failed", undefined, "HeyGen finished with photos the studio cannot show; make the shoot again"], "a photo without a usable link fails the shoot rather than leaving it short");
+      await getStore().put("shoot", { ...partial, status: "processing" as const });
+      shoot = {
+        status: "completed",
+        images: [
+          { image_id: "img_1", image_url: "https://resource2.heygen.ai/images/1.png", width: 2160, height: 2880, seed: 3000 },
+          { image_id: "img_2", image_url: "https://resource2.heygen.ai/images/2.png", width: 2160, height: 2880, seed: 3001 },
+        ],
+      };
+      forgetShootChecks();
       const done = (await listShoots("u1")).find((s) => s.id === job.id)!;
-      assert.deepEqual([done.status, done.photos], ["completed", [{ url: "https://resource2.heygen.ai/images/1.png", width: 2160, height: 2880, seed: 3000 }]]);
+      assert.deepEqual([done.status, done.photos?.map((p) => p.url), done.photos?.[0].seed, done.error], ["completed", ["https://resource2.heygen.ai/images/1.png", "https://resource2.heygen.ai/images/2.png"], 3000, undefined]);
 
       // A failed shoot says which picture to change.
       shoot = { status: "failed", images: [], failure_code: "no_face_detected", failure_message: "identity_images[1] has no detectable face." };
@@ -173,11 +186,16 @@ describe("photo shoots", () => {
       const failed = (await listShoots("u1")).find((s) => s.id === job.id)!;
       assert.equal(failed.status, "failed");
       assert.equal(failed.photos, undefined, "a failed shoot keeps no photos");
-      assert.match(failed.error!, /found no face in one of the pictures \(identity_images\[1\] has no detectable face\); use a clear photo of the face/);
-      shoot = { status: "failed", failure_code: "multiple_faces_detected", failure_message: null };
-      await getStore().put("shoot", { ...failed, status: "processing" as const });
-      forgetShootChecks();
-      assert.equal((await listShoots("u1")).find((s) => s.id === job.id)!.error, "One of the pictures shows more than one person; use a picture of one person");
+      assert.equal(failed.error, "HeyGen found no face in photo 2 of the person; use a clear photo of the face", "HeyGen's place from 0 is the page's photo number");
+      const failure = async (code: string, message: string | null) => {
+        shoot = { status: "failed", failure_code: code, failure_message: message };
+        await getStore().put("shoot", { ...failed, status: "processing" as const });
+        forgetShootChecks();
+        return (await listShoots("u1")).find((s) => s.id === job.id)!.error;
+      };
+      assert.equal(await failure("multiple_faces_detected", "reference_images[0] contains 2 faces."), "The scene picture shows more than one person; use a picture of one person");
+      assert.equal(await failure("multiple_faces_detected", null), "One of the pictures shows more than one person; use pictures of one person");
+      assert.equal(await failure("generation_failed", "Something went wrong."), "Something went wrong.");
       await getStore().put("shoot", { ...failed, status: "processing" as const, providerJobId: "gen_gone" });
       forgetShootChecks();
       assert.match((await listShoots("u1")).find((s) => s.id === job.id)!.error!, /no longer has this photo shoot/);
@@ -191,6 +209,9 @@ describe("photo shoots", () => {
       await assert.rejects(startShoot(ask({ count: 2 }), "u1"), /already asked for with other details/);
       refuse = { status: 429, message: "Slow down." };
       await assert.rejects(startShoot(ask({ count: 2 }), "u1"), /too many photos just now/);
+      // A moment's trouble at HeyGen is to be retried with the same key: said plainly, not as HeyGen's raw answer.
+      refuse = { status: 503, message: "Billing is unavailable." };
+      await assert.rejects(startShoot(ask({ count: 2 }), "u1"), (e: unknown) => e instanceof UpstreamError && /busy just now; try again in a moment/.test((e as Error).message));
     } finally {
       Object.assign(config, { avatarProvider: saved.avatar, heygenApiKey: saved.key });
     }

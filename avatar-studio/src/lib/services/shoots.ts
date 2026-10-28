@@ -19,18 +19,23 @@ export const MAX_SHOOTS = 50;
 /** Each picture of a start, decoded: six of them (five of the person, one scene) still fit in one request. */
 export const MAX_SHOOT_PICTURE_BYTES = 500 * 1024;
 const dataUrlMax = (bytes: number) => Math.ceil((bytes * 4) / 3) + 100;
-const pictureField = (tooLarge: string) => z.string().max(dataUrlMax(MAX_SHOOT_PICTURE_BYTES), tooLarge);
 
 export const shootRequestSchema = z
   .object({
     title: z.string().trim().max(120).optional(),
     /** Data URLs of PNG or JPEG photos of one person, their face clearly seen: several views of the same face. */
     identity: z
-      .array(pictureField("Each photo of the person must be at most 500 KB"), "Add a photo of the person")
+      .array(z.string("Each photo of the person is a data URL"), "Add a photo of the person")
       .min(1, "Add a photo of the person")
-      .max(MAX_SHOOT_IDENTITY, `A shoot takes at most ${MAX_SHOOT_IDENTITY} photos of the person`),
+      .max(MAX_SHOOT_IDENTITY, `A shoot takes at most ${MAX_SHOOT_IDENTITY} photos of the person`)
+      // Checked on the list, so the one message for a photo too large names it, whatever else is wrong with the request.
+      .superRefine((photos, ctx) => {
+        photos.forEach((p, i) => {
+          if (p.length > dataUrlMax(MAX_SHOOT_PICTURE_BYTES)) ctx.addIssue({ code: "custom", path: [i], message: `${photos.length > 1 ? `Photo ${i + 1} of the person` : "The photo of the person"} must be at most 500 KB` });
+        });
+      }),
     /** A data URL of the scene: exactly one person, whose pose, clothing, light, and setting the photos take. */
-    reference: pictureField("The scene picture must be at most 500 KB"),
+    reference: z.string("Add the scene picture").max(dataUrlMax(MAX_SHOOT_PICTURE_BYTES), "The scene picture must be at most 500 KB"),
     /** Without one, the photos take the scene picture's shape. */
     aspect: z.enum(SHOOT_ASPECTS, `The shape is one of ${SHOOT_ASPECTS.join(", ")}; leave it out to follow the scene picture`).optional(),
     count: z.number("The number of photos is a whole number").int("The number of photos is a whole number").min(1, "Ask for at least one photo").max(MAX_SHOOT_PHOTOS, `A shoot makes at most ${MAX_SHOOT_PHOTOS} photos`).default(1),
@@ -39,13 +44,7 @@ export const shootRequestSchema = z
     /** The person in the photos agreed to be photographed this way, or is the one asking. */
     consent: z.literal(true, "Confirm that you have the right to use this person's face"),
   })
-  .strict()
-  // Each picture is named when it is too large (the request would be refused whole).
-  .superRefine((v, ctx) => {
-    v.identity.forEach((p, i) => {
-      if (p.length > dataUrlMax(MAX_SHOOT_PICTURE_BYTES)) ctx.addIssue({ code: "custom", path: ["identity", i], message: `${v.identity.length > 1 ? `Photo ${i + 1} of the person` : "The photo of the person"} must be at most 500 KB` });
-    });
-  });
+  .strict();
 type ShootRequest = z.infer<typeof shootRequestSchema>;
 
 export const shootIdSchema = z.string().regex(/^sh_[A-Za-z0-9_-]{1,64}$/, "Unknown photo shoot");

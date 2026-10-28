@@ -6,7 +6,7 @@ import { voiceTakesAccent } from "../../language";
 import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
 import { HeyGenClient, inlineAsset } from "../heygen-client";
-import { ConflictError, LimitError, NotFoundError, ValidationError } from "../../errors";
+import { ConflictError, LimitError, NotFoundError, UpstreamError, ValidationError } from "../../errors";
 import type { AvatarJobStatus, AvatarProvider, CleanupStatus, FootageInput, FootageStatus, HighlightInput, HighlightStatus, LipsyncInput, LipsyncStatus, MusicMixInput, RenderCast, ShootInput, ShootStatus } from "../types";
 import { musicComposition } from "../../music-mix";
 import { strToU8, zipSync } from "fflate";
@@ -508,6 +508,8 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       if (/ failed: 409 /.test(message) && heygenCode(message) !== "conflict") throw new ConflictError(STILL_SENDING);
       if (/ failed: 409 /.test(message)) throw new ValidationError("This photo shoot was already asked for with other details; start it again");
       if (/ failed: 429 /.test(message)) throw new LimitError("HeyGen is making too many photos just now; try again in a minute");
+      // HeyGen asks for a 503 (billing or service trouble for a moment) to be retried with the same key, so the page keeps it.
+      if (/ failed: 503 /.test(message)) throw new UpstreamError("HeyGen is busy just now; try again in a moment (the same photo shoot is resumed)");
       if (/ failed: (400|402|403|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not make those photos: ${heygenReason(message, "try other pictures")}`);
       throw err;
     }
@@ -523,11 +525,14 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     }
     if (job.status === "failed" || job.status === "cancelled") return { status: "failed", error: shootFailure(job.failure_code, job.failure_message) };
     if (job.status !== "completed") return { status: "processing" };
-    const photos = (job.images ?? []).flatMap((img) => {
+    const images = job.images ?? [];
+    const photos = images.flatMap((img) => {
       const url = httpsOnly(img.image_url);
       return url ? [stripEmpty({ url, width: img.width ?? undefined, height: img.height ?? undefined, seed: typeof img.seed === "number" ? img.seed : undefined })] : [];
     });
-    if (!photos.length) return { status: "failed", error: "HeyGen finished without any photos" };
+    if (!images.length) return { status: "failed", error: "HeyGen finished without any photos" };
+    // HeyGen hands back every photo or none; one without a usable link is not shown as a shoot with photos missing.
+    if (photos.length < images.length) return { status: "failed", error: "HeyGen finished with photos the studio cannot show; make the shoot again" };
     return { status: "completed", photos };
   }
 
@@ -1040,11 +1045,13 @@ function hexColor(value: string): string {
   throw new ValidationError(`HeyGen takes a background colour as #rrggbb; "${value}" is not one.`);
 }
 
-/** A photo shoot HeyGen gave up on, said as what to change: a picture with no face, or more than one person. */
+/** A photo shoot HeyGen gave up on, said as what to change: a picture with no face, or more than one person, named as the page names it. */
 function shootFailure(code: string | null | undefined, message: string | null | undefined): string {
-  const detail = message?.trim() ? ` (${message.trim().replace(/\.$/, "")})` : "";
-  if (code === "no_face_detected") return `HeyGen found no face in one of the pictures${detail}; use a clear photo of the face`;
-  if (code === "multiple_faces_detected") return `One of the pictures shows more than one person${detail}; use a picture of one person`;
+  // HeyGen names the picture by its field and place from 0; the page numbers the person's photos from 1.
+  const person = /identity_images\[(\d+)\]/.exec(message ?? "");
+  const which = person ? `photo ${Number(person[1]) + 1} of the person` : /reference_images/.test(message ?? "") ? "the scene picture" : null;
+  if (code === "no_face_detected") return which ? `HeyGen found no face in ${which}; use a clear photo of the face` : "HeyGen found no face in one of the pictures; use clear photos of the face";
+  if (code === "multiple_faces_detected") return which ? `${which[0].toUpperCase()}${which.slice(1)} shows more than one person; use a picture of one person` : "One of the pictures shows more than one person; use pictures of one person";
   if (code === "generation_cancelled") return "The photo shoot was cancelled; make it again";
   return message?.trim() || "HeyGen could not make these photos";
 }

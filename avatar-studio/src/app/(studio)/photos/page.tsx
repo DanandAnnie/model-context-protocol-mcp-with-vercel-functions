@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import { Camera, Download, ImagePlus, Trash2, X } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
@@ -19,6 +20,8 @@ const newKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? 
 const RELINK_MS = 30 * 60 * 1000;
 /** Each picture of a start: six of them still fit in one request. */
 const MAX_PICTURE_BYTES = 500 * 1024;
+/** A scene picture's file name as a title: without its extension, cut to fit. */
+const sceneName = (file: string) => (file.replace(/\.[A-Za-z0-9]{1,5}$/, "").trim() || "scene").slice(0, 100);
 const SHAPES: Record<ShootAspect, string> = {
   "1:1": "Square 1:1",
   "2:3": "Portrait 2:3",
@@ -87,7 +90,10 @@ export default function PhotoShootPage() {
       if (before === "processing" && s.status !== "processing") parts.push(s.status === "completed" ? `${s.title} is ready.` : `${s.title} could not be made: ${s.error ?? "the renderer failed"}.`);
       seen.current.set(s.id, s.status);
     }
-    if (parts.length) setNote(parts.join(" "));
+    // Through say(), so a second shoot of the same name being ready is announced too.
+    if (parts.length) say(setNote, parts.join(" "));
+    // say() is a fresh function each render; what is announced depends only on the list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
   // A page left open past the links' lifetime asks again when it is looked at, so the photos still show.
   const loadedAt = useRef(Date.now());
@@ -169,7 +175,8 @@ export default function PhotoShootPage() {
         ...(aspect === "scene" ? {} : { aspect }),
         count,
         consent: true,
-        ...(title.trim() ? { title: title.trim() } : {}),
+        // Without a title, the scene's file name tells shoots apart (the same in a retry, which sends the same body).
+        title: title.trim() || `Photo shoot: ${sceneName(scene!.name)}`,
       };
       const { shoot } = await api<{ shoot: Shoot }>("/api/shoots", { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": requestKey } });
       setData((prev) => ({ available: prev?.available ?? true, shoots: [shoot, ...(prev?.shoots ?? []).filter((s) => s.id !== shoot.id)] }));
@@ -283,7 +290,7 @@ export default function PhotoShootPage() {
                   <label htmlFor="shoot-shape" className="mb-1.5 block text-sm font-medium text-slate-700">
                     Shape
                   </label>
-                  <select id="shoot-shape" className={inputClass} value={aspect} disabled={canEdit === false} onChange={(e) => (setAspect(e.target.value as ShootAspect | "scene"), changed())}>
+                  <select id="shoot-shape" className={inputClass} value={aspect} disabled={busy || canEdit === false} onChange={(e) => (setAspect(e.target.value as ShootAspect | "scene"), changed())}>
                     <option value="scene">Like the scene picture</option>
                     {SHOOT_ASPECTS.map((a) => (
                       <option key={a} value={a}>
@@ -296,7 +303,7 @@ export default function PhotoShootPage() {
                   <label htmlFor="shoot-count" className="mb-1.5 block text-sm font-medium text-slate-700">
                     Photos
                   </label>
-                  <select id="shoot-count" className={inputClass} value={count} disabled={canEdit === false} onChange={(e) => (setCount(Number(e.target.value)), changed())}>
+                  <select id="shoot-count" className={inputClass} value={count} disabled={busy || canEdit === false} onChange={(e) => (setCount(Number(e.target.value)), changed())}>
                     {Array.from({ length: MAX_SHOOT_PHOTOS }, (_, i) => i + 1).map((n) => (
                       <option key={n} value={n}>
                         {n === 1 ? "1 photo" : `${n} photos`}
@@ -310,12 +317,12 @@ export default function PhotoShootPage() {
                 <label htmlFor="shoot-title" className="mb-1.5 block text-sm font-medium text-slate-700">
                   Title (optional)
                 </label>
-                <input id="shoot-title" className={inputClass} value={title} maxLength={120} disabled={canEdit === false} onChange={(e) => (setTitle(e.target.value), changed())} placeholder="Photo shoot" />
+                <input id="shoot-title" className={inputClass} value={title} maxLength={120} disabled={busy || canEdit === false} onChange={(e) => (setTitle(e.target.value), changed())} placeholder={scene ? `Photo shoot: ${sceneName(scene.name)}` : "Photo shoot: the scene's file name"} />
               </div>
 
               <div>
                 <label className="flex min-h-6 items-start gap-2 text-sm text-slate-700">
-                  <input type="checkbox" className="mt-0.5 accent-brand-600" checked={consent} disabled={canEdit === false} aria-describedby="shoot-consent-hint" onChange={(e) => (setConsent(e.target.checked), changed())} />
+                  <input type="checkbox" className="mt-0.5 accent-brand-600" checked={consent} disabled={busy || canEdit === false} aria-describedby="shoot-consent-hint" onChange={(e) => (setConsent(e.target.checked), changed())} />
                   I have the right to use this person&apos;s face
                 </label>
                 <p id="shoot-consent-hint" className="mt-1 text-xs text-slate-500">
@@ -369,10 +376,15 @@ export default function PhotoShootPage() {
                     <ul className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3" aria-label={`Photos of ${s.title}`}>
                       {s.photos.map((p, i) => (
                         <li key={`${i}-${p.url}`} className="space-y-1" data-testid="shoot-photo">
-                          <a href={p.url} target="_blank" rel="noopener noreferrer" className="block overflow-hidden rounded-lg bg-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={p.url} alt={`Photo ${i + 1} of ${s.title}${p.width && p.height ? `, ${p.width} × ${p.height}` : ""}`} className="w-full object-cover" style={{ aspectRatio: p.width && p.height ? `${p.width} / ${p.height}` : "3 / 4" }} loading="lazy" />
-                          </a>
+                          {/* Shown at its size in the list, not as HeyGen's full 4K file; a click opens that. */}
+                          {p.url.startsWith("https://") ? (
+                            <a href={p.url} target="_blank" rel="noopener noreferrer" className="block overflow-hidden rounded-lg bg-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500">
+                              <Image src={p.url} alt={`Photo ${i + 1} of ${s.title}${p.width && p.height ? `, ${p.width} × ${p.height}` : ""}`} width={p.width ?? 600} height={p.height ?? 800} sizes="(min-width: 640px) 220px, 45vw" className="h-auto w-full" />
+                            </a>
+                          ) : (
+                            // The demo's drawn stand-ins are data URLs, which a browser will not open in a new tab.
+                            <Image src={p.url} alt={`Photo ${i + 1} of ${s.title}${p.width && p.height ? `, ${p.width} × ${p.height}` : ""}`} width={p.width ?? 600} height={p.height ?? 800} unoptimized className="h-auto w-full rounded-lg bg-slate-100" />
+                          )}
                           <a href={p.url} download target="_blank" rel="noopener noreferrer" className="inline-flex min-h-6 items-center gap-1 py-1 text-xs font-medium text-brand-700 hover:underline" aria-label={`Download photo ${i + 1} of ${s.title}`}>
                             <Download className="h-3 w-3" aria-hidden /> Download
                           </a>

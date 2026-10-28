@@ -181,6 +181,8 @@ describe("generated clips", () => {
     assert.ok(ask({ references: [png(1)], aspect: "9:16", quality: "hd" }));
     assert.throws(() => ask({ references: [`data:image/png;base64,${"A".repeat(1_300_000)}`] }), /The picture to feature must be at most 900 KB/);
     assert.throws(() => ask({ prompt: "The shoe in <Picture 1> on the track in <Picture 2>", references: [png(1), `data:image/png;base64,${"A".repeat(1_300_000)}`] }), /Picture 2 must be at most 900 KB/);
+    // The one message the page shows names the picture: no unnamed message for the same picture comes before it.
+    assert.deepEqual(footageRequestSchema.safeParse({ prompt: "The shoe in <Picture 1> on the track in <Picture 2>", references: [png(1), `data:image/png;base64,${"A".repeat(1_300_000)}`] }).error!.issues.map((i) => i.message), ["Picture 2 must be at most 900 KB"]);
     // Labels with no pictures featured name nothing either, with a first frame or with none.
     assert.throws(() => ask({ prompt: "The shoe in <Picture 1> on a marble desk" }), /names <Picture 1>, but no picture is featured/);
     assert.throws(() => ask({ prompt: "The shoe in <Picture 1> on a marble desk", image: png(1) }), /no picture is featured/);

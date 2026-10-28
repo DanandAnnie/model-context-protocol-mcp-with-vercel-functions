@@ -54,11 +54,15 @@ export const footageRequestSchema = z
      * description as <Picture 1>, <Picture 2>… in this order.
      */
     references: z
-      // The per-picture check below names the picture; this one still holds when another field stops the object's
-      // checks from running.
-      .array(z.string().max(dataUrlMax(MAX_FOOTAGE_REFERENCE_BYTES), "Each picture to feature must be at most 900 KB"))
+      .array(z.string())
       .min(1, "Add a picture to feature, or leave the pictures out")
       .max(MAX_FOOTAGE_REFERENCES, `A clip features at most ${MAX_FOOTAGE_REFERENCES} pictures`)
+      // Checked on the list, so the one message for a picture too large names it, whatever else is wrong with the request.
+      .superRefine((refs, ctx) => {
+        refs.forEach((r, i) => {
+          if (r.length > dataUrlMax(MAX_FOOTAGE_REFERENCE_BYTES)) ctx.addIssue({ code: "custom", path: [i], message: `${refs.length > 1 ? `Picture ${i + 1}` : "The picture to feature"} must be at most 900 KB` });
+        });
+      })
       .optional(),
   })
   .strict()
@@ -69,15 +73,6 @@ export const footageRequestSchema = z
     path: ["durationSec"],
   })
   .refine((v) => !(v.image && v.aspect), { message: "A clip from a picture takes the picture's shape; leave the frame out", path: ["aspect"] })
-  // Each picture to feature is named by its number when it is too large (the request would be refused whole).
-  .superRefine((v, ctx) => {
-    (v.references ?? []).forEach((r, i) => {
-      if (r.length > dataUrlMax(MAX_FOOTAGE_REFERENCE_BYTES)) {
-        const which = (v.references ?? []).length > 1 ? `Picture ${i + 1}` : "The picture to feature";
-        ctx.addIssue({ code: "custom", path: ["references", i], message: `${which} must be at most 900 KB` });
-      }
-    });
-  })
   // HeyGen does not rewrite the labels, so one that names no picture sent (or any, with no pictures featured) would
   // point the shot at nothing.
   .superRefine((v, ctx) => {

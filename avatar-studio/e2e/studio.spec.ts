@@ -2600,7 +2600,7 @@ test("no page scrolls sideways at phone width", async ({ browser }) => {
     // A transparent video's Background row and a cleaned recording with a long title are the widest content of their pages.
     const clear = await createVideoViaApi(page, "Phone width transparent", { transparent: true });
     expect((await page.request.post("/api/cleanups", { data: { sourceUrl: "https://93.184.216.34/webinar.mp4", title: "Team webinar on pricing and the spring roadmap (cleaned)" } })).status()).toBe(202);
-    const pages = ["/home", "/create", "/agent", "/videos", `/videos/${v.id}`, `/videos/${clear.id}`, "/templates", "/avatars", "/voices", "/batch", "/brand", "/interactive", "/workspace", "/settings", "/translate", "/cleanup", "/lipsync", "/music", "/cinematic", "/footage", "/voice-changer", `/share/${v.id}`];
+    const pages = ["/home", "/create", "/agent", "/videos", `/videos/${v.id}`, `/videos/${clear.id}`, "/templates", "/avatars", "/voices", "/batch", "/brand", "/interactive", "/workspace", "/settings", "/translate", "/cleanup", "/lipsync", "/music", "/cinematic", "/footage", "/photos", "/voice-changer", `/share/${v.id}`];
     for (const path of pages) {
       await page.goto(path);
       await expect(page.locator("h1").first()).toBeVisible();
@@ -3061,7 +3061,7 @@ test("webhook settings reject private hosts and show the signing secret", async 
 test("pages have no WCAG 2.1 AA violations", async ({ page }) => {
   const v = await createVideoViaApi(page, "Accessible video");
   const agent = (await (await page.request.post("/api/agents", { data: { name: "Axe agent", avatarId: "stock_1" } })).json()).agent as { id: string };
-  const paths = ["/", "/login", "/home", "/create", "/agent", "/videos", `/videos/${v.id}`, "/templates", "/batch", "/avatars", "/voices", "/translate", "/cleanup", "/lipsync", "/music", "/cinematic", "/footage", "/voice-changer", "/interactive", "/brand", "/settings", `/share/${v.id}`, `/talk/${agent.id}`, "/demo-consent"];
+  const paths = ["/", "/login", "/home", "/create", "/agent", "/videos", `/videos/${v.id}`, "/templates", "/batch", "/avatars", "/voices", "/translate", "/cleanup", "/lipsync", "/music", "/cinematic", "/footage", "/photos", "/voice-changer", "/interactive", "/brand", "/settings", `/share/${v.id}`, `/talk/${agent.id}`, "/demo-consent"];
   const report: string[] = [];
   for (const path of paths) {
     await page.goto(path);
@@ -3157,6 +3157,7 @@ test("a workspace viewer sees view-only notices instead of create controls", asy
     ["/music", "add music to videos"],
     ["/cinematic", "make cinematic shots"],
     ["/footage", "make clips"],
+    ["/photos", "make photo shoots"],
     ["/voice-changer", "change voices or make new ones"],
     ["/avatars", "add or change avatars"],
     ["/voices", "clone, design, or change voices"],
@@ -4650,6 +4651,19 @@ test("a photo shoot puts a person's face in a scene picture, with their consent,
   await expect(item.getByTestId("shoot-photo")).toHaveCount(2);
   await expect(item.getByRole("img", { name: `Photo 1 of Train window ${tag}, 2176 × 2720` })).toBeVisible();
   await expect(item.getByRole("link", { name: `Download photo 2 of Train window ${tag}` })).toHaveAttribute("download", "");
+  // Without a title, the scene's file name names the shoot, so two shoots are told apart.
+  await page.getByLabel("Add the scene picture").setInputFiles({ name: "harbour.png", mimeType: "image/png", buffer: Buffer.from(TINY_PNG, "base64") });
+  await expect(page.getByLabel("Title (optional)")).toHaveAttribute("placeholder", "Photo shoot: harbour");
+  await consent.check();
+  const untitled = page.waitForRequest((r) => r.url().endsWith("/api/shoots") && r.method() === "POST");
+  await make.click();
+  expect((await untitled).postDataJSON().title).toBe("Photo shoot: harbour");
+  const harbour = page.getByTestId("shoot").filter({ hasText: "Photo shoot: harbour" }).first();
+  await expect(harbour).toBeVisible();
+  expect((await page.request.delete(`/api/shoots/${await harbour.getAttribute("data-shoot")}`)).ok()).toBe(true);
+  // (Deleted elsewhere, so the page is loaded again to list what is left.)
+  await page.reload();
+  await expect(item).toBeVisible();
   // The API refuses a shoot without consent, and keeps the renderer's job to itself.
   const refused = await page.request.post("/api/shoots", { data: { identity: [`data:image/png;base64,${TINY_PNG}`], reference: `data:image/png;base64,${TINY_PNG}` } });
   expect(refused.status()).toBe(400);
@@ -4657,9 +4671,11 @@ test("a photo shoot puts a person's face in a scene picture, with their consent,
   const listed = (await (await page.request.get("/api/shoots")).json()).shoots as Array<Record<string, unknown>>;
   const id = (await item.getAttribute("data-shoot"))!;
   expect(Object.keys(listed.find((s) => s.id === id)!).filter((k) => ["provider", "providerJobId", "pictureDigest", "ownerId"].includes(k))).toEqual([]);
-  // Deleting it moves the focus to the list's heading when it was the only one, and says so.
+  // Deleting it says so and moves the focus to the next shoot, or to the list's heading when it was the last one.
+  const next = (await page.getByTestId("shoot").count()) > 1 ? page.getByTestId("shoot").filter({ hasNotText: `Train window ${tag}` }).first() : page.getByRole("heading", { name: "Your photo shoots" });
   page.once("dialog", (d) => void d.accept());
   await item.getByRole("button", { name: `Delete Train window ${tag}` }).click();
   await expect(page.locator('p[role="status"]')).toHaveText(`Deleted Train window ${tag}.`);
   await expect(page.getByTestId("shoot").filter({ hasText: `Train window ${tag}` })).toHaveCount(0);
+  await expect(next).toBeFocused();
 });

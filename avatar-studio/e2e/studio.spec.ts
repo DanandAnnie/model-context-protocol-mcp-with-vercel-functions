@@ -913,6 +913,27 @@ test("an instant voice is made from a recording with the speaker's agreement, an
   await expect(spokenCard).toBeFocused();
   await expect(spokenCard.getByTestId("voice-change-meta")).toContainText("from text");
   await expect(spokenCard.getByRole("link", { name: /^Download / })).toHaveAttribute("href", /\/demo\/revoiced\.mp3$/);
+  // Delivery: Turbo and an expressiveness boost, set from the keyboard, are sent and shown with the recording.
+  const boost = page.getByRole("slider", { name: "Expressiveness boost" });
+  await expect(boost).toHaveAttribute("aria-valuetext", "none");
+  await page.getByRole("checkbox", { name: /^Turbo\b/ }).check();
+  await boost.focus();
+  for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowRight");
+  await expect(boost).toHaveAttribute("aria-valuetext", "plus 40 percent");
+  await expect(page.locator("output[for='speech-boost']")).toHaveText("+40%");
+  await page.getByRole("textbox", { name: /^Title for the text\b/ }).fill("Lively welcome");
+  const lively = page.waitForRequest((r) => r.url().endsWith("/api/voice-changer/speech") && r.method() === "POST");
+  await speak.click();
+  expect((await lively).postDataJSON()).toEqual({ voiceId: expect.stringMatching(/^iv_/), text: "Welcome to the team.", title: "Lively welcome", turbo: true, expressivenessBoost: 0.4 });
+  const livelyCard = page.getByTestId("voice-change").filter({ hasText: "Lively welcome" });
+  await expect(livelyCard.getByTestId("voice-change-meta")).toContainText("from text · Turbo · expressiveness +40%");
+  await expect(spokenCard.getByTestId("voice-change-meta")).not.toContainText("Turbo");
+  page.once("dialog", (d) => d.accept());
+  await livelyCard.getByRole("button", { name: /^Delete / }).click();
+  await expect(livelyCard).toHaveCount(0);
+  await page.getByRole("checkbox", { name: /^Turbo\b/ }).uncheck();
+  await boost.fill("0");
+  await expect(boost).toHaveAttribute("aria-valuetext", "none");
   // The count is read with the field; a message stays in its own card when another card's choice changes.
   await expect(page.getByText("20 of 2,000 characters", { exact: true })).toBeVisible();
   const speechCard = page.getByRole("heading", { name: "Speak text in a voice", exact: true }).locator("..");

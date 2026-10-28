@@ -12,7 +12,7 @@ const PER_OWNER = 30;
 const PER_INSTANCE = 90;
 const WINDOW_MS = 60 * 60 * 1000;
 
-/** Speak text in one of the account's instant voices: `{ voiceId, text, title? }`. */
+/** Speak text in one of the account's instant voices: `{ voiceId, text, title?, turbo?, expressivenessBoost? }`. */
 export async function POST(req: Request) {
   try {
     const owner = await requireEditor();

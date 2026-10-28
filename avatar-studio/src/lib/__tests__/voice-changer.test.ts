@@ -318,6 +318,28 @@ describe("voice changer", () => {
     assert.deepEqual(out.voicechange.map((c) => c.text).sort(), ["-".repeat(50), "Hi there!", "Hi.", 'Say "wait…"', text, `${"👋🏽".repeat(39)} hi there`].sort());
   });
 
+  it("takes how the text is delivered: Turbo and an expressiveness boost, kept with the recording", async () => {
+    const parse = (extra: Record<string, unknown>) => voiceSpeechSchema.parse({ voiceId: "iv_x", text: "Hi.", ...extra });
+    assert.deepEqual([parse({ turbo: true }).turbo, parse({ turbo: false }).turbo], [true, undefined], "the standard model is stored as absent");
+    assert.deepEqual([parse({ expressivenessBoost: 0.4 }).expressivenessBoost, parse({ expressivenessBoost: 0 }).expressivenessBoost, parse({ expressivenessBoost: 0.7 }).expressivenessBoost, parse({ expressivenessBoost: 1 }).expressivenessBoost], [0.4, undefined, 0.7, 1], "in tenths; none is stored as absent");
+    for (const fine of [0.04, 0.33, 0.96]) assert.throws(() => parse({ expressivenessBoost: fine }), /steps of 0\.1/, "a finer value is refused, not rounded to another delivery");
+    for (const bad of [-0.1, 1.1, "0.5", Number.NaN]) assert.throws(() => parse({ expressivenessBoost: bad }), /expressivenessBoost is a number from 0 to 1/);
+    assert.throws(() => parse({ turbo: "yes" }), /turbo is true or false/);
+    const voice = await ready("u1");
+    const lively = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Big news today.", turbo: true, expressivenessBoost: 0.6 }), "u1", { key: "speech-delivery" });
+    assert.deepEqual([lively.turbo, lively.expressivenessBoost], [true, 0.6]);
+    assert.deepEqual([publicVoiceChange(lively).turbo, publicVoiceChange(lively).expressivenessBoost], [true, 0.6]);
+    const plain = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Big news today." }), "u1");
+    assert.deepEqual(["turbo" in plain, "expressivenessBoost" in plain], [false, false]);
+    // The same key with another delivery is another recording, refused rather than answered with the first.
+    await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Big news today.", turbo: true }), "u1", { key: "speech-delivery" }), ConflictError);
+    await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Big news today.", expressivenessBoost: 0.6 }), "u1", { key: "speech-delivery" }), ConflictError);
+    assert.equal((await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Big news today.", turbo: true, expressivenessBoost: 0.6 }), "u1", { key: "speech-delivery" })).id, lively.id);
+    // A recording kept from before these options replays for a retry that spells out the defaults.
+    const before = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Older words." }), "u1", { key: "speech-before" });
+    assert.equal((await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Older words.", turbo: false, expressivenessBoost: 0 }), "u1", { key: "speech-before" })).id, before.id);
+  });
+
   it("asks HeyGen to speak text in an instant voice once, dropping one not done in time and telling a refusal apart", async () => {
     // A voice made beforehand, as HeyGen holds it.
     const voice: InstantVoice = { ...(await ready("u1")), status: "completed", provider: "heygen", providerVoiceId: "hv_1" };
@@ -361,6 +383,12 @@ describe("voice changer", () => {
       tts = "refuse";
       await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Bonjour." }), "u1"), (e: unknown) => e instanceof ValidationError && /could not speak that text: text language is not supported/.test((e as Error).message));
       assert.equal((await listVoiceChanges("u1")).length, 1, "nothing is kept for a refused text");
+      // Turbo and the boost reach HeyGen as its model and expressiveness_boost.
+      tts = "done";
+      await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Big news.", turbo: true, expressivenessBoost: 0.3 }), "u1");
+      assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1-turbo", voice_id: "hv_1", text: "Big news.", expressiveness_boost: 0.3 });
+      await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Big news.", expressivenessBoost: 0 }), "u1");
+      assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1", voice_id: "hv_1", text: "Big news." });
       // One left as being spoken (its request was cut off) is waited for while its start could still answer, then given
       // up, and never asked for.
       const cut: VoiceChange = { ...done, id: "vc_cut", status: "processing", audioUrl: undefined, createdAt: new Date(Date.now() - 30_000).toISOString() };

@@ -189,7 +189,7 @@ export interface AvatarProvider {
    * Speaks text in an instant voice (HeyGen Voice's text to speech): waits up to `waitMs`, sending `key` as the
    * Idempotency-Key; "processing" means not done by then. Unlike a recording, a text is never asked for again.
    */
-  speakText?(input: { voiceId: string; text: string; key: string; waitMs: number }): Promise<{ status: "processing" } | { status: "completed"; audioUrl: string; durationSec: number }>;
+  speakText?(input: { voiceId: string; text: string; turbo?: true; expressivenessBoost?: number; key: string; waitMs: number }): Promise<{ status: "processing" } | { status: "completed"; audioUrl: string; durationSec: number }>;
   /** Where a music mix stands, with the video once it is ready (its link signed for a limited time). */
   musicMixStatus?(jobId: string): Promise<LipsyncStatus>;
   /** Deletes a music mix and its video at the renderer; one it no longer has counts as deleted. */

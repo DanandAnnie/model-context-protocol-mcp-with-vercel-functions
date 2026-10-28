@@ -134,6 +134,9 @@ export default function VoiceChangerPage() {
   const [speechVoiceId, setSpeechVoiceId] = useState("");
   const [speechText, setSpeechText] = useState("");
   const [speechTitle, setSpeechTitle] = useState("");
+  // How the text is delivered: HeyGen's Turbo model, and a livelier delivery in tenths (0 is the voice's own).
+  const [speechTurbo, setSpeechTurbo] = useState(false);
+  const [speechBoost, setSpeechBoost] = useState(0);
   const [speechKey, setSpeechKey] = useState(() => newKey());
   const [speaking, setSpeaking] = useState(false);
   const [voiceName, setVoiceName] = useState("");
@@ -244,7 +247,7 @@ export default function VoiceChangerPage() {
     fail("speech")(null);
     setNote(null);
     try {
-      const body = { voiceId: speechVoiceId, text: speechText.trim(), ...(speechTitle.trim() ? { title: speechTitle.trim() } : {}) };
+      const body = { voiceId: speechVoiceId, text: speechText.trim(), ...(speechTitle.trim() ? { title: speechTitle.trim() } : {}), ...(speechTurbo ? { turbo: true } : {}), ...(speechBoost ? { expressivenessBoost: speechBoost / 10 } : {}) };
       const { change } = await api<{ change: Change }>("/api/voice-changer/speech", { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": speechKey } });
       setData((prev) => (prev ? { ...prev, changes: [change, ...prev.changes.filter((c) => c.id !== change.id)] } : prev));
       void refetch();
@@ -417,6 +420,41 @@ export default function VoiceChangerPage() {
                     {speechText.length >= MAX_SPEECH_CHARS ? `The text is at the ${MAX_SPEECH_CHARS.toLocaleString("en-US")}-character limit; anything longer is cut there.` : ""}
                   </span>
                 </div>
+                <fieldset className="space-y-3" disabled={!editable || speaking}>
+                  <legend className="mb-1 text-sm font-medium text-slate-700">Delivery</legend>
+                  <label className="flex items-start gap-2 text-sm text-slate-700">
+                    <input type="checkbox" className="mt-0.5 accent-brand-600" checked={speechTurbo} onChange={(e) => (setSpeechTurbo(e.target.checked), setSpeechKey(newKey()), fail("speech")(null))} />
+                    <span>
+                      Turbo
+                      <span className="block text-xs text-slate-500">HeyGen&apos;s faster, cheaper model for instant voices.</span>
+                    </span>
+                  </label>
+                  <div>
+                    <div className="flex items-baseline justify-between gap-3">
+                      <label htmlFor="speech-boost" className="text-sm text-slate-700">
+                        Expressiveness boost
+                      </label>
+                      <output htmlFor="speech-boost" aria-hidden="true" className="text-xs tabular-nums text-slate-600">
+                        {speechBoost ? `+${speechBoost * 10}%` : "None"}
+                      </output>
+                    </div>
+                    <input
+                      id="speech-boost"
+                      type="range"
+                      min={0}
+                      max={10}
+                      step={1}
+                      value={speechBoost}
+                      aria-valuetext={speechBoost ? `plus ${speechBoost * 10} percent` : "none"}
+                      aria-describedby="speech-boost-hint"
+                      onChange={(e) => (setSpeechBoost(Number(e.target.value)), setSpeechKey(newKey()), fail("speech")(null))}
+                      className="mt-1 w-full accent-brand-600"
+                    />
+                    <p id="speech-boost-hint" className="text-xs text-slate-500">
+                      A livelier delivery than the voice&apos;s own; none keeps it as recorded.
+                    </p>
+                  </div>
+                </fieldset>
                 <Field label="Title for the text (optional)">
                   <input className={inputClass} value={speechTitle} maxLength={120} disabled={!editable || speaking} onChange={(e) => (setSpeechTitle(e.target.value), setSpeechKey(newKey()), fail("speech")(null))} placeholder="The text's first words, in the voice" />
                 </Field>
@@ -512,6 +550,8 @@ export default function VoiceChangerPage() {
                             {typeof c.durationSec === "number" && c.durationSec > 0 ? ` · ${formatSeconds(Math.max(1, Math.round(c.durationSec)))}` : ""}
                             {c.removeNoise ? " · noise removed" : ""}
                             {c.text !== undefined ? " · from text" : ""}
+                            {c.turbo ? " · Turbo" : ""}
+                            {c.expressivenessBoost ? ` · expressiveness +${Math.round(c.expressivenessBoost * 100)}%` : ""}
                           </div>
                           {c.error && <div className="mt-1 text-xs text-rose-600">{c.error}</div>}
                         </div>

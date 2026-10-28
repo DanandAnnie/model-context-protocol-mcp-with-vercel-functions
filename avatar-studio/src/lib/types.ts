@@ -453,6 +453,10 @@ export interface VoiceChange {
   clipId?: string;
   text?: string;
   removeNoise?: true;
+  /** Text only: spoken by the renderer's faster, cheaper model (HeyGen Voice 1 Turbo); absent is its standard model. */
+  turbo?: true;
+  /** Text only: how much livelier than the voice's own delivery, 0 to 1 (HeyGen's `expressiveness_boost`); absent is none. */
+  expressivenessBoost?: number;
   /** Renderer, the voice there, and the recording as it was sent (none for text), so one still running is asked for again. */
   provider: string;
   providerVoiceId: string;

@@ -785,8 +785,14 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     return this.voiceAudio(() => this.client.speechToSpeech(body, input.key, input.waitMs), { what: "recording", fix: "try a clearer recording" });
   }
 
-  async speakText(input: { voiceId: string; text: string; key: string; waitMs: number }): Promise<{ status: "processing" } | { status: "completed"; audioUrl: string; durationSec: number }> {
-    const body = { model: "heygen-voice-1", voice_id: input.voiceId, text: input.text };
+  async speakText(input: { voiceId: string; text: string; turbo?: true; expressivenessBoost?: number; key: string; waitMs: number }): Promise<{ status: "processing" } | { status: "completed"; audioUrl: string; durationSec: number }> {
+    // Turbo speaks instant voices faster and cheaper; the boost is an instant-voice setting, and every voice here is one.
+    const body = {
+      model: input.turbo ? "heygen-voice-1-turbo" : "heygen-voice-1",
+      voice_id: input.voiceId,
+      text: input.text,
+      ...(input.expressivenessBoost ? { expressiveness_boost: input.expressivenessBoost } : {}),
+    };
     return this.voiceAudio(() => this.client.textToSpeech(body, input.key, input.waitMs), { what: "text", fix: "check the text is plain prose in a supported language" });
   }
 

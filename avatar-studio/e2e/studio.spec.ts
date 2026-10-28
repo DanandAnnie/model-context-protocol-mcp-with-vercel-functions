@@ -1414,6 +1414,41 @@ test("a b-roll take is made again with changes, from its seed, longer or word fo
   for (const id of [firstId, (await second.getAttribute("data-footage"))!, (await third.getAttribute("data-footage"))!]) expect((await page.request.delete(`/api/footage/${id}`)).ok()).toBe(true);
 });
 
+test("a b-roll clip can leave its length to HeyGen, and is made again at the length it picked", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  await page.goto("/footage");
+  const prompt = page.getByRole("textbox", { name: "Describe the shot", exact: true });
+  await prompt.fill(`A baker ${tag} turns to the camera and says "Fresh bread every morning, since 1982."`);
+  const length = page.getByRole("slider", { name: /Length/ });
+  const auto = page.getByLabel("Let HeyGen pick the length");
+  await expect(auto).not.toBeChecked();
+  await expect(auto).toHaveAccessibleDescription(/8 to 30 seconds, fitted to any lines the description quotes/);
+  await auto.check();
+  // The slider gives way, and its limit still follows the clip's settings.
+  await expect(length).toBeDisabled();
+  await expect(page.getByLabel("Length: picked by HeyGen")).toBeVisible();
+  const exact = page.getByLabel("Follow my description exactly");
+  await exact.check();
+  await expect(auto).toHaveAccessibleDescription(/^8 to 15 seconds/);
+  await exact.uncheck();
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/footage") && r.method() === "POST");
+  await page.getByRole("button", { name: "Make the clip" }).click();
+  const body = (await sent).postDataJSON() as Record<string, unknown>;
+  expect([body.autoLength, "durationSec" in body]).toEqual([true, false]);
+  const item = page.getByTestId("footage").filter({ hasText: `A baker ${tag}` });
+  await expect(item.getByTestId("footage-meta")).toContainText("length picked by HeyGen · 16:9 · standard");
+  // Once made, the clip names the length HeyGen picked (the demo picks 10 seconds).
+  await expect(item.getByText("Completed")).toBeVisible({ timeout: 20_000 });
+  await expect(item.getByTestId("footage-meta")).toContainText("10 s, picked by HeyGen · 16:9");
+  // Made again, the take asks for that length, so it comes out the same.
+  await item.getByRole("button", { name: /^Make again with changes: / }).click();
+  await expect(auto).not.toBeChecked();
+  await expect(length).toBeEnabled();
+  await expect(page.getByLabel("Length: 10 seconds")).toBeVisible();
+  await expect(page.locator('p[role="status"]')).toContainText("The length HeyGen picked, 10 seconds, is now set; tick “Let HeyGen pick the length” for it to pick again");
+  expect((await page.request.delete(`/api/footage/${await item.getAttribute("data-footage")}`)).ok()).toBe(true);
+});
+
 test("a b-roll clip is made from a description and loops behind a presenter as a scene's background", async ({ page }) => {
   const tag = Date.now().toString(36);
   await page.goto("/footage");

@@ -152,9 +152,10 @@ export class MockAvatarProvider implements AvatarProvider {
 
   /** Demo cleanup: the sample video stands in for the cleaned cut a few seconds later, with made-up statistics; nothing is cut. */
   /** Demo generated clip: the studio's sample clip, "made" a few seconds after it is asked for; nothing is generated. */
-  async startFootage({ durationSec, seed }: { durationSec: number; seed?: number }) {
-    // The demo picks a seed like the renderer does, and keeps one asked for, so a take can be made again.
-    return { jobId: `mockft_${Date.now()}_${durationSec}_${seed ?? Math.floor(Math.random() * 1_000_000)}` };
+  async startFootage({ durationSec, seed }: { durationSec: number | "auto"; seed?: number }) {
+    // The demo picks a seed like the renderer does, and keeps one asked for, so a take can be made again; a length left
+    // to it is 10 seconds, reported once the clip is "made", as HeyGen reports the one it picked.
+    return { jobId: `mockft_${Date.now()}_${durationSec === "auto" ? 10 : durationSec}_${seed ?? Math.floor(Math.random() * 1_000_000)}` };
   }
 
   async footageStatus(jobId: string): Promise<FootageStatus> {

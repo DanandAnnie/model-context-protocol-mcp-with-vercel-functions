@@ -7,7 +7,7 @@ import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import type { AvatarProvider, FootageInput } from "../providers/types";
-import { FOOTAGE_ASPECTS, FOOTAGE_MAX_SEC, FOOTAGE_MAX_SEC_SHORT, FOOTAGE_MIN_SEC, MAX_FOOTAGE_REFERENCES, MAX_FOOTAGE_SEED, FIRST_FRAME_ADVICE, footageIdOf, type Background, type BrandKit, type FootageJob, type VideoTemplate } from "../types";
+import { FOOTAGE_ASPECTS, FOOTAGE_AUTO_MIN_SEC, FOOTAGE_MAX_SEC, FOOTAGE_MAX_SEC_SHORT, FOOTAGE_MIN_SEC, MAX_FOOTAGE_REFERENCES, MAX_FOOTAGE_SEED, FIRST_FRAME_ADVICE, footageIdOf, type Background, type BrandKit, type FootageJob, type VideoTemplate } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { decodeDataUrl } from "../providers/image";
@@ -40,7 +40,10 @@ export const footageRequestSchema = z
       .max(FOOTAGE_MAX_SEC, `A clip is at most ${FOOTAGE_MAX_SEC} seconds (${FOOTAGE_MAX_SEC_SHORT} when it features pictures or follows the description exactly)`)
       // After the range, which a number too large to be exact (that int() also refuses) is outside of.
       .int("A clip is a whole number of seconds")
-      .default(FOOTAGE_MIN_SEC),
+      // 5 seconds when neither a length nor autoLength is given.
+      .optional(),
+    /** Let HeyGen pick the length (8 to 30 seconds, or to 15 when the clip features pictures or is exact), instead of durationSec. */
+    autoLength: z.boolean().optional(),
     /** Ignored shape for a clip from a picture, which takes the picture's shape. */
     aspect: z.enum(FOOTAGE_ASPECTS, `The frame is ${FOOTAGE_ASPECTS.join(", ")}; leave it out for a clip from pictures to follow the first one`).optional(),
     quality: z.enum(["standard", "hd"]).default("standard"),
@@ -69,10 +72,11 @@ export const footageRequestSchema = z
       .optional(),
   })
   .strict()
+  .refine((v) => !(v.autoLength && v.durationSec !== undefined), { message: "A clip has a length or lets HeyGen pick one; leave durationSec out with autoLength", path: ["durationSec"] })
   .refine((v) => !(v.image && v.references), { message: "A clip either opens on one picture or features pictures, not both", path: ["references"] })
   .refine((v) => !(v.shootPhoto && (v.image || v.references)), { message: "A clip opens on a photo shoot's photo or on a picture sent with it, not both, and does not feature pictures too", path: ["shootPhoto"] })
   // HeyGen makes clips over 15 seconds only from a description or a first frame, with its prompt enhancement on.
-  .refine((v) => v.durationSec <= FOOTAGE_MAX_SEC_SHORT || !(v.references || v.exact), {
+  .refine((v) => (v.durationSec ?? FOOTAGE_MIN_SEC) <= FOOTAGE_MAX_SEC_SHORT || !(v.references || v.exact), {
     message: `A clip that features pictures, or follows the description exactly, is at most ${FOOTAGE_MAX_SEC_SHORT} seconds`,
     path: ["durationSec"],
   })
@@ -166,6 +170,8 @@ export async function startFootage(input: FootageRequest, ownerId: string = LOCA
   const imageDigest = shoot ? `shoot:${shoot.shootId}:${shoot.photo}` : image || references ? `${references ? "ref:" : ""}${hash.digest("base64url")}` : undefined;
   // A first frame sets the shape; pictures to feature follow the first one's unless a frame is chosen.
   const aspect = image || shoot ? undefined : references ? input.aspect : (input.aspect ?? "16:9");
+  // A length HeyGen picks is not known until the clip is made.
+  const durationSec = input.autoLength ? undefined : (input.durationSec ?? FOOTAGE_MIN_SEC);
   // Without a title the clip is named after its description; HeyGen's opening advice, the same for every clip from a
   // photo, is left out of the name so such clips are told apart.
   const afterAdvice = input.prompt.startsWith(FIRST_FRAME_ADVICE) ? promptExcerpt(input.prompt.slice(FIRST_FRAME_ADVICE.length), 60) : "";
@@ -174,7 +180,7 @@ export async function startFootage(input: FootageRequest, ownerId: string = LOCA
   const existing = opts.key ? await getStore().get<FootageJob>("footage", id) : null;
   if (existing && existing.ownerId === ownerId) {
     // (A clip stored before titles left the advice out was named after the whole description.)
-    const same = (existing.title === title || existing.title === (input.title || promptExcerpt(input.prompt, 60))) && existing.prompt === input.prompt && existing.durationSec === input.durationSec && existing.aspect === aspect && existing.quality === input.quality && (existing.imageDigest ?? "") === (imageDigest ?? "") && (existing.references ?? 0) === (references?.length ?? 0) && !!existing.exact === !!input.exact && existing.seed === input.seed;
+    const same = (existing.title === title || existing.title === (input.title || promptExcerpt(input.prompt, 60))) && existing.prompt === input.prompt && !!existing.autoLength === !!input.autoLength && (input.autoLength || existing.durationSec === durationSec) && existing.aspect === aspect && existing.quality === input.quality && (existing.imageDigest ?? "") === (imageDigest ?? "") && (existing.references ?? 0) === (references?.length ?? 0) && !!existing.exact === !!input.exact && existing.seed === input.seed;
     if (!same) throw new ConflictError("This Idempotency-Key was already used for another clip; send a new key");
     return existing;
   }
@@ -192,7 +198,7 @@ export async function startFootage(input: FootageRequest, ownerId: string = LOCA
     frame = { url: link.url };
   }
   opts.admit?.();
-  const { jobId } = await provider.startFootage({ prompt: input.prompt, image: frame, references, durationSec: input.durationSec, aspect, quality: input.quality, exact: input.exact, seed: input.seed, key: id });
+  const { jobId } = await provider.startFootage({ prompt: input.prompt, image: frame, references, durationSec: durationSec ?? "auto", aspect, quality: input.quality, exact: input.exact, seed: input.seed, key: id });
   const now = nowIso();
   const job: FootageJob = stripUndefined({
     id,
@@ -204,7 +210,8 @@ export async function startFootage(input: FootageRequest, ownerId: string = LOCA
     references: references?.length,
     exact: input.exact ? (true as const) : undefined,
     seed: input.seed,
-    durationSec: input.durationSec,
+    durationSec,
+    autoLength: input.autoLength ? (true as const) : undefined,
     aspect,
     quality: input.quality,
     imageDigest,
@@ -293,7 +300,9 @@ async function refreshFootage(job: FootageJob): Promise<FootageJob> {
     void _e;
     const next: FootageJob = {
       ...kept,
-      // The length asked for is kept (it is what a retried start is compared on); the clip's own is in the file.
+      // The length asked for is kept (it is what a retried start is compared on), and the clip's own is in the file; a
+      // length HeyGen picked is recorded once it is known, in whole seconds within the range it picks from.
+      ...(job.autoLength && out.durationSec ? { durationSec: Math.min(FOOTAGE_MAX_SEC, Math.max(FOOTAGE_AUTO_MIN_SEC, Math.round(out.durationSec))) } : {}),
       ...stripUndefined({ status: out.status, videoUrl: out.videoUrl, width: out.width, height: out.height, error: out.error, takeSeed: out.seed ?? job.takeSeed }),
       checkedAt: now,
       updatedAt: out.status !== job.status ? now : job.updatedAt,

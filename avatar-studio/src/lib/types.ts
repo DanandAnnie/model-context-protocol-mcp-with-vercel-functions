@@ -122,6 +122,11 @@ export const FOOTAGE_MAX_SEC = 30;
 export const FOOTAGE_MAX_SEC_SHORT = 15;
 /** The longest clip HeyGen makes with these settings. */
 export const maxFootageSec = (o: { references?: number; exact?: boolean }) => (o.references || o.exact ? FOOTAGE_MAX_SEC_SHORT : FOOTAGE_MAX_SEC);
+/** The shortest length HeyGen picks when a clip leaves the length to it (the longest is the clip's usual limit). */
+export const FOOTAGE_AUTO_MIN_SEC = 8;
+/** A clip's length as a list shows it: the one asked for, or, when HeyGen picked it, that one once the clip is made. */
+export const footageLength = (f: Pick<FootageJob, "durationSec" | "autoLength">) =>
+  f.autoLength ? (f.durationSec ? `${f.durationSec} s, picked by HeyGen` : "length picked by HeyGen") : `${f.durationSec} s`;
 /** The seed that makes a clip's take again: the one the renderer used, else the one asked for. */
 export const seedOf = (f: Pick<FootageJob, "seed" | "takeSeed">) => f.takeSeed ?? f.seed;
 /** The largest seed HeyGen takes (unsigned 32-bit). */
@@ -155,7 +160,16 @@ export interface FootageJob {
   seed?: number;
   /** The seed the renderer used, once the clip is made (the one to ask for to make this take again). */
   takeSeed?: number;
-  durationSec: number;
+  /**
+   * The length asked for, in seconds; for a clip that left the length to HeyGen (`autoLength`), the length it picked,
+   * once the clip is made (absent until then).
+   */
+  durationSec?: number;
+  /**
+   * HeyGen picked the length (its `duration: "auto"`): 8 to 30 seconds, or to 15 for a clip that features pictures or
+   * follows the description exactly, fitted to any lines the description quotes. Part of what a retried start is compared on.
+   */
+  autoLength?: true;
   /**
    * The frame asked for; a clip from a picture follows the picture, so it has none, and a clip featuring pictures
    * without one follows the first picture's shape.

@@ -11,7 +11,7 @@ import { MAX_PRONUNCIATIONS, formatPronunciations, parsePronunciations } from "@
 import { MAX_FORCED_TRANSLATIONS, MAX_FORCED_TRANSLATION_LENGTH, MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH, MIN_GLOSSARY_TERM_LENGTH, formatForcedTranslations, parseForcedTranslations, parseGlossary } from "@/lib/glossary";
 import { LOGO_TYPES, logoDataUrlValid, logoFileType } from "@/lib/logo-types";
 import type { BrandSuggestion } from "@/lib/brand-import";
-import { backdropIdOf, footageIdOf, footagePath, type FootageJob, type AspectRatio, type Avatar, type Backdrop, type BrandKit, type Resolution, type Voice, type WatermarkCorner } from "@/lib/types";
+import { backdropIdOf, footageIdOf, footageLength, footagePath, type FootageJob, type AspectRatio, type Avatar, type Backdrop, type BrandKit, type Resolution, type Voice, type WatermarkCorner } from "@/lib/types";
 
 const DEFAULT_PRIMARY = "#4f46e5";
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -33,7 +33,7 @@ export default function BrandPage() {
   const [bgWhole, setBgWhole] = useState(false);
   // Uploaded images, so the kit's default background can be one of them like any scene's.
   const { data: backdropData, error: backdropError, setData: setBackdropData } = useApi<{ backdrops: Backdrop[] }>("/api/backdrops");
-  const { data: footageData } = useApi<{ footage: Array<Pick<FootageJob, "id" | "title" | "status" | "durationSec" | "aspect">>; available: boolean }>("/api/footage");
+  const { data: footageData } = useApi<{ footage: Array<Pick<FootageJob, "id" | "title" | "status" | "durationSec" | "autoLength" | "aspect">>; available: boolean }>("/api/footage");
   const readyFootage = (footageData?.footage ?? []).filter((f) => f.status === "completed");
   // An uploaded image that is gone (deleted here, or elsewhere and so taken off the saved kit) is not offered for saving.
   useEffect(() => {
@@ -425,7 +425,7 @@ export default function BrandPage() {
                   <option value="">Choose a clip</option>
                   {readyFootage.map((f) => (
                     <option key={f.id} value={f.id}>
-                      {f.title} ({f.durationSec} s{f.aspect ? `, ${f.aspect}` : ""})
+                      {f.title} ({footageLength(f)}{f.aspect ? `, ${f.aspect}` : ""})
                     </option>
                   ))}
                   {footageIdOf({ type: "video", value: bgUrl }) && !readyFootage.some((f) => f.id === footageIdOf({ type: "video", value: bgUrl })) && <option value={footageIdOf({ type: "video", value: bgUrl })!}>A clip that is gone or not ready</option>}

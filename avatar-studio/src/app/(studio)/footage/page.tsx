@@ -9,7 +9,7 @@ import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api, formatDate, isRefusal } from "@/lib/client";
 import { toUploadable } from "@/lib/image-upload";
 import { danglingLabels, insertPictureLabel, pictureLabels, withPictureRemoved } from "@/lib/picture-labels";
-import { FOOTAGE_ASPECTS, FOOTAGE_MAX_SEC_SHORT, FOOTAGE_MIN_SEC, MAX_FOOTAGE_REFERENCES, footagePath, maxFootageSec, seedOf, type FootageAspect, type FootageJob, type ShootJob, FIRST_FRAME_ADVICE } from "@/lib/types";
+import { FOOTAGE_ASPECTS, FOOTAGE_AUTO_MIN_SEC, FOOTAGE_MAX_SEC_SHORT, FOOTAGE_MIN_SEC, MAX_FOOTAGE_REFERENCES, footageLength, footagePath, maxFootageSec, seedOf, type FootageAspect, type FootageJob, type ShootJob, FIRST_FRAME_ADVICE } from "@/lib/types";
 
 /** A clip as the server lists it: never the renderer, its job id, or the picture's digest. */
 type Footage = Omit<FootageJob, "ownerId" | "provider" | "providerJobId" | "imageDigest">;
@@ -60,6 +60,8 @@ export default function FootagePage() {
   }, [running, refetch]);
   const [prompt, setPrompt] = useState("");
   const [durationSec, setDurationSec] = useState(FOOTAGE_MIN_SEC);
+  // HeyGen picks the length instead (the slider keeps its value for when this is unticked).
+  const [autoLength, setAutoLength] = useState(false);
   // "adaptive" follows the first picture featured; it is offered only while there is one.
   const [aspect, setAspect] = useState<FootageAspect | "adaptive">("16:9");
   const [quality, setQuality] = useState<"standard" | "hd">("standard");
@@ -151,8 +153,11 @@ export default function FootagePage() {
   useEffect(() => {
     if (durationSec > maxLength) {
       setDurationSec(maxLength);
-      say(setNote, `The length is now ${maxLength} seconds, the longest for a clip that features pictures or follows the description exactly.`);
+      // A length HeyGen picks stays within the limit by itself; the slider's value only matters once it is used again.
+      if (!autoLength) say(setNote, `The length is now ${maxLength} seconds, the longest for a clip that features pictures or follows the description exactly.`);
     }
+    // Only a length or limit change clamps; autoLength is read, not watched.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [durationSec, maxLength]);
   const needsPicture = use === "frame" && !picture;
   // A label HeyGen cannot match to a picture sent would point the shot at nothing (it does not rewrite labels), and
@@ -337,7 +342,7 @@ export default function FootagePage() {
     try {
       const body = {
         prompt: prompt.trim(),
-        durationSec,
+        ...(autoLength ? { autoLength: true } : { durationSec }),
         ...(frame ? (frame.shoot ? { shootPhoto: frame.shoot } : { image: frame.url }) : featured.length ? { references: featured.map((f) => f.url), ...(shape === "adaptive" ? {} : { aspect: shape }) } : { aspect: shape }),
         quality: hdBlocked ? "standard" : quality,
         ...(exact ? { exact: true } : {}),
@@ -376,7 +381,11 @@ export default function FootagePage() {
     if (seed === undefined) return;
     setPrompt(f.prompt);
     setTitle("");
-    setDurationSec(f.durationSec);
+    // The take's own length: one HeyGen picked is asked for as a number, so the take comes out the same length; one
+    // it never reported is left to it again.
+    const pickedLength = f.autoLength ? f.durationSec : undefined;
+    setDurationSec(f.durationSec ?? FOOTAGE_MIN_SEC);
+    setAutoLength(!!f.autoLength && f.durationSec === undefined);
     setQuality(f.quality);
     setExact(!!f.exact);
     setUse(f.references ? "feature" : f.fromPicture ? "frame" : "none");
@@ -394,7 +403,8 @@ export default function FootagePage() {
     // A photo shoot's photo is the account's, so it is opened on again; other pictures are not kept.
     if (f.fromShoot) void openShootPhoto(f.fromShoot);
     const pictures = f.references ? (f.references === 1 ? " Add the picture to feature again: pictures are not kept." : ` Add the ${f.references} pictures to feature again, in the same order: pictures are not kept.`) : f.fromShoot ? "" : f.fromPicture ? " Add the picture to open on again: pictures are not kept." : "";
-    say(setNote, `The form has “${f.title}” with its take; change what you want and make the clip.${pictures}`);
+    const length = pickedLength ? ` The length HeyGen picked, ${pickedLength} seconds, is now set; tick “Let HeyGen pick the length” for it to pick again, say for new lines.` : "";
+    say(setNote, `The form has “${f.title}” with its take; change what you want and make the clip.${length}${pictures}`);
     focusAfterRender(() => promptRef.current);
   }
 
@@ -522,11 +532,18 @@ export default function FootagePage() {
               </fieldset>
               <div>
                 <label htmlFor="footage-length" className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Length: {durationSec} seconds
+                  Length: {autoLength ? "picked by HeyGen" : `${durationSec} seconds`}
                 </label>
-                <input ref={lengthRef} id="footage-length" type="range" min={FOOTAGE_MIN_SEC} max={maxLength} step={1} value={durationSec} disabled={canEdit === false} aria-describedby="footage-length-hint" onChange={(e) => (setDurationSec(Number(e.target.value)), changed())} className="w-full accent-brand-600" />
+                <input ref={lengthRef} id="footage-length" type="range" min={FOOTAGE_MIN_SEC} max={maxLength} step={1} value={durationSec} disabled={canEdit === false || autoLength} aria-describedby="footage-length-hint" onChange={(e) => (setDurationSec(Number(e.target.value)), changed())} className="w-full accent-brand-600" />
                 <p id="footage-length-hint" className="mt-1 text-xs text-slate-500">
                   {maxLength === FOOTAGE_MAX_SEC_SHORT ? `Up to ${FOOTAGE_MAX_SEC_SHORT} seconds when the clip features pictures or follows the description exactly.` : `Up to ${maxLength} seconds.`}
+                </p>
+                <label className="mt-2 flex min-h-6 items-center gap-2 text-sm text-slate-700">
+                  <input type="checkbox" className="accent-brand-600" checked={autoLength} disabled={canEdit === false} aria-describedby="footage-auto-hint" onChange={(e) => (setAutoLength(e.target.checked), changed())} />
+                  Let HeyGen pick the length
+                </label>
+                <p id="footage-auto-hint" className="mt-1 text-xs text-slate-500">
+                  {FOOTAGE_AUTO_MIN_SEC} to {maxLength} seconds, fitted to any lines the description quotes so they are spoken at a natural pace. The clip is billed for the length HeyGen picks.
                 </p>
               </div>
               <div>
@@ -629,7 +646,7 @@ export default function FootagePage() {
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium text-slate-900">{f.title}</div>
                       <div className="mt-0.5 text-xs text-slate-500" data-testid="footage-meta">
-                        {f.durationSec} s · {shapeOf(f)} ·{f.exact ? " as written ·" : ""} {f.quality === "hd" ? "HD" : "standard"} · {formatDate(f.createdAt)}
+                        {footageLength(f)} · {shapeOf(f)} ·{f.exact ? " as written ·" : ""} {f.quality === "hd" ? "HD" : "standard"} · {formatDate(f.createdAt)}
                       </div>
                       <div className="mt-1 line-clamp-2 break-words text-xs text-slate-600" title={f.prompt}>
                         {f.prompt}

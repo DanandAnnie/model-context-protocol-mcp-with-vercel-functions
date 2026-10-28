@@ -393,7 +393,8 @@ export interface FootageInput {
   /** The first frame, inline, or by a link the renderer fetches (a photo shoot's photo). */
   image?: { bytes: Uint8Array; mimeType: string } | { url: string };
   references?: Array<{ bytes: Uint8Array; mimeType: string }>;
-  durationSec: number;
+  /** Seconds, or "auto" for the renderer to pick a length fitted to the description (reported once the clip is made). */
+  durationSec: number | "auto";
   aspect?: "16:9" | "9:16" | "1:1";
   quality: "standard" | "hd";
   /** Send the description as written, without the renderer's prompt enhancement. */

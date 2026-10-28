@@ -29,7 +29,7 @@ export async function GET() {
   }
 }
 
-/** Generate a clip: `{ prompt, durationSec?, aspect?, quality?, image?, references?, title? }`. */
+/** Generate a clip: `{ prompt, durationSec? or autoLength?, aspect?, quality?, image?, references?, title? }`. */
 export async function POST(req: Request) {
   try {
     const owner = await requireEditor();

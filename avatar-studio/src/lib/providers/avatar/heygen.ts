@@ -441,7 +441,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
    * product, a place, or a person (`reference_to_video`, which the description names as <Picture 1>, <Picture 2>…).
    * Pictures go inline, so a retry with the same key sends the same body and gets HeyGen's first answer; a photo shoot's
    * photo goes by its link, which is the same unless it was renewed (after half an hour) between the tries. HD is 1080p, at
-   * three times the cost.
+   * three times the cost. A `duration` of "auto" has HeyGen pick the length (reported, and billed, once the clip is made).
    */
   async startFootage({ prompt, image, references, durationSec, aspect, quality, exact, seed, key }: FootageInput) {
     const inline = (p: { bytes: Uint8Array; mimeType: string }) => inlineAsset({ data: Buffer.from(p.bytes).toString("base64"), mimeType: p.mimeType });
@@ -492,7 +492,8 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     if (job.status !== "completed") return { status: "processing" };
     const videoUrl = httpsOnly(job.video_url);
     if (!videoUrl) return { status: "failed", error: "HeyGen finished without a clip" };
-    return stripEmpty({ status: "completed" as const, videoUrl, durationSec: job.duration ?? undefined, width: job.width ?? undefined, height: job.height ?? undefined, seed: typeof job.seed === "number" ? job.seed : undefined });
+    const durationSec = typeof job.duration === "number" && Number.isFinite(job.duration) && job.duration > 0 ? job.duration : undefined;
+    return stripEmpty({ status: "completed" as const, videoUrl, durationSec, width: job.width ?? undefined, height: job.height ?? undefined, seed: typeof job.seed === "number" ? job.seed : undefined });
   }
 
   /**

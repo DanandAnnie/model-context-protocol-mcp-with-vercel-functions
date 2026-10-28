@@ -25,7 +25,7 @@ import { findTemplate } from "@/lib/templates";
 import { capSceneText, fitSceneTextEdit, sceneTextLength } from "@/lib/scene-text";
 import { graphemes } from "@/lib/text";
 import { takeAgentDraft, type AgentDraft } from "@/lib/agent-draft";
-import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, footageIdOf, footagePath, type FootageJob, framingFor, isDefaultLayout, isPhotoAvatar, rendersOnAvatarV, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, type PhotoExpressiveness, VOICE_ACCENTS, type VoiceAccent, AVATAR_ENGINES, type AvatarEngine } from "@/lib/types";
+import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, footageIdOf, footageLength, footagePath, type FootageJob, framingFor, isDefaultLayout, isPhotoAvatar, rendersOnAvatarV, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, type PhotoExpressiveness, VOICE_ACCENTS, type VoiceAccent, AVATAR_ENGINES, type AvatarEngine } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -223,7 +223,7 @@ function CreateInner() {
   // Uploaded background images; the picker adds and removes them here, so the list is always the editor's.
   const { data: backdropData, error: backdropError, setData: setBackdropData } = useApi<{ backdrops: Backdrop[] }>("/api/backdrops");
   // Generated clips (the B-roll page) a scene can loop as its video background; only finished ones are offered.
-  const { data: footageData, refetch: refetchFootage } = useApi<{ footage: Array<Pick<FootageJob, "id" | "title" | "status" | "durationSec" | "aspect">>; available: boolean }>("/api/footage");
+  const { data: footageData, refetch: refetchFootage } = useApi<{ footage: Array<Pick<FootageJob, "id" | "title" | "status" | "durationSec" | "autoLength" | "aspect">>; available: boolean }>("/api/footage");
   const readyFootage = (footageData?.footage ?? []).filter((f) => f.status === "completed");
   const { play, playingId, busyId } = useVoicePreview();
 
@@ -1684,7 +1684,7 @@ function CreateInner() {
                       <option value="">None</option>
                       {readyFootage.map((f) => (
                         <option key={f.id} value={f.id}>
-                          {f.title} ({f.durationSec} s{f.aspect ? `, ${f.aspect}` : ""})
+                          {f.title} ({footageLength(f)}{f.aspect ? `, ${f.aspect}` : ""})
                         </option>
                       ))}
                       {footageIdOf(background) && !readyFootage.some((f) => f.id === footageIdOf(background)) && <option value={footageIdOf(background)!}>A clip that is gone or not ready</option>}

@@ -64,7 +64,24 @@ describe("generated clips", () => {
     assert.ok(ask({ image: png(), quality: "hd" }), "a picture sets the shape, so HD is fine");
     assert.throws(() => ask({ mode: "text_to_video" }), /mode/, "unknown fields are refused");
     const plain = ask();
-    assert.deepEqual([plain.durationSec, plain.aspect, plain.quality], [5, undefined, "standard"]);
+    assert.deepEqual([plain.durationSec, plain.aspect, plain.quality], [undefined, undefined, "standard"], "the 5-second default is the service's, so the length can be left to HeyGen instead");
+  });
+
+  it("can leave the length to HeyGen, which reports the one it picked once the clip is made", async () => {
+    assert.throws(() => ask({ autoLength: true, durationSec: 10 }), /leave durationSec out with autoLength/);
+    assert.equal(ask({ autoLength: true, exact: true }).autoLength, true, "HeyGen keeps an exact clip's pick to 15 seconds itself");
+    assert.equal((await startFootage(ask(), "u1")).durationSec, 5, "without either, a clip is 5 seconds");
+    const job = await startFootage(ask({ autoLength: true }), "u1", { key: "key-auto-1" });
+    assert.deepEqual([job.autoLength, job.durationSec], [true, undefined], "the length is not known until the clip is made");
+    await getStore().put("footage", { ...job, providerJobId: `mockft_${Date.now() - 10_000}_10` });
+    forgetFootageChecks();
+    const done = (await listFootage("u1")).find((f) => f.id === job.id)!;
+    assert.deepEqual([done.status, done.autoLength, done.durationSec], ["completed", true, 10], "the demo picks 10 seconds and reports them");
+    assert.equal((await startFootage(ask({ autoLength: true }), "u1", { key: "key-auto-1" })).id, job.id, "the length picked does not change what a retried start is compared on");
+    await assert.rejects(startFootage(ask({ durationSec: 10 }), "u1", { key: "key-auto-1" }), ConflictError, "asking for the picked length is another start");
+    const fixed = await startFootage(ask({ durationSec: 10 }), "u1", { key: "key-fixed-1" });
+    await assert.rejects(startFootage(ask({ autoLength: true }), "u1", { key: "key-fixed-1" }), ConflictError, "and so is leaving a fixed length to HeyGen");
+    assert.equal(fixed.autoLength, undefined);
   });
 
   it("are made in demo mode, followed until ready, named after the description, and kept private", async () => {
@@ -311,6 +328,26 @@ describe("generated clips", () => {
       await startFootage(ask({ image: png(7) }), "u1");
       const b64 = png(7).slice(png(7).indexOf(",") + 1);
       assert.deepEqual(calls[1].body, { model: "heygen-video-1", mode: "image_to_video", prompt: PROMPT, duration: 5, resolution: "768p", image: { type: "base64", media_type: "image/png", data: b64 } }, "a picture sets the shape, and goes as HeyGen's inline asset: no frame is sent");
+      // A length left to HeyGen goes as its "auto", and the length it reports once the clip is made is kept.
+      const auto = await startFootage(ask({ autoLength: true, image: png(8) }), "u1");
+      assert.equal(calls[2].body?.duration, "auto");
+      clip = { status: "completed", video_url: "https://resource2.heygen.ai/videos/auto.mp4", duration: 12, width: 1280, height: 720 };
+      forgetFootageChecks();
+      const listed = await listFootage("u1");
+      assert.deepEqual(listed.filter((f) => f.id === auto.id).map((f) => [f.status, f.durationSec]), [["completed", 12]]);
+      assert.deepEqual(listed.filter((f) => f.id === text.id).map((f) => [f.status, f.durationSec]), [["completed", 8]], "a length asked for is kept whatever HeyGen reports");
+      // A length HeyGen reports that is not a number of seconds is not taken; one is recorded whole.
+      for (const [duration, kept] of [["auto", undefined], [12.4, 12]] as const) {
+        await getStore().put("footage", { ...auto, status: "processing" as const });
+        clip = { status: "completed", video_url: "https://resource2.heygen.ai/videos/auto.mp4", duration };
+        forgetFootageChecks();
+        assert.equal((await listFootage("u1")).find((f) => f.id === auto.id)!.durationSec, kept, String(duration));
+      }
+      // Back to the start for the rest: the clips HeyGen is still making.
+      await getStore().remove("footage", auto.id);
+      await getStore().put("footage", text);
+      clip = { status: "pending" };
+      forgetFootageChecks();
 
       // Followed until HeyGen has it, then kept with its link and size.
       assert.equal((await listFootage("u1")).find((f) => f.id === text.id)!.status, "processing");

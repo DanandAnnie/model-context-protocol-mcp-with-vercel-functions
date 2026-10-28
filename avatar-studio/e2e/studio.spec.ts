@@ -1313,8 +1313,10 @@ test("a b-roll take is made again with changes, from its seed, longer or word fo
   await expect(prompt).toBeFocused();
   // Without exact wording the clip runs to 30 seconds, sent with no seed.
   await exact.uncheck();
+  await expect(length).toHaveAttribute("max", "30");
   await length.focus();
   await page.keyboard.press("End");
+  await expect(page.getByLabel("Length: 30 seconds")).toBeVisible();
   await prompt.fill(`A long dolly past a bakery window ${tag} from dawn to noon`);
   const long = page.waitForRequest((r) => r.url().endsWith("/api/footage") && r.method() === "POST");
   await page.getByRole("button", { name: "Make the clip" }).click();

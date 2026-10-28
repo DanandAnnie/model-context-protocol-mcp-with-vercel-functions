@@ -435,7 +435,9 @@ export default function FootagePage() {
                 <label htmlFor="footage-length" className="mb-1.5 block text-sm font-medium text-slate-700">
                   Length: {durationSec} seconds
                 </label>
-                <input id="footage-length" type="range" min={FOOTAGE_MIN_SEC} max={maxLength} step={1} value={durationSec} disabled={canEdit === false} aria-describedby="footage-length-hint" onChange={(e) => (setDurationSec(Number(e.target.value)), changed())} className="w-full accent-brand-600" />
+                {/* Keyed by its limit: a browser clamps a range's value itself when its max drops, which React does not
+                    see, so moving back to that value later would change nothing. A new input starts in step. */}
+                <input key={maxLength} id="footage-length" type="range" min={FOOTAGE_MIN_SEC} max={maxLength} step={1} value={durationSec} disabled={canEdit === false} aria-describedby="footage-length-hint" onChange={(e) => (setDurationSec(Number(e.target.value)), changed())} className="w-full accent-brand-600" />
                 <p id="footage-length-hint" className="mt-1 text-xs text-slate-500">
                   {maxLength === FOOTAGE_MAX_SEC_SHORT ? `Up to ${FOOTAGE_MAX_SEC_SHORT} seconds when the clip features pictures or follows the description exactly.` : `Up to ${maxLength} seconds.`}
                 </p>

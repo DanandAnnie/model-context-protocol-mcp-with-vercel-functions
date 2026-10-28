@@ -3174,6 +3174,11 @@ test("a workspace viewer sees view-only notices instead of create controls", asy
   await expect(page.getByRole("link", { name: "Create video" })).toHaveCount(1);
   await page.goto("/avatars");
   await expect(page.getByRole("button", { name: "New photo avatar" })).toBeDisabled();
+  // Arriving by a photo shoot's "Make a presenter" link opens no panel for a viewer; the address is cleaned.
+  await page.goto("/avatars?shoot=sh_viewer&photo=1");
+  await expect(page.getByTestId("view-only")).toBeVisible();
+  await expect(page).toHaveURL(/\/avatars$/);
+  await expect(page.getByLabel("Avatar name")).toHaveCount(0);
   // A voice of the space's own is listed for the viewer, without rename or delete.
   const sample = "data:audio/webm;base64," + Buffer.from("viewer sees this voice").toString("base64");
   const own = (await (await page.request.post("/api/voices/clone", { data: { name: `Viewer hears ${Date.now().toString(36)}`, samples: [sample] } })).json()).voice as { id: string; name: string };
@@ -4722,6 +4727,8 @@ test("a photo shoot's photo becomes a presenter, kept as a photo avatar", async 
     // The new photo avatar panel opens with that photo as the portrait; the name is what is left, and has the focus.
     await expect(page).toHaveURL(/\/avatars$/);
     await expect(page.getByRole("img", { name: `Portrait preview: photo 2 of Studio ${tag}` })).toBeVisible();
+    // Shown whole, in whatever shape the shoot made it, rather than cropped to the portrait tile.
+    await expect(page.getByRole("img", { name: `Portrait preview: photo 2 of Studio ${tag}` })).toHaveCSS("object-fit", "contain");
     await expect(page.getByRole("status").filter({ hasText: "The portrait is photo 2" })).toHaveText(`The portrait is photo 2 of “Studio ${tag}”. Name the presenter to create it, or upload another portrait.`);
     const create = page.getByRole("button", { name: "Create avatar" });
     await expect(create).toBeDisabled();

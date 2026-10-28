@@ -443,7 +443,8 @@ function CreateAvatarPanel({ shoot: fromShoot, voices, canGenerate, demo, onClos
             </>
           ) : preview ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={preview} alt={shoot ? `Portrait preview: photo ${shoot.photo} of ${shoot.title}` : "Portrait preview"} className="h-full w-full object-cover" />
+            // A photo shoot's photo can be any of nine shapes; it is shown whole, as the presenter will use it, not cropped to the tile.
+            <img src={preview} alt={shoot ? `Portrait preview: photo ${shoot.photo} of ${shoot.title}` : "Portrait preview"} className={`h-full w-full ${shoot ? "object-contain" : "object-cover"}`} />
           ) : (
             <>
               <Upload className="mb-2 h-6 w-6" />

@@ -69,6 +69,8 @@ export default function FootagePage() {
   const [exact, setExact] = useState(false);
   // A take to make again: a finished clip's seed, so only what is changed differs.
   const [take, setTake] = useState<{ seed: number; title: string } | null>(null);
+  // A take made again from a clip shaped like its first picture gets that shape back once a picture is featured.
+  const [restoreAdaptive, setRestoreAdaptive] = useState(false);
   const [reading, setReading] = useState(false);
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
@@ -137,7 +139,7 @@ export default function FootagePage() {
   useEffect(() => {
     if (durationSec > maxLength) {
       setDurationSec(maxLength);
-      setNote(`The length is now ${maxLength} seconds, the longest for a clip that features pictures or follows the description exactly.`);
+      say(setNote, `The length is now ${maxLength} seconds, the longest for a clip that features pictures or follows the description exactly.`);
     }
   }, [durationSec, maxLength]);
   const needsPicture = use === "frame" && !picture;
@@ -183,6 +185,10 @@ export default function FootagePage() {
         const added = { name: file.name, url: await toUploadable(file, { maxBytes: MAX_FEATURE_BYTES, maxEdge: 1536 }) };
         // (Removing is held while a picture is read, so the list is the one this pick was made on.)
         setFeatures((prev) => (prev.length < MAX_FOOTAGE_REFERENCES ? [...prev, added] : prev));
+        if (restoreAdaptive) {
+          setAspect("adaptive");
+          setRestoreAdaptive(false);
+        }
         // When the last one is added, the add control goes, so the focus moves to that picture's remove button.
         if (features.length + 1 >= MAX_FOOTAGE_REFERENCES) focusAfterRender(() => document.getElementById(`footage-feature-remove-${MAX_FOOTAGE_REFERENCES - 1}`));
       } else {
@@ -289,8 +295,13 @@ export default function FootagePage() {
     setQuality(f.quality);
     setExact(!!f.exact);
     setUse(f.references ? "feature" : f.fromPicture ? "frame" : "none");
-    // A clip shaped like its first picture is chosen so again once the pictures are added (it needs one featured).
-    if (f.aspect) setAspect(f.aspect);
+    // Pictures added for another clip are not this take's (they are not kept, so they are added again).
+    setPicture(null);
+    setFeatures([]);
+    // The clip's frame; a clip from pictures without one gets its first picture's shape back once one is added.
+    // (A first frame sets its own shape, and landscape meanwhile keeps an HD choice from being dropped.)
+    setAspect(f.aspect ?? "16:9");
+    setRestoreAdaptive(!!f.references && !f.aspect);
     setTake({ seed, title: f.title });
     changed();
     caretRef.current = null;
@@ -357,7 +368,7 @@ export default function FootagePage() {
                   {USES.map((u) => (
                     <Fragment key={u.value}>
                       <label className="flex min-h-6 items-center gap-2">
-                        <input type="radio" name="footage-use" className="accent-brand-600" checked={use === u.value} aria-describedby={`footage-use-hint-${u.value}`} disabled={reading} onChange={() => (setUse(u.value), changed())} />
+                        <input type="radio" name="footage-use" className="accent-brand-600" checked={use === u.value} aria-describedby={`footage-use-hint-${u.value}`} disabled={reading} onChange={() => (setUse(u.value), setRestoreAdaptive(false), changed())} />
                         {u.label}
                       </label>
                       {/* Each choice is described by its own hint (outside its label, so not part of its name); the
@@ -443,7 +454,16 @@ export default function FootagePage() {
                   <span>
                     The same take as “{take.title}” (seed {take.seed}): only what you change differs.
                   </span>
-                  <button type="button" onClick={() => (setTake(null), changed(), say(setNote, "A new take: HeyGen picks the seed."))} className="min-h-6 rounded border border-brand-200 bg-white px-2 py-0.5 font-medium text-brand-700 hover:bg-brand-100">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTake(null);
+                      changed();
+                      say(setNote, "A new take: HeyGen picks the seed.");
+                      // The button goes with the note it sits in, so the focus goes back to the description.
+                      focusAfterRender(() => promptRef.current);
+                    }}
+                    className="min-h-6 rounded border border-brand-200 bg-white px-2 py-0.5 font-medium text-brand-700 hover:bg-brand-100">
                     Use a new take
                   </button>
                 </div>
@@ -456,7 +476,7 @@ export default function FootagePage() {
                   <div className="flex flex-wrap gap-4 text-sm text-slate-700">
                     {FOOTAGE_ASPECTS.map((a) => (
                       <label key={a} className="flex min-h-6 items-center gap-2">
-                        <input type="radio" name="footage-frame" className="accent-brand-600" checked={shape === a} onChange={() => (setAspect(a), changed())} />
+                        <input type="radio" name="footage-frame" className="accent-brand-600" checked={shape === a} onChange={() => (setAspect(a), setRestoreAdaptive(false), changed())} />
                         {FRAMES[a]}
                       </label>
                     ))}
@@ -544,7 +564,7 @@ export default function FootagePage() {
                           <Download className="h-3 w-3" aria-hidden /> Download
                         </a>
                         {canEdit !== false && seedOf(f) !== undefined && (
-                          <button type="button" onClick={() => againWith(f)} className="inline-flex min-h-6 items-center gap-1 py-1 font-medium text-brand-700 hover:underline" aria-label={`Make ${f.title} again with changes`}>
+                          <button type="button" onClick={() => againWith(f)} disabled={busy} className="inline-flex min-h-6 items-center gap-1 py-1 font-medium text-brand-700 hover:underline disabled:opacity-60" aria-label={`Make ${f.title} again with changes`}>
                             <RotateCcw className="h-3 w-3" aria-hidden /> Make again with changes
                           </button>
                         )}

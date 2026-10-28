@@ -1306,11 +1306,23 @@ test("a b-roll take is made again with changes, from its seed, longer or word fo
   await expect(page.getByTestId("footage-take")).toHaveCount(0);
   const second = page.getByTestId("footage").filter({ hasText: `at dusk` }).filter({ hasText: tag });
   await expect(second).toHaveCount(1);
-  // A take dropped goes back to HeyGen choosing the seed.
+  // A take dropped goes back to HeyGen choosing the seed, and the focus goes back to the description.
   await first.getByRole("button", { name: /^Make .* again with changes$/ }).click();
   await page.getByRole("button", { name: "Use a new take" }).click();
   await expect(page.getByTestId("footage-take")).toHaveCount(0);
-  for (const id of [firstId, (await second.getAttribute("data-footage"))!]) expect((await page.request.delete(`/api/footage/${id}`)).ok()).toBe(true);
+  await expect(prompt).toBeFocused();
+  // Without exact wording the clip runs to 30 seconds, sent with no seed.
+  await exact.uncheck();
+  await length.focus();
+  await page.keyboard.press("End");
+  await prompt.fill(`A long dolly past a bakery window ${tag} from dawn to noon`);
+  const long = page.waitForRequest((r) => r.url().endsWith("/api/footage") && r.method() === "POST");
+  await page.getByRole("button", { name: "Make the clip" }).click();
+  const longBody = (await long).postDataJSON() as Record<string, unknown>;
+  expect([longBody.durationSec, "seed" in longBody, "exact" in longBody]).toEqual([30, false, false]);
+  const third = page.getByTestId("footage").filter({ hasText: `long dolly past a bakery window ${tag}` });
+  await expect(third.getByTestId("footage-meta")).toContainText("30 s · 16:9 · standard");
+  for (const id of [firstId, (await second.getAttribute("data-footage"))!, (await third.getAttribute("data-footage"))!]) expect((await page.request.delete(`/api/footage/${id}`)).ok()).toBe(true);
 });
 
 test("a b-roll clip is made from a description and loops behind a presenter as a scene's background", async ({ page }) => {

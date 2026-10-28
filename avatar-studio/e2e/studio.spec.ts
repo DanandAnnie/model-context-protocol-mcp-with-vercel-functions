@@ -4657,6 +4657,45 @@ test("HeyGen's Video Agent composes a video in a curated style chosen from its g
   expect(planned.status()).toBe(400);
 });
 
+test("a video HeyGen's Video Agent directed has its scenes edited into a new cut, keeping the rest", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const made = (await (await page.request.post("/api/video-agent", { data: { prompt: `A welcome for new bakery staff ${tag}`, mode: "direct" } })).json()).video as { id: string; title: string };
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${made.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  await page.goto(`/videos/${made.id}`);
+  const panel = page.getByTestId("scene-edits");
+  // Read on request (a heavy read at HeyGen), then one box per scene, each described by what it says.
+  await panel.getByRole("button", { name: "Open the scenes" }).click();
+  const first = panel.getByRole("textbox", { name: "What to change in scene 1" });
+  await expect(first).toBeFocused();
+  await expect(first).toHaveAccessibleDescription(/It says: “Welcome!/);
+  await expect(panel.getByRole("textbox", { name: /^What to change in scene/ })).toHaveCount(3);
+  const make = panel.getByRole("button", { name: "Make the edited cut" });
+  await expect(make).toBeDisabled();
+  await panel.getByRole("textbox", { name: "What to change in scene 2" }).fill(`Make the kitchen darker ${tag}; keep the narration.`);
+  await expect(panel.getByText("1 of 3 scenes to change")).toBeVisible();
+  const sent = page.waitForRequest((r) => r.url().endsWith(`/api/videos/${made.id}/scenes`) && r.method() === "POST");
+  await make.click();
+  const body = (await sent).postDataJSON() as { editVersion: string; edits: Array<{ sceneId: string; text: string }> };
+  expect(body.edits).toEqual([{ sceneId: expect.stringMatching(/_2$/), text: `Make the kitchen darker ${tag}; keep the narration.` }]);
+  // The cut is a new video, named after the one it edits, which it links to with what changed.
+  await page.waitForURL((u) => /\/videos\/vid_/.test(u.pathname) && !u.pathname.endsWith(made.id));
+  await expect(page.getByRole("heading", { name: `${made.title} (edited)` })).toBeVisible();
+  await expect(page.getByRole("link", { name: made.title, exact: true })).toHaveAttribute("href", `/videos/${made.id}`);
+  await expect(page.getByText(`Make the kitchen darker ${tag}; keep the narration.`)).toBeVisible();
+  await expect(page.getByText("Scene 2 changed")).toBeVisible();
+  // While the cut renders it has no scenes to edit yet.
+  await expect(page.getByTestId("scene-edits")).toHaveCount(0);
+  const cutId = new URL(page.url()).pathname.split("/").at(-1);
+  // The same edit sent again (a retried request) is the same cut, not a second render.
+  const again = await page.request.post(`/api/videos/${made.id}/scenes`, { data: body });
+  expect([again.status(), (await again.json()).video.id]).toEqual([201, cutId]);
+  // Sent against a version that moved on, the edit is a conflict to read again, and leaves no cut behind.
+  const stale = await page.request.post(`/api/videos/${made.id}/scenes`, { data: { editVersion: "mockev_1", edits: [{ sceneId: body.edits[0].sceneId, text: "Brighter" }] } });
+  expect(stale.status()).toBe(409);
+  const cuts = ((await (await page.request.get(`/api/videos?q=${encodeURIComponent(made.title)}`)).json()).videos as Array<{ title: string }>).filter((v) => v.title.endsWith("(edited)"));
+  expect(cuts).toHaveLength(1);
+});
+
 test("a photo shoot puts a person's face in a scene picture, with their consent, and lists the photos to download", async ({ page }) => {
   const tag = Date.now().toString(36);
   await page.goto("/photos");

@@ -13,6 +13,7 @@ import { ViewerEmails } from "@/components/ViewerEmails";
 import { VideoChapters } from "@/components/VideoChapters";
 import { OtherSizes } from "@/components/OtherSizes";
 import { HighlightClips } from "@/components/HighlightClips";
+import { DirectedSceneEdits } from "@/components/DirectedSceneEdits";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { captionsBurnedIn } from "@/lib/captions";
@@ -939,6 +940,13 @@ export default function VideoDetailPage() {
                       <Row label="Presenter">{video.directed.avatarName ?? "Chosen by HeyGen"}</Row>
                       <Row label="Voice">{video.directed.voiceName ?? "Chosen by HeyGen"}</Row>
                       <Row label="Style">{video.directed.styleName ?? "Chosen by HeyGen"}</Row>
+                      {video.directed.editOf && (
+                        <Row label="Edited from">
+                          <Link href={`/videos/${video.directed.editOf.videoId}`} className="text-brand-700 hover:underline [overflow-wrap:anywhere]">
+                            {video.directed.editOf.title}
+                          </Link>
+                        </Row>
+                      )}
                     </>
                   )}
                   {video.cinematic && (
@@ -1199,6 +1207,12 @@ export default function VideoDetailPage() {
                           <dd className="break-words">{video.directed.documentName}</dd>
                         </>
                       )}
+                      {video.directed.editOf?.edits.map((e) => (
+                        <div key={e.scene} className="contents">
+                          <dt className="text-slate-500">Scene {e.scene} changed</dt>
+                          <dd className="whitespace-pre-wrap break-words">{e.text}</dd>
+                        </div>
+                      ))}
                     </dl>
                     <p className="mt-2 text-xs text-slate-500">
                       {video.status === "failed"
@@ -1247,6 +1261,7 @@ export default function VideoDetailPage() {
               {/* Offered once the role is known to allow it, so a viewer never sees a button the server would refuse. */}
               {(canEdit === true || video.resizedFrom) && !video.studioTemplate && !described && <OtherSizes video={video} canEdit={canEdit === true} />}
               {video.status === "completed" && canEdit !== null && <HighlightClips video={video} canEdit={canEdit === true} />}
+              {video.directed && video.agentSessionId && video.status === "completed" && !video.deletedAt && canEdit === true && <DirectedSceneEdits video={video} />}
               <ReviewPanel video={video} onChange={(next) => setData({ video: next })} />
               <VideoComments videoId={video.id} player={video.status === "completed" && video.videoUrl ? player : undefined} />
             </div>

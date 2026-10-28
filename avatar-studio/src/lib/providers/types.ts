@@ -1,4 +1,4 @@
-import type { AgentStyle, AudioClip, Avatar, Backdrop, CaptionCue, HighlightClip, HighlightFrame, HighlightLength, StudioTemplate, StudioTemplateDetail, Translation, TranslationRequest, Video, VideoRequest, Voice, MusicTrack, AspectRatio } from "../types";
+import type { AgentStyle, AudioClip, Avatar, Backdrop, DirectedScene, CaptionCue, HighlightClip, HighlightFrame, HighlightLength, StudioTemplate, StudioTemplateDetail, Translation, TranslationRequest, Video, VideoRequest, Voice, MusicTrack, AspectRatio } from "../types";
 
 export interface TtsProvider {
   readonly name: string;
@@ -89,7 +89,11 @@ export interface AvatarProvider {
    * Starts a request's `directed` video from its brief (HeyGen's Video Agent), with the presenter (prepared) and voice
    * only when the request names them; HeyGen chooses otherwise. Absent when the renderer cannot.
    */
-  startDirected?(req: VideoRequest, avatar: Avatar | null, voice: Voice | null, videoId: string): Promise<{ providerJobId: string }>;
+  startDirected?(req: VideoRequest, avatar: Avatar | null, voice: Voice | null, videoId: string): Promise<{ providerJobId: string; agentSessionId?: string }>;
+  /** A finished directed render's scenes, in order, and the version of the whole document to edit them against. */
+  directedScenes?(renderJobId: string): Promise<{ editVersion: string; scenes: DirectedScene[] }>;
+  /** Revises the scenes named (one instruction each) of a render the session made; the new cut is another render to follow. */
+  editDirectedScenes?(input: { sessionId: string; renderJobId: string; editVersion: string; edits: Array<{ sceneId: string; text: string }> }): Promise<{ providerJobId: string }>;
   /** The curated styles its Video Agent composes in (`directed.styleId`), where it offers them. */
   listAgentStyles?(): Promise<AgentStyle[]>;
   /**

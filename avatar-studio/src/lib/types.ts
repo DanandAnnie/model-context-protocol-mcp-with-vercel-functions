@@ -794,7 +794,19 @@ export interface DirectedVideo {
   /** The curated style HeyGen's agent composed it in (`style_id`), by name as it was then. */
   styleId?: string;
   styleName?: string;
+  /** The directed video this cut revised, scene by scene, and what each changed scene (numbered from 1) was asked to become. */
+  editOf?: { videoId: string; title: string; edits: Array<{ scene: number; text: string }> };
 }
+
+/** One scene of a directed video as its renderer composed it: its id there, and the words spoken over it. */
+export interface DirectedScene {
+  id: string;
+  script: string;
+}
+
+/** Most scenes one edit changes, and longest instruction for one (HeyGen's limits). */
+export const MAX_SCENE_EDITS = 50;
+export const MAX_SCENE_EDIT_CHARS = 10_000;
 
 /** The groups HeyGen files its Video Agent styles under. */
 export const AGENT_STYLE_TAGS = ["cinematic", "retro-tech", "iconic-artist", "pop-culture", "handmade", "print"] as const;
@@ -994,6 +1006,8 @@ export interface Video extends VideoRequest {
   lastCtaClickAt?: string;
   provider: string;
   providerJobId?: string;
+  /** The renderer's Video Agent session a directed video was made in, kept after the job moves to its render, to edit its scenes. */
+  agentSessionId?: string;
   videoUrl?: string;
   thumbnailUrl?: string;
   /** The renderer's short animated GIF of the video, for an email; signed for a limited time and renewed when old. */

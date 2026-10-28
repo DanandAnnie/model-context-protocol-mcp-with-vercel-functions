@@ -1,4 +1,4 @@
-import { AGENT_STYLE_TAGS, STUDIO_VARIABLE_TYPES, backdropIdOf, footageIdOf, isPhotoAvatar, rendersOnAvatarV, type AgentStyle, type AgentStyleTag, type AudioClip, type Avatar, type Backdrop, type Background, type Scene, type StudioTemplate, type StudioTemplateDetail, type StudioVariable, type VideoRequest, type Voice, type MusicTrack } from "../../types";
+import { AGENT_STYLE_TAGS, STUDIO_VARIABLE_TYPES, backdropIdOf, footageIdOf, isPhotoAvatar, rendersOnAvatarV, type AgentStyle, type AgentStyleTag, type AudioClip, type DirectedScene, type Avatar, type Backdrop, type Background, type Scene, type StudioTemplate, type StudioTemplateDetail, type StudioVariable, type VideoRequest, type Voice, type MusicTrack } from "../../types";
 import { silentSeconds, withBreakTags } from "../../pauses";
 import type { LookPackKey } from "../../look-packs";
 import { heygenBurnsCaptions } from "../../captions";
@@ -898,7 +898,47 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       throw err;
     }
     if (!data.session_id) throw new Error("HeyGen's Video Agent answered without a session");
-    return { providerJobId: `${AGENT_JOB}${Date.now()}_${data.session_id}` };
+    return { providerJobId: `${AGENT_JOB}${Date.now()}_${data.session_id}`, agentSessionId: data.session_id };
+  }
+
+  /**
+   * A finished directed render's scenes (`GET /v3/videos/{id}/scenes`): each scene's id and its spoken words (the text
+   * items of its script, joined; uploaded audio and silences have none), and the document's `edit_version`.
+   */
+  async directedScenes(renderJobId: string): Promise<{ editVersion: string; scenes: DirectedScene[] }> {
+    let data;
+    try {
+      data = await this.client.videoScenes(renderJobId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      if (/ failed: 409 /.test(message)) throw new ValidationError("HeyGen is still preparing this video's scenes; try again in a minute");
+      if (/ failed: (400|404) /.test(message)) throw new ValidationError("HeyGen has no scenes to edit for this video");
+      throw err;
+    }
+    const scenes = (data.scenes ?? []).flatMap((sc) => (sc.id ? [{ id: sc.id, script: (sc.script ?? []).flatMap((i) => (i.type === "text" && i.text ? [i.text.trim()] : [])).join(" ") }] : []));
+    if (!data.edit_version || !scenes.length) throw new ValidationError("HeyGen has no scenes to edit for this video");
+    return { editVersion: data.edit_version, scenes };
+  }
+
+  /**
+   * Revises the scenes named of a render its session made (`POST /v3/video-agents/{session_id}` with an `edit_plan`, one
+   * item per scene against that render's `edit_version`); the other scenes keep their script and visuals. The new cut
+   * is another render, followed like any.
+   */
+  async editDirectedScenes({ sessionId, renderJobId, editVersion, edits }: { sessionId: string; renderJobId: string; editVersion: string; edits: Array<{ sceneId: string; text: string }> }): Promise<{ providerJobId: string }> {
+    let data;
+    try {
+      data = await this.client.sendVideoAgent(sessionId, { edit_plan: edits.map((e) => ({ scene_id: e.sceneId, text: e.text, scene_snapshot_video_id: renderJobId, edit_version: editVersion })) });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      if (/ failed: 409 /.test(message)) throw new ConflictError("The video's scenes changed since they were read; open them again and resend the changes");
+      if (/ failed: 402 /.test(message)) throw new ValidationError("The HeyGen account has no credits left for the Video Agent");
+      if (/ failed: 404 /.test(message)) throw new ValidationError("HeyGen no longer has the Video Agent session this video was made in, so its scenes cannot be edited");
+      if (/ failed: (400|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen's Video Agent could not make those changes: ${heygenReason(message, "describe the changes differently")}`);
+      throw err;
+    }
+    if (!data.video_id) throw new Error("HeyGen's Video Agent took the changes but named no new cut");
+    return { providerJobId: data.video_id };
   }
 
   /**

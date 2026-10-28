@@ -1,10 +1,11 @@
 // Video renders. Used by API routes only.
 import { z } from "zod";
+import { createHash } from "node:crypto";
 import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import { getStore } from "../store";
-import { EMPTY_WATCH, MAX_SCENES, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
-import type { AudioClip, Avatar, Backdrop, Background, CaptionCue, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
+import { EMPTY_WATCH, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
+import type { AudioClip, Avatar, Backdrop, Background, CaptionCue, DirectedScene, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
 import { buildCues } from "../captions";
 import { captionDurationSec, sceneBoundsMs, type Timed } from "../chapters";
 import { graphemes, wellFormed } from "../text";
@@ -1215,9 +1216,107 @@ export async function retryVideo(id: string, ownerId: string = LOCAL_OWNER): Pro
   if (purgeDue(failed, Date.now())) throw new NotFoundError(`Video ${id} not found`);
   if (failed.status !== "failed") throw new ConflictError("Only failed renders can be retried");
   if (failed.deletedAt) throw new ConflictError("Restore the video from the trash before retrying it");
+  // An edited cut is a turn of the session it was made in, not a brief to start again.
+  if (failed.directed?.editOf) throw new ConflictError(`An edited cut is not retried; edit the scenes of “${failed.directed.editOf.title}” again`);
   const req = requestOf(failed);
   // One write: the provider's webhook can land as soon as the job exists, so nothing may overwrite the stored video afterwards.
   return createVideo(req, ownerId, undefined, false, { folder: failed.folder, description: failed.description, batchId: failed.batchId, rowLabel: failed.rowLabel, retryOf: failed.id, resizedFrom: failed.resizedFrom });
+}
+
+/**
+ * A directed video whose scenes its renderer can revise: the account's, out of the trash, finished, and made in a
+ * Video Agent session the studio kept (videos made before sessions were kept, and edited cuts' sources alike).
+ */
+async function editableDirected(id: string, ownerId: string): Promise<{ video: Video & { agentSessionId: string; providerJobId: string }; provider: AvatarProvider }> {
+  const video = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
+  if (purgeDue(video, Date.now())) throw new NotFoundError(`Video ${id} not found`);
+  if (!video.directed) throw new ValidationError("Only a video HeyGen's Video Agent directed has scenes to edit here");
+  if (video.deletedAt) throw new ConflictError("Restore the video from the trash before editing its scenes");
+  if (video.status !== "completed") throw new ValidationError("Its scenes can be edited once the video is ready");
+  if (!video.agentSessionId || !video.providerJobId) throw new ValidationError("This video was made before its Video Agent session was kept, so its scenes cannot be edited; ask the agent again for a new one");
+  const provider = getAvatarProviderByName(video.provider);
+  if (!provider.directedScenes || !provider.editDirectedScenes) throw new ValidationError(`Scene edits are not available with the ${video.provider} renderer`);
+  return { video: video as Video & { agentSessionId: string; providerJobId: string }, provider };
+}
+
+/** A finished directed video's scenes as its renderer holds them, in order, with the version edits are sent against. */
+export async function directedVideoScenes(id: string, ownerId: string = LOCAL_OWNER): Promise<{ editVersion: string; scenes: DirectedScene[] }> {
+  const { video, provider } = await editableDirected(id, ownerId);
+  return provider.directedScenes!(video.providerJobId);
+}
+
+export const sceneEditSchema = z
+  .object({
+    /** The version the scenes were read at (`GET /api/videos/:id/scenes`); a later one is a conflict to read again. */
+    editVersion: z.string("Open the video's scenes first").min(1, "Open the video's scenes first").max(500),
+    edits: z
+      .array(
+        z
+          .object({
+            sceneId: z.string("Name the scene to change").min(1, "Name the scene to change").max(200),
+            text: z.string("Describe the change to the scene").trim().min(3, "Describe the change to each scene in a few words").max(MAX_SCENE_EDIT_CHARS, `A change to one scene is at most ${MAX_SCENE_EDIT_CHARS.toLocaleString("en-US")} characters`),
+          })
+          .strict(),
+        "Describe a change to at least one scene",
+      )
+      .superRefine((edits, ctx) => {
+        if (!edits.length) return void ctx.addIssue({ code: "custom", message: "Describe a change to at least one scene" });
+        if (edits.length > MAX_SCENE_EDITS) return void ctx.addIssue({ code: "custom", message: `One edit changes at most ${MAX_SCENE_EDITS} scenes` });
+        if (new Set(edits.map((e) => e.sceneId)).size !== edits.length) ctx.addIssue({ code: "custom", message: "Describe each scene's change once" });
+      }),
+  })
+  .strict();
+
+/**
+ * A new cut of a finished directed video with the scenes named changed as described (HeyGen's Video Agent scene edit);
+ * the other scenes keep their script and visuals. The scenes are read again first, so a version that moved on is a
+ * conflict and every scene named is the video's, numbered for the record. The cut is another library video, counted
+ * and followed like any render; the video it edits is kept as it was. The same edit sent again (a retried request, a
+ * second tab) is the same cut: its id is derived from the video, the version, and the changes.
+ */
+export async function editDirectedVideo(id: string, input: z.infer<typeof sceneEditSchema>, ownerId: string = LOCAL_OWNER): Promise<Video> {
+  const { video, provider } = await editableDirected(id, ownerId);
+  const changes = [...input.edits].sort((a, b) => a.sceneId.localeCompare(b.sceneId)).map((e) => [e.sceneId, e.text]);
+  const cutId = `vid_${createHash("sha256").update(`${ownerId}\0scene-edit\0${video.id}\0${input.editVersion}\0${JSON.stringify(changes)}`).digest("base64url").slice(0, 24)}`;
+  const held = await getStore().get<Video>("video", cutId);
+  if (held && held.ownerId === ownerId) return held;
+  await enforceRenderLimit(ownerId);
+  const { editVersion, scenes } = await provider.directedScenes!(video.providerJobId);
+  if (editVersion !== input.editVersion) throw new ConflictError("The video's scenes changed since they were read; open them again and resend the changes");
+  const edits = input.edits
+    .map((e) => {
+      const at = scenes.findIndex((s) => s.id === e.sceneId);
+      if (at < 0) throw new ValidationError("A scene named is not one of this video's; open its scenes again");
+      return { scene: at + 1, text: e.text };
+    })
+    .sort((a, b) => a.scene - b.scene);
+  const title = /\(edited\)$/.test(video.title) ? video.title : `${fitTitle(video.title, 120 - " (edited)".length)} (edited)`;
+  const base: Video = {
+    ...requestOf(video),
+    title,
+    directed: { ...video.directed!, editOf: { videoId: video.id, title: video.title, edits } },
+    ...stripUndefined({ folder: video.folder, avatarName: video.avatarName, voiceName: video.voiceName }),
+    id: cutId,
+    ownerId,
+    status: "queued",
+    provider: video.provider,
+    agentSessionId: video.agentSessionId,
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  };
+  // Sent before anything is stored: HeyGen refusing the changes (the version moved on, a scene not the video's, a reason
+  // of its own) is answered as such, with no failed cut left in the library; any other failure is kept as one, like any start.
+  let started: { providerJobId: string } | Error;
+  try {
+    started = await provider.editDirectedScenes!({ sessionId: video.agentSessionId, renderJobId: video.providerJobId, editVersion, edits: input.edits.map((e) => ({ sceneId: e.sceneId, text: e.text })) });
+  } catch (err) {
+    if (err instanceof ConflictError || err instanceof ValidationError) throw err;
+    started = err instanceof Error ? err : new Error(String(err));
+  }
+  return startReserved(base, ownerId, true, async () => {
+    if (started instanceof Error) throw started;
+    return started;
+  });
 }
 
 /** How long a keyed render's reserved row stands for a start still being sent (a function is cut off well before). */
@@ -1258,7 +1357,7 @@ async function createStudioTemplateVideo(req: VideoRequest & { studioTemplate: N
  * reserved long ago whose start never came back (the function died) is started again; the renderer gets the same key,
  * so it is not rendered twice there.
  */
-async function startReserved(base: Video, ownerId: string, keyed: boolean, send: () => Promise<{ providerJobId: string }>, onStarted?: () => void): Promise<Video> {
+async function startReserved(base: Video, ownerId: string, keyed: boolean, send: () => Promise<{ providerJobId: string; agentSessionId?: string }>, onStarted?: () => void): Promise<Video> {
   if (keyed) {
     if (!(await getStore().insert("video", base))) {
       const held = await getStore().get<Video>("video", base.id);
@@ -1269,8 +1368,10 @@ async function startReserved(base: Video, ownerId: string, keyed: boolean, send:
     }
   }
   try {
-    const { providerJobId } = await send();
+    const { providerJobId, agentSessionId } = await send();
     base.providerJobId = providerJobId;
+    // A directed video's session outlives its first job, so its scenes can be edited once it renders.
+    if (agentSessionId) base.agentSessionId = agentSessionId;
     base.status = "processing";
   } catch (err) {
     base.status = "failed";

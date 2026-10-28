@@ -2,8 +2,8 @@ import { spokenWords } from "../../captions";
 import { pauseSeconds, stripPauses } from "../../pauses";
 import { SAMPLE_PREVIEW_VIDEO, STOCK_AVATARS, portraitSvg } from "../../stock";
 import { demoAssetUrl } from "../../config";
-import { NotFoundError } from "../../errors";
-import type { AgentStyle, AudioClip, Avatar, MusicTrack, StudioTemplate, StudioTemplateDetail, VideoRequest } from "../../types";
+import { ConflictError, NotFoundError, ValidationError } from "../../errors";
+import type { AgentStyle, AudioClip, Avatar, DirectedScene, MusicTrack, StudioTemplate, StudioTemplateDetail, VideoRequest } from "../../types";
 import type { AvatarJobStatus, AvatarProvider, CleanupStatus, FootageStatus, HighlightInput, HighlightStatus, LipsyncStatus, ShootStatus } from "../types";
 import { SHOOT_ASPECTS, type ShootAspect } from "../../types";
 
@@ -18,6 +18,9 @@ function shootSvg(width: number, height: number, seed: number): string {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${hue},60%,55%)"/><stop offset="1" stop-color="hsl(${(hue + 60) % 360},60%,35%)"/></linearGradient></defs><rect width="${w}" height="${h}" fill="url(#g)"/><circle cx="${w / 2}" cy="${h / 2 - r}" r="${r}" fill="rgba(255,255,255,0.9)"/><path d="M${w / 2 - 2 * r} ${h} C${w / 2 - 2 * r} ${h / 2 + r} ${w / 2 + 2 * r} ${h / 2 + r} ${w / 2 + 2 * r} ${h} Z" fill="rgba(255,255,255,0.9)"/></svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
+
+/** What the demo's directed videos say, scene by scene (the sample video does not change with them). */
+const DEMO_DIRECTED_SCENES = ["Welcome! Here is what this short video covers.", "The main point, in a few clear sentences.", "Thanks for watching; here is what to do next."];
 
 /** The demo's Video Agent styles, one per HeyGen style group, each drawn in its own colour. */
 const DEMO_AGENT_STYLES: Array<Omit<AgentStyle, "thumbnailUrl" | "previewUrl"> & { hue: number }> = [
@@ -287,8 +290,24 @@ export class MockAvatarProvider implements AvatarProvider {
    * A demo stand-in for HeyGen's Video Agent: the sample video, rendered as a 30-second job. Like HeyGen's, the job
    * starts as the agent's session and moves to its render halfway (see `getStatus`); the brief is not read.
    */
-  async startDirected(): Promise<{ providerJobId: string }> {
-    return { providerJobId: `mockagent_${Date.now()}` };
+  async startDirected(): Promise<{ providerJobId: string; agentSessionId: string }> {
+    const now = Date.now();
+    return { providerJobId: `mockagent_${now}`, agentSessionId: `mocksess_${now}` };
+  }
+
+  /** A demo directed render's three scenes, their ids and edit version drawn from the render's own id. */
+  async directedScenes(renderJobId: string): Promise<{ editVersion: string; scenes: DirectedScene[] }> {
+    const m = /^mock_(\d+)_\d+$/.exec(renderJobId);
+    if (!m) throw new ValidationError("The demo renderer has no scenes to edit for this video");
+    return { editVersion: `mockev_${m[1]}`, scenes: DEMO_DIRECTED_SCENES.map((script, i) => ({ id: `mockscene_${m[1]}_${i + 1}`, script })) };
+  }
+
+  /** A demo scene edit: checked like HeyGen's (the version current, every scene the render's), then a new sample render. */
+  async editDirectedScenes({ renderJobId, editVersion, edits }: { sessionId: string; renderJobId: string; editVersion: string; edits: Array<{ sceneId: string; text: string }> }): Promise<{ providerJobId: string }> {
+    const { editVersion: current, scenes } = await this.directedScenes(renderJobId);
+    if (editVersion !== current) throw new ConflictError("The video's scenes changed since they were read; open them again and resend the changes");
+    if (edits.some((e) => !scenes.some((s) => s.id === e.sceneId))) throw new ValidationError("HeyGen's Video Agent could not make those changes: a scene named is not one of this video's");
+    return { providerJobId: `mock_${Date.now()}_30` };
   }
 
   /** Demo stand-ins for HeyGen's Video Agent styles: drawn cards, one per group, and the sample video as each one's sample. */

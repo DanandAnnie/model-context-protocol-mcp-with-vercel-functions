@@ -448,6 +448,17 @@ export class HeyGenClient {
     return this.listAll<Style>("/video-agents/styles", 100, 5);
   }
 
+  /** A video's scenes as its editor document holds them (`GET /v3/videos/{id}/scenes`), with the document's edit version. */
+  videoScenes(videoId: string) {
+    type ScriptItem = { type?: string; text?: string | null };
+    return this.request<{ video_id?: string; edit_version?: string; scenes?: Array<{ id?: string; script?: ScriptItem[] | null }> }>(`${V3}/videos/${encodeURIComponent(videoId)}/scenes`, { signal: AbortSignal.timeout(15_000) });
+  }
+
+  /** A turn of a Video Agent session (`POST /v3/video-agents/{session_id}`): here, a scene `edit_plan`; it answers with the new draft. */
+  sendVideoAgent(sessionId: string, body: Record<string, unknown>) {
+    return this.request<{ session_id?: string; video_id?: string | null }>(`${V3}/video-agents/${encodeURIComponent(sessionId)}`, { method: "POST", body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
+  }
+
   /** A Video Agent session: its status, and the video it renders once it has one. */
   videoAgentStatus(sessionId: string) {
     return this.request<{ session_id?: string; status?: string; video_id?: string | null; failure_message?: string | null; error?: string | null }>(`${V3}/video-agents/${encodeURIComponent(sessionId)}`, { signal: AbortSignal.timeout(10_000) });

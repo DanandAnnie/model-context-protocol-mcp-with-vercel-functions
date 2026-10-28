@@ -6,9 +6,9 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
-import { addSubtitles, applyAvatarWebhook, createTemplate, directAgentVideo, getAvatar, getVideo, queryVideos, resizeVideo, retryVideo, saveCaptionCues, videoAgentSchema, videoQuerySchema } from "../services";
+import { addSubtitles, applyAvatarWebhook, createTemplate, directAgentVideo, directedVideoScenes, editDirectedVideo, sceneEditSchema, getAvatar, getVideo, queryVideos, resizeVideo, retryVideo, saveCaptionCues, videoAgentSchema, videoQuerySchema } from "../services";
 import { asksForPortrait, generateAgentVideo, listAgentStyles, planVideo } from "../services/video-agent";
-import { NotFoundError, ValidationError } from "../errors";
+import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { shareBodyFor } from "../share-body";
 import { providerStatus } from "../providers";
 import { HEYGEN_LOOK_KEY, HeyGenAvatarProvider } from "../providers/avatar/heygen";
@@ -238,6 +238,140 @@ describe("videos HeyGen's Video Agent directs", () => {
       const req = { title: "x", script: "", avatarId: "", voiceId: "", aspect: "16:9" as const, resolution: "1080p" as const, background: { type: "color" as const, value: "#000000" }, captions: false, speed: 1, directed: { brief: "The brief.", prompt: "The brief.", orientation: "landscape" as const, lengthSec: 60, language: "English", styleId: "style_noir", styleName: "Noir Detective" } };
       await provider.startDirected(req, null, null, "vid_styled");
       assert.deepEqual(bodies[0], { prompt: "The brief.", mode: "generate", orientation: "landscape", style_id: "style_noir" });
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it("edits a finished video's scenes into a new cut, keeping the video it edits, in the session it was made in", async () => {
+    const started = await directAgentVideo(videoAgentSchema.parse({ ...ASK, styleId: "demo_style_noir" }), "u1");
+    assert.match(started.agentSessionId ?? "", /^mocksess_\d+$/, "the agent's session is kept from the start");
+    await assert.rejects(directedVideoScenes(started.id, "u1"), /once the video is ready/);
+    // Finished: the session's render, a while ago.
+    const done: Video = { ...started, status: "completed", providerJobId: `mock_${Date.now() - 60_000}_30`, videoUrl: "/demo/render.webm" };
+    await getStore().put("video", done);
+    const { editVersion, scenes } = await directedVideoScenes(done.id, "u1");
+    assert.equal(scenes.length, 3);
+    assert.match(scenes[0].script, /Welcome/);
+    await assert.rejects(directedVideoScenes(done.id, "u2"), NotFoundError, "another account's reads as not found");
+    // The request: one change per scene, described in a few words, at most 50.
+    const ask = (edits: unknown, version = editVersion) => sceneEditSchema.parse({ editVersion: version, edits });
+    assert.throws(() => ask([]), /at least one scene/);
+    assert.throws(() => ask([{ sceneId: scenes[0].id, text: "ok" }]), /in a few words/);
+    assert.throws(() => ask([{ sceneId: scenes[0].id, text: "Darker room" }, { sceneId: scenes[0].id, text: "Brighter room" }]), /each scene's change once/);
+    assert.throws(() => ask(Array.from({ length: 51 }, (_, i) => ({ sceneId: `s${i}`, text: "Change it" }))), /at most 50 scenes/);
+    assert.throws(() => sceneEditSchema.parse({ editVersion, edits: [{ sceneId: scenes[0].id, text: "Darker", extra: 1 }] }), /extra/);
+    // Read against an older version, or naming a scene that is not the video's: refused before anything is sent.
+    await assert.rejects(editDirectedVideo(done.id, ask([{ sceneId: scenes[1].id, text: "Make the room darker" }], "mockev_1"), "u1"), ConflictError);
+    await assert.rejects(editDirectedVideo(done.id, ask([{ sceneId: "mockscene_0_9", text: "Make the room darker" }]), "u1"), /not one of this video's/);
+    assert.equal((await getStore().list<Video>("video", "u1")).length, 1, "neither left a cut behind");
+    const cut = await editDirectedVideo(done.id, ask([{ sceneId: scenes[2].id, text: "End on: available now." }, { sceneId: scenes[1].id, text: "Make the room darker; keep the narration." }]), "u1");
+    assert.equal(cut.status, "processing");
+    assert.notEqual(cut.id, done.id);
+    assert.match(cut.providerJobId ?? "", /^mock_\d+_30$/, "the new cut is a render to follow");
+    assert.deepEqual([cut.title, cut.agentSessionId, cut.aspect, cut.directed?.styleName], [`${done.title} (edited)`, done.agentSessionId, done.aspect, "Noir detective"]);
+    assert.deepEqual(cut.directed?.editOf, { videoId: done.id, title: done.title, edits: [{ scene: 2, text: "Make the room darker; keep the narration." }, { scene: 3, text: "End on: available now." }] }, "numbered, in order");
+    assert.equal((await getVideo(done.id, "u1", false)).status, "completed", "the video edited is kept as it was");
+    // An edit of an edit stays named once; a failed cut is not retried from the brief.
+    const again = await editDirectedVideo(cut.id, ask([{ sceneId: `mockscene_${cut.providerJobId!.split("_")[1]}_1`, text: "A warmer welcome" }], `mockev_${cut.providerJobId!.split("_")[1]}`), "u1").catch((e) => e);
+    assert.match(String(again), /once the video is ready/, "a cut still rendering cannot be edited yet");
+    await getStore().put("video", { ...cut, status: "completed", providerJobId: `mock_${Date.now() - 60_000}_30` });
+    const chained = await directedVideoScenes(cut.id, "u1");
+    assert.equal((await editDirectedVideo(cut.id, ask([{ sceneId: chained.scenes[0].id, text: "A warmer welcome" }], chained.editVersion), "u1")).title, `${done.title} (edited)`);
+    await getStore().put("video", { ...cut, status: "failed", error: "HeyGen gave up" });
+    await assert.rejects(retryVideo(cut.id, "u1"), /edit the scenes of/);
+    // Not directed, or directed before sessions were kept, or in the trash: nothing to edit.
+    const { agentSessionId: _s, ...old } = done;
+    void _s;
+    await getStore().put("video", { ...old, id: "vid_old" });
+    await assert.rejects(directedVideoScenes("vid_old", "u1"), /before its Video Agent session was kept/);
+    await getStore().put("video", { ...done, id: "vid_binned", deletedAt: new Date().toISOString() });
+    await assert.rejects(directedVideoScenes("vid_binned", "u1"), /from the trash/);
+    const { directed: _d, ...plain } = done;
+    void _d;
+    await getStore().put("video", { ...plain, id: "vid_plain" });
+    await assert.rejects(directedVideoScenes("vid_plain", "u1"), /Only a video HeyGen's Video Agent directed/);
+  });
+
+  it("answers HeyGen refusing the changes as such, with no failed cut left behind, and keeps a cut it started", async () => {
+    const { config } = await import("../config");
+    const saved = { key: config.heygenApiKey };
+    const realFetch = globalThis.fetch;
+    let editAnswer = () => Response.json({ error: { code: "stale_edit_version", message: "stale" } }, { status: 409 });
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "https://api.heygen.com/v3/videos/hg_vid_1/scenes") return Response.json({ data: { edit_version: "ev_1", scenes: [{ id: "sc_a", script: [{ type: "text", text: "Hi." }] }] } });
+      if (url === "https://api.heygen.com/v3/video-agents/sess_1" && init?.method === "POST") return editAnswer();
+      return new Response("unexpected", { status: 500 });
+    }) as typeof fetch;
+    Object.assign(config, { heygenApiKey: "hg_key" });
+    try {
+      const source: Video = { id: "vid_hg", ownerId: "u1", title: "Bakery welcome", script: "", avatarId: "", voiceId: "", aspect: "16:9", resolution: "1080p", background: { type: "color", value: "#000000" }, captions: false, speed: 1, status: "completed", provider: "heygen", providerJobId: "hg_vid_1", agentSessionId: "sess_1", directed: { brief: "b", prompt: "b", orientation: "landscape", lengthSec: 60, language: "English" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      await getStore().put("video", source);
+      const plan = sceneEditSchema.parse({ editVersion: "ev_1", edits: [{ sceneId: "sc_a", text: "Make it warmer" }] });
+      await assert.rejects(editDirectedVideo("vid_hg", plan, "u1"), ConflictError, "HeyGen's stale version is a conflict to read again");
+      editAnswer = () => Response.json({ error: { code: "invalid_parameter", message: "scene_id not in snapshot" } }, { status: 400 });
+      await assert.rejects(editDirectedVideo("vid_hg", plan, "u1"), /could not make those changes: scene_id not in snapshot/);
+      assert.deepEqual((await getStore().list<Video>("video", "u1")).map((v) => v.id), ["vid_hg"], "no failed cut is left in the library");
+      // Trouble at HeyGen's end is kept as a failed cut, like any start; the same edit sent again is that cut, not another.
+      editAnswer = () => new Response("upstream", { status: 503 });
+      const failed = await editDirectedVideo("vid_hg", plan, "u1");
+      assert.equal(failed.status, "failed");
+      assert.equal((await editDirectedVideo("vid_hg", plan, "u1")).id, failed.id);
+      editAnswer = () => Response.json({ data: { session_id: "sess_1", video_id: "hg_cut_2" } });
+      const other = sceneEditSchema.parse({ editVersion: "ev_1", edits: [{ sceneId: "sc_a", text: "Make it cooler" }] });
+      const cut = await editDirectedVideo("vid_hg", other, "u1");
+      assert.deepEqual([cut.status, cut.providerJobId, cut.agentSessionId], ["processing", "hg_cut_2", "sess_1"]);
+    } finally {
+      globalThis.fetch = realFetch;
+      Object.assign(config, { heygenApiKey: saved.key });
+    }
+  });
+
+  it("reads a render's scenes from HeyGen and sends the changes as an edit plan against that render", async () => {
+    const realFetch = globalThis.fetch;
+    const posts: Array<{ url: string; body: Record<string, unknown> }> = [];
+    let editAnswer: Response = Response.json({ data: { session_id: "sess_1", video_id: "hg_cut_2" } });
+    let scenesAnswer: () => Response = () =>
+      Response.json({
+        data: {
+          video_id: "hg_vid_1",
+          edit_version: "ev_1",
+          scenes: [
+            { id: "sc_a", script: [{ type: "text", text: "Hello there. " }, { type: "silence", duration: 1 }, { type: "text", text: "Welcome in." }] },
+            { id: "sc_b", script: [{ type: "audio", audio_url: "https://x/a.mp3" }] },
+            { script: [{ type: "text", text: "No id" }] },
+          ],
+        },
+      });
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "https://api.heygen.com/v3/videos/hg_vid_1/scenes") return scenesAnswer();
+      if (url === "https://api.heygen.com/v3/video-agents/sess_1" && init?.method === "POST") {
+        posts.push({ url, body: JSON.parse(String(init.body)) });
+        return editAnswer;
+      }
+      if (url === "https://api.heygen.com/v3/video-agents" && init?.method === "POST") return Response.json({ data: { session_id: "sess_1", status: "thinking", video_id: null } });
+      return new Response("unexpected", { status: 500 });
+    }) as typeof fetch;
+    try {
+      const provider = new HeyGenAvatarProvider("hg_key");
+      const req = { title: "x", script: "", avatarId: "", voiceId: "", aspect: "16:9" as const, resolution: "1080p" as const, background: { type: "color" as const, value: "#000000" }, captions: false, speed: 1, directed: { brief: "b", prompt: "b", orientation: "landscape" as const, lengthSec: 60, language: "English" } };
+      assert.equal((await provider.startDirected(req, null, null, "vid_x")).agentSessionId, "sess_1", "the session comes back with the start");
+      assert.deepEqual(await provider.directedScenes("hg_vid_1"), { editVersion: "ev_1", scenes: [{ id: "sc_a", script: "Hello there. Welcome in." }, { id: "sc_b", script: "" }] }, "spoken words only; a scene without an id is left out");
+      assert.deepEqual(await provider.editDirectedScenes({ sessionId: "sess_1", renderJobId: "hg_vid_1", editVersion: "ev_1", edits: [{ sceneId: "sc_b", text: "Darker" }] }), { providerJobId: "hg_cut_2" });
+      assert.deepEqual(posts[0].body, { edit_plan: [{ scene_id: "sc_b", text: "Darker", scene_snapshot_video_id: "hg_vid_1", edit_version: "ev_1" }] });
+      const plan = { sessionId: "sess_1", renderJobId: "hg_vid_1", editVersion: "ev_1", edits: [{ sceneId: "sc_b", text: "Darker" }] };
+      editAnswer = Response.json({ error: { code: "stale_edit_version", message: "stale" } }, { status: 409 });
+      await assert.rejects(provider.editDirectedScenes(plan), ConflictError);
+      editAnswer = Response.json({ error: { code: "invalid_parameter", message: "scene_id not in snapshot" } }, { status: 400 });
+      await assert.rejects(provider.editDirectedScenes(plan), /could not make those changes: scene_id not in snapshot/);
+      editAnswer = Response.json({ data: { session_id: "sess_1", video_id: null } });
+      await assert.rejects(provider.editDirectedScenes(plan), /named no new cut/);
+      scenesAnswer = () => Response.json({ error: { code: "resource_not_ready" } }, { status: 409 });
+      await assert.rejects(provider.directedScenes("hg_vid_1"), /still preparing this video's scenes/);
+      scenesAnswer = () => Response.json({ error: { code: "video_not_found" } }, { status: 404 });
+      await assert.rejects(provider.directedScenes("hg_vid_1"), /no scenes to edit/);
     } finally {
       globalThis.fetch = realFetch;
     }

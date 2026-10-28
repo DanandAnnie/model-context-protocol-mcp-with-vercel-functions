@@ -4738,8 +4738,8 @@ test("HeyGen's Video Agent is given the account's own pictures to use, named on 
   expect(asked[1].id).toBe(storefront);
   await page.waitForURL(/\/videos\/vid_/);
   const id = new URL(page.url()).pathname.split("/").at(-1)!;
-  // Named on the video's page, in the order chosen.
-  await expect(page.getByText(`counter-${tag}; Storefront ${tag}`, { exact: true })).toBeVisible();
+  // Named on the video's page, one per line, in the order chosen.
+  await expect(page.getByRole("list", { name: "Pictures and clips HeyGen's agent was given" }).getByRole("listitem")).toHaveText([`counter-${tag}`, `Storefront ${tag}`]);
   // Asked again once the uploaded one was deleted, the one still there is chosen, by name, and the page says one is not.
   const uploaded = ((await (await page.request.get(`/api/videos/${id}`)).json()).video as { directed: { media: Array<{ id: string }> } }).directed.media[0].id;
   expect((await page.request.delete(`/api/backdrops/${uploaded}`)).ok()).toBe(true);

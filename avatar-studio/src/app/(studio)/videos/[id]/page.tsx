@@ -1211,7 +1211,16 @@ export default function VideoDetailPage() {
                       {video.directed.media?.length ? (
                         <>
                           <dt className="text-slate-500">Pictures and clips</dt>
-                          <dd className="break-words">{video.directed.media.map((m) => m.name || (m.kind === "clip" ? "A clip" : m.kind === "photo" ? "A photo" : "A picture")).join("; ")}</dd>
+                          <dd className="min-w-0">
+                            {/* One per line: a run of long names joined in a sentence is hard to read. */}
+                            <ul aria-label="Pictures and clips HeyGen's agent was given" className="space-y-0.5">
+                              {video.directed.media.map((m, i) => (
+                                <li key={i} className="[overflow-wrap:anywhere]">
+                                  {m.name || (m.kind === "clip" ? "A clip" : m.kind === "photo" ? "A photo" : "A picture")}
+                                </li>
+                              ))}
+                            </ul>
+                          </dd>
                         </>
                       ) : null}
                       {video.directed.editOf?.edits.map((e) => (

@@ -4599,3 +4599,67 @@ test("HeyGen's Video Agent directs a whole video from a brief, and is asked agai
   expect(square.status()).toBe(400);
   expect((await square.json()).error).toMatch(/landscape or portrait/);
 });
+
+test("a photo shoot puts a person's face in a scene picture, with their consent, and lists the photos to download", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  await page.goto("/photos");
+  await expect(page.getByRole("link", { name: "Photo shoot" })).toBeVisible();
+  const make = page.getByRole("button", { name: "Make the photos" });
+  await expect(make).toBeDisabled();
+  await expect(make).toHaveAccessibleDescription("Add a photo of the person first.");
+  const person = page.getByLabel("Add a photo of the person");
+  await expect(person).toHaveAccessibleDescription(/1 to 5 clear photos of one person's face/);
+  await person.setInputFiles({ name: "front.png", mimeType: "image/png", buffer: Buffer.from(TINY_PNG, "base64") });
+  await expect(page.getByRole("img", { name: "Photo 1 of the person: front.png" })).toBeVisible();
+  await page.getByLabel("Add another photo of the person").setInputFiles({ name: "side.png", mimeType: "image/png", buffer: Buffer.from(TINY_PNG, "base64") });
+  await expect(page.getByText("2 of 5 photos")).toBeVisible();
+  await expect(make).toHaveAccessibleDescription("Add the scene picture.");
+  await page.getByLabel("Add the scene picture").setInputFiles({ name: "train.png", mimeType: "image/png", buffer: Buffer.from(TINY_PNG, "base64") });
+  // The scene's add control gives way to the picture, and the focus goes to its remove button.
+  await expect(page.getByRole("button", { name: "Remove the scene picture, train.png" })).toBeFocused();
+  await expect(make).toHaveAccessibleDescription("Confirm that you have the right to use this person's face.");
+  const consent = page.getByLabel("I have the right to use this person's face");
+  await expect(consent).toHaveAccessibleDescription(/A public photo is not permission/);
+  await consent.check();
+  await expect(make).toBeEnabled();
+  // Removing a photo of the person is announced, and the focus goes back to the add control.
+  await page.getByRole("button", { name: "Remove photo 2 of the person, side.png" }).click();
+  await expect(page.locator('p[role="status"]')).toHaveText("Photo 2 of the person removed (side.png).");
+  await expect(page.getByLabel("Add another photo of the person")).toBeFocused();
+  await page.getByLabel("Add another photo of the person").setInputFiles({ name: "side.png", mimeType: "image/png", buffer: Buffer.from(TINY_PNG, "base64") });
+  await page.getByLabel("Shape").selectOption("4:5");
+  await page.getByLabel("Photos", { exact: true }).selectOption("2");
+  await page.getByLabel("Title (optional)").fill(`Train window ${tag}`);
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/shoots") && r.method() === "POST");
+  await make.click();
+  const request = await sent;
+  const body = request.postDataJSON() as { identity: string[]; reference: string; aspect: string; count: number; consent: boolean; title: string };
+  expect([body.identity.length, body.aspect, body.count, body.consent, body.title]).toEqual([2, "4:5", 2, true, `Train window ${tag}`]);
+  expect([...body.identity, body.reference].every((p) => p.startsWith("data:image/png;base64,"))).toBe(true);
+  expect(request.headers()["idempotency-key"]).toMatch(/^[A-Za-z0-9_-]{8,100}$/);
+  const item = page.getByTestId("shoot").filter({ hasText: `Train window ${tag}` });
+  await expect(item).toBeFocused();
+  await expect(item.getByTestId("shoot-meta")).toContainText("2 photos · 4:5 · from 2 photos of the person");
+  // The person stays for another scene; the scene and the consent go with the shoot.
+  await expect(page.getByTestId("shoot-person")).toHaveCount(2);
+  await expect(page.getByTestId("shoot-scene")).toHaveCount(0);
+  await expect(consent).not.toBeChecked();
+  // Once made, each photo is shown in its shape, with a download link, and its being ready is announced.
+  await expect(item.getByText("Completed")).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('p[role="status"]')).toHaveText(`Train window ${tag} is ready.`);
+  await expect(item.getByTestId("shoot-photo")).toHaveCount(2);
+  await expect(item.getByRole("img", { name: `Photo 1 of Train window ${tag}, 2176 × 2720` })).toBeVisible();
+  await expect(item.getByRole("link", { name: `Download photo 2 of Train window ${tag}` })).toHaveAttribute("download", "");
+  // The API refuses a shoot without consent, and keeps the renderer's job to itself.
+  const refused = await page.request.post("/api/shoots", { data: { identity: [`data:image/png;base64,${TINY_PNG}`], reference: `data:image/png;base64,${TINY_PNG}` } });
+  expect(refused.status()).toBe(400);
+  expect(((await refused.json()).issues as Array<{ message: string }>).map((i) => i.message)).toEqual(["Confirm that you have the right to use this person's face"]);
+  const listed = (await (await page.request.get("/api/shoots")).json()).shoots as Array<Record<string, unknown>>;
+  const id = (await item.getAttribute("data-shoot"))!;
+  expect(Object.keys(listed.find((s) => s.id === id)!).filter((k) => ["provider", "providerJobId", "pictureDigest", "ownerId"].includes(k))).toEqual([]);
+  // Deleting it moves the focus to the list's heading when it was the only one, and says so.
+  page.once("dialog", (d) => void d.accept());
+  await item.getByRole("button", { name: `Delete Train window ${tag}` }).click();
+  await expect(page.locator('p[role="status"]')).toHaveText(`Deleted Train window ${tag}.`);
+  await expect(page.getByTestId("shoot").filter({ hasText: `Train window ${tag}` })).toHaveCount(0);
+});

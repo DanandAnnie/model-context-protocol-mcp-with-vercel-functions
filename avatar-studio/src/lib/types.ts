@@ -176,6 +176,51 @@ export interface FootageJob {
   checkedAt?: string;
 }
 
+/** Shapes a photo shoot can be made in (HeyGen Image); without one, the photos take the scene picture's shape. */
+export const SHOOT_ASPECTS = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9"] as const;
+export type ShootAspect = (typeof SHOOT_ASPECTS)[number];
+/** Photos of the person a shoot keeps the face of, and photos one shoot makes (HeyGen Image's limits). */
+export const MAX_SHOOT_IDENTITY = 5;
+export const MAX_SHOOT_PHOTOS = 5;
+
+/** One photo of a shoot, signed by the renderer for a limited time and renewed when it gets old. */
+export interface ShootPhoto {
+  url: string;
+  width?: number;
+  height?: number;
+  /** The seed it was made with: the shoot's seed for the first photo, one more for each after it. */
+  seed?: number;
+}
+
+/**
+ * A photo shoot (HeyGen Image, `heygen-image-1`): photos of one person, their face kept from a few photos of them,
+ * with the pose, clothing, light, and setting of one scene picture. Neither set of pictures is kept.
+ */
+export interface ShootJob {
+  id: string;
+  ownerId: string;
+  title: string;
+  /** How many photos of the person the face was taken from (not kept). */
+  identityCount: number;
+  /** The shape asked for; without one, the photos follow the scene picture's. */
+  aspect?: ShootAspect;
+  /** Photos asked for, 1 to 5. */
+  count: number;
+  /** The seed asked for (the first photo's); the renderer picks one when absent. Part of a retried start's comparison. */
+  seed?: number;
+  /** A digest of the person's photos and the scene picture, so a retried start is known to be the same. Server only. */
+  pictureDigest?: string;
+  /** Renderer making it, and its job id there, never shown to the account. */
+  provider: string;
+  providerJobId: string;
+  status: "processing" | "completed" | "failed";
+  photos?: ShootPhoto[];
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+  checkedAt?: string;
+}
+
 /** The path a video background takes when it is a generated clip, and the editor's preview URL for it. */
 export const footagePath = (id: string) => `/api/footage/${id}/clip`;
 
@@ -1293,6 +1338,8 @@ export interface ProviderStatus {
   fillerRemoval: boolean;
   /** Whether the renderer can generate a short clip from a description or a picture (HeyGen Video). */
   generatedFootage: boolean;
+  /** Whether the renderer can photograph a person into a scene picture, keeping their face (HeyGen Image). */
+  photoShoots: boolean;
   /** Whether the renderer can put a new audio track on a video and redraw the mouth to match. */
   lipsync: boolean;
   /** Whether the renderer can generate a pack of new looks for a photo avatar. */

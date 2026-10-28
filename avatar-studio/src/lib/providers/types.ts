@@ -131,6 +131,14 @@ export interface AvatarProvider {
   /** Where a generated clip stands, with the clip once it is ready (its link signed for a limited time). */
   footageStatus?(jobId: string): Promise<FootageStatus>;
   /**
+   * Starts a photo shoot: photos of the person in `identity`, their face kept, in the pose, clothing, light, and
+   * setting of `reference` (HeyGen Image). `key` makes a retried start return the same job. Absent when the provider
+   * cannot.
+   */
+  startShoot?(input: ShootInput): Promise<{ jobId: string }>;
+  /** Where a photo shoot stands, with its photos once they are all ready (their links signed for a limited time). */
+  shootStatus?(jobId: string): Promise<ShootStatus>;
+  /**
    * Starts putting a new audio track on a video, the speaker's mouth redrawn to match (HeyGen lip sync). `key` makes a
    * retried start return the same job. Absent when the provider cannot lip-sync videos.
    */
@@ -384,6 +392,23 @@ export interface FootageStatus {
   seed?: number;
   width?: number;
   height?: number;
+  error?: string;
+}
+
+/** One photo shoot to make: 1 to 5 photos of one person, one scene picture, and how many photos to make. */
+export interface ShootInput {
+  identity: Array<{ bytes: Uint8Array; mimeType: string }>;
+  reference: { bytes: Uint8Array; mimeType: string };
+  /** Without one, the photos take the scene picture's shape. */
+  aspect?: string;
+  count: number;
+  seed?: number;
+  key: string;
+}
+
+export interface ShootStatus {
+  status: "processing" | "completed" | "failed";
+  photos?: Array<{ url: string; width?: number; height?: number; seed?: number }>;
   error?: string;
 }
 

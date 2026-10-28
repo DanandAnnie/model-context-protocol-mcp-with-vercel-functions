@@ -7,7 +7,7 @@ import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
 import { HeyGenClient, inlineAsset } from "../heygen-client";
 import { ConflictError, LimitError, NotFoundError, ValidationError } from "../../errors";
-import type { AvatarJobStatus, AvatarProvider, CleanupStatus, FootageInput, FootageStatus, HighlightInput, HighlightStatus, LipsyncInput, LipsyncStatus, MusicMixInput, RenderCast } from "../types";
+import type { AvatarJobStatus, AvatarProvider, CleanupStatus, FootageInput, FootageStatus, HighlightInput, HighlightStatus, LipsyncInput, LipsyncStatus, MusicMixInput, RenderCast, ShootInput, ShootStatus } from "../types";
 import { musicComposition } from "../../music-mix";
 import { strToU8, zipSync } from "fflate";
 import { createHash } from "node:crypto";
@@ -480,6 +480,55 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     const videoUrl = httpsOnly(job.video_url);
     if (!videoUrl) return { status: "failed", error: "HeyGen finished without a clip" };
     return stripEmpty({ status: "completed" as const, videoUrl, durationSec: job.duration ?? undefined, width: job.width ?? undefined, height: job.height ?? undefined, seed: typeof job.seed === "number" ? job.seed : undefined });
+  }
+
+  /**
+   * A photo shoot by HeyGen Image (`heygen-image-1`, its one mode `identity_remix`): the face from the person's photos,
+   * the pose, clothing, light, and setting from the scene picture. Pictures go inline, so a retry with the same key
+   * sends the same body and resumes HeyGen's first job.
+   */
+  async startShoot({ identity, reference, aspect, count, seed, key }: ShootInput) {
+    const inline = (p: { bytes: Uint8Array; mimeType: string }) => inlineAsset({ data: Buffer.from(p.bytes).toString("base64"), mimeType: p.mimeType });
+    try {
+      const jobId = await this.client.createModelImage(
+        {
+          model: "heygen-image-1",
+          identity_images: identity.map(inline),
+          reference_images: [inline(reference)],
+          // Without a shape, HeyGen follows the scene picture's.
+          ...(aspect ? { aspect_ratio: aspect } : {}),
+          num_images: count,
+          ...(seed !== undefined ? { seed } : {}),
+        },
+        key,
+      );
+      return { jobId };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      if (/ failed: 409 /.test(message) && heygenCode(message) !== "conflict") throw new ConflictError(STILL_SENDING);
+      if (/ failed: 409 /.test(message)) throw new ValidationError("This photo shoot was already asked for with other details; start it again");
+      if (/ failed: 429 /.test(message)) throw new LimitError("HeyGen is making too many photos just now; try again in a minute");
+      if (/ failed: (400|402|403|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not make those photos: ${heygenReason(message, "try other pictures")}`);
+      throw err;
+    }
+  }
+
+  async shootStatus(jobId: string): Promise<ShootStatus> {
+    let job;
+    try {
+      job = await this.client.modelImage(jobId);
+    } catch (err) {
+      if (err instanceof Error && / failed: 404 /.test(err.message)) return { status: "failed", error: "HeyGen no longer has this photo shoot; make it again" };
+      throw err;
+    }
+    if (job.status === "failed" || job.status === "cancelled") return { status: "failed", error: shootFailure(job.failure_code, job.failure_message) };
+    if (job.status !== "completed") return { status: "processing" };
+    const photos = (job.images ?? []).flatMap((img) => {
+      const url = httpsOnly(img.image_url);
+      return url ? [stripEmpty({ url, width: img.width ?? undefined, height: img.height ?? undefined, seed: typeof img.seed === "number" ? img.seed : undefined })] : [];
+    });
+    if (!photos.length) return { status: "failed", error: "HeyGen finished without any photos" };
+    return { status: "completed", photos };
   }
 
   /** A recording with its filler words ("um", "uh") and overlong silences cut out (v3 filler word removal), one cleaned cut back. */
@@ -989,4 +1038,13 @@ function hexColor(value: string): string {
   if (/^#[0-9a-f]{6}$/i.test(v)) return v;
   if (/^#[0-9a-f]{3}$/i.test(v)) return `#${[...v.slice(1)].map((c) => c + c).join("")}`;
   throw new ValidationError(`HeyGen takes a background colour as #rrggbb; "${value}" is not one.`);
+}
+
+/** A photo shoot HeyGen gave up on, said as what to change: a picture with no face, or more than one person. */
+function shootFailure(code: string | null | undefined, message: string | null | undefined): string {
+  const detail = message?.trim() ? ` (${message.trim().replace(/\.$/, "")})` : "";
+  if (code === "no_face_detected") return `HeyGen found no face in one of the pictures${detail}; use a clear photo of the face`;
+  if (code === "multiple_faces_detected") return `One of the pictures shows more than one person${detail}; use a picture of one person`;
+  if (code === "generation_cancelled") return "The photo shoot was cancelled; make it again";
+  return message?.trim() || "HeyGen could not make these photos";
 }

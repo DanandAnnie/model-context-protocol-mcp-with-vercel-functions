@@ -301,6 +301,26 @@ export class HeyGenClient {
     }>(`${V3}/models/videos/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(10_000) });
   }
 
+  /**
+   * Starts a photo shoot with HeyGen Image (`POST /v3/models/images`, model `heygen-image-1`); `key` makes a retried
+   * start resume or return the first job.
+   */
+  async createModelImage(body: Record<string, unknown>, key: string): Promise<string> {
+    const out = await this.request<{ generation_id?: string }>(`${V3}/models/images`, { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": key }, signal: AbortSignal.timeout(30_000) });
+    if (!out?.generation_id) throw new Error("HeyGen returned no generation id for the photo shoot");
+    return out.generation_id;
+  }
+
+  /** Where a HeyGen Image shoot stands (`GET /v3/models/images/:id`), with freshly signed links once every photo is ready. */
+  async modelImage(id: string) {
+    return this.request<{
+      status?: "pending" | "completed" | "failed" | "cancelled";
+      images?: Array<{ image_id?: string; image_url?: string | null; width?: number | null; height?: number | null; seed?: number | null }> | null;
+      failure_code?: string | null;
+      failure_message?: string | null;
+    }>(`${V3}/models/images/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(10_000) });
+  }
+
   /** Starts a lip sync (`POST /v3/lipsyncs`); `key` makes a retried start return the same job. */
   async createLipsync(body: Record<string, unknown>, key: string): Promise<string> {
     const out = await this.request<{ lipsync_id?: string }>(`${V3}/lipsyncs`, { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": key }, signal: AbortSignal.timeout(20_000) });

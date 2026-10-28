@@ -11,7 +11,7 @@ import type { InstantVoice, MusicJob, TwinJob } from "../types";
 import { dropMusicRender } from "./music";
 import { dropInstantVoice } from "./voice-changer";
 
-const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip", "videolead", "backdrop", "portrait", "highlight", "cleanup", "lipsync", "lookpack", "twin", "music", "instantvoice", "voicechange", "footage"] as const;
+const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip", "videolead", "backdrop", "portrait", "highlight", "cleanup", "lipsync", "lookpack", "twin", "music", "instantvoice", "voicechange", "footage", "shoot"] as const;
 /**
  * Cover rows hold image bytes; the export describes each cover from its video (`cover.mimeType`, `cover.bytes`) instead
  * of loading them. Clip audio is never listed (each `clip` row names its own `clipaudio_<id>` row), so the export and
@@ -49,6 +49,11 @@ export async function exportOwnerData(ownerId: string = LOCAL_OWNER): Promise<Ow
         delete copy.provider;
         delete copy.providerJobId;
         delete copy.imageDigest;
+      }
+      if (kind === "shoot") {
+        delete copy.provider;
+        delete copy.providerJobId;
+        delete copy.pictureDigest;
       }
       if (kind === "lookpack") {
         delete copy.provider;

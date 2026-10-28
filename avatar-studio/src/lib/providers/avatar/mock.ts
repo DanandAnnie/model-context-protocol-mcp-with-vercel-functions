@@ -4,11 +4,14 @@ import { SAMPLE_PREVIEW_VIDEO, STOCK_AVATARS, portraitSvg } from "../../stock";
 import { demoAssetUrl } from "../../config";
 import { NotFoundError } from "../../errors";
 import type { AudioClip, Avatar, MusicTrack, StudioTemplate, StudioTemplateDetail, VideoRequest } from "../../types";
-import type { AvatarJobStatus, AvatarProvider, CleanupStatus, FootageStatus, HighlightInput, HighlightStatus, LipsyncStatus } from "../types";
+import type { AvatarJobStatus, AvatarProvider, CleanupStatus, FootageStatus, HighlightInput, HighlightStatus, LipsyncStatus, ShootStatus } from "../types";
+import { SHOOT_ASPECTS, type ShootAspect } from "../../types";
 
 /** Labeled, self-hosted stand-in; no avatar synthesis or paid operation occurs. */
 const SAMPLE_VIDEO = SAMPLE_PREVIEW_VIDEO;
 const SAMPLE_THUMB = "/demo/poster.svg";
+/** HeyGen Image's delivered sizes for each shape. */
+const SHOOT_SIZES: Record<ShootAspect, [number, number]> = { "1:1": [2176, 2176], "2:3": [2176, 3264], "3:2": [3264, 2176], "3:4": [2160, 2880], "4:3": [2880, 2160], "4:5": [2176, 2720], "5:4": [2720, 2176], "9:16": [2160, 3840], "16:9": [3840, 2160] };
 const SAMPLE_GIF = "/demo/preview.gif";
 
 
@@ -90,6 +93,25 @@ export class MockAvatarProvider implements AvatarProvider {
     if (!m) return { status: "failed", error: "No such clip" };
     if (Date.now() - Number(m[1]) < MockAvatarProvider.CLIP_MS) return { status: "processing" };
     return { status: "completed", videoUrl: demoAssetUrl(SAMPLE_VIDEO), durationSec: Number(m[2]), width: 1280, height: 720, ...(m[3] ? { seed: Number(m[3]) } : {}) };
+  }
+
+  /**
+   * Demo photo shoot: drawn stand-ins, "made" a few seconds after they are asked for, in the shape asked for (a
+   * portrait shape when the scene picture's is to be followed); nothing is generated. Seeds count up from the one
+   * asked for, as HeyGen's do.
+   */
+  async startShoot({ aspect, count, seed }: { aspect?: string; count: number; seed?: number }) {
+    const shape = aspect ? SHOOT_ASPECTS.indexOf(aspect as ShootAspect) : -1;
+    return { jobId: `mocksh_${Date.now()}_${count}_${seed ?? Math.floor(Math.random() * 1_000_000)}_${shape < 0 ? "x" : shape}` };
+  }
+
+  async shootStatus(jobId: string): Promise<ShootStatus> {
+    const m = /^mocksh_(\d+)_(\d+)_(\d+)_(x|\d+)$/.exec(jobId);
+    if (!m) return { status: "failed", error: "No such photo shoot" };
+    if (Date.now() - Number(m[1]) < MockAvatarProvider.CLIP_MS) return { status: "processing" };
+    const [width, height] = SHOOT_SIZES[m[4] === "x" ? "3:4" : SHOOT_ASPECTS[Number(m[4])]];
+    const seed = Number(m[3]);
+    return { status: "completed", photos: Array.from({ length: Number(m[2]) }, (_, i) => ({ url: portraitSvg("Photo shoot", seed + i), width, height, seed: seed + i })) };
   }
 
   async startCleanup() {

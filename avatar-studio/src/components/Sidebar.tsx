@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { useMobileNav } from "@/components/MobileNav";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
-import { AudioLines, Clapperboard, Film, Music, Wand2, Eraser, Home, Languages, Layers3, LayoutTemplate, LogOut, MessageSquare, Mic2, MonitorPlay, Palette, Settings, Users, Video, Sparkles, X } from "lucide-react";
+import { AudioLines, Camera, Clapperboard, Film, Music, Wand2, Eraser, Home, Languages, Layers3, LayoutTemplate, LogOut, MessageSquare, Mic2, MonitorPlay, Palette, Settings, Users, Video, Sparkles, X } from "lucide-react";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import type { ProviderStatus } from "@/lib/types";
@@ -15,6 +15,7 @@ const NAV = [
   { href: "/agent", label: "Video Agent", icon: Sparkles },
   { href: "/cinematic", label: "Cinematic", icon: Film },
   { href: "/footage", label: "B-roll", icon: MonitorPlay },
+  { href: "/photos", label: "Photo shoot", icon: Camera },
   { href: "/videos", label: "My videos", icon: Video },
   { href: "/templates", label: "Templates", icon: LayoutTemplate },
   { href: "/batch", label: "Personalize", icon: Layers3 },

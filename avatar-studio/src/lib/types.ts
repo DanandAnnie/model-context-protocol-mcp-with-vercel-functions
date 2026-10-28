@@ -455,6 +455,19 @@ export interface InstantVoice {
   checkedAt?: string;
 }
 
+/**
+ * One of HeyGen's public voices, offered to every account to speak text in (HeyGen Voice): its studio id is `pv_` and
+ * HeyGen's voice id, which is public. Turbo and the expressiveness boost are for instant voices only.
+ */
+export interface PublicVoice {
+  id: string;
+  name: string;
+  language?: string;
+  mode: "instant" | "professional";
+  /** HeyGen's short sample of the voice; its link can expire, so the list is read again rather than kept long. */
+  previewUrl?: string;
+}
+
 /** A recording spoken again in one of the account's instant voices, the words and timing kept (speech to speech). */
 /**
  * How long a recording spoken in an instant voice is offered as a lip sync's audio once it is ready: its link is the
@@ -466,7 +479,7 @@ export interface VoiceChange {
   id: string;
   ownerId: string;
   title: string;
-  /** The instant voice it speaks in, and its name then. */
+  /** The instant voice it speaks in (`iv_…`), or for text one of HeyGen's public voices (`pv_…`), and its name then. */
   voiceId: string;
   voiceName: string;
   /** The audio clip spoken again; or, for text spoken in the voice, the text (one or the other). */

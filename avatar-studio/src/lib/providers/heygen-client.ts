@@ -56,12 +56,12 @@ export class HeyGenClient {
    * Every page of a v3 list (`{ data: [...], has_more, next_token }`, cursor `token`), up to `maxPages` pages so a huge
    * account cannot hold a request open.
    */
-  private async listAll<T>(path: string, limit: number, maxPages = 20): Promise<T[]> {
+  private async listAll<T>(path: string, limit: number, maxPages = 20, pageTimeoutMs?: number): Promise<T[]> {
     const items: T[] = [];
     let token: string | undefined;
     for (let page = 0; page < maxPages; page++) {
       const sep = path.includes("?") ? "&" : "?";
-      const json = await this.envelope<T[]>(`${V3}${path}${sep}limit=${limit}${token ? `&token=${encodeURIComponent(token)}` : ""}`);
+      const json = await this.envelope<T[]>(`${V3}${path}${sep}limit=${limit}${token ? `&token=${encodeURIComponent(token)}` : ""}`, pageTimeoutMs ? { signal: AbortSignal.timeout(pageTimeoutMs) } : {});
       items.push(...(Array.isArray(json.data) ? json.data : []));
       token = typeof json.next_token === "string" && json.next_token ? json.next_token : undefined;
       if (!json.has_more || !token) break;
@@ -375,6 +375,11 @@ export class HeyGenClient {
     return this.request<{ status?: "PENDING" | "ACTIVE" | "FAILED" | string; failure_reason?: string | null; language?: string | null; preview_audio_url?: string | null }>(`${V3}/models/audio/voices/${encodeURIComponent(id)}`, {
       signal: AbortSignal.timeout(10_000),
     });
+  }
+
+  /** HeyGen Voice's public voices (`GET /v3/models/audio/voices?type=public`), every page up to `maxPages` of 100. */
+  publicModelVoices(maxPages = 5) {
+    return this.listAll<{ voice_id?: string; name?: string; mode?: string; status?: string; language?: string | null; preview_audio_url?: string | null }>("/models/audio/voices?type=public", 100, maxPages, 8_000);
   }
 
   /** Deletes an instant voice (`DELETE /v3/models/audio/voices/{id}`). */

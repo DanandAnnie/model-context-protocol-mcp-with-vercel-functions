@@ -855,6 +855,41 @@ test("a catalog track found by describing it is mixed under a finished video, fo
   await expect(page.locator('[data-testid="mix"]:focus, h2:focus')).toHaveCount(1);
 });
 
+test("text is spoken in one of HeyGen's public voices, heard first, without the instant-only delivery", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  await page.goto("/voice-changer");
+  const speakingVoice = page.getByRole("combobox", { name: /^Speaking voice\b/ });
+  await expect(speakingVoice.locator("optgroup[label='HeyGen voices'] option")).toHaveText(["Atlas · English", "Nadine · English"]);
+  // Delivery set for an instant voice first, then a professional voice chosen: it speaks without Turbo or the boost.
+  await speakingVoice.selectOption({ label: "Atlas · English" });
+  const turbo = page.getByRole("checkbox", { name: /^Turbo/ });
+  await turbo.check();
+  const boost = page.getByRole("slider", { name: "Expressiveness boost" });
+  await boost.focus();
+  await page.keyboard.press("ArrowLeft");
+  await speakingVoice.selectOption({ label: "Nadine · English" });
+  // The voice can be heard first.
+  await expect(page.getByLabel("Sample of the voice Nadine")).toHaveAttribute("src", /\/demo\/revoiced\.mp3$/);
+  await expect(turbo).toBeDisabled();
+  await expect(turbo).not.toBeChecked();
+  await expect(page.getByRole("group", { name: "Delivery" })).toHaveAccessibleDescription(/Nadine is one of HeyGen's professional voices/);
+  await page.getByRole("textbox", { name: /^Text\b/ }).fill(`Welcome to the team ${tag}.`);
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/voice-changer/speech") && r.method() === "POST");
+  await page.getByRole("button", { name: "Speak the text" }).click();
+  expect((await sent).postDataJSON()).toEqual({ voiceId: "pv_mockpv_nadine", text: `Welcome to the team ${tag}.` });
+  const card = page.getByTestId("voice-change").filter({ hasText: tag });
+  await expect(card).toContainText("in Nadine");
+  // An instant one takes them again, as they were left.
+  await speakingVoice.selectOption({ label: "Atlas · English" });
+  await expect(turbo).toBeEnabled();
+  await expect(turbo).toBeChecked();
+  await expect(boost).toHaveValue("9");
+  await expect(page.getByLabel("Sample of the voice Atlas")).toBeVisible();
+  page.once("dialog", (d) => d.accept());
+  await card.getByRole("button", { name: /^Delete / }).click();
+  await expect(card).toHaveCount(0);
+});
+
 test("an instant voice is made from a recording with the speaker's agreement, and a recording is spoken again in it", async ({ page }) => {
   // A picture of the speaker's setting, from the account's uploaded pictures.
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]).toString("base64");

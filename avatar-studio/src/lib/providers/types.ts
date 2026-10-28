@@ -185,6 +185,8 @@ export interface AvatarProvider {
    * renderer no longer has or could not make.
    */
   instantVoicePreview?(voiceId: string): Promise<{ url?: string; gone?: string }>;
+  /** The renderer's public voices, ready to speak text in (HeyGen Voice), with a short sample of each when it has one. */
+  publicVoices?(): Promise<Array<{ voiceId: string; name: string; language?: string; mode: "instant" | "professional"; previewUrl?: string }>>;
   /**
    * Speaks a recording (an uploaded asset) again in an instant voice, keeping its words and timing. Waits up to
    * `waitMs`; a conversion not done by then is "processing", and asking again with the same `key` returns its result

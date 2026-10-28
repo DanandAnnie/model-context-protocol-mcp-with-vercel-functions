@@ -10,7 +10,7 @@ import { api, formatDate, formatSeconds, isRefusal } from "@/lib/client";
 import { clipBody as clipFrom } from "@/lib/clip-upload";
 import { VOICE_RESULT_LINK_MS, type AudioClip, type LipsyncJob, type LipsyncMode, type Video, type VoiceChange } from "@/lib/types";
 
-/** A recording or text spoken in one of the account's instant voices, as the voice changer lists it. */
+/** A recording or text spoken in one of the account's instant voices (text in one of HeyGen's too), as the voice changer lists it. */
 type Voiced = Pick<VoiceChange, "id" | "title" | "status" | "audioUrl" | "durationSec" | "updatedAt" | "checkedAt">;
 /** A lip sync as the server lists it: never the renderer or its job id. */
 type Lipsync = Omit<LipsyncJob, "ownerId" | "provider" | "providerJobId">;
@@ -23,7 +23,7 @@ const MODE_LABEL: Record<LipsyncMode, string> = { speed: "Fast", precision: "Pre
  * "Lip sync": a video given a new audio track, the speaker's mouth redrawn to match (HeyGen lip sync). For a line
  * re-recorded after the shoot, a voice-over replaced, or a dub of one's own. The footage is a video of the library or a
  * link; the audio is a saved audio clip (uploaded here or recorded for a scene), a recording or text spoken in one of the
- * account's instant voices (`?voiceChange=` chooses one, from the voice changer), or a link.
+ * account's instant voices or, for text, one of HeyGen's (`?voiceChange=` chooses one, from the voice changer), or a link.
  */
 export default function LipsyncPage() {
   const canEdit = useCanEdit();
@@ -289,7 +289,7 @@ export default function LipsyncPage() {
               </fieldset>
               {audioFrom === "voice" ? (
                 <div>
-                  <Field label="Recording in your voice" hint={voiced.length ? "A recording or text spoken in one of your instant voices within the last hour, from the voice changer." : voiceData ? "None made within the last hour is ready; make one in the voice changer." : voiceError ? "Your recordings could not be loaded." : "Loading your recordings…"}>
+                  <Field label="Recording in your voice" hint={voiced.length ? "A recording or text spoken in one of your instant voices (or text in one of HeyGen's) within the last hour, from the voice changer." : voiceData ? "None made within the last hour is ready; make one in the voice changer." : voiceError ? "Your recordings could not be loaded." : "Loading your recordings…"}>
                     <select className={inputClass} value={voiceChangeId} disabled={canEdit === false} aria-describedby={voiceGone ? "voice-gone" : undefined} onChange={(e) => (setVoiceChangeId(e.target.value), setVoiceGone(null), changed())}>
                       <option value="">{voiced.length ? "Choose a recording" : "No recordings yet"}</option>
                       {voiced.map((c) => (

@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
-import type { AudioClip, InstantVoice, VoiceChange } from "../types";
+import type { AudioClip, InstantVoice, PublicVoice, VoiceChange } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, LimitError, NotFoundError, UpstreamError, ValidationError } from "../errors";
 import { owned, stripUndefined } from "./shared";
@@ -67,7 +67,8 @@ const SPEECH_GIVE_UP_MS = 90_000;
 export const MAX_SPEECH_CHARS = 2000;
 
 export const voiceSpeechSchema = z.object({
-  voiceId: z.string({ error: "Choose one of your instant voices" }).regex(/^iv_[A-Za-z0-9_-]{1,64}$/, "Choose one of your instant voices"),
+  /** One of the account's instant voices (`iv_…`) or one of HeyGen's public voices (`pv_…`). */
+  voiceId: z.string({ error: "Choose a voice" }).regex(/^(iv|pv)_[A-Za-z0-9_-]{1,64}$/, "Choose one of your instant voices or one of HeyGen's"),
   text: z.string({ error: "Write the text to speak" }).trim().min(1, "Write the text to speak").max(MAX_SPEECH_CHARS, `Keep the text to ${MAX_SPEECH_CHARS.toLocaleString("en-US")} characters`),
   title: z.string().trim().max(120, "Keep the title to 120 characters").optional(),
   /** The renderer's faster, cheaper model; false (or absent) is its standard one, stored as absent. */
@@ -152,6 +153,42 @@ const changeChecks = jobChecker<VoiceChange>((c) => refreshVoiceChange(c));
 export function forgetVoiceChangerChecks(): void {
   voiceChecks.forget();
   changeChecks.forget();
+  publicVoiceCache = null;
+  publicVoiceLoad = null;
+}
+
+/** How long the renderer's public voices are kept before they are asked for again (their samples' links can expire). */
+const PUBLIC_VOICES_MS = 10 * 60_000;
+let publicVoiceCache: { provider: string; at: number; voices: PublicVoice[] } | null = null;
+// One listing at a time: requests that arrive while it runs share it.
+let publicVoiceLoad: { provider: string; voices: Promise<PublicVoice[]> } | null = null;
+
+export function publicVoicesAvailable(): boolean {
+  return typeof getAvatarProvider().publicVoices === "function";
+}
+
+/** The renderer's public voices to speak text in, by name; the same for every account, and kept for a few minutes. */
+export async function listPublicVoices(): Promise<PublicVoice[]> {
+  const provider = getAvatarProvider();
+  if (!provider.publicVoices) return [];
+  if (publicVoiceCache && publicVoiceCache.provider === provider.name && Date.now() - publicVoiceCache.at < PUBLIC_VOICES_MS) return publicVoiceCache.voices;
+  if (publicVoiceLoad?.provider === provider.name) return publicVoiceLoad.voices;
+  const list = provider.publicVoices.bind(provider);
+  const entry = { provider: provider.name } as { provider: string; voices: Promise<PublicVoice[]> };
+  entry.voices = (async () => {
+    try {
+      const voices = (await list())
+        .map((v): PublicVoice => stripUndefined({ id: `pv_${v.voiceId}`, name: v.name, language: v.language, mode: v.mode, previewUrl: v.previewUrl }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      // A failure is not kept, so the next request asks again.
+      publicVoiceCache = { provider: provider.name, at: Date.now(), voices };
+      return voices;
+    } finally {
+      if (publicVoiceLoad === entry) publicVoiceLoad = null;
+    }
+  })();
+  publicVoiceLoad = entry;
+  return entry.voices;
 }
 
 /** The account's instant voices, newest first; one still being made is asked about first. */
@@ -328,8 +365,21 @@ export async function startVoiceChange(input: z.infer<typeof voiceChangeSchema>,
 }
 
 /** Room for one more recording, and one of the account's voices that is ready to speak. */
-async function readyVoice(voiceId: string, ownerId: string): Promise<InstantVoice> {
+async function underChangeCap(ownerId: string): Promise<void> {
   if ((await getStore().list<VoiceChange>("voicechange", ownerId)).length >= MAX_VOICE_CHANGES) throw new ConflictError(`An account keeps at most ${MAX_VOICE_CHANGES} recordings in its voices; delete one to make another`);
+}
+
+/** One of the renderer's public voices to speak text in, still offered; Turbo and the boost only for an instant one. */
+async function publicSpeaker(input: z.infer<typeof voiceSpeechSchema>, ownerId: string): Promise<{ id: string; name: string; providerVoiceId: string }> {
+  await underChangeCap(ownerId);
+  const voice = (await listPublicVoices()).find((v) => v.id === input.voiceId);
+  if (!voice) throw new ValidationError("That HeyGen voice is no longer offered; choose another");
+  if (voice.mode !== "instant" && (input.turbo || input.expressivenessBoost !== undefined)) throw new ValidationError(`Turbo and the expressiveness boost are for instant voices, and ${voice.name} is not one; leave them out for this voice`);
+  return { id: voice.id, name: voice.name, providerVoiceId: voice.id.slice("pv_".length) };
+}
+
+async function readyVoice(voiceId: string, ownerId: string): Promise<InstantVoice> {
+  await underChangeCap(ownerId);
   let voice: InstantVoice;
   try {
     voice = owned(await getStore().get<InstantVoice>("instantvoice", voiceId), ownerId, "Instant voice");
@@ -342,7 +392,7 @@ async function readyVoice(voiceId: string, ownerId: string): Promise<InstantVoic
 }
 
 /**
- * Speaks text in one of the account's instant voices, kept with the recordings spoken again. The record is stored before
+ * Speaks text in one of the account's instant voices or one of the renderer's public voices, kept with the recordings spoken again. The record is stored before
  * the renderer is asked (so a start retried while the first is running returns it) and the start waits for most of a
  * minute; one not done by then is not asked for again (see `SPEECH_GIVE_UP_MS`) but dropped, with a 502 to try again.
  * With a client `key`, a start retried after a lost answer returns what was spoken.
@@ -358,8 +408,8 @@ export async function startVoiceSpeech(input: z.infer<typeof voiceSpeechSchema>,
     return existing;
   }
   const provider = getAvatarProvider();
-  if (!provider.speakText) throw new ValidationError(`Text to speech in an instant voice is not available with the ${provider.name} renderer`);
-  const voice = await readyVoice(input.voiceId, ownerId);
+  if (!provider.speakText) throw new ValidationError(`Text to speech is not available with the ${provider.name} renderer`);
+  const voice = input.voiceId.startsWith("pv_") ? await publicSpeaker(input, ownerId) : await readyVoice(input.voiceId, ownerId);
   opts.admit?.();
   const now = nowIso();
   const change: VoiceChange = {
@@ -388,6 +438,14 @@ export async function startVoiceSpeech(input: z.infer<typeof voiceSpeechSchema>,
     // Nothing to follow: a refusal made nothing, and anything else is not asked again.
     await getStore().remove("voicechange", change.id);
     if (!(err instanceof ValidationError || err instanceof LimitError || err instanceof UpstreamError)) console.error(`voice speech ${change.id} start failed:`, err);
+    // The renderer's words are about the account's own voices; a public voice gone is chosen again, not made again.
+    if (input.voiceId.startsWith("pv_") && err instanceof ValidationError) {
+      if (/no longer has this voice/.test(err.message)) {
+        publicVoiceCache = null;
+        throw new ValidationError("That HeyGen voice is no longer offered; choose another");
+      }
+      if (/may not use instant voices/.test(err.message)) throw new ValidationError("The HeyGen account behind this studio may not use HeyGen's voices; ask its operator");
+    }
     throw err;
   }
 }

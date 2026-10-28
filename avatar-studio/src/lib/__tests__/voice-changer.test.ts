@@ -16,6 +16,7 @@ import {
   forgetVoiceChangerChecks,
   instantVoicePreview,
   instantVoiceSchema,
+  listPublicVoices,
   listInstantVoices,
   listVoiceChanges,
   publicInstantVoice,
@@ -159,6 +160,79 @@ describe("voice changer", () => {
       await getStore().put("instantvoice", { ...voice, providerVoiceId: "hv_gone" });
       await assert.rejects(instantVoicePreview(voice.id, "u1"), /can no longer be used: HeyGen no longer has this voice; make it again/);
       assert.deepEqual([(await getStore().get<InstantVoice>("instantvoice", voice.id))!.status, (await getStore().get<InstantVoice>("instantvoice", voice.id))!.error], ["failed", "HeyGen no longer has this voice; make it again"]);
+    } finally {
+      globalThis.fetch = realFetch;
+      Object.assign(config, { avatarProvider: saved.avatar, heygenApiKey: saved.key });
+    }
+  });
+
+  it("speaks text in one of HeyGen's public voices, with Turbo and the boost only for an instant one", async () => {
+    const offered = await listPublicVoices();
+    assert.deepEqual(offered.map((v) => [v.id, v.name, v.mode]), [["pv_mockpv_atlas", "Atlas", "instant"], ["pv_mockpv_nadine", "Nadine", "professional"]], "by name, with the studio's ids");
+    const nadine = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: "pv_mockpv_nadine", text: "Welcome aboard." }), "u1");
+    assert.deepEqual([nadine.status, nadine.voiceId, nadine.voiceName, nadine.title], ["completed", "pv_mockpv_nadine", "Nadine", "Welcome aboard in Nadine"]);
+    await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: "pv_mockpv_nadine", text: "Welcome aboard.", turbo: true }), "u1"), /for instant voices, and Nadine is not one/);
+    await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: "pv_mockpv_nadine", text: "Welcome aboard.", expressivenessBoost: 0.5 }), "u1"), /for instant voices/);
+    const atlas = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: "pv_mockpv_atlas", text: "Welcome aboard.", turbo: true, expressivenessBoost: 0.5 }), "u1");
+    assert.deepEqual([atlas.turbo, atlas.expressivenessBoost], [true, 0.5]);
+    await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: "pv_gone", text: "Hi." }), "u1"), /no longer offered/);
+    assert.throws(() => voiceSpeechSchema.parse({ voiceId: "hv_1", text: "Hi." }), /one of HeyGen's/);
+    // Retried with the same key, the same voice returns the same recording; another voice is another recording.
+    const keyed = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: "pv_mockpv_nadine", text: "Again." }), "u1", { key: "public-voice-key" });
+    assert.equal((await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: "pv_mockpv_nadine", text: "Again." }), "u1", { key: "public-voice-key" })).id, keyed.id);
+    await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: "pv_mockpv_atlas", text: "Again." }), "u1", { key: "public-voice-key" }), ConflictError);
+  });
+
+  it("lists HeyGen's public voices page by page, ready ones only, and speaks text in one by HeyGen's id", async () => {
+    const { config } = await import("../config");
+    const saved = { avatar: config.avatarProvider, key: config.heygenApiKey };
+    const realFetch = globalThis.fetch;
+    const calls: Array<{ url: string; body: Record<string, unknown> | null }> = [];
+    let down = false;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, body: typeof init?.body === "string" ? JSON.parse(init.body) : null });
+      if (url.startsWith("https://api.heygen.com/v3/models/audio/voices?type=public")) {
+        if (down) return Response.json({ error: { code: "internal_error", message: "boom" } }, { status: 502 });
+        if (!url.includes("token=")) {
+          return Response.json({ data: [{ voice_id: "pub_nadine", name: "Nadine", mode: "professional", status: "ACTIVE", language: "English", preview_audio_url: "https://files.heygen.ai/p/nadine.wav" }, { voice_id: "pub_new", name: "Draft", mode: "instant", status: "PENDING" }], has_more: true, next_token: "t2" });
+        }
+        return Response.json({ data: [{ voice_id: "pub_ama", name: "Ama", mode: "instant", status: "ACTIVE", language: null, preview_audio_url: "http://files.heygen.ai/p/ama.wav" }, { voice_id: "pub/odd", name: "Odd", mode: "instant", status: "ACTIVE" }], has_more: false, next_token: null });
+      }
+      if (url === "https://api.heygen.com/v3/models/audio/tts") {
+        if (calls.at(-1)!.body?.voice_id === "pub_ama") return Response.json({ error: { code: "voice_not_found", message: "no such voice" } }, { status: 404 });
+        return Response.json({ data: { audio_url: "https://files.heygen.ai/generated/tts.wav", duration: 1.5 } });
+      }
+      return new Response("unexpected", { status: 500 });
+    }) as typeof fetch;
+    Object.assign(config, { avatarProvider: "heygen", heygenApiKey: "hg_key" });
+    try {
+      const voices = await listPublicVoices();
+      assert.deepEqual(voices, [
+        { id: "pv_pub_ama", name: "Ama", mode: "instant" },
+        { id: "pv_pub_nadine", name: "Nadine", language: "English", mode: "professional", previewUrl: "https://files.heygen.ai/p/nadine.wav" },
+      ], "every page, ready voices only, no id the studio cannot carry, and no plain-http sample");
+      assert.deepEqual(calls.map((c) => c.url), ["https://api.heygen.com/v3/models/audio/voices?type=public&limit=100", "https://api.heygen.com/v3/models/audio/voices?type=public&limit=100&token=t2"]);
+      await listPublicVoices();
+      assert.equal(calls.length, 2, "kept for a few minutes");
+      const spoken = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: "pv_pub_nadine", text: "Hello there." }), "u1");
+      assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1", voice_id: "pub_nadine", text: "Hello there." });
+      assert.equal(spoken.audioUrl, "https://files.heygen.ai/generated/tts.wav");
+      // A public voice HeyGen no longer has is chosen again, not made again, and the list is read afresh.
+      await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: "pv_pub_ama", text: "Hello there." }), "u1"), /That HeyGen voice is no longer offered; choose another/);
+      const before = calls.length;
+      await listPublicVoices();
+      assert.equal(calls.length, before + 2, "read again");
+      forgetVoiceChangerChecks();
+      down = true;
+      await assert.rejects(listPublicVoices(), (e: unknown) => e instanceof UpstreamError && /could not be listed just now/.test((e as Error).message));
+      // A failure is not kept: the next request asks again and gets the list; requests at once share one read.
+      down = false;
+      const reads = calls.length;
+      const [a, b] = await Promise.all([listPublicVoices(), listPublicVoices()]);
+      assert.deepEqual(a.map((v) => v.id), ["pv_pub_ama", "pv_pub_nadine"]);
+      assert.equal(a, b);
+      assert.equal(calls.length, reads + 2, "one read of two pages for both");
     } finally {
       globalThis.fetch = realFetch;
       Object.assign(config, { avatarProvider: saved.avatar, heygenApiKey: saved.key });

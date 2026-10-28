@@ -792,6 +792,22 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     return voice.status === "ACTIVE" ? stripEmpty({ url: httpsOnly(voice.preview_audio_url) }) : {};
   }
 
+  /** HeyGen Voice's public voices that are ready, with their samples (plain-http links are dropped). */
+  async publicVoices() {
+    let rows;
+    try {
+      rows = await this.client.publicModelVoices();
+    } catch (err) {
+      console.error("public voices could not be listed:", err);
+      throw new UpstreamError("HeyGen's voices could not be listed just now; try again in a moment");
+    }
+    return rows.flatMap((v) =>
+      v.status === "ACTIVE" && typeof v.voice_id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(v.voice_id) && typeof v.name === "string" && v.name.trim()
+        ? [stripEmpty({ voiceId: v.voice_id, name: v.name.trim().slice(0, 80), language: v.language ?? undefined, mode: v.mode === "instant" ? ("instant" as const) : ("professional" as const), previewUrl: httpsOnly(v.preview_audio_url) })]
+        : [],
+    );
+  }
+
   async deleteInstantVoice(voiceId: string) {
     try {
       await this.client.deleteInstantVoice(voiceId);
@@ -806,8 +822,9 @@ export class HeyGenAvatarProvider implements AvatarProvider {
   }
 
   async speakText(input: { voiceId: string; text: string; turbo?: true; expressivenessBoost?: number; key: string; waitMs: number }): Promise<{ status: "processing" } | { status: "completed"; audioUrl: string; durationSec: number }> {
-    // Turbo speaks instant voices faster and cheaper. The boost is an instant-voice setting (every voice here is one),
-    // which HeyGen sets to its full 1 when none is sent, so a lower one, 0 included, is always sent.
+    // Turbo speaks instant voices faster and cheaper. The boost is an instant-voice setting (the studio sends neither for
+    // a public voice that is not instant), which HeyGen sets to its full 1 when none is sent, so a lower one, 0
+    // included, is always sent.
     const body = {
       model: input.turbo ? "heygen-voice-1-turbo" : "heygen-voice-1",
       voice_id: input.voiceId,

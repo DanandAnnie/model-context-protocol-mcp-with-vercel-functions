@@ -284,6 +284,15 @@ export class MockAvatarProvider implements AvatarProvider {
 
   async deleteInstantVoice() {}
 
+  /** Demo public voices: a professional one and an instant one, both with the sample recording as their preview. */
+  async publicVoices() {
+    const previewUrl = demoAssetUrl("/demo/revoiced.mp3");
+    return [
+      { voiceId: "mockpv_nadine", name: "Nadine", language: "English", mode: "professional" as const, previewUrl },
+      { voiceId: "mockpv_atlas", name: "Atlas", language: "English", mode: "instant" as const, previewUrl },
+    ];
+  }
+
   /** A demo voice's preview: the sample recording (the studio asks only for a voice it knows is ready). */
   async instantVoicePreview(voiceId: string): Promise<{ url?: string; gone?: string }> {
     return /^mockiv_\d+$/.test(voiceId) ? { url: demoAssetUrl("/demo/revoiced.mp3") } : { gone: "No such voice" };

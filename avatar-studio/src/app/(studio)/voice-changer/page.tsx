@@ -9,7 +9,7 @@ import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { ApiError, api, formatDate, formatSeconds, isRefusal } from "@/lib/client";
 import { clipBody } from "@/lib/clip-upload";
-import { VOICE_RESULT_LINK_MS, type AudioClip, type Backdrop, type InstantVoice, type VoiceChange } from "@/lib/types";
+import { VOICE_RESULT_LINK_MS, type AudioClip, type Backdrop, type InstantVoice, type PublicVoice, type VoiceChange } from "@/lib/types";
 
 /** As the server lists them: never the renderer, its ids, or the upload sent to it. */
 type Voice = Omit<InstantVoice, "ownerId" | "provider" | "providerVoiceId">;
@@ -111,6 +111,9 @@ export default function VoiceChangerPage() {
   const voices = data?.voices ?? [];
   const changes = data?.changes ?? [];
   const ready = voices.filter((v) => v.status === "completed");
+  // HeyGen's public voices, to speak text in without making one.
+  const { data: publicData, error: publicError, refetch: refetchPublic } = useApi<{ voices: PublicVoice[]; available: boolean }>("/api/voice-changer/public-voices");
+  const publicVoices = publicData?.voices ?? [];
   // While a voice or a recording is being made the list is asked again, only while the tab is visible.
   const running = voices.some((v) => v.status === "processing") || changes.some((c) => c.status === "processing");
   useEffect(() => {
@@ -199,6 +202,11 @@ export default function VoiceChangerPage() {
       setSettingId("");
       void refetchPictures();
     }
+    if (/HeyGen voice is no longer offered/.test(e.message)) {
+      setSpeechVoiceId("");
+      focusAfterRender(() => speechVoiceRef.current);
+      void refetchPublic();
+    }
     if (/voice is no longer available/.test(e.message)) {
       // The card's button goes disabled with the choice, so the focus moves to the choice rather than being lost.
       if (at === "change") {
@@ -226,8 +234,8 @@ export default function VoiceChangerPage() {
   // Likewise a chosen voice that is no longer ready.
   useEffect(() => {
     if (data && voiceId && !data.voices.some((v) => v.id === voiceId && v.status === "completed")) setVoiceId("");
-    if (data && speechVoiceId && !data.voices.some((v) => v.id === speechVoiceId && v.status === "completed")) setSpeechVoiceId("");
-  }, [data, voiceId, speechVoiceId]);
+    if (speechVoiceId.startsWith("pv_") ? publicData && !publicData.voices.some((v) => v.id === speechVoiceId) : data && speechVoiceId && !data.voices.some((v) => v.id === speechVoiceId && v.status === "completed")) setSpeechVoiceId("");
+  }, [data, publicData, voiceId, speechVoiceId]);
   function clipDeleted(clip: AudioClip) {
     setClipData((prev) => (prev ? { clips: prev.clips.filter((c) => c.id !== clip.id) } : prev));
     void refetchClips();
@@ -264,7 +272,9 @@ export default function VoiceChangerPage() {
     fail("speech")(null);
     setNote(null);
     try {
-      const body = { voiceId: speechVoiceId, text: speechText.trim(), ...(speechTitle.trim() ? { title: speechTitle.trim() } : {}), ...(speechTurbo ? { turbo: true } : {}), ...(speechBoost !== 10 ? { expressivenessBoost: speechBoost / 10 } : {}) };
+      // A public voice that is not instant speaks without Turbo or the boost, which are kept for the next instant voice.
+      const delivery = deliveryOff ? {} : { ...(speechTurbo ? { turbo: true } : {}), ...(speechBoost !== 10 ? { expressivenessBoost: speechBoost / 10 } : {}) };
+      const body = { voiceId: speechVoiceId, text: speechText.trim(), ...(speechTitle.trim() ? { title: speechTitle.trim() } : {}), ...delivery };
       const { change } = await api<{ change: Change }>("/api/voice-changer/speech", { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": speechKey } });
       setData((prev) => (prev ? { ...prev, changes: [change, ...prev.changes.filter((c) => c.id !== change.id)] } : prev));
       void refetch();
@@ -370,6 +380,19 @@ export default function VoiceChangerPage() {
   const voiceBeingMade = voices.some((v) => v.status === "processing");
   const voiceHint = ready.length ? "One of your instant voices." : voiceBeingMade ? "Your voice is being made; it is ready in a few seconds." : "Make a voice below first.";
   const voicePlaceholder = ready.length ? "Choose a voice" : voiceBeingMade ? "Being made…" : "No voices yet";
+  const speechPublic = publicVoices.find((v) => v.id === speechVoiceId);
+  // Turbo and the boost are HeyGen's settings for instant voices.
+  const deliveryOff = !!speechPublic && speechPublic.mode !== "instant";
+  const publicHint = publicError ? " HeyGen's voices could not be loaded just now." : "";
+  const speechVoiceHint =
+    (!publicVoices.length
+      ? voiceHint
+      : ready.length
+        ? "One of your instant voices, or one of HeyGen's voices."
+        : voiceBeingMade
+          ? "One of HeyGen's voices; yours is being made and is ready in a few seconds."
+          : "One of HeyGen's voices, or make your own below.") + publicHint;
+  const speechPlaceholder = ready.length || publicVoices.length ? "Choose a voice" : voicePlaceholder;
   const speechNeeds = !speechVoiceId && !speechText.trim() ? "Choose a voice and write the text to speak it." : !speechVoiceId ? "Choose a voice to speak the text." : !speechText.trim() ? "Write the text to speak." : null;
 
   return (
@@ -438,16 +461,30 @@ export default function VoiceChangerPage() {
               <Card className="space-y-4 p-5">
                 <h2 className="text-sm font-semibold text-slate-900">Speak text in a voice</h2>
                 <ErrorBanner message={errAt === "speech" ? err : null} />
-                <Field label="Speaking voice" hint={voiceHint}>
+                <Field label="Speaking voice" hint={speechVoiceHint}>
                   <select ref={speechVoiceRef} className={inputClass} value={speechVoiceId} disabled={!editable || speaking} onChange={(e) => (setSpeechVoiceId(e.target.value), setSpeechKey(newKey()), fail("speech")(null))}>
-                    <option value="">{voicePlaceholder}</option>
-                    {ready.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.name}
-                      </option>
-                    ))}
+                    <option value="">{speechPlaceholder}</option>
+                    {ready.length > 0 && (
+                      <optgroup label="Your voices">
+                        {ready.map((v) => (
+                          <option key={v.id} value={v.id}>
+                            {v.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {publicVoices.length > 0 && (
+                      <optgroup label="HeyGen voices">
+                        {publicVoices.map((v) => (
+                          <option key={v.id} value={v.id}>
+                            {v.language ? `${v.name} · ${v.language}` : v.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
                   </select>
                 </Field>
+                {speechPublic?.previewUrl && <audio key={speechPublic.id} controls preload="none" src={speechPublic.previewUrl} className="h-8 w-full" aria-label={`Sample of the voice ${speechPublic.name}`} data-testid="public-voice-sample" />}
                 <div>
                   <Field label="Text" hint={`Plain prose, up to ${MAX_SPEECH_CHARS.toLocaleString("en-US")} characters; the language is worked out from the text.`}>
                     <textarea className={`${inputClass} min-h-28`} value={speechText} maxLength={MAX_SPEECH_CHARS} disabled={!editable || speaking} aria-describedby="speech-count" onChange={(e) => (setSpeechText(e.target.value), setSpeechKey(newKey()), fail("speech")(null))} placeholder="Welcome to the team. Here is what your first week looks like." />
@@ -461,10 +498,16 @@ export default function VoiceChangerPage() {
                     {speechText.length >= MAX_SPEECH_CHARS ? `The text is at the ${MAX_SPEECH_CHARS.toLocaleString("en-US")}-character limit; anything longer is cut there.` : ""}
                   </span>
                 </div>
-                <fieldset className="space-y-3" disabled={!editable || speaking}>
+                {/* Outside the fieldset, so it is read even though the fieldset's controls are skipped while it is disabled. */}
+                {deliveryOff && (
+                  <p id="speech-delivery-off" className="text-xs text-slate-600">
+                    {speechPublic!.name} is one of HeyGen&apos;s professional voices, which speak without Turbo or the expressiveness boost (they are for instant voices).
+                  </p>
+                )}
+                <fieldset className="space-y-3" disabled={!editable || speaking || deliveryOff} aria-describedby={deliveryOff ? "speech-delivery-off" : undefined}>
                   <legend className="mb-1 text-sm font-medium text-slate-700">Delivery</legend>
                   <label className="flex items-start gap-2 text-sm text-slate-700">
-                    <input type="checkbox" className="mt-0.5 accent-brand-600" checked={speechTurbo} onChange={(e) => (setSpeechTurbo(e.target.checked), setSpeechKey(newKey()), fail("speech")(null))} />
+                    <input type="checkbox" className="mt-0.5 accent-brand-600" checked={speechTurbo && !deliveryOff} onChange={(e) => (setSpeechTurbo(e.target.checked), setSpeechKey(newKey()), fail("speech")(null))} />
                     <span>
                       Turbo
                       <span className="block text-xs text-slate-500">HeyGen&apos;s faster, cheaper model for instant voices.</span>

@@ -14,6 +14,15 @@ export function inlineAsset(file: { data: string; mimeType: string }) {
   return { type: "base64" as const, media_type: file.mimeType, data: file.data };
 }
 
+/** Which languages a glossary rule applies in (all when left out). */
+export type GlossaryLanguage = { scope: "all" } | { scope: "specific"; code: string };
+/** A glossary's rule lists as HeyGen reads and writes them. */
+export interface GlossaryLists {
+  terms?: Array<{ term: string; pronunciation: string; pronunciation_language?: GlossaryLanguage }> | null;
+  do_not_translate_terms?: Array<{ term: string }> | null;
+  forced_translations?: Array<{ term: string; translation: string; target_language?: GlossaryLanguage }> | null;
+}
+
 export class HeyGenClient {
   constructor(private apiKey: string) {}
 
@@ -495,15 +504,28 @@ export class HeyGenClient {
     );
   }
 
-  /** Brand glossary (v3): rules every translation that names it follows; `key` makes a retried create return the same glossary. */
-  createGlossary(body: { name: string; do_not_translate_terms: Array<{ term: string }>; forced_translations?: Array<{ term: string; translation: string }> }, key: string) {
-    return this.request<{ id?: string; brand_glossary_id?: string }>(`${V3}/brand-glossaries`, { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": key } });
+  /**
+   * The workspace's brand glossary (v3; one per workspace since October 2026, so a second create is a 409): rules
+   * every video and translation that names it follows. `key` makes a retried create return the same glossary.
+   */
+  createGlossary(body: { name: string } & GlossaryLists, key: string) {
+    return this.request<{ id?: string; brand_glossary_id?: string }>(`${V3}/brand-glossaries`, { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": key }, signal: AbortSignal.timeout(10_000) });
+  }
+
+  /** A glossary with its full rule lists (`GET /v3/brand-glossaries/{id}`). */
+  getGlossary(id: string) {
+    return this.request<GlossaryLists & { id?: string; brand_glossary_id?: string; name?: string }>(`${V3}/brand-glossaries/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(10_000) });
+  }
+
+  /** Replaces the lists sent, each in full (`PATCH /v3/brand-glossaries/{id}`); a concurrent edit is a 409. */
+  updateGlossary(id: string, body: GlossaryLists & { name?: string }) {
+    return this.request<unknown>(`${V3}/brand-glossaries/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body), signal: AbortSignal.timeout(10_000) });
   }
 
   /** One page of the workspace's glossaries (names and ids), and the cursor of the next page when there is one. */
   async listGlossaries(token?: string): Promise<{ glossaries: Array<{ id?: string; brand_glossary_id?: string; name?: string }>; next?: string }> {
     type Item = { id?: string; brand_glossary_id?: string; name?: string };
-    const json = await this.envelope<Item[] | { items?: Item[]; next_token?: string; token?: string }>(`${V3}/brand-glossaries?limit=100${token ? `&token=${encodeURIComponent(token)}` : ""}`);
+    const json = await this.envelope<Item[] | { items?: Item[]; next_token?: string; token?: string }>(`${V3}/brand-glossaries?limit=100${token ? `&token=${encodeURIComponent(token)}` : ""}`, { signal: AbortSignal.timeout(10_000) });
     const data = json.data;
     const glossaries = Array.isArray(data) ? data : data?.items ?? [];
     // The cursor's place is not documented; it is read from the envelope or from inside `data`.

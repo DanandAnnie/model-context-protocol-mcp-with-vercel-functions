@@ -239,86 +239,159 @@ describe("dubs that keep the brand glossary", () => {
     assert.equal("keepGlossary" in off, false, "the request flag is not stored; the terms are");
   });
 
-  it("gives HeyGen one glossary per set of terms, found again by name when it already exists", async () => {
+  it("adds each dub's rules to the workspace's one glossary, in the dub's language, keeping the rules already there", async () => {
     const { HeyGenTranslateProvider } = await import("../providers/translate/heygen");
+    const { forgetGlossary } = await import("../providers/heygen-glossary");
+    forgetGlossary();
     const realFetch = globalThis.fetch;
-    const calls: Array<{ method: string; url: string; body?: Record<string, unknown>; key?: string }> = [];
-    let respond: (method: string, url: string) => Response = () => new Response("{}");
+    type Rule = Record<string, unknown> & { term: string; translation: string; target_language?: { code: string } };
+    type Glossary = { id: string; name: string; do_not_translate_terms?: unknown[] | null; terms?: unknown[] | null; forced_translations?: Rule[] | null };
+    // HeyGen as it is since October 2026: one glossary per workspace, a second create a 409, a create's key replayed.
+    let workspace: Glossary[] = [];
+    const replays = new Map<string, unknown>();
+    let made = 0;
+    let conflicts = 0;
+    let undo = 0;
+    let down = false;
+    let dub: (body: Record<string, unknown>) => Response = () => ok({ video_translation_ids: ["vt_g"], proofread_ids: ["pr_g"] });
+    const calls: Array<{ method: string; url: string; body?: Record<string, unknown> }> = [];
+    function ok(data: unknown, status = 200) {
+      return new Response(JSON.stringify({ data }), { status });
+    }
     globalThis.fetch = (async (url: string, init?: RequestInit) => {
       const method = init?.method ?? "GET";
-      calls.push({ method, url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined, key: (init?.headers as Record<string, string> | undefined)?.["Idempotency-Key"] });
-      return respond(method, String(url));
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      calls.push({ method, url: String(url), body });
+      if (down) return new Response("down", { status: 500 });
+      const one = /\/brand-glossaries\/([^/?]+)$/.exec(String(url))?.[1];
+      if (String(url).endsWith("/brand-glossaries") && method === "POST") {
+        const key = (init?.headers as Record<string, string>)["Idempotency-Key"];
+        if (replays.has(key)) return ok(replays.get(key), 201);
+        if (workspace.length) return new Response("The workspace already has a glossary", { status: 409 });
+        const g = { id: `bg_studio${++made}`, ...body };
+        workspace.push(g);
+        replays.set(key, { brand_glossary_id: g.id, name: g.name });
+        return ok({ brand_glossary_id: g.id, name: g.name }, 201);
+      }
+      if (String(url).includes("/brand-glossaries?")) return ok(workspace.map(({ id, name }) => ({ id, name })));
+      const g = workspace.find((w) => w.id === one);
+      if (one && !g) return new Response("not found", { status: 404 });
+      if (g && method === "GET") return ok(g);
+      if (g && method === "PATCH") {
+        if (conflicts > 0) {
+          conflicts--;
+          return new Response("changed during the update", { status: 409 });
+        }
+        const before = structuredClone(g);
+        Object.assign(g, body);
+        // Another writer, unnoticed by HeyGen, puts its own list back right after.
+        if (undo > 0) {
+          undo--;
+          g.forced_translations = before.forced_translations;
+        }
+        return ok({});
+      }
+      return dub(body);
     }) as typeof fetch;
-    const ok = (data: unknown) => new Response(JSON.stringify({ data }), { status: 200 });
+    const glossaryCalls = () => calls.filter((c) => c.url.includes("/brand-glossaries")).map((c) => `${c.method}${c.url.includes("?") ? " list" : ""}`);
+    const rules = () => workspace[0].forced_translations?.map((r) => `${r.term}=${r.translation}/${r.target_language?.code}`);
+    const fr = { scope: "specific", code: "fr" };
     try {
       const heygen = new HeyGenTranslateProvider("key");
-      respond = (_m, url) => (url.endsWith("/brand-glossaries") ? ok({ id: "bg_1", name: "x" }) : ok({ video_translation_ids: ["vt_g"] }));
+      // None yet: the studio's is made, a kept term as a translation to itself in the dub's language.
       await heygen.createTranslation({ ...base, targetLanguage: "French", glossary: ["Zeno", "Acme Cloud"] });
-      const [create, dub] = calls;
-      assert.equal(create.url, "https://api.heygen.com/v3/brand-glossaries");
-      assert.deepEqual(create.body?.do_not_translate_terms, [{ term: "Acme Cloud" }, { term: "Zeno" }]);
-      assert.match(String(create.body?.name), /^Avatar Studio terms [0-9a-f]{16}$/);
-      assert.match(create.key ?? "", /^avatar-studio-glossary-[0-9a-f]{16}$/, "a retried create returns the same glossary");
-      assert.equal(dub.body?.brand_glossary_id, "bg_1");
+      const create = calls.find((c) => c.method === "POST" && c.url.endsWith("/brand-glossaries"));
+      assert.equal(create?.body?.name, "Avatar Studio");
+      assert.deepEqual(create?.body?.forced_translations, [{ term: "Zeno", translation: "Zeno", target_language: fr }, { term: "Acme Cloud", translation: "Acme Cloud", target_language: fr }]);
+      assert.equal("do_not_translate_terms" in (create?.body ?? {}), false, "HeyGen's don't-translate list applies in every language, so it is not used");
+      assert.equal(calls.at(-1)?.body?.brand_glossary_id, "bg_studio1");
 
-      // The same terms in any order reuse it; a dub without terms names none.
+      // The same rules again: nothing read or written.
       calls.length = 0;
-      await heygen.createTranslation({ ...base, targetLanguage: "German", glossary: ["Acme Cloud", "Zeno"] });
+      await heygen.createTranslation({ ...base, targetLanguage: "French", glossary: ["Acme Cloud", "Zeno"] });
       await heygen.createTranslation({ ...base, targetLanguage: "German" });
-      assert.deepEqual(calls.map((c) => [c.url.endsWith("/brand-glossaries"), c.body?.brand_glossary_id]), [[false, "bg_1"], [false, undefined]]);
+      assert.deepEqual([glossaryCalls(), calls.map((c) => c.body?.brand_glossary_id)], [[], ["bg_studio1", undefined]], "a dub without terms names none");
 
-      // A glossary made before (its name taken) is found by name, and proofreads use it too.
+      // Another language's rules are added beside them, after a concurrent edit HeyGen noticed, and one it did not
+      // (the write is read back, and made again when it did not hold).
       calls.length = 0;
-      respond = (m, url) => {
-        if (url.endsWith("/brand-glossaries") && m === "POST") return new Response("name taken", { status: 409 });
-        if (url.includes("/brand-glossaries?")) {
-          const name = String(calls.find((c) => c.method === "POST" && c.url.endsWith("/brand-glossaries"))?.body?.name);
-          return ok([{ id: "bg_other", name: "Someone else's" }, { id: "bg_2", name }]);
-        }
-        return ok({ proofread_ids: ["pr_g"] });
-      };
-      await heygen.createProofread({ ...base, targetLanguage: "Spanish", glossary: ["Nimbus"] });
-      assert.equal(calls.at(-1)?.body?.brand_glossary_id, "bg_2");
+      conflicts = 1;
+      undo = 1;
+      await heygen.createProofread({ ...base, targetLanguage: "German", glossary: ["Zeno"], forcedTranslations: [{ term: "CEO", translation: "Geschäftsführer" }] });
+      assert.deepEqual(glossaryCalls(), ["GET", "PATCH", "GET", "PATCH", "GET", "PATCH", "GET"]);
+      assert.deepEqual(rules(), ["Zeno=Zeno/fr", "Acme Cloud=Acme Cloud/fr", "Zeno=Zeno/de", "CEO=Geschäftsführer/de"]);
 
-      // A glossary deleted in HeyGen since: the dub naming it is refused, so it is made again and the dub sent once more.
-      calls.length = 0;
-      let made = 0;
-      respond = (m, url) => {
-        if (url.endsWith("/brand-glossaries") && m === "POST") return ok({ id: `bg_new${++made}` });
-        const body = calls.at(-1)?.body;
-        return body?.brand_glossary_id === "bg_2" ? new Response("glossary not found", { status: 404 }) : ok({ video_translation_ids: ["vt_again"] });
-      };
-      assert.deepEqual(await heygen.createTranslation({ ...base, targetLanguage: "Spanish", glossary: ["Nimbus"] }), { providerJobId: "vt_again" });
-      assert.deepEqual(calls.map((c) => c.body?.brand_glossary_id ?? (c.url.endsWith("/brand-glossaries") ? "create" : "?")), ["bg_2", "create", "bg_new1"]);
-      // A refusal for another reason (the glossary is fine) is not retried with a copy of it.
-      calls.length = 0;
-      respond = (m, url) => (url.endsWith("/brand-glossaries") && m === "POST" ? new Response("name taken", { status: 409 }) : url.includes("/brand-glossaries?") ? ok([{ id: "bg_new1", name: String(calls.find((c) => c.method === "POST" && c.url.endsWith("/brand-glossaries"))?.body?.name) }]) : new Response("bad video", { status: 400 }));
-      await assert.rejects(heygen.createTranslation({ ...base, targetLanguage: "Spanish", glossary: ["Nimbus"] }), /400 bad video/);
-      assert.equal(calls.filter((c) => !c.url.includes("brand-glossaries")).length, 1, "the glossary was still there, so the dub was not sent again");
+      // Another account's rule for the same term and language replaces it; the first account's next dub, though its
+      // rules were written moments ago, reads the glossary again and puts its own back.
+      await heygen.createTranslation({ ...base, targetLanguage: "German", forcedTranslations: [{ term: "ceo", translation: "Vorstand" }] });
+      assert.deepEqual(rules()?.slice(3), ["ceo=Vorstand/de"]);
+      await heygen.createProofread({ ...base, targetLanguage: "German", glossary: ["Zeno"], forcedTranslations: [{ term: "CEO", translation: "Geschäftsführer" }] });
+      assert.deepEqual(rules()?.slice(3), ["CEO=Geschäftsführer/de"]);
 
-      // The name is looked up through every page, and a create still in flight elsewhere is waited for.
+      // A regional language is its base language; one HeyGen's rules cannot name fails the dub rather than writing a
+      // rule every language would follow.
+      await heygen.createTranslation({ ...base, targetLanguage: "Spanish (Mexico)", glossary: ["Zeno"] });
+      assert.ok(rules()?.includes("Zeno=Zeno/es"));
+      await heygen.createTranslation({ ...base, targetLanguage: "Norwegian Bokmål", glossary: ["Zeno"] });
+      await heygen.createTranslation({ ...base, targetLanguage: "Brazilian Portuguese", glossary: ["Zeno"] });
+      assert.ok(rules()?.includes("Zeno=Zeno/no") && rules()?.includes("Zeno=Zeno/pt"), "a name with a language's name among its words");
       calls.length = 0;
-      let lists = 0;
-      respond = (m, url) => {
-        if (url.endsWith("/brand-glossaries") && m === "POST") return new Response("key in use", { status: 409 });
-        if (url.includes("/brand-glossaries?")) {
-          lists++;
-          const name = String(calls.find((c) => c.method === "POST" && c.url.endsWith("/brand-glossaries"))?.body?.name);
-          if (lists === 1) return ok([{ id: "bg_a", name: "Other" }]); // first look: not made yet, no further page
-          if (!url.includes("token=")) return new Response(JSON.stringify({ data: [{ id: "bg_b", name: "Other 2" }], next_token: "p2" }), { status: 200 });
-          return ok([{ id: "bg_paged", name }]);
-        }
-        return ok({ video_translation_ids: ["vt_paged"] });
-      };
-      await heygen.createTranslation({ ...base, targetLanguage: "Spanish", glossary: ["Orbit 2"] });
-      assert.equal(calls.at(-1)?.body?.brand_glossary_id, "bg_paged");
-      assert.ok(calls.some((c) => c.url.includes("token=p2")), "the second page was read");
+      await assert.rejects(heygen.createTranslation({ ...base, targetLanguage: "Klingon", glossary: ["Zeno"] }), /cannot be applied to a dub in Klingon/);
+      assert.equal(calls.length, 0, "nothing written, nothing dubbed");
 
-      // Any other failure fails the dub rather than dubbing without the terms.
-      respond = () => new Response("down", { status: 500 });
+      // Deleted in HeyGen since: made again under a key of its own (a replayed create would name the deleted one).
+      workspace = [];
+      calls.length = 0;
+      await heygen.createTranslation({ ...base, targetLanguage: "French", glossary: ["Orbit"] });
+      assert.deepEqual([calls.at(-1)?.body?.brand_glossary_id, workspace[0]?.id], ["bg_studio2", "bg_studio2"]);
+
+      // A refusal naming the glossary finds it again and sends the dub once more; any other refusal is the dub's own.
+      dub = (body) => (body.brand_glossary_id === "bg_studio2" ? new Response("brand glossary not found", { status: 400 }) : ok({ video_translation_ids: ["vt_again"] }));
+      workspace[0].id = "bg_moved";
+      assert.deepEqual(await heygen.createTranslation({ ...base, targetLanguage: "French", glossary: ["Orbit"] }), { providerJobId: "vt_again" });
+      calls.length = 0;
+      dub = () => new Response("bad video", { status: 400 });
+      await assert.rejects(heygen.createTranslation({ ...base, targetLanguage: "French", glossary: ["Orbit"] }), /400 bad video/);
+      assert.deepEqual(glossaryCalls(), [], "a refusal that is not about the glossary does not look it up again");
+      dub = () => ok({ video_translation_ids: ["vt_g"] });
+
+      // A workspace whose glossary was made in HeyGen's app: used before the studio's old ones, its own rules kept and
+      // its other lists left alone.
+      forgetGlossary();
+      workspace = [
+        { id: "bg_old2", name: "Avatar Studio terms 00000000000000bb", do_not_translate_terms: [{ term: "Zeno" }] },
+        { id: "bg_app", name: "Brand voice", terms: [{ term: "HeyGen", pronunciation: "hey-jen" }], do_not_translate_terms: [{ term: "Acme" }], forced_translations: [{ term: "Hello", translation: "Bonjour", target_language: fr }] },
+      ];
+      calls.length = 0;
+      await heygen.createTranslation({ ...base, targetLanguage: "French", glossary: ["Nimbus"] });
+      const patch = calls.find((c) => c.method === "PATCH");
+      assert.deepEqual(Object.keys(patch?.body ?? {}), ["forced_translations"], "only the list it changes is sent");
+      assert.deepEqual(workspace[1].forced_translations, [{ term: "Hello", translation: "Bonjour", target_language: fr }, { term: "Nimbus", translation: "Nimbus", target_language: fr }]);
+      assert.deepEqual([workspace[1].terms, workspace[1].do_not_translate_terms], [[{ term: "HeyGen", pronunciation: "hey-jen" }], [{ term: "Acme" }]]);
+      assert.equal(calls.at(-1)?.body?.brand_glossary_id, "bg_app");
+
+      // Only the studio's old per-set glossaries: the first by id is adopted, renamed, and its don't-translate list
+      // (which would win over every language's forced translations) cleared.
+      forgetGlossary();
+      workspace = [
+        { id: "bg_old2", name: "Avatar Studio terms 00000000000000bb", do_not_translate_terms: [{ term: "Zeno" }] },
+        { id: "bg_old10", name: "Avatar Studio terms 00000000000000cc" },
+        { id: "bg_old1", name: "Avatar Studio terms 00000000000000aa", do_not_translate_terms: [{ term: "CEO" }], forced_translations: [{ term: "board", translation: "conseil" }] },
+      ];
+      await heygen.createTranslation({ ...base, targetLanguage: "German", forcedTranslations: [{ term: "CEO", translation: "Vorstand" }] });
+      // Its rules, written before rules had languages, would reach every language: none is kept.
+      assert.deepEqual([workspace[2].name, workspace[2].do_not_translate_terms, workspace[2].forced_translations, calls.at(-1)?.body?.brand_glossary_id], ["Avatar Studio", [], [{ term: "CEO", translation: "Vorstand", target_language: { scope: "specific", code: "de" } }], "bg_old1"]);
+      assert.equal(workspace[1].name, "Avatar Studio terms 00000000000000cc", "the first by id in number order, not text order");
+      assert.equal(workspace[0].name, "Avatar Studio terms 00000000000000bb", "the other old one is left alone");
+
+      // Any other failure fails the dub rather than dubbing without its terms.
+      forgetGlossary();
+      down = true;
       await assert.rejects(heygen.createTranslation({ ...base, targetLanguage: "Spanish", glossary: ["Orbit"] }), /500/);
     } finally {
       globalThis.fetch = realFetch;
+      const { forgetGlossary: reset } = await import("../providers/heygen-glossary");
+      reset();
     }
   });
 });
@@ -343,33 +416,42 @@ describe("dubs that follow the brand kit's forced translations", () => {
     ]);
 
     const { HeyGenTranslateProvider } = await import("../providers/translate/heygen");
+    const { forgetGlossary } = await import("../providers/heygen-glossary");
+    forgetGlossary();
     const realFetch = globalThis.fetch;
-    const calls: Array<{ url: string; body?: Record<string, unknown> }> = [];
+    const calls: Array<{ method: string; url: string; body?: Record<string, unknown> }> = [];
+    let glossary = null as Record<string, unknown> | null;
     globalThis.fetch = (async (url: string, init?: RequestInit) => {
-      calls.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined });
-      return new Response(JSON.stringify({ data: String(url).endsWith("/brand-glossaries") ? { id: "bg_ft" } : { video_translation_ids: ["vt_ft"] } }), { status: 200 });
+      const method = init?.method ?? "GET";
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      calls.push({ method, url: String(url), body });
+      const reply = (data: unknown) => new Response(JSON.stringify({ data }), { status: 200 });
+      if (String(url).endsWith("/brand-glossaries") && method === "POST") return reply((glossary = { id: "bg_ft", ...body }));
+      if (String(url).includes("/brand-glossaries?")) return reply(glossary ? [{ id: "bg_ft", name: glossary.name }] : []);
+      if (String(url).endsWith("/brand-glossaries/bg_ft")) return reply(method === "PATCH" ? Object.assign(glossary!, body) : glossary);
+      return reply({ video_translation_ids: ["vt_ft"] });
     }) as typeof fetch;
     try {
       const heygen = new HeyGenTranslateProvider("key");
       await heygen.createTranslation({ ...base, targetLanguage: "German", glossary: ["Zeno"], forcedTranslations: [{ term: "free trial", translation: "Testphase" }, { term: "CEO", translation: "Geschäftsführer" }] });
-      assert.deepEqual(calls[0].body?.do_not_translate_terms, [{ term: "Zeno" }]);
-      assert.deepEqual(calls[0].body?.forced_translations, [{ term: "CEO", translation: "Geschäftsführer" }, { term: "free trial", translation: "Testphase" }]);
-      assert.equal(calls[1].body?.brand_glossary_id, "bg_ft");
-      // Other rules for the same kept terms are another glossary, never a change to this one.
-      const firstName = calls[0].body?.name;
-      calls.length = 0;
-      await heygen.createTranslation({ ...base, targetLanguage: "French", glossary: ["Zeno"], forcedTranslations: [{ term: "CEO", translation: "PDG" }] });
-      assert.ok(calls[0].url.endsWith("/brand-glossaries"), "a new glossary for new rules");
-      assert.notEqual(calls[0].body?.name, firstName);
-      assert.deepEqual(calls[0].body?.forced_translations, [{ term: "CEO", translation: "PDG" }]);
-      // A glossary of kept terms only is named as it was before rules existed: a digest of the sorted terms.
-      calls.length = 0;
-      await heygen.createTranslation({ ...base, targetLanguage: "French", glossary: ["Zulu", "Yak"] });
-      const { createHash } = await import("node:crypto");
-      assert.equal(calls[0].body?.name, `Avatar Studio terms ${createHash("sha256").update(JSON.stringify(["Yak", "Zulu"])).digest("hex").slice(0, 16)}`);
-      assert.equal("forced_translations" in (calls[0].body ?? {}), false);
+      const de = { scope: "specific", code: "de" };
+      // Kept terms as translations to themselves, then the fixed ones, each in the dub's language.
+      assert.deepEqual(glossary?.forced_translations, [
+        { term: "Zeno", translation: "Zeno", target_language: de },
+        { term: "free trial", translation: "Testphase", target_language: de },
+        { term: "CEO", translation: "Geschäftsführer", target_language: de },
+      ]);
+      assert.equal(calls.at(-1)?.body?.brand_glossary_id, "bg_ft");
+      // Another language's rule for the same term sits beside it rather than replacing it.
+      await heygen.createTranslation({ ...base, targetLanguage: "French", forcedTranslations: [{ term: "CEO", translation: "PDG" }] });
+      assert.deepEqual((glossary?.forced_translations as Array<{ term: string; translation: string; target_language: { code: string } }>).filter((r) => r.term === "CEO").map((r) => [r.translation, r.target_language.code]), [
+        ["Geschäftsführer", "de"],
+        ["PDG", "fr"],
+      ]);
+      assert.equal(calls.at(-1)?.body?.brand_glossary_id, "bg_ft");
     } finally {
       globalThis.fetch = realFetch;
+      forgetGlossary();
     }
   });
 });

@@ -5,12 +5,13 @@ import { useEffect, useRef, useState } from "react";
 import { FileText, PencilLine, Sparkles, X } from "lucide-react";
 import { Button, Card, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
+import { AgentStylePicker } from "@/components/AgentStylePicker";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ApiError, api } from "@/lib/client";
 import { AGENT_DRAFT_KEY } from "@/lib/agent-draft";
 import { documentText } from "@/lib/document-text";
-import type { Avatar, ProviderStatus, Video, Voice } from "@/lib/types";
+import type { AgentStyle, Avatar, ProviderStatus, Video, Voice } from "@/lib/types";
 
 const LENGTHS = [
   { sec: 30, label: "About 30 seconds" },
@@ -42,6 +43,9 @@ export default function VideoAgentPage() {
   // casts, and directs the whole video itself, where the renderer offers it.
   const [maker, setMaker] = useState<"studio" | "heygen">("studio");
   const byHeygen = maker === "heygen" && status?.directedVideos === true;
+  // HeyGen's curated styles for its agent, listed where it directs videos.
+  const { data: styleData, error: styleErr } = useApi<{ styles: AgentStyle[]; available: boolean }>(status?.directedVideos ? "/api/video-agent/styles" : null);
+  const [styleId, setStyleId] = useState("");
   const [folder, setFolder] = useState<string | undefined>(undefined);
   // Notes about what was or was not filled in, each shown once, so a later one does not replace an earlier one.
   const [notices, setNotices] = useState<string[]>([]);
@@ -117,6 +121,8 @@ export default function VideoAgentPage() {
         setAvatarId(video.avatarId);
         setVoiceId(video.voiceId);
         setFolder(video.folder);
+        // Checked against the styles once they are listed (see below).
+        setStyleId(asked.styleId ?? "");
         // The document's words were sent, not kept: it has to be attached again.
         if (asked.documentName) addNotice(`“${asked.documentName}” was attached to the brief but is not kept; attach it again to write from it.`);
       })
@@ -133,6 +139,17 @@ export default function VideoAgentPage() {
     setVoiceId("");
     addNotice("The voice it was made with is no longer available, so none is chosen.");
   }, [voiceData, voiceId]);
+  useEffect(() => {
+    // The styles could not be listed: the one asked again is not shown, so it is not sent either, and the page says so.
+    if (styleErr && styleId) {
+      setStyleId("");
+      addNotice("HeyGen's styles could not be listed, so the style it was made in is not chosen.");
+      return;
+    }
+    if (!styleData || !styleId || styleData.styles.some((s) => s.id === styleId)) return;
+    setStyleId("");
+    addNotice("The style it was made in is no longer offered, so none is chosen.");
+  }, [styleData, styleErr, styleId]);
   // A render that could not start is still in the library: the error links to it.
   const [failed, setFailed] = useState<{ id: string; title: string } | null>(null);
   const buttons = useRef<Partial<Record<"generate" | "plan" | "direct", HTMLButtonElement | null>>>({});
@@ -148,7 +165,7 @@ export default function VideoAgentPage() {
     setBusy(mode);
     setErr(null);
     setFailed(null);
-    const body = { prompt, mode, orientation, lengthSec, language, ...(mode === "direct" && folder ? { folder } : {}), ...(url.trim() ? { url: url.trim() } : {}), ...(doc ? { document: { name: doc.name, text: doc.text } } : {}), ...(avatarId ? { avatarId } : {}), ...(voiceId ? { voiceId } : {}) };
+    const body = { prompt, mode, orientation, lengthSec, language, ...(mode === "direct" && folder ? { folder } : {}), ...(mode === "direct" && styleId && styleData?.styles.some((s) => s.id === styleId) ? { styleId } : {}), ...(url.trim() ? { url: url.trim() } : {}), ...(doc ? { document: { name: doc.name, text: doc.text } } : {}), ...(avatarId ? { avatarId } : {}), ...(voiceId ? { voiceId } : {}) };
     try {
       if (mode === "plan") {
         const { draft } = await api<{ draft: unknown }>("/api/video-agent", { method: "POST", body: JSON.stringify(body) });
@@ -314,6 +331,8 @@ export default function VideoAgentPage() {
                 </div>
               </fieldset>
             )}
+            {byHeygen && styleData?.available && styleData.styles.length > 0 && <AgentStylePicker styles={styleData.styles} value={styleId} onChange={(id) => (touch(), setStyleId(id))} disabled={canEdit === false} />}
+            {byHeygen && styleErr && <p className="text-xs text-slate-500">HeyGen&apos;s styles could not be listed just now; the agent will choose the look.</p>}
             {byHeygen ? (
               <Button ref={(el) => void (buttons.current.direct = el)} onClick={() => run("direct")} loading={busy === "direct"} disabled={!ready} className="w-full">
                 <Sparkles className="h-4 w-4" /> Generate with HeyGen

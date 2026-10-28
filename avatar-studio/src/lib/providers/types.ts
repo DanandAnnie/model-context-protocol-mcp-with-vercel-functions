@@ -1,4 +1,4 @@
-import type { AudioClip, Avatar, Backdrop, CaptionCue, HighlightClip, HighlightFrame, HighlightLength, StudioTemplate, StudioTemplateDetail, Translation, TranslationRequest, Video, VideoRequest, Voice, MusicTrack, AspectRatio } from "../types";
+import type { AgentStyle, AudioClip, Avatar, Backdrop, CaptionCue, HighlightClip, HighlightFrame, HighlightLength, StudioTemplate, StudioTemplateDetail, Translation, TranslationRequest, Video, VideoRequest, Voice, MusicTrack, AspectRatio } from "../types";
 
 export interface TtsProvider {
   readonly name: string;
@@ -90,6 +90,8 @@ export interface AvatarProvider {
    * only when the request names them; HeyGen chooses otherwise. Absent when the renderer cannot.
    */
   startDirected?(req: VideoRequest, avatar: Avatar | null, voice: Voice | null, videoId: string): Promise<{ providerJobId: string }>;
+  /** The curated styles its Video Agent composes in (`directed.styleId`), where it offers them. */
+  listAgentStyles?(): Promise<AgentStyle[]>;
   /**
    * Make an audio clip usable by this renderer, e.g. by uploading it. Returns the clip with
    * `providerAssetIds[provider]` set; the caller persists it. Renderers without it cannot use audio scenes.

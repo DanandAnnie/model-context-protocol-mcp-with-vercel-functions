@@ -442,6 +442,12 @@ export class HeyGenClient {
     return this.request<{ session_id?: string; status?: string; video_id?: string | null }>(`${V3}/video-agents`, { method: "POST", body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
   }
 
+  /** The curated styles the Video Agent composes in (`GET /v3/video-agents/styles`), every page up to a few. */
+  listAgentStyles() {
+    type Style = { style_id?: string; name?: string; thumbnail_url?: string | null; preview_video_url?: string | null; tags?: string[] | null; aspect_ratio?: string | null };
+    return this.listAll<Style>("/video-agents/styles", 100, 5);
+  }
+
   /** A Video Agent session: its status, and the video it renders once it has one. */
   videoAgentStatus(sessionId: string) {
     return this.request<{ session_id?: string; status?: string; video_id?: string | null; failure_message?: string | null; error?: string | null }>(`${V3}/video-agents/${encodeURIComponent(sessionId)}`, { signal: AbortSignal.timeout(10_000) });

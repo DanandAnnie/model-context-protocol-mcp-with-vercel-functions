@@ -1,4 +1,4 @@
-import { STUDIO_VARIABLE_TYPES, backdropIdOf, footageIdOf, isPhotoAvatar, rendersOnAvatarV, type AudioClip, type Avatar, type Backdrop, type Background, type Scene, type StudioTemplate, type StudioTemplateDetail, type StudioVariable, type VideoRequest, type Voice, type MusicTrack } from "../../types";
+import { AGENT_STYLE_TAGS, STUDIO_VARIABLE_TYPES, backdropIdOf, footageIdOf, isPhotoAvatar, rendersOnAvatarV, type AgentStyle, type AgentStyleTag, type AudioClip, type Avatar, type Backdrop, type Background, type Scene, type StudioTemplate, type StudioTemplateDetail, type StudioVariable, type VideoRequest, type Voice, type MusicTrack } from "../../types";
 import { silentSeconds, withBreakTags } from "../../pauses";
 import type { LookPackKey } from "../../look-packs";
 import { heygenBurnsCaptions } from "../../captions";
@@ -884,6 +884,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       orientation: directed.orientation,
       ...(avatar ? { avatar_id: this.lookId(avatar) } : {}),
       ...(voice ? { voice_id: this.voiceId(voice, voice.id) } : {}),
+      ...(directed.styleId ? { style_id: directed.styleId } : {}),
       // Its webhooks name the render it starts, which the studio does not know yet: the studio's video id comes back.
       ...(webhookUrl("heygen") ? { callback_url: webhookUrl("heygen"), callback_id: videoId } : {}),
     };
@@ -898,6 +899,24 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     }
     if (!data.session_id) throw new Error("HeyGen's Video Agent answered without a session");
     return { providerJobId: `${AGENT_JOB}${Date.now()}_${data.session_id}` };
+  }
+
+  /**
+   * The Video Agent's curated styles (`GET /v3/video-agents/styles`): a style without an id or a name is left out, as
+   * are links that are not https, tags this studio does not know, and a shape other than the three HeyGen names.
+   */
+  async listAgentStyles(): Promise<AgentStyle[]> {
+    const rows = await this.client.listAgentStyles();
+    const seen = new Set<string>();
+    return rows.flatMap((r) => {
+      const id = r.style_id?.trim();
+      const name = r.name?.trim();
+      if (!id || !name || seen.has(id)) return [];
+      seen.add(id);
+      const tags = (r.tags ?? []).filter((t): t is AgentStyleTag => (AGENT_STYLE_TAGS as readonly string[]).includes(t));
+      const aspect = (["16:9", "9:16", "1:1"] as const).find((x) => x === r.aspect_ratio);
+      return [stripEmpty({ id, name, thumbnailUrl: httpsOnly(r.thumbnail_url), previewUrl: httpsOnly(r.preview_video_url), tags, aspect })];
+    });
   }
 
   async getStatus(providerJobId: string): Promise<AvatarJobStatus> {

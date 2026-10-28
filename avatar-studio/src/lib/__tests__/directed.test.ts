@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import { addSubtitles, applyAvatarWebhook, createTemplate, directAgentVideo, getAvatar, getVideo, queryVideos, resizeVideo, retryVideo, saveCaptionCues, videoAgentSchema, videoQuerySchema } from "../services";
-import { asksForPortrait } from "../services/video-agent";
+import { asksForPortrait, generateAgentVideo, listAgentStyles, planVideo } from "../services/video-agent";
 import { NotFoundError, ValidationError } from "../errors";
 import { shareBodyFor } from "../share-body";
 import { providerStatus } from "../providers";
@@ -178,6 +178,66 @@ describe("videos HeyGen's Video Agent directs", () => {
       assert.match((await provider.getStatus(`agent_${Date.now() - 4 * 60 * 60 * 1000}_sess_1`)).error ?? "", /did not start a render in three hours/);
       refuse = true;
       await assert.rejects(provider.startDirected(req, null, null, "vid_studio_3"), (e: unknown) => e instanceof ValidationError && /HeyGen's Video Agent could not take that brief: prompt is too vague/.test((e as Error).message));
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it("is composed in one of HeyGen's curated styles, whose shape it takes when the shape is left to it", async () => {
+    const styles = await listAgentStyles();
+    assert.deepEqual(styles.map((x) => x.id), ["demo_style_noir", "demo_style_crt", "demo_style_pop", "demo_style_paper", "demo_style_press"]);
+    assert.ok(styles.every((x) => x.thumbnailUrl?.startsWith("data:image/svg+xml") && x.tags.length));
+    const paper = await directAgentVideo(videoAgentSchema.parse({ ...ASK, styleId: "demo_style_paper" }), "u1");
+    assert.deepEqual([paper.directed?.styleId, paper.directed?.styleName, paper.directed?.orientation, paper.directed?.autoOrientation, paper.aspect], ["demo_style_paper", "Paper cut-out", "portrait", true, "9:16"], "a portrait style makes a portrait video");
+    assert.equal((await directAgentVideo(videoAgentSchema.parse({ ...ASK, styleId: "demo_style_paper", orientation: "landscape" }), "u1")).directed?.orientation, "landscape", "a shape asked for wins");
+    assert.equal((await directAgentVideo(videoAgentSchema.parse({ ...ASK, prompt: "An Instagram Reels tour of the clinic", styleId: "demo_style_noir" }), "u1")).directed?.orientation, "portrait", "and so does one the request asks for");
+    assert.equal((await directAgentVideo(videoAgentSchema.parse({ ...ASK, prompt: "A widescreen tour of the clinic", styleId: "demo_style_paper" }), "u1")).directed?.orientation, "landscape", "a wide shape too");
+    assert.equal((await directAgentVideo(videoAgentSchema.parse({ ...ASK, prompt: "A YouTube video about the clinic", styleId: "demo_style_paper" }), "u1")).directed?.orientation, "landscape", "or a wide platform");
+    assert.equal((await directAgentVideo(videoAgentSchema.parse(ASK), "u1")).directed?.styleId, undefined, "none unless chosen");
+    // A style HeyGen no longer offers, or one that cannot be a style, is refused before anything starts.
+    await assert.rejects(directAgentVideo(videoAgentSchema.parse({ ...ASK, styleId: "style_retired" }), "u1"), /no longer offers that style/);
+    assert.throws(() => videoAgentSchema.parse({ ...ASK, styleId: "../styles" }), /Unknown style/);
+    // This studio's own agent has no styles: one sent with it is refused rather than ignored.
+    await assert.rejects(planVideo(videoAgentSchema.parse({ ...ASK, mode: "plan", styleId: "demo_style_noir" }), "u1"), /style is for HeyGen's Video Agent/);
+    await assert.rejects(generateAgentVideo(videoAgentSchema.parse({ ...ASK, mode: "generate", styleId: "demo_style_noir" }), "u1"), /style is for HeyGen's Video Agent/);
+  });
+
+  it("lists HeyGen's styles, every page, keeping only what the studio can show, and sends the one chosen", async () => {
+    const realFetch = globalThis.fetch;
+    const asked: string[] = [];
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      asked.push(url);
+      if (url === "https://api.heygen.com/v3/video-agents/styles?limit=100")
+        return Response.json({
+          data: [
+            { style_id: "style_noir", name: "Noir Detective", thumbnail_url: "https://files.heygen.ai/noir.jpg", preview_video_url: "https://files.heygen.ai/noir.mp4", tags: ["cinematic", "spooky"], aspect_ratio: "16:9" },
+            { style_id: "style_plain", name: " Plain ", thumbnail_url: "http://files.heygen.ai/plain.jpg", preview_video_url: null, tags: null, aspect_ratio: "4:3" },
+            { style_id: "", name: "No id" },
+            { style_id: "style_nameless" },
+          ],
+          has_more: true,
+          next_token: "page 2",
+        });
+      if (url === "https://api.heygen.com/v3/video-agents/styles?limit=100&token=page%202") return Response.json({ data: [{ style_id: "style_noir", name: "Noir again" }, { style_id: "style_reel", name: "Reel", tags: ["pop-culture"], aspect_ratio: "9:16" }], has_more: false });
+      if (url === "https://api.heygen.com/v3/video-agents" && init?.method === "POST") {
+        bodies.push(JSON.parse(String(init.body)));
+        return Response.json({ data: { session_id: "sess_s", status: "thinking", video_id: null } });
+      }
+      return new Response("unexpected", { status: 500 });
+    }) as typeof fetch;
+    try {
+      const provider = new HeyGenAvatarProvider("hg_key");
+      assert.deepEqual(await provider.listAgentStyles(), [
+        { id: "style_noir", name: "Noir Detective", thumbnailUrl: "https://files.heygen.ai/noir.jpg", previewUrl: "https://files.heygen.ai/noir.mp4", tags: ["cinematic"], aspect: "16:9" },
+        { id: "style_plain", name: "Plain", tags: [] },
+        { id: "style_reel", name: "Reel", tags: ["pop-culture"], aspect: "9:16" },
+      ]);
+      assert.equal(asked.length, 2, "both pages");
+      const req = { title: "x", script: "", avatarId: "", voiceId: "", aspect: "16:9" as const, resolution: "1080p" as const, background: { type: "color" as const, value: "#000000" }, captions: false, speed: 1, directed: { brief: "The brief.", prompt: "The brief.", orientation: "landscape" as const, lengthSec: 60, language: "English", styleId: "style_noir", styleName: "Noir Detective" } };
+      await provider.startDirected(req, null, null, "vid_styled");
+      assert.deepEqual(bodies[0], { prompt: "The brief.", mode: "generate", orientation: "landscape", style_id: "style_noir" });
     } finally {
       globalThis.fetch = realFetch;
     }

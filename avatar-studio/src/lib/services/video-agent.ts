@@ -7,11 +7,13 @@ import { NotFoundError, ValidationError } from "../errors";
 import { stripPauses } from "../pauses";
 import { fetchPageText } from "../webpage";
 import type { FetchLike } from "../safe-fetch";
-import { MAX_DIRECTED_BRIEF, MAX_DOCUMENT_CHARS, MAX_SCENES, type AspectRatio, type Avatar, type Background, type Resolution, type SceneLayout, type Video } from "../types";
+import { MAX_DIRECTED_BRIEF, MAX_DOCUMENT_CHARS, MAX_SCENES, type AgentStyle, type AspectRatio, type Avatar, type Background, type Resolution, type SceneLayout, type Video } from "../types";
 import { getAvatar, listAvatars } from "./avatars";
 import { getBrandKit } from "./brand";
 import { listVoices } from "./voices";
 import { createVideo, enforceRenderLimit, videoRequestSchema } from "./videos";
+import { forgetMemo, memo } from "../cache";
+import { LIST_TTL_MS } from "./shared";
 
 /** What a video holds: its scenes' scripts together, joined as the editor joins them. */
 const MAX_SCRIPT = 5000;
@@ -43,6 +45,8 @@ export const videoAgentSchema = z.object({
   mode: z.enum(["generate", "plan", "direct"]).default("generate"),
   /** Where a "direct" video is filed (the folder of the one asked again); the other modes leave it to the editor. */
   folder: z.string().trim().max(40).optional(),
+  /** One of HeyGen's curated styles (`GET /api/video-agent/styles`) its agent composes a "direct" video in. */
+  styleId: z.string().regex(/^[A-Za-z0-9_.:-]{1,100}$/, "Unknown style").optional(),
 });
 export type VideoAgentInput = z.infer<typeof videoAgentSchema>;
 
@@ -129,6 +133,7 @@ async function sourcesOf(input: VideoAgentInput, fetchImpl?: FetchLike): Promise
 
 /** Plans a video from a prompt and makes it ready to render, with the owner's brand kit applied. */
 export async function planVideo(input: VideoAgentInput, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<VideoAgentDraft> {
+  noStyle(input);
   const source = await sourcesOf(input, fetchImpl);
   const kit = await getBrandKit(ownerId);
   const avatar = await presenter(input.avatarId, kit?.defaultAvatarId, ownerId);
@@ -171,6 +176,7 @@ export function asksForLandscape(prompt: string): boolean {
 
 /** Plans and renders in one step, like HeyGen's one-shot "generate" mode. */
 export async function generateAgentVideo(input: VideoAgentInput, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<{ video: Video; draft: VideoAgentDraft }> {
+  noStyle(input);
   // Before the page fetch and the planner call, so an owner at the monthly limit is not charged for a plan.
   await enforceRenderLimit(ownerId);
   const draft = await planVideo(input, ownerId, fetchImpl);
@@ -183,14 +189,20 @@ export async function generateAgentVideo(input: VideoAgentInput, ownerId: string
  * "YouTube Shorts") or the shape ("vertical", "9:16"), not words that only sound like one ("customer stories").
  */
 export function asksForPortrait(prompt: string): boolean {
+  return shapeAsked(prompt) === "portrait";
+}
+
+/** The shape a request names, by the shape itself or by a platform (see `asksForPortrait`); none when it names neither. */
+function shapeAsked(prompt: string): "portrait" | "landscape" | undefined {
   // The shape named outright decides: vertical first ("a portrait video, not landscape"), then wide.
-  if (/\b(vertical|portrait\s+(?:video|format|orientation|mode)|9\s*:\s*16)\b/i.test(prompt)) return true;
-  if (/\b(landscape|widescreen|wide[- ]screen|horizontal|16\s*:\s*9)\b/i.test(prompt)) return false;
+  if (/\b(vertical|portrait\s+(?:video|format|orientation|mode)|9\s*:\s*16)\b/i.test(prompt)) return "portrait";
+  if (/\b(landscape|widescreen|wide[- ]screen|horizontal|16\s*:\s*9)\b/i.test(prompt)) return "landscape";
   // Else the platform named first: "a TikTok promoting our YouTube channel" is vertical, "a YouTube video about our
   // TikTok strategy" wide.
   const vertical = /\b(tik\s?toks?|(?:instagram|ig|facebook)\s+(?:reels?|stor(?:y|ies))|reels?\s+video|youtube[\s-]+shorts?)\b/i.exec(prompt);
   const wide = /\byoutube\b(?![\s-]+shorts?\b)/i.exec(prompt);
-  return !!vertical && (!wide || vertical.index < wide.index);
+  if (vertical && (!wide || vertical.index < wide.index)) return "portrait";
+  return wide ? "landscape" : undefined;
 }
 
 /** Fewest characters of a page or document worth sending; less is no source at all. */
@@ -220,14 +232,17 @@ export async function directAgentVideo(input: VideoAgentInput, ownerId: string =
   // Before the page is read, so a renderer without the agent refuses without fetching anything.
   const provider = getAvatarProvider();
   if (!provider.startDirected) throw new ValidationError(`HeyGen's Video Agent is not available with the ${provider.name} renderer`);
+  const style = input.styleId ? (await listAgentStyles()).find((s) => s.id === input.styleId) : undefined;
+  if (input.styleId && !style) throw new ValidationError("HeyGen no longer offers that style; choose another, or none");
   await enforceRenderLimit(ownerId);
   // The request is checked before the page is read: its own length, and the room it leaves for the sources asked for.
   briefOf(input, input.url || input.document ? "-" : undefined);
   const source = await sourcesOf(input, fetchImpl);
   const brief = briefOf(input, source);
-  const orientation = input.orientation === "landscape" || input.orientation === "portrait" ? input.orientation : asksForPortrait(input.prompt) ? "portrait" : "landscape";
+  // Left to the agent, the shape is the one the request asks for, else the style's own, else landscape.
+  const orientation = input.orientation === "landscape" || input.orientation === "portrait" ? input.orientation : (shapeAsked(input.prompt) ?? (style?.aspect === "9:16" ? "portrait" : "landscape"));
   const title = input.prompt.replace(/\s+/g, " ").trim();
-  return createVideo(
+  const video = await createVideo(
     {
       title: title.length <= 80 ? title : `${title.slice(0, 79).replace(/\s+\S*$/, "")}…`,
       // HeyGen writes the script: none is kept here, so nothing is captioned or subtitled from it.
@@ -248,6 +263,7 @@ export async function directAgentVideo(input: VideoAgentInput, ownerId: string =
         language: input.language,
         ...(input.url ? { url: input.url } : {}),
         ...(input.document ? { documentName: input.document.name } : {}),
+        ...(style ? { styleId: style.id, styleName: style.name } : {}),
       },
     },
     ownerId,
@@ -255,5 +271,24 @@ export async function directAgentVideo(input: VideoAgentInput, ownerId: string =
     true,
     input.folder ? { folder: input.folder } : {},
   );
+  // A start refused while a style was named may be HeyGen retiring it: the next listing asks HeyGen afresh.
+  if (style && video.status === "failed") forgetMemo("agentstyles:");
+  return video;
 }
 
+/** A style is HeyGen's agent's own; this studio's planner has none to apply, so it refuses one rather than ignoring it. */
+function noStyle(input: VideoAgentInput): void {
+  if (input.styleId) throw new ValidationError("A style is for HeyGen's Video Agent; choose it to make the video, or leave the style out");
+}
+
+/** Whether the renderer's Video Agent offers curated styles. */
+export function agentStylesAvailable(): boolean {
+  return typeof getAvatarProvider().listAgentStyles === "function";
+}
+
+/** The curated styles HeyGen's Video Agent composes in, memoised per renderer for a few minutes; none without them. */
+export async function listAgentStyles(): Promise<AgentStyle[]> {
+  const p = getAvatarProvider();
+  if (!p.listAgentStyles) return [];
+  return memo(`agentstyles:${p.name}`, LIST_TTL_MS, () => p.listAgentStyles!());
+}

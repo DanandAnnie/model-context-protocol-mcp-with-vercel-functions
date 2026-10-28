@@ -938,6 +938,7 @@ export default function VideoDetailPage() {
                       <Row label="Directed by">HeyGen&apos;s Video Agent</Row>
                       <Row label="Presenter">{video.directed.avatarName ?? "Chosen by HeyGen"}</Row>
                       <Row label="Voice">{video.directed.voiceName ?? "Chosen by HeyGen"}</Row>
+                      <Row label="Style">{video.directed.styleName ?? "Chosen by HeyGen"}</Row>
                     </>
                   )}
                   {video.cinematic && (

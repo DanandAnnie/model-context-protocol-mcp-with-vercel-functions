@@ -789,8 +789,27 @@ export interface DirectedVideo {
   avatarName?: string;
   voiceName?: string;
   orientation: "landscape" | "portrait";
-  /** The orientation was left to the agent (and read from the request), so asking again leaves it so. */
+  /** The orientation was left to the agent (and read from the request, or the style's shape), so asking again leaves it so. */
   autoOrientation?: true;
+  /** The curated style HeyGen's agent composed it in (`style_id`), by name as it was then. */
+  styleId?: string;
+  styleName?: string;
+}
+
+/** The groups HeyGen files its Video Agent styles under. */
+export const AGENT_STYLE_TAGS = ["cinematic", "retro-tech", "iconic-artist", "pop-culture", "handmade", "print"] as const;
+export type AgentStyleTag = (typeof AGENT_STYLE_TAGS)[number];
+
+/** A curated look HeyGen's Video Agent composes a video in: its layouts, transitions, text, and pacing. */
+export interface AgentStyle {
+  id: string;
+  name: string;
+  /** A picture of it, and a sample video made in it (https links, or the demo's drawn stand-ins). */
+  thumbnailUrl?: string;
+  previewUrl?: string;
+  tags: AgentStyleTag[];
+  /** The shape it is designed for. */
+  aspect?: "16:9" | "9:16" | "1:1";
 }
 
 /** Longest and shortest cinematic shot, in seconds (HeyGen's `duration`); a shot without one is timed by HeyGen. */

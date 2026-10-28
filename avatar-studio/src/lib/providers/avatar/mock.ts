@@ -3,7 +3,7 @@ import { pauseSeconds, stripPauses } from "../../pauses";
 import { SAMPLE_PREVIEW_VIDEO, STOCK_AVATARS, portraitSvg } from "../../stock";
 import { demoAssetUrl } from "../../config";
 import { NotFoundError } from "../../errors";
-import type { AudioClip, Avatar, MusicTrack, StudioTemplate, StudioTemplateDetail, VideoRequest } from "../../types";
+import type { AgentStyle, AudioClip, Avatar, MusicTrack, StudioTemplate, StudioTemplateDetail, VideoRequest } from "../../types";
 import type { AvatarJobStatus, AvatarProvider, CleanupStatus, FootageStatus, HighlightInput, HighlightStatus, LipsyncStatus, ShootStatus } from "../types";
 import { SHOOT_ASPECTS, type ShootAspect } from "../../types";
 
@@ -16,6 +16,23 @@ function shootSvg(width: number, height: number, seed: number): string {
   const hue = seed % 360;
   const r = Math.min(w, h) / 6;
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${hue},60%,55%)"/><stop offset="1" stop-color="hsl(${(hue + 60) % 360},60%,35%)"/></linearGradient></defs><rect width="${w}" height="${h}" fill="url(#g)"/><circle cx="${w / 2}" cy="${h / 2 - r}" r="${r}" fill="rgba(255,255,255,0.9)"/><path d="M${w / 2 - 2 * r} ${h} C${w / 2 - 2 * r} ${h / 2 + r} ${w / 2 + 2 * r} ${h / 2 + r} ${w / 2 + 2 * r} ${h} Z" fill="rgba(255,255,255,0.9)"/></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+/** The demo's Video Agent styles, one per HeyGen style group, each drawn in its own colour. */
+const DEMO_AGENT_STYLES: Array<Omit<AgentStyle, "thumbnailUrl" | "previewUrl"> & { hue: number }> = [
+  { id: "demo_style_noir", name: "Noir detective", tags: ["cinematic"], aspect: "16:9", hue: 220 },
+  { id: "demo_style_crt", name: "Retro CRT", tags: ["retro-tech"], aspect: "16:9", hue: 140 },
+  { id: "demo_style_pop", name: "Pop art", tags: ["pop-culture", "iconic-artist"], aspect: "1:1", hue: 330 },
+  { id: "demo_style_paper", name: "Paper cut-out", tags: ["handmade"], aspect: "9:16", hue: 35 },
+  { id: "demo_style_press", name: "Morning paper", tags: ["print"], aspect: "16:9", hue: 0 },
+];
+
+/** A demo style's card: its name on a two-colour field in the style's shape. */
+function styleSvg(name: string, hue: number, aspect: "16:9" | "9:16" | "1:1"): string {
+  const [w, h] = aspect === "9:16" ? [90, 160] : aspect === "1:1" ? [120, 120] : [160, 90];
+  const label = name.replace(/[<>&"']/g, "");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><rect width="${w}" height="${h}" fill="hsl(${hue},45%,30%)"/><rect y="${h * 0.6}" width="${w}" height="${h * 0.4}" fill="hsl(${(hue + 40) % 360},55%,50%)"/><text x="${w / 2}" y="${h * 0.45}" font-family="sans-serif" font-size="11" fill="#fff" text-anchor="middle">${label}</text></svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
@@ -272,6 +289,11 @@ export class MockAvatarProvider implements AvatarProvider {
    */
   async startDirected(): Promise<{ providerJobId: string }> {
     return { providerJobId: `mockagent_${Date.now()}` };
+  }
+
+  /** Demo stand-ins for HeyGen's Video Agent styles: drawn cards, one per group, and the sample video as each one's sample. */
+  async listAgentStyles(): Promise<AgentStyle[]> {
+    return DEMO_AGENT_STYLES.map(({ hue, ...s }) => ({ ...s, thumbnailUrl: styleSvg(s.name, hue, s.aspect ?? "16:9"), previewUrl: SAMPLE_VIDEO }));
   }
 
   async getStatus(providerJobId: string): Promise<AvatarJobStatus> {

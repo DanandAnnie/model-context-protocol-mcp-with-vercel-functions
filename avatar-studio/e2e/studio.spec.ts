@@ -4593,7 +4593,8 @@ test("HeyGen's Video Agent directs a whole video from a brief, and is asked agai
   await expect(brief).toContainText("About 90 seconds");
   await expect(brief).toContainText("Spanish");
   await expect(page.getByText("HeyGen's Video Agent", { exact: true })).toBeVisible();
-  await expect(page.getByText("Chosen by HeyGen")).toHaveCount(2);
+  // The presenter, voice, and style were all left to HeyGen.
+  await expect(page.getByText("Chosen by HeyGen")).toHaveCount(3);
   await expect(page.getByRole("link", { name: "Edit a copy" })).toHaveCount(0);
   const video = (await (await page.request.get(`/api/videos/${id}`)).json()).video as { aspect: string; script: string; directed: { orientation: string } };
   expect([video.aspect, video.script, video.directed.orientation]).toEqual(["9:16", "", "portrait"]);
@@ -4614,6 +4615,46 @@ test("HeyGen's Video Agent directs a whole video from a brief, and is asked agai
   const square = await page.request.post("/api/video-agent", { data: { prompt: "A square video for our feed", mode: "direct", orientation: "square" } });
   expect(square.status()).toBe(400);
   expect((await square.json()).error).toMatch(/landscape or portrait/);
+});
+
+test("HeyGen's Video Agent composes a video in a curated style chosen from its groups, kept when asked again", async ({ page }) => {
+  await page.goto("/agent");
+  // The styles are HeyGen's agent's: none are offered for this studio's own.
+  await expect(page.getByRole("group", { name: "Style (optional)" })).toHaveCount(0);
+  await page.getByLabel(/^HeyGen's Video Agent/).check();
+  const styles = page.getByRole("group", { name: "Style (optional)" });
+  await expect(styles).toHaveAccessibleDescription(/curated look HeyGen's agent composes the video in/);
+  await expect(styles.getByRole("radio", { name: "No style" })).toBeChecked();
+  await expect(styles.getByTestId("agent-style")).toHaveCount(5);
+  // Filtered by group; a style chosen and then filtered out stays chosen, and says so.
+  await styles.getByRole("radio", { name: /^Paper cut-out/ }).check();
+  await styles.getByRole("combobox", { name: "Show" }).selectOption("cinematic");
+  await expect(styles.getByTestId("agent-style")).toHaveCount(1);
+  await expect(styles.getByText("Chosen: Paper cut-out")).toBeVisible();
+  await styles.getByRole("combobox", { name: "Show" }).selectOption("");
+  await expect(styles.getByRole("radio", { name: /^Paper cut-out/ })).toBeChecked();
+  await expect(styles.getByRole("link", { name: "Watch a sample of Paper cut-out (opens in a new tab)" })).toHaveAttribute("target", "_blank");
+  await page.getByLabel("What should the video be?").fill("A short tour of our new bakery, warm and friendly");
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/video-agent") && r.method() === "POST");
+  await page.getByRole("button", { name: "Generate with HeyGen" }).click();
+  expect(((await sent).postDataJSON() as Record<string, unknown>).styleId).toBe("demo_style_paper");
+  await page.waitForURL(/\/videos\/vid_/);
+  const id = new URL(page.url()).pathname.split("/").at(-1)!;
+  // The style is named on the video's page, and, its shape left to the agent, the portrait style made it portrait.
+  await expect(page.getByText("Paper cut-out", { exact: true })).toBeVisible();
+  const video = (await (await page.request.get(`/api/videos/${id}`)).json()).video as { aspect: string; directed: { styleId: string; styleName: string } };
+  expect([video.aspect, video.directed.styleId, video.directed.styleName]).toEqual(["9:16", "demo_style_paper", "Paper cut-out"]);
+  // Asked again, the same style is chosen.
+  await page.getByRole("link", { name: "Ask the agent again" }).click();
+  await page.waitForURL(/\/agent\?from=/);
+  await expect(page.getByRole("group", { name: "Style (optional)" }).getByRole("radio", { name: /^Paper cut-out/ })).toBeChecked();
+  // The API lists the styles, and refuses one it does not offer, or one sent to this studio's own agent.
+  const listed = (await (await page.request.get("/api/video-agent/styles")).json()) as { styles: Array<{ id: string }>; available: boolean };
+  expect([listed.available, listed.styles.length]).toEqual([true, 5]);
+  const retired = await page.request.post("/api/video-agent", { data: { prompt: "A video in an old style", mode: "direct", styleId: "style_retired" } });
+  expect([retired.status(), (await retired.json()).error]).toEqual([400, "HeyGen no longer offers that style; choose another, or none"]);
+  const planned = await page.request.post("/api/video-agent", { data: { prompt: "A planned video", mode: "plan", styleId: "demo_style_noir" } });
+  expect(planned.status()).toBe(400);
 });
 
 test("a photo shoot puts a person's face in a scene picture, with their consent, and lists the photos to download", async ({ page }) => {

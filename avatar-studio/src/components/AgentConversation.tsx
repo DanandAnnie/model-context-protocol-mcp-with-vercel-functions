@@ -63,6 +63,13 @@ export function AgentConversation({ video, canEdit, onAnswered }: { video: Video
   const [note, setNote] = useState("");
   const box = useRef<HTMLTextAreaElement>(null);
   const noteRef = useRef<HTMLParagraphElement>(null);
+  // After an answer the form goes; the focus moves to the status line once it says what happened (it is hidden while empty).
+  const focusNote = useRef(false);
+  useEffect(() => {
+    if (!note || !focusNote.current) return;
+    focusNote.current = false;
+    noteRef.current?.focus();
+  }, [note]);
   /** Says something in the status line, cleared first so the same words said again are heard again. */
   const say = (text: string) => {
     setNote("");
@@ -92,7 +99,7 @@ export function AgentConversation({ video, canEdit, onAnswered }: { video: Video
       onAnswered();
       lookNow.current();
       // The form goes once the agent works on the answer: the focus goes to what was said, not off the page.
-      requestAnimationFrame(() => noteRef.current?.focus());
+      focusNote.current = true;
     } catch (e) {
       setErr(e instanceof Error ? e.message : "The answer could not be sent");
       if (kind === "answer") box.current?.focus();
@@ -118,7 +125,7 @@ export function AgentConversation({ video, canEdit, onAnswered }: { video: Video
         <ol className="mt-3 space-y-3" aria-label="Conversation">
           {messages.map((m, i) => (
             <li key={i} className={`min-w-0 rounded-lg p-3 text-sm ${m.from === "you" ? "ml-6 bg-brand-50 text-slate-800" : m.error ? "mr-6 bg-rose-50 text-rose-800" : "mr-6 bg-slate-50 text-slate-800"}`}>
-              <span className="block text-xs font-medium text-slate-500">{m.from === "you" ? "You" : "HeyGen's agent"}</span>
+              <span className="block text-xs font-medium text-slate-600">{m.from === "you" ? "You" : "HeyGen's agent"}</span>
               {m.text && <p className="mt-0.5 whitespace-pre-wrap [overflow-wrap:anywhere]">{m.text}</p>}
               {m.attachments?.map((a, j) => {
                 // A picture is shown for a thumbnail, or for an image itself; a link only to an https page (a demo's drawn

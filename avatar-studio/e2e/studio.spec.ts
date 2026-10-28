@@ -4723,11 +4723,13 @@ test("HeyGen's Video Agent stops at its storyboard for review, takes feedback, a
   await library.close();
   // Feedback first: it is shown as the account's, and the agent works on it and answers again.
   const answer = talk.getByRole("textbox", { name: "Your answer" });
-  await answer.fill(`Add a scene about parking ${tag}`);
+  await answer.fill(`Make the intro shorter, and add a scene about parking ${tag}`);
   await talk.getByRole("button", { name: "Send", exact: true }).click();
-  await expect(talk.getByText(`Add a scene about parking ${tag}`, { exact: true })).toBeVisible();
-  await expect(answer).toHaveValue("");
-  await expect(talk.getByText(new RegExp(`updated the storyboard: Add a scene about parking ${tag}`))).toBeVisible({ timeout: 15_000 });
+  await expect(talk.getByText(`Make the intro shorter, and add a scene about parking ${tag}`, { exact: true })).toBeVisible();
+  // The form goes while the agent works: the focus is on what happened, not lost.
+  await expect(talk.getByRole("status")).toBeFocused();
+  await expect(talk.getByRole("status")).toHaveText("Sent. HeyGen's Video Agent is working on your answer.");
+  await expect(talk.getByText(new RegExp(`updated the storyboard: Make the intro shorter, and add a scene about parking ${tag}`))).toBeVisible({ timeout: 15_000 });
   // The go-ahead: the video is made, and the conversation stays as the record without an answer box.
   await talk.getByRole("button", { name: "Looks good, make the video" }).click();
   await expect(talk.getByText("Looks good, go ahead and make the video.")).toBeVisible();

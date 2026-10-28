@@ -343,13 +343,13 @@ describe("videos HeyGen's Video Agent directs", () => {
     assert.match(talk.messages[1].text, /drafted a storyboard/);
     assert.match(talk.messages[1].attachments?.[0].thumbnailUrl ?? "", /^data:image\/svg\+xml/);
     assert.equal((await getVideo(video.id, "u1")).agentWaiting, true, "the video says it is waiting for an answer");
-    // Feedback: the agent works on it, then answers again.
-    assert.ok(!(await answerAgent(video.id, "Add a scene about parking", "u1")).agentWaiting);
+    // Feedback, even one that starts "make the…", is worked on, then answered again.
+    assert.ok(!(await answerAgent(video.id, "Make the intro shorter, and add a scene about parking", "u1")).agentWaiting);
     assert.equal((await agentConversation(video.id, "u1")).waiting, false);
     t.mock.timers.tick(3000);
     talk = await agentConversation(video.id, "u1");
     assert.deepEqual(talk.messages.map((m) => m.from), ["you", "agent", "you", "agent"]);
-    assert.match(talk.messages[3].text, /updated the storyboard: Add a scene about parking/);
+    assert.match(talk.messages[3].text, /updated the storyboard: Make the intro shorter, and add a scene about parking/);
     // The go-ahead: the video follows its render from then on, and there is nothing left to answer.
     await answerAgent(video.id, "Looks good, go ahead and make the video.", "u1");
     const making = await getVideo(video.id, "u1");

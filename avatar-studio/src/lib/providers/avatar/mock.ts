@@ -24,8 +24,8 @@ const DEMO_SESSIONS = new Map<string, { turnAt: number; approvedAt?: number; mes
 const MAX_DEMO_SESSIONS = 200;
 /** How long the demo agent "works" on each turn before it answers. */
 const DEMO_TURN_MS = 2500;
-/** An answer that approves the storyboard. */
-const DEMO_APPROVAL = /\b(go ahead|generate|make (?:the|it)|looks (?:good|great|perfect)|approve[ds]?|proceed|render)\b/i;
+/** An answer that approves the storyboard (not one asking for a change, such as "make the intro shorter"). */
+const DEMO_APPROVAL = /\b(go ahead|make the video|generate the video|render it|looks (?:good|great|perfect)|approved?|proceed)\b/i;
 
 /** Whether the demo agent waits for an answer; a turn worked on long enough gets its reply (and storyboard) once. */
 function demoWaiting(session: { turnAt: number; approvedAt?: number; messages: AgentMessage[] }): boolean {

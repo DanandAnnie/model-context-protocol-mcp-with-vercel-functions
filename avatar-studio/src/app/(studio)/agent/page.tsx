@@ -6,12 +6,13 @@ import { FileText, PencilLine, Sparkles, X } from "lucide-react";
 import { Button, Card, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { AgentStylePicker } from "@/components/AgentStylePicker";
+import { AgentMediaPicker, mediaKey, type MediaRef } from "@/components/AgentMediaPicker";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ApiError, api } from "@/lib/client";
 import { AGENT_DRAFT_KEY } from "@/lib/agent-draft";
 import { documentText } from "@/lib/document-text";
-import type { AgentStyle, Avatar, ProviderStatus, Video, Voice } from "@/lib/types";
+import type { AgentStyle, Avatar, Backdrop, FootageJob, ProviderStatus, ShootJob, Video, Voice } from "@/lib/types";
 
 const LENGTHS = [
   { sec: 30, label: "About 30 seconds" },
@@ -49,6 +50,15 @@ export default function VideoAgentPage() {
   // HeyGen's agent stops at its storyboard for the person to answer, on the video's page, before it renders.
   const [review, setReview] = useState(false);
   const [folder, setFolder] = useState<string | undefined>(undefined);
+  // The account's pictures, clips, and shoot photos for HeyGen's agent to use, listed where it directs videos.
+  const [media, setMedia] = useState<MediaRef[]>([]);
+  const [mediaBusy, setMediaBusy] = useState(false);
+  const { data: backdropData, setData: setBackdropData } = useApi<{ backdrops: Backdrop[] }>(status?.directedVideos ? "/api/backdrops" : null);
+  const { data: clipData } = useApi<{ footage: FootageJob[] }>(status?.directedVideos && status.generatedFootage ? "/api/footage" : null);
+  const { data: shootData } = useApi<{ shoots: ShootJob[] }>(status?.directedVideos && status.photoShoots ? "/api/shoots" : null);
+  // A renderer without clips or shoots has none to list: the lists are empty rather than never loaded.
+  const clips = status && !status.generatedFootage ? [] : clipData?.footage;
+  const shoots = status && !status.photoShoots ? [] : shootData?.shoots;
   // Notes about what was or was not filled in, each shown once, so a later one does not replace an earlier one.
   const [notices, setNotices] = useState<string[]>([]);
   const addNotice = (note: string) => setNotices((all) => (all.includes(note) ? all : [...all, note]));
@@ -126,6 +136,8 @@ export default function VideoAgentPage() {
         // Checked against the styles once they are listed (see below).
         setStyleId(asked.styleId ?? "");
         setReview(!!asked.review);
+        // Checked against the lists once they are listed (see below).
+        setMedia((asked.media ?? []).map((m): MediaRef => (m.kind === "photo" ? { kind: "photo", shootId: m.shootId, photo: m.photo } : { kind: m.kind, id: m.id })));
         // The document's words were sent, not kept: it has to be attached again.
         if (asked.documentName) addNotice(`“${asked.documentName}” was attached to the brief but is not kept; attach it again to write from it.`);
       })
@@ -153,6 +165,21 @@ export default function VideoAgentPage() {
     setStyleId("");
     addNotice("The style it was made in is no longer offered, so none is chosen.");
   }, [styleData, styleErr, styleId]);
+  // A picture, clip, or photo no longer there (deleted, or a clip no longer finished) is not chosen, and the page says so.
+  useEffect(() => {
+    if (!media.length) return;
+    const gone = media.filter((m) =>
+      m.kind === "picture"
+        ? backdropData && !backdropData.backdrops.some((b) => b.id === m.id)
+        : m.kind === "clip"
+          ? clips && !clips.some((c) => c.id === m.id && c.status === "completed")
+          : shoots && !shoots.some((s) => s.id === m.shootId && s.status === "completed" && (s.photos?.length ?? 0) >= m.photo),
+    );
+    if (!gone.length) return;
+    const goneKeys = new Set(gone.map(mediaKey));
+    setMedia((all) => all.filter((m) => !goneKeys.has(mediaKey(m))));
+    addNotice(gone.length === 1 ? "One of the pictures and clips chosen for it is no longer in your library or not finished, so it is not chosen." : `${gone.length} of the pictures and clips chosen for it are no longer in your library or not finished, so they are not chosen.`);
+  }, [media, backdropData, clips, shoots]);
   // A render that could not start is still in the library: the error links to it.
   const [failed, setFailed] = useState<{ id: string; title: string } | null>(null);
   const buttons = useRef<Partial<Record<"generate" | "plan" | "direct", HTMLButtonElement | null>>>({});
@@ -160,7 +187,7 @@ export default function VideoAgentPage() {
 
   const urlOk = !url.trim() || /^https?:\/\/\S+$/.test(url.trim());
   // Not while busy: the pressed button stays focusable (marked busy), so the focus is not lost if the start fails.
-  const ready = prompt.trim().length >= 3 && urlOk && canEdit !== false && !reading;
+  const ready = prompt.trim().length >= 3 && urlOk && canEdit !== false && !reading && !(byHeygen && mediaBusy);
   const otherBusy = (mode: "generate" | "plan" | "direct") => !!busy && busy !== mode;
 
   async function run(mode: "generate" | "plan" | "direct") {
@@ -168,7 +195,7 @@ export default function VideoAgentPage() {
     setBusy(mode);
     setErr(null);
     setFailed(null);
-    const body = { prompt, mode, orientation, lengthSec, language, ...(mode === "direct" && folder ? { folder } : {}), ...(mode === "direct" && styleId && styleData?.styles.some((s) => s.id === styleId) ? { styleId } : {}), ...(mode === "direct" && review ? { review: true } : {}), ...(url.trim() ? { url: url.trim() } : {}), ...(doc ? { document: { name: doc.name, text: doc.text } } : {}), ...(avatarId ? { avatarId } : {}), ...(voiceId ? { voiceId } : {}) };
+    const body = { prompt, mode, orientation, lengthSec, language, ...(mode === "direct" && folder ? { folder } : {}), ...(mode === "direct" && styleId && styleData?.styles.some((s) => s.id === styleId) ? { styleId } : {}), ...(mode === "direct" && review ? { review: true } : {}), ...(mode === "direct" && media.length ? { media } : {}), ...(url.trim() ? { url: url.trim() } : {}), ...(doc ? { document: { name: doc.name, text: doc.text } } : {}), ...(avatarId ? { avatarId } : {}), ...(voiceId ? { voiceId } : {}) };
     try {
       if (mode === "plan") {
         const { draft } = await api<{ draft: unknown }>("/api/video-agent", { method: "POST", body: JSON.stringify(body) });
@@ -345,6 +372,18 @@ export default function VideoAgentPage() {
                   </span>
                 </span>
               </label>
+            )}
+            {byHeygen && (
+              <AgentMediaPicker
+                value={media}
+                onChange={(update) => (touch(), setMedia(update))}
+                backdrops={backdropData?.backdrops}
+                clips={clips}
+                shoots={shoots}
+                onUploaded={(b) => setBackdropData((d) => ({ backdrops: [b, ...(d?.backdrops ?? [])] }))}
+                onBusy={setMediaBusy}
+                disabled={canEdit === false}
+              />
             )}
             {byHeygen && styleErr && <p className="text-xs text-slate-500">HeyGen&apos;s styles could not be listed just now; the agent will choose the look.</p>}
             {byHeygen ? (

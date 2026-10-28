@@ -4,7 +4,7 @@ import { SAMPLE_PREVIEW_VIDEO, STOCK_AVATARS, portraitSvg } from "../../stock";
 import { demoAssetUrl } from "../../config";
 import { ConflictError, NotFoundError, ValidationError } from "../../errors";
 import type { AgentMessage, AgentStyle, AudioClip, Avatar, DirectedScene, MusicTrack, StudioTemplate, StudioTemplateDetail, VideoRequest } from "../../types";
-import type { AvatarJobStatus, AvatarProvider, CleanupStatus, FootageStatus, HighlightInput, HighlightStatus, LipsyncStatus, ShootStatus } from "../types";
+import type { AgentFile, AvatarJobStatus, AvatarProvider, CleanupStatus, FootageStatus, HighlightInput, HighlightStatus, LipsyncStatus, ShootStatus } from "../types";
 import { SHOOT_ASPECTS, type ShootAspect } from "../../types";
 
 /** Labeled, self-hosted stand-in; no avatar synthesis or paid operation occurs. */
@@ -20,7 +20,7 @@ function shootSvg(width: number, height: number, seed: number): string {
 }
 
 /** The demo agent's conversations under review, by session: kept on this server instance only. */
-const DEMO_SESSIONS = new Map<string, { turnAt: number; approvedAt?: number; messages: AgentMessage[] }>();
+const DEMO_SESSIONS = new Map<string, { turnAt: number; approvedAt?: number; files?: number; messages: AgentMessage[] }>();
 const MAX_DEMO_SESSIONS = 200;
 /** How long the demo agent "works" on each turn before it answers. */
 const DEMO_TURN_MS = 2500;
@@ -35,7 +35,7 @@ export function demoApproves(text: string): boolean {
 }
 
 /** Whether the demo agent waits for an answer; a turn worked on long enough gets its reply (and storyboard) once. */
-function demoWaiting(session: { turnAt: number; approvedAt?: number; messages: AgentMessage[] }): boolean {
+function demoWaiting(session: { turnAt: number; approvedAt?: number; files?: number; messages: AgentMessage[] }): boolean {
   if (session.approvedAt) return false;
   if (Date.now() - session.turnAt < DEMO_TURN_MS) return false;
   if (session.messages.at(-1)?.from === "you") {
@@ -43,7 +43,7 @@ function demoWaiting(session: { turnAt: number; approvedAt?: number; messages: A
     session.messages.push({
       from: "agent",
       text: first
-        ? "I've drafted a storyboard with three scenes: a welcome, the main point, and what to do next. Would you like any changes, or shall I make the video?"
+        ? `I've drafted a storyboard with three scenes: a welcome, the main point, and what to do next${session.files ? `, using ${session.files === 1 ? "the file" : `the ${session.files} files`} you attached` : ""}. Would you like any changes, or shall I make the video?`
         : `I've updated the storyboard: ${session.messages.at(-1)!.text.slice(0, 200)}. Anything else, or shall I make the video?`,
       at: new Date(session.turnAt + DEMO_TURN_MS).toISOString(),
       attachments: [{ kind: "image", thumbnailUrl: storyboardSvg(session.messages.length) }],
@@ -330,13 +330,13 @@ export class MockAvatarProvider implements AvatarProvider {
    * A demo stand-in for HeyGen's Video Agent: the sample video, rendered as a 30-second job. Like HeyGen's, the job
    * starts as the agent's session and moves to its render halfway (see `getStatus`); the brief is not read.
    */
-  async startDirected(req: VideoRequest): Promise<{ providerJobId: string; agentSessionId: string }> {
+  async startDirected(req: VideoRequest, _avatar?: Avatar | null, _voice?: unknown, _videoId?: string, files: AgentFile[] = []): Promise<{ providerJobId: string; agentSessionId: string }> {
     const now = Date.now();
     if (!req.directed?.review) return { providerJobId: `mockagent_${now}`, agentSessionId: `mocksess_${now}` };
     // Under review, the demo agent keeps a conversation (on this server instance, the latest 200) and stops at a drawn
     // storyboard. Its id is its own, so a video started in the same millisecond never shares it.
     const key = `${now}_${Math.random().toString(36).slice(2, 10)}`;
-    DEMO_SESSIONS.set(`mocksess_${key}`, { turnAt: now, messages: [{ from: "you", text: req.directed.prompt, at: new Date(now).toISOString() }] });
+    DEMO_SESSIONS.set(`mocksess_${key}`, { turnAt: now, ...(files.length ? { files: files.length } : {}), messages: [{ from: "you", text: req.directed.prompt, at: new Date(now).toISOString() }] });
     for (const old of DEMO_SESSIONS.keys()) {
       if (DEMO_SESSIONS.size <= MAX_DEMO_SESSIONS) break;
       DEMO_SESSIONS.delete(old);

@@ -796,9 +796,21 @@ export interface DirectedVideo {
   styleName?: string;
   /** HeyGen's agent stops at its storyboard for the account to review and answer before it renders (its "chat" mode). */
   review?: true;
+  /** The account's pictures, b-roll clips, and photo shoot photos HeyGen's agent was given to use, by name as they were then. */
+  media?: DirectedMedia[];
   /** The directed video this cut revised, scene by scene, and what each changed scene (numbered from 1) was asked to become. */
   editOf?: { videoId: string; title: string; edits: Array<{ scene: number; text: string }> };
 }
+
+/** Most pictures and clips a directed video's brief carries (HeyGen's agent takes up to 20 files). */
+export const MAX_DIRECTED_MEDIA = 10;
+
+/**
+ * One of the account's own pictures or clips handed to HeyGen's Video Agent with the brief: an uploaded image (a
+ * background image), a generated b-roll clip, or a photo of a photo shoot (numbered from 1). Sent by the renderer's
+ * asset id or a fresh link each time the video is started, so a retry sends them again.
+ */
+export type DirectedMedia = { kind: "picture"; id: string; name: string } | { kind: "clip"; id: string; name: string } | { kind: "photo"; shootId: string; photo: number; name: string };
 
 /** A turn of the conversation with the renderer's Video Agent about a directed video under review. */
 export interface AgentMessage {

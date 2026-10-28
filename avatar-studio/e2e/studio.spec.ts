@@ -4696,6 +4696,67 @@ test("a video HeyGen's Video Agent directed has its scenes edited into a new cut
   expect(cuts).toHaveLength(1);
 });
 
+test("HeyGen's Video Agent is given the account's own pictures to use, named on the video and chosen again when asked again", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+  const made = await page.request.post("/api/backdrops", { data: { name: `Storefront ${tag}`, image: `data:image/png;base64,${png.toString("base64")}` } });
+  expect(made.status()).toBe(201);
+  const storefront = ((await made.json()) as { backdrop: { id: string } }).backdrop.id;
+  await page.goto("/agent");
+  // Pictures and clips are for HeyGen's agent: not offered for this studio's own.
+  await expect(page.getByRole("group", { name: "Pictures and clips (optional)" })).toHaveCount(0);
+  await page.getByLabel(/^HeyGen's Video Agent/).check();
+  const media = page.getByRole("group", { name: "Pictures and clips (optional)" });
+  await expect(media).toHaveAccessibleDescription(/for HeyGen's agent to use where they fit, up to 10/);
+  // One chosen from the account's pictures (picked, then added, so moving through the list adds nothing), another uploaded here.
+  const add = media.getByRole("combobox", { name: "Add a picture or clip" });
+  const addButton = media.getByRole("button", { name: "Add", exact: true });
+  await expect(addButton).toBeDisabled();
+  await add.selectOption({ label: `Storefront ${tag}` });
+  const chosen = media.getByRole("list", { name: "Chosen pictures and clips" }).getByRole("listitem");
+  await expect(chosen).toHaveCount(0);
+  await addButton.click();
+  await expect(chosen).toHaveCount(1);
+  // The Add button is disabled once nothing is picked: the focus goes back to the list, or, with nothing left in it, to the upload field.
+  const uploadField = media.getByLabel("Upload a picture");
+  await expect((await add.isEnabled()) ? add : uploadField).toBeFocused();
+  await uploadField.setInputFiles({ name: `counter-${tag}.png`, mimeType: "image/png", buffer: png });
+  await expect(chosen).toHaveCount(2);
+  await expect(chosen.nth(1)).toContainText(`counter-${tag}`);
+  await expect(uploadField).toBeFocused();
+  // A chosen one removed: the focus goes to the next one's Remove button, and it can be chosen again from the list.
+  await media.getByRole("button", { name: `Remove Storefront ${tag}` }).click();
+  await expect(media.getByRole("button", { name: `Remove counter-${tag}` })).toBeFocused();
+  await expect(add.getByRole("option", { name: `Storefront ${tag}` })).toHaveCount(1);
+  await add.selectOption({ label: `Storefront ${tag}` });
+  await addButton.click();
+  await page.getByLabel("What should the video be?").fill(`A tour of our bakery counter ${tag}`);
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/video-agent") && r.method() === "POST");
+  await page.getByRole("button", { name: "Generate with HeyGen" }).click();
+  const asked = ((await sent).postDataJSON() as { media: Array<{ kind: string; id: string }> }).media;
+  expect(asked.map((m) => m.kind)).toEqual(["picture", "picture"]);
+  expect(asked[1].id).toBe(storefront);
+  await page.waitForURL(/\/videos\/vid_/);
+  const id = new URL(page.url()).pathname.split("/").at(-1)!;
+  // Named on the video's page, in the order chosen.
+  await expect(page.getByText(`counter-${tag}; Storefront ${tag}`, { exact: true })).toBeVisible();
+  // Asked again once the uploaded one was deleted, the one still there is chosen, by name, and the page says one is not.
+  const uploaded = ((await (await page.request.get(`/api/videos/${id}`)).json()).video as { directed: { media: Array<{ id: string }> } }).directed.media[0].id;
+  expect((await page.request.delete(`/api/backdrops/${uploaded}`)).ok()).toBe(true);
+  await page.getByRole("link", { name: "Ask the agent again" }).click();
+  await page.waitForURL(/\/agent\?from=/);
+  const again = page.getByRole("group", { name: "Pictures and clips (optional)" });
+  await expect(again.getByRole("button", { name: `Remove Storefront ${tag}` })).toBeVisible();
+  await expect(again.getByRole("listitem")).toHaveCount(1);
+  await expect(page.getByText("One of the pictures and clips chosen for it is no longer in your library or not finished, so it is not chosen.")).toBeVisible();
+  // The API refuses them for this studio's own planner, and a picture that is not the account's.
+  const planned = await page.request.post("/api/video-agent", { data: { prompt: "A planned video", mode: "plan", media: [{ kind: "picture", id: storefront }] } });
+  expect(planned.status()).toBe(400);
+  const unknown = await page.request.post("/api/video-agent", { data: { prompt: "A video with a picture nobody has", mode: "direct", media: [{ kind: "picture", id: "bd_nobodyhasthis" }] } });
+  expect([unknown.status(), (await unknown.json()).error]).toEqual([400, "A picture you chose was deleted; remove it from the brief"]);
+  expect((await page.request.delete(`/api/backdrops/${storefront}`)).ok()).toBe(true);
+});
+
 test("HeyGen's Video Agent stops at its storyboard for review, takes feedback, and renders on the go-ahead", async ({ page }) => {
   const tag = Date.now().toString(36);
   await page.goto("/agent");

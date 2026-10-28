@@ -7,18 +7,33 @@ import { NotFoundError, ValidationError } from "../errors";
 import { stripPauses } from "../pauses";
 import { fetchPageText } from "../webpage";
 import type { FetchLike } from "../safe-fetch";
-import { MAX_DIRECTED_BRIEF, MAX_DOCUMENT_CHARS, MAX_SCENES, type AgentStyle, type AspectRatio, type Avatar, type Background, type Resolution, type SceneLayout, type Video } from "../types";
+import { MAX_DIRECTED_BRIEF, MAX_DIRECTED_MEDIA, MAX_DOCUMENT_CHARS, MAX_SCENES, type AgentStyle, type DirectedMedia, type AspectRatio, type Avatar, type Background, type Resolution, type SceneLayout, type Video } from "../types";
 import { getAvatar, listAvatars } from "./avatars";
 import { getBrandKit } from "./brand";
 import { listVoices } from "./voices";
 import { createVideo, enforceRenderLimit, videoRequestSchema } from "./videos";
 import { forgetMemo, memo } from "../cache";
+import { footageIdSchema } from "./footage";
+import { shootIdSchema, shootPhotoSchema } from "./shoots";
 import { LIST_TTL_MS } from "./shared";
 
 /** What a video holds: its scenes' scripts together, joined as the editor joins them. */
 const MAX_SCRIPT = 5000;
 /** The planner is asked for about this many scenes at most; a video holds more, but an agent's plan rarely needs them. */
 const MAX_PLANNED_SCENES = 10;
+
+/** One of the account's pictures, clips, or shoot photos for HeyGen's agent to use, named as it is listed. */
+const mediaSchema = z.discriminatedUnion(
+  "kind",
+  [
+    z.object({ kind: z.literal("picture"), id: z.string().regex(/^bd_[A-Za-z0-9]{1,64}$/, "Unknown picture") }).strict(),
+    z.object({ kind: z.literal("clip"), id: footageIdSchema }).strict(),
+    // Its id bounded as a clip's is, so a malformed one is refused as such rather than read as a deleted shoot.
+    shootPhotoSchema.extend({ kind: z.literal("photo"), shootId: shootIdSchema }),
+  ],
+  "Choose a picture, a clip, or a photo shoot's photo",
+);
+const mediaKey = (m: z.infer<typeof mediaSchema>) => (m.kind === "photo" ? `photo:${m.shootId}:${m.photo}` : `${m.kind}:${m.id}`);
 
 export const videoAgentSchema = z.object({
   prompt: z.string().trim().min(3, "Describe the video in a few words").max(10_000),
@@ -49,6 +64,12 @@ export const videoAgentSchema = z.object({
   review: z.boolean().optional(),
   /** One of HeyGen's curated styles (`GET /api/video-agent/styles`) its agent composes a "direct" video in. */
   styleId: z.string().regex(/^[A-Za-z0-9_.:-]{1,100}$/, "Unknown style").optional(),
+  /** The account's pictures, b-roll clips, and photo shoot photos HeyGen's agent may use in a "direct" video. */
+  media: z
+    .array(mediaSchema)
+    .max(MAX_DIRECTED_MEDIA, `HeyGen's agent takes up to ${MAX_DIRECTED_MEDIA} pictures and clips`)
+    .refine((all) => new Set(all.map(mediaKey)).size === all.length, "The same picture or clip is chosen twice")
+    .optional(),
 });
 export type VideoAgentInput = z.infer<typeof videoAgentSchema>;
 
@@ -210,12 +231,15 @@ function shapeAsked(prompt: string): "portrait" | "landscape" | undefined {
 /** Fewest characters of a page or document worth sending; less is no source at all. */
 const MIN_SOURCE_ROOM = 500;
 
+/** Said in the brief when pictures or clips are attached, as HeyGen advises naming attachments in the prompt. */
+const MEDIA_NOTE = "Use the attached pictures and clips where they fit.";
+
 /**
  * The brief HeyGen's agent gets: the length and language, the request, then the sources, cut to fit what HeyGen takes.
  * A request too long to leave the length and language (or the sources asked for) their room is refused, never cut.
  */
 function briefOf(input: VideoAgentInput, source: string | undefined): string {
-  const asks = `Length: about ${input.lengthSec} seconds. Language: ${input.language}.\n\n${input.prompt}`;
+  const asks = `Length: about ${input.lengthSec} seconds. Language: ${input.language}.\n\n${input.prompt}${input.media?.length ? `\n\n${MEDIA_NOTE}` : ""}`;
   if (asks.length > MAX_DIRECTED_BRIEF) throw new ValidationError(`HeyGen's Video Agent takes up to ${MAX_DIRECTED_BRIEF.toLocaleString("en-US")} characters with the length and language; shorten the request by ${(asks.length - MAX_DIRECTED_BRIEF).toLocaleString("en-US")}`);
   if (!source) return asks;
   const lead = "\n\nWrite from these sources, using only their facts:\n";
@@ -267,6 +291,8 @@ export async function directAgentVideo(input: VideoAgentInput, ownerId: string =
         ...(input.document ? { documentName: input.document.name } : {}),
         ...(style ? { styleId: style.id, styleName: style.name } : {}),
         ...(input.review ? { review: true as const } : {}),
+        // Named once checked, as the video starts.
+        ...(input.media?.length ? { media: input.media.map((m): DirectedMedia => ({ ...m, name: "" })) } : {}),
       },
     },
     ownerId,
@@ -283,6 +309,7 @@ export async function directAgentVideo(input: VideoAgentInput, ownerId: string =
 function noStyle(input: VideoAgentInput): void {
   if (input.styleId) throw new ValidationError("A style is for HeyGen's Video Agent; choose it to make the video, or leave the style out");
   if (input.review) throw new ValidationError("Reviewing a storyboard is for HeyGen's Video Agent; this studio's agent lets you review its plan in the editor instead");
+  if (input.media?.length) throw new ValidationError("Pictures and clips are for HeyGen's Video Agent; choose it to make the video, or leave them out");
 }
 
 /** Whether the renderer's Video Agent offers curated styles. */

@@ -158,17 +158,18 @@ export async function startShoot(input: ShootRequest, ownerId: string = LOCAL_OW
 
 /**
  * The link of one finished photo of the account's shoot (`photo` from 1), fresh enough for a renderer to fetch: an old
- * one is renewed first. For a clip that opens on it; a shoot not ready, or a photo it does not have, is refused.
+ * one is renewed first. For a clip that opens on it, a presenter, or HeyGen's Video Agent; a shoot not ready, or a
+ * photo it does not have, is refused, `instead` ending the refusal with what to do about it.
  */
-export async function shootPhotoLink(id: string, photo: number, ownerId: string = LOCAL_OWNER): Promise<{ url: string; provider: string }> {
+export async function shootPhotoLink(id: string, photo: number, ownerId: string = LOCAL_OWNER, instead = "choose another photo"): Promise<{ url: string; provider: string; title: string }> {
   const [job] = await checks.follow([owned(await getStore().get<ShootJob>("shoot", shootId(id)), ownerId, "Photo shoot")]);
-  if (job.status === "failed") throw new ValidationError(`"${job.title}" has no photos${job.error ? ` (${job.error.replace(/\.$/, "")})` : ""}; choose another photo`);
-  if (job.status !== "completed") throw new ValidationError(`"${job.title}" is not ready yet; wait for its photos`);
+  if (job.status === "failed") throw new ValidationError(`"${job.title}" has no photos${job.error ? ` (${job.error.replace(/\.$/, "")})` : ""}; ${instead}`);
+  if (job.status !== "completed") throw new ValidationError(`"${job.title}" is not ready yet; wait for its photos, or ${instead}`);
   const url = job.photos?.[photo - 1]?.url;
   if (!url) throw new ValidationError(`"${job.title}" has ${job.photos?.length === 1 ? "one photo" : `${job.photos?.length ?? 0} photos`}; there is no photo ${photo}`);
   // A link the renderer could not renew (it was asked a moment ago and failed) may have expired; it is not sent.
   if (Date.now() - Date.parse(job.checkedAt ?? job.updatedAt) > RELINK_MS) throw new ValidationError(`The link to photo ${photo} of "${job.title}" could not be renewed just now; try again in a few minutes`);
-  return { url, provider: job.provider };
+  return { url, provider: job.provider, title: job.title };
 }
 
 /** Forgets one photo shoot (the renderer's copies expire on their own). */

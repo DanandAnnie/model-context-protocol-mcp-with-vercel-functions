@@ -1208,6 +1208,12 @@ export default function VideoDetailPage() {
                           <dd className="break-words">{video.directed.documentName}</dd>
                         </>
                       )}
+                      {video.directed.media?.length ? (
+                        <>
+                          <dt className="text-slate-500">Pictures and clips</dt>
+                          <dd className="break-words">{video.directed.media.map((m) => m.name || (m.kind === "clip" ? "A clip" : m.kind === "photo" ? "A photo" : "A picture")).join("; ")}</dd>
+                        </>
+                      ) : null}
                       {video.directed.editOf?.edits.map((e) => (
                         <div key={e.scene} className="contents">
                           <dt className="text-slate-500">Scene {e.scene} changed</dt>

@@ -247,15 +247,16 @@ export async function getFootage(id: string, ownerId: string = LOCAL_OWNER): Pro
 }
 
 /**
- * A finished clip of the account with a link fresh enough to use now: for a render that loops it, and for the editor's
- * preview. An old link is renewed first; one the renderer cannot renew is tried as it is.
+ * A finished clip of the account with a link fresh enough to use now: for a render that loops it, the editor's preview,
+ * and HeyGen's Video Agent. An old link is renewed first; one the renderer cannot renew is tried as it is. `instead`
+ * ends a refusal with what to do about it.
  */
-export async function footageLink(id: string, ownerId: string = LOCAL_OWNER): Promise<{ job: FootageJob; videoUrl: string }> {
+export async function footageLink(id: string, ownerId: string = LOCAL_OWNER, instead = "choose another background"): Promise<{ job: FootageJob; videoUrl: string }> {
   // A clip still being made is asked about here too (a render may come before any listing does), and an old link is
   // renewed; both through the shared checker, so lookups side by side make one renderer call, at most every few seconds.
   const [job] = await checks.follow([owned(await getStore().get<FootageJob>("footage", clipId(id)), ownerId, "Clip")]);
   if (job.status !== "completed" || !job.videoUrl) {
-    throw new ValidationError(job.status === "failed" ? `The generated clip "${job.title}" could not be made; choose another background` : `The generated clip "${job.title}" is not ready yet; wait for it, or choose another background`);
+    throw new ValidationError(job.status === "failed" ? `The generated clip "${job.title}" could not be made; ${instead}` : `The generated clip "${job.title}" is not ready yet; wait for it, or ${instead}`);
   }
   return { job, videoUrl: job.videoUrl };
 }

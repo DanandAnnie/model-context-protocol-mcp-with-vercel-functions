@@ -5,12 +5,12 @@ import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import { getStore } from "../store";
 import { EMPTY_WATCH, MAX_AGENT_MESSAGE, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
-import type { AgentMessage, AudioClip, Avatar, Backdrop, Background, CaptionCue, DirectedScene, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
+import type { AgentMessage, AudioClip, Avatar, Backdrop, Background, CaptionCue, DirectedMedia, DirectedScene, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
 import { buildCues } from "../captions";
 import { captionDurationSec, sceneBoundsMs, type Timed } from "../chapters";
 import { graphemes, wellFormed } from "../text";
 import { pauseSeconds, silentProblem, silentSeconds, stripPauses } from "../pauses";
-import type { AvatarProvider, RenderCast } from "../providers/types";
+import type { AgentFile, AvatarProvider, RenderCast } from "../providers/types";
 import { LOCAL_OWNER } from "../owner-id";
 import { renderLimitFor } from "../billing";
 import { ConflictError, ForbiddenError, LimitError, NotFoundError, ValidationError } from "../errors";
@@ -18,7 +18,8 @@ import { isWorkspaceId, type User } from "../workspaces";
 import { getAvatar, madeLooksOf, rememberMadeLooks } from "./avatars";
 import { getClip, getClipAudio, saveClipAssetIds } from "./clips";
 import { getBackdrop, getBackdropImage, saveBackdropAssetIds } from "./backdrops";
-import { footageForRender, rendersFootage } from "./footage";
+import { footageForRender, footageLink, rendersFootage } from "./footage";
+import { shootPhotoLink } from "./shoots";
 import { listVoices } from "./voices";
 import { PUBLIC_ACCESS, owned, scheduleNotification, stripUndefined } from "./shared";
 import { SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, clearShareLock, setShareLock, shareUnlocked } from "../share-lock";
@@ -1447,7 +1448,9 @@ async function createDirectedVideo(req: VideoRequest & { directed: NonNullable<V
     voice = (await listVoices(ownerId)).find((v) => v.id === req.voiceId) ?? null;
     if (!voice) throw new ValidationError(req.directed.voiceName ? `The voice “${req.directed.voiceName}” is not available; choose another or let HeyGen choose` : `Voice ${req.voiceId} is not available`);
   }
-  req = { ...req, directed: stripUndefined({ ...req.directed, avatarName: avatar?.name, voiceName: voice?.name }) };
+  // Checked and sent as they are now, each named as it is now: a picture, clip, or photo deleted since is refused.
+  const given = req.directed.media?.length ? await directedFiles(req.directed.media, ownerId, provider) : null;
+  req = { ...req, directed: stripUndefined({ ...req.directed, avatarName: avatar?.name, voiceName: voice?.name, media: given?.media }) };
   const base: Video = {
     ...req,
     ...stripUndefined(extras),
@@ -1462,8 +1465,58 @@ async function createDirectedVideo(req: VideoRequest & { directed: NonNullable<V
   };
   return startReserved(base, ownerId, !!extras.id, async () => {
     const prepared = avatar && avatar.source === "custom" && provider.prepareAvatar ? await prepareOnce(provider, avatar) : avatar;
-    return provider.startDirected!(req, prepared, voice, base.id);
+    // Pictures are uploaded to the renderer here, once each, so trouble there leaves a failed video like any start.
+    return provider.startDirected!(req, prepared, voice, base.id, given ? await given.files() : []);
   }, onStarted);
+}
+
+/** What a refusal calls a chosen picture, clip, or photo: by the name it had, else by its kind. */
+function mediaSaid(m: DirectedMedia): string {
+  const kind = m.kind === "picture" ? "picture" : m.kind === "clip" ? "clip" : "photo";
+  return m.name ? `The ${kind} “${m.name}”` : `A ${kind} you chose`;
+}
+
+/**
+ * The pictures, clips, and photos a directed video hands the renderer's Video Agent, each the account's own and
+ * finished, named as they are now and sent as the renderer holds them: an uploaded picture as its asset (uploaded once
+ * and remembered, as for a background, when `files` is called as the video starts), a clip or photo by a fresh link.
+ * Asked at every start, so a retry sends again what is still there and refuses what was deleted, or made with another
+ * renderer, since.
+ */
+async function directedFiles(media: DirectedMedia[], ownerId: string, provider: AvatarProvider): Promise<{ media: DirectedMedia[]; files: () => Promise<AgentFile[]> }> {
+  const instead = "remove it from the brief";
+  const found = await Promise.all(
+    media.map(async (m): Promise<{ media: DirectedMedia; file: AgentFile | Backdrop }> => {
+      try {
+        if (m.kind === "picture") {
+          const backdrop = await getBackdrop(m.id, ownerId);
+          return { media: { ...m, name: backdrop.name }, file: backdrop };
+        }
+        if (m.kind === "clip") {
+          const { job, videoUrl } = await footageLink(m.id, ownerId, instead);
+          if (job.provider !== provider.name) throw new ValidationError(`The clip “${job.title}” was made with another renderer; ${instead}`);
+          return { media: { ...m, name: job.title }, file: { type: "url", url: videoUrl } };
+        }
+        const photo = await shootPhotoLink(m.shootId, m.photo, ownerId, instead);
+        const name = `${photo.title}, photo ${m.photo}`;
+        if (photo.provider !== provider.name) throw new ValidationError(`The photo “${name}” was made with another renderer; ${instead}`);
+        return { media: { ...m, name }, file: { type: "url", url: photo.url } };
+      } catch (err) {
+        if (err instanceof NotFoundError) throw new ValidationError(`${mediaSaid(m)} was deleted; ${instead}`);
+        throw err;
+      }
+    }),
+  );
+  const files = () =>
+    Promise.all(
+      found.map(async ({ file }): Promise<AgentFile> => {
+        if ("type" in file) return file;
+        // The demo renderer, the only one directing videos without uploading pictures, is given the picture's own id.
+        const ready = provider.prepareBackdrop ? await prepareBackdropOnce(provider, file, ownerId) : file;
+        return { type: "asset_id", assetId: ready.providerAssetIds?.[provider.assetKey ?? provider.name] ?? file.id };
+      }),
+    );
+  return { media: found.map((f) => f.media), files };
 }
 
 /** The request a stored video was rendered from, to render it again (a retry, another size). */

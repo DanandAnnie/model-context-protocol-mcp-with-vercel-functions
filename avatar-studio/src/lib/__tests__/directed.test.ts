@@ -6,15 +6,18 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
-import { addSubtitles, agentConversation, answerAgent, applyAvatarWebhook, createTemplate, directAgentVideo, directedVideoScenes, editDirectedVideo, sceneEditSchema, getAvatar, getVideo, queryVideos, resizeVideo, retryVideo, saveCaptionCues, videoAgentSchema, videoQuerySchema } from "../services";
+import { addSubtitles, agentConversation, answerAgent, createBackdrop, deleteBackdrop, applyAvatarWebhook, createTemplate, directAgentVideo, directedVideoScenes, editDirectedVideo, sceneEditSchema, getAvatar, getVideo, queryVideos, resizeVideo, retryVideo, saveCaptionCues, videoAgentSchema, videoQuerySchema } from "../services";
 import { asksForPortrait, generateAgentVideo, listAgentStyles, planVideo } from "../services/video-agent";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { shareBodyFor } from "../share-body";
 import { providerStatus } from "../providers";
 import { HEYGEN_LOOK_KEY, HeyGenAvatarProvider } from "../providers/avatar/heygen";
-import { demoApproves } from "../providers/avatar/mock";
+import { MockAvatarProvider, demoApproves } from "../providers/avatar/mock";
 import { getStore } from "../store";
-import { MAX_DIRECTED_BRIEF, type Avatar, type Video } from "../types";
+import { MAX_DIRECTED_BRIEF, type Avatar, type Backdrop, type FootageJob, type ShootJob, type Video } from "../types";
+
+/** A one-pixel PNG. */
+const PNG_1PX = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
 beforeEach(() => {
   globalThis.__avatarStudioStore = new MemoryStore();
@@ -166,6 +169,8 @@ describe("videos HeyGen's Video Agent directs", () => {
       assert.deepEqual(calls[0].body, { prompt: "The brief.", mode: "generate", orientation: "portrait", avatar_id: "look_dana", voice_id: "hg_voice" }, "the photo avatar's HeyGen look, and HeyGen's own voice id");
       await provider.startDirected({ ...req, directed: { ...req.directed, orientation: "landscape" } }, null, null, "vid_studio_2");
       assert.deepEqual(calls[1].body, { prompt: "The brief.", mode: "generate", orientation: "landscape" }, "HeyGen chooses the presenter and voice when none is named");
+      await provider.startDirected(req, null, null, "vid_studio_files", [{ type: "url", url: "https://cdn.example/lobby.mp4" }, { type: "asset_id", assetId: "asset_front" }]);
+      assert.deepEqual(calls[2].body?.files, [{ type: "url", url: "https://cdn.example/lobby.mp4" }, { type: "asset_id", asset_id: "asset_front" }], "clips and photos by link, pictures by asset");
       assert.deepEqual(await provider.getStatus(started.providerJobId), { status: "processing", agentWaiting: false });
       session = { ...session, status: "generating", video_id: "hg_vid_1" };
       assert.deepEqual(await provider.getStatus(started.providerJobId), { status: "completed", videoUrl: "https://cdn/v.mp4", thumbnailUrl: "https://cdn/v.jpg", durationSec: 44, providerJobId: "hg_vid_1", agentWaiting: false });
@@ -182,6 +187,56 @@ describe("videos HeyGen's Video Agent directs", () => {
     } finally {
       globalThis.fetch = realFetch;
     }
+  });
+
+  it("hands HeyGen's agent the account's pictures, clips, and shoot photos, checked and named at every start", async (t) => {
+    t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+    // What the renderer is handed, and a picture uploaded to it as HeyGen's renderer does (the demo's keeps none).
+    const started = t.mock.method(MockAvatarProvider.prototype, "startDirected");
+    let uploads = 0;
+    const proto = MockAvatarProvider.prototype as unknown as { prepareBackdrop?: (b: Backdrop) => Promise<Backdrop> };
+    proto.prepareBackdrop = async (b) => (uploads++, { ...b, providerAssetIds: { mock: "asset_front" } });
+    t.after(() => void delete proto.prepareBackdrop);
+    const now = new Date().toISOString();
+    const picture = await createBackdrop({ name: "Front desk", image: `data:image/png;base64,${PNG_1PX}` }, "u1");
+    const clip = (id: string, ownerId: string, status: FootageJob["status"]): FootageJob => ({ id, ownerId, title: "Lobby walk-through", prompt: "A slow walk through the lobby", durationSec: 5, quality: "standard", provider: "mock", providerJobId: `mockft_${Date.now()}_5`, status, ...(status === "completed" ? { videoUrl: "https://cdn.example/lobby.mp4" } : {}), createdAt: now, updatedAt: now, checkedAt: now });
+    await getStore().put("footage", clip("ft_lobby", "u1", "completed"));
+    await getStore().put("footage", clip("ft_theirs", "u2", "completed"));
+    await getStore().put("footage", clip("ft_making", "u1", "processing"));
+    await getStore().put("footage", { ...clip("ft_elsewhere", "u1", "completed"), provider: "heygen" });
+    const shoot: ShootJob = { id: "sh_team", ownerId: "u1", title: "Team photos", identityCount: 1, count: 2, provider: "mock", providerJobId: "mockshoot_team", status: "completed", photos: [{ url: "https://cdn.example/a.png" }, { url: "https://cdn.example/b.png" }], createdAt: now, updatedAt: now, checkedAt: now };
+    await getStore().put("shoot", shoot);
+    const media = [{ kind: "picture", id: picture.id }, { kind: "clip", id: "ft_lobby" }, { kind: "photo", shootId: "sh_team", photo: 2 }];
+    const video = await directAgentVideo(videoAgentSchema.parse({ ...ASK, media, review: true }), "u1");
+    assert.deepEqual(video.directed?.media, [
+      { kind: "picture", id: picture.id, name: "Front desk" },
+      { kind: "clip", id: "ft_lobby", name: "Lobby walk-through" },
+      { kind: "photo", shootId: "sh_team", photo: 2, name: "Team photos, photo 2" },
+    ]);
+    assert.match(video.directed!.brief, /\n\nUse the attached pictures and clips where they fit\.$/, "the brief says what they are for");
+    const sent = [{ type: "asset_id", assetId: "asset_front" }, { type: "url", url: "https://cdn.example/lobby.mp4" }, { type: "url", url: "https://cdn.example/b.png" }];
+    assert.deepEqual(started.mock.calls.at(-1)?.arguments[4], sent, "the picture as the asset uploaded for it, the clip and photo by their links");
+    assert.equal((await getStore().get<Backdrop>("backdrop", picture.id))?.providerAssetIds?.mock, "asset_front", "the upload is remembered");
+    t.mock.timers.tick(3000);
+    assert.match((await agentConversation(video.id, "u1")).messages[1].text, /using the 3 files you attached/, "the agent was given all three");
+    // Refused before anything is stored: twice the same one, too many, another account's, one not finished, or for this studio's own planner.
+    assert.match(videoAgentSchema.safeParse({ ...ASK, media: [media[1], media[1]] }).error?.issues[0].message ?? "", /chosen twice/);
+    assert.match(videoAgentSchema.safeParse({ ...ASK, media: Array.from({ length: 11 }, (_, i) => ({ kind: "photo", shootId: `sh_${i}`, photo: 1 })) }).error?.issues[0].message ?? "", /up to 10 pictures and clips/);
+    assert.equal(videoAgentSchema.safeParse({ ...ASK, media: [{ kind: "clip", id: "../etc" }] }).success, false);
+    const before = (await getStore().list<Video>("video", "u1")).length;
+    await assert.rejects(directAgentVideo(videoAgentSchema.parse({ ...ASK, media: [{ kind: "clip", id: "ft_theirs" }] }), "u1"), (e: unknown) => e instanceof ValidationError && (e as Error).message === "A clip you chose was deleted; remove it from the brief", "another account's clip reads as deleted");
+    await assert.rejects(directAgentVideo(videoAgentSchema.parse({ ...ASK, media: [{ kind: "clip", id: "ft_making" }] }), "u1"), /not ready yet; wait for it, or remove it from the brief/);
+    await assert.rejects(directAgentVideo(videoAgentSchema.parse({ ...ASK, media: [{ kind: "clip", id: "ft_elsewhere" }] }), "u1"), /“Lobby walk-through” was made with another renderer; remove it from the brief/);
+    await assert.rejects(directAgentVideo(videoAgentSchema.parse({ ...ASK, media: [{ kind: "photo", shootId: "sh_team", photo: 3 }] }), "u1"), /there is no photo 3/);
+    await assert.rejects(planVideo(videoAgentSchema.parse({ ...ASK, mode: "plan", media }), "u1"), /Pictures and clips are for HeyGen's Video Agent/);
+    assert.equal((await getStore().list<Video>("video", "u1")).length, before, "nothing is started or counted");
+    // A retry sends them again as they are then, the picture's upload reused; a picture deleted since is refused by the name it had.
+    await getStore().put("video", { ...(await getVideo(video.id, "u1")), status: "failed", error: "HeyGen had trouble" });
+    const retried = await retryVideo(video.id, "u1");
+    assert.deepEqual([started.mock.calls.at(-1)?.arguments[4], uploads], [sent, 1]);
+    await getStore().put("video", { ...(await getVideo(retried.id, "u1")), status: "failed", error: "HeyGen had trouble" });
+    await deleteBackdrop(picture.id, "u1");
+    await assert.rejects(retryVideo(retried.id, "u1"), /The picture “Front desk” was deleted; remove it from the brief/);
   });
 
   it("is composed in one of HeyGen's curated styles, whose shape it takes when the shape is left to it", async () => {

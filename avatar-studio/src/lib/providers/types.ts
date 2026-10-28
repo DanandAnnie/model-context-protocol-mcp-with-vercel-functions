@@ -52,6 +52,9 @@ export interface AvatarJobStatus {
 }
 
 /** Avatars and voices referenced by a request's scenes, keyed by id. */
+/** A file handed to the renderer's Video Agent with a brief: by a link it fetches, or an asset it already holds. */
+export type AgentFile = { type: "url"; url: string } | { type: "asset_id"; assetId: string };
+
 export interface RenderCast {
   avatars: Record<string, Avatar>;
   voices: Record<string, Voice>;
@@ -89,9 +92,10 @@ export interface AvatarProvider {
   readonly cinematicShots?: true;
   /**
    * Starts a request's `directed` video from its brief (HeyGen's Video Agent), with the presenter (prepared) and voice
-   * only when the request names them; HeyGen chooses otherwise. Absent when the renderer cannot.
+   * only when the request names them; HeyGen chooses otherwise; `files` are the request's pictures and clips to use.
+   * Absent when the renderer cannot.
    */
-  startDirected?(req: VideoRequest, avatar: Avatar | null, voice: Voice | null, videoId: string): Promise<{ providerJobId: string; agentSessionId?: string }>;
+  startDirected?(req: VideoRequest, avatar: Avatar | null, voice: Voice | null, videoId: string, files?: AgentFile[]): Promise<{ providerJobId: string; agentSessionId?: string }>;
   /** The conversation with the agent of a directed video under review, oldest first, and whether it waits for an answer. */
   agentConversation?(sessionId: string): Promise<{ waiting: boolean; progress?: number; messages: AgentMessage[] }>;
   /** An answer to the agent of a directed video under review: feedback, or the go-ahead to render. */

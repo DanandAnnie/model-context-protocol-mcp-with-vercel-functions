@@ -7,7 +7,7 @@ import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
 import { HeyGenClient, inlineAsset } from "../heygen-client";
 import { ConflictError, LimitError, NotFoundError, UpstreamError, ValidationError } from "../../errors";
-import type { AvatarJobStatus, AvatarProvider, CleanupStatus, FootageInput, FootageStatus, HighlightInput, HighlightStatus, LipsyncInput, LipsyncStatus, MusicMixInput, RenderCast, ShootInput, ShootStatus } from "../types";
+import type { AgentFile, AvatarJobStatus, AvatarProvider, CleanupStatus, FootageInput, FootageStatus, HighlightInput, HighlightStatus, LipsyncInput, LipsyncStatus, MusicMixInput, RenderCast, ShootInput, ShootStatus } from "../types";
 import { musicComposition } from "../../music-mix";
 import { strToU8, zipSync } from "fflate";
 import { createHash } from "node:crypto";
@@ -882,7 +882,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
    * A whole video HeyGen's Video Agent writes, casts, and renders from the brief (v3 `POST /v3/video-agents`, one-shot).
    * The session is followed until it names the video it renders, then that video (see `getStatus`).
    */
-  async startDirected(req: VideoRequest, avatar: Avatar | null, voice: Voice | null, videoId: string) {
+  async startDirected(req: VideoRequest, avatar: Avatar | null, voice: Voice | null, videoId: string, files: AgentFile[] = []) {
     const directed = req.directed;
     if (!directed) throw new ValidationError("Nothing to direct");
     const body = {
@@ -893,6 +893,8 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       ...(avatar ? { avatar_id: this.lookId(avatar) } : {}),
       ...(voice ? { voice_id: this.voiceId(voice, voice.id) } : {}),
       ...(directed.styleId ? { style_id: directed.styleId } : {}),
+      // The account's pictures (uploaded once as assets) and clips and photos (by fresh links), for the agent to use.
+      ...(files.length ? { files: files.map((f) => (f.type === "url" ? { type: "url", url: f.url } : { type: "asset_id", asset_id: f.assetId })) } : {}),
       // Its webhooks name the render it starts, which the studio does not know yet: the studio's video id comes back.
       ...(webhookUrl("heygen") ? { callback_url: webhookUrl("heygen"), callback_id: videoId } : {}),
     };

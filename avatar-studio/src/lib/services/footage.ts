@@ -32,9 +32,14 @@ export const footageRequestSchema = z
     title: z.string().trim().max(120).optional(),
     /** The shot: what is seen, what happens, how the camera moves. */
     prompt: z.string().trim().min(10, "Describe the shot in a few words").max(MAX_FOOTAGE_PROMPT, `Describe the shot in at most ${MAX_FOOTAGE_PROMPT} characters`),
-    durationSec: z.number().int().min(FOOTAGE_MIN_SEC).max(FOOTAGE_MAX_SEC).default(FOOTAGE_MIN_SEC),
+    durationSec: z
+      .number()
+      .int(`A clip is a whole number of seconds, from ${FOOTAGE_MIN_SEC} to ${FOOTAGE_MAX_SEC}`)
+      .min(FOOTAGE_MIN_SEC, `A clip is ${FOOTAGE_MIN_SEC} to ${FOOTAGE_MAX_SEC} seconds`)
+      .max(FOOTAGE_MAX_SEC, `A clip is ${FOOTAGE_MIN_SEC} to ${FOOTAGE_MAX_SEC} seconds`)
+      .default(FOOTAGE_MIN_SEC),
     /** Ignored shape for a clip from a picture, which takes the picture's shape. */
-    aspect: z.enum(FOOTAGE_ASPECTS).optional(),
+    aspect: z.enum(FOOTAGE_ASPECTS, `The frame is ${FOOTAGE_ASPECTS.join(", ")}; leave it out for a clip from pictures to follow the first one`).optional(),
     quality: z.enum(["standard", "hd"]).default("standard"),
     /** A data URL of a PNG or JPEG the clip opens on, as its first frame. */
     image: z.string().max(dataUrlMax(MAX_FOOTAGE_IMAGE_BYTES), "The picture is larger than 3 MB").optional(),
@@ -43,7 +48,7 @@ export const footageRequestSchema = z
      * description as <Picture 1>, <Picture 2>… in this order.
      */
     references: z
-      .array(z.string().max(dataUrlMax(MAX_FOOTAGE_REFERENCE_BYTES), "Each picture to feature must be at most 900 KB"))
+      .array(z.string())
       .min(1, "Add a picture to feature, or leave the pictures out")
       .max(MAX_FOOTAGE_REFERENCES, `A clip features at most ${MAX_FOOTAGE_REFERENCES} pictures`)
       .optional(),
@@ -51,14 +56,24 @@ export const footageRequestSchema = z
   .strict()
   .refine((v) => !(v.image && v.references), { message: "A clip either opens on one picture or features pictures, not both", path: ["references"] })
   .refine((v) => !(v.image && v.aspect), { message: "A clip from a picture takes the picture's shape; leave the frame out", path: ["aspect"] })
-  // HeyGen does not rewrite the labels, so one that names no picture sent would point the shot at nothing.
+  // Each picture to feature is named by its number when it is too large (the request would be refused whole).
   .superRefine((v, ctx) => {
-    if (!v.references) return;
-    const missing = danglingLabels(v.prompt, v.references.length);
-    if (missing.length) {
-      const count = v.references.length === 1 ? "one picture is" : `${v.references.length} pictures are`;
-      ctx.addIssue({ code: "custom", path: ["prompt"], message: `The description names ${missing.map((n) => `<Picture ${n}>`).join(", ")}, but ${count} featured` });
-    }
+    (v.references ?? []).forEach((r, i) => {
+      if (r.length > dataUrlMax(MAX_FOOTAGE_REFERENCE_BYTES)) {
+        const which = (v.references ?? []).length > 1 ? `Picture ${i + 1}` : "The picture to feature";
+        ctx.addIssue({ code: "custom", path: ["references", i], message: `${which} must be at most 900 KB` });
+      }
+    });
+  })
+  // HeyGen does not rewrite the labels, so one that names no picture sent (or any, with no pictures featured) would
+  // point the shot at nothing.
+  .superRefine((v, ctx) => {
+    const count = v.references?.length ?? 0;
+    const missing = danglingLabels(v.prompt, count);
+    if (!missing.length) return;
+    const names = missing.map((n) => `<Picture ${n}>`).join(", ");
+    const featured = count === 0 ? "no picture is featured; feature the pictures or take the labels out" : `${count === 1 ? "one picture is" : `${count} pictures are`} featured`;
+    ctx.addIssue({ code: "custom", path: ["prompt"], message: `The description names ${names}, but ${featured}` });
   })
   // HeyGen renders HD in landscape or portrait only, and a clip featuring pictures in the first one's shape at standard only.
   .refine((v) => v.quality !== "hd" || v.image || (v.references ? v.aspect === "16:9" || v.aspect === "9:16" : (v.aspect ?? "16:9") !== "1:1"), {

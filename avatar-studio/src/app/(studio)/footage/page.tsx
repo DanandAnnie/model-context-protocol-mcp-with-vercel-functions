@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Download, ImagePlus, MonitorPlay, Trash2, X } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
@@ -8,7 +8,7 @@ import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api, formatDate, isRefusal } from "@/lib/client";
 import { toUploadable } from "@/lib/image-upload";
-import { danglingLabels, pictureLabels, withPictureRemoved } from "@/lib/picture-labels";
+import { danglingLabels, insertPictureLabel, pictureLabels, withPictureRemoved } from "@/lib/picture-labels";
 import { FOOTAGE_ASPECTS, FOOTAGE_MAX_SEC, FOOTAGE_MIN_SEC, MAX_FOOTAGE_REFERENCES, footagePath, type FootageAspect, type FootageJob } from "@/lib/types";
 
 /** A clip as the server lists it: never the renderer, its job id, or the picture's digest. */
@@ -77,14 +77,20 @@ export default function FootagePage() {
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const featureRef = useRef<HTMLInputElement>(null);
-  // Where the cursor was in the description, so a label goes there although pressing its button takes the focus.
-  const caretRef = useRef<number | null>(null);
+  // Where the cursor (or selection) was in the description, so a label goes there although pressing its button takes
+  // the focus.
+  const caretRef = useRef<{ start: number; end: number } | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const focusAfterRender = useFocusAfterRender();
   const changed = () => {
     setErr(null);
     setRequestKey(newKey());
+  };
+  // A message the same as the one showing is cleared first, so it is announced again rather than ignored.
+  const say = (set: (m: string | null) => void, message: string) => {
+    set(null);
+    setTimeout(() => set(message), 30);
   };
   // A clip that is made or fails while the page is open is announced.
   const seen = useRef<Map<string, Footage["status"]>>(new Map());
@@ -123,8 +129,9 @@ export default function FootagePage() {
   const hdBlocked = !frame && (shape === "1:1" || shape === "adaptive");
   const needsFeature = use === "feature" && !features.length;
   const needsPicture = use === "frame" && !picture;
-  // A label HeyGen cannot match to a picture sent would point the shot at nothing (it does not rewrite labels).
-  const dangling = use === "feature" && features.length ? danglingLabels(prompt, features.length) : [];
+  // A label HeyGen cannot match to a picture sent would point the shot at nothing (it does not rewrite labels), and
+  // without pictures featured every label is one.
+  const dangling = danglingLabels(prompt, featured.length);
   const startNote = shortPrompt
     ? "Describe the shot in a few words first."
     : needsPicture
@@ -132,7 +139,9 @@ export default function FootagePage() {
       : needsFeature
         ? "Add a picture to feature, or choose No pictures."
         : dangling.length
-          ? `The description names ${dangling.map((n) => `<Picture ${n}>`).join(", ")}, but ${features.length === 1 ? "one picture is" : `${features.length} pictures are`} added.`
+          ? `The description names ${dangling.map((n) => `<Picture ${n}>`).join(", ")}, but ${
+              !featured.length ? "no picture is featured: choose Feature my pictures, or take the labels out" : featured.length === 1 ? "one picture is added" : `${featured.length} pictures are added`
+            }.`
           : null;
   // "Like Picture 1" goes with the last picture featured (or with leaving that mode), back to landscape, so a choice
   // made meanwhile (HD, say) is not undone when a picture is added again.
@@ -168,7 +177,7 @@ export default function FootagePage() {
         setPicture({ name: file.name, url: await toUploadable(file, { maxBytes: MAX_PICTURE_BYTES, maxEdge: 2048 }) });
       }
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "That picture could not be read");
+      say(setErr, `${file.name}: ${e instanceof Error ? e.message : "that picture could not be read"}`);
     } finally {
       setReading(false);
     }
@@ -184,10 +193,12 @@ export default function FootagePage() {
   function removeFeature(i: number) {
     setFeatures((prev) => prev.filter((_, j) => j !== i));
     // The description follows: the removed picture's label goes and later ones move down, as the pictures do.
-    if (pictureLabels(prompt).some((n) => n >= i + 1)) {
-      setPrompt(withPictureRemoved(prompt, i + 1));
-      setNote(`Picture ${i + 1} removed; its label is taken out of the description and later pictures are numbered one lower.`);
-    }
+    // What happened is always said: which picture went, and what that did to the description.
+    const labels = pictureLabels(prompt);
+    const own = labels.includes(i + 1);
+    const later = labels.some((n) => n > i + 1);
+    if (own || later) setPrompt(withPictureRemoved(prompt, i + 1));
+    say(setNote, [`Picture ${i + 1} removed.`, own ? "Its label is taken out of the description." : "", later ? "Later labels are numbered one lower." : ""].filter(Boolean).join(" "));
     changed();
     // The pictures after it move up a number; the focus goes to the add control, there again with a place free.
     focusAfterRender(() => featureRef.current);
@@ -196,13 +207,13 @@ export default function FootagePage() {
   /** Puts a picture's label in the description where the cursor last was (at the end before it has been in the box). */
   function insertLabel(i: number) {
     const label = `<Picture ${i + 1}>`;
-    const at = Math.min(caretRef.current ?? prompt.length, prompt.length);
-    const before = prompt.slice(0, at);
-    const inserted = `${before && !/\s$/.test(before) ? " " : ""}${label}`;
-    const text = `${before}${inserted}${prompt.slice(at)}`.slice(0, MAX_PROMPT);
-    const caret = Math.min(at + inserted.length, text.length);
+    const sel = caretRef.current ?? { start: prompt.length, end: prompt.length };
+    const put = insertPictureLabel(prompt, label, sel.start, sel.end, MAX_PROMPT);
+    // Nothing is cut to make room; the description is left as it is and the reason given.
+    if (!put) return say(setErr, `No room for ${label}: the description is at most ${MAX_PROMPT} characters. Shorten it first.`);
+    const { text, caret } = put;
     setPrompt(text);
-    caretRef.current = caret;
+    caretRef.current = { start: caret, end: caret };
     changed();
     // Back in the box with the cursor just after the label, ready to go on typing.
     focusAfterRender(() => {
@@ -289,8 +300,8 @@ export default function FootagePage() {
                   disabled={canEdit === false}
                   aria-describedby="footage-prompt-hint"
                   placeholder="A slow push-in on a sunlit kitchen; steam rises from a coffee cup on the counter"
-                  onChange={(e) => (setPrompt(e.target.value), (caretRef.current = e.target.selectionStart), changed())}
-                  onSelect={(e) => (caretRef.current = e.currentTarget.selectionStart)}
+                  onChange={(e) => (setPrompt(e.target.value), (caretRef.current = { start: e.target.selectionStart, end: e.target.selectionEnd }), changed())}
+                  onSelect={(e) => (caretRef.current = { start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd })}
                 />
                 <p id="footage-prompt-hint" className="mt-1 text-xs text-slate-500">
                   What is seen, what happens, and how the camera moves. {prompt.length} of {MAX_PROMPT} characters.
@@ -300,14 +311,17 @@ export default function FootagePage() {
                 <legend className="mb-1.5 text-sm font-medium text-slate-700">Pictures</legend>
                 <div className="flex flex-wrap gap-x-4 gap-y-2 text-sm text-slate-700">
                   {USES.map((u) => (
-                    <label key={u.value} className="flex items-center gap-2">
-                      <input type="radio" name="footage-use" className="accent-brand-600" checked={use === u.value} aria-describedby={`footage-use-hint-${u.value}`} disabled={reading} onChange={() => (setUse(u.value), changed())} />
-                      {u.label}
-                      {/* Each choice is described by its own hint; the selected one's is also shown below. */}
+                    <Fragment key={u.value}>
+                      <label className="flex min-h-6 items-center gap-2">
+                        <input type="radio" name="footage-use" className="accent-brand-600" checked={use === u.value} aria-describedby={`footage-use-hint-${u.value}`} disabled={reading} onChange={() => (setUse(u.value), changed())} />
+                        {u.label}
+                      </label>
+                      {/* Each choice is described by its own hint (outside its label, so not part of its name); the
+                          selected one's is also shown below. */}
                       <span id={`footage-use-hint-${u.value}`} className="sr-only">
                         {u.hint}
                       </span>
-                    </label>
+                    </Fragment>
                   ))}
                 </div>
                 <p className="mt-1 text-xs text-slate-500" id="footage-use-hint" aria-hidden>
@@ -375,13 +389,13 @@ export default function FootagePage() {
                 ) : (
                   <div className="flex flex-wrap gap-4 text-sm text-slate-700">
                     {FOOTAGE_ASPECTS.map((a) => (
-                      <label key={a} className="flex items-center gap-2">
+                      <label key={a} className="flex min-h-6 items-center gap-2">
                         <input type="radio" name="footage-frame" className="accent-brand-600" checked={shape === a} onChange={() => (setAspect(a), changed())} />
                         {FRAMES[a]}
                       </label>
                     ))}
                     {featured.length > 0 && (
-                      <label className="flex items-center gap-2">
+                      <label className="flex min-h-6 items-center gap-2">
                         <input type="radio" name="footage-frame" className="accent-brand-600" checked={shape === "adaptive"} onChange={() => (setAspect("adaptive"), changed())} />
                         Like Picture 1
                       </label>
@@ -392,11 +406,11 @@ export default function FootagePage() {
               <fieldset disabled={canEdit === false}>
                 <legend className="mb-1.5 text-sm font-medium text-slate-700">Quality</legend>
                 <div className="flex flex-wrap gap-4 text-sm text-slate-700">
-                  <label className="flex items-center gap-2">
+                  <label className="flex min-h-6 items-center gap-2">
                     <input type="radio" name="footage-quality" className="accent-brand-600" checked={quality === "standard" || hdBlocked} onChange={() => (setQuality("standard"), changed())} onClick={() => setQuality("standard")} />
                     Standard (768p)
                   </label>
-                  <label className="flex items-center gap-2">
+                  <label className="flex min-h-6 items-center gap-2">
                     <input type="radio" name="footage-quality" className="accent-brand-600" checked={quality === "hd" && !hdBlocked} disabled={hdBlocked} aria-describedby="footage-hd-hint" onChange={() => (setQuality("hd"), changed())} />
                     HD (1080p)
                   </label>
@@ -460,7 +474,7 @@ export default function FootagePage() {
                     <>
                       <video src={f.videoUrl} controls preload="none" className="mt-3 w-full rounded-lg bg-black" aria-label={f.title} />
                       <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
-                        <a href={f.videoUrl} download target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-medium text-brand-700 hover:underline" aria-label={`Download ${f.title}`}>
+                        <a href={f.videoUrl} download target="_blank" rel="noopener noreferrer" className="inline-flex min-h-6 items-center gap-1 py-1 font-medium text-brand-700 hover:underline" aria-label={`Download ${f.title}`}>
                           <Download className="h-3 w-3" aria-hidden /> Download
                         </a>
                         <span className="text-slate-500" data-testid="footage-use" data-path={footagePath(f.id)}>

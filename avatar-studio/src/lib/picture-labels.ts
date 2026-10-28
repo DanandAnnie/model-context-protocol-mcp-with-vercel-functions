@@ -27,3 +27,29 @@ export function withPictureRemoved(prompt: string, removed: number): string {
     })
     .replace(/^[ \t]+/, "");
 }
+
+/**
+ * The description with `label` put in at the selection `start`–`end`: a selection is replaced unless it touches a
+ * label (then the new one goes after it), a cursor inside a label moves past it, and spaces keep the label apart
+ * from the words around it. Null when the result would be longer than `max`: nothing is cut to make room.
+ */
+export function insertPictureLabel(prompt: string, label: string, start: number, end: number, max: number): { text: string; caret: number } | null {
+  let from = Math.max(0, Math.min(start, prompt.length));
+  let to = Math.max(from, Math.min(end, prompt.length));
+  for (const m of prompt.matchAll(LABEL)) {
+    const a = m.index;
+    const b = a + m[0].length;
+    if (from < to && from < b && to > a) {
+      // A selection over (part of) a label is not replaced, so no picture's name is lost.
+      from = to = Math.max(to, b);
+    }
+    if (from === to && from > a && from < b) from = to = b;
+  }
+  const before = prompt.slice(0, from);
+  const after = prompt.slice(to);
+  const lead = before && !/\s$/.test(before) ? " " : "";
+  const trail = after && !/^[\s.,;:!?)]/.test(after) ? " " : "";
+  const text = `${before}${lead}${label}${trail}${after}`;
+  if (text.length > max) return null;
+  return { text, caret: before.length + lead.length + label.length };
+}

@@ -161,7 +161,13 @@ describe("generated clips", () => {
     assert.throws(() => ask({ references: [png(1)], quality: "hd" }), /landscape or portrait/, "the first picture's shape is standard only");
     assert.throws(() => ask({ references: [png(1)], aspect: "1:1", quality: "hd" }), /landscape or portrait/);
     assert.ok(ask({ references: [png(1)], aspect: "9:16", quality: "hd" }));
-    assert.throws(() => ask({ references: [`data:image/png;base64,${"A".repeat(1_300_000)}`] }), /at most 900 KB/);
+    assert.throws(() => ask({ references: [`data:image/png;base64,${"A".repeat(1_300_000)}`] }), /The picture to feature must be at most 900 KB/);
+    assert.throws(() => ask({ prompt: "The shoe in <Picture 1> on the track in <Picture 2>", references: [png(1), `data:image/png;base64,${"A".repeat(1_300_000)}`] }), /Picture 2 must be at most 900 KB/);
+    // Labels with no pictures featured name nothing either, with a first frame or with none.
+    assert.throws(() => ask({ prompt: "The shoe in <Picture 1> on a marble desk" }), /names <Picture 1>, but no picture is featured/);
+    assert.throws(() => ask({ prompt: "The shoe in <Picture 1> on a marble desk", image: png(1) }), /no picture is featured/);
+    assert.throws(() => ask({ durationSec: 16 }), /5 to 15 seconds/);
+    assert.throws(() => ask({ aspect: "adaptive" }), /leave it out for a clip from pictures to follow the first one/);
     // A label must name a picture that is sent: HeyGen does not rewrite them.
     assert.throws(() => ask({ prompt: "The shoe in <Picture 1> on the track in <Picture 2>", references: [png(1)] }), /names <Picture 2>, but one picture is featured/);
     assert.throws(() => ask({ prompt: "A slow shot of <Picture 4> and <Picture 3>", references: [png(1), png(2)] }), /names <Picture 3>, <Picture 4>, but 2 pictures are featured/);

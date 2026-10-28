@@ -1177,14 +1177,20 @@ test("a b-roll clip features pictures the description names as <Picture 1>, <Pic
   const prompt = page.getByRole("textbox", { name: "Describe the shot", exact: true });
   await prompt.fill(`A runner ${tag} laces up the shoe in`);
   const make = page.getByRole("button", { name: "Make the clip" });
+  // A label with no picture featured names nothing, so it holds the start.
+  await prompt.fill(`A runner ${tag} laces up the shoe in <Picture 1>`);
+  await expect(make).toHaveAccessibleDescription("The description names <Picture 1>, but no picture is featured: choose Feature my pictures, or take the labels out.");
+  await expect(make).toBeDisabled();
+  await prompt.fill(`A runner ${tag} laces up the shoe in`);
   // A mode that needs a picture says so until it has one.
   await page.getByLabel("Open on a picture").check();
   await expect(make).toBeDisabled();
   await expect(make).toHaveAccessibleDescription("Add the picture to open on, or choose No pictures.");
   await page.getByLabel("Feature my pictures").check();
   await expect(page.locator("#footage-use-hint")).toContainText("Name them in the description as <Picture 1>, <Picture 2>, in this order.");
-  await expect(page.getByLabel("Feature my pictures")).toHaveAccessibleDescription(/Up to 3 pictures of a product, a place, or a person/);
-  await expect(page.getByLabel("No pictures")).toHaveAccessibleDescription("The shot is made from the description alone.");
+  // Each choice is named by its label alone and described by its own hint.
+  await expect(page.getByLabel("Feature my pictures", { exact: true })).toHaveAccessibleDescription(/Up to 3 pictures of a product, a place, or a person/);
+  await expect(page.getByLabel("No pictures", { exact: true })).toHaveAccessibleDescription("The shot is made from the description alone.");
   await expect(make).toBeDisabled();
   await expect(make).toHaveAccessibleDescription("Add a picture to feature, or choose No pictures.");
   const file = page.locator('input[type="file"][accept="image/*"]');
@@ -1231,6 +1237,14 @@ test("a b-roll clip features pictures the description names as <Picture 1>, <Pic
   await expect(file).toHaveCount(0);
   await page.getByRole("button", { name: "Remove Picture 3, extra.png" }).click();
   await expect(file).toBeFocused();
+  // A label never pushes text out at the length limit: the description stays as it is and the reason is given.
+  const kept = await prompt.inputValue();
+  await prompt.fill(`${"x".repeat(1995)} end.`);
+  await prompt.focus();
+  await page.getByRole("button", { name: "Put <Picture 1> in the description" }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "No room for" })).toHaveText("No room for <Picture 1>: the description is at most 2000 characters. Shorten it first.");
+  await expect(prompt).toHaveValue(`${"x".repeat(1995)} end.`);
+  await prompt.fill(kept);
   await page.getByLabel("Portrait 9:16").check();
   await page.getByLabel("HD (1080p)").check();
   const sent = page.waitForRequest((r) => r.url().endsWith("/api/footage") && r.method() === "POST");

@@ -3174,11 +3174,21 @@ test("a workspace viewer sees view-only notices instead of create controls", asy
   await expect(page.getByRole("link", { name: "Create video" })).toHaveCount(1);
   await page.goto("/avatars");
   await expect(page.getByRole("button", { name: "New photo avatar" })).toBeDisabled();
-  // Arriving by a photo shoot's "Make a presenter" link opens no panel for a viewer; the address is cleaned.
+  // Arriving by a photo shoot's "Make a presenter" link opens no panel for a viewer, nor even looks the photo up, where an
+  // editor's would open on it; the address is cleaned.
+  let lookedUp = 0;
+  await page.route("**/api/shoots", (route) => {
+    lookedUp++;
+    return route.fulfill({ json: { available: true, shoots: [{ id: "sh_viewer", title: "Viewer shoot", status: "completed", photos: [{ url: `data:image/png;base64,${TINY_PNG}` }] }] } });
+  });
   await page.goto("/avatars?shoot=sh_viewer&photo=1");
   await expect(page.getByTestId("view-only")).toBeVisible();
   await expect(page).toHaveURL(/\/avatars$/);
+  await page.waitForTimeout(500);
+  expect(lookedUp).toBe(0);
   await expect(page.getByLabel("Avatar name")).toHaveCount(0);
+  await expect(page.getByRole("alert").filter({ hasText: "upload a portrait instead" })).toHaveCount(0);
+  await page.unroute("**/api/shoots");
   // A voice of the space's own is listed for the viewer, without rename or delete.
   const sample = "data:audio/webm;base64," + Buffer.from("viewer sees this voice").toString("base64");
   const own = (await (await page.request.post("/api/voices/clone", { data: { name: `Viewer hears ${Date.now().toString(36)}`, samples: [sample] } })).json()).voice as { id: string; name: string };

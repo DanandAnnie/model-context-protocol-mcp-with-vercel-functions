@@ -431,7 +431,8 @@ function CreateAvatarPanel({ shoot: fromShoot, voices, canGenerate, demo, onClos
       <div className="grid gap-5 md:grid-cols-[180px_1fr]">
         <div
           onClick={() => !camera && fileRef.current?.click()}
-          className="relative flex aspect-[4/5] cursor-pointer flex-col items-center justify-center overflow-hidden rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 text-center text-xs text-slate-500 hover:border-brand-400"
+          // Empty, the tile is a drop zone; with a picture in it, a frame (the photo still replaced by a click).
+          className={`relative flex aspect-[4/5] cursor-pointer flex-col items-center justify-center overflow-hidden rounded-xl border-2 text-center text-xs text-slate-500 hover:border-brand-400 ${preview && !camera ? "border-slate-200 bg-slate-100" : "border-dashed border-slate-300 bg-slate-50"}`}
         >
           {camera ? (
             <>
@@ -442,8 +443,8 @@ function CreateAvatarPanel({ shoot: fromShoot, voices, canGenerate, demo, onClos
               </div>
             </>
           ) : preview ? (
+            // A photo shoot's photo can be any of nine shapes, and the server keeps it whole; it is shown whole, not cropped to the tile.
             // eslint-disable-next-line @next/next/no-img-element
-            // A photo shoot's photo can be any of nine shapes; it is shown whole, as the presenter will use it, not cropped to the tile.
             <img src={preview} alt={shoot ? `Portrait preview: photo ${shoot.photo} of ${shoot.title}` : "Portrait preview"} className={`h-full w-full ${shoot ? "object-contain" : "object-cover"}`} />
           ) : (
             <>

@@ -7,7 +7,7 @@ import { LOCAL_OWNER } from "../owner-id";
 import { renderLimitFor } from "../billing";
 import { ValidationError } from "../errors";
 import { fillTemplate, parseCsv, placeholdersIn } from "../csv";
-import { accentSchema, avatarEngineSchema, transparentSchema, backgroundSchema, captionStyleSchema, createVideo, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, rendersThisMonth, resolveRenderContext } from "./videos";
+import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, createVideo, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, rendersThisMonth, resolveRenderContext } from "./videos";
 import { getBrandKit } from "./brand";
 import { stripPauses } from "../pauses";
 
@@ -67,8 +67,9 @@ export const batchRequestSchema = z.object({
   motionPrompt: motionPromptSchema,
   accent: accentSchema,
   avatarEngine: avatarEngineSchema,
+  moreBlinking: moreBlinkingSchema,
   transparent: transparentSchema,
-});
+}).refine((b) => !b.moreBlinking || b.avatarEngine === "avatar_v", { path: ["moreBlinking"], message: MORE_BLINKING_NEEDS_V });
 
 export interface BatchResult {
   batchId: string;
@@ -140,6 +141,7 @@ export async function createBatch(input: z.infer<typeof batchRequestSchema>, own
         ...(input.motionPrompt ? { motionPrompt: input.motionPrompt } : {}),
         ...(input.accent ? { accent: input.accent } : {}),
         ...(input.avatarEngine ? { avatarEngine: input.avatarEngine } : {}),
+        ...(input.moreBlinking ? { moreBlinking: true as const } : {}),
         ...(input.transparent ? { transparent: true as const } : {}),
       },
       ownerId,

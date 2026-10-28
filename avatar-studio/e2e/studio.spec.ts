@@ -531,26 +531,41 @@ test("Avatar V is chosen for presenters whose look supports it, kept with the vi
   await expect(engine).toBeEnabled();
   // On Avatar IV, Ava's gestures wait for Avatar V, and the panel says so.
   await expect(page.locator("#photo-motion-hint")).toContainText("choose Avatar V above for gestures to reach this video's presenter");
+  // More blinking is an Avatar V setting, offered once Avatar V is chosen.
+  const blink = page.getByLabel("More blinking", { exact: true });
+  await expect(blink).toBeDisabled();
+  await expect(page.locator("#more-blinking-hint")).toContainText("choose Avatar V above to use it");
+  await engine.selectOption("avatar_v");
+  await blink.check();
+  await expect(page.locator("#more-blinking-hint")).toContainText("Avatar V blinks more naturally");
+  // Back on Avatar IV the box keeps its tick, can still be cleared, and says it is not sent.
+  await engine.selectOption("avatar_iv");
+  await expect(blink).toBeEnabled();
+  await expect(page.locator("#more-blinking-hint")).toHaveText("Not sent on Avatar IV; kept for when you choose Avatar V above.");
   await engine.selectOption("avatar_v");
   // Ava is a video avatar, so on Avatar V she takes gestures too.
   await expect(page.locator("#photo-motion-hint")).toContainText("Gestures reach the video avatars rendering on Avatar V");
   const sent = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
   await page.getByRole("button", { name: "Generate video" }).click();
-  expect((await sent).postDataJSON()).toMatchObject({ avatarEngine: "avatar_v" });
+  expect((await sent).postDataJSON()).toMatchObject({ avatarEngine: "avatar_v", moreBlinking: true });
   await page.waitForURL(/\/videos\/vid_/);
   const id = page.url().split("/").pop()!;
-  expect((await (await page.request.get(`/api/videos/${id}`)).json()).video.avatarEngine).toBe("avatar_v");
-  await expect(page.getByText("Avatar V (not applied by this renderer)")).toBeVisible();
+  const saved = (await (await page.request.get(`/api/videos/${id}`)).json()).video;
+  expect([saved.avatarEngine, saved.moreBlinking]).toEqual(["avatar_v", true]);
+  await expect(page.getByText("Avatar V, more blinking (not applied by this renderer)")).toBeVisible();
   await page.goto(`/create?from=${id}`);
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByLabel("Avatar engine", { exact: true })).toHaveValue("avatar_v");
+  await expect(page.getByLabel("More blinking", { exact: true })).toBeChecked();
   await page.getByRole("button", { name: "Avatar", exact: true }).click();
   await page.getByRole("button", { name: "Sofia Reyes Sofia Reyes" }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByLabel("Avatar engine", { exact: true }).locator("option:checked")).toHaveText("Avatar V (not sent: no presenter here renders on it)");
+  await expect(page.locator("#more-blinking-hint")).toHaveText("Not sent: no presenter in this video renders on Avatar V.");
   const again = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
   await page.getByRole("button", { name: "Generate video" }).click();
-  expect("avatarEngine" in ((await again).postDataJSON() as Record<string, unknown>)).toBe(false);
+  const body = (await again).postDataJSON() as Record<string, unknown>;
+  expect(["avatarEngine" in body, "moreBlinking" in body]).toEqual([false, false]);
 });
 
 test("a one-scene video can render over a transparent background, kept with the video and its copy", async ({ page }) => {

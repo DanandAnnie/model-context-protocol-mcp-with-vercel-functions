@@ -39,6 +39,13 @@ export const avatarEngineSchema = z
   .enum(AVATAR_ENGINES)
   .transform((v) => (v === "avatar_iv" ? undefined : v))
   .optional();
+/** More natural blinking on Avatar V: `true`; `false` (or absent) is the engine's own, stored as absent. */
+export const moreBlinkingSchema = z
+  .boolean({ error: "moreBlinking is true or false" })
+  .transform((v): true | undefined => (v ? true : undefined))
+  .optional();
+/** The message for more blinking asked without Avatar V. */
+export const MORE_BLINKING_NEEDS_V = "More blinking is for Avatar V: set avatarEngine to avatar_v, or leave moreBlinking out";
 /** An accent for voices that offer several; optional where it is used. */
 export const accentSchema = z.enum(VOICE_ACCENTS, { error: "Choose one of the listed accents (a BCP 47 tag such as en-GB)" }).optional();
 /** Voice pitch shift, -50..50 whole steps; HeyGen applies it, other renderers keep the voice's natural pitch. */

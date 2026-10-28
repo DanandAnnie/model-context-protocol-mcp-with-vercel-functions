@@ -984,7 +984,7 @@ export default function VideoDetailPage() {
                   ) : null}
                   {video.avatarEngine === "avatar_v" ? (
                     <Row label="Avatar engine">
-                      {`Avatar V${
+                      {`Avatar V${video.moreBlinking ? ", more blinking" : ""}${
                         video.provider !== "heygen"
                           ? " (not applied by this renderer)"
                           : video.scenes?.length && video.scenes.every((sc) => sc.hidePresenter)

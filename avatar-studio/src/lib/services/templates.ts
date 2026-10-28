@@ -10,7 +10,7 @@ import { LimitError, NotFoundError, ValidationError } from "../errors";
 import { owned } from "./shared";
 import { getBackdrop, plainScene } from "./backdrops";
 import { getFootage } from "./footage";
-import { accentSchema, avatarEngineSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema } from "./videos";
+import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema } from "./videos";
 
 export const MAX_TEMPLATES = 50;
 
@@ -58,8 +58,9 @@ export const templateInputSchema = z.object({
   motionPrompt: motionPromptSchema,
   accent: accentSchema,
   avatarEngine: avatarEngineSchema,
+  moreBlinking: moreBlinkingSchema,
   transparent: transparentSchema,
-}).refine((t) => !t.transparent || !t.scenes || (t.scenes.length === 1 && !t.scenes[0].hidePresenter), {
+}).refine((t) => !t.moreBlinking || t.avatarEngine === "avatar_v", { path: ["moreBlinking"], message: MORE_BLINKING_NEEDS_V }).refine((t) => !t.transparent || !t.scenes || (t.scenes.length === 1 && !t.scenes[0].hidePresenter), {
   path: ["transparent"],
   message: "A transparent background is for a one-scene template that shows the presenter",
 });
@@ -115,6 +116,7 @@ export async function createTemplate(input: TemplateInput, ownerId: string = LOC
       ...(video.motionPrompt ? { motionPrompt: video.motionPrompt } : {}),
       ...(video.accent ? { accent: video.accent } : {}),
       ...(video.avatarEngine ? { avatarEngine: video.avatarEngine } : {}),
+      ...(video.moreBlinking ? { moreBlinking: true as const } : {}),
       ...(video.transparent ? { transparent: true as const } : {}),
       sourceVideoId: video.id,
     };
@@ -137,6 +139,7 @@ export async function createTemplate(input: TemplateInput, ownerId: string = LOC
       ...(input.motionPrompt ? { motionPrompt: input.motionPrompt } : {}),
       ...(input.accent ? { accent: input.accent } : {}),
       ...(input.avatarEngine ? { avatarEngine: input.avatarEngine } : {}),
+      ...(input.moreBlinking ? { moreBlinking: true as const } : {}),
       ...(input.transparent ? { transparent: true as const } : {}),
     };
   }

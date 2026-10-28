@@ -531,6 +531,7 @@ export interface VideoTemplate {
   motionPrompt?: string;
   accent?: VoiceAccent;
   avatarEngine?: AvatarEngine;
+  moreBlinking?: true;
   transparent?: true;
   /** The video it was saved from, when it was. */
   sourceVideoId?: string;
@@ -746,6 +747,11 @@ export interface VideoRequest {
    * supports it (`avatarV`); absent is HeyGen's default, Avatar IV. Other renderers ignore it.
    */
   avatarEngine?: AvatarEngine;
+  /**
+   * More natural blinking on Avatar V, for presenters that blink too little (HeyGen's `engine.more_blinking`). Only
+   * with `avatarEngine: "avatar_v"`, and only on the scenes that render on it. Absent is the engine's own blinking.
+   */
+  moreBlinking?: true;
   /**
    * Render the presenter alone over a transparent background, as a WebM with an alpha channel for compositing
    * (HeyGen's `output_format: "webm"`). One scene showing the presenter only; its background is left out, and the

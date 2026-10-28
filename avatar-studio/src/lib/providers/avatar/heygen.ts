@@ -233,7 +233,8 @@ export class HeyGenAvatarProvider implements AvatarProvider {
         }
         // Avatar V where the look supports it (a photo avatar given motion settings stays on Avatar IV; see rendersOnAvatarV).
         const onV = req.avatarEngine === "avatar_v" && rendersOnAvatarV(sceneAvatarOf(scene), req);
-        const engine = onV ? { engine: { type: "avatar_v" } } : {};
+        // More blinking is an Avatar V setting, so it goes only where the scene renders on it.
+        const engine = onV ? { engine: { type: "avatar_v", ...(req.moreBlinking ? { more_blinking: true } : {}) } } : {};
         // A photo avatar moves as asked (on Avatar IV). A video avatar takes gestures on Avatar V only, as HeyGen refuses a
         // motion prompt for one on Avatar IV; expressiveness is for photo avatars alone.
         const photo = isPhotoAvatar(sceneAvatarOf(scene));
@@ -255,7 +256,8 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       // Avatar V can be refused where Avatar IV is not (a look's reference whose consent is missing), and a retry
       // asks again, so the error says how to get past it.
       if (err instanceof Error && body.scenes.some((sc) => "input" in sc && sc.input && "engine" in sc.input)) {
-        throw new Error(`${err.message} (this video asked for Avatar V; if HeyGen refused it, make a copy with Avatar engine set to Avatar IV)`);
+        const instead = req.moreBlinking ? "with More blinking off, or with Avatar engine set to Avatar IV" : "with Avatar engine set to Avatar IV";
+        throw new Error(`${err.message} (this video asked for Avatar V${req.moreBlinking ? " with more blinking" : ""}; if HeyGen refused it, make a copy ${instead})`);
       }
       throw err;
     }

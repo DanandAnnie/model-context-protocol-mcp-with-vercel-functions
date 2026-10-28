@@ -28,7 +28,7 @@ import { clearCover, setCover } from "../cover";
 import { posterUrl, shareOffline } from "../client";
 import { bumpViewsByDay } from "../insights";
 
-import { accentSchema, avatarEngineSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema } from "./schemas";
+import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema } from "./schemas";
 import { getBrandKit } from "./brand";
 import { spokenCopy } from "../pronounce";
 import { clearComments } from "./comments";
@@ -40,7 +40,7 @@ import { clearMusicJobs } from "./music";
 import { reviseScript } from "./scripts";
 import { RELINK_MS, RETRY_FINISHED_MS } from "./job-checks";
 import { config } from "../config";
-export { accentSchema, avatarEngineSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema };
+export { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema };
 
 export const videoRequestSchema = z
   .object({
@@ -85,9 +85,14 @@ export const videoRequestSchema = z
     motionPrompt: motionPromptSchema,
     accent: accentSchema,
     avatarEngine: avatarEngineSchema,
+    moreBlinking: moreBlinkingSchema,
     transparent: transparentSchema,
   })
   .transform((v, ctx) => {
+    if (v.moreBlinking && v.avatarEngine !== "avatar_v") {
+      ctx.addIssue({ code: "custom", path: ["moreBlinking"], message: MORE_BLINKING_NEEDS_V });
+      return z.NEVER;
+    }
     if (v.transparent && v.scenes && (v.scenes.length > 1 || v.scenes[0]?.hidePresenter)) {
       ctx.addIssue({ code: "custom", path: ["transparent"], message: "A transparent background is for a one-scene video that shows the presenter" });
       return z.NEVER;
@@ -362,6 +367,7 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
   if (!base.motionPrompt) delete base.motionPrompt;
   if (!base.accent) delete base.accent;
   if (!base.avatarEngine) delete base.avatarEngine;
+  if (!base.moreBlinking) delete base.moreBlinking;
   if (!base.transparent) delete base.transparent;
 
   try {
@@ -1546,6 +1552,7 @@ function requestOf(video: Video): VideoRequest {
     ...(video.motionPrompt ? { motionPrompt: video.motionPrompt } : {}),
     ...(video.accent ? { accent: video.accent } : {}),
     ...(video.avatarEngine ? { avatarEngine: video.avatarEngine } : {}),
+    ...(video.moreBlinking ? { moreBlinking: true as const } : {}),
     ...(video.transparent ? { transparent: true as const } : {}),
     ...(video.studioTemplate ? { studioTemplate: video.studioTemplate } : {}),
     ...(video.cinematic ? { cinematic: video.cinematic } : {}),

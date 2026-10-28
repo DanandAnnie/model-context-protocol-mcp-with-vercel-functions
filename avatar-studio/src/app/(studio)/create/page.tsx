@@ -54,6 +54,7 @@ interface Draft {
   motionPrompt?: string;
   accent?: VoiceAccent;
   avatarEngine?: AvatarEngine;
+  moreBlinking?: boolean;
   transparent?: boolean;
   avatarId?: string;
   voiceId?: string;
@@ -592,6 +593,8 @@ function CreateInner() {
   });
   const [accent, setAccent] = useState<VoiceAccent | "">("");
   const [avatarEngine, setAvatarEngine] = useState<AvatarEngine>("avatar_iv");
+  // More natural blinking is an Avatar V setting: kept while another engine is chosen, sent only with Avatar V.
+  const [moreBlinking, setMoreBlinking] = useState(false);
   const [transparent, setTransparent] = useState(false);
   // A transparent background is HeyGen's single-presenter WebM: one scene that shows the presenter.
   const canTransparent = scenes.length === 1 && !scenes[0].hidePresenter;
@@ -740,6 +743,7 @@ function CreateInner() {
     setMotionPrompt(asMotionPrompt(d.motionPrompt));
     setAccent(asAccent(d.accent));
     setAvatarEngine(asAvatarEngine(d.avatarEngine));
+    setMoreBlinking(d.moreBlinking === true);
     setTransparent(d.transparent === true);
     setPrefill({ avatarId: d.avatarId, voiceId: d.voiceId });
     setDraftRestored(d.savedAt);
@@ -750,10 +754,10 @@ function CreateInner() {
     if (!hydrated.current || !editKey) return;
     const empty = !scenes.some(hasContent) && title === "Untitled video";
     const t = setTimeout(() => {
-      writeDraft(editKey, empty ? null : { title, scenes, aspect, resolution, captions, ...(isDefaultCaptionStyle ? {} : { captionStyle }), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...(expressiveness !== "low" ? { expressiveness } : {}), ...(motionPrompt ? { motionPrompt } : {}), ...(accent ? { accent } : {}), ...(avatarEngine !== "avatar_iv" ? { avatarEngine } : {}), ...(transparent ? { transparent } : {}), avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
+      writeDraft(editKey, empty ? null : { title, scenes, aspect, resolution, captions, ...(isDefaultCaptionStyle ? {} : { captionStyle }), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...(expressiveness !== "low" ? { expressiveness } : {}), ...(motionPrompt ? { motionPrompt } : {}), ...(accent ? { accent } : {}), ...(avatarEngine !== "avatar_iv" ? { avatarEngine } : {}), ...(moreBlinking ? { moreBlinking } : {}), ...(transparent ? { transparent } : {}), avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
     }, 400);
     return () => clearTimeout(t);
-  }, [title, scenes, aspect, resolution, captions, captionStyle, isDefaultCaptionStyle, speed, pitch, emotion, expressiveness, motionPrompt, accent, avatarEngine, transparent, avatar, voice, editKey]);
+  }, [title, scenes, aspect, resolution, captions, captionStyle, isDefaultCaptionStyle, speed, pitch, emotion, expressiveness, motionPrompt, accent, avatarEngine, moreBlinking, transparent, avatar, voice, editKey]);
 
   function discardDraft() {
     if (editKey) writeDraft(editKey, null);
@@ -775,6 +779,7 @@ function CreateInner() {
     setMotionPrompt("");
     setAccent("");
     setAvatarEngine("avatar_iv");
+    setMoreBlinking(false);
     setTransparent(false);
     setCaptionStyle(DEFAULT_CAPTION_STYLE);
     // Back to a fresh editor's presenter and voice: the first ones, then the brand kit's defaults on top.
@@ -836,6 +841,7 @@ function CreateInner() {
         setMotionPrompt(asMotionPrompt(template.motionPrompt));
         setAccent(asAccent(template.accent));
         setAvatarEngine(asAvatarEngine(template.avatarEngine));
+        setMoreBlinking(template.moreBlinking === true);
         setTransparent(template.transparent === true);
         setPrefill({ avatarId: template.avatarId, voiceId: template.voiceId });
       })
@@ -876,6 +882,7 @@ function CreateInner() {
         setMotionPrompt(asMotionPrompt(video.motionPrompt));
         setAccent(asAccent(video.accent));
         setAvatarEngine(asAvatarEngine(video.avatarEngine));
+        setMoreBlinking(video.moreBlinking === true);
         setTransparent(video.transparent === true);
         setPrefill({ avatarId: video.avatarId, voiceId: video.voiceId });
       })
@@ -953,7 +960,7 @@ function CreateInner() {
     try {
       const { video } = await api<{ video: Video }>("/api/videos", {
         method: "POST",
-        body: JSON.stringify({ title, scenes: scenes.map(sentScene), avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...motion, ...(sentAccent ? { accent: sentAccent } : {}), ...(avatarEngine !== "avatar_iv" && avatarVInUse ? { avatarEngine } : {}), ...(sentTransparent ? { transparent: true } : {}) }),
+        body: JSON.stringify({ title, scenes: scenes.map(sentScene), avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...motion, ...(sentAccent ? { accent: sentAccent } : {}), ...(avatarEngine !== "avatar_iv" && avatarVInUse ? { avatarEngine, ...(moreBlinking ? { moreBlinking: true } : {}) } : {}), ...(sentTransparent ? { transparent: true } : {}) }),
       });
       if (editKey) writeDraft(editKey, null);
       router.push(`/videos/${video.id}`);
@@ -1785,6 +1792,21 @@ function CreateInner() {
                     <option value="avatar_v">{!avatarData || avatarVInUse ? "Avatar V (higher quality)" : "Avatar V (not sent: no presenter here renders on it)"}</option>
                   </select>
                 </Field>
+                <label className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 px-3 py-3">
+                  <span>
+                    <span className="block text-sm font-medium text-slate-800">More blinking</span>
+                    <span id="more-blinking-hint" className="block text-xs text-slate-500">
+                      {avatarEngine !== "avatar_v"
+                        ? moreBlinking
+                          ? "Not sent on Avatar IV; kept for when you choose Avatar V above."
+                          : "An Avatar V setting, for presenters that blink too little; choose Avatar V above to use it."
+                        : avatarData && !avatarVInUse
+                          ? "Not sent: no presenter in this video renders on Avatar V."
+                          : "HeyGen's Avatar V blinks more naturally, for presenters that blink too little; scenes on Avatar IV keep their own blinking. Other renderers ignore it."}
+                    </span>
+                  </span>
+                  <input type="checkbox" checked={moreBlinking} onChange={(e) => setMoreBlinking(e.target.checked)} disabled={avatarEngine !== "avatar_v" && !moreBlinking} aria-label="More blinking" aria-describedby="more-blinking-hint" className="mt-1 h-5 w-5 shrink-0 accent-brand-600" />
+                </label>
                 <label className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 px-3 py-3">
                   <span>
                     <span className="block text-sm font-medium text-slate-800">Transparent background</span>

@@ -4709,6 +4709,71 @@ test("a photo shoot puts a person's face in a scene picture, with their consent,
   await expect(next).toBeFocused();
 });
 
+test("a photo shoot's photo becomes a presenter, kept as a photo avatar", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const shoot = (await (await page.request.post("/api/shoots", { data: { identity: [`data:image/png;base64,${TINY_PNG}`], reference: `data:image/png;base64,${TINY_PNG}`, consent: true, count: 2, title: `Studio ${tag}` } })).json()).shoot as { id: string };
+  const name = `Dana ${tag}`;
+  try {
+    await page.goto("/photos");
+    const item = page.getByTestId("shoot").filter({ hasText: `Studio ${tag}` });
+    await expect(item.getByText("Completed")).toBeVisible({ timeout: 20_000 });
+    const photoUrl = await item.getByRole("img", { name: /^Photo 2 of / }).getAttribute("src");
+    await item.getByRole("link", { name: `Make a presenter: photo 2 of Studio ${tag}` }).click();
+    // The new photo avatar panel opens with that photo as the portrait; the name is what is left, and has the focus.
+    await expect(page).toHaveURL(/\/avatars$/);
+    await expect(page.getByRole("img", { name: `Portrait preview: photo 2 of Studio ${tag}` })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "The portrait is photo 2" })).toHaveText(`The portrait is photo 2 of “Studio ${tag}”. Name the presenter to create it, or upload another portrait.`);
+    const create = page.getByRole("button", { name: "Create avatar" });
+    await expect(create).toBeDisabled();
+    await expect(page.getByLabel("Avatar name")).toBeFocused();
+    await page.keyboard.type(name);
+    const sent = page.waitForRequest((r) => r.url().endsWith("/api/avatars") && r.method() === "POST");
+    await create.click();
+    const body = (await sent).postDataJSON() as Record<string, unknown>;
+    // The server is named the photo, and keeps its own copy of it, rather than being sent the picture.
+    expect([body.shootPhoto, "imageUrl" in body]).toEqual([{ shootId: shoot.id, photo: 2 }, false]);
+    await expect(page.getByRole("img", { name, exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "New photo avatar" })).toBeFocused();
+    const made = ((await (await page.request.get("/api/avatars")).json()).avatars as Array<{ name: string; imageUrl: string; source: string }>).find((a) => a.name === name);
+    expect([made?.source, made?.imageUrl === photoUrl]).toEqual(["custom", true]);
+    // Opened again from the photo, another portrait chosen instead is the one sent.
+    await page.goto(`/avatars?shoot=${shoot.id}&photo=1`);
+    await expect(page.getByRole("img", { name: `Portrait preview: photo 1 of Studio ${tag}` })).toBeVisible();
+    // The name says which photo is the portrait, for a screen reader too.
+    await expect(page.getByLabel("Avatar name")).toHaveAccessibleDescription(/The portrait is photo 1 of/);
+    await page.getByLabel("Avatar name").fill(`${name} again`);
+    // "New photo avatar" with the panel open keeps what is in it, and goes to its name.
+    await page.getByRole("button", { name: "New photo avatar" }).click();
+    await expect(page.getByLabel("Avatar name")).toHaveValue(`${name} again`);
+    await expect(page.getByLabel("Avatar name")).toBeFocused();
+    await expect(page.getByRole("img", { name: `Portrait preview: photo 1 of Studio ${tag}` })).toBeVisible();
+    const address = page.getByLabel("Or paste an image URL");
+    await address.fill("https://cdn.example.com/portrait.jpg");
+    await expect(page.getByRole("status").filter({ hasText: "The portrait is photo" })).toHaveCount(0);
+    await expect(page.getByRole("img", { name: "Portrait preview", exact: true })).toHaveAttribute("src", "https://cdn.example.com/portrait.jpg");
+    // Emptied, the photo is the portrait again.
+    await address.fill("");
+    await expect(page.getByRole("img", { name: `Portrait preview: photo 1 of Studio ${tag}` })).toBeVisible();
+    page.once("dialog", (d) => void d.accept());
+    await page.getByLabel("Avatar name").press("Escape");
+    await expect(page.getByLabel("Avatar name")).toHaveCount(0);
+    // A link that names no photo, or a photo that is gone, is said so; no panel opens, and the address is cleaned.
+    await page.goto("/avatars?shoot=x&photo=abc");
+    await expect(page.getByRole("alert").filter({ hasText: "does not name a photo" })).toBeVisible();
+    await expect(page).toHaveURL(/\/avatars$/);
+    await page.goto(`/avatars?shoot=${shoot.id}&photo=3`);
+    await expect(page.getByRole("alert").filter({ hasText: "has no photo 3" })).toHaveText(`“Studio ${tag}” has no photo 3; upload a portrait instead.`);
+    await expect(page.getByLabel("Avatar name")).toHaveCount(0);
+    // The API is named the photo the same way, and refuses one the account does not have.
+    expect((await page.request.post("/api/avatars", { data: { name, shootPhoto: { shootId: shoot.id, photo: 3 } } })).status()).toBe(400);
+    expect((await page.request.post("/api/avatars", { data: { name, shootPhoto: { shootId: "sh_nope", photo: 1 } } })).status()).toBe(404);
+  } finally {
+    const avatars = (await (await page.request.get("/api/avatars")).json()).avatars as Array<{ id: string; name: string }>;
+    for (const a of avatars.filter((x) => x.name === name)) await page.request.delete(`/api/avatars/${a.id}`);
+    await page.request.delete(`/api/shoots/${shoot.id}`);
+  }
+});
+
 test("a photo shoot's photo is brought to life as a b-roll clip's first frame, and made again from it", async ({ page }) => {
   const tag = Date.now().toString(36);
   const shoot = (await (await page.request.post("/api/shoots", { data: { identity: [`data:image/png;base64,${TINY_PNG}`], reference: `data:image/png;base64,${TINY_PNG}`, consent: true, count: 2, title: `Harbour ${tag}` } })).json()).shoot as { id: string };

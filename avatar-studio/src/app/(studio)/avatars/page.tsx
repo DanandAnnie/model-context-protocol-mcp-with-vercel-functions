@@ -15,7 +15,10 @@ import { lookJobTitle } from "@/lib/look-packs";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { api } from "@/lib/client";
-import type { Avatar, ProviderStatus, Voice } from "@/lib/types";
+import type { Avatar, ProviderStatus, ShootJob, Voice } from "@/lib/types";
+
+/** A photo of one of the account's photo shoots, chosen as a new photo avatar's portrait. */
+type ShootPortrait = { shootId: string; photo: number; url: string; title: string };
 
 export default function AvatarsPage() {
   return (
@@ -65,10 +68,50 @@ function AvatarsInner() {
     focusAfterRender(() => document.querySelector<HTMLElement>(`[data-new-looks="${CSS.escape(a.id)}"]`));
   };
   const [open, setOpen] = useState(params.get("new") === "1");
+  // The panel opened by the person (the New button, or `?new=1`) is theirs: a photo shoot looked up slowly opens nothing.
+  const panelChosen = useRef(open);
   const newButton = useRef<HTMLButtonElement>(null);
+  const [fromShoot, setFromShoot] = useState<ShootPortrait | null>(null);
+  // Opened from a photo shoot ("Make a presenter"): the new photo avatar's portrait is that photo. The address is cleaned,
+  // so a reload starts afresh. Once it is known whether this person may add avatars; a viewer's arrival only cleans it.
+  const arrived = useRef(false);
+  useEffect(() => {
+    if (canEdit === null || arrived.current) return;
+    arrived.current = true;
+    const q = new URLSearchParams(window.location.search);
+    if (!q.has("shoot") && !q.has("photo")) return;
+    window.history.replaceState(null, "", window.location.pathname);
+    if (canEdit === false) return;
+    const shootId = q.get("shoot");
+    const photo = Number(q.get("photo"));
+    if (!shootId || !Number.isInteger(photo) || photo < 1) return setActionErr("That link does not name a photo of a photo shoot; upload a portrait instead.");
+    void (async () => {
+      try {
+        const { shoots } = await api<{ shoots: Array<Pick<ShootJob, "id" | "title" | "status" | "photos">> }>("/api/shoots");
+        if (panelChosen.current) return;
+        const shoot = shoots.find((x) => x.id === shootId);
+        const found = shoot?.status === "completed" ? shoot.photos?.[photo - 1] : undefined;
+        if (!shoot || !found) {
+          const why = !shoot
+            ? "That photo shoot is no longer there"
+            : shoot.status === "failed"
+              ? `“${shoot.title}” has no photos`
+              : shoot.status !== "completed"
+                ? `Photo ${photo} of “${shoot.title}” is not ready yet`
+                : `“${shoot.title}” has no photo ${photo}`;
+          return setActionErr(`${why}; upload a portrait instead.`);
+        }
+        setFromShoot({ shootId, photo, url: found.url, title: shoot.title });
+        setOpen(true);
+      } catch (e) {
+        setActionErr(e instanceof Error ? e.message : "The photo shoot could not be read");
+      }
+    })();
+  }, [canEdit]);
   /** Closes the panel and gives the focus back to the button that opened it, rather than losing it with the panel. */
   const closePanel = () => {
     setOpen(false);
+    setFromShoot(null);
     requestAnimationFrame(() => newButton.current?.focus());
   };
   const [filter, setFilter] = useState<"all" | "custom" | "library">("all");
@@ -134,7 +177,17 @@ function AvatarsInner() {
         title="Avatars"
         subtitle="Library presenters plus any photo avatars you create."
         action={
-          <Button ref={newButton} onClick={() => setOpen(true)} disabled={canEdit === false}>
+          <Button
+            ref={newButton}
+            onClick={() => {
+              panelChosen.current = true;
+              // A panel already open keeps what is in it; the focus goes to its name.
+              if (open) return document.getElementById("avatar-name")?.focus();
+              setFromShoot(null);
+              setOpen(true);
+            }}
+            disabled={canEdit === false}
+          >
             <Camera className="h-4 w-4" /> New photo avatar
           </Button>
         }
@@ -197,7 +250,7 @@ function AvatarsInner() {
         }}
       />
 
-      {open && <CreateAvatarPanel voices={voices} canGenerate={!!status?.portraitGeneration} demo={status?.avatar === "mock"} onClose={closePanel} onCreated={() => { closePanel(); refetch(); }} />}
+      {open && <CreateAvatarPanel key={fromShoot ? `${fromShoot.shootId}:${fromShoot.photo}` : "new"} shoot={fromShoot} voices={voices} canGenerate={!!status?.portraitGeneration} demo={status?.avatar === "mock"} onClose={closePanel} onCreated={() => { closePanel(); refetch(); }} />}
 
       {loading ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
@@ -269,9 +322,18 @@ function AvatarsInner() {
   );
 }
 
-function CreateAvatarPanel({ voices, canGenerate, demo, onClose, onCreated }: { voices: Voice[]; canGenerate: boolean; demo: boolean; onClose: () => void; onCreated: () => void }) {
+function CreateAvatarPanel({ shoot: fromShoot, voices, canGenerate, demo, onClose, onCreated }: { shoot: ShootPortrait | null; voices: Voice[]; canGenerate: boolean; demo: boolean; onClose: () => void; onCreated: () => void }) {
   const [name, setName] = useState("");
   const [imageUrl, setImageUrl] = useState("");
+  // A photo shoot's photo is the portrait while no other is chosen (emptying the address field brings it back); the
+  // server keeps its own copy of it.
+  const shoot = imageUrl ? null : fromShoot;
+  const preview = imageUrl || shoot?.url || "";
+  const nameRef = useRef<HTMLInputElement>(null);
+  // Arriving with a photo, the name is what is left to give; the focus goes there only if nothing else has it.
+  useEffect(() => {
+    if (fromShoot && (!document.activeElement || document.activeElement === document.body)) nameRef.current?.focus();
+  }, [fromShoot]);
   const [gender, setGender] = useState<"" | "male" | "female" | "neutral">("");
   const [defaultVoiceId, setDefaultVoiceId] = useState("");
   const [saving, setSaving] = useState(false);
@@ -334,6 +396,7 @@ function CreateAvatarPanel({ voices, canGenerate, demo, onClose, onCreated }: { 
     // An Escape a control inside used for itself (closing an open list) is not for the panel.
     if (e.key !== "Escape" || e.defaultPrevented || (e.target as HTMLElement).tagName === "SELECT") return;
     e.stopPropagation();
+    // A photo shoot's photo stays in its shoot, so only a name or a portrait of one's own is lost.
     if ((imageUrl || name.trim()) && !window.confirm("Discard this photo avatar? The picture and name are not saved.")) return;
     stopCamera();
     onClose();
@@ -354,7 +417,7 @@ function CreateAvatarPanel({ voices, canGenerate, demo, onClose, onCreated }: { 
     setSaving(true);
     setErr(null);
     try {
-      await api("/api/avatars", { method: "POST", body: JSON.stringify({ name, imageUrl, gender: gender || undefined, defaultVoiceId: defaultVoiceId || undefined }) });
+      await api("/api/avatars", { method: "POST", body: JSON.stringify({ name, ...(shoot ? { shootPhoto: { shootId: shoot.shootId, photo: shoot.photo } } : { imageUrl }), gender: gender || undefined, defaultVoiceId: defaultVoiceId || undefined }) });
       onCreated();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not create avatar");
@@ -378,9 +441,9 @@ function CreateAvatarPanel({ voices, canGenerate, demo, onClose, onCreated }: { 
                 <button type="button" onClick={stopCamera} className="rounded-full bg-black/60 px-3 py-1.5 text-xs font-medium text-white">Cancel</button>
               </div>
             </>
-          ) : imageUrl ? (
+          ) : preview ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={imageUrl} alt="Portrait preview" className="h-full w-full object-cover" />
+            <img src={preview} alt={shoot ? `Portrait preview: photo ${shoot.photo} of ${shoot.title}` : "Portrait preview"} className="h-full w-full object-cover" />
           ) : (
             <>
               <Upload className="mb-2 h-6 w-6" />
@@ -409,8 +472,13 @@ function CreateAvatarPanel({ voices, canGenerate, demo, onClose, onCreated }: { 
               <Upload className="h-4 w-4" /> Upload a portrait
             </Button>
           )}
+          {shoot && (
+            <p id="avatar-shoot-note" role="status" className="text-sm text-slate-600 [overflow-wrap:anywhere]">
+              The portrait is photo {shoot.photo} of “{shoot.title}”. Name the presenter to create it, or upload another portrait.
+            </p>
+          )}
           <Field label="Avatar name">
-            <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Dan – office" />
+            <input id="avatar-name" ref={nameRef} aria-describedby={shoot ? "avatar-shoot-note" : undefined} className={inputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Dan – office" />
           </Field>
           <Field label="Or paste an image URL" hint="Must be publicly reachable if your rendering provider fetches it.">
             <input className={inputClass} value={imageUrl.startsWith("data:") ? "" : imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://…/portrait.jpg" />
@@ -439,7 +507,7 @@ function CreateAvatarPanel({ voices, canGenerate, demo, onClose, onCreated }: { 
           <ErrorBanner message={err} />
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={onClose}>Cancel</Button>
-            <Button onClick={submit} loading={saving} disabled={!name.trim() || !imageUrl}>Create avatar</Button>
+            <Button onClick={submit} loading={saving} disabled={!name.trim() || !preview}>Create avatar</Button>
           </div>
         </div>
       </div>

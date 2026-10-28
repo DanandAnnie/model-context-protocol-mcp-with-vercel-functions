@@ -50,6 +50,14 @@ type ShootRequest = z.infer<typeof shootRequestSchema>;
 
 export const shootIdSchema = z.string().regex(/^sh_[A-Za-z0-9_-]{1,64}$/, "Unknown photo shoot");
 
+/** One photo of one of the account's photo shoots (1 for its first photo), named by a request that uses it. */
+export const shootPhotoSchema = z
+  .object({
+    shootId: z.string("Name the photo shoot"),
+    photo: z.number("Name the photo by its number").int("Name the photo by its number").min(1, "Photos are numbered from 1").max(MAX_SHOOT_PHOTOS, `A shoot has at most ${MAX_SHOOT_PHOTOS} photos`),
+  }, "Name the photo shoot and the photo")
+  .strict();
+
 /** A shoot id as a lookup takes it: one that cannot be a shoot's reads as not found, like an unknown one. */
 function shootId(id: string): string {
   if (!shootIdSchema.safeParse(id).success) throw new NotFoundError("Photo shoot not found");

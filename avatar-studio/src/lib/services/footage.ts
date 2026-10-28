@@ -7,7 +7,7 @@ import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import type { AvatarProvider, FootageInput } from "../providers/types";
-import { FOOTAGE_ASPECTS, FOOTAGE_MAX_SEC, FOOTAGE_MAX_SEC_SHORT, FOOTAGE_MIN_SEC, MAX_FOOTAGE_REFERENCES, MAX_FOOTAGE_SEED, MAX_SHOOT_PHOTOS, FIRST_FRAME_ADVICE, footageIdOf, type Background, type BrandKit, type FootageJob, type VideoTemplate } from "../types";
+import { FOOTAGE_ASPECTS, FOOTAGE_MAX_SEC, FOOTAGE_MAX_SEC_SHORT, FOOTAGE_MIN_SEC, MAX_FOOTAGE_REFERENCES, MAX_FOOTAGE_SEED, FIRST_FRAME_ADVICE, footageIdOf, type Background, type BrandKit, type FootageJob, type VideoTemplate } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { decodeDataUrl } from "../providers/image";
@@ -16,7 +16,7 @@ import { jobChecker } from "./job-checks";
 import { plainScene, rewriteIfNamed, sniff } from "./backdrops";
 import { promptExcerpt } from "./lookpacks";
 import { danglingLabels } from "../picture-labels";
-import { shootPhotoLink } from "./shoots";
+import { shootPhotoLink, shootPhotoSchema } from "./shoots";
 
 /** Generated clips an account keeps; another needs one deleted first. */
 export const MAX_FOOTAGE = 50;
@@ -51,13 +51,7 @@ export const footageRequestSchema = z
     /** A data URL of a PNG or JPEG the clip opens on, as its first frame. */
     image: z.string().max(dataUrlMax(MAX_FOOTAGE_IMAGE_BYTES), "The picture is larger than 3 MB").optional(),
     /** A photo of one of the account's photo shoots to open on instead (1 for its first photo); sent to the renderer by its link. */
-    shootPhoto: z
-      .object({
-        shootId: z.string("Name the photo shoot"),
-        photo: z.number("Name the photo by its number").int("Name the photo by its number").min(1, "Photos are numbered from 1").max(MAX_SHOOT_PHOTOS, `A shoot has at most ${MAX_SHOOT_PHOTOS} photos`),
-      }, "Name the photo shoot and the photo")
-      .strict()
-      .optional(),
+    shootPhoto: shootPhotoSchema.optional(),
     /**
      * Data URLs of PNG or JPEG pictures of things the shot must feature (a product, a place, a person), named in the
      * description as <Picture 1>, <Picture 2>… in this order.

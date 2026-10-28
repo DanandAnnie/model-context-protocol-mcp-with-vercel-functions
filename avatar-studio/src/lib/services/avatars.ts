@@ -12,6 +12,9 @@ import { listVoices } from "./voices";
 import { NotFoundError, ValidationError } from "../errors";
 import { loadImage } from "../providers/image";
 import type { FetchLike } from "../safe-fetch";
+import { UnsafeUrlError } from "../safe-url";
+import { shootPhotoLink, shootPhotoSchema } from "./shoots";
+import { sniff } from "./backdrops";
 
 /** Provider avatar list, memoised per provider for a few minutes. */
 export function providerAvatars(): Promise<Avatar[]> {
@@ -74,17 +77,23 @@ export async function getAvatar(id: string, ownerId: string = LOCAL_OWNER): Prom
   return match;
 }
 
-export const createAvatarSchema = z.object({
-  name: z.string().trim().min(1).max(80),
-  imageUrl: z
-    .string()
-    .min(1)
-    .max(8_000_000, "Uploaded image must be under 6 MB")
-    .refine((v) => v.startsWith("data:image/") || /^https?:\/\//.test(v), "Must be an image URL or uploaded image"),
-  gender: z.enum(["male", "female", "neutral"]).optional(),
-  /** A voice from `GET /api/voices` (the owner's clones included) the editor picks with this avatar. */
-  defaultVoiceId: z.string().trim().min(1).max(200).optional(),
-});
+export const createAvatarSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80),
+    imageUrl: z
+      .string()
+      .min(1)
+      .max(8_000_000, "Uploaded image must be under 6 MB")
+      .refine((v) => v.startsWith("data:image/") || /^https?:\/\//.test(v), "Must be an image URL or uploaded image")
+      .optional(),
+    /** A photo of one of the account's photo shoots to make the presenter of instead of a picture sent (1 for its first). */
+    shootPhoto: shootPhotoSchema.optional(),
+    gender: z.enum(["male", "female", "neutral"]).optional(),
+    /** A voice from `GET /api/voices` (the owner's clones included) the editor picks with this avatar. */
+    defaultVoiceId: z.string().trim().min(1).max(200).optional(),
+  })
+  .refine((v) => v.imageUrl || v.shootPhoto, { message: "Add a portrait: upload one, paste its address, or pick a photo shoot's photo", path: ["imageUrl"] })
+  .refine((v) => !(v.imageUrl && v.shootPhoto), { message: "A photo avatar is made from a portrait sent or from a photo shoot's photo, not both", path: ["shootPhoto"] });
 
 export const generatePortraitSchema = z.object({
   name: z.string().trim().min(1).max(80),
@@ -168,13 +177,38 @@ async function assertVoiceAvailable(voiceId: string, ownerId: string): Promise<v
   if (!(await listVoices(ownerId)).some((v) => v.id === voiceId)) throw new ValidationError(`Voice ${voiceId} is not available`);
 }
 
-export async function createAvatar(input: z.infer<typeof createAvatarSchema>, ownerId: string = LOCAL_OWNER): Promise<Avatar> {
+/**
+ * A photo of one of the account's photo shoots as a photo avatar's portrait. The renderer's link expires within the
+ * day, so the photo is read once, through the public-address guard, and kept as a data URL, like a drawn portrait.
+ */
+async function shootPortrait(from: z.infer<typeof shootPhotoSchema>, ownerId: string, fetchImpl?: FetchLike): Promise<string> {
+  const link = await shootPhotoLink(from.shootId, from.photo, ownerId);
+  // The demo's photos are drawn by the studio itself and kept as they are.
+  if (link.url.startsWith("data:")) return link.url;
+  let picture: { bytes: Uint8Array; mimeType: string };
+  try {
+    picture = await loadImage(link.url, fetchImpl);
+  } catch (err) {
+    console.error(err);
+    // A photo that is not one to keep says why; trying again helps only when the download itself failed.
+    const kept = err instanceof UnsafeUrlError || (err instanceof Error && /too large|redirects|did not return an image/.test(err.message));
+    throw new ValidationError(kept ? `Photo ${from.photo} cannot be kept as a portrait (${err instanceof Error ? err.message.replace(/^Avatar /, "").replace(/\.$/, "") : "unknown"}); download it and upload it instead` : `Photo ${from.photo} could not be downloaded just now; try again in a few minutes`);
+  }
+  const mimeType = sniff(picture.bytes);
+  if (!mimeType) throw new ValidationError(`Photo ${from.photo} is not a PNG or JPEG image; download it and upload a copy that is`);
+  if (picture.bytes.byteLength > MAX_PORTRAIT_BYTES) throw new ValidationError(`Photo ${from.photo} is larger than ${MAX_PORTRAIT_BYTES / 1024 / 1024} MB, the most a photo avatar keeps; download it and upload a copy under 4 MB`);
+  return `data:${mimeType};base64,${Buffer.from(picture.bytes).toString("base64")}`;
+}
+
+export async function createAvatar(input: z.infer<typeof createAvatarSchema>, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<Avatar> {
   if (input.defaultVoiceId) await assertVoiceAvailable(input.defaultVoiceId, ownerId);
+  const imageUrl = input.shootPhoto ? await shootPortrait(input.shootPhoto, ownerId, fetchImpl) : input.imageUrl;
+  if (!imageUrl) throw new ValidationError("Add a portrait: upload one, paste its address, or pick a photo shoot's photo");
   const avatar: Avatar = {
     id: newId("av"),
     ownerId,
     name: input.name,
-    imageUrl: input.imageUrl,
+    imageUrl,
     gender: input.gender,
     ...(input.defaultVoiceId ? { defaultVoiceId: input.defaultVoiceId } : {}),
     source: "custom",

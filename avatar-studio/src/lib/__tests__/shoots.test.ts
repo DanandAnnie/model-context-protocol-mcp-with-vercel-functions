@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
-import { MAX_SHOOTS, deleteShoot, exportOwnerData, forgetShootChecks, listShoots, publicShoot, shootRequestSchema, startShoot } from "../services";
+import { MAX_SHOOTS, createAvatar, createAvatarSchema, deleteShoot, exportOwnerData, forgetShootChecks, listShoots, publicShoot, shootRequestSchema, startShoot } from "../services";
 import { ConflictError, UpstreamError, ValidationError } from "../errors";
 import { providerStatus } from "../providers";
 import { getStore } from "../store";
@@ -233,5 +233,53 @@ describe("photo shoots", () => {
     } finally {
       Object.assign(config, { avatarProvider: saved.avatar, didApiKey: saved.key });
     }
+  });
+  it("give a photo avatar its portrait, kept with it rather than by the renderer's link", async () => {
+    const shoot = await startShoot(ask({ count: 2 }), "u1");
+    const make = (extra: Record<string, unknown>) => createAvatarSchema.parse({ name: "Dana at the harbour", ...extra });
+    const from = { shootPhoto: { shootId: shoot.id, photo: 2 } };
+    // A portrait sent or a shoot's photo: one of them, not both and not neither.
+    assert.throws(() => make({}), /Add a portrait/);
+    assert.throws(() => make({ ...from, imageUrl: png(1) }), /not both/);
+    assert.throws(() => make({ shootPhoto: { shootId: shoot.id, photo: 0 } }), /numbered from 1/);
+    assert.throws(() => make({ shootPhoto: { shootId: shoot.id, photo: 1, url: "https://example.com/x.png" } }), /url/, "only the shoot and the photo are named");
+    // Refused while the shoot is being made, for a photo it does not have, and for another account's shoot.
+    await assert.rejects(createAvatar(make(from), "u1"), /is not ready yet/);
+    await getStore().put("shoot", { ...shoot, providerJobId: `mocksh_${Date.now() - 10_000}_2_7_x` });
+    forgetShootChecks();
+    await assert.rejects(createAvatar(make({ shootPhoto: { shootId: shoot.id, photo: 3 } }), "u1"), /has 2 photos; there is no photo 3/);
+    await assert.rejects(createAvatar(make(from), "u2"), /not found/i);
+    assert.equal((await getStore().list("avatar")).length, 0);
+    // The demo's drawn photo is kept as it is.
+    const demo = await createAvatar(make({ ...from, gender: "female" }), "u1");
+    const [, second] = (await listShoots("u1"))[0].photos!;
+    assert.deepEqual([demo.name, demo.imageUrl, demo.gender, demo.source, demo.ownerId], ["Dana at the harbour", second.url, "female", "custom", "u1"]);
+
+    // A renderer's photo is read once, through the public-address guard, and kept as a data URL.
+    const hosted = { ...(await getStore().get<ShootJob>("shoot", shoot.id))!, provider: "heygen", photos: [{ url: "https://93.184.216.34/1.png" }, { url: "https://93.184.216.34/2.png" }], checkedAt: new Date().toISOString() };
+    await getStore().put("shoot", hosted);
+    forgetShootChecks();
+    const asked: string[] = [];
+    const answer = (body: Uint8Array, type = "image/png") => (async (url: string) => (asked.push(url), new Response(body as BlobPart, { headers: { "content-type": type } }))) as never;
+    const bytes = Buffer.from(png(9).split(",")[1], "base64");
+    const kept = await createAvatar(make(from), "u1", answer(bytes));
+    assert.deepEqual(asked, ["https://93.184.216.34/2.png"]);
+    assert.equal(kept.imageUrl, `data:image/png;base64,${bytes.toString("base64")}`);
+    // What is kept is what the bytes are, whatever the reply called them; anything but a PNG or JPEG is refused.
+    assert.match((await createAvatar(make(from), "u1", answer(bytes, "image/webp"))).imageUrl, /^data:image\/png;base64,/);
+    await assert.rejects(createAvatar(make(from), "u1", answer(new Uint8Array([0x47, 0x49, 0x46, 0x38]), "image/gif")), /not a PNG or JPEG/);
+    // Too large to keep, or not downloadable now: refused with what to do.
+    const big = new Uint8Array(3 * 1024 * 1024 + 1);
+    big.set(bytes);
+    await assert.rejects(createAvatar(make(from), "u1", answer(big)), /larger than 3 MB/);
+    await assert.rejects(createAvatar(make(from), "u1", (async () => new Response("gone", { status: 404 })) as never), /could not be downloaded just now/);
+    // One that will never do says why, rather than to try again.
+    await assert.rejects(createAvatar(make(from), "u1", answer(bytes, "text/html")), /cannot be kept as a portrait \(URL did not return an image\); download it and upload it instead/);
+    // A link that could not be renewed and may have expired is not fetched at all.
+    await getStore().put("shoot", { ...hosted, checkedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() });
+    forgetShootChecks();
+    asked.length = 0;
+    await assert.rejects(createAvatar(make(from), "u1", answer(bytes)), /could not be renewed just now/);
+    assert.deepEqual(asked, []);
   });
 });

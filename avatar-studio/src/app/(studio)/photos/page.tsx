@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { Camera, Clapperboard, Download, ImagePlus, Trash2, X } from "lucide-react";
+import { Camera, Clapperboard, Download, ImagePlus, Trash2, UserRound, X } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
@@ -407,6 +407,11 @@ export default function PhotoShootPage() {
                           {canEdit === true && status?.generatedFootage === true && (
                             <Link href={`/footage?shoot=${s.id}&photo=${i + 1}`} className="inline-flex min-h-6 items-center gap-1 py-1 text-xs font-medium text-brand-700 hover:underline" aria-label={`Bring to life: photo ${i + 1} of ${s.title}`}>
                               <Clapperboard className="h-3 w-3" aria-hidden /> Bring to life
+                            </Link>
+                          )}
+                          {canEdit === true && (
+                            <Link href={`/avatars?shoot=${s.id}&photo=${i + 1}`} className="inline-flex min-h-6 items-center gap-1 py-1 text-xs font-medium text-brand-700 hover:underline" aria-label={`Make a presenter: photo ${i + 1} of ${s.title}`}>
+                              <UserRound className="h-3 w-3" aria-hidden /> Make a presenter
                             </Link>
                           )}
                           </div>

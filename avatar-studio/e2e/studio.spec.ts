@@ -1265,6 +1265,54 @@ test("a b-roll clip features pictures the description names as <Picture 1>, <Pic
   for (const id of [shaped.id, first]) expect((await page.request.delete(`/api/footage/${id}`)).ok()).toBe(true);
 });
 
+test("a b-roll take is made again with changes, from its seed, longer or word for word", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  await page.goto("/footage");
+  const prompt = page.getByRole("textbox", { name: "Describe the shot", exact: true });
+  await prompt.fill(`A slow dolly past a bakery window ${tag} at dawn, steam on the glass`);
+  // Up to 30 seconds from a description; 15 when it is followed exactly, and the length follows with a word why.
+  const length = page.getByRole("slider", { name: /Length/ });
+  await expect(length).toHaveAttribute("max", "30");
+  await length.focus();
+  await page.keyboard.press("End");
+  await expect(page.getByLabel("Length: 30 seconds")).toBeVisible();
+  const exact = page.getByLabel("Follow my description exactly");
+  await expect(exact).toHaveAccessibleDescription(/sends yours word for word/);
+  await exact.check();
+  await expect(length).toHaveAttribute("max", "15");
+  await expect(page.getByLabel("Length: 15 seconds")).toBeVisible();
+  await expect(page.locator('p[role="status"]')).toHaveText("The length is now 15 seconds, the longest for a clip that features pictures or follows the description exactly.");
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/footage") && r.method() === "POST");
+  await page.getByRole("button", { name: "Make the clip" }).click();
+  expect((await sent).postDataJSON()).toMatchObject({ durationSec: 15, exact: true });
+  const first = page.getByTestId("footage").filter({ hasText: `bakery window ${tag}` });
+  await expect(first.getByTestId("footage-meta")).toContainText("15 s · 16:9 · as written · standard");
+  // Once made, the take can be made again: the form takes its description and settings, and its seed.
+  await expect(first.getByText("Completed")).toBeVisible({ timeout: 20_000 });
+  const firstId = (await first.getAttribute("data-footage"))!;
+  const listed = ((await (await page.request.get("/api/footage")).json()).footage as Array<{ id: string; takeSeed?: number }>).find((f) => f.id === firstId)!;
+  expect(typeof listed.takeSeed).toBe("number");
+  await exact.uncheck();
+  await first.getByRole("button", { name: /^Make .* again with changes$/ }).click();
+  await expect(prompt).toBeFocused();
+  await expect(prompt).toHaveValue(`A slow dolly past a bakery window ${tag} at dawn, steam on the glass`);
+  await expect(exact).toBeChecked();
+  await expect(page.getByLabel("Length: 15 seconds")).toBeVisible();
+  await expect(page.getByTestId("footage-take")).toContainText(`(seed ${listed.takeSeed}): only what you change differs.`);
+  await prompt.fill(`A slow dolly past a bakery window ${tag} at dusk, steam on the glass`);
+  const again = page.waitForRequest((r) => r.url().endsWith("/api/footage") && r.method() === "POST");
+  await page.getByRole("button", { name: "Make the clip" }).click();
+  expect((await again).postDataJSON()).toMatchObject({ prompt: `A slow dolly past a bakery window ${tag} at dusk, steam on the glass`, durationSec: 15, exact: true, seed: listed.takeSeed });
+  await expect(page.getByTestId("footage-take")).toHaveCount(0);
+  const second = page.getByTestId("footage").filter({ hasText: `at dusk` }).filter({ hasText: tag });
+  await expect(second).toHaveCount(1);
+  // A take dropped goes back to HeyGen choosing the seed.
+  await first.getByRole("button", { name: /^Make .* again with changes$/ }).click();
+  await page.getByRole("button", { name: "Use a new take" }).click();
+  await expect(page.getByTestId("footage-take")).toHaveCount(0);
+  for (const id of [firstId, (await second.getAttribute("data-footage"))!]) expect((await page.request.delete(`/api/footage/${id}`)).ok()).toBe(true);
+});
+
 test("a b-roll clip is made from a description and loops behind a presenter as a scene's background", async ({ page }) => {
   const tag = Date.now().toString(36);
   await page.goto("/footage");

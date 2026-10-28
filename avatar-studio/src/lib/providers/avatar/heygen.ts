@@ -430,7 +430,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
    * Pictures go inline, so a retry with the same key sends the same body and gets HeyGen's first answer. HD is 1080p, at
    * three times the cost.
    */
-  async startFootage({ prompt, image, references, durationSec, aspect, quality, key }: FootageInput) {
+  async startFootage({ prompt, image, references, durationSec, aspect, quality, exact, seed, key }: FootageInput) {
     const inline = (p: { bytes: Uint8Array; mimeType: string }) => inlineAsset({ data: Buffer.from(p.bytes).toString("base64"), mimeType: p.mimeType });
     // A first frame sets the clip's shape; pictures to feature follow the first one's shape unless a frame is chosen
     // (HeyGen's `adaptive`); a clip from words alone is landscape unless asked otherwise.
@@ -447,6 +447,9 @@ export class HeyGenAvatarProvider implements AvatarProvider {
           duration: durationSec,
           resolution: quality === "hd" ? "1080p" : "768p",
           ...conditioning,
+          // HeyGen expands the description before generating unless told to take it word for word.
+          ...(exact ? { prompt_enhancement: "disabled" } : {}),
+          ...(seed !== undefined ? { seed } : {}),
         },
         key,
       );
@@ -476,7 +479,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     if (job.status !== "completed") return { status: "processing" };
     const videoUrl = httpsOnly(job.video_url);
     if (!videoUrl) return { status: "failed", error: "HeyGen finished without a clip" };
-    return stripEmpty({ status: "completed" as const, videoUrl, durationSec: job.duration ?? undefined, width: job.width ?? undefined, height: job.height ?? undefined });
+    return stripEmpty({ status: "completed" as const, videoUrl, durationSec: job.duration ?? undefined, width: job.width ?? undefined, height: job.height ?? undefined, seed: typeof job.seed === "number" ? job.seed : undefined });
   }
 
   /** A recording with its filler words ("um", "uh") and overlong silences cut out (v3 filler word removal), one cleaned cut back. */

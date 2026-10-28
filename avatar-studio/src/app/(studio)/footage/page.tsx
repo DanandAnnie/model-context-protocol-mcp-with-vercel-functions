@@ -1,6 +1,6 @@
 "use client";
 import { Fragment, useEffect, useRef, useState } from "react";
-import { Download, ImagePlus, MonitorPlay, Trash2, X } from "lucide-react";
+import { Download, ImagePlus, MonitorPlay, RotateCcw, Trash2, X } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
@@ -9,7 +9,7 @@ import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api, formatDate, isRefusal } from "@/lib/client";
 import { toUploadable } from "@/lib/image-upload";
 import { danglingLabels, insertPictureLabel, pictureLabels, withPictureRemoved } from "@/lib/picture-labels";
-import { FOOTAGE_ASPECTS, FOOTAGE_MAX_SEC, FOOTAGE_MIN_SEC, MAX_FOOTAGE_REFERENCES, footagePath, type FootageAspect, type FootageJob } from "@/lib/types";
+import { FOOTAGE_ASPECTS, FOOTAGE_MAX_SEC_SHORT, FOOTAGE_MIN_SEC, MAX_FOOTAGE_REFERENCES, footagePath, maxFootageSec, seedOf, type FootageAspect, type FootageJob } from "@/lib/types";
 
 /** A clip as the server lists it: never the renderer, its job id, or the picture's digest. */
 type Footage = Omit<FootageJob, "ownerId" | "provider" | "providerJobId" | "imageDigest">;
@@ -65,6 +65,10 @@ export default function FootagePage() {
   const [use, setUse] = useState<PictureUse>("none");
   const [picture, setPicture] = useState<{ name: string; url: string } | null>(null);
   const [features, setFeatures] = useState<Array<{ name: string; url: string }>>([]);
+  // The description goes to the renderer as written, without its prompt enhancement.
+  const [exact, setExact] = useState(false);
+  // A take to make again: a finished clip's seed, so only what is changed differs.
+  const [take, setTake] = useState<{ seed: number; title: string } | null>(null);
   const [reading, setReading] = useState(false);
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
@@ -128,6 +132,14 @@ export default function FootagePage() {
   // opens on a picture takes the picture's shape.
   const hdBlocked = !frame && (shape === "1:1" || shape === "adaptive");
   const needsFeature = use === "feature" && !features.length;
+  // HeyGen makes clips over 15 seconds only from a description or a first frame, with its enhancement on.
+  const maxLength = maxFootageSec({ references: featured.length, exact });
+  useEffect(() => {
+    if (durationSec > maxLength) {
+      setDurationSec(maxLength);
+      setNote(`The length is now ${maxLength} seconds, the longest for a clip that features pictures or follows the description exactly.`);
+    }
+  }, [durationSec, maxLength]);
   const needsPicture = use === "frame" && !picture;
   // A label HeyGen cannot match to a picture sent would point the shot at nothing (it does not rewrite labels), and
   // without pictures featured every label is one.
@@ -237,6 +249,8 @@ export default function FootagePage() {
         durationSec,
         ...(frame ? { image: frame.url } : featured.length ? { references: featured.map((f) => f.url), ...(shape === "adaptive" ? {} : { aspect: shape }) } : { aspect: shape }),
         quality: hdBlocked ? "standard" : quality,
+        ...(exact ? { exact: true } : {}),
+        ...(take ? { seed: take.seed } : {}),
         ...(title.trim() ? { title: title.trim() } : {}),
       };
       const { footage } = await api<{ footage: Footage }>("/api/footage", { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": requestKey } });
@@ -248,6 +262,7 @@ export default function FootagePage() {
       caretRef.current = null;
       setPicture(null);
       setFeatures([]);
+      setTake(null);
       setTitle("");
       setNote(`Making ${footage.title}; it appears here when it is ready.`);
       // Focus goes to the new clip, rather than being lost with the cleared form.
@@ -259,6 +274,29 @@ export default function FootagePage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  /**
+   * Fills the form from a finished clip, with its take's seed, so the next clip is the same take with only the
+   * changes made (one clause at a time is HeyGen's advice). Pictures are not kept, so they are added again.
+   */
+  function againWith(f: Footage) {
+    const seed = seedOf(f);
+    if (seed === undefined) return;
+    setPrompt(f.prompt);
+    setTitle("");
+    setDurationSec(f.durationSec);
+    setQuality(f.quality);
+    setExact(!!f.exact);
+    setUse(f.references ? "feature" : f.fromPicture ? "frame" : "none");
+    // A clip shaped like its first picture is chosen so again once the pictures are added (it needs one featured).
+    if (f.aspect) setAspect(f.aspect);
+    setTake({ seed, title: f.title });
+    changed();
+    caretRef.current = null;
+    const pictures = f.references ? (f.references === 1 ? " Add the picture to feature again: pictures are not kept." : ` Add the ${f.references} pictures to feature again, in the same order: pictures are not kept.`) : f.fromPicture ? " Add the picture to open on again: pictures are not kept." : "";
+    say(setNote, `The form has “${f.title}” with its take; change what you want and make the clip.${pictures}`);
+    focusAfterRender(() => promptRef.current);
   }
 
   async function remove(f: Footage) {
@@ -386,8 +424,30 @@ export default function FootagePage() {
                 <label htmlFor="footage-length" className="mb-1.5 block text-sm font-medium text-slate-700">
                   Length: {durationSec} seconds
                 </label>
-                <input id="footage-length" type="range" min={FOOTAGE_MIN_SEC} max={FOOTAGE_MAX_SEC} step={1} value={durationSec} disabled={canEdit === false} onChange={(e) => (setDurationSec(Number(e.target.value)), changed())} className="w-full accent-brand-600" />
+                <input id="footage-length" type="range" min={FOOTAGE_MIN_SEC} max={maxLength} step={1} value={durationSec} disabled={canEdit === false} aria-describedby="footage-length-hint" onChange={(e) => (setDurationSec(Number(e.target.value)), changed())} className="w-full accent-brand-600" />
+                <p id="footage-length-hint" className="mt-1 text-xs text-slate-500">
+                  {maxLength === FOOTAGE_MAX_SEC_SHORT ? `Up to ${FOOTAGE_MAX_SEC_SHORT} seconds when the clip features pictures or follows the description exactly.` : `Up to ${maxLength} seconds.`}
+                </p>
               </div>
+              <div>
+                <label className="flex min-h-6 items-center gap-2 text-sm text-slate-700">
+                  <input type="checkbox" className="accent-brand-600" checked={exact} disabled={canEdit === false} aria-describedby="footage-exact-hint" onChange={(e) => (setExact(e.target.checked), changed())} />
+                  Follow my description exactly
+                </label>
+                <p id="footage-exact-hint" className="mt-1 text-xs text-slate-500">
+                  HeyGen expands a description before filming it; this sends yours word for word. For long, fully written descriptions (up to {FOOTAGE_MAX_SEC_SHORT} seconds).
+                </p>
+              </div>
+              {take && (
+                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-800" data-testid="footage-take">
+                  <span>
+                    The same take as “{take.title}” (seed {take.seed}): only what you change differs.
+                  </span>
+                  <button type="button" onClick={() => (setTake(null), changed(), say(setNote, "A new take: HeyGen picks the seed."))} className="min-h-6 rounded border border-brand-200 bg-white px-2 py-0.5 font-medium text-brand-700 hover:bg-brand-100">
+                    Use a new take
+                  </button>
+                </div>
+              )}
               <fieldset disabled={!!frame || canEdit === false}>
                 <legend className="mb-1.5 text-sm font-medium text-slate-700">Frame</legend>
                 {frame ? (
@@ -460,7 +520,7 @@ export default function FootagePage() {
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium text-slate-900">{f.title}</div>
                       <div className="mt-0.5 text-xs text-slate-500" data-testid="footage-meta">
-                        {f.durationSec} s · {shapeOf(f)} · {f.quality === "hd" ? "HD" : "standard"} · {formatDate(f.createdAt)}
+                        {f.durationSec} s · {shapeOf(f)} ·{f.exact ? " as written ·" : ""} {f.quality === "hd" ? "HD" : "standard"} · {formatDate(f.createdAt)}
                       </div>
                       <div className="mt-1 line-clamp-2 break-words text-xs text-slate-600" title={f.prompt}>
                         {f.prompt}
@@ -483,6 +543,11 @@ export default function FootagePage() {
                         <a href={f.videoUrl} download target="_blank" rel="noopener noreferrer" className="inline-flex min-h-6 items-center gap-1 py-1 font-medium text-brand-700 hover:underline" aria-label={`Download ${f.title}`}>
                           <Download className="h-3 w-3" aria-hidden /> Download
                         </a>
+                        {canEdit !== false && seedOf(f) !== undefined && (
+                          <button type="button" onClick={() => againWith(f)} className="inline-flex min-h-6 items-center gap-1 py-1 font-medium text-brand-700 hover:underline" aria-label={`Make ${f.title} again with changes`}>
+                            <RotateCcw className="h-3 w-3" aria-hidden /> Make again with changes
+                          </button>
+                        )}
                         <span className="text-slate-500" data-testid="footage-use" data-path={footagePath(f.id)}>
                           Loop it behind a presenter: choose it under Generated clip in the editor&apos;s Background tab.
                         </span>

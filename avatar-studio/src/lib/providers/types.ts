@@ -369,6 +369,10 @@ export interface FootageInput {
   durationSec: number;
   aspect?: "16:9" | "9:16" | "1:1";
   quality: "standard" | "hd";
+  /** Send the description as written, without the renderer's prompt enhancement. */
+  exact?: boolean;
+  /** The take to make again; the renderer picks one when absent. */
+  seed?: number;
   key: string;
 }
 
@@ -376,6 +380,8 @@ export interface FootageStatus {
   status: "processing" | "completed" | "failed";
   videoUrl?: string;
   durationSec?: number;
+  /** The seed the renderer used, to make the same take again. */
+  seed?: number;
   width?: number;
   height?: number;
   error?: string;

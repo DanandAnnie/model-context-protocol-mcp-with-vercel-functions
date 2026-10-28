@@ -113,9 +113,19 @@ export interface HighlightJob {
 /** Frames a generated clip can be made in (a clip from a picture takes the picture's shape instead). */
 export const FOOTAGE_ASPECTS = ["16:9", "9:16", "1:1"] as const;
 export type FootageAspect = (typeof FOOTAGE_ASPECTS)[number];
-/** Shortest and longest generated clip, in seconds (HeyGen Video). */
+/**
+ * Shortest and longest generated clip, in seconds (HeyGen Video): up to 30 from a description or a first frame, and
+ * up to 15 when it features pictures or follows the description exactly (HeyGen's limit for those).
+ */
 export const FOOTAGE_MIN_SEC = 5;
-export const FOOTAGE_MAX_SEC = 15;
+export const FOOTAGE_MAX_SEC = 30;
+export const FOOTAGE_MAX_SEC_SHORT = 15;
+/** The longest clip HeyGen makes with these settings. */
+export const maxFootageSec = (o: { references?: number; exact?: boolean }) => (o.references || o.exact ? FOOTAGE_MAX_SEC_SHORT : FOOTAGE_MAX_SEC);
+/** The seed that makes a clip's take again: the one the renderer used, else the one asked for. */
+export const seedOf = (f: Pick<FootageJob, "seed" | "takeSeed">) => f.takeSeed ?? f.seed;
+/** The largest seed HeyGen takes (unsigned 32-bit). */
+export const MAX_FOOTAGE_SEED = 4_294_967_295;
 
 /** Pictures a clip can be asked to feature (a product, a place, a person), in the order the description names them. */
 export const MAX_FOOTAGE_REFERENCES = 3;
@@ -134,6 +144,15 @@ export interface FootageJob {
   fromPicture?: true;
   /** How many pictures the shot features, named in the description as <Picture 1>, <Picture 2>… (not kept). */
   references?: number;
+  /** The description went to the renderer exactly as written (no prompt enhancement). */
+  exact?: true;
+  /**
+   * The seed asked for, to make a take again: the same description and seed give the same clip, so changing one
+   * clause at a time iterates on a shot. Part of what a retried start is compared on.
+   */
+  seed?: number;
+  /** The seed the renderer used, once the clip is made (the one to ask for to make this take again). */
+  takeSeed?: number;
   durationSec: number;
   /**
    * The frame asked for; a clip from a picture follows the picture, so it has none, and a clip featuring pictures

@@ -80,15 +80,16 @@ export class MockAvatarProvider implements AvatarProvider {
 
   /** Demo cleanup: the sample video stands in for the cleaned cut a few seconds later, with made-up statistics; nothing is cut. */
   /** Demo generated clip: the studio's sample clip, "made" a few seconds after it is asked for; nothing is generated. */
-  async startFootage({ durationSec }: { durationSec: number }) {
-    return { jobId: `mockft_${Date.now()}_${durationSec}` };
+  async startFootage({ durationSec, seed }: { durationSec: number; seed?: number }) {
+    // The demo picks a seed like the renderer does, and keeps one asked for, so a take can be made again.
+    return { jobId: `mockft_${Date.now()}_${durationSec}_${seed ?? Math.floor(Math.random() * 1_000_000)}` };
   }
 
   async footageStatus(jobId: string): Promise<FootageStatus> {
-    const m = /^mockft_(\d+)_(\d+)$/.exec(jobId);
+    const m = /^mockft_(\d+)_(\d+)(?:_(\d+))?$/.exec(jobId);
     if (!m) return { status: "failed", error: "No such clip" };
     if (Date.now() - Number(m[1]) < MockAvatarProvider.CLIP_MS) return { status: "processing" };
-    return { status: "completed", videoUrl: demoAssetUrl(SAMPLE_VIDEO), durationSec: Number(m[2]), width: 1280, height: 720 };
+    return { status: "completed", videoUrl: demoAssetUrl(SAMPLE_VIDEO), durationSec: Number(m[2]), width: 1280, height: 720, ...(m[3] ? { seed: Number(m[3]) } : {}) };
   }
 
   async startCleanup() {

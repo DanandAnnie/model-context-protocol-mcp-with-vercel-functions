@@ -7,7 +7,7 @@ import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import type { AvatarProvider } from "../providers/types";
-import { FOOTAGE_ASPECTS, FOOTAGE_MAX_SEC, FOOTAGE_MIN_SEC, MAX_FOOTAGE_REFERENCES, footageIdOf, type Background, type BrandKit, type FootageJob, type VideoTemplate } from "../types";
+import { FOOTAGE_ASPECTS, FOOTAGE_MAX_SEC, FOOTAGE_MAX_SEC_SHORT, FOOTAGE_MIN_SEC, MAX_FOOTAGE_REFERENCES, MAX_FOOTAGE_SEED, footageIdOf, type Background, type BrandKit, type FootageJob, type VideoTemplate } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { decodeDataUrl } from "../providers/image";
@@ -41,6 +41,10 @@ export const footageRequestSchema = z
     /** Ignored shape for a clip from a picture, which takes the picture's shape. */
     aspect: z.enum(FOOTAGE_ASPECTS, `The frame is ${FOOTAGE_ASPECTS.join(", ")}; leave it out for a clip from pictures to follow the first one`).optional(),
     quality: z.enum(["standard", "hd"]).default("standard"),
+    /** Send the description to the renderer exactly as written, without its prompt enhancement. */
+    exact: z.boolean().optional(),
+    /** The take to make again (a clip's seed); the renderer picks one when absent. */
+    seed: z.number().int("A seed is a whole number").min(0, "A seed is 0 or more").max(MAX_FOOTAGE_SEED, `A seed is at most ${MAX_FOOTAGE_SEED}`).optional(),
     /** A data URL of a PNG or JPEG the clip opens on, as its first frame. */
     image: z.string().max(dataUrlMax(MAX_FOOTAGE_IMAGE_BYTES), "The picture is larger than 3 MB").optional(),
     /**
@@ -57,6 +61,11 @@ export const footageRequestSchema = z
   })
   .strict()
   .refine((v) => !(v.image && v.references), { message: "A clip either opens on one picture or features pictures, not both", path: ["references"] })
+  // HeyGen makes clips over 15 seconds only from a description or a first frame, with its prompt enhancement on.
+  .refine((v) => v.durationSec <= FOOTAGE_MAX_SEC_SHORT || !(v.references || v.exact), {
+    message: `A clip that features pictures, or follows the description exactly, is at most ${FOOTAGE_MAX_SEC_SHORT} seconds`,
+    path: ["durationSec"],
+  })
   .refine((v) => !(v.image && v.aspect), { message: "A clip from a picture takes the picture's shape; leave the frame out", path: ["aspect"] })
   // Each picture to feature is named by its number when it is too large (the request would be refused whole).
   .superRefine((v, ctx) => {
@@ -157,7 +166,7 @@ export async function startFootage(input: FootageRequest, ownerId: string = LOCA
   const id = opts.key ? `ft_${createHash("sha256").update(`${ownerId}\0${opts.key}`).digest("base64url").slice(0, 32)}` : newId("ft");
   const existing = opts.key ? await getStore().get<FootageJob>("footage", id) : null;
   if (existing && existing.ownerId === ownerId) {
-    const same = existing.title === (input.title || promptExcerpt(input.prompt, 60)) && existing.prompt === input.prompt && existing.durationSec === input.durationSec && existing.aspect === aspect && existing.quality === input.quality && (existing.imageDigest ?? "") === (imageDigest ?? "") && (existing.references ?? 0) === (references?.length ?? 0);
+    const same = existing.title === (input.title || promptExcerpt(input.prompt, 60)) && existing.prompt === input.prompt && existing.durationSec === input.durationSec && existing.aspect === aspect && existing.quality === input.quality && (existing.imageDigest ?? "") === (imageDigest ?? "") && (existing.references ?? 0) === (references?.length ?? 0) && !!existing.exact === !!input.exact && existing.seed === input.seed;
     if (!same) throw new ConflictError("This Idempotency-Key was already used for another clip; send a new key");
     return existing;
   }
@@ -166,7 +175,7 @@ export async function startFootage(input: FootageRequest, ownerId: string = LOCA
   // Read then written: two starts at the same moment can between them pass the cap.
   if ((await getStore().list<FootageJob>("footage", ownerId)).length >= MAX_FOOTAGE) throw new ConflictError(`An account keeps at most ${MAX_FOOTAGE} generated clips; delete one to make another`);
   opts.admit?.();
-  const { jobId } = await provider.startFootage({ prompt: input.prompt, image, references, durationSec: input.durationSec, aspect, quality: input.quality, key: id });
+  const { jobId } = await provider.startFootage({ prompt: input.prompt, image, references, durationSec: input.durationSec, aspect, quality: input.quality, exact: input.exact, seed: input.seed, key: id });
   const now = nowIso();
   const job: FootageJob = stripUndefined({
     id,
@@ -175,6 +184,8 @@ export async function startFootage(input: FootageRequest, ownerId: string = LOCA
     prompt: input.prompt,
     fromPicture: image ? (true as const) : undefined,
     references: references?.length,
+    exact: input.exact ? (true as const) : undefined,
+    seed: input.seed,
     durationSec: input.durationSec,
     aspect,
     quality: input.quality,
@@ -264,7 +275,7 @@ async function refreshFootage(job: FootageJob): Promise<FootageJob> {
     const next: FootageJob = {
       ...kept,
       // The length asked for is kept (it is what a retried start is compared on); the clip's own is in the file.
-      ...stripUndefined({ status: out.status, videoUrl: out.videoUrl, width: out.width, height: out.height, error: out.error }),
+      ...stripUndefined({ status: out.status, videoUrl: out.videoUrl, width: out.width, height: out.height, error: out.error, takeSeed: out.seed ?? job.takeSeed }),
       checkedAt: now,
       updatedAt: out.status !== job.status ? now : job.updatedAt,
     };

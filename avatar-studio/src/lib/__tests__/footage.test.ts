@@ -32,12 +32,23 @@ async function finished(job: FootageJob, ageMs = 0): Promise<FootageJob> {
 }
 
 describe("generated clips", () => {
-  it("take a description of 10 to 2,000 characters, 5 to 15 seconds, a frame or a picture, and a quality", () => {
+  it("take a description of 10 to 2,000 characters, 5 to 30 seconds, a frame or a picture, and a quality", () => {
     assert.throws(() => footageRequestSchema.parse({ prompt: "kitchen" }), /few words/);
     assert.throws(() => ask({ prompt: "x".repeat(2001) }), /at most 2000/);
     assert.throws(() => ask({ durationSec: 4 }));
-    assert.throws(() => ask({ durationSec: 16 }));
+    assert.throws(() => ask({ durationSec: 31 }), /5 to 30 seconds/);
+    assert.equal(ask({ durationSec: 30 }).durationSec, 30, "a clip from a description runs up to 30 seconds");
+    assert.equal(ask({ durationSec: 30, image: png() }).durationSec, 30, "so does one from a first frame");
+    // Featuring pictures, or the description followed exactly, keeps HeyGen to 15 seconds.
+    assert.throws(() => ask({ durationSec: 16, exact: true }), /at most 15 seconds/);
+    assert.ok(ask({ durationSec: 15, exact: true }));
     assert.throws(() => ask({ durationSec: 7.5 }), "whole seconds");
+    // A seed is HeyGen's unsigned 32-bit number.
+    assert.equal(ask({ seed: 0 }).seed, 0);
+    assert.equal(ask({ seed: 4_294_967_295 }).seed, 4_294_967_295);
+    assert.throws(() => ask({ seed: 4_294_967_296 }), /at most 4294967295/);
+    assert.throws(() => ask({ seed: -1 }), /0 or more/);
+    assert.throws(() => ask({ seed: 1.5 }), /whole number/);
     assert.throws(() => ask({ aspect: "4:3" }));
     assert.throws(() => ask({ quality: "2k" }));
     assert.throws(() => ask({ image: png(), aspect: "16:9" }), /picture's shape/);
@@ -166,7 +177,7 @@ describe("generated clips", () => {
     // Labels with no pictures featured name nothing either, with a first frame or with none.
     assert.throws(() => ask({ prompt: "The shoe in <Picture 1> on a marble desk" }), /names <Picture 1>, but no picture is featured/);
     assert.throws(() => ask({ prompt: "The shoe in <Picture 1> on a marble desk", image: png(1) }), /no picture is featured/);
-    assert.throws(() => ask({ durationSec: 16 }), /5 to 15 seconds/);
+    assert.throws(() => ask({ durationSec: 16, references: [png(1)] }), /features pictures, or follows the description exactly, is at most 15 seconds/);
     // An oversized picture is still refused when another field is wrong too.
     const both = footageRequestSchema.safeParse({ prompt: PROMPT, durationSec: 5.5, references: [`data:image/png;base64,${"A".repeat(1_300_000)}`] });
     assert.equal(both.success, false);
@@ -219,6 +230,46 @@ describe("generated clips", () => {
       });
       await startFootage(ask({ prompt, references: [png(5), jpeg], aspect: "16:9", quality: "hd" }), "u1");
       assert.deepEqual([bodies[1].mode, bodies[1].aspect_ratio, bodies[1].resolution], ["reference_to_video", "16:9", "1080p"]);
+    } finally {
+      Object.assign(config, { avatarProvider: saved.avatar, heygenApiKey: saved.key });
+    }
+  });
+
+  it("keep their take's seed, to make the same take again with a change, and can follow the description exactly", async () => {
+    // The demo reports a seed once the clip is made, like HeyGen; one asked for is kept.
+    const job = await startFootage(ask({ seed: 42, exact: true }), "u1", { key: "key-seed-1" });
+    assert.deepEqual([job.seed, job.exact, job.takeSeed], [42, true, undefined]);
+    await getStore().put("footage", { ...job, providerJobId: `mockft_${Date.now() - 10_000}_5_42` });
+    forgetFootageChecks();
+    const [done] = await listFootage("u1");
+    assert.deepEqual([done.status, done.takeSeed, publicFootage(done).takeSeed], ["completed", 42, 42]);
+    // Retried with the same key: the same seed and wording return the same clip; another is another clip.
+    assert.equal((await startFootage(ask({ seed: 42, exact: true }), "u1", { key: "key-seed-1" })).id, job.id, "the seed reported later does not change what the start is compared on");
+    await assert.rejects(startFootage(ask({ seed: 43, exact: true }), "u1", { key: "key-seed-1" }), ConflictError);
+    await assert.rejects(startFootage(ask({ seed: 42 }), "u1", { key: "key-seed-1" }), ConflictError, "exact wording is part of the start");
+
+    // HeyGen gets the seed and prompt enhancement turned off, and reports the seed it used.
+    const { config } = await import("../config");
+    const saved = { avatar: config.avatarProvider, key: config.heygenApiKey };
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "https://api.heygen.com/v3/models/videos" && init?.method === "POST") {
+        bodies.push(JSON.parse(String(init.body)));
+        return Response.json({ data: { status: "pending", video_id: "vid_seed" } }, { status: 202 });
+      }
+      if (url.startsWith("https://api.heygen.com/v3/models/videos/vid_seed")) return Response.json({ data: { status: "completed", video_url: "https://resource2.heygen.ai/v/seed.mp4", duration: 20, width: 1344, height: 768, seed: 987654 } });
+      return new Response("unexpected", { status: 500 });
+    }) as typeof fetch;
+    Object.assign(config, { avatarProvider: "heygen", heygenApiKey: "hg_key" });
+    try {
+      await startFootage(ask({ durationSec: 12, seed: 7, exact: true }), "u2");
+      assert.deepEqual(bodies[0], { model: "heygen-video-1", mode: "text_to_video", prompt: PROMPT, duration: 12, resolution: "768p", aspect_ratio: "16:9", prompt_enhancement: "disabled", seed: 7 });
+      const long = await startFootage(ask({ durationSec: 20 }), "u2");
+      assert.deepEqual([bodies[1].duration, "prompt_enhancement" in bodies[1], "seed" in bodies[1]], [20, false, false], "without them HeyGen enhances the description and picks a seed");
+      forgetFootageChecks();
+      const made = (await listFootage("u2")).find((f) => f.id === long.id)!;
+      assert.deepEqual([made.status, made.takeSeed, made.seed], ["completed", 987654, undefined]);
     } finally {
       Object.assign(config, { avatarProvider: saved.avatar, heygenApiKey: saved.key });
     }

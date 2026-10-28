@@ -295,6 +295,7 @@ export class HeyGenClient {
       duration?: number | null;
       width?: number | null;
       height?: number | null;
+      seed?: number | null;
       failure_code?: string | null;
       failure_message?: string | null;
     }>(`${V3}/models/videos/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(10_000) });

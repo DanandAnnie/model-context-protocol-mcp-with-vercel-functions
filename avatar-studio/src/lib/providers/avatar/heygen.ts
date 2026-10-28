@@ -742,11 +742,13 @@ export class HeyGenAvatarProvider implements AvatarProvider {
    * the studio's mark, so HeyGen's voice listings never offer it to another account; the mark is drawn from the key, so
    * a start retried with the same key sends the same request and HeyGen replays its first answer.
    */
-  async createInstantVoice(input: { name: string; assetId: string; key: string }) {
+  async createInstantVoice(input: { name: string; assetId: string; image?: { mimeType: string; data: Uint8Array }; key: string }) {
     try {
       const mark = ` ·st_${createHash("sha256").update(input.key).digest("hex").slice(0, 12)}`;
       const name = `${Array.from(input.name).slice(0, 64 - mark.length).join("")}${mark}`;
-      const voiceId = await this.client.createInstantVoice({ mode: "instant", name, audio: [{ type: "asset_id", asset_id: input.assetId }], remove_background_noise: true }, input.key);
+      // A picture of the setting gives the voice its ambience; sent inline (a picture here is at most a few megabytes).
+      const image = input.image ? { image: { type: "base64", media_type: input.image.mimeType, data: Buffer.from(input.image.data).toString("base64") } } : {};
+      const voiceId = await this.client.createInstantVoice({ mode: "instant", name, audio: [{ type: "asset_id", asset_id: input.assetId }], remove_background_noise: true, ...image }, input.key);
       return { voiceId };
     } catch (err) {
       const message = err instanceof Error ? err.message : "";
@@ -754,7 +756,9 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       if (/ failed: 409 /.test(message)) throw new ValidationError("This voice was already asked for with other details; make it again");
       if (/ failed: 429 /.test(message)) throw new LimitError("HeyGen is making too many voices just now; try again in a minute");
       if (/ failed: (401|403) /.test(message)) throw new ValidationError("The HeyGen account behind this studio may not make voices; ask its operator");
-      if (/ failed: (400|402|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not make a voice from that recording: ${heygenReason(message, "try a clearer recording")}`);
+      if (/ failed: (400|402|422) /.test(message) || message.startsWith("HeyGen error:")) {
+        throw new ValidationError(`HeyGen could not make a voice from that recording${input.image ? " and picture" : ""}: ${heygenReason(message, input.image ? "try a clearer recording, or another picture" : "try a clearer recording")}`);
+      }
       throw err;
     }
   }

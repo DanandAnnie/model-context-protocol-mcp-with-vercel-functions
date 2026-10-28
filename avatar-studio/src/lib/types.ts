@@ -424,6 +424,12 @@ export interface InstantVoice {
   name: string;
   /** The audio clip it was made from. */
   clipId: string;
+  /**
+   * A picture of the speaker's setting it was made with (one of the account's uploaded pictures), and its name then:
+   * HeyGen gives the voice that setting's ambience, so a busy street adds matching background sound.
+   */
+  settingPictureId?: string;
+  settingPictureName?: string;
   /** Renderer that holds it, and its voice id there; neither is shown to the account. */
   provider: string;
   providerVoiceId: string;

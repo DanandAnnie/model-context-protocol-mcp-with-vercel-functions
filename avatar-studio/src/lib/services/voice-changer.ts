@@ -12,6 +12,7 @@ import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, LimitError, NotFoundError, UpstreamError, ValidationError } from "../errors";
 import { owned, stripUndefined } from "./shared";
 import { getClip } from "./clips";
+import { getBackdrop, getBackdropImage } from "./backdrops";
 import { prepareClipOnce } from "./videos";
 import { rememberMadeVoices } from "./voices";
 import { jobChecker } from "./job-checks";
@@ -45,6 +46,8 @@ export const instantVoiceSchema = z.object({
   clipId: z.string({ error: "Choose a recording of the voice" }).trim().min(1, "Choose a recording of the voice"),
   /** The person whose voice it is agreed to it being cloned. */
   agreed: z.literal(true, { error: "Confirm that the speaker agreed to have their voice cloned" }),
+  /** One of the account's uploaded pictures, of the speaker's setting, whose ambience the voice takes on. */
+  settingPictureId: z.string().regex(/^bd_[A-Za-z0-9_-]{1,64}$/, "Choose one of your pictures for the setting").optional(),
 });
 
 export const voiceChangeSchema = z.object({
@@ -169,7 +172,7 @@ export async function createInstantVoice(input: z.infer<typeof instantVoiceSchem
   const id = opts.key ? keyedId("iv", ownerId, opts.key) : newId("iv");
   const existing = opts.key ? await getStore().get<InstantVoice>("instantvoice", id) : null;
   if (existing && existing.ownerId === ownerId) {
-    if (existing.clipId !== input.clipId || existing.name !== input.name) throw new ConflictError("This Idempotency-Key was already used for another voice; send a new key");
+    if (existing.clipId !== input.clipId || existing.name !== input.name || existing.settingPictureId !== input.settingPictureId) throw new ConflictError("This Idempotency-Key was already used for another voice; send a new key");
     return existing;
   }
   const provider = getAvatarProvider();
@@ -181,15 +184,28 @@ export async function createInstantVoice(input: z.infer<typeof instantVoiceSchem
   const name = input.name.trim().toLowerCase();
   if (mine.some((v) => v.status !== "failed" && v.name.trim().toLowerCase() === name)) throw new ConflictError(`You already have a voice named "${input.name}"; pick another name`);
   const clip = await clipOf(input.clipId, ownerId);
+  const setting = input.settingPictureId ? await settingPicture(input.settingPictureId, ownerId) : undefined;
   opts.admit?.();
   const assetId = await assetOf(clip, ownerId);
-  const { voiceId } = await provider.createInstantVoice({ name: input.name, assetId, key: id });
+  const { voiceId } = await provider.createInstantVoice({ name: input.name, assetId, ...(setting ? { image: setting.image } : {}), key: id });
   // Noted at once, whatever becomes of this record, so the renderer's voice listings never offer it to another account.
   await rememberMadeVoices([voiceId]);
   const now = nowIso();
-  const voice: InstantVoice = { id, ownerId, name: input.name, clipId: clip.id, provider: provider.name, providerVoiceId: voiceId, status: "processing", createdAt: now, updatedAt: now };
+  const voice: InstantVoice = { id, ownerId, name: input.name, clipId: clip.id, ...(setting ? { settingPictureId: setting.id, settingPictureName: setting.name } : {}), provider: provider.name, providerVoiceId: voiceId, status: "processing", createdAt: now, updatedAt: now };
   await getStore().put("instantvoice", voice);
   return voice;
+}
+
+/** One of the account's uploaded pictures, read for a voice's setting; one gone since is refused by name. */
+async function settingPicture(id: string, ownerId: string): Promise<{ id: string; name: string; image: { mimeType: string; data: Uint8Array } }> {
+  try {
+    const picture = await getBackdrop(id, ownerId);
+    const { mimeType, bytes } = await getBackdropImage(id, ownerId);
+    return { id: picture.id, name: picture.name, image: { mimeType, data: bytes } };
+  } catch (err) {
+    if (err instanceof NotFoundError) throw new ValidationError("That picture is no longer available; choose another, or make the voice without one");
+    throw err;
+  }
 }
 
 /** Deletes an instant voice at the renderer and here; a voice the renderer would not delete is kept, to try again. */

@@ -174,7 +174,7 @@ export interface AvatarProvider {
    * Makes an instant voice from one recording (an uploaded asset), named and marked as the studio's. `key` makes a
    * retried start return the same voice. Absent when the provider cannot.
    */
-  createInstantVoice?(input: { name: string; assetId: string; key: string }): Promise<{ voiceId: string }>;
+  createInstantVoice?(input: { name: string; assetId: string; image?: { mimeType: string; data: Uint8Array }; key: string }): Promise<{ voiceId: string }>;
   /** Where an instant voice stands; one the renderer no longer has has failed. */
   instantVoiceStatus?(voiceId: string): Promise<{ status: "processing" | "completed" | "failed"; language?: string; error?: string }>;
   /** Deletes an instant voice at the renderer; one already gone is no error. */

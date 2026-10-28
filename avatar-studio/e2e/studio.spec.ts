@@ -856,6 +856,10 @@ test("a catalog track found by describing it is mixed under a finished video, fo
 });
 
 test("an instant voice is made from a recording with the speaker's agreement, and a recording is spoken again in it", async ({ page }) => {
+  // A picture of the speaker's setting, from the account's uploaded pictures.
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]).toString("base64");
+  const settingName = `Street ${Date.now().toString(36)}`;
+  const setting = (await (await page.request.post("/api/backdrops", { data: { name: settingName, image: `data:image/png;base64,${png}` } })).json()).backdrop as { id: string };
   await page.goto("/voice-changer");
   await expect(page.getByRole("heading", { name: "Voice changer", exact: true })).toBeVisible();
   const make = page.getByRole("button", { name: "Make the voice" });
@@ -869,15 +873,20 @@ test("an instant voice is made from a recording with the speaker's agreement, an
   await expect(page.getByRole("combobox", { name: /^Recording of the voice\b/ }).locator("option:checked")).toHaveText("voice-over (3s)");
   await expect(make).toBeDisabled();
   await page.getByLabel(/agreed to have their voice cloned/).check();
+  await page.getByRole("combobox", { name: /^Setting \(optional\)/ }).selectOption({ label: settingName });
   const sent = page.waitForRequest((r) => r.url().endsWith("/api/voice-changer/voices") && r.method() === "POST");
   await make.click();
   const request = await sent;
-  expect(request.postDataJSON()).toEqual({ name, clipId: expect.stringMatching(/^clip_/), agreed: true });
+  expect(request.postDataJSON()).toEqual({ name, clipId: expect.stringMatching(/^clip_/), agreed: true, settingPictureId: setting.id });
   expect(request.headers()["idempotency-key"]).toMatch(/^[A-Za-z0-9_-]{8,100}$/);
   const voiceRow = page.getByTestId("instant-voices").locator("li").filter({ hasText: name });
   await expect(voiceRow).toBeFocused();
   // The demo renderer makes it in a moment; the page checks again on its own.
   await expect(voiceRow).toContainText("Ready", { timeout: 20_000 });
+  await expect(voiceRow).toContainText(`set in “${settingName}”`);
+  // The choice is cleared with the rest of the card, and the picture can go: the voice keeps its name.
+  await expect(page.getByRole("combobox", { name: /^Setting \(optional\)/ })).toHaveValue("");
+  expect((await page.request.delete(`/api/backdrops/${setting.id}`)).ok()).toBe(true);
   // A second voice of the same name is refused, with the reason in the card it was made from (an alert scoped to the
   // card: Next's route announcer is an alert too).
   const voiceCard = page.getByRole("heading", { name: "Make a voice", exact: true }).locator("..");

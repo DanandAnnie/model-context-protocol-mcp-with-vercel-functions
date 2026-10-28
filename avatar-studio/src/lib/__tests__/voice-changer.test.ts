@@ -163,6 +163,57 @@ describe("voice changer", () => {
     assert.deepEqual(await getStore().list("voicechange", "u1"), []);
   });
 
+  it("makes a voice set in a picture of the speaker's setting, sent to HeyGen inline and kept by name", async () => {
+    const { createBackdrop } = await import("../services");
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+    const street = await createBackdrop({ name: "Busy street", image: `data:image/png;base64,${Buffer.from(png).toString("base64")}` }, "u1");
+    const theirs = await createBackdrop({ name: "Their room", image: `data:image/png;base64,${Buffer.from(png).toString("base64")}` }, "u2");
+    assert.throws(() => instantVoiceSchema.parse({ name: "N", clipId: "clip_1", agreed: true, settingPictureId: "not-a-picture" }), /Choose one of your pictures/);
+    // The demo renderer keeps the setting with the voice too.
+    const sample = await clip("u1", "Sample");
+    const demo = await createInstantVoice(instantVoiceSchema.parse({ name: "Street", clipId: sample.id, agreed: true, settingPictureId: street.id }), "u1", { key: "voice-set" });
+    assert.deepEqual([demo.settingPictureId, demo.settingPictureName], [street.id, "Busy street"]);
+    assert.equal(publicInstantVoice(demo).settingPictureName, "Busy street");
+    // The same key with another setting is another voice.
+    await assert.rejects(createInstantVoice(instantVoiceSchema.parse({ name: "Street", clipId: sample.id, agreed: true }), "u1", { key: "voice-set" }), ConflictError);
+    // Another account's picture, or one deleted since, is refused by name, before anything is asked of the renderer.
+    await assert.rejects(createInstantVoice(instantVoiceSchema.parse({ name: "Room", clipId: sample.id, agreed: true, settingPictureId: theirs.id }), "u1"), /picture is no longer available/);
+
+    const { config } = await import("../config");
+    const saved = { avatar: config.avatarProvider, key: config.heygenApiKey };
+    const calls: Array<{ url: string; method: string; body: Record<string, unknown> | null }> = [];
+    const realFetch = globalThis.fetch;
+    let refuse = false;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = typeof init?.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : null;
+      calls.push({ url, method: init?.method ?? "GET", body });
+      if (url === "https://api.heygen.com/v3/assets") return Response.json({ data: { asset_id: "asset_take" } });
+      if (url === "https://api.heygen.com/v3/models/audio/voices" && init?.method === "POST") {
+        if (refuse) return Response.json({ error: { code: "invalid_parameter", message: "image could not be read", param: "image" } }, { status: 400 });
+        return Response.json({ data: { voice_id: "hv_set" } }, { status: 202 });
+      }
+      return new Response("unexpected", { status: 500 });
+    }) as typeof fetch;
+    Object.assign(config, { avatarProvider: "heygen", heygenApiKey: "hg_key" });
+    try {
+      const voice = await createInstantVoice(instantVoiceSchema.parse({ name: "On the street", clipId: sample.id, agreed: true, settingPictureId: street.id }), "u1");
+      const create = calls.find((c) => c.url.endsWith("/v3/models/audio/voices") && c.method === "POST")!;
+      assert.deepEqual(create.body?.image, { type: "base64", media_type: "image/png", data: Buffer.from(png).toString("base64") });
+      assert.equal("gender" in create.body! || "age" in create.body!, false, "HeyGen refuses gender or age with a picture");
+      assert.equal(voice.settingPictureName, "Busy street");
+      // Without a picture, none is sent.
+      await createInstantVoice(instantVoiceSchema.parse({ name: "Plain", clipId: sample.id, agreed: true }), "u1");
+      assert.equal("image" in calls.filter((c) => c.url.endsWith("/v3/models/audio/voices") && c.method === "POST").at(-1)!.body!, false);
+      // A refusal names the picture as something to change.
+      refuse = true;
+      await assert.rejects(createInstantVoice(instantVoiceSchema.parse({ name: "Refused", clipId: sample.id, agreed: true, settingPictureId: street.id }), "u1"), /could not make a voice from that recording and picture: image could not be read/);
+    } finally {
+      globalThis.fetch = realFetch;
+      Object.assign(config, { avatarProvider: saved.avatar, heygenApiKey: saved.key });
+    }
+  });
+
   it("asks HeyGen for an instant voice and speaks a recording in it, following one not done in time", async () => {
     const { config } = await import("../config");
     const saved = { avatar: config.avatarProvider, key: config.heygenApiKey };

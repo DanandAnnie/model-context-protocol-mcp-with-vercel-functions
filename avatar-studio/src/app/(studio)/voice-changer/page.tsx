@@ -9,7 +9,7 @@ import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { ApiError, api, formatDate, formatSeconds, isRefusal } from "@/lib/client";
 import { clipBody } from "@/lib/clip-upload";
-import { VOICE_RESULT_LINK_MS, type AudioClip, type InstantVoice, type VoiceChange } from "@/lib/types";
+import { VOICE_RESULT_LINK_MS, type AudioClip, type Backdrop, type InstantVoice, type VoiceChange } from "@/lib/types";
 
 /** As the server lists them: never the renderer, its ids, or the upload sent to it. */
 type Voice = Omit<InstantVoice, "ownerId" | "provider" | "providerVoiceId">;
@@ -105,6 +105,8 @@ export default function VoiceChangerPage() {
   const canEdit = useCanEdit();
   const { data, error, setData, refetch } = useApi<{ voices: Voice[]; changes: Change[]; available: boolean; speech?: boolean }>("/api/voice-changer");
   const { data: clipData, setData: setClipData, refetch: refetchClips } = useApi<{ clips: AudioClip[] }>("/api/clips");
+  // The account's uploaded pictures, one of which may be the setting a new voice takes the ambience of.
+  const { data: pictureData, error: pictureError, refetch: refetchPictures } = useApi<{ backdrops: Backdrop[] }>("/api/backdrops");
   const clips = clipData?.clips ?? [];
   const voices = data?.voices ?? [];
   const changes = data?.changes ?? [];
@@ -142,6 +144,7 @@ export default function VoiceChangerPage() {
   const [voiceName, setVoiceName] = useState("");
   const [sampleId, setSampleId] = useState("");
   const [agreed, setAgreed] = useState(false);
+  const [settingId, setSettingId] = useState("");
   const [voiceKey, setVoiceKey] = useState(() => newKey());
   const [making, setMaking] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -186,6 +189,10 @@ export default function VoiceChangerPage() {
   function forgetGone(e: unknown, at: "change" | "speech" | "voice") {
     if (!(e instanceof Error)) return;
     if (/audio clip is no longer available/.test(e.message)) void refetchClips();
+    if (/picture is no longer available/.test(e.message)) {
+      setSettingId("");
+      void refetchPictures();
+    }
     if (/voice is no longer available/.test(e.message)) {
       // The card's button goes disabled with the choice, so the focus moves to the choice rather than being lost.
       if (at === "change") {
@@ -206,6 +213,10 @@ export default function VoiceChangerPage() {
     if (clipId && !ids.has(clipId)) setClipId("");
     if (sampleId && !ids.has(sampleId)) setSampleId("");
   }, [clipData, clipId, sampleId]);
+  // Likewise a chosen setting picture no longer listed.
+  useEffect(() => {
+    if (pictureData && settingId && !pictureData.backdrops.some((b) => b.id === settingId)) setSettingId("");
+  }, [pictureData, settingId]);
   // Likewise a chosen voice that is no longer ready.
   useEffect(() => {
     if (data && voiceId && !data.voices.some((v) => v.id === voiceId && v.status === "completed")) setVoiceId("");
@@ -270,12 +281,13 @@ export default function VoiceChangerPage() {
     fail("voice")(null);
     setNote(null);
     try {
-      const { voice } = await api<{ voice: Voice }>("/api/voice-changer/voices", { method: "POST", body: JSON.stringify({ name: voiceName.trim(), clipId: sampleId, agreed }), headers: { "Idempotency-Key": voiceKey } });
+      const { voice } = await api<{ voice: Voice }>("/api/voice-changer/voices", { method: "POST", body: JSON.stringify({ name: voiceName.trim(), clipId: sampleId, agreed, ...(settingId ? { settingPictureId: settingId } : {}) }), headers: { "Idempotency-Key": voiceKey } });
       setData((prev) => (prev ? { ...prev, voices: [voice, ...prev.voices.filter((v) => v.id !== voice.id)] } : prev));
       void refetch();
       setVoiceKey(newKey());
       setVoiceName("");
       setAgreed(false);
+      setSettingId("");
       setNote(`Making the voice ${voice.name}; it is ready in a few seconds.`);
       focusAfterRender(() => voicesRef.current?.querySelector<HTMLElement>(`[data-voice="${voice.id}"]`));
     } catch (e) {
@@ -488,6 +500,24 @@ export default function VoiceChangerPage() {
                 onDeleted={clipDeleted}
                 onError={fail("voice")}
               />
+              <Field
+                label="Setting (optional)"
+                hint={`A picture of the speaker's surroundings, from your images (uploaded in the editor under Background → Your images): the voice takes on its ambience, so a quiet room keeps it clean and a busy street adds matching background sound.${pictureError && !pictureData ? " Your images could not be loaded; the voice can still be made without one." : ""}`}
+              >
+                <select
+                  className={inputClass}
+                  value={settingId}
+                  disabled={!editable || !pictureData || making}
+                  onChange={(e) => (setSettingId(e.target.value), setVoiceKey(newKey()), fail("voice")(null))}
+                >
+                  <option value="">{!pictureData ? (pictureError ? "No setting (your images could not be loaded)" : "Loading your images…") : pictureData.backdrops.length ? "No setting" : "No setting (you have no images yet)"}</option>
+                  {pictureData?.backdrops.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
               <label className="flex items-start gap-2 text-sm text-slate-700">
                 <input type="checkbox" className="mt-0.5 accent-brand-600" checked={agreed} disabled={!editable} onChange={(e) => setAgreed(e.target.checked)} />
                 <span>The person speaking agreed to have their voice cloned, and to it speaking recordings for this account.</span>
@@ -518,6 +548,7 @@ export default function VoiceChangerPage() {
                         <div className="truncate font-medium text-slate-900">{v.name}</div>
                         <div className="text-xs text-slate-500">
                           {VOICE_STATUS[v.status]} · {formatDate(v.createdAt)}
+                          {v.settingPictureName ? ` · set in “${v.settingPictureName}”` : ""}
                           {v.error ? ` · ${v.error}` : ""}
                         </div>
                       </div>

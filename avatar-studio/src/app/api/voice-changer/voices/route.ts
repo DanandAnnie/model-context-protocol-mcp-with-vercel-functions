@@ -11,7 +11,7 @@ const PER_OWNER = 5;
 const PER_INSTANCE = 20;
 const WINDOW_MS = 60 * 60 * 1000;
 
-/** Make an instant voice from one of the account's audio clips: `{ name, clipId, agreed: true }`. */
+/** Make an instant voice from one of the account's audio clips: `{ name, clipId, agreed: true, settingPictureId? }`. */
 export async function POST(req: Request) {
   try {
     const owner = await requireEditor();

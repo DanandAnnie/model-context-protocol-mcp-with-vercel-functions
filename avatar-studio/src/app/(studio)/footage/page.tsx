@@ -9,7 +9,7 @@ import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api, formatDate, isRefusal } from "@/lib/client";
 import { toUploadable } from "@/lib/image-upload";
 import { danglingLabels, insertPictureLabel, pictureLabels, withPictureRemoved } from "@/lib/picture-labels";
-import { FOOTAGE_ASPECTS, FOOTAGE_MAX_SEC_SHORT, FOOTAGE_MIN_SEC, MAX_FOOTAGE_REFERENCES, footagePath, maxFootageSec, seedOf, type FootageAspect, type FootageJob } from "@/lib/types";
+import { FOOTAGE_ASPECTS, FOOTAGE_MAX_SEC_SHORT, FOOTAGE_MIN_SEC, MAX_FOOTAGE_REFERENCES, footagePath, maxFootageSec, seedOf, type FootageAspect, type FootageJob, type ShootJob } from "@/lib/types";
 
 /** A clip as the server lists it: never the renderer, its job id, or the picture's digest. */
 type Footage = Omit<FootageJob, "ownerId" | "provider" | "providerJobId" | "imageDigest">;
@@ -34,7 +34,8 @@ const USES: Array<{ value: PictureUse; label: string; hint: string }> = [
   },
 ];
 /** How a listed clip was shaped. */
-function shapeOf(f: Pick<FootageJob, "fromPicture" | "references" | "aspect">): string {
+function shapeOf(f: Pick<FootageJob, "fromPicture" | "fromShoot" | "references" | "aspect">): string {
+  if (f.fromShoot) return `from photo ${f.fromShoot.photo} of a photo shoot`;
   if (f.fromPicture) return "from a picture";
   if (f.references) return `features ${f.references === 1 ? "a picture" : `${f.references} pictures`} · ${f.aspect ?? "shaped like Picture 1"}`;
   return f.aspect ?? "16:9";
@@ -63,7 +64,8 @@ export default function FootagePage() {
   const [aspect, setAspect] = useState<FootageAspect | "adaptive">("16:9");
   const [quality, setQuality] = useState<"standard" | "hd">("standard");
   const [use, setUse] = useState<PictureUse>("none");
-  const [picture, setPicture] = useState<{ name: string; url: string } | null>(null);
+  // A picture to open on: one added here, or a photo of one of the account's photo shoots (sent by its shoot and number).
+  const [picture, setPicture] = useState<{ name: string; url: string; shoot?: { shootId: string; photo: number } } | null>(null);
   const [features, setFeatures] = useState<Array<{ name: string; url: string }>>([]);
   // The description goes to the renderer as written, without its prompt enhancement.
   const [exact, setExact] = useState(false);
@@ -211,6 +213,49 @@ export default function FootagePage() {
     }
   }
 
+  /** Opens on a photo of one of the account's photo shoots, if it is still there and finished; says why not otherwise. */
+  async function openShootPhoto(from: { shootId: string; photo: number }): Promise<boolean> {
+    try {
+      const { shoots } = await api<{ shoots: Array<Pick<ShootJob, "id" | "title" | "status" | "photos">> }>("/api/shoots");
+      const shoot = shoots.find((x) => x.id === from.shootId);
+      const photo = shoot?.status === "completed" ? shoot.photos?.[from.photo - 1] : undefined;
+      if (!shoot || !photo) {
+        say(setErr, !shoot ? "That photo shoot is no longer there; add a picture to open on instead." : `Photo ${from.photo} of “${shoot.title}” is not ready; add a picture to open on instead.`);
+        return false;
+      }
+      setUse("frame");
+      setPicture({ name: `Photo ${from.photo} of ${shoot.title}`, url: photo.url, shoot: from });
+      changed();
+      return true;
+    } catch (e) {
+      say(setErr, e instanceof Error ? e.message : "The photo shoot could not be read");
+      return false;
+    }
+  }
+
+  // Opened from a photo shoot ("Bring to life"): the clip opens on that photo, and the description starts as HeyGen
+  // advises for a person in the first frame, ready for one camera move. The address is cleaned, so a reload starts afresh.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const shootId = q.get("shoot");
+    const photo = Number(q.get("photo"));
+    if (!shootId || !Number.isInteger(photo) || photo < 1) return;
+    window.history.replaceState(null, "", window.location.pathname);
+    void openShootPhoto({ shootId, photo }).then((ok) => {
+      if (!ok) return;
+      const start = "Keep the person exactly as they appear in the first frame. ";
+      setPrompt((p) => p || start);
+      say(setNote, `The clip opens on photo ${photo} of the photo shoot. Describe one camera move after the first sentence.`);
+      focusAfterRender(() => {
+        const box = promptRef.current;
+        box?.setSelectionRange(box.value.length, box.value.length);
+        return box;
+      });
+    });
+    // Once, on arrival.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function removePicture() {
     setPicture(null);
     changed();
@@ -263,7 +308,7 @@ export default function FootagePage() {
       const body = {
         prompt: prompt.trim(),
         durationSec,
-        ...(frame ? { image: frame.url } : featured.length ? { references: featured.map((f) => f.url), ...(shape === "adaptive" ? {} : { aspect: shape }) } : { aspect: shape }),
+        ...(frame ? (frame.shoot ? { shootPhoto: frame.shoot } : { image: frame.url }) : featured.length ? { references: featured.map((f) => f.url), ...(shape === "adaptive" ? {} : { aspect: shape }) } : { aspect: shape }),
         quality: hdBlocked ? "standard" : quality,
         ...(exact ? { exact: true } : {}),
         ...(take ? { seed: take.seed } : {}),
@@ -315,7 +360,9 @@ export default function FootagePage() {
     setTake({ seed, title: f.title });
     changed();
     caretRef.current = null;
-    const pictures = f.references ? (f.references === 1 ? " Add the picture to feature again: pictures are not kept." : ` Add the ${f.references} pictures to feature again, in the same order: pictures are not kept.`) : f.fromPicture ? " Add the picture to open on again: pictures are not kept." : "";
+    // A photo shoot's photo is the account's, so it is opened on again; other pictures are not kept.
+    if (f.fromShoot) void openShootPhoto(f.fromShoot);
+    const pictures = f.references ? (f.references === 1 ? " Add the picture to feature again: pictures are not kept." : ` Add the ${f.references} pictures to feature again, in the same order: pictures are not kept.`) : f.fromShoot ? "" : f.fromPicture ? " Add the picture to open on again: pictures are not kept." : "";
     say(setNote, `The form has “${f.title}” with its take; change what you want and make the clip.${pictures}`);
     focusAfterRender(() => promptRef.current);
   }

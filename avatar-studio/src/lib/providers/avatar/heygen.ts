@@ -435,7 +435,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     // A first frame sets the clip's shape; pictures to feature follow the first one's shape unless a frame is chosen
     // (HeyGen's `adaptive`); a clip from words alone is landscape unless asked otherwise.
     const conditioning = image
-      ? { mode: "image_to_video", image: inline(image) }
+      ? { mode: "image_to_video", image: "url" in image ? { type: "url", url: image.url } : inline(image) }
       : references?.length
         ? { mode: "reference_to_video", reference_images: references.map(inline), aspect_ratio: aspect ?? "adaptive" }
         : { mode: "text_to_video", aspect_ratio: aspect ?? "16:9" };

@@ -142,6 +142,8 @@ export interface FootageJob {
   /** The shot, in words, and whether a picture was its first frame (the picture is not kept). */
   prompt: string;
   fromPicture?: true;
+  /** The photo shoot photo the clip opened on (its first frame), when it came from one: the shoot and its photo, from 1. */
+  fromShoot?: { shootId: string; photo: number };
   /** How many pictures the shot features, named in the description as <Picture 1>, <Picture 2>… (not kept). */
   references?: number;
   /** The description went to the renderer exactly as written (no prompt enhancement). */

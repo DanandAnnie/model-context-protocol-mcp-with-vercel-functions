@@ -372,7 +372,8 @@ export interface LipsyncStatus {
  */
 export interface FootageInput {
   prompt: string;
-  image?: { bytes: Uint8Array; mimeType: string };
+  /** The first frame, inline, or by a link the renderer fetches (a photo shoot's photo). */
+  image?: { bytes: Uint8Array; mimeType: string } | { url: string };
   references?: Array<{ bytes: Uint8Array; mimeType: string }>;
   durationSec: number;
   aspect?: "16:9" | "9:16" | "1:1";

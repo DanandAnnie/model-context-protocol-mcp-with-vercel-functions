@@ -7,7 +7,7 @@ import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import type { AvatarProvider } from "../providers/types";
-import { FOOTAGE_ASPECTS, FOOTAGE_MAX_SEC, FOOTAGE_MAX_SEC_SHORT, FOOTAGE_MIN_SEC, MAX_FOOTAGE_REFERENCES, MAX_FOOTAGE_SEED, footageIdOf, type Background, type BrandKit, type FootageJob, type VideoTemplate } from "../types";
+import { FOOTAGE_ASPECTS, FOOTAGE_MAX_SEC, FOOTAGE_MAX_SEC_SHORT, FOOTAGE_MIN_SEC, MAX_FOOTAGE_REFERENCES, MAX_FOOTAGE_SEED, MAX_SHOOT_PHOTOS, footageIdOf, type Background, type BrandKit, type FootageJob, type VideoTemplate } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { decodeDataUrl } from "../providers/image";
@@ -16,6 +16,7 @@ import { jobChecker } from "./job-checks";
 import { plainScene, rewriteIfNamed, sniff } from "./backdrops";
 import { promptExcerpt } from "./lookpacks";
 import { danglingLabels } from "../picture-labels";
+import { shootPhotoLink } from "./shoots";
 
 /** Generated clips an account keeps; another needs one deleted first. */
 export const MAX_FOOTAGE = 50;
@@ -49,6 +50,14 @@ export const footageRequestSchema = z
     seed: z.number().int("A seed is a whole number").min(0, "A seed is 0 or more").max(MAX_FOOTAGE_SEED, `A seed is at most ${MAX_FOOTAGE_SEED}`).optional(),
     /** A data URL of a PNG or JPEG the clip opens on, as its first frame. */
     image: z.string().max(dataUrlMax(MAX_FOOTAGE_IMAGE_BYTES), "The picture is larger than 3 MB").optional(),
+    /** A photo of one of the account's photo shoots to open on instead (1 for its first photo); sent to the renderer by its link. */
+    shootPhoto: z
+      .object({
+        shootId: z.string("Name the photo shoot"),
+        photo: z.number("Name the photo by its number").int("Name the photo by its number").min(1, "Photos are numbered from 1").max(MAX_SHOOT_PHOTOS, `A shoot has at most ${MAX_SHOOT_PHOTOS} photos`),
+      }, "Name the photo shoot and the photo")
+      .strict()
+      .optional(),
     /**
      * Data URLs of PNG or JPEG pictures of things the shot must feature (a product, a place, a person), named in the
      * description as <Picture 1>, <Picture 2>… in this order.
@@ -67,12 +76,13 @@ export const footageRequestSchema = z
   })
   .strict()
   .refine((v) => !(v.image && v.references), { message: "A clip either opens on one picture or features pictures, not both", path: ["references"] })
+  .refine((v) => !(v.shootPhoto && (v.image || v.references)), { message: "A clip opens on a photo shoot's photo or on a picture sent with it, not both, and does not feature pictures too", path: ["shootPhoto"] })
   // HeyGen makes clips over 15 seconds only from a description or a first frame, with its prompt enhancement on.
   .refine((v) => v.durationSec <= FOOTAGE_MAX_SEC_SHORT || !(v.references || v.exact), {
     message: `A clip that features pictures, or follows the description exactly, is at most ${FOOTAGE_MAX_SEC_SHORT} seconds`,
     path: ["durationSec"],
   })
-  .refine((v) => !(v.image && v.aspect), { message: "A clip from a picture takes the picture's shape; leave the frame out", path: ["aspect"] })
+  .refine((v) => !((v.image || v.shootPhoto) && v.aspect), { message: "A clip from a picture takes the picture's shape; leave the frame out", path: ["aspect"] })
   // HeyGen does not rewrite the labels, so one that names no picture sent (or any, with no pictures featured) would
   // point the shot at nothing.
   .superRefine((v, ctx) => {
@@ -84,7 +94,7 @@ export const footageRequestSchema = z
     ctx.addIssue({ code: "custom", path: ["prompt"], message: `The description names ${names}, but ${featured}` });
   })
   // HeyGen renders HD in landscape or portrait only, and a clip featuring pictures in the first one's shape at standard only.
-  .refine((v) => v.quality !== "hd" || v.image || (v.references ? v.aspect === "16:9" || v.aspect === "9:16" : (v.aspect ?? "16:9") !== "1:1"), {
+  .refine((v) => v.quality !== "hd" || v.image || v.shootPhoto || (v.references ? v.aspect === "16:9" || v.aspect === "9:16" : (v.aspect ?? "16:9") !== "1:1"), {
     message: "HD clips are landscape or portrait; choose 16:9 or 9:16, or standard quality",
     path: ["quality"],
   });
@@ -157,9 +167,11 @@ export async function startFootage(input: FootageRequest, ownerId: string = LOCA
   const hash = createHash("sha256");
   if (image) hash.update(image.bytes);
   for (const r of references ?? []) hash.update(createHash("sha256").update(r.bytes).digest()).update("\0");
-  const imageDigest = image || references ? `${references ? "ref:" : ""}${hash.digest("base64url")}` : undefined;
+  // A photo shoot's photo is named by its shoot and number (its link changes as it is renewed).
+  const shoot = input.shootPhoto;
+  const imageDigest = shoot ? `shoot:${shoot.shootId}:${shoot.photo}` : image || references ? `${references ? "ref:" : ""}${hash.digest("base64url")}` : undefined;
   // A first frame sets the shape; pictures to feature follow the first one's unless a frame is chosen.
-  const aspect = image ? undefined : references ? input.aspect : (input.aspect ?? "16:9");
+  const aspect = image || shoot ? undefined : references ? input.aspect : (input.aspect ?? "16:9");
   const id = opts.key ? `ft_${createHash("sha256").update(`${ownerId}\0${opts.key}`).digest("base64url").slice(0, 32)}` : newId("ft");
   const existing = opts.key ? await getStore().get<FootageJob>("footage", id) : null;
   if (existing && existing.ownerId === ownerId) {
@@ -171,15 +183,19 @@ export async function startFootage(input: FootageRequest, ownerId: string = LOCA
   if (!provider.startFootage) throw new ValidationError(`Generated clips are not available with the ${provider.name} renderer`);
   // Read then written: two starts at the same moment can between them pass the cap.
   if ((await getStore().list<FootageJob>("footage", ownerId)).length >= MAX_FOOTAGE) throw new ConflictError(`An account keeps at most ${MAX_FOOTAGE} generated clips; delete one to make another`);
+  // The photo is looked up for the account (finished, with a link fresh enough for the renderer to fetch) before the
+  // hour's starts are counted, so a photo not ready is refused without using one.
+  const frame = shoot ? { url: await shootPhotoLink(shoot.shootId, shoot.photo, ownerId) } : image;
   opts.admit?.();
-  const { jobId } = await provider.startFootage({ prompt: input.prompt, image, references, durationSec: input.durationSec, aspect, quality: input.quality, exact: input.exact, seed: input.seed, key: id });
+  const { jobId } = await provider.startFootage({ prompt: input.prompt, image: frame, references, durationSec: input.durationSec, aspect, quality: input.quality, exact: input.exact, seed: input.seed, key: id });
   const now = nowIso();
   const job: FootageJob = stripUndefined({
     id,
     ownerId,
     title: input.title || promptExcerpt(input.prompt, 60),
     prompt: input.prompt,
-    fromPicture: image ? (true as const) : undefined,
+    fromPicture: image || shoot ? (true as const) : undefined,
+    fromShoot: shoot ? { shootId: shoot.shootId, photo: shoot.photo } : undefined,
     references: references?.length,
     exact: input.exact ? (true as const) : undefined,
     seed: input.seed,

@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
-import { Camera, Download, ImagePlus, Trash2, X } from "lucide-react";
+import Link from "next/link";
+import { Camera, Clapperboard, Download, ImagePlus, Trash2, X } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
@@ -400,6 +401,11 @@ export default function PhotoShootPage() {
                           <a href={p.url} download target="_blank" rel="noopener noreferrer" className="inline-flex min-h-6 items-center gap-1 py-1 text-xs font-medium text-brand-700 hover:underline" aria-label={`Download photo ${i + 1} of ${s.title}`}>
                             <Download className="h-3 w-3" aria-hidden /> Download
                           </a>
+                          {canEdit !== false && (
+                            <Link href={`/footage?shoot=${s.id}&photo=${i + 1}`} className="ml-3 inline-flex min-h-6 items-center gap-1 py-1 text-xs font-medium text-brand-700 hover:underline" aria-label={`Bring to life: photo ${i + 1} of ${s.title}`}>
+                              <Clapperboard className="h-3 w-3" aria-hidden /> Bring to life
+                            </Link>
+                          )}
                         </li>
                       ))}
                     </ul>

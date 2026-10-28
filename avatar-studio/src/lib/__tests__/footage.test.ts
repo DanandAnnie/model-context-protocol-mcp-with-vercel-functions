@@ -355,6 +355,55 @@ describe("generated clips", () => {
     assert.deepEqual((sent!.scenes[0] as { input: { background: unknown } }).input.background, { type: "video", source: { type: "url", url: "https://resource2.heygen.ai/videos/fresh.mp4" } });
   });
 
+  it("open on a photo shoot's photo, looked up for the account and sent to HeyGen by its fresh link", async () => {
+    const { startShoot, shootRequestSchema } = await import("../services");
+    const shoot = await startShoot(shootRequestSchema.parse({ identity: [png(1)], reference: png(2), consent: true, count: 2 }), "u1");
+    const from = { shootPhoto: { shootId: shoot.id, photo: 2 } };
+    // The photo sets the shape, as a picture sent with the request does; it cannot come with one, or with pictures to feature.
+    assert.throws(() => ask({ ...from, aspect: "16:9" }), /picture's shape/);
+    assert.throws(() => ask({ ...from, image: png(3) }), /not both/);
+    assert.throws(() => ask({ ...from, references: [png(3)] }), /not both/);
+    assert.throws(() => ask({ shootPhoto: { shootId: shoot.id, photo: 0 } }), /numbered from 1/);
+    assert.throws(() => ask({ shootPhoto: { shootId: shoot.id } }), /by its number/);
+    assert.ok(ask({ ...from, quality: "hd", durationSec: 30 }), "HD and 30 seconds, as for a picture");
+    // Refused while the shoot is being made, for a photo it does not have, and for another account's shoot; none counts.
+    let admitted = 0;
+    const admit = () => void admitted++;
+    await assert.rejects(startFootage(ask(from), "u1", { admit }), /is not ready yet/);
+    await getStore().put("shoot", { ...shoot, providerJobId: `mocksh_${Date.now() - 10_000}_2_7_x` });
+    const { forgetShootChecks } = await import("../services");
+    forgetShootChecks();
+    await assert.rejects(startFootage(ask({ shootPhoto: { shootId: shoot.id, photo: 3 } }), "u1", { admit }), /has 2 photos; there is no photo 3/);
+    await assert.rejects(startFootage(ask(from), "u2", { admit }), /not found/i);
+    await assert.rejects(startFootage(ask({ shootPhoto: { shootId: "nope", photo: 1 } }), "u1", { admit }), /not found/i);
+    assert.equal(admitted, 0);
+    const job = await startFootage(ask(from), "u1", { key: "key-from-shoot", admit });
+    assert.deepEqual([job.fromPicture, job.fromShoot, job.aspect, admitted], [true, { shootId: shoot.id, photo: 2 }, undefined, 1]);
+    assert.equal((await startFootage(ask(from), "u1", { key: "key-from-shoot" })).id, job.id, "a retry returns the same clip");
+    await assert.rejects(startFootage(ask({ shootPhoto: { shootId: shoot.id, photo: 1 } }), "u1", { key: "key-from-shoot" }), ConflictError, "another photo is another clip");
+
+    // HeyGen gets image_to_video with the photo by its link, not inline.
+    const { config } = await import("../config");
+    const saved = { avatar: config.avatarProvider, key: config.heygenApiKey };
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "https://api.heygen.com/v3/models/videos" && init?.method === "POST") {
+        bodies.push(JSON.parse(String(init.body)));
+        return Response.json({ data: { video_id: "vid_from_shoot" } }, { status: 202 });
+      }
+      return new Response("unexpected", { status: 500 });
+    }) as typeof fetch;
+    Object.assign(config, { avatarProvider: "heygen", heygenApiKey: "hg_key" });
+    try {
+      const done = { ...(await getStore().get<import("../types").ShootJob>("shoot", shoot.id))!, provider: "heygen", status: "completed" as const, photos: [{ url: "https://resource2.heygen.ai/images/1.png" }, { url: "https://resource2.heygen.ai/images/2.png" }], checkedAt: new Date().toISOString() };
+      await getStore().put("shoot", done);
+      await startFootage(ask(from), "u1");
+      assert.deepEqual(bodies[0], { model: "heygen-video-1", mode: "image_to_video", prompt: PROMPT, duration: 5, resolution: "768p", image: { type: "url", url: "https://resource2.heygen.ai/images/2.png" } });
+    } finally {
+      Object.assign(config, { avatarProvider: saved.avatar, heygenApiKey: saved.key });
+    }
+  });
+
   it("are not offered by a renderer without them", async () => {
     const { config } = await import("../config");
     const saved = { avatar: config.avatarProvider, key: config.didApiKey };

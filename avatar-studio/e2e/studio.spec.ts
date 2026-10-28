@@ -4708,3 +4708,38 @@ test("a photo shoot puts a person's face in a scene picture, with their consent,
   await expect(page.getByTestId("shoot").filter({ hasText: `Train window ${tag}` })).toHaveCount(0);
   await expect(next).toBeFocused();
 });
+
+test("a photo shoot's photo is brought to life as a b-roll clip's first frame, and made again from it", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const shoot = (await (await page.request.post("/api/shoots", { data: { identity: [`data:image/png;base64,${TINY_PNG}`], reference: `data:image/png;base64,${TINY_PNG}`, consent: true, count: 2, title: `Harbour ${tag}` } })).json()).shoot as { id: string };
+  await page.goto("/photos");
+  const item = page.getByTestId("shoot").filter({ hasText: `Harbour ${tag}` });
+  await expect(item.getByText("Completed")).toBeVisible({ timeout: 20_000 });
+  await item.getByRole("link", { name: `Bring to life: photo 2 of Harbour ${tag}` }).click();
+  // The B-roll page opens on that photo, the description started as HeyGen advises, ready for a camera move.
+  await expect(page).toHaveURL(/\/footage$/);
+  await expect(page.getByLabel("Open on a picture")).toBeChecked();
+  await expect(page.getByRole("img", { name: `Photo 2 of Harbour ${tag}` })).toBeVisible();
+  const prompt = page.getByRole("textbox", { name: "Describe the shot", exact: true });
+  await expect(prompt).toHaveValue("Keep the person exactly as they appear in the first frame. ");
+  await expect(prompt).toBeFocused();
+  await expect(page.locator('p[role="status"]')).toHaveText("The clip opens on photo 2 of the photo shoot. Describe one camera move after the first sentence.");
+  await page.keyboard.type(`A slow push-in ${tag} as the wind lifts her hair.`);
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/footage") && r.method() === "POST");
+  await page.getByRole("button", { name: "Make the clip" }).click();
+  const body = (await sent).postDataJSON() as Record<string, unknown>;
+  expect([body.shootPhoto, "image" in body, "aspect" in body]).toEqual([{ shootId: shoot.id, photo: 2 }, false, false]);
+  const clip = page.getByTestId("footage").filter({ hasText: `push-in ${tag}` });
+  await expect(clip.getByTestId("footage-meta")).toContainText("from photo 2 of a photo shoot");
+  // Made again, it opens on the same photo, which the account still has.
+  await expect(clip.getByText("Completed")).toBeVisible({ timeout: 20_000 });
+  await clip.getByRole("button", { name: /^Make again with changes: / }).click();
+  await expect(page.getByRole("img", { name: `Photo 2 of Harbour ${tag}` })).toBeVisible();
+  await expect(page.getByLabel("Open on a picture")).toBeChecked();
+  // A photo that is gone is said so, and nothing is opened on.
+  expect((await page.request.delete(`/api/shoots/${shoot.id}`)).ok()).toBe(true);
+  await page.goto(`/footage?shoot=${shoot.id}&photo=1`);
+  await expect(page.getByRole("alert").filter({ hasText: "no longer there" })).toHaveText("That photo shoot is no longer there; add a picture to open on instead.");
+  await expect(page.getByLabel("No pictures")).toBeChecked();
+  expect((await page.request.delete(`/api/footage/${await clip.getAttribute("data-footage")}`)).ok()).toBe(true);
+});

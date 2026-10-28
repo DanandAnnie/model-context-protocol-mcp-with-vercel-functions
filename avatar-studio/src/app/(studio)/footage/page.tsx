@@ -1,5 +1,5 @@
 "use client";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Download, ImagePlus, MonitorPlay, RotateCcw, Trash2, X } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
@@ -83,6 +83,7 @@ export default function FootagePage() {
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const featureRef = useRef<HTMLInputElement>(null);
+  const lengthRef = useRef<HTMLInputElement>(null);
   // Where the cursor (or selection) was in the description, so a label goes there although pressing its button takes
   // the focus.
   const caretRef = useRef<{ start: number; end: number } | null>(null);
@@ -136,6 +137,14 @@ export default function FootagePage() {
   const needsFeature = use === "feature" && !features.length;
   // HeyGen makes clips over 15 seconds only from a description or a first frame, with its enhancement on.
   const maxLength = maxFootageSec({ references: featured.length, exact });
+  // A browser clamps a range's value itself when its max drops, which React's record of the value does not see, so
+  // moving back to the old value would then change nothing. Writing the value through the property keeps that record
+  // in step (and, unlike a new input, keeps the slider's focus).
+  useLayoutEffect(() => {
+    if (lengthRef.current) lengthRef.current.value = String(Math.min(durationSec, maxLength));
+    // Only a new limit clamps; durationSec is read, not watched.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [maxLength]);
   useEffect(() => {
     if (durationSec > maxLength) {
       setDurationSec(maxLength);
@@ -409,7 +418,7 @@ export default function FootagePage() {
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img src={f.url} alt={`Picture ${i + 1}: ${f.name}`} className="h-14 w-20 rounded-md bg-slate-100 object-cover" />
                             <span className="text-xs font-medium text-slate-700">&lt;Picture {i + 1}&gt;</span>
-                            <button type="button" onClick={() => insertLabel(i)} disabled={busy} className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50" aria-label={`Put <Picture ${i + 1}> in the description`}>
+                            <button type="button" onClick={() => insertLabel(i)} disabled={busy} className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50" aria-label={`Put in the description: <Picture ${i + 1}>`}>
                               Put in the description
                             </button>
                             <button type="button" id={`footage-feature-remove-${i}`} onClick={() => removeFeature(i)} disabled={busy || reading} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50" aria-label={`Remove Picture ${i + 1}, ${f.name}`}>
@@ -435,9 +444,7 @@ export default function FootagePage() {
                 <label htmlFor="footage-length" className="mb-1.5 block text-sm font-medium text-slate-700">
                   Length: {durationSec} seconds
                 </label>
-                {/* Keyed by its limit: a browser clamps a range's value itself when its max drops, which React does not
-                    see, so moving back to that value later would change nothing. A new input starts in step. */}
-                <input key={maxLength} id="footage-length" type="range" min={FOOTAGE_MIN_SEC} max={maxLength} step={1} value={durationSec} disabled={canEdit === false} aria-describedby="footage-length-hint" onChange={(e) => (setDurationSec(Number(e.target.value)), changed())} className="w-full accent-brand-600" />
+                <input ref={lengthRef} id="footage-length" type="range" min={FOOTAGE_MIN_SEC} max={maxLength} step={1} value={durationSec} disabled={canEdit === false} aria-describedby="footage-length-hint" onChange={(e) => (setDurationSec(Number(e.target.value)), changed())} className="w-full accent-brand-600" />
                 <p id="footage-length-hint" className="mt-1 text-xs text-slate-500">
                   {maxLength === FOOTAGE_MAX_SEC_SHORT ? `Up to ${FOOTAGE_MAX_SEC_SHORT} seconds when the clip features pictures or follows the description exactly.` : `Up to ${maxLength} seconds.`}
                 </p>
@@ -499,7 +506,7 @@ export default function FootagePage() {
                     Standard (768p)
                   </label>
                   <label className="flex min-h-6 items-center gap-2">
-                    <input type="radio" name="footage-quality" className="accent-brand-600" checked={quality === "hd" && !hdBlocked} disabled={hdBlocked} aria-describedby="footage-hd-hint" onChange={() => (setQuality("hd"), changed())} />
+                    <input type="radio" name="footage-quality" className="accent-brand-600" checked={quality === "hd" && !hdBlocked} disabled={hdBlocked} aria-describedby="footage-hd-hint" onChange={() => (setQuality("hd"), setRestoreAdaptive(false), changed())} />
                     HD (1080p)
                   </label>
                 </div>
@@ -566,7 +573,7 @@ export default function FootagePage() {
                           <Download className="h-3 w-3" aria-hidden /> Download
                         </a>
                         {canEdit !== false && seedOf(f) !== undefined && (
-                          <button type="button" onClick={() => againWith(f)} disabled={busy} className="inline-flex min-h-6 items-center gap-1 py-1 font-medium text-brand-700 hover:underline disabled:opacity-60" aria-label={`Make ${f.title} again with changes`}>
+                          <button type="button" onClick={() => againWith(f)} disabled={busy} className="inline-flex min-h-6 items-center gap-1 py-1 font-medium text-brand-700 hover:underline disabled:opacity-60" aria-label={`Make again with changes: ${f.title}`}>
                             <RotateCcw className="h-3 w-3" aria-hidden /> Make again with changes
                           </button>
                         )}

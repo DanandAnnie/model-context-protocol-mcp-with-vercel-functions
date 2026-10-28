@@ -35,14 +35,20 @@ describe("generated clips", () => {
   it("take a description of 10 to 2,000 characters, 5 to 30 seconds, a frame or a picture, and a quality", () => {
     assert.throws(() => footageRequestSchema.parse({ prompt: "kitchen" }), /few words/);
     assert.throws(() => ask({ prompt: "x".repeat(2001) }), /at most 2000/);
-    assert.throws(() => ask({ durationSec: 4 }));
-    assert.throws(() => ask({ durationSec: 31 }), /5 to 30 seconds/);
+    assert.throws(() => ask({ durationSec: 4 }), /at least 5 seconds/);
+    assert.throws(() => ask({ durationSec: 31 }), /at most 30 seconds/);
+    assert.throws(() => ask({ durationSec: "10" }), /number of seconds/);
     assert.equal(ask({ durationSec: 30 }).durationSec, 30, "a clip from a description runs up to 30 seconds");
     assert.equal(ask({ durationSec: 30, image: png() }).durationSec, 30, "so does one from a first frame");
     // Featuring pictures, or the description followed exactly, keeps HeyGen to 15 seconds.
     assert.throws(() => ask({ durationSec: 16, exact: true }), /at most 15 seconds/);
     assert.ok(ask({ durationSec: 15, exact: true }));
-    assert.throws(() => ask({ durationSec: 7.5 }), "whole seconds");
+    assert.throws(() => ask({ durationSec: 7.5 }), /whole number of seconds/);
+    // The first message (the one the page shows) never offers 30 seconds to a clip that is held to 15.
+    for (const extra of [{ durationSec: 40, references: [png()] }, { durationSec: 31, exact: true }, { durationSec: 3, exact: true }, { durationSec: 12.5, exact: true }]) {
+      const first = footageRequestSchema.safeParse({ prompt: PROMPT, ...extra }).error?.issues[0]?.message ?? "";
+      assert.ok(first && !/5 to 30|from 5 to/.test(first) && (!/30/.test(first) || /15 when/.test(first)), `${JSON.stringify(extra)}: ${first}`);
+    }
     // A seed is HeyGen's unsigned 32-bit number.
     assert.equal(ask({ seed: 0 }).seed, 0);
     assert.equal(ask({ seed: 4_294_967_295 }).seed, 4_294_967_295);

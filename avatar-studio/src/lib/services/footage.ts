@@ -32,11 +32,12 @@ export const footageRequestSchema = z
     title: z.string().trim().max(120).optional(),
     /** The shot: what is seen, what happens, how the camera moves. */
     prompt: z.string().trim().min(10, "Describe the shot in a few words").max(MAX_FOOTAGE_PROMPT, `Describe the shot in at most ${MAX_FOOTAGE_PROMPT} characters`),
+    // Each message holds for every clip: the limit for one that features pictures or is exact is checked below.
     durationSec: z
-      .number()
-      .int(`A clip is a whole number of seconds, from ${FOOTAGE_MIN_SEC} to ${FOOTAGE_MAX_SEC}`)
-      .min(FOOTAGE_MIN_SEC, `A clip is ${FOOTAGE_MIN_SEC} to ${FOOTAGE_MAX_SEC} seconds`)
-      .max(FOOTAGE_MAX_SEC, `A clip is ${FOOTAGE_MIN_SEC} to ${FOOTAGE_MAX_SEC} seconds`)
+      .number("A clip's length is a number of seconds")
+      .int("A clip is a whole number of seconds")
+      .min(FOOTAGE_MIN_SEC, `A clip is at least ${FOOTAGE_MIN_SEC} seconds`)
+      .max(FOOTAGE_MAX_SEC, `A clip is at most ${FOOTAGE_MAX_SEC} seconds (${FOOTAGE_MAX_SEC_SHORT} when it features pictures or follows the description exactly)`)
       .default(FOOTAGE_MIN_SEC),
     /** Ignored shape for a clip from a picture, which takes the picture's shape. */
     aspect: z.enum(FOOTAGE_ASPECTS, `The frame is ${FOOTAGE_ASPECTS.join(", ")}; leave it out for a clip from pictures to follow the first one`).optional(),

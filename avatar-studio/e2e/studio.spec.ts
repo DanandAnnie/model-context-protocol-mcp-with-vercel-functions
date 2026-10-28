@@ -1197,13 +1197,13 @@ test("a b-roll clip features pictures the description names as <Picture 1>, <Pic
   await file.setInputFiles({ name: "shoe.png", mimeType: "image/png", buffer: Buffer.from(TINY_PNG, "base64") });
   await expect(page.getByTestId("footage-feature")).toHaveCount(1);
   // The label goes into the description where it is needed.
-  await page.getByRole("button", { name: "Put <Picture 1> in the description" }).click();
+  await page.getByRole("button", { name: "Put in the description: <Picture 1>" }).click();
   await expect(prompt).toHaveValue(`A runner ${tag} laces up the shoe in <Picture 1>`);
   await expect(prompt).toBeFocused();
   await prompt.press("Control+End");
   await prompt.pressSequentially(" on the track in ");
   await file.setInputFiles({ name: "track.png", mimeType: "image/png", buffer: Buffer.from(TINY_PNG, "base64") });
-  await page.getByRole("button", { name: "Put <Picture 2> in the description" }).click();
+  await page.getByRole("button", { name: "Put in the description: <Picture 2>" }).click();
   await expect(prompt).toHaveValue(`A runner ${tag} laces up the shoe in <Picture 1> on the track in <Picture 2>`);
   await expect(page.getByText("2 of 3 pictures")).toBeVisible();
   // A label goes where the cursor was, although pressing its button takes the focus, and typing carries on after it.
@@ -1212,7 +1212,7 @@ test("a b-roll clip features pictures the description names as <Picture 1>, <Pic
   await prompt.evaluate((el: HTMLTextAreaElement, i: number) => el.setSelectionRange(i, i), at);
   await prompt.press("ArrowRight");
   await prompt.press("ArrowLeft");
-  await page.getByRole("button", { name: "Put <Picture 2> in the description" }).click();
+  await page.getByRole("button", { name: "Put in the description: <Picture 2>" }).click();
   await page.keyboard.type(" and");
   await expect(prompt).toHaveValue(`A runner ${tag} <Picture 2> and laces up the shoe in <Picture 1> on the track in <Picture 2>`);
   // A label that names no picture added holds the start, with the reason.
@@ -1242,7 +1242,7 @@ test("a b-roll clip features pictures the description names as <Picture 1>, <Pic
   const kept = await prompt.inputValue();
   await prompt.fill(`${"x".repeat(1995)} end.`);
   await prompt.focus();
-  await page.getByRole("button", { name: "Put <Picture 1> in the description" }).click();
+  await page.getByRole("button", { name: "Put in the description: <Picture 1>" }).click();
   await expect(page.getByRole("alert").filter({ hasText: "No room for" })).toHaveText("No room for <Picture 1>: the description is at most 2000 characters. Shorten it first.");
   await expect(prompt).toHaveValue(`${"x".repeat(1995)} end.`);
   await prompt.fill(kept);
@@ -1262,6 +1262,18 @@ test("a b-roll clip features pictures the description names as <Picture 1>, <Pic
   await page.reload();
   await expect(page.getByTestId("footage").filter({ hasText: `A shelf ${tag}` }).getByTestId("footage-meta")).toContainText("features a picture · shaped like Picture 1");
   expect(JSON.stringify((await (await page.request.get("/api/footage")).json()).footage)).not.toContain(TINY_PNG);
+  // Made again, it asks for its picture back and would take its shape again, unless HD is chosen meanwhile: that
+  // choice holds (HD is landscape or portrait), and the frame stays landscape.
+  const shapedItem = page.getByTestId("footage").filter({ hasText: `A shelf ${tag}` });
+  await expect(shapedItem.getByText("Completed")).toBeVisible({ timeout: 20_000 });
+  await shapedItem.getByRole("button", { name: /^Make again with changes: / }).click();
+  await expect(page.getByLabel("Feature my pictures")).toBeChecked();
+  await page.getByLabel("HD (1080p)").check();
+  await file.setInputFiles({ name: "jar.png", mimeType: "image/png", buffer: Buffer.from(TINY_PNG, "base64") });
+  await expect(page.getByRole("img", { name: "Picture 1: jar.png" })).toBeVisible();
+  await expect(page.getByLabel("HD (1080p)")).toBeChecked();
+  await expect(page.getByLabel("Landscape 16:9")).toBeChecked();
+  await expect(page.getByLabel("Like Picture 1")).not.toBeChecked();
   for (const id of [shaped.id, first]) expect((await page.request.delete(`/api/footage/${id}`)).ok()).toBe(true);
 });
 
@@ -1293,7 +1305,7 @@ test("a b-roll take is made again with changes, from its seed, longer or word fo
   const listed = ((await (await page.request.get("/api/footage")).json()).footage as Array<{ id: string; takeSeed?: number }>).find((f) => f.id === firstId)!;
   expect(typeof listed.takeSeed).toBe("number");
   await exact.uncheck();
-  await first.getByRole("button", { name: /^Make .* again with changes$/ }).click();
+  await first.getByRole("button", { name: /^Make again with changes: / }).click();
   await expect(prompt).toBeFocused();
   await expect(prompt).toHaveValue(`A slow dolly past a bakery window ${tag} at dawn, steam on the glass`);
   await expect(exact).toBeChecked();
@@ -1307,7 +1319,7 @@ test("a b-roll take is made again with changes, from its seed, longer or word fo
   const second = page.getByTestId("footage").filter({ hasText: `at dusk` }).filter({ hasText: tag });
   await expect(second).toHaveCount(1);
   // A take dropped goes back to HeyGen choosing the seed, and the focus goes back to the description.
-  await first.getByRole("button", { name: /^Make .* again with changes$/ }).click();
+  await first.getByRole("button", { name: /^Make again with changes: / }).click();
   await page.getByRole("button", { name: "Use a new take" }).click();
   await expect(page.getByTestId("footage-take")).toHaveCount(0);
   await expect(prompt).toBeFocused();
@@ -1315,6 +1327,17 @@ test("a b-roll take is made again with changes, from its seed, longer or word fo
   await exact.uncheck();
   await expect(length).toHaveAttribute("max", "30");
   await length.focus();
+  await page.keyboard.press("End");
+  await expect(page.getByLabel("Length: 30 seconds")).toBeVisible();
+  // A limit that changes while the slider has the focus (a picture that lands, say) leaves the focus on it, in step.
+  await exact.evaluate((el: HTMLInputElement) => el.click());
+  await expect(page.getByLabel("Length: 15 seconds")).toBeVisible();
+  await expect(length).toBeFocused();
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.getByLabel("Length: 14 seconds")).toBeVisible();
+  await exact.evaluate((el: HTMLInputElement) => el.click());
+  await expect(length).toHaveAttribute("max", "30");
+  await expect(length).toBeFocused();
   await page.keyboard.press("End");
   await expect(page.getByLabel("Length: 30 seconds")).toBeVisible();
   await prompt.fill(`A long dolly past a bakery window ${tag} from dawn to noon`);

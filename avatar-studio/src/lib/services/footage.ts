@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
-import type { AvatarProvider } from "../providers/types";
+import type { AvatarProvider, FootageInput } from "../providers/types";
 import { FOOTAGE_ASPECTS, FOOTAGE_MAX_SEC, FOOTAGE_MAX_SEC_SHORT, FOOTAGE_MIN_SEC, MAX_FOOTAGE_REFERENCES, MAX_FOOTAGE_SEED, MAX_SHOOT_PHOTOS, footageIdOf, type Background, type BrandKit, type FootageJob, type VideoTemplate } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
@@ -185,7 +185,13 @@ export async function startFootage(input: FootageRequest, ownerId: string = LOCA
   if ((await getStore().list<FootageJob>("footage", ownerId)).length >= MAX_FOOTAGE) throw new ConflictError(`An account keeps at most ${MAX_FOOTAGE} generated clips; delete one to make another`);
   // The photo is looked up for the account (finished, with a link fresh enough for the renderer to fetch) before the
   // hour's starts are counted, so a photo not ready is refused without using one.
-  const frame = shoot ? { url: await shootPhotoLink(shoot.shootId, shoot.photo, ownerId) } : image;
+  let frame: FootageInput["image"] = image;
+  if (shoot) {
+    const link = await shootPhotoLink(shoot.shootId, shoot.photo, ownerId);
+    // The renderer fetches the photo by its link: one made by another renderer (the demo's are drawn, not hosted) is not one it can use.
+    if (link.provider !== provider.name || (provider.name !== "mock" && !link.url.startsWith("https://"))) throw new ValidationError("This photo was made with another renderer; download it and add it as a picture to open on");
+    frame = { url: link.url };
+  }
   opts.admit?.();
   const { jobId } = await provider.startFootage({ prompt: input.prompt, image: frame, references, durationSec: input.durationSec, aspect, quality: input.quality, exact: input.exact, seed: input.seed, key: id });
   const now = nowIso();

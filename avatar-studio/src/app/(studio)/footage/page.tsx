@@ -204,6 +204,7 @@ export default function FootagePage() {
         // When the last one is added, the add control goes, so the focus moves to that picture's remove button.
         if (features.length + 1 >= MAX_FOOTAGE_REFERENCES) focusAfterRender(() => document.getElementById(`footage-feature-remove-${MAX_FOOTAGE_REFERENCES - 1}`));
       } else {
+        pictureTurn.current++;
         setPicture({ name: file.name, url: await toUploadable(file, { maxBytes: MAX_PICTURE_BYTES, maxEdge: 2048 }) });
       }
     } catch (e) {
@@ -213,14 +214,26 @@ export default function FootagePage() {
     }
   }
 
+  // Each choice of picture (a photo shoot's being looked up, one added, one removed, a start) counts, so a photo shoot
+  // looked up slowly does not replace a choice made meanwhile.
+  const pictureTurn = useRef(0);
   /** Opens on a photo of one of the account's photo shoots, if it is still there and finished; says why not otherwise. */
   async function openShootPhoto(from: { shootId: string; photo: number }): Promise<boolean> {
+    const turn = ++pictureTurn.current;
     try {
       const { shoots } = await api<{ shoots: Array<Pick<ShootJob, "id" | "title" | "status" | "photos">> }>("/api/shoots");
+      if (turn !== pictureTurn.current) return false;
       const shoot = shoots.find((x) => x.id === from.shootId);
       const photo = shoot?.status === "completed" ? shoot.photos?.[from.photo - 1] : undefined;
       if (!shoot || !photo) {
-        say(setErr, !shoot ? "That photo shoot is no longer there; add a picture to open on instead." : `Photo ${from.photo} of “${shoot.title}” is not ready; add a picture to open on instead.`);
+        const why = !shoot
+          ? "That photo shoot is no longer there"
+          : shoot.status === "failed"
+            ? `“${shoot.title}” has no photos`
+            : shoot.status !== "completed"
+              ? `Photo ${from.photo} of “${shoot.title}” is not ready yet`
+              : `“${shoot.title}” has no photo ${from.photo}`;
+        say(setErr, `${why}; add a picture to open on instead.`);
         return false;
       }
       setUse("frame");
@@ -228,7 +241,7 @@ export default function FootagePage() {
       changed();
       return true;
     } catch (e) {
-      say(setErr, e instanceof Error ? e.message : "The photo shoot could not be read");
+      if (turn === pictureTurn.current) say(setErr, e instanceof Error ? e.message : "The photo shoot could not be read");
       return false;
     }
   }
@@ -242,14 +255,17 @@ export default function FootagePage() {
     if (!shootId || !Number.isInteger(photo) || photo < 1) return;
     window.history.replaceState(null, "", window.location.pathname);
     void openShootPhoto({ shootId, photo }).then((ok) => {
-      if (!ok) return;
+      // Only into an empty description, on a form that is shown, and taking the focus only if nothing else has it.
+      const box = promptRef.current;
+      if (!ok || !box) return;
+      if (box.value) return say(setNote, `The clip opens on photo ${photo} of the photo shoot.`);
       const start = "Keep the person exactly as they appear in the first frame. ";
-      setPrompt((p) => p || start);
+      setPrompt(start);
       say(setNote, `The clip opens on photo ${photo} of the photo shoot. Describe one camera move after the first sentence.`);
+      if (document.activeElement && document.activeElement !== document.body) return;
       focusAfterRender(() => {
-        const box = promptRef.current;
-        box?.setSelectionRange(box.value.length, box.value.length);
-        return box;
+        promptRef.current?.setSelectionRange(start.length, start.length);
+        return promptRef.current;
       });
     });
     // Once, on arrival.
@@ -257,6 +273,7 @@ export default function FootagePage() {
   }, []);
 
   function removePicture() {
+    pictureTurn.current++;
     setPicture(null);
     changed();
     // The focus goes to the control that adds one, which takes the remove button's place.
@@ -301,6 +318,7 @@ export default function FootagePage() {
   }
 
   async function submit() {
+    pictureTurn.current++;
     setBusy(true);
     setErr(null);
     setNote(null);
@@ -351,6 +369,7 @@ export default function FootagePage() {
     setExact(!!f.exact);
     setUse(f.references ? "feature" : f.fromPicture ? "frame" : "none");
     // Pictures added for another clip are not this take's (they are not kept, so they are added again).
+    pictureTurn.current++;
     setPicture(null);
     setFeatures([]);
     // The clip's frame; a clip from pictures without one gets its first picture's shape back once one is added.

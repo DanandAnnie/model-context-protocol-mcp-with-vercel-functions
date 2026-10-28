@@ -395,6 +395,24 @@ describe("generated clips", () => {
     }) as typeof fetch;
     Object.assign(config, { avatarProvider: "heygen", heygenApiKey: "hg_key" });
     try {
+      // A photo the demo drew is not one HeyGen can fetch: refused, before the hour's starts are counted.
+      const before = admitted;
+      await assert.rejects(startFootage(ask(from), "u1", { admit }), /made with another renderer/);
+      assert.equal(admitted, before);
+      // Nor is a link that could not be renewed and may have expired.
+      const stale = { ...(await getStore().get<import("../types").ShootJob>("shoot", shoot.id))!, provider: "heygen", status: "completed" as const, photos: [{ url: "https://resource2.heygen.ai/images/1.png" }, { url: "https://resource2.heygen.ai/images/2.png" }], checkedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() };
+      await getStore().put("shoot", stale);
+      globalThis.fetch = (async () => new Response("down", { status: 500 })) as typeof fetch;
+      forgetShootChecks();
+      await assert.rejects(startFootage(ask(from), "u1", { admit }), /could not be renewed just now/);
+      assert.equal(admitted, before);
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input) === "https://api.heygen.com/v3/models/videos" && init?.method === "POST") {
+          bodies.push(JSON.parse(String(init.body)));
+          return Response.json({ data: { video_id: "vid_from_shoot" } }, { status: 202 });
+        }
+        return new Response("unexpected", { status: 500 });
+      }) as typeof fetch;
       const done = { ...(await getStore().get<import("../types").ShootJob>("shoot", shoot.id))!, provider: "heygen", status: "completed" as const, photos: [{ url: "https://resource2.heygen.ai/images/1.png" }, { url: "https://resource2.heygen.ai/images/2.png" }], checkedAt: new Date().toISOString() };
       await getStore().put("shoot", done);
       await startFootage(ask(from), "u1");

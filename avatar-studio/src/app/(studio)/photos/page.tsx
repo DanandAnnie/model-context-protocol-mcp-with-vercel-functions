@@ -10,7 +10,7 @@ import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api, formatDate, isRefusal } from "@/lib/client";
 import { toUploadable } from "@/lib/image-upload";
-import { MAX_SHOOT_IDENTITY, MAX_SHOOT_PHOTOS, SHOOT_ASPECTS, type ShootAspect, type ShootJob } from "@/lib/types";
+import { MAX_SHOOT_IDENTITY, MAX_SHOOT_PHOTOS, SHOOT_ASPECTS, type ProviderStatus, type ShootAspect, type ShootJob } from "@/lib/types";
 
 /** A shoot as the server lists it: never the renderer, its job id, or the pictures' digest. */
 type Shoot = Omit<ShootJob, "ownerId" | "provider" | "providerJobId" | "pictureDigest">;
@@ -45,6 +45,8 @@ const SHAPES: Record<ShootAspect, string> = {
 export default function PhotoShootPage() {
   const canEdit = useCanEdit();
   const { data, error, setData, refetch } = useApi<{ shoots: Shoot[]; available: boolean }>("/api/shoots");
+  // "Bring to life" is offered only where clips can be made.
+  const { data: status } = useApi<ProviderStatus>("/api/status");
   // While a shoot is being made the list is asked again, only while the tab is visible.
   const running = (data?.shoots ?? []).some((s) => s.status === "processing");
   useEffect(() => {
@@ -401,7 +403,7 @@ export default function PhotoShootPage() {
                           <a href={p.url} download target="_blank" rel="noopener noreferrer" className="inline-flex min-h-6 items-center gap-1 py-1 text-xs font-medium text-brand-700 hover:underline" aria-label={`Download photo ${i + 1} of ${s.title}`}>
                             <Download className="h-3 w-3" aria-hidden /> Download
                           </a>
-                          {canEdit !== false && (
+                          {canEdit !== false && status?.generatedFootage !== false && (
                             <Link href={`/footage?shoot=${s.id}&photo=${i + 1}`} className="ml-3 inline-flex min-h-6 items-center gap-1 py-1 text-xs font-medium text-brand-700 hover:underline" aria-label={`Bring to life: photo ${i + 1} of ${s.title}`}>
                               <Clapperboard className="h-3 w-3" aria-hidden /> Bring to life
                             </Link>

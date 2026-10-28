@@ -404,7 +404,7 @@ export default function PhotoShootPage() {
                           <a href={p.url} download target="_blank" rel="noopener noreferrer" className="inline-flex min-h-6 items-center gap-1 py-1 text-xs font-medium text-brand-700 hover:underline" aria-label={`Download photo ${i + 1} of ${s.title}`}>
                             <Download className="h-3 w-3" aria-hidden /> Download
                           </a>
-                          {canEdit !== false && status?.generatedFootage === true && (
+                          {canEdit === true && status?.generatedFootage === true && (
                             <Link href={`/footage?shoot=${s.id}&photo=${i + 1}`} className="inline-flex min-h-6 items-center gap-1 py-1 text-xs font-medium text-brand-700 hover:underline" aria-label={`Bring to life: photo ${i + 1} of ${s.title}`}>
                               <Clapperboard className="h-3 w-3" aria-hidden /> Bring to life
                             </Link>

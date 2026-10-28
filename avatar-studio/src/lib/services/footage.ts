@@ -174,11 +174,13 @@ export async function startFootage(input: FootageRequest, ownerId: string = LOCA
   const aspect = image || shoot ? undefined : references ? input.aspect : (input.aspect ?? "16:9");
   // Without a title the clip is named after its description; HeyGen's opening advice, the same for every clip from a
   // photo, is left out of the name so such clips are told apart.
-  const title = input.title || promptExcerpt(input.prompt.startsWith(FIRST_FRAME_ADVICE) && input.prompt.length > FIRST_FRAME_ADVICE.length + 1 ? input.prompt.slice(FIRST_FRAME_ADVICE.length) : input.prompt, 60);
+  const afterAdvice = input.prompt.startsWith(FIRST_FRAME_ADVICE) ? promptExcerpt(input.prompt.slice(FIRST_FRAME_ADVICE.length), 60) : "";
+  const title = input.title || afterAdvice || promptExcerpt(input.prompt, 60);
   const id = opts.key ? `ft_${createHash("sha256").update(`${ownerId}\0${opts.key}`).digest("base64url").slice(0, 32)}` : newId("ft");
   const existing = opts.key ? await getStore().get<FootageJob>("footage", id) : null;
   if (existing && existing.ownerId === ownerId) {
-    const same = existing.title === title && existing.prompt === input.prompt && existing.durationSec === input.durationSec && existing.aspect === aspect && existing.quality === input.quality && (existing.imageDigest ?? "") === (imageDigest ?? "") && (existing.references ?? 0) === (references?.length ?? 0) && !!existing.exact === !!input.exact && existing.seed === input.seed;
+    // (A clip stored before titles left the advice out was named after the whole description.)
+    const same = (existing.title === title || existing.title === (input.title || promptExcerpt(input.prompt, 60))) && existing.prompt === input.prompt && existing.durationSec === input.durationSec && existing.aspect === aspect && existing.quality === input.quality && (existing.imageDigest ?? "") === (imageDigest ?? "") && (existing.references ?? 0) === (references?.length ?? 0) && !!existing.exact === !!input.exact && existing.seed === input.seed;
     if (!same) throw new ConflictError("This Idempotency-Key was already used for another clip; send a new key");
     return existing;
   }

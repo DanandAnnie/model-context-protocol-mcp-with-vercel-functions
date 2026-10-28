@@ -382,7 +382,7 @@ describe("generated clips", () => {
     const { FIRST_FRAME_ADVICE } = await import("../types");
     assert.equal((await startFootage(ask({ ...from, prompt: `${FIRST_FRAME_ADVICE} A slow push-in on the harbour at dawn` }), "u1")).title, "A slow push-in on the harbour at dawn");
     assert.equal((await startFootage(ask({ ...from, prompt: FIRST_FRAME_ADVICE }), "u1")).title, promptExcerptOf(FIRST_FRAME_ADVICE), "the advice alone still names it");
-    admitted = 0;
+    assert.match((await startFootage(ask({ ...from, prompt: `${FIRST_FRAME_ADVICE} ...` }), "u1")).title, /^Keep the person exactly as they appear in the first frame/, "so does the advice with only punctuation after it, never an empty name");
     const job = await startFootage(ask(from), "u1", { key: "key-from-shoot", admit });
     assert.deepEqual([job.fromPicture, job.fromShoot, job.aspect, admitted], [true, { shootId: shoot.id, photo: 2 }, undefined, 1]);
     assert.equal((await startFootage(ask(from), "u1", { key: "key-from-shoot" })).id, job.id, "a retry returns the same clip");

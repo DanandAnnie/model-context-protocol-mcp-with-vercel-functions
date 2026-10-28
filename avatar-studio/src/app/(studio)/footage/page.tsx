@@ -220,8 +220,8 @@ export default function FootagePage() {
   // looked up slowly does not replace a choice made meanwhile.
   const pictureTurn = useRef(0);
   /** Opens on a photo of one of the account's photo shoots, if it is still there and finished; says why not otherwise. */
-  async function openShootPhoto(from: { shootId: string; photo: number }): Promise<boolean> {
-    const turn = ++pictureTurn.current;
+  async function openShootPhoto(from: { shootId: string; photo: number }, taken?: number): Promise<boolean> {
+    const turn = taken ?? ++pictureTurn.current;
     try {
       const { shoots } = await api<{ shoots: Array<Pick<ShootJob, "id" | "title" | "status" | "photos">> }>("/api/shoots");
       if (turn !== pictureTurn.current) return false;
@@ -252,7 +252,10 @@ export default function FootagePage() {
   // advises for a person in the first frame, ready for one camera move. The address is cleaned, so a reload starts afresh.
   // Once it is known whether this person may make clips here; a viewer's arrival only cleans the address.
   const arrived = useRef(false);
+  // The arrival takes its turn on mount, so a picture chosen while the person's role is still loading is kept.
+  const arrivalTurn = useRef<number | null>(null);
   useEffect(() => {
+    if (arrivalTurn.current === null) arrivalTurn.current = ++pictureTurn.current;
     if (canEdit === null || arrived.current) return;
     arrived.current = true;
     const q = new URLSearchParams(window.location.search);
@@ -262,7 +265,8 @@ export default function FootagePage() {
     const shootId = q.get("shoot");
     const photo = Number(q.get("photo"));
     if (!shootId || !Number.isInteger(photo) || photo < 1) return say(setErr, "That link does not name a photo of a photo shoot; add a picture to open on instead.");
-    void openShootPhoto({ shootId, photo }).then((ok) => {
+    if (pictureTurn.current !== arrivalTurn.current) return;
+    void openShootPhoto({ shootId, photo }, arrivalTurn.current).then((ok) => {
       // Only into an empty description, on a form that is shown, and taking the focus only if nothing else has it.
       const box = promptRef.current;
       if (!ok || !box) return;
@@ -453,7 +457,7 @@ export default function FootagePage() {
                   {USES.map((u) => (
                     <Fragment key={u.value}>
                       <label className="flex min-h-6 items-center gap-2">
-                        <input type="radio" name="footage-use" className="accent-brand-600" checked={use === u.value} aria-describedby={`footage-use-hint-${u.value}`} disabled={reading} onChange={() => (setUse(u.value), pictureTurn.current++, (restoreAdaptive.current = false), changed())} />
+                        <input type="radio" name="footage-use" className="accent-brand-600" checked={use === u.value} aria-describedby={`footage-use-hint-${u.value}`} disabled={reading} onChange={() => (setUse(u.value), u.value !== "frame" && pictureTurn.current++, (restoreAdaptive.current = false), changed())} />
                         {u.label}
                       </label>
                       {/* Each choice is described by its own hint (outside its label, so not part of its name); the

@@ -14,6 +14,7 @@ import {
   deleteVoiceChange,
   exportOwnerData,
   forgetVoiceChangerChecks,
+  instantVoicePreview,
   instantVoiceSchema,
   listInstantVoices,
   listVoiceChanges,
@@ -102,6 +103,65 @@ describe("voice changer", () => {
       assert.deepEqual(await listVoiceChanges("u1"), []);
     } finally {
       clipMs.CLIP_MS = saved;
+    }
+  });
+
+  it("lets a voice be heard before it is used: a fresh preview link once it is ready, only for its account", async () => {
+    const sample = await clip("u1", "Sample");
+    const making = await createInstantVoice(instantVoiceSchema.parse({ name: "Narrator", clipId: sample.id, agreed: true }), "u1");
+    await assert.rejects(instantVoicePreview(making.id, "u1"), (e: unknown) => e instanceof ValidationError && /"Narrator" is still being made/.test((e as Error).message));
+    const voice = await ready("u1", "Host");
+    assert.match(await instantVoicePreview(voice.id, "u1"), /\/demo\/revoiced\.mp3$/);
+    await assert.rejects(instantVoicePreview(voice.id, "u2"), NotFoundError, "another account's reads as not found");
+    await assert.rejects(instantVoicePreview("iv_nope", "u1"), NotFoundError);
+    await getStore().put<InstantVoice>("instantvoice", { ...(await getStore().get<InstantVoice>("instantvoice", voice.id))!, status: "failed" });
+    await assert.rejects(instantVoicePreview(voice.id, "u1"), /could not be made, so it has no preview/);
+  });
+
+  it("reads HeyGen's preview of an active voice each time, never a plain-http link, and says when HeyGen has none", async () => {
+    const { config } = await import("../config");
+    const saved = { avatar: config.avatarProvider, key: config.heygenApiKey };
+    const realFetch = globalThis.fetch;
+    let answer: Record<string, unknown> = { voice_id: "hv_p", status: "ACTIVE", preview_audio_url: "https://files.heygen.ai/previews/hv_p.wav?sig=1" };
+    let reads = 0;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "https://api.heygen.com/v3/models/audio/voices/hv_p" && !init?.method) {
+        reads++;
+        return Response.json({ data: answer });
+      }
+      if (url === "https://api.heygen.com/v3/models/audio/voices/hv_gone") return Response.json({ error: { code: "voice_not_found" } }, { status: 404 });
+      if (url === "https://api.heygen.com/v3/models/audio/voices/hv_down") return Response.json({ error: { code: "internal_error", message: "hv_down unavailable" } }, { status: 503 });
+      return new Response("unexpected", { status: 500 });
+    }) as typeof fetch;
+    Object.assign(config, { avatarProvider: "heygen", heygenApiKey: "hg_key" });
+    try {
+      const now = new Date().toISOString();
+      const voice: InstantVoice = { id: "iv_heygen_preview", ownerId: "u1", name: "Host", clipId: "clip_x", provider: "heygen", providerVoiceId: "hv_p", status: "completed", createdAt: now, updatedAt: now };
+      await getStore().put("instantvoice", voice);
+      assert.equal(await instantVoicePreview(voice.id, "u1"), "https://files.heygen.ai/previews/hv_p.wav?sig=1");
+      answer = { ...answer, preview_audio_url: "https://files.heygen.ai/previews/hv_p.wav?sig=2" };
+      assert.equal(await instantVoicePreview(voice.id, "u1"), "https://files.heygen.ai/previews/hv_p.wav?sig=2", "the link expires, so it is read again");
+      assert.equal(reads, 2);
+      for (const missing of [{ preview_audio_url: null }, { preview_audio_url: "http://files.heygen.ai/p.wav" }, { status: "PENDING" }]) {
+        answer = { voice_id: "hv_p", status: "ACTIVE", preview_audio_url: "https://files.heygen.ai/p.wav", ...missing };
+        await assert.rejects(instantVoicePreview(voice.id, "u1"), /There is no preview of "Host" yet/, JSON.stringify(missing));
+      }
+      // HeyGen down: a message to try again, never HeyGen's own error, which names the voice there.
+      await getStore().put("instantvoice", { ...voice, providerVoiceId: "hv_down" });
+      await assert.rejects(instantVoicePreview(voice.id, "u1"), (e: unknown) => e instanceof UpstreamError && /try listening again/.test((e as Error).message) && !/hv_/.test((e as Error).message));
+      assert.equal((await getStore().get<InstantVoice>("instantvoice", voice.id))!.status, "completed", "and the voice is kept as it was");
+      // A voice HeyGen failed or no longer has will not come back: it is marked failed, with why, so it is not offered again.
+      answer = { voice_id: "hv_p", status: "FAILED", failure_reason: "PREPROCESSING_FAILED" };
+      await getStore().put("instantvoice", voice);
+      await assert.rejects(instantVoicePreview(voice.id, "u1"), /The voice "Host" can no longer be used/);
+      assert.equal((await getStore().get<InstantVoice>("instantvoice", voice.id))!.status, "failed");
+      await getStore().put("instantvoice", { ...voice, providerVoiceId: "hv_gone" });
+      await assert.rejects(instantVoicePreview(voice.id, "u1"), /can no longer be used: HeyGen no longer has this voice; make it again/);
+      assert.deepEqual([(await getStore().get<InstantVoice>("instantvoice", voice.id))!.status, (await getStore().get<InstantVoice>("instantvoice", voice.id))!.error], ["failed", "HeyGen no longer has this voice; make it again"]);
+    } finally {
+      globalThis.fetch = realFetch;
+      Object.assign(config, { avatarProvider: saved.avatar, heygenApiKey: saved.key });
     }
   });
 

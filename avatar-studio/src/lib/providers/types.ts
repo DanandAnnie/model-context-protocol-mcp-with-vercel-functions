@@ -180,6 +180,12 @@ export interface AvatarProvider {
   /** Deletes an instant voice at the renderer; one already gone is no error. */
   deleteInstantVoice?(voiceId: string): Promise<void>;
   /**
+   * A link to an instant voice reading a short preview script in its language, signed for a limited time (so it is
+   * asked for each time, never kept); none while the voice is not ready, and `gone`, saying why, for a voice the
+   * renderer no longer has or could not make.
+   */
+  instantVoicePreview?(voiceId: string): Promise<{ url?: string; gone?: string }>;
+  /**
    * Speaks a recording (an uploaded asset) again in an instant voice, keeping its words and timing. Waits up to
    * `waitMs`; a conversion not done by then is "processing", and asking again with the same `key` returns its result
    * once done, without paying twice.

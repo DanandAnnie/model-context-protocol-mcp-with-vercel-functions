@@ -372,7 +372,7 @@ export class HeyGenClient {
 
   /** An instant voice and where it stands (`GET /v3/models/audio/voices/{id}`). */
   instantVoice(id: string) {
-    return this.request<{ status?: "PENDING" | "ACTIVE" | "FAILED" | string; failure_reason?: string | null; language?: string | null }>(`${V3}/models/audio/voices/${encodeURIComponent(id)}`, {
+    return this.request<{ status?: "PENDING" | "ACTIVE" | "FAILED" | string; failure_reason?: string | null; language?: string | null; preview_audio_url?: string | null }>(`${V3}/models/audio/voices/${encodeURIComponent(id)}`, {
       signal: AbortSignal.timeout(10_000),
     });
   }

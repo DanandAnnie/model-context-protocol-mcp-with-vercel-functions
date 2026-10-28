@@ -884,6 +884,20 @@ test("an instant voice is made from a recording with the speaker's agreement, an
   // The demo renderer makes it in a moment; the page checks again on its own.
   await expect(voiceRow).toContainText("Ready", { timeout: 20_000 });
   await expect(voiceRow).toContainText(`set in “${settingName}”`);
+  // Ready, the voice can be heard first: HeyGen's preview, asked for on each listen (the demo's is the sample recording).
+  const previewAsked = page.waitForResponse((r) => /\/api\/voice-changer\/voices\/iv_[^/]+\/preview$/.test(r.url()));
+  const listenButton = voiceRow.getByRole("button", { name: `Listen to the voice ${name}` });
+  await listenButton.click();
+  expect((await previewAsked).headers()["cache-control"]).toContain("no-store");
+  await expect(voiceRow.getByLabel(`Preview of the voice ${name}`)).toHaveAttribute("src", /\/demo\/revoiced\.mp3$/);
+  // Listening again from the keyboard asks for a fresh link and keeps the focus on the button.
+  const again = page.waitForResponse((r) => /\/api\/voice-changer\/voices\/iv_[^/]+\/preview$/.test(r.url()));
+  await listenButton.focus();
+  await page.keyboard.press("Enter");
+  await again;
+  await expect(listenButton).toBeFocused();
+  await expect(voiceRow.getByLabel(`Preview of the voice ${name}`)).toHaveCount(1);
+  expect((await page.request.get("/api/voice-changer/voices/iv_nope/preview")).status()).toBe(404);
   // The choice is cleared with the rest of the card, and the picture can go: the voice keeps its name.
   await expect(page.getByRole("combobox", { name: /^Setting \(optional\)/ })).toHaveValue("");
   expect((await page.request.delete(`/api/backdrops/${setting.id}`)).ok()).toBe(true);

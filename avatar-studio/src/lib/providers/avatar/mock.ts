@@ -284,6 +284,11 @@ export class MockAvatarProvider implements AvatarProvider {
 
   async deleteInstantVoice() {}
 
+  /** A demo voice's preview: the sample recording (the studio asks only for a voice it knows is ready). */
+  async instantVoicePreview(voiceId: string): Promise<{ url?: string; gone?: string }> {
+    return /^mockiv_\d+$/.test(voiceId) ? { url: demoAssetUrl("/demo/revoiced.mp3") } : { gone: "No such voice" };
+  }
+
   /** A demo conversion: a short sample recording stands in for the recording spoken again, at once. */
   async changeVoice(): Promise<{ status: "completed"; audioUrl: string; durationSec: number }> {
     return { status: "completed", audioUrl: demoAssetUrl("/demo/revoiced.mp3"), durationSec: 0 };

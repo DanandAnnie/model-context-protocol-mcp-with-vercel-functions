@@ -777,6 +777,21 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     return { status: "processing" };
   }
 
+  /** HeyGen's preview of an active voice (`preview_audio_url`, a WAV whose link can expire, so it is read each time). */
+  async instantVoicePreview(voiceId: string): Promise<{ url?: string; gone?: string }> {
+    let voice;
+    try {
+      voice = await this.client.instantVoice(voiceId);
+    } catch (err) {
+      if (err instanceof Error && / failed: 404 /.test(err.message)) return { gone: "HeyGen no longer has this voice; make it again" };
+      // HeyGen's error names the voice there, which stays on the server.
+      console.error("instant voice preview failed:", err);
+      throw new UpstreamError("HeyGen did not answer just now; try listening again in a moment");
+    }
+    if (voice.status === "FAILED") return { gone: INSTANT_VOICE_FAILURES[voice.failure_reason ?? ""] ?? "HeyGen could not make a voice from that recording" };
+    return voice.status === "ACTIVE" ? stripEmpty({ url: httpsOnly(voice.preview_audio_url) }) : {};
+  }
+
   async deleteInstantVoice(voiceId: string) {
     try {
       await this.client.deleteInstantVoice(voiceId);

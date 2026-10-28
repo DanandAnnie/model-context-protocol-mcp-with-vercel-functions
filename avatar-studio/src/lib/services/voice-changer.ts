@@ -215,6 +215,25 @@ export async function deleteInstantVoice(id: string, ownerId: string = LOCAL_OWN
   await getStore().remove("instantvoice", voice.id);
 }
 
+/**
+ * A link to one of the account's voices reading a short preview script in its language. The renderer signs it for a
+ * limited time, so it is asked for each time and never stored.
+ */
+export async function instantVoicePreview(id: string, ownerId: string = LOCAL_OWNER): Promise<string> {
+  const voice = owned(await getStore().get<InstantVoice>("instantvoice", instantVoiceIdSchema.parse(id)), ownerId, "Instant voice");
+  if (voice.status !== "completed") throw new ValidationError(voice.status === "failed" ? `The voice "${voice.name}" could not be made, so it has no preview` : `The voice "${voice.name}" is still being made; listen once it is ready`);
+  const provider = getAvatarProviderByName(voice.provider);
+  if (!provider.instantVoicePreview) throw new ValidationError(`Voice previews are not available with the ${provider.name} renderer`);
+  const out = await provider.instantVoicePreview(voice.providerVoiceId);
+  if (out.gone) {
+    // It will not come back: marked failed, with why, so it is no longer offered for a recording or text.
+    await getStore().putIf("instantvoice", { ...voice, status: "failed", error: out.gone, updatedAt: nowIso() }, "updatedAt", voice.updatedAt);
+    throw new ValidationError(`The voice "${voice.name}" can no longer be used: ${out.gone}`);
+  }
+  if (!out.url) throw new ValidationError(`There is no preview of "${voice.name}" yet; try again in a moment`);
+  return out.url;
+}
+
 /** Deletes a voice at the renderer, as its record goes (with the account too): it is a real person's voice. */
 export async function dropInstantVoice(voice: InstantVoice): Promise<void> {
   try {

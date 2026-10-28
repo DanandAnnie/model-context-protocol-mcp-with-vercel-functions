@@ -12,6 +12,7 @@ import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { shareBodyFor } from "../share-body";
 import { providerStatus } from "../providers";
 import { HEYGEN_LOOK_KEY, HeyGenAvatarProvider } from "../providers/avatar/heygen";
+import { demoApproves } from "../providers/avatar/mock";
 import { getStore } from "../store";
 import { MAX_DIRECTED_BRIEF, type Avatar, type Video } from "../types";
 
@@ -350,6 +351,11 @@ describe("videos HeyGen's Video Agent directs", () => {
     talk = await agentConversation(video.id, "u1");
     assert.deepEqual(talk.messages.map((m) => m.from), ["you", "agent", "you", "agent"]);
     assert.match(talk.messages[3].text, /updated the storyboard: Make the intro shorter, and add a scene about parking/);
+    // An approval beside a change asked for is feedback too.
+    assert.ok(!(await answerAgent(video.id, "Approved, but add a scene", "u1")).agentWaiting);
+    t.mock.timers.tick(3000);
+    talk = await agentConversation(video.id, "u1");
+    assert.deepEqual([talk.waiting, talk.messages.length], [true, 6]);
     // The go-ahead: the video follows its render from then on, and there is nothing left to answer.
     await answerAgent(video.id, "Looks good, go ahead and make the video.", "u1");
     const making = await getVideo(video.id, "u1");
@@ -368,6 +374,15 @@ describe("videos HeyGen's Video Agent directs", () => {
     const { agentAnswerSchema } = await import("../services");
     assert.throws(() => agentAnswerSchema.parse({ text: " " }), /Write an answer/);
     assert.throws(() => agentAnswerSchema.parse({ text: "x".repeat(10_001) }), /at most 10,000/);
+  });
+
+  it("takes a demo answer as the go-ahead only when it asks for nothing first", () => {
+    for (const text of ["Looks good, go ahead and make the video.", "Approved", "Go-ahead", "LGTM", "Render the video", "Yes, render", "Generate it", "Make it!", "Proceed"]) {
+      assert.equal(demoApproves(text), true, text);
+    }
+    for (const text of ["Make the intro shorter", "Make it more upbeat", "Approved, but add a scene", "Looks good, but make the intro shorter", "Don't go ahead yet; add a scene", "Don’t go ahead yet", "Before you make the video, add a scene about parking", "The intro looks great but cut the outro", "Render it in Spanish instead"]) {
+      assert.equal(demoApproves(text), false, text);
+    }
   });
 
   it("asks HeyGen's agent to stop for review, reads its conversation and storyboard, and sends answers", async () => {

@@ -24,8 +24,15 @@ const DEMO_SESSIONS = new Map<string, { turnAt: number; approvedAt?: number; mes
 const MAX_DEMO_SESSIONS = 200;
 /** How long the demo agent "works" on each turn before it answers. */
 const DEMO_TURN_MS = 2500;
-/** An answer that approves the storyboard (not one asking for a change, such as "make the intro shorter"). */
-const DEMO_APPROVAL = /\b(go ahead|make the video|generate the video|render it|looks (?:good|great|perfect)|approved?|proceed)\b/i;
+/** Words that approve the storyboard: a go-ahead said outright, or a bare "render" / "make it" / "generate it". */
+const DEMO_APPROVAL = /\b(?:go[- ]ahead|(?:make|generate|render) the video|render it|lgtm|looks (?:good|great|perfect)|approved?|proceed)\b|^\s*(?:(?:yes|ok(?:ay)?)[,!.]?\s*)?(?:render|generate it|make it)[.!]*\s*$/i;
+/** Words that ask for something first, so an answer with them is feedback even beside an approval ("approved, but add a scene"). */
+const DEMO_CHANGE = /\b(?:but|except|before|first|yet|instead|wait|not|no|don'?t|do not|\w+n't|add|change|cut|remove|replace|swap|fix|shorter|longer|more|less)\b/i;
+
+/** Whether the demo agent takes an answer as the go-ahead: approving words, and nothing asked for first. */
+export function demoApproves(text: string): boolean {
+  return DEMO_APPROVAL.test(text) && !DEMO_CHANGE.test(text.replace(/[’]/g, "'"));
+}
 
 /** Whether the demo agent waits for an answer; a turn worked on long enough gets its reply (and storyboard) once. */
 function demoWaiting(session: { turnAt: number; approvedAt?: number; messages: AgentMessage[] }): boolean {
@@ -350,7 +357,7 @@ export class MockAvatarProvider implements AvatarProvider {
     if (!demoWaiting(session)) throw new ConflictError("HeyGen's Video Agent is still working on the last answer; wait for it, then answer again");
     const now = Date.now();
     session.messages.push({ from: "you", text, at: new Date(now).toISOString() });
-    if (DEMO_APPROVAL.test(text)) session.approvedAt = now;
+    if (demoApproves(text)) session.approvedAt = now;
     else session.turnAt = now;
   }
 

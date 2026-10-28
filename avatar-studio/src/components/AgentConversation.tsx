@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useId, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { Button, Card, ErrorBanner, inputClass } from "@/components/ui";
 import { api } from "@/lib/client";
 import { MAX_AGENT_MESSAGE, type AgentMessage, type Video } from "@/lib/types";
@@ -62,18 +63,18 @@ export function AgentConversation({ video, canEdit, onAnswered }: { video: Video
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const box = useRef<HTMLTextAreaElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   const noteRef = useRef<HTMLParagraphElement>(null);
-  // After an answer the form goes; the focus moves to the status line once it says what happened (it is hidden while empty).
-  const focusNote = useRef(false);
-  useEffect(() => {
-    if (!note || !focusNote.current) return;
-    focusNote.current = false;
-    noteRef.current?.focus();
-  }, [note]);
-  /** Says something in the status line, cleared first so the same words said again are heard again. */
-  const say = (text: string) => {
+  /**
+   * Says something in the status line, cleared first so the same words said again are heard again; with `focus`, the
+   * focus moves to it once it has the words (it is hidden while empty).
+   */
+  const say = (text: string, focus = false) => {
     setNote("");
-    requestAnimationFrame(() => setNote(text));
+    requestAnimationFrame(() => {
+      flushSync(() => setNote(text));
+      if (focus) noteRef.current?.focus();
+    });
   };
   const waiting = !!data?.waiting && making;
   const messages = data?.messages ?? [];
@@ -95,11 +96,13 @@ export function AgentConversation({ video, canEdit, onAnswered }: { video: Video
     try {
       await api(`/api/videos/${video.id}/agent`, { method: "POST", body: JSON.stringify({ text }) });
       if (kind === "answer") setAnswer("");
-      say(kind === "go" ? "Sent. HeyGen's Video Agent is making the video." : "Sent. HeyGen's Video Agent is working on your answer.");
+      // The form goes once the agent works on the answer: the focus goes to what was said rather than off the page, unless
+      // it moved elsewhere on the page while the answer was on its way.
+      const at = document.activeElement;
+      const focus = !at || at === document.body || !!formRef.current?.contains(at);
+      say(kind === "go" ? "Sent. HeyGen's Video Agent is making the video." : "Sent. HeyGen's Video Agent is working on your answer.", focus);
       onAnswered();
       lookNow.current();
-      // The form goes once the agent works on the answer: the focus goes to what was said, not off the page.
-      focusNote.current = true;
     } catch (e) {
       setErr(e instanceof Error ? e.message : "The answer could not be sent");
       if (kind === "answer") box.current?.focus();
@@ -157,6 +160,7 @@ export function AgentConversation({ video, canEdit, onAnswered }: { video: Video
       {making && !waiting && <p className="mt-3 text-xs text-slate-600">{data ? `HeyGen's Video Agent is working${typeof data.progress === "number" ? ` (${data.progress}%)` : ""}…` : "Reading the conversation…"}</p>}
       {waiting && canEdit && (
         <form
+          ref={formRef}
           className="mt-3 space-y-2"
           onSubmit={(e) => {
             e.preventDefault();

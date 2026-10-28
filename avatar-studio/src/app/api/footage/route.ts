@@ -4,7 +4,7 @@ import { rateLimit, rateLimitPair } from "@/lib/rate-limit";
 import { LimitError, footageAvailable, footageKeySchema, footageRequestSchema, listFootage, publicFootage, startFootage } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
-/** A start carries a picture of up to 3 MB on to the renderer. */
+/** A start carries a picture of up to 3 MB, or three of up to 900 KB, on to the renderer. */
 export const maxDuration = 60;
 
 /**
@@ -29,11 +29,11 @@ export async function GET() {
   }
 }
 
-/** Generate a clip: `{ prompt, durationSec?, aspect?, quality?, image?, title? }`. */
+/** Generate a clip: `{ prompt, durationSec?, aspect?, quality?, image?, references?, title? }`. */
 export async function POST(req: Request) {
   try {
     const owner = await requireEditor();
-    const input = footageRequestSchema.parse(await readJson(req, "The picture is larger than 3 MB"));
+    const input = footageRequestSchema.parse(await readJson(req, "The pictures are too large: a first frame is at most 3 MB, and each picture to feature at most 900 KB"));
     // A client key makes a retried start return the same clip instead of paying for another.
     const header = req.headers.get("idempotency-key");
     const key = header ? footageKeySchema.parse(header) : undefined;

@@ -127,7 +127,7 @@ export interface AvatarProvider {
    * Starts generating a short clip from a description of the shot, or from a picture as its first frame (HeyGen Video).
    * `key` makes a retried start return the same job. Absent when the provider cannot.
    */
-  startFootage?(input: { prompt: string; image?: { bytes: Uint8Array; mimeType: string }; durationSec: number; aspect?: "16:9" | "9:16" | "1:1"; quality: "standard" | "hd"; key: string }): Promise<{ jobId: string }>;
+  startFootage?(input: FootageInput): Promise<{ jobId: string }>;
   /** Where a generated clip stands, with the clip once it is ready (its link signed for a limited time). */
   footageStatus?(jobId: string): Promise<FootageStatus>;
   /**
@@ -355,6 +355,21 @@ export interface LipsyncStatus {
   videoUrl?: string;
   durationSec?: number;
   error?: string;
+}
+
+/**
+ * One clip to generate: from the description alone, opening on `image` as its first frame, or featuring `references`
+ * (named in the description as <Picture 1>, <Picture 2>…). Without `aspect`, a clip from pictures follows the (first)
+ * picture's shape. `key` makes a retried start return the same job.
+ */
+export interface FootageInput {
+  prompt: string;
+  image?: { bytes: Uint8Array; mimeType: string };
+  references?: Array<{ bytes: Uint8Array; mimeType: string }>;
+  durationSec: number;
+  aspect?: "16:9" | "9:16" | "1:1";
+  quality: "standard" | "hd";
+  key: string;
 }
 
 export interface FootageStatus {

@@ -1,6 +1,6 @@
-// Generated clips (HeyGen Video): a short shot from a description, or from a picture as its first frame, kept to watch,
-// download, or loop as a scene's video background. What is accepted, what HeyGen is asked, how clips are followed, and
-// how a render loops one with a fresh link.
+// Generated clips (HeyGen Video): a short shot from a description, from a picture as its first frame, or featuring
+// pictures the description names, kept to watch, download, or loop as a scene's video background. What is accepted,
+// what HeyGen is asked, how clips are followed, and how a render loops one with a fresh link.
 // Run with: npm test
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -151,6 +151,63 @@ describe("generated clips", () => {
     // A refusal says which scene loops the clip.
     const multi = videoRequestSchema.parse({ title: "Tour", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, scenes: [{ script: "One.", background: { type: "color", value: "#101820" } }, { script: "Two.", background: { type: "video", value: footagePath("ft_gone") } }] });
     await assert.rejects(createVideo(multi, "u1"), (e: unknown) => e instanceof ValidationError && /^Scene 2: A scene loops a generated clip that was deleted/.test((e as Error).message));
+  });
+
+  it("feature up to three pictures named in the description, in the first one's shape unless a frame is chosen", async () => {
+    // What is accepted: one to three pictures, not with a first frame, HD only in a chosen landscape or portrait frame.
+    assert.throws(() => ask({ references: [] }), /Add a picture/);
+    assert.throws(() => ask({ references: [png(1), png(2), png(3), png(4)] }), /at most 3 pictures/);
+    assert.throws(() => ask({ image: png(1), references: [png(2)] }), /not both/);
+    assert.throws(() => ask({ references: [png(1)], quality: "hd" }), /landscape or portrait/, "the first picture's shape is standard only");
+    assert.throws(() => ask({ references: [png(1)], aspect: "1:1", quality: "hd" }), /landscape or portrait/);
+    assert.ok(ask({ references: [png(1)], aspect: "9:16", quality: "hd" }));
+    assert.throws(() => ask({ references: [`data:image/png;base64,${"A".repeat(1_300_000)}`] }), /at most 900 KB/);
+    await assert.rejects(startFootage(ask({ references: [png(1), "https://example.com/b.png"] }), "u1"), /Picture 2 must be an image file/);
+    await assert.rejects(startFootage(ask({ references: [`data:image/gif;base64,${Buffer.from("GIF89a").toString("base64")}`] }), "u1"), /The picture to feature is not a PNG or JPEG/);
+
+    // Stored with how many it features and no frame of its own; the pictures themselves are not kept or shown.
+    const job = await startFootage(ask({ references: [png(1), png(2)] }), "u1", { key: "key-refs-1" });
+    assert.deepEqual([job.references, job.aspect, job.fromPicture], [2, undefined, undefined]);
+    assert.equal(JSON.stringify(publicFootage(job)).includes("base64"), false);
+    assert.equal("imageDigest" in publicFootage(job), false);
+    assert.equal((await startFootage(ask({ references: [png(1), png(2)] }), "u1", { key: "key-refs-1" })).id, job.id, "the same start returns the same clip");
+    await assert.rejects(startFootage(ask({ references: [png(2), png(1)] }), "u1", { key: "key-refs-1" }), ConflictError, "the order names the pictures, so another order is another clip");
+    await assert.rejects(startFootage(ask({ references: [png(1)] }), "u1", { key: "key-refs-1" }), ConflictError);
+    await assert.rejects(startFootage(ask({ image: png(1) }), "u1", { key: "key-refs-1" }), ConflictError, "a first frame is not a picture to feature");
+
+    // HeyGen gets reference_to_video with each picture inline, in order, and `adaptive` unless a frame was chosen.
+    const { config } = await import("../config");
+    const saved = { avatar: config.avatarProvider, key: config.heygenApiKey };
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "https://api.heygen.com/v3/models/videos" && init?.method === "POST") {
+        bodies.push(JSON.parse(String(init.body)));
+        return Response.json({ data: { status: "pending", video_id: `vid_ref_${bodies.length}` } }, { status: 202 });
+      }
+      return new Response("unexpected", { status: 500 });
+    }) as typeof fetch;
+    Object.assign(config, { avatarProvider: "heygen", heygenApiKey: "hg_key" });
+    try {
+      const jpeg = `data:image/jpeg;base64,${Buffer.from([0xff, 0xd8, 0xff, 0xe0, 9]).toString("base64")}`;
+      const prompt = "A runner laces up the shoe in <Picture 1> on the track in <Picture 2>, then sets off";
+      await startFootage(ask({ prompt, references: [png(5), jpeg], durationSec: 6 }), "u1");
+      assert.deepEqual(bodies[0], {
+        model: "heygen-video-1",
+        mode: "reference_to_video",
+        prompt,
+        duration: 6,
+        resolution: "768p",
+        aspect_ratio: "adaptive",
+        reference_images: [
+          { type: "base64", media_type: "image/png", data: png(5).slice(png(5).indexOf(",") + 1) },
+          { type: "base64", media_type: "image/jpeg", data: jpeg.slice(jpeg.indexOf(",") + 1) },
+        ],
+      });
+      await startFootage(ask({ prompt, references: [png(5)], aspect: "16:9", quality: "hd" }), "u1");
+      assert.deepEqual([bodies[1].mode, bodies[1].aspect_ratio, bodies[1].resolution], ["reference_to_video", "16:9", "1080p"]);
+    } finally {
+      Object.assign(config, { avatarProvider: saved.avatar, heygenApiKey: saved.key });
+    }
   });
 
   it("ask HeyGen Video with the description or the picture, follow the clip, and say why one is refused", async () => {

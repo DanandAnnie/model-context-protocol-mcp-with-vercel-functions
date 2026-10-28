@@ -1171,6 +1171,58 @@ test("a photo avatar is given a look described in words, with a picture of the c
   for (const id of [avatar.id, ...made]) expect((await page.request.delete(`/api/avatars/${id}`)).status()).toBe(200);
 });
 
+test("a b-roll clip features pictures the description names as <Picture 1>, <Picture 2>", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  await page.goto("/footage");
+  const prompt = page.getByRole("textbox", { name: "Describe the shot", exact: true });
+  await prompt.fill(`A runner ${tag} laces up the shoe in`);
+  const make = page.getByRole("button", { name: "Make the clip" });
+  await page.getByLabel("Feature my pictures").check();
+  await expect(page.getByText("Name them in the description as <Picture 1>, <Picture 2>, in this order.", { exact: false })).toBeVisible();
+  await expect(make).toBeDisabled();
+  await expect(make).toHaveAccessibleDescription("Add a picture to feature, or choose No pictures.");
+  const file = page.locator('input[type="file"][accept="image/*"]');
+  await file.setInputFiles({ name: "shoe.png", mimeType: "image/png", buffer: Buffer.from(TINY_PNG, "base64") });
+  await expect(page.getByTestId("footage-feature")).toHaveCount(1);
+  // The label goes into the description where it is needed.
+  await page.getByRole("button", { name: "Put <Picture 1> in the description" }).click();
+  await expect(prompt).toHaveValue(`A runner ${tag} laces up the shoe in <Picture 1>`);
+  await expect(prompt).toBeFocused();
+  await prompt.press("End");
+  await prompt.pressSequentially(" on the track in ");
+  await file.setInputFiles({ name: "track.png", mimeType: "image/png", buffer: Buffer.from(TINY_PNG, "base64") });
+  await page.getByRole("button", { name: "Put <Picture 2> in the description" }).click();
+  await expect(prompt).toHaveValue(`A runner ${tag} laces up the shoe in <Picture 1> on the track in <Picture 2>`);
+  await expect(page.getByText("2 of 3 pictures")).toBeVisible();
+  // The clip can take the first picture's shape, at standard quality only.
+  await page.getByLabel("Like Picture 1").check();
+  await expect(page.getByLabel("HD (1080p)")).toBeDisabled();
+  await expect(page.getByText("a clip shaped like Picture 1 is standard")).toBeVisible();
+  // A third picture fills the list: the add control goes and the focus lands on that picture's remove button.
+  await file.setInputFiles({ name: "extra.png", mimeType: "image/png", buffer: Buffer.from(TINY_PNG, "base64") });
+  await expect(page.getByRole("button", { name: "Remove Picture 3, extra.png" })).toBeFocused();
+  await expect(file).toHaveCount(0);
+  await page.getByRole("button", { name: "Remove Picture 3, extra.png" }).click();
+  await expect(file).toBeFocused();
+  await page.getByLabel("Portrait 9:16").check();
+  await page.getByLabel("HD (1080p)").check();
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/footage") && r.method() === "POST");
+  await make.click();
+  const body = (await sent).postDataJSON() as { references: string[]; aspect: string; quality: string; image?: string };
+  expect([body.references.length, body.aspect, body.quality, body.image]).toEqual([2, "9:16", "hd", undefined]);
+  expect(body.references.every((r) => r.startsWith("data:image/png;base64,"))).toBe(true);
+  const item = page.getByTestId("footage").filter({ hasText: tag });
+  await expect(item.getByTestId("footage-meta")).toContainText("5 s · features 2 pictures · 9:16 · HD");
+  const first = (await item.getAttribute("data-footage"))!;
+  // A clip shaped like its first picture says so; the pictures themselves are not kept.
+  const shaped = (await (await page.request.post("/api/footage", { data: { prompt: `A shelf ${tag} with the jar in <Picture 1>`, references: [`data:image/png;base64,${TINY_PNG}`] } })).json()).footage as { id: string; aspect?: string; references: number };
+  expect([shaped.references, shaped.aspect]).toEqual([1, undefined]);
+  await page.reload();
+  await expect(page.getByTestId("footage").filter({ hasText: `A shelf ${tag}` }).getByTestId("footage-meta")).toContainText("features a picture · shaped like Picture 1");
+  expect(JSON.stringify((await (await page.request.get("/api/footage")).json()).footage)).not.toContain(TINY_PNG);
+  for (const id of [shaped.id, first]) expect((await page.request.delete(`/api/footage/${id}`)).ok()).toBe(true);
+});
+
 test("a b-roll clip is made from a description and loops behind a presenter as a scene's background", async ({ page }) => {
   const tag = Date.now().toString(36);
   await page.goto("/footage");
@@ -1190,10 +1242,12 @@ test("a b-roll clip is made from a description and loops behind a presenter as a
   await expect(page.getByLabel("HD (1080p)")).toBeDisabled();
   await expect(page.getByText("HD clips are landscape or portrait, not square.")).toBeVisible();
   // HD chosen for a picture does not come back once the picture is removed on a square frame.
+  await page.getByLabel("Open on a picture").check();
   await page.locator('input[type="file"][accept="image/*"]').setInputFiles({ name: "frame.png", mimeType: "image/png", buffer: Buffer.from(TINY_PNG, "base64") });
   await page.getByLabel("HD (1080p)").check();
   await page.getByRole("button", { name: "Remove frame.png" }).click();
   await expect(page.getByLabel("Standard (768p)")).toBeChecked();
+  await page.getByLabel("No pictures").check();
   await page.getByLabel("Landscape 16:9").check();
   await expect(page.getByLabel("Standard (768p)")).toBeChecked();
   await page.getByLabel("Square 1:1").check();

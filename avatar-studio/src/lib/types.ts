@@ -117,9 +117,13 @@ export type FootageAspect = (typeof FOOTAGE_ASPECTS)[number];
 export const FOOTAGE_MIN_SEC = 5;
 export const FOOTAGE_MAX_SEC = 15;
 
+/** Pictures a clip can be asked to feature (a product, a place, a person), in the order the description names them. */
+export const MAX_FOOTAGE_REFERENCES = 3;
+
 /**
- * A short clip the renderer generates from a description of the shot, or brings to life from a picture as its first
- * frame (HeyGen Video): b-roll to watch, download, or loop behind a presenter as a scene's video background.
+ * A short clip the renderer generates from a description of the shot, brings to life from a picture as its first
+ * frame, or builds around pictures of things it must feature (HeyGen Video): b-roll to watch, download, or loop behind
+ * a presenter as a scene's video background.
  */
 export interface FootageJob {
   id: string;
@@ -128,11 +132,16 @@ export interface FootageJob {
   /** The shot, in words, and whether a picture was its first frame (the picture is not kept). */
   prompt: string;
   fromPicture?: true;
+  /** How many pictures the shot features, named in the description as <Picture 1>, <Picture 2>… (not kept). */
+  references?: number;
   durationSec: number;
-  /** The frame asked for; a clip from a picture follows the picture, so it has none. */
+  /**
+   * The frame asked for; a clip from a picture follows the picture, so it has none, and a clip featuring pictures
+   * without one follows the first picture's shape.
+   */
   aspect?: FootageAspect;
   quality: "standard" | "hd";
-  /** A digest of the picture, so a retried start with the same key is known to be the same one. Server only. */
+  /** A digest of the picture or pictures, so a retried start with the same key is known to be the same one. Server only. */
   imageDigest?: string;
   /** Renderer generating it, and its job id there, never shown to the account. */
   provider: string;

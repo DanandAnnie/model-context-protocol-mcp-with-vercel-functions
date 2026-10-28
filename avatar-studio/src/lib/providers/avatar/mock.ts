@@ -10,6 +10,15 @@ import { SHOOT_ASPECTS, type ShootAspect } from "../../types";
 /** Labeled, self-hosted stand-in; no avatar synthesis or paid operation occurs. */
 const SAMPLE_VIDEO = SAMPLE_PREVIEW_VIDEO;
 const SAMPLE_THUMB = "/demo/poster.svg";
+/** A demo photo: a drawn figure on a gradient, in the photo's own shape (at a tenth of its size), its colours from the seed. */
+function shootSvg(width: number, height: number, seed: number): string {
+  const [w, h] = [Math.round(width / 10), Math.round(height / 10)];
+  const hue = seed % 360;
+  const r = Math.min(w, h) / 6;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${hue},60%,55%)"/><stop offset="1" stop-color="hsl(${(hue + 60) % 360},60%,35%)"/></linearGradient></defs><rect width="${w}" height="${h}" fill="url(#g)"/><circle cx="${w / 2}" cy="${h / 2 - r}" r="${r}" fill="rgba(255,255,255,0.9)"/><path d="M${w / 2 - 2 * r} ${h} C${w / 2 - 2 * r} ${h / 2 + r} ${w / 2 + 2 * r} ${h / 2 + r} ${w / 2 + 2 * r} ${h} Z" fill="rgba(255,255,255,0.9)"/></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
 /** HeyGen Image's delivered sizes for each shape. */
 const SHOOT_SIZES: Record<ShootAspect, [number, number]> = { "1:1": [2176, 2176], "2:3": [2176, 3264], "3:2": [3264, 2176], "3:4": [2160, 2880], "4:3": [2880, 2160], "4:5": [2176, 2720], "5:4": [2720, 2176], "9:16": [2160, 3840], "16:9": [3840, 2160] };
 const SAMPLE_GIF = "/demo/preview.gif";
@@ -111,7 +120,7 @@ export class MockAvatarProvider implements AvatarProvider {
     if (Date.now() - Number(m[1]) < MockAvatarProvider.CLIP_MS) return { status: "processing" };
     const [width, height] = SHOOT_SIZES[m[4] === "x" ? "3:4" : SHOOT_ASPECTS[Number(m[4])]];
     const seed = Number(m[3]);
-    return { status: "completed", photos: Array.from({ length: Number(m[2]) }, (_, i) => ({ url: portraitSvg("Photo shoot", seed + i), width, height, seed: seed + i })) };
+    return { status: "completed", photos: Array.from({ length: Number(m[2]) }, (_, i) => ({ url: shootSvg(width, height, seed + i), width, height, seed: seed + i })) };
   }
 
   async startCleanup() {

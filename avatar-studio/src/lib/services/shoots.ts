@@ -20,16 +20,16 @@ export const MAX_SHOOTS = 50;
 export const MAX_SHOOT_PICTURE_BYTES = 500 * 1024;
 const dataUrlMax = (bytes: number) => Math.ceil((bytes * 4) / 3) + 100;
 
+// The pictures come first, so a request with several mistakes leads with the one about a picture (the page shows the first).
 export const shootRequestSchema = z
   .object({
-    title: z.string().trim().max(120).optional(),
     /** Data URLs of PNG or JPEG photos of one person, their face clearly seen: several views of the same face. */
     identity: z
       .array(z.string("Each photo of the person is a data URL"), "Add a photo of the person")
-      .min(1, "Add a photo of the person")
-      .max(MAX_SHOOT_IDENTITY, `A shoot takes at most ${MAX_SHOOT_IDENTITY} photos of the person`)
-      // Checked on the list, so the one message for a photo too large names it, whatever else is wrong with the request.
+      // The count and each photo's size in one check, which runs only on a list: one message, naming the photo too large.
       .superRefine((photos, ctx) => {
+        if (!photos.length) return void ctx.addIssue({ code: "custom", message: "Add a photo of the person" });
+        if (photos.length > MAX_SHOOT_IDENTITY) return void ctx.addIssue({ code: "custom", message: `A shoot takes at most ${MAX_SHOOT_IDENTITY} photos of the person` });
         photos.forEach((p, i) => {
           if (p.length > dataUrlMax(MAX_SHOOT_PICTURE_BYTES)) ctx.addIssue({ code: "custom", path: [i], message: `${photos.length > 1 ? `Photo ${i + 1} of the person` : "The photo of the person"} must be at most 500 KB` });
         });
@@ -43,6 +43,7 @@ export const shootRequestSchema = z
     seed: z.number("A seed is a whole number").int("A seed is a whole number").min(0, "A seed is 0 or more").max(MAX_FOOTAGE_SEED, `A seed is at most ${MAX_FOOTAGE_SEED}`).optional(),
     /** The person in the photos agreed to be photographed this way, or is the one asking. */
     consent: z.literal(true, "Confirm that you have the right to use this person's face"),
+    title: z.string("A title is text").trim().max(120, "A title is at most 120 characters").optional(),
   })
   .strict();
 type ShootRequest = z.infer<typeof shootRequestSchema>;

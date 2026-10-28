@@ -346,7 +346,8 @@ export default function FootagePage() {
       <p role="status" className="sr-only">
         {note ?? ""}
       </p>
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_1.4fr]">
+      {/* Each column no wider than its share, so a long title is cut short rather than widening the page. */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
         <Card className="p-5">
           {data?.available === false ? (
             <p className="text-sm text-slate-600">Generated clips need the HeyGen renderer; the current renderer has no such feature.</p>
@@ -372,7 +373,7 @@ export default function FootagePage() {
                   What is seen, what happens, and how the camera moves. {prompt.length} of {MAX_PROMPT} characters.
                 </p>
               </div>
-              <fieldset disabled={canEdit === false}>
+              <fieldset disabled={canEdit === false} className="min-w-0">
                 <legend className="mb-1.5 text-sm font-medium text-slate-700">Pictures</legend>
                 <div className="flex flex-wrap gap-x-4 gap-y-2 text-sm text-slate-700">
                   {USES.map((u) => (
@@ -478,7 +479,7 @@ export default function FootagePage() {
                   </button>
                 </div>
               )}
-              <fieldset disabled={!!frame || canEdit === false}>
+              <fieldset disabled={!!frame || canEdit === false} className="min-w-0">
                 <legend className="mb-1.5 text-sm font-medium text-slate-700">Frame</legend>
                 {frame ? (
                   <p className="text-xs text-slate-500">The picture&apos;s own shape.</p>
@@ -499,7 +500,7 @@ export default function FootagePage() {
                   </div>
                 )}
               </fieldset>
-              <fieldset disabled={canEdit === false}>
+              <fieldset disabled={canEdit === false} className="min-w-0">
                 <legend className="mb-1.5 text-sm font-medium text-slate-700">Quality</legend>
                 <div className="flex flex-wrap gap-4 text-sm text-slate-700">
                   <label className="flex min-h-6 items-center gap-2">
@@ -535,7 +536,7 @@ export default function FootagePage() {
           )}
         </Card>
 
-        <div ref={listRef}>
+        <div ref={listRef} className="min-w-0">
           <h2 ref={headingRef} tabIndex={-1} className="mb-3 text-sm font-semibold text-slate-900 outline-none">
             Your clips
           </h2>

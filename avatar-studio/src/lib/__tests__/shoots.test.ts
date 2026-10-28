@@ -53,6 +53,10 @@ describe("photo shoots", () => {
     assert.equal(first({ identity: [big] }), "The photo of the person must be at most 500 KB");
     assert.equal(shootRequestSchema.safeParse({ identity: [png(1), big], reference: jpeg(1) }).error!.issues[0].message, "Photo 2 of the person must be at most 500 KB");
     assert.match(first({ reference: big })!, /scene picture must be at most 500 KB/);
+    // A request with several mistakes leads with the picture's; each message is the studio's own.
+    assert.equal(first({ identity: [png(1), big], title: "x".repeat(121) }), "Photo 2 of the person must be at most 500 KB");
+    assert.equal(first({ title: "x".repeat(121) }), "A title is at most 120 characters");
+    assert.deepEqual(shootRequestSchema.safeParse({ identity: "abcdefgh", reference: jpeg(1), consent: true }).error!.issues.map((i) => i.message), ["Add a photo of the person"], "a list that is not one gets one message");
   });
 
   it("are made in demo mode, followed until ready, and kept private", async () => {
@@ -76,6 +80,8 @@ describe("photo shoots", () => {
       ],
       "each photo in the shape asked for, its seed one more than the one before",
     );
+    // The demo's drawn photos are in that shape too, so the page shows them as they will be.
+    assert.match(decodeURIComponent(done.photos![0].url), /viewBox="0 0 218 272"/);
     assert.deepEqual(await listShoots("u2"), [], "another account sees none");
     await assert.rejects(deleteShoot(job.id, "u2"), /not found/i);
     const exported = JSON.stringify(await exportOwnerData("u1"));

@@ -20,8 +20,10 @@ const newKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? 
 const RELINK_MS = 30 * 60 * 1000;
 /** Each picture of a start: six of them still fit in one request. */
 const MAX_PICTURE_BYTES = 500 * 1024;
+/** The time of day, as an untitled shoot is told apart by. */
+const clock = () => new Date().toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" });
 /** A scene picture's file name as a title: without its extension, cut to fit. */
-const sceneName = (file: string) => (file.replace(/\.[A-Za-z0-9]{1,5}$/, "").trim() || "scene").slice(0, 100);
+const sceneName = (file: string) => (file.replace(/\.[A-Za-z0-9]{1,5}$/, "").trim() || "scene").slice(0, 80);
 const SHAPES: Record<ShootAspect, string> = {
   "1:1": "Square 1:1",
   "2:3": "Portrait 2:3",
@@ -134,10 +136,12 @@ export default function PhotoShootPage() {
       const picture = { name: file.name, url: await toUploadable(file, { maxBytes: MAX_PICTURE_BYTES, maxEdge: 1536 }) };
       if (into === "scene") {
         setScene(picture);
+        say(setNote, `Scene picture added (${file.name}).`);
         // The add control gives way to the picture; the focus goes to its remove button.
         focusAfterRender(() => document.getElementById("shoot-scene-remove"));
       } else {
         setIdentity((prev) => (prev.length < MAX_SHOOT_IDENTITY ? [...prev, picture] : prev));
+        say(setNote, `Photo ${identity.length + 1} of the person added (${file.name}).`);
         // When the last one is added, the add control goes, so the focus moves to that photo's remove button.
         if (identity.length + 1 >= MAX_SHOOT_IDENTITY) focusAfterRender(() => document.getElementById(`shoot-person-remove-${MAX_SHOOT_IDENTITY - 1}`));
       }
@@ -164,6 +168,13 @@ export default function PhotoShootPage() {
     focusAfterRender(() => sceneRef.current);
   }
 
+  // An untitled shoot is named after its scene and the time, kept for this start's key so a retry sends the same body.
+  const named = useRef<{ key: string; title: string } | null>(null);
+  function defaultTitle(): string {
+    if (named.current?.key !== requestKey) named.current = { key: requestKey, title: `Photo shoot: ${sceneName(scene!.name)}, ${clock()}` };
+    return named.current.title;
+  }
+
   async function submit() {
     setBusy(true);
     setErr(null);
@@ -176,7 +187,7 @@ export default function PhotoShootPage() {
         count,
         consent: true,
         // Without a title, the scene's file name tells shoots apart (the same in a retry, which sends the same body).
-        title: title.trim() || `Photo shoot: ${sceneName(scene!.name)}`,
+        title: title.trim() || defaultTitle(),
       };
       const { shoot } = await api<{ shoot: Shoot }>("/api/shoots", { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": requestKey } });
       setData((prev) => ({ available: prev?.available ?? true, shoots: [shoot, ...(prev?.shoots ?? []).filter((s) => s.id !== shoot.id)] }));
@@ -227,13 +238,14 @@ export default function PhotoShootPage() {
       <p role="status" className="sr-only">
         {note ?? ""}
       </p>
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_1.4fr]">
+      {/* Each column no wider than its share, so a long title or file name is cut short rather than widening the page. */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
         <Card className="p-5">
           {data?.available === false ? (
             <p className="text-sm text-slate-600">Photo shoots need the HeyGen renderer; the current renderer has no such feature.</p>
           ) : (
             <div className="space-y-5">
-              <fieldset disabled={canEdit === false}>
+              <fieldset disabled={canEdit === false} className="min-w-0">
                 <legend className="mb-1 text-sm font-medium text-slate-700">The person</legend>
                 <p id="shoot-person-hint" className="mb-2 text-xs text-slate-500">
                   1 to {MAX_SHOOT_IDENTITY} clear photos of one person&apos;s face; a few views help. Their face, hair, and expression come from these (photos looking at the camera look at it in the results). Large pictures are shrunk.
@@ -263,7 +275,7 @@ export default function PhotoShootPage() {
                 </p>
               </fieldset>
 
-              <fieldset disabled={canEdit === false}>
+              <fieldset disabled={canEdit === false} className="min-w-0">
                 <legend className="mb-1 text-sm font-medium text-slate-700">The scene</legend>
                 <p id="shoot-scene-hint" className="mb-2 text-xs text-slate-500">
                   A picture of exactly one person, their whole head in frame. The photos take its pose, clothing, light, and setting; that person never appears.
@@ -291,7 +303,7 @@ export default function PhotoShootPage() {
                     Shape
                   </label>
                   <select id="shoot-shape" className={inputClass} value={aspect} disabled={busy || canEdit === false} onChange={(e) => (setAspect(e.target.value as ShootAspect | "scene"), changed())}>
-                    <option value="scene">Like the scene picture</option>
+                    <option value="scene">Like the scene</option>
                     {SHOOT_ASPECTS.map((a) => (
                       <option key={a} value={a}>
                         {SHAPES[a]}
@@ -317,7 +329,7 @@ export default function PhotoShootPage() {
                 <label htmlFor="shoot-title" className="mb-1.5 block text-sm font-medium text-slate-700">
                   Title (optional)
                 </label>
-                <input id="shoot-title" className={inputClass} value={title} maxLength={120} disabled={busy || canEdit === false} onChange={(e) => (setTitle(e.target.value), changed())} placeholder={scene ? `Photo shoot: ${sceneName(scene.name)}` : "Photo shoot: the scene's file name"} />
+                <input id="shoot-title" className={inputClass} value={title} maxLength={120} disabled={busy || canEdit === false} onChange={(e) => (setTitle(e.target.value), changed())} placeholder={scene ? `Photo shoot: ${sceneName(scene.name)}, and the time` : "Photo shoot: the scene's file name and the time"} />
               </div>
 
               <div>
@@ -344,7 +356,7 @@ export default function PhotoShootPage() {
           )}
         </Card>
 
-        <div ref={listRef}>
+        <div ref={listRef} className="min-w-0">
           <h2 ref={headingRef} tabIndex={-1} className="mb-3 text-sm font-semibold text-slate-900 outline-none">
             Your photo shoots
           </h2>

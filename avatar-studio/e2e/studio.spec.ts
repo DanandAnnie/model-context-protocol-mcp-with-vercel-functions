@@ -4612,12 +4612,14 @@ test("a photo shoot puts a person's face in a scene picture, with their consent,
   await expect(person).toHaveAccessibleDescription(/1 to 5 clear photos of one person's face/);
   await person.setInputFiles({ name: "front.png", mimeType: "image/png", buffer: Buffer.from(TINY_PNG, "base64") });
   await expect(page.getByRole("img", { name: "Photo 1 of the person: front.png" })).toBeVisible();
+  await expect(page.locator('p[role="status"]')).toHaveText("Photo 1 of the person added (front.png).");
   await page.getByLabel("Add another photo of the person").setInputFiles({ name: "side.png", mimeType: "image/png", buffer: Buffer.from(TINY_PNG, "base64") });
   await expect(page.getByText("2 of 5 photos")).toBeVisible();
   await expect(make).toHaveAccessibleDescription("Add the scene picture.");
   await page.getByLabel("Add the scene picture").setInputFiles({ name: "train.png", mimeType: "image/png", buffer: Buffer.from(TINY_PNG, "base64") });
   // The scene's add control gives way to the picture, and the focus goes to its remove button.
   await expect(page.getByRole("button", { name: "Remove the scene picture, train.png" })).toBeFocused();
+  await expect(page.locator('p[role="status"]')).toHaveText("Scene picture added (train.png).");
   await expect(make).toHaveAccessibleDescription("Confirm that you have the right to use this person's face.");
   const consent = page.getByLabel("I have the right to use this person's face");
   await expect(consent).toHaveAccessibleDescription(/A public photo is not permission/);
@@ -4653,11 +4655,11 @@ test("a photo shoot puts a person's face in a scene picture, with their consent,
   await expect(item.getByRole("link", { name: `Download photo 2 of Train window ${tag}` })).toHaveAttribute("download", "");
   // Without a title, the scene's file name names the shoot, so two shoots are told apart.
   await page.getByLabel("Add the scene picture").setInputFiles({ name: "harbour.png", mimeType: "image/png", buffer: Buffer.from(TINY_PNG, "base64") });
-  await expect(page.getByLabel("Title (optional)")).toHaveAttribute("placeholder", "Photo shoot: harbour");
+  await expect(page.getByLabel("Title (optional)")).toHaveAttribute("placeholder", "Photo shoot: harbour, and the time");
   await consent.check();
   const untitled = page.waitForRequest((r) => r.url().endsWith("/api/shoots") && r.method() === "POST");
   await make.click();
-  expect((await untitled).postDataJSON().title).toBe("Photo shoot: harbour");
+  expect((await untitled).postDataJSON().title).toMatch(/^Photo shoot: harbour, \d{1,2}:\d{2}:\d{2}/);
   const harbour = page.getByTestId("shoot").filter({ hasText: "Photo shoot: harbour" }).first();
   await expect(harbour).toBeVisible();
   expect((await page.request.delete(`/api/shoots/${await harbour.getAttribute("data-shoot")}`)).ok()).toBe(true);
@@ -4671,6 +4673,27 @@ test("a photo shoot puts a person's face in a scene picture, with their consent,
   const listed = (await (await page.request.get("/api/shoots")).json()).shoots as Array<Record<string, unknown>>;
   const id = (await item.getAttribute("data-shoot"))!;
   expect(Object.keys(listed.find((s) => s.id === id)!).filter((k) => ["provider", "providerJobId", "pictureDigest", "ownerId"].includes(k))).toEqual([]);
+  // A long file name or title is cut short: the page never scrolls sideways, on a phone or beside the list.
+  const longName = `${"a-really-long-file-name-for-the-photo-of-the-person-".repeat(2)}2026.png`;
+  const long = (await (await page.request.post("/api/shoots", { data: { identity: [`data:image/png;base64,${TINY_PNG}`], reference: `data:image/png;base64,${TINY_PNG}`, consent: true, aspect: "16:9", title: "x".repeat(120) } })).json()).shoot as { id: string };
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.reload();
+  await expect(page.getByTestId("shoot").filter({ hasText: "x".repeat(120) }).getByText("Completed")).toBeVisible({ timeout: 20_000 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+  expect((await page.getByLabel("Shape").boundingBox())!.width).toBeGreaterThan(150);
+  // The demo's photos are drawn in the shape asked for, as HeyGen's are.
+  const wide = page.getByRole("img", { name: `Photo 1 of ${"x".repeat(120)}, 3840 × 2160` });
+  const box = (await wide.boundingBox())!;
+  expect(box.width / box.height).toBeCloseTo(16 / 9, 1);
+  await page.setViewportSize({ width: 375, height: 800 });
+  // (The form starts again after the reload.)
+  await page.getByLabel("Add a photo of the person").setInputFiles({ name: longName, mimeType: "image/png", buffer: Buffer.from(TINY_PNG, "base64") });
+  await expect(page.getByRole("img", { name: `Photo 1 of the person: ${longName}` })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  expect((await page.request.delete(`/api/shoots/${long.id}`)).ok()).toBe(true);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.reload();
+  await expect(item).toBeVisible();
   // Deleting it says so and moves the focus to the next shoot, or to the list's heading when it was the last one.
   const next = (await page.getByTestId("shoot").count()) > 1 ? page.getByTestId("shoot").filter({ hasNotText: `Train window ${tag}` }).first() : page.getByRole("heading", { name: "Your photo shoots" });
   page.once("dialog", (d) => void d.accept());

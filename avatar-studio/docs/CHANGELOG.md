@@ -478,3 +478,16 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - An upload during the first list load could be dropped as deleted; uploading now waits for the list, and Generate waits for an upload.
     - Refusals ended with "choose another photo" in the brief's context.
   - Not changed: clips and photos from a renderer used before are offered and then refused by name, as the lists do not say which renderer made them.
+- QA pass 30 (`349d4d2`): a browser pass over the pictures-and-clips picker at phone width, with ten items chosen and a long name. Arrow keys in the list add nothing, Add and the focus moves work, the choice stops at 10 with the list and upload disabled, a text file is refused with a message, nothing scrolls sideways, axe finds no violations, and a viewer cannot change it. One finding: the video page ran every chosen name together in one semicolon-joined line; it is now a list, one per line.
+- Dub glossaries under HeyGen's one glossary per workspace (`92550d3`). Since October 2026 a HeyGen workspace has one brand glossary, and `POST /v3/brand-glossaries` answers `409` once it has one. The studio made a glossary per set of terms, so in any workspace that already had one, dubs keeping the brand kit's terms or following its forced translations failed. Every dub's rules now go into the workspace's one glossary:
+  - Which glossary: the studio's own, else one made in HeyGen's app, else one of the studio's old per-set glossaries (adopted: renamed, and its language-less rules cleared), else a new one.
+  - Each rule is a forced translation scoped to the dub's language; a kept term is translated to itself, since HeyGen's don't-translate list applies in every language.
+  - How it is written: the glossary is read, merged, written back, and read again to see the write held, with concurrent edits tried again.
+  - Shared across accounts: the latest rule for a term and language wins, and regional dubs share their base language's rules; both are documented in API.md.
+  - Unit coverage includes a HeyGen mock that keeps one glossary, replays creates by key, and simulates edits it does not notice.
+  - An independent review, in two rounds, found blocking defects in earlier drafts. All are fixed before the commit:
+    - a constant idempotency key replayed a deleted glossary;
+    - an unresolved language wrote a rule for every language;
+    - the ten-minute memo stayed stale after another account's rule replaced one;
+    - adopting an old glossary kept its language-less rules.
+    - Its should-fix findings are fixed too: the glossary is read back after writing, glossary calls have time limits, only refusals about the glossary are retried, and the workspace's own glossary is preferred over the studio's old ones.

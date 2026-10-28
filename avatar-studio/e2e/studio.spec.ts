@@ -2836,6 +2836,57 @@ test("captions are served as SRT and VTT, security headers are set", async ({ pa
   expect(checked.some((html) => html.includes('aria-pressed="true"') && html.includes("minimal")), "and the chosen look button").toBe(true);
 });
 
+test("the editor's chosen options, scene chips, and hints keep readable text on a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  await page.locator("textarea").fill("Welcome in, let me show you around.");
+  await page.getByRole("button", { name: "Add scene" }).click();
+  await page.locator("textarea").fill("The kitchen was redone last spring.");
+  // Every node in view is judged: none fails, and none is left undecided.
+  const contrast = async (...selectors: string[]) => {
+    let builder = new AxeBuilder({ page }).withRules(["color-contrast"]);
+    for (const sel of selectors) builder = builder.include(sel);
+    const axe = await builder.analyze();
+    expect(axe.violations.flatMap((v) => v.nodes.map((n) => n.target.join(" ")))).toEqual([]);
+    expect(axe.incomplete.filter((r) => r.id === "color-contrast").flatMap((r) => r.nodes.map((n) => n.target.join(" ")))).toEqual([]);
+    return axe.passes.filter((r) => r.id === "color-contrast").flatMap((r) => r.nodes.map((n) => n.html));
+  };
+  // The note under an option is its own node, so the check names it, not the button around it.
+  const note = (html: string, text: string) => html.startsWith("<div") && html.includes("text-[11px]") && html.includes(text);
+  // The chosen scene's chip sits on the tinted brand fill, the other on white.
+  await page.getByTestId("scene-duration").first().scrollIntoViewIfNeeded();
+  let checked = await contrast('[data-testid="scene-duration"]');
+  expect(checked.filter((html) => html.includes('data-testid="scene-duration"'))).toHaveLength(2);
+  // The on-screen text hint and the character count under it.
+  const overlay = page.getByLabel(/On-screen text for scene 2/);
+  await overlay.fill("Spring sale");
+  const [notes, input] = await page.evaluate(
+    ([a, b]) => [CSS.escape(a), CSS.escape(b)],
+    [(await overlay.getAttribute("aria-describedby"))!, (await overlay.getAttribute("id"))!],
+  );
+  // axe passes over text outside the viewport without a word, so the notes are brought into view.
+  await page.locator(`#${notes}`).scrollIntoViewIfNeeded();
+  checked = await contrast(`#${notes}`, `label[for="${input}"]`);
+  expect(checked.some((html) => html.includes("characters, shown on one line")), "the character count was checked").toBe(true);
+  expect(checked.some((html) => html.includes("(optional: a title")), "the hint was checked").toBe(true);
+  await page.getByRole("button", { name: "Background" }).click();
+  await page.getByLabel("Image URL").fill("https://example.com/kitchen.jpg");
+  const fit = page.getByRole("group", { name: "Background fit" });
+  await expect(fit.getByRole("button", { name: /Fill the frame/ })).toHaveAttribute("aria-pressed", "true");
+  await fit.scrollIntoViewIfNeeded();
+  checked = await contrast('[aria-label="Background fit"]');
+  expect(checked.some((html) => note(html, "Cropped to the frame")), "the chosen fit's note was checked").toBe(true);
+  await page.getByRole("button", { name: "Settings" }).click();
+  // The chosen ratio is announced as chosen, as the chosen quality is, not shown by colour alone.
+  const aspect = page.getByRole("group", { name: "Aspect ratio" });
+  await expect(aspect.getByRole("button", { name: /16:9/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(aspect.getByRole("button", { name: /9:16/ })).toHaveAttribute("aria-pressed", "false");
+  await aspect.scrollIntoViewIfNeeded();
+  checked = await contrast('[aria-label="Aspect ratio"]', '[aria-label="Output quality"]');
+  expect(checked.some((html) => note(html, "Landscape")), "the chosen ratio's note was checked").toBe(true);
+  expect(checked.some((html) => note(html, "Full HD")), "the chosen quality's note was checked").toBe(true);
+});
+
 /** A 1x1 transparent PNG. */
 const TINY_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 

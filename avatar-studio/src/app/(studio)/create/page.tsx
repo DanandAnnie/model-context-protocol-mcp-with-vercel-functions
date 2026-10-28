@@ -1109,9 +1109,9 @@ function CreateInner() {
                   <span className="h-2.5 w-2.5 rounded-full border border-black/10" style={sc.background.type === "color" ? { background: sc.background.value } : sc.background.type === "video" ? { background: "linear-gradient(135deg,#0f172a,#475569)" } : { background: "linear-gradient(135deg,#94a3b8,#cbd5e1)" }} />
                   {i + 1}
                   {sc.script.trim() ? (
-                    <span className="font-normal text-slate-400" data-testid="scene-duration">{sc.audioId ? "" : "~"}{formatSeconds(Math.max(1, sceneSeconds(sc)))}</span>
+                    <span className={`font-normal ${i === activeIdx ? "text-brand-600" : "text-slate-500"}`} data-testid="scene-duration">{sc.audioId ? "" : "~"}{formatSeconds(Math.max(1, sceneSeconds(sc)))}</span>
                   ) : (
-                    <span className="text-amber-500" title="Empty scene">•</span>
+                    <span className="text-amber-700" title="Empty scene">•</span>
                   )}
                 </button>
               ))}
@@ -1180,7 +1180,7 @@ function CreateInner() {
                   <Copy className="h-4 w-4" />
                 </button>
                 {scenes.length > 1 && (
-                  <button type="button" onClick={() => removeScene(activeIdx)} aria-label="Remove scene" className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs text-slate-500 hover:bg-rose-50 hover:text-rose-600">
+                  <button type="button" onClick={() => removeScene(activeIdx)} aria-label="Remove scene" className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs text-slate-500 hover:bg-rose-50 hover:text-rose-700">
                     <Trash2 className="h-3.5 w-3.5" /> Remove scene {activeIdx + 1}
                   </button>
                 )}
@@ -1189,7 +1189,7 @@ function CreateInner() {
             {importNote && (
               <p role="status" className="-mt-1 mb-3 flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="import-note">
                 <span>{importNote}</span>
-                <button type="button" onClick={() => setImportNote(null)} aria-label="Dismiss" className="rounded p-0.5 text-slate-400 hover:text-slate-600">
+                <button type="button" onClick={() => setImportNote(null)} aria-label="Dismiss" className="rounded p-0.5 text-slate-500 hover:text-slate-700">
                   <X className="h-3.5 w-3.5" />
                 </button>
               </p>
@@ -1640,7 +1640,7 @@ function CreateInner() {
                           className={`rounded-lg border px-3 py-2 text-left text-sm font-medium ${(background.fit ?? "cover") === f ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}
                         >
                           {f === "cover" ? "Fill the frame" : "Show all of it"}
-                          <div className="text-[11px] font-normal text-slate-500">{f === "cover" ? "Cropped to the frame's shape" : "Whole, with plain bars, in the preview; renders fill the frame"}</div>
+                          <div className="text-[11px] font-normal text-slate-600">{f === "cover" ? "Cropped to the frame's shape" : "Whole, with plain bars, in the preview; renders fill the frame"}</div>
                         </button>
                       ))}
                     </div>
@@ -1704,22 +1704,24 @@ function CreateInner() {
 
             {tab === "settings" && (
               <div className="space-y-5">
-                <div>
+                <div role="group" aria-label="Aspect ratio">
                   <div className="mb-2 text-sm font-medium text-slate-700">Aspect ratio</div>
                   <div className="grid grid-cols-3 gap-2">
                     {(["16:9", "9:16", "1:1"] as AspectRatio[]).map((a) => (
                       <button
                         key={a}
+                        type="button"
+                        aria-pressed={aspect === a}
                         onClick={() => setAspect(a)}
                         className={`rounded-lg border px-3 py-3 text-sm font-medium ${aspect === a ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}
                       >
                         {a}
-                        <div className="text-[11px] font-normal text-slate-500">{a === "16:9" ? "Landscape" : a === "9:16" ? "Portrait" : "Square"}</div>
+                        <div className="text-[11px] font-normal text-slate-600">{a === "16:9" ? "Landscape" : a === "9:16" ? "Portrait" : "Square"}</div>
                       </button>
                     ))}
                   </div>
                 </div>
-                <div>
+                <div role="group" aria-label="Output quality">
                   <div className="mb-2 text-sm font-medium text-slate-700">Output quality</div>
                   <div className="grid grid-cols-2 gap-2">
                     {RESOLUTIONS.map((r) => (
@@ -1731,7 +1733,7 @@ function CreateInner() {
                         className={`rounded-lg border px-3 py-3 text-sm font-medium ${resolution === r ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}
                       >
                         {r}
-                        <div className="text-[11px] font-normal text-slate-500">{r === "720p" ? "HD · faster, smaller file" : "Full HD · best quality"}</div>
+                        <div className="text-[11px] font-normal text-slate-600">{r === "720p" ? "HD · faster, smaller file" : "Full HD · best quality"}</div>
                       </button>
                     ))}
                   </div>
@@ -2103,7 +2105,7 @@ function SceneTextFields({ overlay, aspect, captionsAt, scene, disabled, onChang
   return (
     <div className="mt-3 space-y-2">
       <label className="block text-xs font-medium text-slate-600" htmlFor={id}>
-        On-screen text{scene ? ` for scene ${scene}` : ""} <span className="font-normal text-slate-400">(optional: a title, a name and role, a price)</span>
+        On-screen text{scene ? ` for scene ${scene}` : ""} <span className="font-normal text-slate-500">(optional: a title, a name and role, a price)</span>
       </label>
       <input
         id={id}
@@ -2146,7 +2148,7 @@ function SceneTextFields({ overlay, aspect, captionsAt, scene, disabled, onChang
       )}
       {shown && (
         <div id={`${id}-notes`} className="space-y-1 text-xs">
-          <p className="text-slate-400">{graphemes(shown).length}/{MAX_SCENE_TEXT} characters, shown on one line</p>
+          <p className="text-slate-500">{graphemes(shown).length}/{MAX_SCENE_TEXT} characters, shown on one line</p>
           <p className="text-slate-500">Shown in the preview and kept with the scene. HeyGen&apos;s current API has no text element, so the rendered video does not carry it yet.</p>
           {!sceneTextFits({ ...overlay, text: shown }, aspect) && (
             <p role="alert" className="font-medium text-amber-700">Too long for one line across a {aspect} frame at this size: shorten it or choose a smaller size, or it runs off the edges.</p>

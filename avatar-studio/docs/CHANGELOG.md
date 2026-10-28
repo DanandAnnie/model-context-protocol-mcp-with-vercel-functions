@@ -469,3 +469,12 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - A few plain approvals ("Render the video", "Yes, render", "Go-ahead", "LGTM") had become feedback; they approve again. A table of both cases is unit tested.
     - The focus moved to the status line even if the person had moved on to another field while the answer was on its way. It now moves only from the form or the page body.
     - The focus is now moved in the same frame the words are set, so an identical note can no longer leave a pending focus move for a later announcement.
+- Pictures and clips for HeyGen's Video Agent (`99b86c4`): a directed video can carry up to 10 of the account's own pictures (uploaded images), finished b-roll clips, and finished photo shoot photos. They are sent as the agent's `files` on `POST /v3/video-agents`: a picture as a HeyGen image asset, uploaded once as the video starts and remembered as for a background, and a clip or photo by a fresh link. The brief asks the agent to use them where they fit. They are checked and named at every start, a retry included; one deleted, another account's, not finished, or made with another renderer is refused before anything starts. The video keeps `directed.media`, shows it on its page, and chooses it again when the agent is asked again, leaving out any gone since and saying so. The agent page has a picker: choose from the list then press Add, or upload a picture there. The demo agent says how many files it was given. Unit coverage checks the exact files sent (asset or link), the upload reused on a retry, and the refusals; an e2e test chooses, uploads, removes, generates, and asks again after a picture was deleted.
+  - An independent review found nothing blocking. Fixed before the commit:
+    - The picture upload ran before the start, so trouble at HeyGen was a raw 500 with nothing stored; it now leaves a failed video like any start.
+    - An upload finishing late could undo a choice made meanwhile.
+    - The focus was lost after an upload.
+    - Moving through the list with the arrow keys added each item; adding now takes an Add button.
+    - An upload during the first list load could be dropped as deleted; uploading now waits for the list, and Generate waits for an upload.
+    - Refusals ended with "choose another photo" in the brief's context.
+  - Not changed: clips and photos from a renderer used before are offered and then refused by name, as the lists do not say which renderer made them.

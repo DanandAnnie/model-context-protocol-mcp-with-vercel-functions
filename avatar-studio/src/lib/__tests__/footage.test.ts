@@ -162,6 +162,10 @@ describe("generated clips", () => {
     assert.throws(() => ask({ references: [png(1)], aspect: "1:1", quality: "hd" }), /landscape or portrait/);
     assert.ok(ask({ references: [png(1)], aspect: "9:16", quality: "hd" }));
     assert.throws(() => ask({ references: [`data:image/png;base64,${"A".repeat(1_300_000)}`] }), /at most 900 KB/);
+    // A label must name a picture that is sent: HeyGen does not rewrite them.
+    assert.throws(() => ask({ prompt: "The shoe in <Picture 1> on the track in <Picture 2>", references: [png(1)] }), /names <Picture 2>, but one picture is featured/);
+    assert.throws(() => ask({ prompt: "A slow shot of <Picture 4> and <Picture 3>", references: [png(1), png(2)] }), /names <Picture 3>, <Picture 4>, but 2 pictures are featured/);
+    assert.ok(ask({ prompt: "The shoe in <Picture 1> on the track in <Picture 2>", references: [png(1), png(2)] }));
     await assert.rejects(startFootage(ask({ references: [png(1), "https://example.com/b.png"] }), "u1"), /Picture 2 must be an image file/);
     await assert.rejects(startFootage(ask({ references: [`data:image/gif;base64,${Buffer.from("GIF89a").toString("base64")}`] }), "u1"), /The picture to feature is not a PNG or JPEG/);
 
@@ -203,7 +207,7 @@ describe("generated clips", () => {
           { type: "base64", media_type: "image/jpeg", data: jpeg.slice(jpeg.indexOf(",") + 1) },
         ],
       });
-      await startFootage(ask({ prompt, references: [png(5)], aspect: "16:9", quality: "hd" }), "u1");
+      await startFootage(ask({ prompt, references: [png(5), jpeg], aspect: "16:9", quality: "hd" }), "u1");
       assert.deepEqual([bodies[1].mode, bodies[1].aspect_ratio, bodies[1].resolution], ["reference_to_video", "16:9", "1080p"]);
     } finally {
       Object.assign(config, { avatarProvider: saved.avatar, heygenApiKey: saved.key });

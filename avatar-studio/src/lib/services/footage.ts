@@ -15,6 +15,7 @@ import { owned, stripUndefined } from "./shared";
 import { jobChecker } from "./job-checks";
 import { plainScene, rewriteIfNamed, sniff } from "./backdrops";
 import { promptExcerpt } from "./lookpacks";
+import { danglingLabels } from "../picture-labels";
 
 /** Generated clips an account keeps; another needs one deleted first. */
 export const MAX_FOOTAGE = 50;
@@ -50,6 +51,15 @@ export const footageRequestSchema = z
   .strict()
   .refine((v) => !(v.image && v.references), { message: "A clip either opens on one picture or features pictures, not both", path: ["references"] })
   .refine((v) => !(v.image && v.aspect), { message: "A clip from a picture takes the picture's shape; leave the frame out", path: ["aspect"] })
+  // HeyGen does not rewrite the labels, so one that names no picture sent would point the shot at nothing.
+  .superRefine((v, ctx) => {
+    if (!v.references) return;
+    const missing = danglingLabels(v.prompt, v.references.length);
+    if (missing.length) {
+      const count = v.references.length === 1 ? "one picture is" : `${v.references.length} pictures are`;
+      ctx.addIssue({ code: "custom", path: ["prompt"], message: `The description names ${missing.map((n) => `<Picture ${n}>`).join(", ")}, but ${count} featured` });
+    }
+  })
   // HeyGen renders HD in landscape or portrait only, and a clip featuring pictures in the first one's shape at standard only.
   .refine((v) => v.quality !== "hd" || v.image || (v.references ? v.aspect === "16:9" || v.aspect === "9:16" : (v.aspect ?? "16:9") !== "1:1"), {
     message: "HD clips are landscape or portrait; choose 16:9 or 9:16, or standard quality",

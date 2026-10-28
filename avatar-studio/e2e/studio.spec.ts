@@ -1177,8 +1177,14 @@ test("a b-roll clip features pictures the description names as <Picture 1>, <Pic
   const prompt = page.getByRole("textbox", { name: "Describe the shot", exact: true });
   await prompt.fill(`A runner ${tag} laces up the shoe in`);
   const make = page.getByRole("button", { name: "Make the clip" });
+  // A mode that needs a picture says so until it has one.
+  await page.getByLabel("Open on a picture").check();
+  await expect(make).toBeDisabled();
+  await expect(make).toHaveAccessibleDescription("Add the picture to open on, or choose No pictures.");
   await page.getByLabel("Feature my pictures").check();
-  await expect(page.getByText("Name them in the description as <Picture 1>, <Picture 2>, in this order.", { exact: false })).toBeVisible();
+  await expect(page.locator("#footage-use-hint")).toContainText("Name them in the description as <Picture 1>, <Picture 2>, in this order.");
+  await expect(page.getByLabel("Feature my pictures")).toHaveAccessibleDescription(/Up to 3 pictures of a product, a place, or a person/);
+  await expect(page.getByLabel("No pictures")).toHaveAccessibleDescription("The shot is made from the description alone.");
   await expect(make).toBeDisabled();
   await expect(make).toHaveAccessibleDescription("Add a picture to feature, or choose No pictures.");
   const file = page.locator('input[type="file"][accept="image/*"]');
@@ -1188,12 +1194,33 @@ test("a b-roll clip features pictures the description names as <Picture 1>, <Pic
   await page.getByRole("button", { name: "Put <Picture 1> in the description" }).click();
   await expect(prompt).toHaveValue(`A runner ${tag} laces up the shoe in <Picture 1>`);
   await expect(prompt).toBeFocused();
-  await prompt.press("End");
+  await prompt.press("Control+End");
   await prompt.pressSequentially(" on the track in ");
   await file.setInputFiles({ name: "track.png", mimeType: "image/png", buffer: Buffer.from(TINY_PNG, "base64") });
   await page.getByRole("button", { name: "Put <Picture 2> in the description" }).click();
   await expect(prompt).toHaveValue(`A runner ${tag} laces up the shoe in <Picture 1> on the track in <Picture 2>`);
   await expect(page.getByText("2 of 3 pictures")).toBeVisible();
+  // A label goes where the cursor was, although pressing its button takes the focus, and typing carries on after it.
+  const value = await prompt.inputValue();
+  const at = value.indexOf(" laces");
+  await prompt.evaluate((el: HTMLTextAreaElement, i: number) => el.setSelectionRange(i, i), at);
+  await prompt.press("ArrowRight");
+  await prompt.press("ArrowLeft");
+  await page.getByRole("button", { name: "Put <Picture 2> in the description" }).click();
+  await page.keyboard.type(" and");
+  await expect(prompt).toHaveValue(`A runner ${tag} <Picture 2> and laces up the shoe in <Picture 1> on the track in <Picture 2>`);
+  // A label that names no picture added holds the start, with the reason.
+  await prompt.press("Control+End");
+  await prompt.pressSequentially(" past <Picture 3>");
+  await expect(make).toBeDisabled();
+  await expect(make).toHaveAccessibleDescription("The description names <Picture 3>, but 2 pictures are added.");
+  // Removing a picture takes its label out and renumbers the ones after it, as the pictures are.
+  await page.getByRole("button", { name: "Remove Picture 1, shoe.png" }).click();
+  await expect(prompt).toHaveValue(`A runner ${tag} <Picture 1> and laces up the shoe in on the track in <Picture 1> past <Picture 2>`);
+  await expect(page.getByRole("img", { name: "Picture 1: track.png" })).toBeVisible();
+  await prompt.fill(`A runner ${tag} laces up the shoe in <Picture 1> on the track in <Picture 2>`);
+  await file.setInputFiles({ name: "track.png", mimeType: "image/png", buffer: Buffer.from(TINY_PNG, "base64") });
+  await expect(make).toBeEnabled();
   // The clip can take the first picture's shape, at standard quality only.
   await page.getByLabel("Like Picture 1").check();
   await expect(page.getByLabel("HD (1080p)")).toBeDisabled();

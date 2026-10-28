@@ -8,6 +8,7 @@ import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api, formatDate, isRefusal } from "@/lib/client";
 import { toUploadable } from "@/lib/image-upload";
+import { danglingLabels, pictureLabels, withPictureRemoved } from "@/lib/picture-labels";
 import { FOOTAGE_ASPECTS, FOOTAGE_MAX_SEC, FOOTAGE_MIN_SEC, MAX_FOOTAGE_REFERENCES, footagePath, type FootageAspect, type FootageJob } from "@/lib/types";
 
 /** A clip as the server lists it: never the renderer, its job id, or the picture's digest. */
@@ -76,6 +77,8 @@ export default function FootagePage() {
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const featureRef = useRef<HTMLInputElement>(null);
+  // Where the cursor was in the description, so a label goes there although pressing its button takes the focus.
+  const caretRef = useRef<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const focusAfterRender = useFocusAfterRender();
@@ -119,6 +122,23 @@ export default function FootagePage() {
   // opens on a picture takes the picture's shape.
   const hdBlocked = !frame && (shape === "1:1" || shape === "adaptive");
   const needsFeature = use === "feature" && !features.length;
+  const needsPicture = use === "frame" && !picture;
+  // A label HeyGen cannot match to a picture sent would point the shot at nothing (it does not rewrite labels).
+  const dangling = use === "feature" && features.length ? danglingLabels(prompt, features.length) : [];
+  const startNote = shortPrompt
+    ? "Describe the shot in a few words first."
+    : needsPicture
+      ? "Add the picture to open on, or choose No pictures."
+      : needsFeature
+        ? "Add a picture to feature, or choose No pictures."
+        : dangling.length
+          ? `The description names ${dangling.map((n) => `<Picture ${n}>`).join(", ")}, but ${features.length === 1 ? "one picture is" : `${features.length} pictures are`} added.`
+          : null;
+  // "Like Picture 1" goes with the last picture featured (or with leaving that mode), back to landscape, so a choice
+  // made meanwhile (HD, say) is not undone when a picture is added again.
+  useEffect(() => {
+    if (aspect === "adaptive" && !featured.length) setAspect("16:9");
+  }, [aspect, featured.length]);
   // A choice HD cannot have moves quality to standard, and it stays there when the frame changes back (HD costs three
   // times as much).
   useEffect(() => {
@@ -140,6 +160,7 @@ export default function FootagePage() {
     try {
       if (use === "feature") {
         const added = { name: file.name, url: await toUploadable(file, { maxBytes: MAX_FEATURE_BYTES, maxEdge: 1536 }) };
+        // (Removing is held while a picture is read, so the list is the one this pick was made on.)
         setFeatures((prev) => (prev.length < MAX_FOOTAGE_REFERENCES ? [...prev, added] : prev));
         // When the last one is added, the add control goes, so the focus moves to that picture's remove button.
         if (features.length + 1 >= MAX_FOOTAGE_REFERENCES) focusAfterRender(() => document.getElementById(`footage-feature-remove-${MAX_FOOTAGE_REFERENCES - 1}`));
@@ -162,21 +183,32 @@ export default function FootagePage() {
 
   function removeFeature(i: number) {
     setFeatures((prev) => prev.filter((_, j) => j !== i));
+    // The description follows: the removed picture's label goes and later ones move down, as the pictures do.
+    if (pictureLabels(prompt).some((n) => n >= i + 1)) {
+      setPrompt(withPictureRemoved(prompt, i + 1));
+      setNote(`Picture ${i + 1} removed; its label is taken out of the description and later pictures are numbered one lower.`);
+    }
     changed();
     // The pictures after it move up a number; the focus goes to the add control, there again with a place free.
     focusAfterRender(() => featureRef.current);
   }
 
-  /** Puts a picture's label in the description where the cursor is (at the end when it is not in the box). */
+  /** Puts a picture's label in the description where the cursor last was (at the end before it has been in the box). */
   function insertLabel(i: number) {
     const label = `<Picture ${i + 1}>`;
-    const box = promptRef.current;
-    const at = box && document.activeElement === box ? box.selectionStart : prompt.length;
+    const at = Math.min(caretRef.current ?? prompt.length, prompt.length);
     const before = prompt.slice(0, at);
-    const text = `${before}${before && !/\s$/.test(before) ? " " : ""}${label}${prompt.slice(at)}`.slice(0, MAX_PROMPT);
+    const inserted = `${before && !/\s$/.test(before) ? " " : ""}${label}`;
+    const text = `${before}${inserted}${prompt.slice(at)}`.slice(0, MAX_PROMPT);
+    const caret = Math.min(at + inserted.length, text.length);
     setPrompt(text);
+    caretRef.current = caret;
     changed();
-    focusAfterRender(() => promptRef.current);
+    // Back in the box with the cursor just after the label, ready to go on typing.
+    focusAfterRender(() => {
+      promptRef.current?.setSelectionRange(caret, caret);
+      return promptRef.current;
+    });
   }
 
   async function submit() {
@@ -257,7 +289,8 @@ export default function FootagePage() {
                   disabled={canEdit === false}
                   aria-describedby="footage-prompt-hint"
                   placeholder="A slow push-in on a sunlit kitchen; steam rises from a coffee cup on the counter"
-                  onChange={(e) => (setPrompt(e.target.value), changed())}
+                  onChange={(e) => (setPrompt(e.target.value), (caretRef.current = e.target.selectionStart), changed())}
+                  onSelect={(e) => (caretRef.current = e.currentTarget.selectionStart)}
                 />
                 <p id="footage-prompt-hint" className="mt-1 text-xs text-slate-500">
                   What is seen, what happens, and how the camera moves. {prompt.length} of {MAX_PROMPT} characters.
@@ -268,12 +301,16 @@ export default function FootagePage() {
                 <div className="flex flex-wrap gap-x-4 gap-y-2 text-sm text-slate-700">
                   {USES.map((u) => (
                     <label key={u.value} className="flex items-center gap-2">
-                      <input type="radio" name="footage-use" className="accent-brand-600" checked={use === u.value} aria-describedby="footage-use-hint" onChange={() => (setUse(u.value), changed())} />
+                      <input type="radio" name="footage-use" className="accent-brand-600" checked={use === u.value} aria-describedby={`footage-use-hint-${u.value}`} disabled={reading} onChange={() => (setUse(u.value), changed())} />
                       {u.label}
+                      {/* Each choice is described by its own hint; the selected one's is also shown below. */}
+                      <span id={`footage-use-hint-${u.value}`} className="sr-only">
+                        {u.hint}
+                      </span>
                     </label>
                   ))}
                 </div>
-                <p className="mt-1 text-xs text-slate-500" id="footage-use-hint">
+                <p className="mt-1 text-xs text-slate-500" id="footage-use-hint" aria-hidden>
                   {USES.find((u) => u.value === use)!.hint}
                 </p>
                 {use === "frame" && (
@@ -288,7 +325,7 @@ export default function FootagePage() {
                       </div>
                     ) : (
                       <label className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 focus-within:ring-2 focus-within:ring-brand-500 ${busy || reading || canEdit === false ? "opacity-60" : ""}`}>
-                        <input ref={fileRef} type="file" accept="image/*" className="sr-only" aria-describedby="footage-use-hint" aria-disabled={busy || reading || canEdit === false} disabled={canEdit === false} onChange={(e) => choosePicture(e.currentTarget)} />
+                        <input ref={fileRef} type="file" accept="image/*" className="sr-only" aria-describedby="footage-use-hint-frame" aria-disabled={busy || reading || canEdit === false} disabled={canEdit === false} onChange={(e) => choosePicture(e.currentTarget)} />
                         <ImagePlus className="h-4 w-4" aria-hidden /> {reading ? "Reading…" : "Add a picture"}
                       </label>
                     )}
@@ -306,7 +343,7 @@ export default function FootagePage() {
                             <button type="button" onClick={() => insertLabel(i)} disabled={busy} className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50" aria-label={`Put <Picture ${i + 1}> in the description`}>
                               Put in the description
                             </button>
-                            <button type="button" id={`footage-feature-remove-${i}`} onClick={() => removeFeature(i)} disabled={busy} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50" aria-label={`Remove Picture ${i + 1}, ${f.name}`}>
+                            <button type="button" id={`footage-feature-remove-${i}`} onClick={() => removeFeature(i)} disabled={busy || reading} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50" aria-label={`Remove Picture ${i + 1}, ${f.name}`}>
                               <X className="h-3.5 w-3.5" aria-hidden /> Remove
                             </button>
                           </li>
@@ -315,7 +352,7 @@ export default function FootagePage() {
                     )}
                     {features.length < MAX_FOOTAGE_REFERENCES && (
                       <label className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 focus-within:ring-2 focus-within:ring-brand-500 ${busy || reading || canEdit === false ? "opacity-60" : ""}`}>
-                        <input ref={featureRef} type="file" accept="image/*" className="sr-only" aria-describedby="footage-use-hint footage-feature-count" aria-disabled={busy || reading || canEdit === false} disabled={canEdit === false} onChange={(e) => choosePicture(e.currentTarget)} />
+                        <input ref={featureRef} type="file" accept="image/*" className="sr-only" aria-describedby="footage-use-hint-feature footage-feature-count" aria-disabled={busy || reading || canEdit === false} disabled={canEdit === false} onChange={(e) => choosePicture(e.currentTarget)} />
                         <ImagePlus className="h-4 w-4" aria-hidden /> {reading ? "Reading…" : features.length ? "Add another picture" : "Add a picture"}
                       </label>
                     )}
@@ -376,12 +413,12 @@ export default function FootagePage() {
               </div>
               {/* A refusal is shown by the button that was pressed, so it is seen on a phone too. */}
               <ErrorBanner message={err} />
-              <Button onClick={submit} loading={busy} disabled={shortPrompt || needsFeature || reading || !canStart} className="w-full" aria-describedby={shortPrompt || needsFeature ? "footage-start-note" : undefined}>
+              <Button onClick={submit} loading={busy} disabled={!!startNote || reading || !canStart} className="w-full" aria-describedby={startNote ? "footage-start-note" : undefined}>
                 <MonitorPlay className="h-4 w-4" /> Make the clip
               </Button>
-              {(shortPrompt || needsFeature) && (
-                <p id="footage-start-note" className="text-xs text-slate-500">
-                  {shortPrompt ? "Describe the shot in a few words first." : "Add a picture to feature, or choose No pictures."}
+              {startNote && (
+                <p id="footage-start-note" className={`text-xs ${dangling.length && !shortPrompt && !needsPicture && !needsFeature ? "text-rose-600" : "text-slate-500"}`}>
+                  {startNote}
                 </p>
               )}
             </div>

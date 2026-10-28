@@ -21,7 +21,8 @@ function sniffPicture(b: Uint8Array): "image/png" | "image/jpeg" | null {
  * GIF, a large photo) redrawn on a canvas as a JPEG no wider or taller than `maxEdge`, shrunk until it fits.
  */
 export async function toUploadable(file: File, { maxBytes, maxEdge }: { maxBytes: number; maxEdge: number }): Promise<string> {
-  const mb = `${Math.round(maxBytes / (1024 * 1024))} MB`;
+  // The limit as people read it: 900 KB, not a rounded "1 MB".
+  const mb = maxBytes < 1024 * 1024 ? `${Math.round(maxBytes / 1024)} KB` : `${Math.round(maxBytes / (1024 * 1024))} MB`;
   // The file's first bytes, not its name or type (which browsers take from the extension), say whether it is a PNG
   // or JPEG to send as it is; anything else is decoded and redrawn, so a text file fails here and a WebP named .png
   // is converted.

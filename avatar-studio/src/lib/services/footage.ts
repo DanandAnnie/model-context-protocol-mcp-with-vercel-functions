@@ -48,7 +48,9 @@ export const footageRequestSchema = z
      * description as <Picture 1>, <Picture 2>… in this order.
      */
     references: z
-      .array(z.string())
+      // The per-picture check below names the picture; this one still holds when another field stops the object's
+      // checks from running.
+      .array(z.string().max(dataUrlMax(MAX_FOOTAGE_REFERENCE_BYTES), "Each picture to feature must be at most 900 KB"))
       .min(1, "Add a picture to feature, or leave the pictures out")
       .max(MAX_FOOTAGE_REFERENCES, `A clip features at most ${MAX_FOOTAGE_REFERENCES} pictures`)
       .optional(),

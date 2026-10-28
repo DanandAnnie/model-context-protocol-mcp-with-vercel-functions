@@ -197,7 +197,12 @@ export default function FootagePage() {
     const labels = pictureLabels(prompt);
     const own = labels.includes(i + 1);
     const later = labels.some((n) => n > i + 1);
-    if (own || later) setPrompt(withPictureRemoved(prompt, i + 1));
+    if (own || later) {
+      setPrompt(withPictureRemoved(prompt, i + 1));
+      // The text moved, so the cursor remembered in it no longer points where it was; the next label goes at the end
+      // unless the cursor is placed again.
+      caretRef.current = null;
+    }
     say(setNote, [`Picture ${i + 1} removed.`, own ? "Its label is taken out of the description." : "", later ? "Later labels are numbered one lower." : ""].filter(Boolean).join(" "));
     changed();
     // The pictures after it move up a number; the focus goes to the add control, there again with a place free.
@@ -240,6 +245,7 @@ export default function FootagePage() {
       void refetch();
       setRequestKey(newKey());
       setPrompt("");
+      caretRef.current = null;
       setPicture(null);
       setFeatures([]);
       setTitle("");

@@ -1222,6 +1222,7 @@ test("a b-roll clip features pictures the description names as <Picture 1>, <Pic
   await expect(make).toHaveAccessibleDescription("The description names <Picture 3>, but 2 pictures are added.");
   // Removing a picture takes its label out and renumbers the ones after it, as the pictures are.
   await page.getByRole("button", { name: "Remove Picture 1, shoe.png" }).click();
+  await expect(page.locator('p[role="status"]')).toHaveText("Picture 1 removed. Its label is taken out of the description. Later labels are numbered one lower.");
   await expect(prompt).toHaveValue(`A runner ${tag} <Picture 1> and laces up the shoe in on the track in <Picture 1> past <Picture 2>`);
   await expect(page.getByRole("img", { name: "Picture 1: track.png" })).toBeVisible();
   await prompt.fill(`A runner ${tag} laces up the shoe in <Picture 1> on the track in <Picture 2>`);

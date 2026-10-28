@@ -36,6 +36,14 @@ describe("picture labels", () => {
     assert.equal(insertPictureLabel("the <Picture 2> track", L, 6, 13, 100)!.text, "the <Picture 2> <Picture 1> track");
     // A cursor inside a label moves past it.
     assert.equal(insertPictureLabel("the <Picture 2> track", L, 8, 8, 100)!.text, "the <Picture 2> <Picture 1> track");
+    // A selection over several labels, or ending inside one, keeps them all; a cursor at a label's edge stays there.
+    assert.equal(insertPictureLabel("<Picture 1> and <Picture 2>", "<Picture 3>", 0, 20, 100)!.text, "<Picture 1> and <Picture 2> <Picture 3>");
+    assert.equal(insertPictureLabel("a <Picture 2> b", L, 0, 5, 100)!.text, "a <Picture 2> <Picture 1> b");
+    assert.equal(insertPictureLabel("a <Picture 2> b", L, 2, 2, 100)!.text, "a <Picture 1> <Picture 2> b");
+    assert.equal(insertPictureLabel("a <Picture 2> b", L, 13, 13, 100)!.text, "a <Picture 2> <Picture 1> b");
+    // No space is put inside an opening bracket or quote.
+    assert.equal(insertPictureLabel("the shoe (", L, 10, 10, 100)!.text, "the shoe (<Picture 1>");
+    assert.equal(insertPictureLabel('says "', L, 6, 6, 100)!.text, 'says "<Picture 1>');
     // No room: nothing is cut.
     assert.equal(insertPictureLabel("a".repeat(95), L, 3, 3, 100), null);
     assert.ok(insertPictureLabel("a".repeat(88), L, 88, 88, 100));

@@ -167,6 +167,10 @@ describe("generated clips", () => {
     assert.throws(() => ask({ prompt: "The shoe in <Picture 1> on a marble desk" }), /names <Picture 1>, but no picture is featured/);
     assert.throws(() => ask({ prompt: "The shoe in <Picture 1> on a marble desk", image: png(1) }), /no picture is featured/);
     assert.throws(() => ask({ durationSec: 16 }), /5 to 15 seconds/);
+    // An oversized picture is still refused when another field is wrong too.
+    const both = footageRequestSchema.safeParse({ prompt: PROMPT, durationSec: 5.5, references: [`data:image/png;base64,${"A".repeat(1_300_000)}`] });
+    assert.equal(both.success, false);
+    assert.ok(both.error!.issues.some((i) => /900 KB/.test(i.message)), "the size is reported alongside the length");
     assert.throws(() => ask({ aspect: "adaptive" }), /leave it out for a clip from pictures to follow the first one/);
     // A label must name a picture that is sent: HeyGen does not rewrite them.
     assert.throws(() => ask({ prompt: "The shoe in <Picture 1> on the track in <Picture 2>", references: [png(1)] }), /names <Picture 2>, but one picture is featured/);

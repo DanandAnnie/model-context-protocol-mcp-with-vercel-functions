@@ -47,7 +47,7 @@ export function insertPictureLabel(prompt: string, label: string, start: number,
   }
   const before = prompt.slice(0, from);
   const after = prompt.slice(to);
-  const lead = before && !/\s$/.test(before) ? " " : "";
+  const lead = before && !/[\s("'[]$/.test(before) ? " " : "";
   const trail = after && !/^[\s.,;:!?)]/.test(after) ? " " : "";
   const text = `${before}${lead}${label}${trail}${after}`;
   if (text.length > max) return null;

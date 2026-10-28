@@ -4,8 +4,8 @@ import { createHash } from "node:crypto";
 import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import { getStore } from "../store";
-import { EMPTY_WATCH, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
-import type { AudioClip, Avatar, Backdrop, Background, CaptionCue, DirectedScene, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
+import { EMPTY_WATCH, MAX_AGENT_MESSAGE, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
+import type { AgentMessage, AudioClip, Avatar, Backdrop, Background, CaptionCue, DirectedScene, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
 import { buildCues } from "../captions";
 import { captionDurationSec, sceneBoundsMs, type Timed } from "../chapters";
 import { graphemes, wellFormed } from "../text";
@@ -870,9 +870,9 @@ async function refreshNow(video: Video): Promise<Video> {
     if (!isPending(current)) return { next: current }; // someone else already recorded the outcome
     // A webhook moved it to another job (its render) while this check asked about the old one: that answer is stale.
     if (current.providerJobId !== video.providerJobId) return { next: current };
-    const next: Video = { ...current, ...stripUndefined(stampGif(update)), updatedAt: nowIso() };
+    const next: Video = settledReview(current, { ...current, ...stripUndefined(stampGif(update)), updatedAt: nowIso() });
     // A render that moved to another job (a directed video once it renders) is stored, so the next check follows it.
-    if (next.status === current.status && next.videoUrl === current.videoUrl && next.providerJobId === current.providerJobId) return { next };
+    if (next.status === current.status && next.videoUrl === current.videoUrl && next.providerJobId === current.providerJobId && next.agentWaiting === current.agentWaiting) return { next };
     await getStore().put("video", next);
     return { next, before: current };
   });
@@ -1645,6 +1645,52 @@ async function awaitingRender(providerName: string, videoId: string | undefined)
   return video && stillSession(video) && video.provider === providerName ? video : null;
 }
 
+/** A directed video under review: the account's own, out of the trash, made in a session the studio kept with a renderer that talks. */
+async function reviewedDirected(id: string, ownerId: string): Promise<{ video: Video & { agentSessionId: string }; provider: AvatarProvider }> {
+  const video = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
+  if (purgeDue(video, Date.now())) throw new NotFoundError(`Video ${id} not found`);
+  if (!video.directed?.review || !video.agentSessionId) throw new ValidationError("Only a video HeyGen's Video Agent drafts for review has a conversation here");
+  if (video.deletedAt) throw new ConflictError("Restore the video from the trash first");
+  const provider = getAvatarProviderByName(video.provider);
+  if (!provider.agentConversation || !provider.sendAgentMessage) throw new ValidationError(`Reviewing with the Video Agent is not available with the ${video.provider} renderer`);
+  return { video: video as Video & { agentSessionId: string }, provider };
+}
+
+/** The conversation with the agent of a directed video under review, oldest first, and whether it waits for an answer. */
+export async function agentConversation(id: string, ownerId: string = LOCAL_OWNER): Promise<{ waiting: boolean; progress?: number; messages: AgentMessage[] }> {
+  const { video, provider } = await reviewedDirected(id, ownerId);
+  const out = await provider.agentConversation!(video.agentSessionId);
+  // Once its render started (or it ended), nothing is waiting for an answer, whatever the session last said.
+  return stillSession(video) && video.status !== "failed" ? out : { ...out, waiting: false };
+}
+
+export const agentAnswerSchema = z
+  .object({
+    text: z.string("Write an answer to the agent").trim().min(2, "Write an answer to the agent").max(MAX_AGENT_MESSAGE, `An answer is at most ${MAX_AGENT_MESSAGE.toLocaleString("en-US")} characters`),
+  })
+  .strict();
+
+/**
+ * An answer to the agent of a directed video under review: feedback on its storyboard, or the go-ahead to render. Only
+ * while the video still follows the agent's session; the video stops being marked as waiting until the agent replies.
+ */
+export async function answerAgent(id: string, text: string, ownerId: string = LOCAL_OWNER): Promise<Video> {
+  const { video, provider } = await reviewedDirected(id, ownerId);
+  if (video.status === "failed") throw new ConflictError("This video's conversation ended; ask the agent again");
+  if (!stillSession(video)) throw new ConflictError("The video is already being made; there is nothing left to answer");
+  await provider.sendAgentMessage!(video.agentSessionId, text);
+  return withCounterLock(video.id, async () => {
+    const current = await getStore().get<Video>("video", video.id);
+    if (!current || !current.agentWaiting) return current ?? video;
+    return getStore().put("video", { ...current, agentWaiting: false, updatedAt: nowIso() });
+  });
+}
+
+/** Once its render started, or it ended, a video under review waits for no answer, whatever an older look said. */
+function settledReview(current: Video, next: Video): Video {
+  return next.agentWaiting && (next.providerJobId !== current.providerJobId || next.status !== "processing" || !stillSession(next)) ? { ...next, agentWaiting: false } : next;
+}
+
 /** A directed video still following its agent's session, not yet the render the session started. */
 function stillSession(video: Video): boolean {
   return !!video.directed && /^(?:mock)?agent_/.test(video.providerJobId ?? "");
@@ -1668,7 +1714,7 @@ export async function applyAvatarWebhook(providerName: string, body: unknown): P
     if (!current || !isPending(current)) return { next: current ?? video };
     // Found by its own id, but a check moved it to its render meanwhile: that render's own webhook decides.
     if (!byJob && !stillSession(current)) return { next: current };
-    const next: Video = { ...current, ...stripUndefined(stampGif(update)), updatedAt: nowIso() };
+    const next: Video = settledReview(current, { ...current, ...stripUndefined(stampGif(update)), updatedAt: nowIso() });
     // A repeated webhook that changes nothing is not written.
     if (next.status === current.status && next.videoUrl === current.videoUrl && next.providerJobId === current.providerJobId) return { next: current };
     await getStore().put("video", next);

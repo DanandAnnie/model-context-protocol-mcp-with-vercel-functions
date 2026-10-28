@@ -17,8 +17,9 @@ export function VideoCard({ video, selectable = false, selected = false, onToggl
             <Film className="h-8 w-8" />
           </div>
         )}
-        <span className="absolute left-2 top-2">
+        <span className="absolute left-2 top-2 flex flex-wrap gap-1">
           <StatusBadge status={video.status} />
+          {video.agentWaiting && video.status === "processing" && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-900">Waiting for your review</span>}
         </span>
         {selectable && (
           <span className={`absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-md border-2 ${selected ? "border-brand-600 bg-brand-600 text-white" : "border-white/80 bg-black/40"}`} aria-hidden>

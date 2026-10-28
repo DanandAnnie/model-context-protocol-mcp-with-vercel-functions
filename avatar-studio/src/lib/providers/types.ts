@@ -1,4 +1,4 @@
-import type { AgentStyle, AudioClip, Avatar, Backdrop, DirectedScene, CaptionCue, HighlightClip, HighlightFrame, HighlightLength, StudioTemplate, StudioTemplateDetail, Translation, TranslationRequest, Video, VideoRequest, Voice, MusicTrack, AspectRatio } from "../types";
+import type { AgentMessage, AgentStyle, AudioClip, Avatar, Backdrop, DirectedScene, CaptionCue, HighlightClip, HighlightFrame, HighlightLength, StudioTemplate, StudioTemplateDetail, Translation, TranslationRequest, Video, VideoRequest, Voice, MusicTrack, AspectRatio } from "../types";
 
 export interface TtsProvider {
   readonly name: string;
@@ -45,6 +45,8 @@ export interface AvatarJobStatus {
   gifUrl?: string;
   /** The job to follow from now on, when the renderer moved the render to another (a directed video once it renders). */
   providerJobId?: string;
+  /** A directed video under review: its agent is waiting for the account's answer (true) or working (false). */
+  agentWaiting?: boolean;
   durationSec?: number;
   error?: string;
 }
@@ -90,6 +92,10 @@ export interface AvatarProvider {
    * only when the request names them; HeyGen chooses otherwise. Absent when the renderer cannot.
    */
   startDirected?(req: VideoRequest, avatar: Avatar | null, voice: Voice | null, videoId: string): Promise<{ providerJobId: string; agentSessionId?: string }>;
+  /** The conversation with the agent of a directed video under review, oldest first, and whether it waits for an answer. */
+  agentConversation?(sessionId: string): Promise<{ waiting: boolean; progress?: number; messages: AgentMessage[] }>;
+  /** An answer to the agent of a directed video under review: feedback, or the go-ahead to render. */
+  sendAgentMessage?(sessionId: string, text: string): Promise<void>;
   /** A finished directed render's scenes, in order, and the version of the whole document to edit them against. */
   directedScenes?(renderJobId: string): Promise<{ editVersion: string; scenes: DirectedScene[] }>;
   /** Revises the scenes named (one instruction each) of a render the session made; the new cut is another render to follow. */

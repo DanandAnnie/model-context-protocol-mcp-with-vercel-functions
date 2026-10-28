@@ -4696,6 +4696,51 @@ test("a video HeyGen's Video Agent directed has its scenes edited into a new cut
   expect(cuts).toHaveLength(1);
 });
 
+test("HeyGen's Video Agent stops at its storyboard for review, takes feedback, and renders on the go-ahead", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  await page.goto("/agent");
+  // The review is HeyGen's agent's: not offered for this studio's own, which has its plan reviewed in the editor.
+  await expect(page.getByLabel("Let me review the storyboard first")).toHaveCount(0);
+  await page.getByLabel(/^HeyGen's Video Agent/).check();
+  const review = page.getByLabel("Let me review the storyboard first");
+  await expect(review).toHaveAccessibleDescription(/stops at its storyboard/);
+  await review.check();
+  await page.getByLabel("What should the video be?").fill(`A welcome for new bakery staff ${tag}`);
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/video-agent") && r.method() === "POST");
+  await page.getByRole("button", { name: "Generate with HeyGen" }).click();
+  expect(((await sent).postDataJSON() as Record<string, unknown>).review).toBe(true);
+  await page.waitForURL(/\/videos\/vid_/);
+  const id = new URL(page.url()).pathname.split("/").at(-1)!;
+  const talk = page.getByTestId("agent-conversation");
+  // The agent drafts a storyboard and waits: its message and storyboard show, with an answer box.
+  await expect(talk.getByText(/drafted a storyboard with three scenes/)).toBeVisible({ timeout: 15_000 });
+  await expect(talk.getByRole("img", { name: "Storyboard" })).toBeVisible();
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${id}`)).json()).video.agentWaiting, { timeout: 15_000 }).toBe(true);
+  // The library says so too.
+  const library = await page.context().newPage();
+  await library.goto("/videos");
+  await expect(library.getByText("Waiting for your review").first()).toBeVisible();
+  await library.close();
+  // Feedback first: it is shown as the account's, and the agent works on it and answers again.
+  const answer = talk.getByRole("textbox", { name: "Your answer" });
+  await answer.fill(`Add a scene about parking ${tag}`);
+  await talk.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(talk.getByText(`Add a scene about parking ${tag}`, { exact: true })).toBeVisible();
+  await expect(answer).toHaveValue("");
+  await expect(talk.getByText(new RegExp(`updated the storyboard: Add a scene about parking ${tag}`))).toBeVisible({ timeout: 15_000 });
+  // The go-ahead: the video is made, and the conversation stays as the record without an answer box.
+  await talk.getByRole("button", { name: "Looks good, make the video" }).click();
+  await expect(talk.getByText("Looks good, go ahead and make the video.")).toBeVisible();
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  await page.reload();
+  await expect(page.getByTestId("agent-conversation").getByRole("textbox", { name: "Your answer" })).toHaveCount(0);
+  await expect(page.getByTestId("agent-conversation").getByText(/What you and HeyGen's Video Agent agreed/)).toBeVisible();
+  // Nothing is left to answer once it is made; an answer of nothing is refused.
+  const late = await page.request.post(`/api/videos/${id}/agent`, { data: { text: "One more change" } });
+  expect(late.status()).toBe(409);
+  expect((await page.request.post(`/api/videos/${id}/agent`, { data: { text: " " } })).status()).toBe(400);
+});
+
 test("a photo shoot puts a person's face in a scene picture, with their consent, and lists the photos to download", async ({ page }) => {
   const tag = Date.now().toString(36);
   await page.goto("/photos");

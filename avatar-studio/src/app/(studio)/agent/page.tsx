@@ -46,6 +46,8 @@ export default function VideoAgentPage() {
   // HeyGen's curated styles for its agent, listed where it directs videos.
   const { data: styleData, error: styleErr } = useApi<{ styles: AgentStyle[]; available: boolean }>(status?.directedVideos ? "/api/video-agent/styles" : null);
   const [styleId, setStyleId] = useState("");
+  // HeyGen's agent stops at its storyboard for the person to answer, on the video's page, before it renders.
+  const [review, setReview] = useState(false);
   const [folder, setFolder] = useState<string | undefined>(undefined);
   // Notes about what was or was not filled in, each shown once, so a later one does not replace an earlier one.
   const [notices, setNotices] = useState<string[]>([]);
@@ -123,6 +125,7 @@ export default function VideoAgentPage() {
         setFolder(video.folder);
         // Checked against the styles once they are listed (see below).
         setStyleId(asked.styleId ?? "");
+        setReview(!!asked.review);
         // The document's words were sent, not kept: it has to be attached again.
         if (asked.documentName) addNotice(`“${asked.documentName}” was attached to the brief but is not kept; attach it again to write from it.`);
       })
@@ -165,7 +168,7 @@ export default function VideoAgentPage() {
     setBusy(mode);
     setErr(null);
     setFailed(null);
-    const body = { prompt, mode, orientation, lengthSec, language, ...(mode === "direct" && folder ? { folder } : {}), ...(mode === "direct" && styleId && styleData?.styles.some((s) => s.id === styleId) ? { styleId } : {}), ...(url.trim() ? { url: url.trim() } : {}), ...(doc ? { document: { name: doc.name, text: doc.text } } : {}), ...(avatarId ? { avatarId } : {}), ...(voiceId ? { voiceId } : {}) };
+    const body = { prompt, mode, orientation, lengthSec, language, ...(mode === "direct" && folder ? { folder } : {}), ...(mode === "direct" && styleId && styleData?.styles.some((s) => s.id === styleId) ? { styleId } : {}), ...(mode === "direct" && review ? { review: true } : {}), ...(url.trim() ? { url: url.trim() } : {}), ...(doc ? { document: { name: doc.name, text: doc.text } } : {}), ...(avatarId ? { avatarId } : {}), ...(voiceId ? { voiceId } : {}) };
     try {
       if (mode === "plan") {
         const { draft } = await api<{ draft: unknown }>("/api/video-agent", { method: "POST", body: JSON.stringify(body) });
@@ -332,6 +335,17 @@ export default function VideoAgentPage() {
               </fieldset>
             )}
             {byHeygen && styleData?.available && styleData.styles.length > 0 && <AgentStylePicker styles={styleData.styles} value={styleId} onChange={(id) => (touch(), setStyleId(id))} disabled={canEdit === false} />}
+            {byHeygen && (
+              <label className="flex items-start gap-2 text-sm text-slate-700">
+                <input type="checkbox" className="mt-0.5 accent-brand-600" checked={review} disabled={canEdit === false} aria-describedby="agent-review-hint" onChange={(e) => (touch(), setReview(e.target.checked))} />
+                <span>
+                  Let me review the storyboard first
+                  <span id="agent-review-hint" className="block text-xs text-slate-500">
+                    HeyGen&apos;s agent stops at its storyboard; ask for changes or tell it to go ahead on the video&apos;s page.
+                  </span>
+                </span>
+              </label>
+            )}
             {byHeygen && styleErr && <p className="text-xs text-slate-500">HeyGen&apos;s styles could not be listed just now; the agent will choose the look.</p>}
             {byHeygen ? (
               <Button ref={(el) => void (buttons.current.direct = el)} onClick={() => run("direct")} loading={busy === "direct"} disabled={!ready} className="w-full">

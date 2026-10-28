@@ -459,9 +459,15 @@ export class HeyGenClient {
     return this.request<{ session_id?: string; video_id?: string | null }>(`${V3}/video-agents/${encodeURIComponent(sessionId)}`, { method: "POST", body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
   }
 
-  /** A Video Agent session: its status, and the video it renders once it has one. */
+  /** A Video Agent session: its status, its latest messages (newest first), and the video it renders once it has one. */
   videoAgentStatus(sessionId: string) {
-    return this.request<{ session_id?: string; status?: string; video_id?: string | null; failure_message?: string | null; error?: string | null }>(`${V3}/video-agents/${encodeURIComponent(sessionId)}`, { signal: AbortSignal.timeout(10_000) });
+    type Message = { role?: string; content?: string | null; type?: string; created_at?: number | null; resource_ids?: string[] | null };
+    return this.request<{ session_id?: string; status?: string; progress?: number; video_id?: string | null; failure_message?: string | null; error?: string | null; messages?: Message[] | null }>(`${V3}/video-agents/${encodeURIComponent(sessionId)}`, { signal: AbortSignal.timeout(10_000) });
+  }
+
+  /** A resource a Video Agent message refers to: a storyboard image, a draft, a chosen avatar or voice. */
+  videoAgentResource(sessionId: string, resourceId: string) {
+    return this.request<{ resource_id?: string; resource_type?: string; url?: string | null; thumbnail_url?: string | null; preview_url?: string | null }>(`${V3}/video-agents/${encodeURIComponent(sessionId)}/resources/${encodeURIComponent(resourceId)}`, { signal: AbortSignal.timeout(10_000) });
   }
 
   videoStatus(videoId: string) {

@@ -3,7 +3,7 @@ import { pauseSeconds, stripPauses } from "../../pauses";
 import { SAMPLE_PREVIEW_VIDEO, STOCK_AVATARS, portraitSvg } from "../../stock";
 import { demoAssetUrl } from "../../config";
 import { ConflictError, NotFoundError, ValidationError } from "../../errors";
-import type { AgentStyle, AudioClip, Avatar, DirectedScene, MusicTrack, StudioTemplate, StudioTemplateDetail, VideoRequest } from "../../types";
+import type { AgentMessage, AgentStyle, AudioClip, Avatar, DirectedScene, MusicTrack, StudioTemplate, StudioTemplateDetail, VideoRequest } from "../../types";
 import type { AvatarJobStatus, AvatarProvider, CleanupStatus, FootageStatus, HighlightInput, HighlightStatus, LipsyncStatus, ShootStatus } from "../types";
 import { SHOOT_ASPECTS, type ShootAspect } from "../../types";
 
@@ -16,6 +16,39 @@ function shootSvg(width: number, height: number, seed: number): string {
   const hue = seed % 360;
   const r = Math.min(w, h) / 6;
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${hue},60%,55%)"/><stop offset="1" stop-color="hsl(${(hue + 60) % 360},60%,35%)"/></linearGradient></defs><rect width="${w}" height="${h}" fill="url(#g)"/><circle cx="${w / 2}" cy="${h / 2 - r}" r="${r}" fill="rgba(255,255,255,0.9)"/><path d="M${w / 2 - 2 * r} ${h} C${w / 2 - 2 * r} ${h / 2 + r} ${w / 2 + 2 * r} ${h / 2 + r} ${w / 2 + 2 * r} ${h} Z" fill="rgba(255,255,255,0.9)"/></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+/** The demo agent's conversations under review, by session: kept on this server instance only. */
+const DEMO_SESSIONS = new Map<string, { turnAt: number; approvedAt?: number; messages: AgentMessage[] }>();
+const MAX_DEMO_SESSIONS = 200;
+/** How long the demo agent "works" on each turn before it answers. */
+const DEMO_TURN_MS = 2500;
+/** An answer that approves the storyboard. */
+const DEMO_APPROVAL = /\b(go ahead|generate|make (?:the|it)|looks (?:good|great|perfect)|approve[ds]?|proceed|render)\b/i;
+
+/** Whether the demo agent waits for an answer; a turn worked on long enough gets its reply (and storyboard) once. */
+function demoWaiting(session: { turnAt: number; approvedAt?: number; messages: AgentMessage[] }): boolean {
+  if (session.approvedAt) return false;
+  if (Date.now() - session.turnAt < DEMO_TURN_MS) return false;
+  if (session.messages.at(-1)?.from === "you") {
+    const first = session.messages.length === 1;
+    session.messages.push({
+      from: "agent",
+      text: first
+        ? "I've drafted a storyboard with three scenes: a welcome, the main point, and what to do next. Would you like any changes, or shall I make the video?"
+        : `I've updated the storyboard: ${session.messages.at(-1)!.text.slice(0, 200)}. Anything else, or shall I make the video?`,
+      at: new Date(session.turnAt + DEMO_TURN_MS).toISOString(),
+      attachments: [{ kind: "image", thumbnailUrl: storyboardSvg(session.messages.length) }],
+    });
+  }
+  return true;
+}
+
+/** A demo storyboard: three drawn frames side by side, their colours from the turn. */
+function storyboardSvg(turn: number): string {
+  const frames = [0, 1, 2].map((i) => `<rect x="${4 + i * 52}" y="4" width="48" height="27" rx="3" fill="hsl(${(turn * 47 + i * 40) % 360},45%,45%)"/><text x="${28 + i * 52}" y="21" font-family="sans-serif" font-size="8" fill="#fff" text-anchor="middle">Scene ${i + 1}</text>`).join("");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 164 35" width="164" height="35"><rect width="164" height="35" fill="#f1f5f9"/>${frames}</svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
@@ -290,9 +323,35 @@ export class MockAvatarProvider implements AvatarProvider {
    * A demo stand-in for HeyGen's Video Agent: the sample video, rendered as a 30-second job. Like HeyGen's, the job
    * starts as the agent's session and moves to its render halfway (see `getStatus`); the brief is not read.
    */
-  async startDirected(): Promise<{ providerJobId: string; agentSessionId: string }> {
+  async startDirected(req: VideoRequest): Promise<{ providerJobId: string; agentSessionId: string }> {
     const now = Date.now();
-    return { providerJobId: `mockagent_${now}`, agentSessionId: `mocksess_${now}` };
+    if (!req.directed?.review) return { providerJobId: `mockagent_${now}`, agentSessionId: `mocksess_${now}` };
+    // Under review, the demo agent keeps a conversation (on this server instance, the latest 200) and stops at a drawn
+    // storyboard. Its id is its own, so a video started in the same millisecond never shares it.
+    const key = `${now}_${Math.random().toString(36).slice(2, 10)}`;
+    DEMO_SESSIONS.set(`mocksess_${key}`, { turnAt: now, messages: [{ from: "you", text: req.directed.prompt, at: new Date(now).toISOString() }] });
+    for (const old of DEMO_SESSIONS.keys()) {
+      if (DEMO_SESSIONS.size <= MAX_DEMO_SESSIONS) break;
+      DEMO_SESSIONS.delete(old);
+    }
+    return { providerJobId: `mockagent_${key}`, agentSessionId: `mocksess_${key}` };
+  }
+
+  async agentConversation(sessionId: string): Promise<{ waiting: boolean; messages: AgentMessage[] }> {
+    const session = DEMO_SESSIONS.get(sessionId);
+    if (!session) throw new ValidationError("The demo renderer no longer has this conversation (the server restarted); ask the agent again");
+    return { waiting: demoWaiting(session), messages: session.messages };
+  }
+
+  async sendAgentMessage(sessionId: string, text: string): Promise<void> {
+    const session = DEMO_SESSIONS.get(sessionId);
+    if (!session) throw new ValidationError("The demo renderer no longer has this conversation (the server restarted); ask the agent again");
+    if (session.approvedAt) throw new ConflictError("The video is already being made; there is nothing left to answer");
+    if (!demoWaiting(session)) throw new ConflictError("HeyGen's Video Agent is still working on the last answer; wait for it, then answer again");
+    const now = Date.now();
+    session.messages.push({ from: "you", text, at: new Date(now).toISOString() });
+    if (DEMO_APPROVAL.test(text)) session.approvedAt = now;
+    else session.turnAt = now;
   }
 
   /** A demo directed render's three scenes, their ids and edit version drawn from the render's own id. */
@@ -316,6 +375,14 @@ export class MockAvatarProvider implements AvatarProvider {
   }
 
   async getStatus(providerJobId: string): Promise<AvatarJobStatus> {
+    const review = /^mockagent_(\d+_[a-z0-9]+)$/.exec(providerJobId);
+    if (review) {
+      const reviewed = DEMO_SESSIONS.get(`mocksess_${review[1]}`);
+      if (!reviewed) return { status: "failed", error: "The demo renderer no longer has this conversation (the server restarted); ask the agent again" };
+      // Approved: rendered like any demo video from then on; until then, writing or waiting for an answer.
+      if (reviewed.approvedAt) return { status: "processing", providerJobId: `mock_${reviewed.approvedAt}_30`, agentWaiting: false };
+      return { status: "processing", agentWaiting: demoWaiting(reviewed) };
+    }
     const agent = /^mockagent_(\d+)$/.exec(providerJobId);
     if (agent) {
       // Writing and casting for the first half, then the render, which finishes when any demo render would.

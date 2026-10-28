@@ -794,9 +794,25 @@ export interface DirectedVideo {
   /** The curated style HeyGen's agent composed it in (`style_id`), by name as it was then. */
   styleId?: string;
   styleName?: string;
+  /** HeyGen's agent stops at its storyboard for the account to review and answer before it renders (its "chat" mode). */
+  review?: true;
   /** The directed video this cut revised, scene by scene, and what each changed scene (numbered from 1) was asked to become. */
   editOf?: { videoId: string; title: string; edits: Array<{ scene: number; text: string }> };
 }
+
+/** A turn of the conversation with the renderer's Video Agent about a directed video under review. */
+export interface AgentMessage {
+  from: "you" | "agent";
+  text: string;
+  /** An agent's message that reports a failure. */
+  error?: true;
+  at?: string;
+  /** What the message shows: a storyboard frame, a draft, a chosen presenter or voice (https links only). */
+  attachments?: Array<{ kind: string; url?: string; thumbnailUrl?: string }>;
+}
+
+/** Longest message to the renderer's Video Agent, in characters (HeyGen's limit). */
+export const MAX_AGENT_MESSAGE = 10_000;
 
 /** One scene of a directed video as its renderer composed it: its id there, and the words spoken over it. */
 export interface DirectedScene {
@@ -1008,6 +1024,8 @@ export interface Video extends VideoRequest {
   providerJobId?: string;
   /** The renderer's Video Agent session a directed video was made in, kept after the job moves to its render, to edit its scenes. */
   agentSessionId?: string;
+  /** A directed video under review whose agent is waiting for the account's answer (its storyboard, or a question). */
+  agentWaiting?: boolean;
   videoUrl?: string;
   thumbnailUrl?: string;
   /** The renderer's short animated GIF of the video, for an email; signed for a limited time and renewed when old. */

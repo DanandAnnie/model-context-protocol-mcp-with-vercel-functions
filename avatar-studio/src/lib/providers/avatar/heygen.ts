@@ -1,4 +1,4 @@
-import { AGENT_STYLE_TAGS, STUDIO_VARIABLE_TYPES, backdropIdOf, footageIdOf, isPhotoAvatar, rendersOnAvatarV, type AgentStyle, type AgentStyleTag, type AudioClip, type DirectedScene, type Avatar, type Backdrop, type Background, type Scene, type StudioTemplate, type StudioTemplateDetail, type StudioVariable, type VideoRequest, type Voice, type MusicTrack } from "../../types";
+import { AGENT_STYLE_TAGS, STUDIO_VARIABLE_TYPES, backdropIdOf, footageIdOf, isPhotoAvatar, rendersOnAvatarV, type AgentMessage, type AgentStyle, type AgentStyleTag, type AudioClip, type DirectedScene, type Avatar, type Backdrop, type Background, type Scene, type StudioTemplate, type StudioTemplateDetail, type StudioVariable, type VideoRequest, type Voice, type MusicTrack } from "../../types";
 import { silentSeconds, withBreakTags } from "../../pauses";
 import type { LookPackKey } from "../../look-packs";
 import { heygenBurnsCaptions } from "../../captions";
@@ -11,6 +11,7 @@ import type { AvatarJobStatus, AvatarProvider, CleanupStatus, FootageInput, Foot
 import { musicComposition } from "../../music-mix";
 import { strToU8, zipSync } from "fflate";
 import { createHash } from "node:crypto";
+import { forgetMemo, memo } from "../../cache";
 
 /**
  * Where a custom portrait's v3 photo avatar look is kept (`providerAssetIds`). Portraits uploaded as v1 talking photos
@@ -25,6 +26,12 @@ const PENDING = "heygen:pending";
 const AGENT_JOB = "agent_";
 /** A session that has named no render by then is given up on (HeyGen's agent writes and casts in minutes). */
 const AGENT_GIVE_UP_MS = 3 * 60 * 60 * 1000;
+/** The session statuses in which HeyGen's agent waits for the account's answer. */
+const AGENT_WAITING = new Set(["reviewing", "waiting_for_input"]);
+/** Resources looked up for one look at a conversation, and how long a looked-up one's signed links are kept. */
+const MAX_AGENT_RESOURCES = 12;
+const AGENT_RESOURCE_TTL_MS = 30 * 60 * 1000;
+const AGENT_LOOK_TTL_MS = 3000;
 /**
  * Where uploaded clips and background images keep their v3 asset ids. Ids from the v1 upload endpoint, kept under
  * "heygen", are uploaded again once rather than trusted as v3 asset ids.
@@ -880,7 +887,8 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     if (!directed) throw new ValidationError("Nothing to direct");
     const body = {
       prompt: directed.brief,
-      mode: "generate",
+      // Under review, the agent stops at its storyboard for the account's answer; otherwise it runs straight through.
+      mode: directed.review ? "chat" : "generate",
       orientation: directed.orientation,
       ...(avatar ? { avatar_id: this.lookId(avatar) } : {}),
       ...(voice ? { voice_id: this.voiceId(voice, voice.id) } : {}),
@@ -899,6 +907,66 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     }
     if (!data.session_id) throw new Error("HeyGen's Video Agent answered without a session");
     return { providerJobId: `${AGENT_JOB}${Date.now()}_${data.session_id}`, agentSessionId: data.session_id };
+  }
+
+  /**
+   * The conversation of a Video Agent session (`GET /v3/video-agents/{session_id}`), oldest first: HeyGen keeps the 40
+   * latest. The resources a message names (a storyboard frame, a draft) are looked up once each and shown by their
+   * https links; whether the agent waits for an answer comes with it.
+   */
+  async agentConversation(sessionId: string): Promise<{ waiting: boolean; progress?: number; messages: AgentMessage[] }> {
+    let session;
+    try {
+      // Several open pages ask about one conversation every few seconds: they share one look a few seconds old.
+      session = await memo(`agentsess:${sessionId}`, AGENT_LOOK_TTL_MS, () => this.client.videoAgentStatus(sessionId));
+    } catch (err) {
+      if (err instanceof Error && / failed: 404 /.test(err.message)) throw new ValidationError("HeyGen no longer has this Video Agent session; ask the agent again");
+      throw err;
+    }
+    const rows = [...(session.messages ?? [])].reverse().filter((m) => (m.content ?? "").trim() || m.resource_ids?.length);
+    // The resources of the latest messages only, so one look at a long conversation stays a few requests.
+    const named = [...new Set(rows.flatMap((m) => m.resource_ids ?? []))].slice(-MAX_AGENT_RESOURCES);
+    const resources = new Map(
+      await Promise.all(
+        named.map(async (id) => {
+          // A resource HeyGen no longer has is remembered as missing too, so it is not asked about at every look.
+          const r = await memo(`agentres:${sessionId}:${id}`, AGENT_RESOURCE_TTL_MS, () => this.client.videoAgentResource(sessionId, id).catch(() => null));
+          return [id, r ? stripEmpty({ kind: r.resource_type ?? "resource", url: httpsOnly(r.url ?? r.preview_url), thumbnailUrl: httpsOnly(r.thumbnail_url) }) : null] as const;
+        }),
+      ),
+    );
+    const messages = rows.map((m) =>
+      stripEmpty({
+        from: m.role === "user" ? ("you" as const) : ("agent" as const),
+        text: (m.content ?? "").trim(),
+        ...(m.type === "error" ? { error: true as const } : {}),
+        at: m.created_at ? new Date(m.created_at * 1000).toISOString() : undefined,
+        attachments: (() => {
+          const found = (m.resource_ids ?? []).flatMap((id) => {
+            const r = resources.get(id);
+            return r && (r.url || r.thumbnailUrl) ? [r] : [];
+          });
+          return found.length ? found : undefined;
+        })(),
+      }),
+    );
+    return stripEmpty({ waiting: AGENT_WAITING.has(session.status ?? ""), progress: typeof session.progress === "number" ? session.progress : undefined, messages });
+  }
+
+  /** An answer to the agent of a session under review (`POST /v3/video-agents/{session_id}` with a `message`): feedback, or the go-ahead. */
+  async sendAgentMessage(sessionId: string, text: string): Promise<void> {
+    try {
+      await this.client.sendVideoAgent(sessionId, { message: text });
+      // The next look shows the answer and what the agent does with it, not a look from before it.
+      forgetMemo(`agentsess:${sessionId}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      if (/ failed: 404 /.test(message)) throw new ValidationError("HeyGen no longer has this Video Agent session; ask the agent again");
+      if (/ failed: 409 /.test(message)) throw new ConflictError("HeyGen's Video Agent is still working on the last answer; wait for it, then answer again");
+      if (/ failed: 402 /.test(message)) throw new ValidationError("The HeyGen account has no credits left for the Video Agent");
+      if (/ failed: (400|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen's Video Agent could not take that answer: ${heygenReason(message, "say it differently")}`);
+      throw err;
+    }
   }
 
   /**
@@ -971,11 +1039,15 @@ export class HeyGenAvatarProvider implements AvatarProvider {
         throw err;
       }
       if (session.status === "failed") return { status: "failed", error: session.failure_message || session.error || "HeyGen's Video Agent could not make that video" };
-      if (session.video_id) return { ...(await this.getStatus(session.video_id)), providerJobId: session.video_id };
+      if (session.video_id) return { ...(await this.getStatus(session.video_id)), providerJobId: session.video_id, agentWaiting: false };
       // Finished without a video, or still writing hours later: neither will render now.
       if (session.status === "completed") return { status: "failed", error: "HeyGen's Video Agent finished without a video; ask the agent again" };
-      if (Date.now() - Number(agent[1]) > AGENT_GIVE_UP_MS) return { status: "failed", error: "HeyGen's Video Agent did not start a render in three hours; ask the agent again" };
-      return { status: "processing" };
+      // Waiting for the account's answer (its storyboard under review, or a question) is never given up on.
+      if (AGENT_WAITING.has(session.status ?? "")) return { status: "processing", agentWaiting: true };
+      // Working: the three hours run from the latest turn of the conversation, so an answer given late is worked on.
+      const lastTurn = Math.max(Number(agent[1]), ...(session.messages ?? []).map((m) => (m.created_at ?? 0) * 1000));
+      if (Date.now() - lastTurn > AGENT_GIVE_UP_MS) return { status: "failed", error: "HeyGen's Video Agent did not start a render in three hours; ask the agent again" };
+      return { status: "processing", agentWaiting: false };
     }
     const s = await this.client.videoStatus(providerJobId);
     if (s.status === "completed") {

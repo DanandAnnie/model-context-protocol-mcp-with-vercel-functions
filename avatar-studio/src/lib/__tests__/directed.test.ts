@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
-import { addSubtitles, applyAvatarWebhook, createTemplate, directAgentVideo, directedVideoScenes, editDirectedVideo, sceneEditSchema, getAvatar, getVideo, queryVideos, resizeVideo, retryVideo, saveCaptionCues, videoAgentSchema, videoQuerySchema } from "../services";
+import { addSubtitles, agentConversation, answerAgent, applyAvatarWebhook, createTemplate, directAgentVideo, directedVideoScenes, editDirectedVideo, sceneEditSchema, getAvatar, getVideo, queryVideos, resizeVideo, retryVideo, saveCaptionCues, videoAgentSchema, videoQuerySchema } from "../services";
 import { asksForPortrait, generateAgentVideo, listAgentStyles, planVideo } from "../services/video-agent";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { shareBodyFor } from "../share-body";
@@ -165,9 +165,9 @@ describe("videos HeyGen's Video Agent directs", () => {
       assert.deepEqual(calls[0].body, { prompt: "The brief.", mode: "generate", orientation: "portrait", avatar_id: "look_dana", voice_id: "hg_voice" }, "the photo avatar's HeyGen look, and HeyGen's own voice id");
       await provider.startDirected({ ...req, directed: { ...req.directed, orientation: "landscape" } }, null, null, "vid_studio_2");
       assert.deepEqual(calls[1].body, { prompt: "The brief.", mode: "generate", orientation: "landscape" }, "HeyGen chooses the presenter and voice when none is named");
-      assert.deepEqual(await provider.getStatus(started.providerJobId), { status: "processing" });
+      assert.deepEqual(await provider.getStatus(started.providerJobId), { status: "processing", agentWaiting: false });
       session = { ...session, status: "generating", video_id: "hg_vid_1" };
-      assert.deepEqual(await provider.getStatus(started.providerJobId), { status: "completed", videoUrl: "https://cdn/v.mp4", thumbnailUrl: "https://cdn/v.jpg", durationSec: 44, providerJobId: "hg_vid_1" });
+      assert.deepEqual(await provider.getStatus(started.providerJobId), { status: "completed", videoUrl: "https://cdn/v.mp4", thumbnailUrl: "https://cdn/v.jpg", durationSec: 44, providerJobId: "hg_vid_1", agentWaiting: false });
       session = { session_id: "sess_1", status: "failed", video_id: null, failure_message: "The brief broke a content rule" };
       assert.deepEqual(await provider.getStatus(started.providerJobId), { status: "failed", error: "The brief broke a content rule" });
       // A session that finished without a video, one HeyGen no longer has, or one that never started a render, has failed.
@@ -325,6 +325,114 @@ describe("videos HeyGen's Video Agent directs", () => {
     } finally {
       globalThis.fetch = realFetch;
       Object.assign(config, { heygenApiKey: saved.key });
+    }
+  });
+
+  it("stops at the storyboard for review, answered on the video's page until the go-ahead renders it", async (t) => {
+    t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+    await assert.rejects(planVideo(videoAgentSchema.parse({ ...ASK, mode: "plan", review: true }), "u1"), /review its plan in the editor/);
+    const video = await directAgentVideo(videoAgentSchema.parse({ ...ASK, review: true }), "u1");
+    assert.equal(video.directed?.review, true);
+    // Working on the brief first: nothing to answer yet.
+    let talk = await agentConversation(video.id, "u1");
+    assert.deepEqual([talk.waiting, talk.messages.map((m) => m.from)], [false, ["you"]]);
+    await assert.rejects(answerAgent(video.id, "Make it shorter", "u1"), ConflictError, "not while the agent is working");
+    t.mock.timers.tick(3000);
+    talk = await agentConversation(video.id, "u1");
+    assert.equal(talk.waiting, true);
+    assert.match(talk.messages[1].text, /drafted a storyboard/);
+    assert.match(talk.messages[1].attachments?.[0].thumbnailUrl ?? "", /^data:image\/svg\+xml/);
+    assert.equal((await getVideo(video.id, "u1")).agentWaiting, true, "the video says it is waiting for an answer");
+    // Feedback: the agent works on it, then answers again.
+    assert.ok(!(await answerAgent(video.id, "Add a scene about parking", "u1")).agentWaiting);
+    assert.equal((await agentConversation(video.id, "u1")).waiting, false);
+    t.mock.timers.tick(3000);
+    talk = await agentConversation(video.id, "u1");
+    assert.deepEqual(talk.messages.map((m) => m.from), ["you", "agent", "you", "agent"]);
+    assert.match(talk.messages[3].text, /updated the storyboard: Add a scene about parking/);
+    // The go-ahead: the video follows its render from then on, and there is nothing left to answer.
+    await answerAgent(video.id, "Looks good, go ahead and make the video.", "u1");
+    const making = await getVideo(video.id, "u1");
+    assert.match(making.providerJobId ?? "", /^mock_\d+_30$/);
+    assert.equal(making.agentWaiting, false);
+    await assert.rejects(answerAgent(video.id, "One more change", "u1"), /already being made/);
+    assert.equal((await agentConversation(video.id, "u1")).waiting, false, "the conversation stays as the record");
+    // A stale look that still said "waiting" is cleared once the video follows its render, however the news arrives.
+    await getStore().put("video", { ...making, providerJobId: `mock_${Date.now() - 120_000}_30`, agentWaiting: true });
+    const done = await getVideo(video.id, "u1");
+    assert.deepEqual([done.status, done.agentWaiting], ["completed", false]);
+    // Another account's reads as not found; a video not under review has no conversation; an answer is a few words.
+    await assert.rejects(agentConversation(video.id, "u2"), NotFoundError);
+    const plain = await directAgentVideo(videoAgentSchema.parse(ASK), "u1");
+    await assert.rejects(agentConversation(plain.id, "u1"), /drafts for review/);
+    const { agentAnswerSchema } = await import("../services");
+    assert.throws(() => agentAnswerSchema.parse({ text: " " }), /Write an answer/);
+    assert.throws(() => agentAnswerSchema.parse({ text: "x".repeat(10_001) }), /at most 10,000/);
+  });
+
+  it("asks HeyGen's agent to stop for review, reads its conversation and storyboard, and sends answers", async () => {
+    const realFetch = globalThis.fetch;
+    const posts: Array<{ url: string; body: Record<string, unknown> }> = [];
+    let session: Record<string, unknown> = { session_id: "sess_r", status: "reviewing", progress: 45, video_id: null, messages: [] };
+    let answer = () => Response.json({ data: { session_id: "sess_r", run_id: "run_1" } });
+    const resourceCalls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "https://api.heygen.com/v3/video-agents" && init?.method === "POST") {
+        posts.push({ url, body: JSON.parse(String(init.body)) });
+        return Response.json({ data: { session_id: "sess_r", status: "thinking", video_id: null } });
+      }
+      if (url === "https://api.heygen.com/v3/video-agents/sess_r" && init?.method === "POST") {
+        posts.push({ url, body: JSON.parse(String(init.body)) });
+        return answer();
+      }
+      if (url === "https://api.heygen.com/v3/video-agents/sess_r") return Response.json({ data: session });
+      if (url.startsWith("https://api.heygen.com/v3/video-agents/sess_r/resources/")) {
+        const id = url.split("/").at(-1)!;
+        resourceCalls.push(id);
+        if (id === "res_board") return Response.json({ data: { resource_id: id, resource_type: "image", url: "https://files.heygen.ai/board.png", thumbnail_url: "https://files.heygen.ai/board_t.png" } });
+        if (id === "res_http") return Response.json({ data: { resource_id: id, resource_type: "image", url: "http://files.heygen.ai/x.png" } });
+        return Response.json({ error: { code: "not_found" } }, { status: 404 });
+      }
+      return new Response("unexpected", { status: 500 });
+    }) as typeof fetch;
+    try {
+      const provider = new HeyGenAvatarProvider("hg_key");
+      const req = { title: "x", script: "", avatarId: "", voiceId: "", aspect: "16:9" as const, resolution: "1080p" as const, background: { type: "color" as const, value: "#000000" }, captions: false, speed: 1, directed: { brief: "b", prompt: "b", orientation: "landscape" as const, lengthSec: 60, language: "English", review: true as const } };
+      const started = await provider.startDirected(req, null, null, "vid_r");
+      assert.equal(posts[0].body.mode, "chat", "under review, HeyGen's agent is asked to stop at its storyboard");
+      assert.deepEqual(await provider.getStatus(started.providerJobId), { status: "processing", agentWaiting: true });
+      const now = Math.floor(Date.now() / 1000);
+      session = {
+        ...session,
+        messages: [
+          { role: "model", content: "I've drafted a storyboard with 4 scenes. Shall I proceed?", type: "text", created_at: now, resource_ids: ["res_board", "res_http", "res_gone"] },
+          { role: "user", content: "A welcome for new staff", type: "text", created_at: now - 60, resource_ids: null },
+          { role: "model", content: "", type: "text", created_at: now - 30, resource_ids: null },
+        ],
+      };
+      const talk = await provider.agentConversation("sess_r");
+      assert.deepEqual(talk, {
+        waiting: true,
+        progress: 45,
+        messages: [
+          { from: "you", text: "A welcome for new staff", at: new Date((now - 60) * 1000).toISOString() },
+          { from: "agent", text: "I've drafted a storyboard with 4 scenes. Shall I proceed?", at: new Date(now * 1000).toISOString(), attachments: [{ kind: "image", url: "https://files.heygen.ai/board.png", thumbnailUrl: "https://files.heygen.ai/board_t.png" }] },
+        ],
+      }, "oldest first, empty turns left out, only https links, a resource HeyGen no longer has dropped");
+      await provider.agentConversation("sess_r");
+      assert.deepEqual(resourceCalls.filter((id) => id === "res_board"), ["res_board"], "a resource is looked up once");
+      await provider.sendAgentMessage("sess_r", "Add a parking scene");
+      assert.deepEqual(posts[1].body, { message: "Add a parking scene" });
+      answer = () => Response.json({ error: { code: "conflict" } }, { status: 409 });
+      await assert.rejects(provider.sendAgentMessage("sess_r", "Again"), ConflictError);
+      // Working on an answer given hours after the start: the three hours run from the latest turn.
+      session = { ...session, status: "thinking", messages: [{ role: "user", content: "Go", type: "text", created_at: now }] };
+      assert.deepEqual(await provider.getStatus(`agent_${Date.now() - 5 * 60 * 60 * 1000}_sess_r`), { status: "processing", agentWaiting: false });
+      session = { ...session, messages: [{ role: "user", content: "Go", type: "text", created_at: now - 4 * 60 * 60 }] };
+      assert.match((await provider.getStatus(`agent_${Date.now() - 5 * 60 * 60 * 1000}_sess_r`)).error ?? "", /three hours/);
+    } finally {
+      globalThis.fetch = realFetch;
     }
   });
 

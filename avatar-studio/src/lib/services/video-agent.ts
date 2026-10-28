@@ -45,6 +45,8 @@ export const videoAgentSchema = z.object({
   mode: z.enum(["generate", "plan", "direct"]).default("generate"),
   /** Where a "direct" video is filed (the folder of the one asked again); the other modes leave it to the editor. */
   folder: z.string().trim().max(40).optional(),
+  /** A "direct" video stops at HeyGen's storyboard for review and answers on its page before it renders. */
+  review: z.boolean().optional(),
   /** One of HeyGen's curated styles (`GET /api/video-agent/styles`) its agent composes a "direct" video in. */
   styleId: z.string().regex(/^[A-Za-z0-9_.:-]{1,100}$/, "Unknown style").optional(),
 });
@@ -264,6 +266,7 @@ export async function directAgentVideo(input: VideoAgentInput, ownerId: string =
         ...(input.url ? { url: input.url } : {}),
         ...(input.document ? { documentName: input.document.name } : {}),
         ...(style ? { styleId: style.id, styleName: style.name } : {}),
+        ...(input.review ? { review: true as const } : {}),
       },
     },
     ownerId,
@@ -279,6 +282,7 @@ export async function directAgentVideo(input: VideoAgentInput, ownerId: string =
 /** A style is HeyGen's agent's own; this studio's planner has none to apply, so it refuses one rather than ignoring it. */
 function noStyle(input: VideoAgentInput): void {
   if (input.styleId) throw new ValidationError("A style is for HeyGen's Video Agent; choose it to make the video, or leave the style out");
+  if (input.review) throw new ValidationError("Reviewing a storyboard is for HeyGen's Video Agent; this studio's agent lets you review its plan in the editor instead");
 }
 
 /** Whether the renderer's Video Agent offers curated styles. */

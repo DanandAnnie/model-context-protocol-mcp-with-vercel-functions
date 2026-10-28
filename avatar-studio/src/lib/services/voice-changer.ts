@@ -72,14 +72,20 @@ export const voiceSpeechSchema = z.object({
     .boolean({ error: "turbo is true or false" })
     .transform((v): true | undefined => (v ? true : undefined))
     .optional(),
-  /** A livelier delivery than the voice's own, 0 to 1 in steps of 0.1; 0 (or absent) is none, stored as absent. */
+  /**
+   * HeyGen's expressiveness boost, 0 to 1 in steps of 0.1. HeyGen applies 1 (its full boost) when none is sent, so 1
+   * is stored as absent and anything lower, 0 included, is stored and sent.
+   */
   expressivenessBoost: z
     .number({ error: "expressivenessBoost is a number from 0 to 1" })
     .min(0, "expressivenessBoost is a number from 0 to 1")
     .max(1, "expressivenessBoost is a number from 0 to 1")
     // Tenths, as offered: a finer value is refused rather than quietly rounded to another delivery.
     .refine((v) => Math.abs(v * 10 - Math.round(v * 10)) < 1e-9, "expressivenessBoost goes in steps of 0.1")
-    .transform((v) => Math.round(v * 10) / 10 || undefined)
+    .transform((v) => {
+      const tenths = Math.round(v * 10) / 10;
+      return tenths === 1 ? undefined : tenths;
+    })
     .optional(),
 });
 
@@ -311,7 +317,8 @@ export async function startVoiceSpeech(input: z.infer<typeof voiceSpeechSchema>,
   const id = opts.key ? keyedId("vc", ownerId, opts.key) : newId("vc");
   const existing = opts.key ? await getStore().get<VoiceChange>("voicechange", id) : null;
   if (existing && existing.ownerId === ownerId) {
-    const sameDelivery = existing.turbo === input.turbo && existing.expressivenessBoost === input.expressivenessBoost;
+    // A boost of 1 is HeyGen's default, so one stored as 1 (as an earlier version did) is the same delivery as none.
+    const sameDelivery = existing.turbo === input.turbo && (existing.expressivenessBoost ?? 1) === (input.expressivenessBoost ?? 1);
     if (existing.voiceId !== input.voiceId || existing.text !== input.text || !sameDelivery || (input.title && existing.title !== input.title)) throw new ConflictError("This Idempotency-Key was already used for another recording; send a new key");
     return existing;
   }
@@ -328,7 +335,7 @@ export async function startVoiceSpeech(input: z.infer<typeof voiceSpeechSchema>,
     voiceName: voice.name,
     text: input.text,
     ...(input.turbo ? { turbo: true as const } : {}),
-    ...(input.expressivenessBoost ? { expressivenessBoost: input.expressivenessBoost } : {}),
+    ...(input.expressivenessBoost !== undefined ? { expressivenessBoost: input.expressivenessBoost } : {}),
     provider: provider.name,
     providerVoiceId: voice.providerVoiceId,
     status: "processing",
@@ -338,7 +345,7 @@ export async function startVoiceSpeech(input: z.infer<typeof voiceSpeechSchema>,
   await getStore().put("voicechange", change);
   try {
     const waitMs = Math.max(MIN_WAIT_MS, START_DEADLINE_MS - (Date.now() - arrived));
-    const out = await provider.speakText({ voiceId: voice.providerVoiceId, text: input.text, ...(input.turbo ? { turbo: true as const } : {}), ...(input.expressivenessBoost ? { expressivenessBoost: input.expressivenessBoost } : {}), key: id, waitMs });
+    const out = await provider.speakText({ voiceId: voice.providerVoiceId, text: input.text, ...(input.turbo ? { turbo: true as const } : {}), ...(input.expressivenessBoost !== undefined ? { expressivenessBoost: input.expressivenessBoost } : {}), key: id, waitMs });
     if (out.status === "processing") throw new UpstreamError("HeyGen did not finish speaking the text in time; try again, or try a shorter text");
     const done: VoiceChange = { ...change, status: "completed", audioUrl: out.audioUrl, ...(out.durationSec ? { durationSec: out.durationSec } : {}), checkedAt: nowIso(), updatedAt: nowIso() };
     return (await getStore().putIf("voicechange", done, "updatedAt", change.updatedAt)) ? done : change;

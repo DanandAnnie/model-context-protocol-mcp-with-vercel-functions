@@ -321,7 +321,7 @@ describe("voice changer", () => {
   it("takes how the text is delivered: Turbo and an expressiveness boost, kept with the recording", async () => {
     const parse = (extra: Record<string, unknown>) => voiceSpeechSchema.parse({ voiceId: "iv_x", text: "Hi.", ...extra });
     assert.deepEqual([parse({ turbo: true }).turbo, parse({ turbo: false }).turbo], [true, undefined], "the standard model is stored as absent");
-    assert.deepEqual([parse({ expressivenessBoost: 0.4 }).expressivenessBoost, parse({ expressivenessBoost: 0 }).expressivenessBoost, parse({ expressivenessBoost: 0.7 }).expressivenessBoost, parse({ expressivenessBoost: 1 }).expressivenessBoost], [0.4, undefined, 0.7, 1], "in tenths; none is stored as absent");
+    assert.deepEqual([parse({ expressivenessBoost: 0.4 }).expressivenessBoost, parse({ expressivenessBoost: 0 }).expressivenessBoost, parse({ expressivenessBoost: 0.7 }).expressivenessBoost, parse({ expressivenessBoost: 1 }).expressivenessBoost], [0.4, 0, 0.7, undefined], "in tenths; HeyGen's default of 1 is stored as absent, and 0 is kept");
     for (const fine of [0.04, 0.33, 0.96]) assert.throws(() => parse({ expressivenessBoost: fine }), /steps of 0\.1/, "a finer value is refused, not rounded to another delivery");
     for (const bad of [-0.1, 1.1, "0.5", Number.NaN]) assert.throws(() => parse({ expressivenessBoost: bad }), /expressivenessBoost is a number from 0 to 1/);
     assert.throws(() => parse({ turbo: "yes" }), /turbo is true or false/);
@@ -337,7 +337,14 @@ describe("voice changer", () => {
     assert.equal((await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Big news today.", turbo: true, expressivenessBoost: 0.6 }), "u1", { key: "speech-delivery" })).id, lively.id);
     // A recording kept from before these options replays for a retry that spells out the defaults.
     const before = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Older words." }), "u1", { key: "speech-before" });
-    assert.equal((await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Older words.", turbo: false, expressivenessBoost: 0 }), "u1", { key: "speech-before" })).id, before.id);
+    assert.equal((await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Older words.", turbo: false, expressivenessBoost: 1 }), "u1", { key: "speech-before" })).id, before.id);
+    await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Older words.", expressivenessBoost: 0 }), "u1", { key: "speech-before" }), ConflictError, "no boost is not HeyGen's default");
+    // A recording an earlier version stored with a boost of 1 replays for a retry at HeyGen's default.
+    const full = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Full words." }), "u1", { key: "speech-full" });
+    await getStore().put("voicechange", { ...full, expressivenessBoost: 1 });
+    assert.equal((await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Full words.", expressivenessBoost: 1 }), "u1", { key: "speech-full" })).id, full.id);
+    const calm = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Calm words.", expressivenessBoost: 0 }), "u1");
+    assert.equal(calm.expressivenessBoost, 0, "no boost at all is kept, as HeyGen would otherwise apply its full one");
   });
 
   it("asks HeyGen to speak text in an instant voice once, dropping one not done in time and telling a refusal apart", async () => {
@@ -387,8 +394,11 @@ describe("voice changer", () => {
       tts = "done";
       await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Big news.", turbo: true, expressivenessBoost: 0.3 }), "u1");
       assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1-turbo", voice_id: "hv_1", text: "Big news.", expressiveness_boost: 0.3 });
-      await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Big news.", expressivenessBoost: 0 }), "u1");
+      // HeyGen's default is its full boost: 1 sends nothing, and 0 is sent rather than left to that default.
+      await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Big news.", expressivenessBoost: 1 }), "u1");
       assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1", voice_id: "hv_1", text: "Big news." });
+      await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Calm news.", expressivenessBoost: 0 }), "u1");
+      assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1", voice_id: "hv_1", text: "Calm news.", expressiveness_boost: 0 });
       // One left as being spoken (its request was cut off) is waited for while its start could still answer, then given
       // up, and never asked for.
       const cut: VoiceChange = { ...done, id: "vc_cut", status: "processing", audioUrl: undefined, createdAt: new Date(Date.now() - 30_000).toISOString() };

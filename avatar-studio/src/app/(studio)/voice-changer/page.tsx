@@ -134,9 +134,9 @@ export default function VoiceChangerPage() {
   const [speechVoiceId, setSpeechVoiceId] = useState("");
   const [speechText, setSpeechText] = useState("");
   const [speechTitle, setSpeechTitle] = useState("");
-  // How the text is delivered: HeyGen's Turbo model, and a livelier delivery in tenths (0 is the voice's own).
+  // How the text is delivered: HeyGen's Turbo model, and its expressiveness boost in tenths (10, its full boost, is its default).
   const [speechTurbo, setSpeechTurbo] = useState(false);
-  const [speechBoost, setSpeechBoost] = useState(0);
+  const [speechBoost, setSpeechBoost] = useState(10);
   const [speechKey, setSpeechKey] = useState(() => newKey());
   const [speaking, setSpeaking] = useState(false);
   const [voiceName, setVoiceName] = useState("");
@@ -247,7 +247,7 @@ export default function VoiceChangerPage() {
     fail("speech")(null);
     setNote(null);
     try {
-      const body = { voiceId: speechVoiceId, text: speechText.trim(), ...(speechTitle.trim() ? { title: speechTitle.trim() } : {}), ...(speechTurbo ? { turbo: true } : {}), ...(speechBoost ? { expressivenessBoost: speechBoost / 10 } : {}) };
+      const body = { voiceId: speechVoiceId, text: speechText.trim(), ...(speechTitle.trim() ? { title: speechTitle.trim() } : {}), ...(speechTurbo ? { turbo: true } : {}), ...(speechBoost !== 10 ? { expressivenessBoost: speechBoost / 10 } : {}) };
       const { change } = await api<{ change: Change }>("/api/voice-changer/speech", { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": speechKey } });
       setData((prev) => (prev ? { ...prev, changes: [change, ...prev.changes.filter((c) => c.id !== change.id)] } : prev));
       void refetch();
@@ -435,7 +435,7 @@ export default function VoiceChangerPage() {
                         Expressiveness boost
                       </label>
                       <output htmlFor="speech-boost" aria-hidden="true" className="text-xs tabular-nums text-slate-600">
-                        {speechBoost ? `+${speechBoost * 10}%` : "None"}
+                        {speechBoost === 10 ? "100% (default)" : `${speechBoost * 10}%`}
                       </output>
                     </div>
                     <input
@@ -445,13 +445,13 @@ export default function VoiceChangerPage() {
                       max={10}
                       step={1}
                       value={speechBoost}
-                      aria-valuetext={speechBoost ? `plus ${speechBoost * 10} percent` : "none"}
+                      aria-valuetext={speechBoost === 10 ? "100 percent, the default" : `${speechBoost * 10} percent`}
                       aria-describedby="speech-boost-hint"
                       onChange={(e) => (setSpeechBoost(Number(e.target.value)), setSpeechKey(newKey()), fail("speech")(null))}
                       className="mt-1 w-full accent-brand-600"
                     />
                     <p id="speech-boost-hint" className="text-xs text-slate-500">
-                      A livelier delivery than the voice&apos;s own; none keeps it as recorded.
+                      How much HeyGen livens the delivery: its default is the full boost; lower keeps it closer to the voice&apos;s own delivery.
                     </p>
                   </div>
                 </fieldset>
@@ -551,7 +551,7 @@ export default function VoiceChangerPage() {
                             {c.removeNoise ? " · noise removed" : ""}
                             {c.text !== undefined ? " · from text" : ""}
                             {c.turbo ? " · Turbo" : ""}
-                            {c.expressivenessBoost ? ` · expressiveness +${Math.round(c.expressivenessBoost * 100)}%` : ""}
+                            {c.expressivenessBoost !== undefined && c.expressivenessBoost !== 1 ? ` · expressiveness boost ${Math.round(c.expressivenessBoost * 100)}%` : ""}
                           </div>
                           {c.error && <div className="mt-1 text-xs text-rose-600">{c.error}</div>}
                         </div>

@@ -69,8 +69,9 @@ export default function FootagePage() {
   const [exact, setExact] = useState(false);
   // A take to make again: a finished clip's seed, so only what is changed differs.
   const [take, setTake] = useState<{ seed: number; title: string } | null>(null);
-  // A take made again from a clip shaped like its first picture gets that shape back once a picture is featured.
-  const [restoreAdaptive, setRestoreAdaptive] = useState(false);
+  // A take made again from a clip shaped like its first picture gets that shape back once a picture is featured. A ref,
+  // so a frame or HD chosen while that picture is being read is seen when the read ends.
+  const restoreAdaptive = useRef(false);
   const [reading, setReading] = useState(false);
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
@@ -194,9 +195,9 @@ export default function FootagePage() {
         const added = { name: file.name, url: await toUploadable(file, { maxBytes: MAX_FEATURE_BYTES, maxEdge: 1536 }) };
         // (Removing is held while a picture is read, so the list is the one this pick was made on.)
         setFeatures((prev) => (prev.length < MAX_FOOTAGE_REFERENCES ? [...prev, added] : prev));
-        if (restoreAdaptive) {
+        if (restoreAdaptive.current) {
           setAspect("adaptive");
-          setRestoreAdaptive(false);
+          restoreAdaptive.current = false;
         }
         // When the last one is added, the add control goes, so the focus moves to that picture's remove button.
         if (features.length + 1 >= MAX_FOOTAGE_REFERENCES) focusAfterRender(() => document.getElementById(`footage-feature-remove-${MAX_FOOTAGE_REFERENCES - 1}`));
@@ -310,7 +311,7 @@ export default function FootagePage() {
     // The clip's frame; a clip from pictures without one gets its first picture's shape back once one is added.
     // (A first frame sets its own shape, and landscape meanwhile keeps an HD choice from being dropped.)
     setAspect(f.aspect ?? "16:9");
-    setRestoreAdaptive(!!f.references && !f.aspect);
+    restoreAdaptive.current = !!f.references && !f.aspect;
     setTake({ seed, title: f.title });
     changed();
     caretRef.current = null;
@@ -377,7 +378,7 @@ export default function FootagePage() {
                   {USES.map((u) => (
                     <Fragment key={u.value}>
                       <label className="flex min-h-6 items-center gap-2">
-                        <input type="radio" name="footage-use" className="accent-brand-600" checked={use === u.value} aria-describedby={`footage-use-hint-${u.value}`} disabled={reading} onChange={() => (setUse(u.value), setRestoreAdaptive(false), changed())} />
+                        <input type="radio" name="footage-use" className="accent-brand-600" checked={use === u.value} aria-describedby={`footage-use-hint-${u.value}`} disabled={reading} onChange={() => (setUse(u.value), (restoreAdaptive.current = false), changed())} />
                         {u.label}
                       </label>
                       {/* Each choice is described by its own hint (outside its label, so not part of its name); the
@@ -485,7 +486,7 @@ export default function FootagePage() {
                   <div className="flex flex-wrap gap-4 text-sm text-slate-700">
                     {FOOTAGE_ASPECTS.map((a) => (
                       <label key={a} className="flex min-h-6 items-center gap-2">
-                        <input type="radio" name="footage-frame" className="accent-brand-600" checked={shape === a} onChange={() => (setAspect(a), setRestoreAdaptive(false), changed())} />
+                        <input type="radio" name="footage-frame" className="accent-brand-600" checked={shape === a} onChange={() => (setAspect(a), (restoreAdaptive.current = false), changed())} />
                         {FRAMES[a]}
                       </label>
                     ))}
@@ -506,7 +507,7 @@ export default function FootagePage() {
                     Standard (768p)
                   </label>
                   <label className="flex min-h-6 items-center gap-2">
-                    <input type="radio" name="footage-quality" className="accent-brand-600" checked={quality === "hd" && !hdBlocked} disabled={hdBlocked} aria-describedby="footage-hd-hint" onChange={() => (setQuality("hd"), setRestoreAdaptive(false), changed())} />
+                    <input type="radio" name="footage-quality" className="accent-brand-600" checked={quality === "hd" && !hdBlocked} disabled={hdBlocked} aria-describedby="footage-hd-hint" onChange={() => (setQuality("hd"), (restoreAdaptive.current = false), changed())} />
                     HD (1080p)
                   </label>
                 </div>

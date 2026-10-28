@@ -35,9 +35,10 @@ export const footageRequestSchema = z
     // Each message holds for every clip: the limit for one that features pictures or is exact is checked below.
     durationSec: z
       .number("A clip's length is a number of seconds")
-      .int("A clip is a whole number of seconds")
       .min(FOOTAGE_MIN_SEC, `A clip is at least ${FOOTAGE_MIN_SEC} seconds`)
       .max(FOOTAGE_MAX_SEC, `A clip is at most ${FOOTAGE_MAX_SEC} seconds (${FOOTAGE_MAX_SEC_SHORT} when it features pictures or follows the description exactly)`)
+      // After the range, which a number too large to be exact (that int() also refuses) is outside of.
+      .int("A clip is a whole number of seconds")
       .default(FOOTAGE_MIN_SEC),
     /** Ignored shape for a clip from a picture, which takes the picture's shape. */
     aspect: z.enum(FOOTAGE_ASPECTS, `The frame is ${FOOTAGE_ASPECTS.join(", ")}; leave it out for a clip from pictures to follow the first one`).optional(),

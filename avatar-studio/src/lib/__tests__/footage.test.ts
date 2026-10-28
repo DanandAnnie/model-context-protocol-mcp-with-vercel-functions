@@ -32,7 +32,7 @@ async function finished(job: FootageJob, ageMs = 0): Promise<FootageJob> {
 }
 
 describe("generated clips", () => {
-  it("take a description of 10 to 2,000 characters, 5 to 30 seconds, a frame or a picture, and a quality", () => {
+  it("take a description of 10 to 2,000 characters, 5 to 30 seconds (15 with pictures featured or exact wording), a frame or a picture, and a quality", () => {
     assert.throws(() => footageRequestSchema.parse({ prompt: "kitchen" }), /few words/);
     assert.throws(() => ask({ prompt: "x".repeat(2001) }), /at most 2000/);
     assert.throws(() => ask({ durationSec: 4 }), /at least 5 seconds/);
@@ -44,8 +44,9 @@ describe("generated clips", () => {
     assert.throws(() => ask({ durationSec: 16, exact: true }), /at most 15 seconds/);
     assert.ok(ask({ durationSec: 15, exact: true }));
     assert.throws(() => ask({ durationSec: 7.5 }), /whole number of seconds/);
+    assert.match(footageRequestSchema.safeParse({ prompt: PROMPT, durationSec: 1e20 }).error?.issues[0]?.message ?? "", /at most 30 seconds/, "a number too large to be exact is out of range, not a fraction");
     // The first message (the one the page shows) never offers 30 seconds to a clip that is held to 15.
-    for (const extra of [{ durationSec: 40, references: [png()] }, { durationSec: 31, exact: true }, { durationSec: 3, exact: true }, { durationSec: 12.5, exact: true }]) {
+    for (const extra of [{ durationSec: 40, references: [png()] }, { durationSec: 31, exact: true }, { durationSec: 3, exact: true }, { durationSec: 12.5, exact: true }, { durationSec: 1e20 }]) {
       const first = footageRequestSchema.safeParse({ prompt: PROMPT, ...extra }).error?.issues[0]?.message ?? "";
       assert.ok(first && !/5 to 30|from 5 to/.test(first) && (!/30/.test(first) || /15 when/.test(first)), `${JSON.stringify(extra)}: ${first}`);
     }

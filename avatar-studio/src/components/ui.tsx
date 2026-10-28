@@ -105,7 +105,7 @@ export function ErrorBanner({ message }: { message: string | null }) {
   if (!message) return null;
   // Announced when it appears, wherever the page is scrolled to.
   return (
-    <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+    <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 [overflow-wrap:anywhere]">
       {message}
     </div>
   );

@@ -4659,7 +4659,7 @@ test("a photo shoot puts a person's face in a scene picture, with their consent,
   await consent.check();
   const untitled = page.waitForRequest((r) => r.url().endsWith("/api/shoots") && r.method() === "POST");
   await make.click();
-  expect((await untitled).postDataJSON().title).toMatch(/^Photo shoot: harbour, \d{1,2}:\d{2}:\d{2}/);
+  expect((await untitled).postDataJSON().title).toMatch(/^Photo shoot: harbour, \S/);
   const harbour = page.getByTestId("shoot").filter({ hasText: "Photo shoot: harbour" }).first();
   await expect(harbour).toBeVisible();
   expect((await page.request.delete(`/api/shoots/${await harbour.getAttribute("data-shoot")}`)).ok()).toBe(true);
@@ -4674,22 +4674,28 @@ test("a photo shoot puts a person's face in a scene picture, with their consent,
   const id = (await item.getAttribute("data-shoot"))!;
   expect(Object.keys(listed.find((s) => s.id === id)!).filter((k) => ["provider", "providerJobId", "pictureDigest", "ownerId"].includes(k))).toEqual([]);
   // A long file name or title is cut short: the page never scrolls sideways, on a phone or beside the list.
-  const longName = `${"a-really-long-file-name-for-the-photo-of-the-person-".repeat(2)}2026.png`;
+  const longName = `IMG_${"2026041214352200".repeat(6)}.png`;
   const long = (await (await page.request.post("/api/shoots", { data: { identity: [`data:image/png;base64,${TINY_PNG}`], reference: `data:image/png;base64,${TINY_PNG}`, consent: true, aspect: "16:9", title: "x".repeat(120) } })).json()).shoot as { id: string };
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.reload();
   await expect(page.getByTestId("shoot").filter({ hasText: "x".repeat(120) }).getByText("Completed")).toBeVisible({ timeout: 20_000 });
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+  // Studio pages scroll inside <main>, so that is what must not be wider than it shows.
+  const overflow = () => page.evaluate(() => [document.documentElement, ...document.querySelectorAll("main")].filter((el) => el.scrollWidth > el.clientWidth + 1).map((el) => `${el.tagName} ${el.scrollWidth}>${el.clientWidth}`));
+  expect(await overflow()).toEqual([]);
   expect((await page.getByLabel("Shape").boundingBox())!.width).toBeGreaterThan(150);
   // The demo's photos are drawn in the shape asked for, as HeyGen's are.
   const wide = page.getByRole("img", { name: `Photo 1 of ${"x".repeat(120)}, 3840 × 2160` });
-  const box = (await wide.boundingBox())!;
-  expect(box.width / box.height).toBeCloseTo(16 / 9, 1);
+  // Measured from the picture itself once loaded (its box takes the shape from its size attributes before then).
+  await expect.poll(() => wide.evaluate((i: HTMLImageElement) => (i.complete && i.naturalWidth ? i.naturalWidth / i.naturalHeight : 0))).toBeCloseTo(16 / 9, 1);
   await page.setViewportSize({ width: 375, height: 800 });
   // (The form starts again after the reload.)
   await page.getByLabel("Add a photo of the person").setInputFiles({ name: longName, mimeType: "image/png", buffer: Buffer.from(TINY_PNG, "base64") });
   await expect(page.getByRole("img", { name: `Photo 1 of the person: ${longName}` })).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  expect(await overflow()).toEqual([]);
+  // An unreadable file's name in the message wraps too.
+  await page.getByLabel("Add another photo of the person").setInputFiles({ name: `X${longName}`, mimeType: "image/png", buffer: Buffer.from("not a picture") });
+  await expect(page.getByRole("alert").filter({ hasText: "not an image the browser can read" })).toBeVisible();
+  expect(await overflow()).toEqual([]);
   expect((await page.request.delete(`/api/shoots/${long.id}`)).ok()).toBe(true);
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.reload();

@@ -557,6 +557,24 @@ test("Avatar V is chosen for presenters whose look supports it, kept with the vi
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByLabel("Avatar engine", { exact: true })).toHaveValue("avatar_v");
   await expect(page.getByLabel("More blinking", { exact: true })).toBeChecked();
+  // A batch started from a template on Avatar V says so, blinking included, and can go back to Avatar IV with neither sent.
+  const engineTpl = await (await page.request.post("/api/templates", { data: { fromVideoId: id } })).json();
+  await page.goto("/batch");
+  await page.getByLabel("Start from a saved template").selectOption(engineTpl.template.id);
+  await expect(page.getByTestId("batch-engine")).toContainText("Avatar V with more blinking, from the template: HeyGen's higher-quality engine, for this presenter's look.");
+  await page.getByRole("button", { name: "Use Avatar IV" }).click();
+  await expect(page.getByTestId("batch-engine")).toHaveCount(0);
+  // The focus does not fall to the page with the button gone, and the change is announced.
+  await expect(page.getByLabel("Start from a saved template")).toBeFocused();
+  await expect(page.getByText("Each video now uses Avatar IV.")).toBeAttached();
+  const batchSent = page.waitForRequest((r) => r.url().endsWith("/api/videos/batch") && r.method() === "POST");
+  await page.getByRole("button", { name: /^Generate \d+ videos?$/ }).click();
+  const batchBody = (await batchSent).postDataJSON() as Record<string, unknown>;
+  expect(["avatarEngine" in batchBody, "moreBlinking" in batchBody]).toEqual([false, false]);
+  await page.waitForURL(/\/videos\?batch=batch_/);
+  expect((await page.request.delete(`/api/templates/${engineTpl.template.id}`)).ok()).toBe(true);
+  await page.goto(`/create?from=${id}`);
+  await page.getByRole("button", { name: "Settings" }).click();
   await page.getByRole("button", { name: "Avatar", exact: true }).click();
   await page.getByRole("button", { name: "Sofia Reyes Sofia Reyes" }).click();
   await page.getByRole("button", { name: "Settings" }).click();

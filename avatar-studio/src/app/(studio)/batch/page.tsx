@@ -8,7 +8,7 @@ import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api } from "@/lib/client";
 import { decodeScript, legacyEncodingFor } from "@/lib/script-import";
-import { VOICE_EMOTIONS, type AspectRatio, type Avatar, type Background, type BrandKit, type CaptionStyle, type PhotoExpressiveness, type VoiceAccent, type AvatarEngine, type Resolution, type Voice, type VideoTemplate, type VoiceEmotion } from "@/lib/types";
+import { VOICE_EMOTIONS, rendersOnAvatarV, type AspectRatio, type Avatar, type Background, type BrandKit, type CaptionStyle, type PhotoExpressiveness, type VoiceAccent, type AvatarEngine, type Resolution, type Voice, type VideoTemplate, type VoiceEmotion } from "@/lib/types";
 
 const MAX_BATCH_SCRIPT = 5000;
 
@@ -51,6 +51,9 @@ export default function BatchPage() {
   // Each holds the ids to try in order: the first scene's own, then the template's.
   const [cast, setCast] = useState<{ avatarIds: string[]; voiceIds: string[] } | null>(null);
   const { data: templateData } = useApi<{ templates: VideoTemplate[] }>("/api/templates");
+  // Where the focus goes when a carried setting's notice (and the button on it) is taken away.
+  const templateSelect = useRef<HTMLSelectElement>(null);
+  const [carriedNote, setCarriedNote] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -110,6 +113,7 @@ export default function BatchPage() {
   function startFrom(id: string) {
     setStartedFrom(id);
     setErr(null);
+    setCarriedNote("");
     const t = templateData?.templates.find((x) => x.id === id);
     if (!t) {
       // "None": drop the settings the page has no controls for, so they do not ride along unseen.
@@ -158,6 +162,7 @@ export default function BatchPage() {
     }
   }
 
+  const chosenAvatar = avatarData?.avatars.find((a) => a.id === avatarId);
   const ready = !!preview && preview.rowCount > 0 && preview.missing.length === 0 && !preview.problem && !!avatarId && !!voiceId && title.trim().length > 0;
 
   return (
@@ -180,7 +185,7 @@ export default function BatchPage() {
           <Card className="space-y-4 p-4">
             {!!templateData?.templates.length && (
               <Field label="Start from a saved template" hint="Fills in its script and settings; scenes become paragraphs of one script, spoken by the first scene's presenter and voice over its background at the template's speed; scene layouts, scene speeds, on-screen text, and scenes without the presenter are not used (every row shows the presenter).">
-                <select className={inputClass} value={startedFrom} onChange={(e) => startFrom(e.target.value)} aria-label="Start from a saved template">
+                <select ref={templateSelect} className={inputClass} value={startedFrom} onChange={(e) => startFrom(e.target.value)} aria-label="Start from a saved template">
                   <option value="">None</option>
                   {templateData.templates.map((t) => (
                     <option key={t.id} value={t.id}>
@@ -194,11 +199,44 @@ export default function BatchPage() {
               // A transparent template changes the output (a WebM of the presenter alone), so the choice is shown and can be dropped.
               <p data-testid="batch-transparent" className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
                 <span>Transparent background, from the template: each video is a WebM of the presenter alone, without the background.</span>
-                <button type="button" className="shrink-0 font-medium text-brand-700 hover:underline" onClick={() => setCarried(({ transparent: _t, ...rest }) => rest)}>
+                <button
+                  type="button"
+                  className="shrink-0 font-medium text-brand-700 hover:underline"
+                  onClick={() => {
+                    setCarried(({ transparent: _t, ...rest }) => rest);
+                    setCarriedNote("Each video now keeps its background.");
+                    templateSelect.current?.focus();
+                  }}
+                >
                   Use the background
                 </button>
               </p>
             )}
+            {carried.avatarEngine === "avatar_v" && (
+              // Like a transparent template's, a template's engine is shown and can be dropped, its blinking with it.
+              <p data-testid="batch-engine" className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                <span>
+                  Avatar V{carried.moreBlinking ? " with more blinking" : ""}, from the template:{" "}
+                  {!chosenAvatar || rendersOnAvatarV(chosenAvatar, carried)
+                    ? "HeyGen's higher-quality engine, for this presenter's look."
+                    : "not used, as this presenter renders on Avatar IV (its look does not support Avatar V, or it is a photo avatar given expressiveness or gestures)."}
+                </span>
+                <button
+                  type="button"
+                  className="shrink-0 font-medium text-brand-700 hover:underline"
+                  onClick={() => {
+                    setCarried(({ avatarEngine: _e, moreBlinking: _b, ...rest }) => rest);
+                    setCarriedNote("Each video now uses Avatar IV.");
+                    templateSelect.current?.focus();
+                  }}
+                >
+                  Use Avatar IV
+                </button>
+              </p>
+            )}
+            <p className="sr-only" aria-live="polite">
+              {carriedNote}
+            </p>
             <Field label="Batch title" hint="Each video is titled with this plus the first column of its row.">
               <input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} />
             </Field>

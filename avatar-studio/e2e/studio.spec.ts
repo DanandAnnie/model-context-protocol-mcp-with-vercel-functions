@@ -4731,11 +4731,21 @@ test("a photo shoot's photo is brought to life as a b-roll clip's first frame, a
   expect([body.shootPhoto, "image" in body, "aspect" in body]).toEqual([{ shootId: shoot.id, photo: 2 }, false, false]);
   const clip = page.getByTestId("footage").filter({ hasText: `push-in ${tag}` });
   await expect(clip.getByTestId("footage-meta")).toContainText("from photo 2 of a photo shoot");
+  // Named after the camera move, not the advice every clip from a photo starts with.
+  await expect(clip.getByRole("button", { name: /^Delete A slow push-in/ })).toBeVisible();
   // Made again, it opens on the same photo, which the account still has.
   await expect(clip.getByText("Completed")).toBeVisible({ timeout: 20_000 });
   await clip.getByRole("button", { name: /^Make again with changes: / }).click();
   await expect(page.getByRole("img", { name: `Photo 2 of Harbour ${tag}` })).toBeVisible();
   await expect(page.getByLabel("Open on a picture")).toBeChecked();
+  // A picture of one's own takes its place, and the focus goes to its remove button.
+  await page.getByRole("button", { name: `Remove Photo 2 of Harbour ${tag}` }).click();
+  await page.getByLabel("Add a picture").setInputFiles({ name: "dock.png", mimeType: "image/png", buffer: Buffer.from(TINY_PNG, "base64") });
+  await expect(page.getByRole("button", { name: "Remove dock.png" })).toBeFocused();
+  // A link that names no photo is said so, and the address is cleaned.
+  await page.goto("/footage?shoot=x&photo=abc");
+  await expect(page.getByRole("alert").filter({ hasText: "does not name a photo" })).toBeVisible();
+  await expect(page).toHaveURL(/\/footage$/);
   // A photo that is gone is said so, and nothing is opened on.
   expect((await page.request.delete(`/api/shoots/${shoot.id}`)).ok()).toBe(true);
   await page.goto(`/footage?shoot=${shoot.id}&photo=1`);

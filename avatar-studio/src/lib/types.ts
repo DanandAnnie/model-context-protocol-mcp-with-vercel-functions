@@ -178,6 +178,9 @@ export interface FootageJob {
   checkedAt?: string;
 }
 
+/** HeyGen's advice for the start of a description of a clip that opens on a photo of a person (a photo shoot's). */
+export const FIRST_FRAME_ADVICE = "Keep the person exactly as they appear in the first frame.";
+
 /** Shapes a photo shoot can be made in (HeyGen Image); without one, the photos take the scene picture's shape. */
 export const SHOOT_ASPECTS = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9"] as const;
 export type ShootAspect = (typeof SHOOT_ASPECTS)[number];

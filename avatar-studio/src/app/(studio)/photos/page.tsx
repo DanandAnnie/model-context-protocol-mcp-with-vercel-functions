@@ -400,14 +400,16 @@ export default function PhotoShootPage() {
                             // The demo's drawn stand-ins are data URLs, which a browser will not open in a new tab.
                             <Image src={p.url} alt={`Photo ${i + 1} of ${s.title}${p.width && p.height ? `, ${p.width} × ${p.height}` : ""}`} width={p.width ?? 600} height={p.height ?? 800} unoptimized className="h-auto w-full rounded-lg bg-slate-100" />
                           )}
+                          <div className="flex flex-wrap gap-x-3">
                           <a href={p.url} download target="_blank" rel="noopener noreferrer" className="inline-flex min-h-6 items-center gap-1 py-1 text-xs font-medium text-brand-700 hover:underline" aria-label={`Download photo ${i + 1} of ${s.title}`}>
                             <Download className="h-3 w-3" aria-hidden /> Download
                           </a>
-                          {canEdit !== false && status?.generatedFootage !== false && (
-                            <Link href={`/footage?shoot=${s.id}&photo=${i + 1}`} className="ml-3 inline-flex min-h-6 items-center gap-1 py-1 text-xs font-medium text-brand-700 hover:underline" aria-label={`Bring to life: photo ${i + 1} of ${s.title}`}>
+                          {canEdit !== false && status?.generatedFootage === true && (
+                            <Link href={`/footage?shoot=${s.id}&photo=${i + 1}`} className="inline-flex min-h-6 items-center gap-1 py-1 text-xs font-medium text-brand-700 hover:underline" aria-label={`Bring to life: photo ${i + 1} of ${s.title}`}>
                               <Clapperboard className="h-3 w-3" aria-hidden /> Bring to life
                             </Link>
                           )}
+                          </div>
                         </li>
                       ))}
                     </ul>

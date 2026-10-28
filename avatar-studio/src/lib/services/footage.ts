@@ -7,7 +7,7 @@ import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import type { AvatarProvider, FootageInput } from "../providers/types";
-import { FOOTAGE_ASPECTS, FOOTAGE_MAX_SEC, FOOTAGE_MAX_SEC_SHORT, FOOTAGE_MIN_SEC, MAX_FOOTAGE_REFERENCES, MAX_FOOTAGE_SEED, MAX_SHOOT_PHOTOS, footageIdOf, type Background, type BrandKit, type FootageJob, type VideoTemplate } from "../types";
+import { FOOTAGE_ASPECTS, FOOTAGE_MAX_SEC, FOOTAGE_MAX_SEC_SHORT, FOOTAGE_MIN_SEC, MAX_FOOTAGE_REFERENCES, MAX_FOOTAGE_SEED, MAX_SHOOT_PHOTOS, FIRST_FRAME_ADVICE, footageIdOf, type Background, type BrandKit, type FootageJob, type VideoTemplate } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { decodeDataUrl } from "../providers/image";
@@ -172,10 +172,13 @@ export async function startFootage(input: FootageRequest, ownerId: string = LOCA
   const imageDigest = shoot ? `shoot:${shoot.shootId}:${shoot.photo}` : image || references ? `${references ? "ref:" : ""}${hash.digest("base64url")}` : undefined;
   // A first frame sets the shape; pictures to feature follow the first one's unless a frame is chosen.
   const aspect = image || shoot ? undefined : references ? input.aspect : (input.aspect ?? "16:9");
+  // Without a title the clip is named after its description; HeyGen's opening advice, the same for every clip from a
+  // photo, is left out of the name so such clips are told apart.
+  const title = input.title || promptExcerpt(input.prompt.startsWith(FIRST_FRAME_ADVICE) && input.prompt.length > FIRST_FRAME_ADVICE.length + 1 ? input.prompt.slice(FIRST_FRAME_ADVICE.length) : input.prompt, 60);
   const id = opts.key ? `ft_${createHash("sha256").update(`${ownerId}\0${opts.key}`).digest("base64url").slice(0, 32)}` : newId("ft");
   const existing = opts.key ? await getStore().get<FootageJob>("footage", id) : null;
   if (existing && existing.ownerId === ownerId) {
-    const same = existing.title === (input.title || promptExcerpt(input.prompt, 60)) && existing.prompt === input.prompt && existing.durationSec === input.durationSec && existing.aspect === aspect && existing.quality === input.quality && (existing.imageDigest ?? "") === (imageDigest ?? "") && (existing.references ?? 0) === (references?.length ?? 0) && !!existing.exact === !!input.exact && existing.seed === input.seed;
+    const same = existing.title === title && existing.prompt === input.prompt && existing.durationSec === input.durationSec && existing.aspect === aspect && existing.quality === input.quality && (existing.imageDigest ?? "") === (imageDigest ?? "") && (existing.references ?? 0) === (references?.length ?? 0) && !!existing.exact === !!input.exact && existing.seed === input.seed;
     if (!same) throw new ConflictError("This Idempotency-Key was already used for another clip; send a new key");
     return existing;
   }
@@ -198,7 +201,7 @@ export async function startFootage(input: FootageRequest, ownerId: string = LOCA
   const job: FootageJob = stripUndefined({
     id,
     ownerId,
-    title: input.title || promptExcerpt(input.prompt, 60),
+    title,
     prompt: input.prompt,
     fromPicture: image || shoot ? (true as const) : undefined,
     fromShoot: shoot ? { shootId: shoot.shootId, photo: shoot.photo } : undefined,

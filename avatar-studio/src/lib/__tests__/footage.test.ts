@@ -14,6 +14,7 @@ import { footageIdOf, footagePath, type FootageJob } from "../types";
 
 const PROMPT = "A slow push-in on a sunlit kitchen; steam rises from a coffee cup";
 const png = (...extra: number[]) => `data:image/png;base64,${Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...extra]).toString("base64")}`;
+const promptExcerptOf = (t: string) => (t.length <= 60 ? t.replace(/[\s,;:.]+$/, "") : t);
 const ask = (extra: Record<string, unknown> = {}) => footageRequestSchema.parse({ prompt: PROMPT, ...extra });
 
 const realFetch = globalThis.fetch;
@@ -377,6 +378,11 @@ describe("generated clips", () => {
     await assert.rejects(startFootage(ask(from), "u2", { admit }), /not found/i);
     await assert.rejects(startFootage(ask({ shootPhoto: { shootId: "nope", photo: 1 } }), "u1", { admit }), /not found/i);
     assert.equal(admitted, 0);
+    // Without a title, a clip from a photo is named after what follows HeyGen's advice, which every such clip starts with.
+    const { FIRST_FRAME_ADVICE } = await import("../types");
+    assert.equal((await startFootage(ask({ ...from, prompt: `${FIRST_FRAME_ADVICE} A slow push-in on the harbour at dawn` }), "u1")).title, "A slow push-in on the harbour at dawn");
+    assert.equal((await startFootage(ask({ ...from, prompt: FIRST_FRAME_ADVICE }), "u1")).title, promptExcerptOf(FIRST_FRAME_ADVICE), "the advice alone still names it");
+    admitted = 0;
     const job = await startFootage(ask(from), "u1", { key: "key-from-shoot", admit });
     assert.deepEqual([job.fromPicture, job.fromShoot, job.aspect, admitted], [true, { shootId: shoot.id, photo: 2 }, undefined, 1]);
     assert.equal((await startFootage(ask(from), "u1", { key: "key-from-shoot" })).id, job.id, "a retry returns the same clip");

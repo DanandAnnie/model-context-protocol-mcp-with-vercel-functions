@@ -9,7 +9,7 @@ import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api, formatDate, isRefusal } from "@/lib/client";
 import { toUploadable } from "@/lib/image-upload";
 import { danglingLabels, insertPictureLabel, pictureLabels, withPictureRemoved } from "@/lib/picture-labels";
-import { FOOTAGE_ASPECTS, FOOTAGE_MAX_SEC_SHORT, FOOTAGE_MIN_SEC, MAX_FOOTAGE_REFERENCES, footagePath, maxFootageSec, seedOf, type FootageAspect, type FootageJob, type ShootJob } from "@/lib/types";
+import { FOOTAGE_ASPECTS, FOOTAGE_MAX_SEC_SHORT, FOOTAGE_MIN_SEC, MAX_FOOTAGE_REFERENCES, footagePath, maxFootageSec, seedOf, type FootageAspect, type FootageJob, type ShootJob, FIRST_FRAME_ADVICE } from "@/lib/types";
 
 /** A clip as the server lists it: never the renderer, its job id, or the picture's digest. */
 type Footage = Omit<FootageJob, "ownerId" | "provider" | "providerJobId" | "imageDigest">;
@@ -206,6 +206,8 @@ export default function FootagePage() {
       } else {
         pictureTurn.current++;
         setPicture({ name: file.name, url: await toUploadable(file, { maxBytes: MAX_PICTURE_BYTES, maxEdge: 2048 }) });
+        // The add control gives way to the picture; the focus goes to its remove button.
+        focusAfterRender(() => document.getElementById("footage-picture-remove"));
       }
     } catch (e) {
       say(setErr, `${file.name}: ${e instanceof Error ? e.message : "that picture could not be read"}`);
@@ -248,18 +250,24 @@ export default function FootagePage() {
 
   // Opened from a photo shoot ("Bring to life"): the clip opens on that photo, and the description starts as HeyGen
   // advises for a person in the first frame, ready for one camera move. The address is cleaned, so a reload starts afresh.
+  // Once it is known whether this person may make clips here; a viewer's arrival only cleans the address.
+  const arrived = useRef(false);
   useEffect(() => {
+    if (canEdit === null || arrived.current) return;
+    arrived.current = true;
     const q = new URLSearchParams(window.location.search);
+    if (!q.has("shoot") && !q.has("photo")) return;
+    window.history.replaceState(null, "", window.location.pathname);
+    if (canEdit === false) return;
     const shootId = q.get("shoot");
     const photo = Number(q.get("photo"));
-    if (!shootId || !Number.isInteger(photo) || photo < 1) return;
-    window.history.replaceState(null, "", window.location.pathname);
+    if (!shootId || !Number.isInteger(photo) || photo < 1) return say(setErr, "That link does not name a photo of a photo shoot; add a picture to open on instead.");
     void openShootPhoto({ shootId, photo }).then((ok) => {
       // Only into an empty description, on a form that is shown, and taking the focus only if nothing else has it.
       const box = promptRef.current;
       if (!ok || !box) return;
       if (box.value) return say(setNote, `The clip opens on photo ${photo} of the photo shoot.`);
-      const start = "Keep the person exactly as they appear in the first frame. ";
+      const start = `${FIRST_FRAME_ADVICE} `;
       setPrompt(start);
       say(setNote, `The clip opens on photo ${photo} of the photo shoot. Describe one camera move after the first sentence.`);
       if (document.activeElement && document.activeElement !== document.body) return;
@@ -270,7 +278,7 @@ export default function FootagePage() {
     });
     // Once, on arrival.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [canEdit]);
 
   function removePicture() {
     pictureTurn.current++;
@@ -445,7 +453,7 @@ export default function FootagePage() {
                   {USES.map((u) => (
                     <Fragment key={u.value}>
                       <label className="flex min-h-6 items-center gap-2">
-                        <input type="radio" name="footage-use" className="accent-brand-600" checked={use === u.value} aria-describedby={`footage-use-hint-${u.value}`} disabled={reading} onChange={() => (setUse(u.value), (restoreAdaptive.current = false), changed())} />
+                        <input type="radio" name="footage-use" className="accent-brand-600" checked={use === u.value} aria-describedby={`footage-use-hint-${u.value}`} disabled={reading} onChange={() => (setUse(u.value), pictureTurn.current++, (restoreAdaptive.current = false), changed())} />
                         {u.label}
                       </label>
                       {/* Each choice is described by its own hint (outside its label, so not part of its name); the
@@ -464,8 +472,8 @@ export default function FootagePage() {
                     {picture ? (
                       <div className="flex items-center gap-3">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={picture.url} alt={picture.name} className="h-16 w-24 rounded-md bg-slate-100 object-cover" />
-                        <button type="button" onClick={removePicture} disabled={busy} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50" aria-label={`Remove ${picture.name}`}>
+                        <img src={picture.url} alt={picture.name} className="max-h-24 max-w-32 rounded-md bg-slate-100 object-contain" />
+                        <button type="button" id="footage-picture-remove" onClick={removePicture} disabled={busy} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50" aria-label={`Remove ${picture.name}`}>
                           <X className="h-3.5 w-3.5" aria-hidden /> Remove
                         </button>
                       </div>

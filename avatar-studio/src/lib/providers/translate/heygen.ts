@@ -2,7 +2,7 @@ import { LANGUAGES } from "../../stock";
 import { webhookUrl } from "../../config";
 import { HeyGenClient } from "../heygen-client";
 import { glossaryWith } from "../heygen-glossary";
-import { languageCode } from "../../language";
+import { baseLanguageCode } from "../../language";
 import { parseSrt } from "../../captions";
 import type { TranslationRequest } from "../../types";
 import { TRANSLATION_GONE, type TranslateProvider } from "../types";
@@ -46,9 +46,7 @@ export class HeyGenTranslateProvider implements TranslateProvider {
     const kept = [...new Set((input.glossary ?? []).map((t) => t.trim()).filter(Boolean))].map((term) => ({ term, translation: term }));
     const forced = [...kept, ...(input.forcedTranslations ?? [])];
     if (!forced.length) return Promise.resolve(undefined);
-    // "Spanish (Mexico)" is "es"; a name with a language's name among its words ("Brazilian Portuguese", "Norwegian
-    // Bokmål") is that language. Words that only look like codes ("Min" in "Min Nan") are not read as codes.
-    const code = languageCode(input.targetLanguage) ?? input.targetLanguage.trim().split(/\s+/).filter((w) => w.length > 3).map((w) => languageCode(w)).find(Boolean);
+    const code = baseLanguageCode(input.targetLanguage);
     if (!code) throw new Error(`The brand kit's terms cannot be applied to a dub in ${input.targetLanguage}: HeyGen's glossary needs a language it can name; dub without them`);
     return glossaryWith(this.client, { code, forced }, fresh);
   }

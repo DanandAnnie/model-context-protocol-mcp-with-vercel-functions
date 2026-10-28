@@ -2,9 +2,10 @@ import { AGENT_STYLE_TAGS, STUDIO_VARIABLE_TYPES, backdropIdOf, footageIdOf, isP
 import { silentSeconds, withBreakTags } from "../../pauses";
 import type { LookPackKey } from "../../look-packs";
 import { heygenBurnsCaptions } from "../../captions";
-import { voiceTakesAccent } from "../../language";
+import { baseLanguageCode, voiceTakesAccent } from "../../language";
 import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
+import { glossaryWith } from "../heygen-glossary";
 import { HeyGenClient, inlineAsset } from "../heygen-client";
 import { ConflictError, LimitError, NotFoundError, UpstreamError, ValidationError } from "../../errors";
 import type { AgentFile, AvatarJobStatus, AvatarProvider, CleanupStatus, FootageInput, FootageStatus, HighlightInput, HighlightStatus, LipsyncInput, LipsyncStatus, MusicMixInput, RenderCast, ShootInput, ShootStatus } from "../types";
@@ -73,6 +74,8 @@ export class HeyGenAvatarProvider implements AvatarProvider {
   readonly assetKey = ASSET;
   readonly gifPreviews = true;
   readonly cinematicShots = true as const;
+  /** Directed videos take the brand kit's pronunciations, as the workspace glossary's terms. */
+  readonly directedPronunciations = true as const;
   private client: HeyGenClient;
   constructor(apiKey: string) {
     this.client = new HeyGenClient(apiKey);
@@ -898,9 +901,28 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       // Its webhooks name the render it starts, which the studio does not know yet: the studio's video id comes back.
       ...(webhookUrl("heygen") ? { callback_url: webhookUrl("heygen"), callback_id: videoId } : {}),
     };
+    // The brand kit's pronunciations, as the workspace glossary's terms in the video's language (set once per session).
+    const said = (directed.pronunciations ?? []).map((p) => ({ term: p.word, pronunciation: p.sayAs }));
+    const code = baseLanguageCode(directed.language);
+    const glossary = (fresh = false) => (said.length && code ? glossaryWith(this.client, { code, say: said }, fresh) : Promise.resolve(undefined));
+    const send = async (glossaryId?: string) => this.client.createVideoAgent({ ...body, ...(glossaryId ? { brand_glossary_id: glossaryId } : {}) });
+    // The glossary first: trouble there is said as the pronunciations' own, not as a brief HeyGen could not take.
+    let glossaryId: string | undefined;
+    try {
+      glossaryId = await glossary();
+    } catch (err) {
+      throw new ValidationError(`HeyGen could not take your brand kit's pronunciations (${heygenReason(err instanceof Error ? err.message : "", "its brand glossary could not be set up")}); try again, or remove them from the brand kit`);
+    }
     let data;
     try {
-      data = await this.client.createVideoAgent(body);
+      try {
+        data = await send(glossaryId);
+      } catch (err) {
+        // Refused for the glossary it names (deleted in HeyGen since): found or made again, and sent once more.
+        const again = glossaryId && / failed: 4\d\d\b[\s\S]*glossary/i.test(err instanceof Error ? err.message : "") ? await glossary(true).catch(() => undefined) : undefined;
+        if (!again || again === glossaryId) throw err;
+        data = await send(again);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "";
       if (/ failed: 402 /.test(message)) throw new ValidationError("The HeyGen account has no credits left for the Video Agent");

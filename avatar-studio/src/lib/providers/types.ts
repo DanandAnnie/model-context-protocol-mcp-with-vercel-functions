@@ -90,6 +90,8 @@ export interface AvatarProvider {
    * shot's presenters from `cast.avatars` (prepared like any presenter) and needs no voice. Absent when it cannot.
    */
   readonly cinematicShots?: true;
+  /** A directed video's voice takes the brand kit's pronunciations (HeyGen: as glossary terms); absent when it cannot. */
+  readonly directedPronunciations?: true;
   /**
    * Starts a request's `directed` video from its brief (HeyGen's Video Agent), with the presenter (prepared) and voice
    * only when the request names them; HeyGen chooses otherwise; `files` are the request's pictures and clips to use.

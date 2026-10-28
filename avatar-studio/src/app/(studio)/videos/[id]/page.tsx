@@ -1223,6 +1223,20 @@ export default function VideoDetailPage() {
                           </dd>
                         </>
                       ) : null}
+                      {video.directed.pronunciations?.length && video.providerJobId ? (
+                        <>
+                          <dt className="text-slate-500">Brand kit pronunciations sent</dt>
+                          <dd className="min-w-0">
+                            <ul aria-label="Brand kit pronunciations sent to HeyGen" className="space-y-0.5">
+                              {video.directed.pronunciations.map((p, i) => (
+                                <li key={i} className="[overflow-wrap:anywhere]">
+                                  {p.word} said “{p.sayAs}”
+                                </li>
+                              ))}
+                            </ul>
+                          </dd>
+                        </>
+                      ) : null}
                       {video.directed.editOf?.edits.map((e) => (
                         <div key={e.scene} className="contents">
                           <dt className="text-slate-500">Scene {e.scene} changed</dt>

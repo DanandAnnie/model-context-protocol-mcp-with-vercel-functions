@@ -53,6 +53,15 @@ export function languageCode(input?: string | null): string | undefined {
   return languageTag(input)?.split("-")[0];
 }
 
+/**
+ * The base code of a language a person named, for rules scoped to a language (HeyGen's glossary): "Spanish (Mexico)"
+ * is "es", and a name with a language's name among its words ("Brazilian Portuguese", "Norwegian Bokmål") is that
+ * language; words that only look like codes ("Min" in "Min Nan") are not read as codes. Undefined when none is found.
+ */
+export function baseLanguageCode(name: string): string | undefined {
+  return languageCode(name) ?? name.trim().split(/\s+/).filter((w) => w.length > 3).map((w) => languageCode(w)).find(Boolean);
+}
+
 /** A readable name for a provider language value ("en-GB" → "British English"); the value itself when unknown. */
 export function languageLabel(value: string): string {
   const tag = languageTag(value);

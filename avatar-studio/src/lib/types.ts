@@ -798,6 +798,11 @@ export interface DirectedVideo {
   review?: true;
   /** The account's pictures, b-roll clips, and photo shoot photos HeyGen's agent was given to use, by name as they were then. */
   media?: DirectedMedia[];
+  /**
+   * The brand kit's pronunciations HeyGen's voice was given (as the workspace glossary's terms, in the video's
+   * language), as the kit had them when the video last started; HeyGen writes the script, so they cannot be spelled in.
+   */
+  pronunciations?: Pronunciation[];
   /** The directed video this cut revised, scene by scene, and what each changed scene (numbered from 1) was asked to become. */
   editOf?: { videoId: string; title: string; edits: Array<{ scene: number; text: string }> };
 }

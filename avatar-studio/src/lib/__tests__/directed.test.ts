@@ -258,6 +258,78 @@ describe("videos HeyGen's Video Agent directs", () => {
     await assert.rejects(generateAgentVideo(videoAgentSchema.parse({ ...ASK, mode: "generate", styleId: "demo_style_noir" }), "u1"), /style is for HeyGen's Video Agent/);
   });
 
+  it("gives HeyGen's voice the brand kit's pronunciations, as the workspace glossary's terms in the video's language", async (t) => {
+    const { saveBrandKit, brandKitSchema } = await import("../services");
+    const { forgetGlossary } = await import("../providers/heygen-glossary");
+    await saveBrandKit(brandKitSchema.parse({ primaryColor: "#112233", pronunciations: [{ word: "Nair", sayAs: "Nye-er" }, { word: "NAIR", sayAs: "Nah-ir" }, { word: "Zeno", sayAs: "Zee-no" }] }), "u1");
+    // The demo renderer takes none: nothing is read, refused, or shown.
+    const demo = await directAgentVideo(videoAgentSchema.parse({ ...ASK, language: "Klingon" }), "u1");
+    assert.equal(demo.directed?.pronunciations, undefined);
+    // A renderer that takes them gets the kit's as it is at the start, a word's first rule only; a language its rules
+    // cannot name is refused rather than sent without them.
+    const proto = MockAvatarProvider.prototype as unknown as { directedPronunciations?: true };
+    proto.directedPronunciations = true;
+    t.after(() => void delete proto.directedPronunciations);
+    const said = await directAgentVideo(videoAgentSchema.parse({ ...ASK, language: "French" }), "u1");
+    assert.deepEqual(said.directed?.pronunciations, [{ word: "Nair", sayAs: "Nye-er" }, { word: "Zeno", sayAs: "Zee-no" }]);
+    await assert.rejects(directAgentVideo(videoAgentSchema.parse({ ...ASK, language: "Klingon" }), "u1"), /pronunciations cannot be given to HeyGen's Video Agent in Klingon; choose a language such as English/);
+
+    forgetGlossary();
+    const realFetch = globalThis.fetch;
+    const calls: Array<{ method: string; url: string; body: Record<string, unknown> | null }> = [];
+    // The workspace's glossary, with a pronunciation and a dub rule already in it.
+    let glossary = { brand_glossary_id: "bg_ws", name: "Avatar Studio", terms: [{ term: "HeyGen", pronunciation: "hey-jen" }], forced_translations: [{ term: "CEO", translation: "PDG", target_language: { scope: "specific", code: "fr" } }] } as Record<string, unknown>;
+    let refuseOnce = false;
+    let broken = false;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const body = init?.body ? JSON.parse(String(init.body)) : null;
+      calls.push({ method, url, body });
+      const ok = (data: unknown) => Response.json({ data });
+      if (url.includes("/brand-glossaries") && broken) return new Response(JSON.stringify({ error: { message: "pronunciation_language.code is not supported" } }), { status: 422 });
+      if (url.includes("/brand-glossaries?")) return ok([{ id: "bg_ws", name: glossary.name }]);
+      if (url.endsWith("/brand-glossaries/bg_ws")) return ok(method === "PATCH" ? Object.assign(glossary, body) : glossary);
+      if (url === "https://api.heygen.com/v3/video-agents") {
+        if (refuseOnce) {
+          refuseOnce = false;
+          return new Response("brand glossary not found", { status: 400 });
+        }
+        return ok({ session_id: "sess_said", status: "thinking", video_id: null });
+      }
+      return new Response("unexpected", { status: 500 });
+    }) as typeof fetch;
+    try {
+      const provider = new HeyGenAvatarProvider("hg_key");
+      const req = { title: "x", script: "", avatarId: "", voiceId: "", aspect: "16:9" as const, resolution: "1080p" as const, background: { type: "color" as const, value: "#000000" }, captions: false, speed: 1, directed: { brief: "The brief.", prompt: "The brief.", orientation: "landscape" as const, lengthSec: 60, language: "French", pronunciations: [{ word: "Nair", sayAs: "Nye-er" }, { word: "nair", sayAs: "Nah-ir" }] } };
+      await provider.startDirected(req, null, null, "vid_said");
+      // Only the terms are written, beside the one already there, a word once; the dub rules are left alone.
+      const patch = calls.find((c) => c.method === "PATCH");
+      assert.deepEqual(Object.keys(patch?.body ?? {}), ["terms"]);
+      assert.deepEqual(glossary.terms, [{ term: "HeyGen", pronunciation: "hey-jen" }, { term: "Nair", pronunciation: "Nye-er", pronunciation_language: { scope: "specific", code: "fr" } }]);
+      assert.equal((glossary.forced_translations as unknown[]).length, 1);
+      assert.equal(calls.at(-1)?.body?.brand_glossary_id, "bg_ws");
+      assert.equal(calls.filter((c) => c.method === "PATCH").length, 1, "it settles at once");
+      // A start refused for the glossary it names finds it again and is sent once more.
+      calls.length = 0;
+      refuseOnce = true;
+      glossary = { ...glossary, brand_glossary_id: "bg_ws" };
+      await assert.rejects(provider.startDirected(req, null, null, "vid_refused"), /could not take that brief/, "found again as the same one: the refusal stands");
+      assert.ok(calls.some((c) => c.url.includes("/brand-glossaries?")), "it was looked up again");
+      // Trouble with the glossary is said as the pronunciations', not as the brief's.
+      forgetGlossary();
+      broken = true;
+      await assert.rejects(provider.startDirected(req, null, null, "vid_broken"), /HeyGen could not take your brand kit's pronunciations \(pronunciation_language\.code is not supported\)/);
+      // Without pronunciations nothing is read or written, and no glossary is named.
+      calls.length = 0;
+      await provider.startDirected({ ...req, directed: { ...req.directed, pronunciations: undefined } }, null, null, "vid_plain");
+      assert.deepEqual([calls.length, "brand_glossary_id" in (calls[0]?.body ?? {})], [1, false]);
+    } finally {
+      globalThis.fetch = realFetch;
+      forgetGlossary();
+    }
+  });
+
   it("lists HeyGen's styles, every page, keeping only what the studio can show, and sends the one chosen", async () => {
     const realFetch = globalThis.fetch;
     const asked: string[] = [];

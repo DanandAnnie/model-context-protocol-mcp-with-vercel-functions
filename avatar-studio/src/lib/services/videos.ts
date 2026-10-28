@@ -10,6 +10,7 @@ import { buildCues } from "../captions";
 import { captionDurationSec, sceneBoundsMs, type Timed } from "../chapters";
 import { graphemes, wellFormed } from "../text";
 import { pauseSeconds, silentProblem, silentSeconds, stripPauses } from "../pauses";
+import { baseLanguageCode } from "../language";
 import type { AgentFile, AvatarProvider, RenderCast } from "../providers/types";
 import { LOCAL_OWNER } from "../owner-id";
 import { renderLimitFor } from "../billing";
@@ -1450,7 +1451,13 @@ async function createDirectedVideo(req: VideoRequest & { directed: NonNullable<V
   }
   // Checked and sent as they are now, each named as it is now: a picture, clip, or photo deleted since is refused.
   const given = req.directed.media?.length ? await directedFiles(req.directed.media, ownerId, provider) : null;
-  req = { ...req, directed: stripUndefined({ ...req.directed, avatarName: avatar?.name, voiceName: voice?.name, media: given?.media }) };
+  // The brand kit's pronunciations as it has them now, as for any render (the first rule for a word, as renders take
+  // it), where the renderer takes them: HeyGen's voice is given them in the video's language, so a language with no
+  // code its rules can name is refused rather than sent without them.
+  const kitSaid = provider.directedPronunciations ? ((await getBrandKit(ownerId))?.pronunciations ?? []) : [];
+  const said = kitSaid.filter((p, i) => kitSaid.findIndex((q) => q.word.trim().toLowerCase() === p.word.trim().toLowerCase()) === i);
+  if (said.length && !baseLanguageCode(req.directed.language)) throw new ValidationError(`Your brand kit's pronunciations cannot be given to HeyGen's Video Agent in ${req.directed.language}; choose a language such as English, Spanish, or French`);
+  req = { ...req, directed: stripUndefined({ ...req.directed, avatarName: avatar?.name, voiceName: voice?.name, media: given?.media, pronunciations: said.length ? said : undefined }) };
   const base: Video = {
     ...req,
     ...stripUndefined(extras),

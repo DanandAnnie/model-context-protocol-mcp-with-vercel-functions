@@ -1,7 +1,7 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
-import { Captions, ChevronLeft, ChevronRight, Clapperboard, ClipboardCopy, ClipboardPaste, Copy, Flag, Image as ImageIcon, Layers, Merge, MessagesSquare, Mic2, Palette, Pause, Play, Plus, Redo2, Replace, Scissors, Sparkles, Square, Trash2, Undo2, Upload, Users, Wand2, X } from "lucide-react";
+import { Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Captions, ChevronLeft, ChevronRight, Clapperboard, ClipboardCopy, ClipboardPaste, Copy, Flag, Image as ImageIcon, Layers, ListOrdered, Merge, MessagesSquare, Mic2, Palette, Pause, Play, Plus, Redo2, Replace, Scissors, Sparkles, Square, Trash2, Undo2, Upload, Users, Wand2, X } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { VoiceRow } from "@/components/VoicePicker";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -114,6 +114,15 @@ const PPTX_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.
 const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 /** A Word file larger than this is refused before it is unpacked (its pictures count, though only its text is read). */
 const MAX_DOCX_BYTES = 50_000_000;
+
+/** The nearest ancestor that scrolls (the studio's main column), or the page. */
+function scrollParent(el: HTMLElement): Element {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const { overflowY } = getComputedStyle(p);
+    if ((overflowY === "auto" || overflowY === "scroll") && p.scrollHeight > p.clientHeight) return p;
+  }
+  return document.scrollingElement ?? document.documentElement;
+}
 
 /** Whether the scenes hold anything worth asking about before they are replaced: a script, a clip, a presenter, a layout, on-screen text, or more than one scene. */
 const setUpScenes = (list: Scene[]) => list.length > 1 || list.some((sc) => sc.script.trim() || sc.audioId || sc.avatarId || sc.voiceId || sc.layout || sc.overlay?.text.trim());
@@ -899,6 +908,34 @@ function CreateInner() {
   const writerButton = useRef<HTMLButtonElement>(null);
   // Find and replace across every scene's script.
   const [findOpen, setFindOpen] = useState(false);
+  // Every scene's script in one column, to read and edit the video through (one scene's box otherwise).
+  const [scriptView, setScriptView] = useState(false);
+  const scriptViewButton = useRef<HTMLButtonElement>(null);
+  const scriptViewList = useRef<HTMLOListElement>(null);
+  // A box selects its scene when it is clicked or written in, not as the focus passes through it, so tabbing back to
+  // Pause or Split from a box still acts on the scene being written. The scene's panels above the list can change
+  // height with the scene, so the box is held where it was on screen rather than moving under the pointer.
+  const keepInPlace = useRef<{ el: HTMLElement; top: number } | null>(null);
+  function selectFromBox(i: number, el: HTMLElement) {
+    if (scenes[i] === active) return;
+    keepInPlace.current = { el, top: el.getBoundingClientRect().top };
+    setActiveIdx(i);
+  }
+  useLayoutEffect(() => {
+    const held = keepInPlace.current;
+    keepInPlace.current = null;
+    if (held) {
+      const shift = held.el.getBoundingClientRect().top - held.top;
+      if (shift) scrollParent(held.el).scrollBy(0, shift);
+    } else if (scriptView) {
+      // Selected from the Scenes row, a key, or a scene change: its box is brought into view.
+      scriptViewList.current?.children[Math.min(activeIdx, scenes.length - 1)]?.scrollIntoView({ block: "nearest" });
+    }
+  }, [activeIdx, scriptView, scenes.length]);
+  // Down to one scene there is only one script to show; adding another starts from the selected scene's box again.
+  useEffect(() => {
+    if (scenes.length < 2) setScriptView(false);
+  }, [scenes.length]);
   const [findText, setFindText] = useState("");
   const [replaceText, setReplaceText] = useState("");
   const [findCase, setFindCase] = useState(false);
@@ -1894,8 +1931,8 @@ function CreateInner() {
               onSaved={(clip) => setClipData((prev) => ({ clips: prev?.clips.some((c) => c.id === clip.id) ? prev.clips.map((c) => (c.id === clip.id ? clip : c)) : [clip, ...(prev?.clips ?? [])] }))}
             />
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold text-slate-900">
-                {active.audioId ? (scenes.length > 1 ? `Scene ${activeIdx + 1}: what the clip says` : "What the clip says") : scenes.length > 1 ? `Scene ${activeIdx + 1} script` : "Script"}
+              <h3 id="script-heading" className="text-sm font-semibold text-slate-900">
+                {scriptView && scenes.length > 1 ? `Every scene's script · scene ${scenes.indexOf(active) + 1} selected` : active.audioId ? (scenes.length > 1 ? `Scene ${activeIdx + 1}: what the clip says` : "What the clip says") : scenes.length > 1 ? `Scene ${activeIdx + 1} script` : "Script"}
               </h3>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs text-slate-500" data-testid="script-length">
@@ -1942,6 +1979,22 @@ function CreateInner() {
                   <span role="alert" className="text-xs font-medium text-rose-600" data-testid="script-too-long">
                     {scriptChars} of {MAX_SCRIPT_CHARS} characters; shorten the script to generate
                   </span>
+                )}
+                {scenes.length > 1 && (
+                  <Button
+                    ref={scriptViewButton}
+                    variant="secondary"
+                    className="px-3 py-1.5"
+                    aria-pressed={scriptView}
+                    title="Every scene's script in one column, or the selected scene's alone"
+                    onClick={() => {
+                      setScriptView((v) => !v);
+                      // The selected scene's box, in whichever view, keeps the writing going.
+                      requestAnimationFrame(() => scriptRef.current?.focus());
+                    }}
+                  >
+                    <ListOrdered className="h-4 w-4" /> All scripts
+                  </Button>
                 )}
                 <Button ref={writerButton} variant="secondary" className="px-3 py-1.5" aria-expanded={writerOpen} onClick={() => setWriterOpen((v) => !v)}>
                   <Wand2 className="h-4 w-4" /> Write with AI
@@ -2124,6 +2177,38 @@ function CreateInner() {
                 onScript={(s) => { if (applyRewrite(active, s, "Written by AI.")) setWriterOpen(false); }}
               />
             )}
+            {scriptView && scenes.length > 1 ? (
+              // A box clicked or written in selects its scene, so the stage, the scene's settings, and the buttons
+              // above (Pause, Split, Write with AI) follow the box being written in.
+              <ol ref={scriptViewList} className="space-y-3" data-testid="script-view" aria-labelledby="script-heading">
+                {scenes.map((sc, i) => (
+                  <li key={i} aria-current={sc === active ? "true" : undefined} className={`rounded-lg border p-2 ${sc === active ? "border-brand-300 bg-brand-50/40" : "border-slate-200"}`}>
+                    <div className="mb-1 flex items-center justify-between gap-2 text-xs">
+                      <span className={`font-semibold ${sc === active ? "text-brand-700" : "text-slate-700"}`}>
+                        Scene {i + 1}
+                        {sc.audioId ? " · clip" : ""}
+                      </span>
+                      <span className="text-slate-500">
+                        {sc.script.trim() ? `${sc.audioId ? "" : "~"}${formatSeconds(Math.max(1, sceneSeconds(sc)))}` : "no words yet"}
+                      </span>
+                    </div>
+                    <textarea
+                      ref={sc === active ? scriptRef : undefined}
+                      aria-label={sc.audioId ? `Scene ${i + 1}: what the clip says` : `Scene ${i + 1} script`}
+                      className={`${inputClass} min-h-[88px] resize-y leading-relaxed`}
+                      value={sc.script}
+                      onPointerDown={(e) => selectFromBox(i, e.currentTarget)}
+                      onChange={(e) => {
+                        selectFromBox(i, e.currentTarget);
+                        updateScene(i, { script: e.target.value });
+                      }}
+                      placeholder={sc.audioId ? "Type what the clip says. It becomes the captions and makes the video searchable." : `What the avatar says in scene ${i + 1}.`}
+                      maxLength={5000}
+                    />
+                  </li>
+                ))}
+              </ol>
+            ) : (
             <textarea
               ref={scriptRef}
               aria-label={scenes.length > 1 ? `Scene ${activeIdx + 1} script` : "Script"}
@@ -2134,6 +2219,7 @@ function CreateInner() {
               placeholder={active.audioId ? "Type what the clip says. It becomes the captions and makes the video searchable." : scenes.length > 1 ? `What the avatar says in scene ${activeIdx + 1}.` : "Type what your avatar should say, or click “Write with AI”."}
               maxLength={5000}
             />
+            )}
             <SceneTextFields
               key={`text-${activeIdx}`}
               overlay={active.overlay}

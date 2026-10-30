@@ -1222,6 +1222,50 @@ test("other scenes without words are named below the script, one is a click away
   await expect(tab(5)).toHaveCount(0);
 });
 
+test("All scripts shows every scene's script in one column, a box selecting its scene as it is written in", async ({ page }) => {
+  await page.locator("input[placeholder='Video title']").fill("Walkthrough");
+  await page.getByRole("textbox", { name: "Script", exact: true }).fill("Welcome in.");
+  const addScene = page.getByRole("button", { name: "Add scene", exact: true });
+  await addScene.click();
+  await page.getByRole("textbox", { name: "Scene 2 script" }).fill("This is the kitchen.");
+  await addScene.click();
+  const toggle = page.getByRole("button", { name: "All scripts" });
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  const view = page.getByTestId("script-view");
+  await expect(view.getByRole("textbox")).toHaveCount(3);
+  await expect(page.getByRole("heading", { name: "Every scene's script · scene 3 selected" })).toBeVisible();
+  // The selected scene's box has the focus; a scene without words says so.
+  await expect(view.getByRole("textbox", { name: "Scene 3 script" })).toBeFocused();
+  await expect(view.getByRole("listitem").nth(2)).toContainText("no words yet");
+  await expect(view.getByRole("textbox", { name: "Scene 1 script" })).toHaveValue("Welcome in.");
+  // Clicking or writing in a box selects its scene, so Pause and the stage follow it.
+  await view.getByRole("textbox", { name: "Scene 1 script" }).click();
+  await expect(page.getByRole("button", { name: /^Scene 1,/ })).toHaveAttribute("aria-current", "true");
+  await expect(page.getByRole("heading", { name: "Every scene's script · scene 1 selected" })).toBeVisible();
+  await view.getByRole("textbox", { name: "Scene 1 script" }).press("End");
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect(view.getByRole("textbox", { name: "Scene 1 script" })).toHaveValue("Welcome in. [pause 1s] ");
+  await view.getByRole("textbox", { name: "Scene 3 script" }).fill("Thanks for watching.");
+  await expect(page.getByRole("button", { name: /^Scene 3,/ })).toHaveAttribute("aria-current", "true");
+  await expect(view.getByRole("listitem").nth(2)).not.toContainText("no words yet");
+  // The focus passing through another box on the way back to the buttons leaves the scene being written selected.
+  await page.keyboard.press("Shift+Tab");
+  await expect(view.getByRole("textbox", { name: "Scene 2 script" })).toBeFocused();
+  await expect(page.getByRole("button", { name: /^Scene 3,/ })).toHaveAttribute("aria-current", "true");
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect(view.getByRole("textbox", { name: "Scene 3 script" })).toHaveValue("Thanks for watching. [pause 1s] ");
+  await expect(view.getByRole("textbox", { name: "Scene 2 script" })).toHaveValue("This is the kitchen.");
+  // Back to one scene at a time, on the scene last written in, its words kept.
+  await toggle.click();
+  await expect(page.getByTestId("script-view")).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Scene 3 script" })).toBeFocused();
+  await expect(page.getByRole("textbox", { name: "Scene 3 script" })).toHaveValue("Thanks for watching. [pause 1s] ");
+  await page.getByRole("button", { name: /^Scene 1,/ }).click();
+  await expect(page.getByRole("textbox", { name: "Scene 1 script" })).toHaveValue("Welcome in. [pause 1s] ");
+});
+
 test("photo avatar motion is set in the editor, kept with the video and its copy", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Moving portrait");
   await page.locator("textarea").fill("Welcome to the open house.");

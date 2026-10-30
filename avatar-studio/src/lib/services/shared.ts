@@ -1,8 +1,10 @@
 // Helpers shared by the service modules.
+import { z } from "zod";
 import { after } from "next/server";
-import { NotFoundError } from "../errors";
+import { ConflictError, NotFoundError } from "../errors";
 import { notifyVideoTransition } from "../notifications";
 import { LOCAL_OWNER } from "../owner-id";
+import { getStore, type ItemKind } from "../store";
 import type { Video } from "../types";
 
 /** Pass as the owner to skip the ownership check (public share pages). */
@@ -38,4 +40,43 @@ export async function afterResponse(work: () => Promise<unknown>): Promise<void>
 
 export function stripUndefined<T extends object>(obj: T): T {
   return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined)) as T;
+}
+
+/** A new name for a generated clip or photo shoot: 1 to 120 characters, trimmed. */
+export const jobRenameSchema = z.object({ title: z.string("A title is text").trim().min(1, "Give it a name").max(120, "A title is at most 120 characters") });
+
+/**
+ * Renames one of the owner's generated clips or photo shoots. The name it was started with is kept (server only) so a
+ * retried start with the same key is still recognised. The write is conditional on the row read and read again on a
+ * miss, so a status change landing meanwhile is kept and a delete meanwhile stays a delete.
+ */
+export async function renameJob<T extends { id: string; ownerId: string; title: string; askedTitle?: string; updatedAt: string }>(kind: Extract<ItemKind, "footage" | "shoot">, id: string, title: string, ownerId: string, what: string): Promise<T> {
+  let current = owned(await getStore().get<T>(kind, id), ownerId, what);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    if (current.title === title) return current;
+    const next: T = { ...current, title, askedTitle: current.askedTitle ?? current.title, updatedAt: nextUpdatedAt(current.updatedAt) };
+    if (await getStore().putIf(kind, next, "updatedAt", current.updatedAt)) return next;
+    current = owned(await getStore().get<T>(kind, id), ownerId, what);
+  }
+  throw new ConflictError(`The ${what.toLowerCase()} kept changing while it was being renamed; try again`);
+}
+
+/** A time after `previous` and no earlier than now, so a conditional write over the row always sees it move. */
+export function nextUpdatedAt(previous: string): string {
+  return new Date(Math.max(Date.now(), Date.parse(previous) + 1)).toISOString();
+}
+
+/**
+ * Stores what the renderer said about a clip or shoot (`apply` builds the row from the latest one read). The write is
+ * conditional on that row and always moves its time on, so a rename landing meanwhile is read again and kept rather
+ * than undone, and the renewal is not lost to it either. A row deleted meanwhile stays deleted: `job` is returned as it was.
+ */
+export async function writeRefresh<T extends { id: string; updatedAt: string }>(kind: Extract<ItemKind, "footage" | "shoot">, job: T, apply: (current: T) => T): Promise<T> {
+  let current: T | null = job;
+  for (let attempt = 0; attempt < 3 && current; attempt++) {
+    const next = { ...apply(current), updatedAt: nextUpdatedAt(current.updatedAt) };
+    if (await getStore().putIf(kind, next, "updatedAt", current.updatedAt)) return next;
+    current = await getStore().get<T>(kind, job.id);
+  }
+  return current ?? job;
 }

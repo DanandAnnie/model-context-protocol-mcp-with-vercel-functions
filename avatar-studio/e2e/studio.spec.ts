@@ -1682,7 +1682,7 @@ test("a b-roll clip can leave its length to HeyGen, and is made again at the len
   expect((await page.request.delete(`/api/footage/${await item.getAttribute("data-footage")}`)).ok()).toBe(true);
 });
 
-test("a b-roll clip is made from a description and loops behind a presenter as a scene's background", async ({ page }) => {
+test("a b-roll clip is made from a description, renamed, and loops behind a presenter as a scene's background", async ({ page }) => {
   const tag = Date.now().toString(36);
   await page.goto("/footage");
   const make = page.getByRole("button", { name: "Make the clip" });
@@ -1732,6 +1732,18 @@ test("a b-roll clip is made from a description and loops behind a presenter as a
   await expect(item.locator("video")).toBeVisible();
   const listed = ((await (await page.request.get("/api/footage")).json()).footage as Array<Record<string, unknown>>).find((f) => f.id === id)!;
   expect(Object.keys(listed)).not.toContain("providerJobId");
+  // Renamed in place; a retried start with the same key is still the same clip, and the name it was started with stays on the server.
+  const shotName = `Renamed shot ${tag}`;
+  page.once("dialog", (d) => void d.accept(shotName));
+  await item.getByRole("button", { name: /^Rename / }).click();
+  await expect(item.getByText(shotName, { exact: true })).toBeVisible();
+  await expect(page.locator('p[role="status"]').filter({ hasText: `Renamed the clip to “${shotName}”.` })).toHaveCount(1);
+  await expect(item.getByRole("button", { name: `Rename ${shotName}` })).toBeFocused();
+  const retried = (await (await page.request.post("/api/footage", { data: { prompt, durationSec: 8, aspect: "9:16", quality: "hd" }, headers: { "Idempotency-Key": key } })).json()).footage as { id: string; title: string };
+  expect([retried.id, retried.title]).toEqual([id, shotName]);
+  expect(Object.keys(retried)).not.toContain("askedTitle");
+  expect((await page.request.patch(`/api/footage/${id}`, { data: { title: " " } })).status()).toBe(400);
+  expect((await page.request.patch("/api/footage/ft_missing123", { data: { title: "Gone" } })).status()).toBe(404);
   // In the editor the clip is offered as a scene's video background and previewed on the stage.
   await page.goto("/create");
   await page.getByRole("button", { name: "Background" }).click();
@@ -5191,7 +5203,7 @@ test("HeyGen's Video Agent stops at its storyboard for review, takes feedback, a
   expect((await page.request.post(`/api/videos/${id}/agent`, { data: { text: " " } })).status()).toBe(400);
 });
 
-test("a photo shoot puts a person's face in a scene picture, with their consent, and lists the photos to download", async ({ page }) => {
+test("a photo shoot puts a person's face in a scene picture, with their consent, lists the photos to download, and is renamed", async ({ page }) => {
   const tag = Date.now().toString(36);
   await page.goto("/photos");
   await expect(page.getByRole("link", { name: "Photo shoot" })).toBeVisible();
@@ -5290,6 +5302,17 @@ test("a photo shoot puts a person's face in a scene picture, with their consent,
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.reload();
   await expect(item).toBeVisible();
+  // Renamed in place (and back, through the API, for the steps below).
+  page.once("dialog", (d) => void d.accept(`Train window ${tag}, renamed`));
+  await item.getByRole("button", { name: `Rename Train window ${tag}` }).click();
+  await expect(page.locator('p[role="status"]')).toHaveText(`Renamed the photo shoot to “Train window ${tag}, renamed”.`);
+  await expect(item.getByRole("button", { name: `Rename Train window ${tag}, renamed` })).toBeFocused();
+  const shootId = (await item.getAttribute("data-shoot"))!;
+  const back = await page.request.patch(`/api/shoots/${shootId}`, { data: { title: `Train window ${tag}` } });
+  expect(((await back.json()).shoot as { title: string }).title).toBe(`Train window ${tag}`);
+  expect((await page.request.patch("/api/shoots/sh_missing123", { data: { title: "Gone" } })).status()).toBe(404);
+  await page.reload();
+  await expect(item.getByRole("button", { name: `Rename Train window ${tag}`, exact: true })).toBeVisible();
   // Deleting it says so and moves the focus to the next shoot, or to the list's heading when it was the last one.
   const next = (await page.getByTestId("shoot").count()) > 1 ? page.getByTestId("shoot").filter({ hasNotText: `Train window ${tag}` }).first() : page.getByRole("heading", { name: "Your photo shoots" });
   page.once("dialog", (d) => void d.accept());

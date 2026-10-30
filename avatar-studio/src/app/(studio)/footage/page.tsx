@@ -1,18 +1,18 @@
 "use client";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Download, ImagePlus, MonitorPlay, RotateCcw, Trash2, X } from "lucide-react";
+import { Download, ImagePlus, MonitorPlay, Pencil, RotateCcw, Trash2, X } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
-import { api, formatDate, isRefusal } from "@/lib/client";
+import { ApiError, api, formatDate, isRefusal } from "@/lib/client";
 import { toUploadable } from "@/lib/image-upload";
 import { danglingLabels, insertPictureLabel, pictureLabels, withPictureRemoved } from "@/lib/picture-labels";
 import { FOOTAGE_ASPECTS, FOOTAGE_AUTO_MIN_SEC, FOOTAGE_MAX_SEC_SHORT, FOOTAGE_MIN_SEC, MAX_FOOTAGE_REFERENCES, footageLength, footagePath, maxFootageSec, seedOf, type FootageAspect, type FootageJob, type ShootJob, FIRST_FRAME_ADVICE } from "@/lib/types";
 
 /** A clip as the server lists it: never the renderer, its job id, or the picture's digest. */
-type Footage = Omit<FootageJob, "ownerId" | "provider" | "providerJobId" | "imageDigest">;
+type Footage = Omit<FootageJob, "ownerId" | "provider" | "providerJobId" | "imageDigest" | "askedTitle">;
 /** A fresh key for one start (a UUID where the browser has one, as it does over https and on localhost). */
 const newKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`);
 /** Clips' links are renewed by the server once this old; a page left open asks again when it is looked at. */
@@ -408,6 +408,25 @@ export default function FootagePage() {
     focusAfterRender(() => promptRef.current);
   }
 
+  async function rename(f: Footage) {
+    const answer = window.prompt("Clip name", f.title);
+    const name = answer?.trim();
+    if (!name || name === f.title) return;
+    setListErr(null);
+    setNote(null);
+    try {
+      const { footage: clip } = await api<{ footage: Footage }>(`/api/footage/${f.id}`, { method: "PATCH", body: JSON.stringify({ title: name }) });
+      setData((prev) => (prev ? { ...prev, footage: prev.footage.map((x) => (x.id === clip.id ? clip : x)) } : prev));
+      setNote(`Renamed the clip to “${clip.title}”.`);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        setData((prev) => (prev ? { ...prev, footage: prev.footage.filter((x) => x.id !== f.id) } : prev));
+        setNote(`The clip “${f.title}” is no longer available.`);
+        focusAfterRender(() => headingRef.current);
+      } else setListErr(e instanceof Error ? e.message : "The clip could not be renamed");
+    }
+  }
+
   async function remove(f: Footage) {
     if (!window.confirm(`Delete “${f.title}”? Scenes that loop it can no longer be rendered, and making it again uses another job.`)) return;
     setListErr(null);
@@ -655,10 +674,15 @@ export default function FootagePage() {
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       <StatusBadge status={f.status} />
-                      {canEdit !== false && (
-                        <button type="button" onClick={() => remove(f)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-rose-600" aria-label={`Delete ${f.title}`}>
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                      {canEdit === true && (
+                        <>
+                          <button type="button" onClick={() => void rename(f)} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-brand-700" aria-label={`Rename ${f.title}`} title="Rename">
+                            <Pencil className="h-4 w-4" aria-hidden />
+                          </button>
+                          <button type="button" onClick={() => remove(f)} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-rose-600" aria-label={`Delete ${f.title}`} title="Delete">
+                            <Trash2 className="h-4 w-4" aria-hidden />
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>

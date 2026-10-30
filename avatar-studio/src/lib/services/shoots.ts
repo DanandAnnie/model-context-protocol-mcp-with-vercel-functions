@@ -10,7 +10,7 @@ import { MAX_FOOTAGE_SEED, MAX_SHOOT_IDENTITY, MAX_SHOOT_PHOTOS, SHOOT_ASPECTS, 
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { decodeDataUrl } from "../providers/image";
-import { owned, stripUndefined } from "./shared";
+import { owned, renameJob, stripUndefined, writeRefresh } from "./shared";
 import { RELINK_MS, jobChecker } from "./job-checks";
 import { sniff } from "./backdrops";
 
@@ -72,13 +72,14 @@ export function shootsAvailable(): boolean {
 }
 
 /** What the account sees of a shoot: never the renderer, its job id, or the pictures' digest, which stay on the server. */
-export type PublicShoot = Omit<ShootJob, "ownerId" | "provider" | "providerJobId" | "pictureDigest">;
+export type PublicShoot = Omit<ShootJob, "ownerId" | "provider" | "providerJobId" | "pictureDigest" | "askedTitle">;
 export function publicShoot(job: ShootJob): PublicShoot {
-  const { ownerId: _o, provider: _p, providerJobId: _j, pictureDigest: _d, ...rest } = job;
+  const { ownerId: _o, provider: _p, providerJobId: _j, pictureDigest: _d, askedTitle: _t, ...rest } = job;
   void _o;
   void _p;
   void _j;
   void _d;
+  void _t;
   return rest;
 }
 
@@ -127,7 +128,8 @@ export async function startShoot(input: ShootRequest, ownerId: string = LOCAL_OW
   const id = opts.key ? `sh_${createHash("sha256").update(`${ownerId}\0${opts.key}`).digest("base64url").slice(0, 32)}` : newId("sh");
   const existing = opts.key ? await getStore().get<ShootJob>("shoot", id) : null;
   if (existing && existing.ownerId === ownerId) {
-    const same = existing.title === title && existing.pictureDigest === pictureDigest && existing.identityCount === identity.length && existing.aspect === input.aspect && existing.count === input.count && existing.seed === input.seed;
+    // Compared on the name it was started with, which a rename since keeps aside.
+    const same = (existing.askedTitle ?? existing.title) === title && existing.pictureDigest === pictureDigest && existing.identityCount === identity.length && existing.aspect === input.aspect && existing.count === input.count && existing.seed === input.seed;
     if (!same) throw new ConflictError("This Idempotency-Key was already used for another photo shoot; send a new key");
     return existing;
   }
@@ -172,6 +174,11 @@ export async function shootPhotoLink(id: string, photo: number, ownerId: string 
   return { url, provider: job.provider, title: job.title };
 }
 
+/** Renames one of the owner's photo shoots: `{ title }` → the shoot as the account sees it. */
+export async function renameShoot(id: string, title: string, ownerId: string = LOCAL_OWNER): Promise<PublicShoot> {
+  return publicShoot(await renameJob<ShootJob>("shoot", shootId(id), title, ownerId, "Photo shoot"));
+}
+
 /** Forgets one photo shoot (the renderer's copies expire on their own). */
 export async function deleteShoot(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
   const job = owned(await getStore().get<ShootJob>("shoot", shootId(id)), ownerId, "Photo shoot");
@@ -185,17 +192,17 @@ async function refreshShoot(job: ShootJob): Promise<ShootJob> {
     if (!provider.shootStatus) return job;
     const out = await provider.shootStatus(job.providerJobId);
     const now = nowIso();
-    const { photos: _p, error: _e, ...kept } = job;
-    void _p;
-    void _e;
-    const next: ShootJob = {
-      ...kept,
-      ...stripUndefined({ status: out.status, photos: out.photos?.length ? out.photos : undefined, error: out.error }),
-      checkedAt: now,
-      updatedAt: out.status !== job.status ? now : job.updatedAt,
-    };
-    // Written only over the record that was read, so a delete meanwhile stays deleted.
-    return (await getStore().putIf("shoot", next, "updatedAt", job.updatedAt)) ? next : job;
+    // Built over the latest row (a rename may land while the renderer is asked), and written only over it.
+    return await writeRefresh<ShootJob>("shoot", job, (current) => {
+      const { photos: _p, error: _e, ...kept } = current;
+      void _p;
+      void _e;
+      return {
+        ...kept,
+        ...stripUndefined({ status: out.status, photos: out.photos?.length ? out.photos : undefined, error: out.error }),
+        checkedAt: now,
+      };
+    });
   } catch (err) {
     console.error(`photo shoot check failed for ${job.id}:`, err);
     return job;

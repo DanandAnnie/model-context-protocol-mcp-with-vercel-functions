@@ -11,7 +11,7 @@ import { FOOTAGE_ASPECTS, FOOTAGE_AUTO_MIN_SEC, FOOTAGE_MAX_SEC, FOOTAGE_MAX_SEC
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { decodeDataUrl } from "../providers/image";
-import { owned, stripUndefined } from "./shared";
+import { owned, renameJob, stripUndefined, writeRefresh } from "./shared";
 import { jobChecker } from "./job-checks";
 import { plainScene, rewriteIfNamed, sniff } from "./backdrops";
 import { promptExcerpt } from "./lookpacks";
@@ -114,13 +114,14 @@ export function footageAvailable(): boolean {
 }
 
 /** What the account sees of a clip: never the renderer, its job id, or the picture's digest, which stay on the server. */
-export type PublicFootage = Omit<FootageJob, "ownerId" | "provider" | "providerJobId" | "imageDigest">;
+export type PublicFootage = Omit<FootageJob, "ownerId" | "provider" | "providerJobId" | "imageDigest" | "askedTitle">;
 export function publicFootage(job: FootageJob): PublicFootage {
-  const { ownerId: _o, provider: _p, providerJobId: _j, imageDigest: _d, ...rest } = job;
+  const { ownerId: _o, provider: _p, providerJobId: _j, imageDigest: _d, askedTitle: _t, ...rest } = job;
   void _o;
   void _p;
   void _j;
   void _d;
+  void _t;
   return rest;
 }
 
@@ -180,7 +181,9 @@ export async function startFootage(input: FootageRequest, ownerId: string = LOCA
   const existing = opts.key ? await getStore().get<FootageJob>("footage", id) : null;
   if (existing && existing.ownerId === ownerId) {
     // (A clip stored before titles left the advice out was named after the whole description.)
-    const same = (existing.title === title || existing.title === (input.title || promptExcerpt(input.prompt, 60))) && existing.prompt === input.prompt && !!existing.autoLength === !!input.autoLength && (input.autoLength || existing.durationSec === durationSec) && existing.aspect === aspect && existing.quality === input.quality && (existing.imageDigest ?? "") === (imageDigest ?? "") && (existing.references ?? 0) === (references?.length ?? 0) && !!existing.exact === !!input.exact && existing.seed === input.seed;
+    // Compared on the name it was started with, which a rename since keeps aside.
+    const asked = existing.askedTitle ?? existing.title;
+    const same = (asked === title || asked === (input.title || promptExcerpt(input.prompt, 60))) && existing.prompt === input.prompt && !!existing.autoLength === !!input.autoLength && (input.autoLength || existing.durationSec === durationSec) && existing.aspect === aspect && existing.quality === input.quality && (existing.imageDigest ?? "") === (imageDigest ?? "") && (existing.references ?? 0) === (references?.length ?? 0) && !!existing.exact === !!input.exact && existing.seed === input.seed;
     if (!same) throw new ConflictError("This Idempotency-Key was already used for another clip; send a new key");
     return existing;
   }
@@ -248,6 +251,11 @@ export async function deleteFootage(id: string, ownerId: string = LOCAL_OWNER): 
   await getStore().remove("footage", job.id);
 }
 
+/** Renames one of the owner's generated clips: `{ title }` → the clip as the account sees it. */
+export async function renameFootage(id: string, title: string, ownerId: string = LOCAL_OWNER): Promise<PublicFootage> {
+  return publicFootage(await renameJob<FootageJob>("footage", clipId(id), title, ownerId, "Clip"));
+}
+
 /** One of the owner's clips, for a record that will loop it later (a brand kit, a template): a foreign or unknown id reads as not found. */
 export async function getFootage(id: string, ownerId: string = LOCAL_OWNER): Promise<FootageJob> {
   return owned(await getStore().get<FootageJob>("footage", clipId(id)), ownerId, "Clip");
@@ -293,22 +301,22 @@ async function refreshFootage(job: FootageJob): Promise<FootageJob> {
     if (!provider.footageStatus) return job;
     const out = await provider.footageStatus(job.providerJobId);
     const now = nowIso();
-    const { videoUrl: _v, width: _w, height: _h, error: _e, ...kept } = job;
-    void _v;
-    void _w;
-    void _h;
-    void _e;
-    const next: FootageJob = {
-      ...kept,
-      // The length asked for is kept (it is what a retried start is compared on), and the clip's own is in the file; a
-      // length HeyGen picked is recorded once it is known, in whole seconds within the range it picks from.
-      ...(job.autoLength && out.durationSec ? { durationSec: Math.min(FOOTAGE_MAX_SEC, Math.max(FOOTAGE_AUTO_MIN_SEC, Math.round(out.durationSec))) } : {}),
-      ...stripUndefined({ status: out.status, videoUrl: out.videoUrl, width: out.width, height: out.height, error: out.error, takeSeed: out.seed ?? job.takeSeed }),
-      checkedAt: now,
-      updatedAt: out.status !== job.status ? now : job.updatedAt,
-    };
-    // Written only over the record that was read, so a delete meanwhile stays deleted.
-    return (await getStore().putIf("footage", next, "updatedAt", job.updatedAt)) ? next : job;
+    // Built over the latest row (a rename may land while the renderer is asked), and written only over it.
+    return await writeRefresh<FootageJob>("footage", job, (current) => {
+      const { videoUrl: _v, width: _w, height: _h, error: _e, ...kept } = current;
+      void _v;
+      void _w;
+      void _h;
+      void _e;
+      return {
+        ...kept,
+        // The length asked for is kept (it is what a retried start is compared on), and the clip's own is in the file; a
+        // length HeyGen picked is recorded once it is known, in whole seconds within the range it picks from.
+        ...(current.autoLength && out.durationSec ? { durationSec: Math.min(FOOTAGE_MAX_SEC, Math.max(FOOTAGE_AUTO_MIN_SEC, Math.round(out.durationSec))) } : {}),
+        ...stripUndefined({ status: out.status, videoUrl: out.videoUrl, width: out.width, height: out.height, error: out.error, takeSeed: out.seed ?? current.takeSeed }),
+        checkedAt: now,
+      };
+    });
   } catch (err) {
     console.error(`clip check failed for ${job.id}:`, err);
     return job;

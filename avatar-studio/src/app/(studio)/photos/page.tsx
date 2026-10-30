@@ -2,18 +2,18 @@
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { Camera, Clapperboard, Download, ImagePlus, Trash2, UserRound, X } from "lucide-react";
+import { Camera, Clapperboard, Download, ImagePlus, Pencil, Trash2, UserRound, X } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
-import { api, formatDate, isRefusal } from "@/lib/client";
+import { ApiError, api, formatDate, isRefusal } from "@/lib/client";
 import { toUploadable } from "@/lib/image-upload";
 import { MAX_SHOOT_IDENTITY, MAX_SHOOT_PHOTOS, SHOOT_ASPECTS, type ProviderStatus, type ShootAspect, type ShootJob } from "@/lib/types";
 
 /** A shoot as the server lists it: never the renderer, its job id, or the pictures' digest. */
-type Shoot = Omit<ShootJob, "ownerId" | "provider" | "providerJobId" | "pictureDigest">;
+type Shoot = Omit<ShootJob, "ownerId" | "provider" | "providerJobId" | "pictureDigest" | "askedTitle">;
 type Picture = { name: string; url: string };
 /** A fresh key for one start (a UUID where the browser has one, as it does over https and on localhost). */
 const newKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`);
@@ -212,6 +212,25 @@ export default function PhotoShootPage() {
     }
   }
 
+  async function rename(s: Shoot) {
+    const answer = window.prompt("Photo shoot name", s.title);
+    const name = answer?.trim();
+    if (!name || name === s.title) return;
+    setListErr(null);
+    setNote(null);
+    try {
+      const { shoot } = await api<{ shoot: Shoot }>(`/api/shoots/${s.id}`, { method: "PATCH", body: JSON.stringify({ title: name }) });
+      setData((prev) => (prev ? { ...prev, shoots: prev.shoots.map((x) => (x.id === shoot.id ? shoot : x)) } : prev));
+      setNote(`Renamed the photo shoot to “${shoot.title}”.`);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        setData((prev) => (prev ? { ...prev, shoots: prev.shoots.filter((x) => x.id !== s.id) } : prev));
+        setNote(`The photo shoot “${s.title}” is no longer available.`);
+        focusAfterRender(() => headingRef.current);
+      } else setListErr(e instanceof Error ? e.message : "The photo shoot could not be renamed");
+    }
+  }
+
   async function remove(s: Shoot) {
     if (!window.confirm(`Delete “${s.title}”? Its photos go too; download any you want to keep first.`)) return;
     setListErr(null);
@@ -380,10 +399,15 @@ export default function PhotoShootPage() {
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       <StatusBadge status={s.status} />
-                      {canEdit !== false && (
-                        <button type="button" onClick={() => remove(s)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-rose-600" aria-label={`Delete ${s.title}`}>
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                      {canEdit === true && (
+                        <>
+                          <button type="button" onClick={() => void rename(s)} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-brand-700" aria-label={`Rename ${s.title}`} title="Rename">
+                            <Pencil className="h-4 w-4" aria-hidden />
+                          </button>
+                          <button type="button" onClick={() => remove(s)} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-rose-600" aria-label={`Delete ${s.title}`} title="Delete">
+                            <Trash2 className="h-4 w-4" aria-hidden />
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>

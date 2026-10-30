@@ -49,11 +49,13 @@ export async function exportOwnerData(ownerId: string = LOCAL_OWNER): Promise<Ow
         delete copy.provider;
         delete copy.providerJobId;
         delete copy.imageDigest;
+        delete copy.askedTitle;
       }
       if (kind === "shoot") {
         delete copy.provider;
         delete copy.providerJobId;
         delete copy.pictureDigest;
+        delete copy.askedTitle;
       }
       if (kind === "lookpack") {
         delete copy.provider;

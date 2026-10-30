@@ -162,6 +162,113 @@ describe("generated clips", () => {
     assert.equal(after.scenes[0].hidePresenter, undefined, "the presenter comes back, as a colour cannot stand in for it");
   });
 
+  it("can be renamed, keeping the name a retried start is compared on", async () => {
+    const { jobRenameSchema, renameFootage } = await import("../services");
+    const job = await startFootage(ask({ title: "Kitchen pan" }), "u1", { key: "rename-key-1" });
+    const renamed = await renameFootage(job.id, "Kitchen, morning light", "u1");
+    assert.equal(renamed.title, "Kitchen, morning light");
+    assert.equal("askedTitle" in renamed, false, "the name it was started with is server only");
+    assert.ok(renamed.updatedAt > job.updatedAt);
+    assert.equal((await listFootage("u1")).map(publicFootage)[0].title, "Kitchen, morning light");
+    // A retried start with the same key and request is still the same clip, renamed.
+    assert.equal((await startFootage(ask({ title: "Kitchen pan" }), "u1", { key: "rename-key-1" })).id, job.id);
+    await assert.rejects(startFootage(ask({ title: "Something else" }), "u1", { key: "rename-key-1" }), ConflictError);
+    // Renaming again keeps the first name aside.
+    await renameFootage(job.id, "Kitchen pan, take 2", "u1");
+    assert.equal((await getStore().get<FootageJob>("footage", job.id))!.askedTitle, "Kitchen pan");
+    // Not another account's, not an unknown or malformed id; the name is trimmed and 1 to 120 characters.
+    await assert.rejects(renameFootage(job.id, "Mine", "u2"), /not found/i);
+    await assert.rejects(renameFootage("ft_missing", "Gone", "u1"), /not found/i);
+    await assert.rejects(renameFootage("../x", "Gone", "u1"), /not found/i);
+    assert.equal(jobRenameSchema.parse({ title: "  Spaced  " }).title, "Spaced");
+    assert.throws(() => jobRenameSchema.parse({ title: " " }), /Give it a name/);
+    assert.throws(() => jobRenameSchema.parse({ title: "x".repeat(121) }), /at most 120/);
+    // Deleted meanwhile: not found, and it stays deleted.
+    const store = getStore();
+    const putIf = store.putIf.bind(store);
+    store.putIf = async (kind, item, field, expected) => {
+      store.putIf = putIf;
+      await deleteFootage(job.id, "u1");
+      return putIf(kind, item, field, expected);
+    };
+    try {
+      await assert.rejects(renameFootage(job.id, "Back", "u1"), /not found/i);
+      assert.equal(await store.get("footage", job.id), null);
+    } finally {
+      store.putIf = putIf;
+    }
+  });
+
+  it("keep a status change that lands while being renamed", async () => {
+    const { renameFootage } = await import("../services");
+    const job = await startFootage(ask(), "u1");
+    const store = getStore();
+    const putIf = store.putIf.bind(store);
+    store.putIf = async (kind, item, field, expected) => {
+      store.putIf = putIf;
+      // The clip finishes between the rename's read and its write (a status change moves its time on).
+      const at = new Date(Date.parse(job.updatedAt) + 5).toISOString();
+      await getStore().put("footage", { ...job, status: "completed" as const, videoUrl: "https://files.heygen.ai/new.mp4", checkedAt: at, updatedAt: at });
+      return putIf(kind, item, field, expected);
+    };
+    try {
+      const renamed = await renameFootage(job.id, "Renamed mid-render", "u1");
+      assert.deepEqual([renamed.title, renamed.status], ["Renamed mid-render", "completed"]);
+      const stored = (await store.get<FootageJob>("footage", job.id))!;
+      assert.deepEqual([stored.title, stored.status, !!stored.videoUrl], ["Renamed mid-render", "completed", true]);
+    } finally {
+      store.putIf = putIf;
+    }
+  });
+
+  it("keep a renewed link when a rename and the renewal land together, in either order", async () => {
+    const { renameFootage } = await import("../services");
+    const store = getStore();
+    const putIf = store.putIf.bind(store);
+    const stale = async () => {
+      const job = await startFootage(ask(), "u1");
+      // Finished long ago: the next use asks the renderer for a fresh link (the demo hands back its sample clip).
+      await store.put("footage", { ...(await finished(job, 60 * 60 * 1000)), providerJobId: `mockft_${Date.now() - 10_000}_5` });
+      forgetFootageChecks();
+      return job;
+    };
+    try {
+      // The renewal lands between the rename's read and its write.
+      const a = await stale();
+      store.putIf = async (kind, item, field, expected) => {
+        store.putIf = putIf;
+        await footageForRender(a.id, "u1");
+        return putIf(kind, item, field, expected);
+      };
+      await renameFootage(a.id, "Renamed during renewal", "u1");
+      const storedA = (await store.get<FootageJob>("footage", a.id))!;
+      assert.equal(storedA.title, "Renamed during renewal");
+      assert.match(storedA.videoUrl!, /\/demo\//, "the renewed link is kept");
+      assert.ok(Date.now() - Date.parse(storedA.checkedAt!) < 60_000);
+      // The rename lands while the renderer is asked for the renewal.
+      const b = await stale();
+      store.putIf = async (kind, item, field, expected) => {
+        store.putIf = putIf;
+        await renameFootage(b.id, "Renamed mid-check", "u1");
+        return putIf(kind, item, field, expected);
+      };
+      assert.match((await footageForRender(b.id, "u1")).videoUrl, /\/demo\//);
+      const storedB = (await store.get<FootageJob>("footage", b.id))!;
+      assert.equal(storedB.title, "Renamed mid-check", "the rename is kept");
+      assert.match(storedB.videoUrl!, /\/demo\//, "and so is the renewal");
+    } finally {
+      store.putIf = putIf;
+    }
+  });
+
+  it("leave the name they were started with out of the account export, and change nothing renamed to the same name", async () => {
+    const { renameFootage } = await import("../services");
+    const job = await startFootage(ask({ title: "Original" }), "u1");
+    const renamed = await renameFootage(job.id, "Renamed", "u1");
+    assert.doesNotMatch(JSON.stringify(await exportOwnerData("u1")), /askedTitle|"Original"/);
+    assert.equal((await renameFootage(job.id, "Renamed", "u1")).updatedAt, renamed.updatedAt);
+  });
+
   it("give a duplicated template's scene a plain background when the clip is gone", async () => {
     const { createTemplate } = await import("../services");
     const job = await finished(await startFootage(ask(), "u1"));

@@ -178,6 +178,8 @@ export interface FootageJob {
   quality: "standard" | "hd";
   /** A digest of the picture or pictures, so a retried start with the same key is known to be the same one. Server only. */
   imageDigest?: string;
+  /** The title it was started with, kept once it is renamed, so a retried start is still known to be the same. Server only. */
+  askedTitle?: string;
   /** Renderer generating it, and its job id there, never shown to the account. */
   provider: string;
   providerJobId: string;
@@ -229,6 +231,8 @@ export interface ShootJob {
   seed?: number;
   /** A digest of the person's photos and the scene picture, so a retried start is known to be the same. Server only. */
   pictureDigest?: string;
+  /** The title it was started with, kept once it is renamed, so a retried start is still known to be the same. Server only. */
+  askedTitle?: string;
   /** Renderer making it, and its job id there, never shown to the account. */
   provider: string;
   providerJobId: string;

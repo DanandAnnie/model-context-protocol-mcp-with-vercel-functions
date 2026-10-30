@@ -282,4 +282,21 @@ describe("photo shoots", () => {
     await assert.rejects(createAvatar(make(from), "u1", answer(bytes)), /could not be renewed just now/);
     assert.deepEqual(asked, []);
   });
+  it("can be renamed, keeping the name a retried start is compared on", async () => {
+    const { renameShoot } = await import("../services");
+    const job = await startShoot(ask({ title: "Lobby portraits" }), "u1", { key: "shoot-rename-1" });
+    const renamed = await renameShoot(job.id, "Lobby, spring", "u1");
+    assert.equal(renamed.title, "Lobby, spring");
+    assert.equal("askedTitle" in renamed, false);
+    assert.equal((await listShoots("u1")).map(publicShoot)[0].title, "Lobby, spring");
+    assert.equal((await startShoot(ask({ title: "Lobby portraits" }), "u1", { key: "shoot-rename-1" })).id, job.id);
+    await assert.rejects(startShoot(ask({ title: "Lobby, spring" }), "u1", { key: "shoot-rename-1" }), ConflictError, "a start under the new name is another start");
+    assert.doesNotMatch(JSON.stringify(await exportOwnerData("u1")), /askedTitle|Lobby portraits/);
+    await assert.rejects(renameShoot(job.id, "Mine", "u2"), /not found/i);
+    await assert.rejects(renameShoot("sh_missing", "Gone", "u1"), /not found/i);
+    await assert.rejects(renameShoot("../x", "Gone", "u1"), /not found/i);
+    await deleteShoot(job.id, "u1");
+    await assert.rejects(renameShoot(job.id, "Back", "u1"), /not found/i);
+    assert.equal(await getStore().get("shoot", job.id), null);
+  });
 });

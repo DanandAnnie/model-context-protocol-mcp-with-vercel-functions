@@ -8,6 +8,7 @@ import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ApiError, api, formatDate, formatSeconds } from "@/lib/client";
 import { clipBody } from "@/lib/clip-upload";
+import { ASSET_SORTS, inRankOrder, inSortOrder, rankAssets, type AssetSort } from "@/lib/asset-sort";
 import { foldTerm } from "@/lib/glossary";
 import { toUploadable } from "@/lib/image-upload";
 import { MAX_BACKDROPS, MAX_CLIPS, type AudioClip, type Backdrop } from "@/lib/types";
@@ -38,8 +39,19 @@ export default function AssetsPage() {
   const pin = (id: string) => setPinned((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
   const needle = foldTerm(q.trim());
   const matches = (id: string, ...texts: Array<string | undefined>) => !needle || pinned.has(id) || texts.some((t) => !!t && foldTerm(t).includes(needle));
-  const shownClips = clips.filter((c) => matches(c.id, c.name, c.transcript));
-  const shownPictures = pictures.filter((b) => matches(b.id, b.name));
+  // The order is worked out when a sort is chosen and when each list first loads, and then held: a rename does not
+  // move its card, an upload appears first, and a delete leaves the rest where they are, so nothing moves out from
+  // under the person (or their focus). "Sort again" shows once the held order no longer matches the sort.
+  const [sort, setSort] = useState<AssetSort>("newest");
+  const [sortRound, setSortRound] = useState(0);
+  const orderKey = `${sort}:${sortRound}:${!!clipsApi.data}:${!!picturesApi.data}`;
+  const [order, setOrder] = useState<{ key: string; clips: Map<string, number>; pictures: Map<string, number> } | null>(null);
+  if (order?.key !== orderKey) setOrder({ key: orderKey, clips: rankAssets(clips, sort), pictures: rankAssets(pictures, sort) });
+  const orderedClips = inRankOrder(clips, order?.clips);
+  const orderedPictures = inRankOrder(pictures, order?.pictures);
+  const outOfOrder = !inSortOrder(orderedClips, sort) || !inSortOrder(orderedPictures, sort);
+  const shownClips = orderedClips.filter((c) => matches(c.id, c.name, c.transcript));
+  const shownPictures = orderedPictures.filter((b) => matches(b.id, b.name));
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [uploading, setUploading] = useState<"clip" | "picture" | null>(null);
@@ -51,6 +63,11 @@ export default function AssetsPage() {
   const say = (message: string) => {
     setErr(null);
     setNote(message);
+  };
+  const sortBy = (next: AssetSort) => {
+    setSort(next);
+    setSortRound((n) => n + 1);
+    say(`Sorted: ${ASSET_SORTS.find((o) => o.value === next)!.label}.`);
   };
   const fail = (e: unknown, fallback: string) => {
     setNote(null);
@@ -175,6 +192,18 @@ export default function AssetsPage() {
       {(clipsApi.data || picturesApi.data) && (
         <div className="mb-5 flex flex-wrap items-center gap-3">
           <input type="search" aria-label="Search assets" aria-describedby="assets-matches" className={`${inputClass} max-w-sm`} placeholder="Search by name or by what a clip says" value={q} onChange={(e) => search(e.target.value)} />
+          <select aria-label="Sort assets" value={sort} onChange={(e) => sortBy(e.target.value as AssetSort)} className={inputClass.replace("w-full", "w-auto")}>
+            {ASSET_SORTS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          {outOfOrder && (
+            <button type="button" onClick={() => sortBy(sort)} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+              Sort again
+            </button>
+          )}
           <span id="assets-matches" role="status" className="text-xs text-slate-500" data-testid="assets-matches">
             {needle ? `${shownClips.length} of ${clips.length} clips · ${shownPictures.length} of ${pictures.length} pictures` : ""}
           </span>
@@ -217,7 +246,7 @@ export default function AssetsPage() {
           <div className="space-y-3" data-testid="asset-clips">
             {shownClips.length === 0 && <p className="rounded-lg bg-slate-50 px-3 py-4 text-sm text-slate-600">No clips match “{q.trim()}”.</p>}
             {/* Every card stays mounted, hidden when it does not match, so words typed into one survive a search. */}
-            {clips.map((clip) => (
+            {orderedClips.map((clip) => (
               <ClipCard key={clip.id} clip={clip} hidden={!shownClips.includes(clip)} canEdit={canEdit === true} roleKnown={canEdit !== null} onRename={() => void renameClip(clip)} onDelete={() => void removeClip(clip)} onSaved={putClip} onGone={() => dropClip(clip.id)} onNote={say} onError={fail} />
             ))}
           </div>

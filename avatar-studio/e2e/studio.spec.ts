@@ -5340,7 +5340,7 @@ test("a photo shoot's photo is brought to life as a b-roll clip's first frame, a
   expect((await page.request.delete(`/api/footage/${await clip.getAttribute("data-footage")}`)).ok()).toBe(true);
 });
 
-test("the Assets page keeps the account's audio clips and pictures: upload, words, rename, make a video, download, delete", async ({ page }) => {
+test("the Assets page keeps the account's audio clips and pictures: upload, words, rename, make a video, download, sort, delete", async ({ page }) => {
   // Names unique to this run, so a run left part-way on a reused server does not match here.
   const tag = Date.now().toString(36);
   const take = `asset-take-${tag}`;
@@ -5436,6 +5436,39 @@ test("the Assets page keeps the account's audio clips and pictures: upload, word
   await expect(page.getByTestId("asset-clip").filter({ hasText: intro })).toHaveCount(1);
   await search.fill("");
   await expect(page.getByTestId("assets-matches")).toHaveText("");
+  // Newest first by default, oldest first, or by name. The order is then held: a renamed picture keeps its place
+  // (so the focus stays with it), and "Sort again" puts the list back in order.
+  const aardvark = `aardvark-${tag}`;
+  const zebra = `Zebra ${tag}`;
+  const sortBy = page.getByRole("combobox", { name: "Sort assets" });
+  const pictureOrder = () => pictures.getByRole("img").evaluateAll((imgs) => imgs.map((img) => img.getAttribute("alt")));
+  await expect(sortBy).toHaveValue("newest");
+  // The select sits beside the search box rather than taking a row of its own.
+  expect(Math.abs((await sortBy.boundingBox())!.y - (await search.boundingBox())!.y)).toBeLessThan(8);
+  await page.getByLabel("Upload a picture").setInputFiles({ name: `${aardvark}.png`, mimeType: "image/png", buffer: pixel });
+  await expect(pictures.getByRole("img", { name: aardvark, exact: true })).toBeVisible();
+  await search.fill(tag);
+  await expect.poll(pictureOrder).toEqual([aardvark, front]);
+  await sortBy.selectOption("oldest");
+  await expect(page.getByTestId("assets-note")).toHaveText("Sorted: Oldest first.");
+  await expect.poll(pictureOrder).toEqual([front, aardvark]);
+  await sortBy.selectOption("name");
+  await expect.poll(pictureOrder).toEqual([aardvark, front]);
+  await expect(page.getByRole("button", { name: "Sort again" })).toHaveCount(0);
+  // Renaming the first card to a name that sorts last leaves it, and the focus, where it was.
+  page.once("dialog", (d) => d.accept(zebra));
+  await pictures.getByRole("button", { name: `Rename ${aardvark}`, exact: true }).click();
+  await expect(pictures.getByRole("button", { name: `Rename ${zebra}`, exact: true })).toBeFocused();
+  expect(await pictureOrder()).toEqual([zebra, front]);
+  await page.getByRole("button", { name: "Sort again" }).click();
+  await expect.poll(pictureOrder).toEqual([front, zebra]);
+  await expect(page.getByRole("button", { name: "Sort again" })).toHaveCount(0);
+  await expect(page.getByTestId("assets-note")).toHaveText("Sorted: Name A–Z.");
+  page.once("dialog", (d) => d.accept());
+  await pictures.getByRole("button", { name: `Delete ${zebra}`, exact: true }).click();
+  await expect(pictures.getByRole("img", { name: zebra, exact: true })).toHaveCount(0);
+  await sortBy.selectOption("newest");
+  await search.fill("");
   const pictureShown = await page.request.get(`/api/backdrops/${pictureId}`);
   expect(pictureShown.headers()["content-disposition"]).toBeUndefined();
   // On a phone-width screen every picture action stays inside its card.

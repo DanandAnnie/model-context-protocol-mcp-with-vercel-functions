@@ -1,7 +1,7 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
-import { Captions, ChevronLeft, ChevronRight, Clapperboard, Copy, Image as ImageIcon, Layers, Mic2, Palette, Pause, Play, Plus, Replace, Sparkles, Square, Trash2, Upload, Users, Wand2, X } from "lucide-react";
+import { Captions, ChevronLeft, ChevronRight, Clapperboard, Copy, Image as ImageIcon, Layers, MessagesSquare, Mic2, Palette, Pause, Play, Plus, Replace, Sparkles, Square, Trash2, Upload, Users, Wand2, X } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { VoiceRow } from "@/components/VoicePicker";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -10,6 +10,7 @@ import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { SceneAudio } from "@/components/SceneAudio";
 import { BackdropPicker } from "@/components/BackdropPicker";
+import { CONVERSATION_PANEL_ID, ConversationImport, type CastTurn } from "@/components/ConversationImport";
 import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib/client";
@@ -336,6 +337,30 @@ function CreateInner() {
     setActiveIdx(0);
     if (doc.title && (!title.trim() || title === "Untitled video")) setTitle(doc.title);
     setImportNote(`Imported ${doc.scenes.length === 1 ? "1 scene" : `${doc.scenes.length} scenes`} from ${file.name}${doc.truncated ? `; the rest did not fit (a video holds up to ${MAX_SCENES} scenes and ${MAX_SCRIPT_CHARS} characters of script)` : ""}.`);
+  }
+  const [conversationOpen, setConversationOpen] = useState(false);
+  const conversationButton = useRef<HTMLButtonElement>(null);
+  function closeConversation() {
+    setConversationOpen(false);
+    requestAnimationFrame(() => conversationButton.current?.focus());
+  }
+  /** Replaces the scenes with a conversation's turns, each cast with its speaker's presenter and voice, on the first scene's background. */
+  function makeConversation(turns: CastTurn[], summary: string) {
+    if (setUpScenes(scenes) && !window.confirm(`Replace the ${scenes.length === 1 ? "current scene" : `current ${scenes.length} scenes`} with ${turns.length === 1 ? "1 scene" : `${turns.length} scenes`} from the conversation?`)) return;
+    const background = scenes[0].background;
+    if (turns.length === 1) {
+      // One scene has no presenter or voice of its own to show in the editor, so its speaker's become the video's.
+      const a = turns[0].avatarId && avatarData?.avatars.find((x) => x.id === turns[0].avatarId);
+      const v = turns[0].voiceId && voiceData?.voices.find((x) => x.id === turns[0].voiceId);
+      if (a) setAvatar(a);
+      if (v) setVoice(v);
+      setScenes([newScene(turns[0].script, background)]);
+    } else {
+      setScenes(turns.map((t) => newScene(t.script, background, { avatarId: t.avatarId || undefined, voiceId: t.voiceId || undefined })));
+    }
+    setActiveIdx(0);
+    setImportNote(summary);
+    closeConversation();
   }
   const slidesInput = useRef<HTMLInputElement>(null);
   const [slidesProgress, setSlidesProgress] = useState<string | null>(null);
@@ -1201,6 +1226,18 @@ function CreateInner() {
                 <Upload className="h-3.5 w-3.5" /> Import script
               </button>
               <button
+                ref={conversationButton}
+                type="button"
+                onClick={() => (conversationOpen ? closeConversation() : setConversationOpen(true))}
+                disabled={canEdit === false || !!slidesProgress}
+                aria-expanded={conversationOpen}
+                aria-controls={conversationOpen ? CONVERSATION_PANEL_ID : undefined}
+                title="Paste a conversation between two or more people: each turn becomes a scene, spoken by its speaker's presenter and voice"
+                className="inline-flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:border-brand-400 hover:text-brand-700 disabled:opacity-50"
+              >
+                <MessagesSquare className="h-3.5 w-3.5" /> Conversation
+              </button>
+              <button
                 type="button"
                 onClick={() => slidesInput.current?.click()}
                 disabled={canEdit !== true || !!slidesProgress}
@@ -1254,6 +1291,16 @@ function CreateInner() {
                 )}
               </span>
             </div>
+            {conversationOpen && (
+              <ConversationImport
+                avatars={avatarsSorted}
+                voices={voiceData?.voices ?? []}
+                videoAvatar={avatar}
+                videoVoice={voice}
+                onMake={makeConversation}
+                onCancel={closeConversation}
+              />
+            )}
             {importNote && (
               <p role="status" className="-mt-1 mb-3 flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="import-note">
                 <span>{importNote}</span>

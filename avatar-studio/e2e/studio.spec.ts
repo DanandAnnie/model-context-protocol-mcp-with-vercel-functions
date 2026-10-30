@@ -525,6 +525,100 @@ test("importing a script file makes one scene per section", async ({ page }) => 
   await expect(page.getByTestId("import-note")).toContainText("minutes.txt is password-protected or a Word 97–2003 file");
 });
 
+test("a pasted conversation makes one scene per turn, each speaker cast with a presenter and a voice", async ({ page }) => {
+  await page.locator("input[placeholder='Video title']").fill("Market chat");
+  await page.locator("textarea").fill("A first draft.");
+  const open = page.getByRole("button", { name: "Conversation" });
+  await open.click();
+  await expect(open).toHaveAttribute("aria-expanded", "true");
+  const panel = page.getByTestId("conversation-import");
+  await expect(open).toHaveAttribute("aria-controls", (await panel.getAttribute("id"))!);
+  const box = panel.getByLabel("Paste or write the conversation");
+  await expect(box).toBeFocused();
+  // Escape closes it, as Cancel does, and the focus goes back to the button.
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+  await expect(open).toBeFocused();
+  await expect(open).toHaveAttribute("aria-expanded", "false");
+  await open.click();
+  await expect(panel.getByRole("button", { name: "Make scenes" })).toBeDisabled();
+  // Text without names says how to write one (once the typing stops), and makes nothing.
+  await box.fill("Just a paragraph of script.");
+  await expect(page.getByTestId("conversation-status")).toContainText("No speakers found");
+  await box.fill(["Spring market update", "Alex: Welcome back to the show.", "Sam: Thanks for having me.", "(laughs)", "ALEX: Prices are up.", "Inventory is down.", "Jordan: (leaning in) And rates?", "Riley: Thanks, all."].join("\n"));
+  await expect(page.getByTestId("conversation-status")).toHaveText("4 speakers, 5 scenes; 1 line before the first name is left out; 2 stage directions in parentheses are not spoken.");
+  const speakers = panel.getByRole("list", { name: "Speakers" }).getByRole("listitem");
+  await expect(speakers).toHaveCount(4);
+  await expect(speakers.nth(0)).toContainText("Alex · 2 scenes");
+  // The first speaker is the video's presenter and voice; each other is offered a presenter and a voice the video and
+  // earlier speakers are not, in the video voice's language (English): with none left, the video's voice.
+  await expect(panel.getByLabel("Alex's presenter")).toHaveValue("");
+  await expect(panel.getByLabel("Alex's voice")).toHaveValue("");
+  const offered = async (name: string) => [await panel.getByLabel(`${name}'s presenter`).inputValue(), await panel.getByLabel(`${name}'s voice`).inputValue()];
+  await expect(panel.getByLabel("Sam's presenter")).not.toHaveValue("");
+  const [samAvatar, samVoice] = await offered("Sam");
+  const [jordanAvatar, jordanVoice] = await offered("Jordan");
+  const [rileyAvatar, rileyVoice] = await offered("Riley");
+  const label = async (select: string, value: string) => (await panel.getByLabel(select).locator(`option[value="${value}"]`).textContent())!;
+  const videoAvatarName = (await label("Alex's presenter", "")).match(/\((.*)\)/)![1];
+  const videoVoiceName = (await label("Alex's voice", "")).match(/\((.*)\)/)![1];
+  const presenters = [samAvatar, jordanAvatar, rileyAvatar];
+  expect(new Set(presenters).size).toBe(3);
+  for (const a of presenters) expect(await label("Sam's presenter", a)).not.toBe(videoAvatarName);
+  expect(samVoice).not.toBe("");
+  expect(jordanVoice).not.toBe("");
+  expect(samVoice).not.toBe(jordanVoice);
+  const voices = (await (await page.request.get("/api/voices")).json()).voices as Array<{ id: string; name: string; language?: string }>;
+  for (const v of [samVoice, jordanVoice, rileyVoice].filter(Boolean)) {
+    const voice = voices.find((x) => x.id === v)!;
+    expect(voice.name).not.toBe(videoVoiceName);
+    expect(voice.language).toMatch(/^en/);
+  }
+  // Never one of the voices that speak another language, even with no English voice left to offer.
+  expect(["stock_voice_4", "stock_voice_5", "stock_voice_6"]).not.toContain(rileyVoice);
+  // A presenter chosen for one speaker changes no one else's offer, and keeps the voice the speaker was offered.
+  await panel.getByLabel("Sam's presenter").selectOption("stock_8");
+  await expect(panel.getByLabel("Sam's voice")).toHaveValue(samVoice);
+  expect(await offered("Jordan")).toEqual([jordanAvatar, jordanVoice]);
+  await panel.getByLabel("Riley's voice").selectOption("stock_voice_1");
+  const axe = await new AxeBuilder({ page }).include("[data-testid='conversation-import']").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(axe.violations).toEqual([]);
+  // Written scenes are only replaced once confirmed; declined, the panel stays as it was.
+  page.once("dialog", (d) => d.dismiss());
+  await panel.getByRole("button", { name: "Make 5 scenes" }).click();
+  await expect(page.getByRole("textbox", { name: "Script", exact: true })).toHaveValue("A first draft.");
+  await expect(panel).toBeVisible();
+  page.once("dialog", (d) => d.accept());
+  await panel.getByRole("button", { name: "Make 5 scenes" }).click();
+  await expect(panel).toHaveCount(0);
+  await expect(open).toBeFocused();
+  await expect(page.getByTestId("import-note")).toHaveText("Made 5 scenes from the conversation: Alex in 2, Sam in 1, Jordan in 1, Riley in 1.");
+  await expect(page.locator("textarea")).toHaveValue("Welcome back to the show.");
+  await expect(page.getByLabel("Scene avatar")).toHaveValue("");
+  await page.getByRole("button", { name: /^Scene 2,/ }).click();
+  await expect(page.locator("textarea")).toHaveValue("Thanks for having me.");
+  await expect(page.getByLabel("Scene avatar")).toHaveValue("stock_8");
+  await expect(page.getByLabel("Scene voice")).toHaveValue(samVoice);
+  await page.getByRole("button", { name: /^Scene 3,/ }).click();
+  await expect(page.locator("textarea")).toHaveValue("Prices are up.\nInventory is down.");
+  await expect(page.getByLabel("Scene avatar")).toHaveValue("");
+  await page.getByRole("button", { name: /^Scene 4,/ }).click();
+  await expect(page.locator("textarea")).toHaveValue("And rates?");
+  await expect(page.getByLabel("Scene avatar")).toHaveValue(jordanAvatar);
+  // Each scene goes to the renderer with its speaker's presenter and voice.
+  await page.getByRole("button", { name: "Generate video" }).click();
+  await page.waitForURL(/\/videos\/vid_/);
+  const id = page.url().split("/").pop()!;
+  const video = (await (await page.request.get(`/api/videos/${id}`)).json()).video as { scenes: Array<{ script: string; avatarId?: string; voiceId?: string }> };
+  expect(video.scenes.map((sc) => sc.script)).toEqual(["Welcome back to the show.", "Thanks for having me.", "Prices are up.\nInventory is down.", "And rates?", "Thanks, all."]);
+  expect(video.scenes[0].avatarId).toBeUndefined();
+  expect(video.scenes[0].voiceId).toBeUndefined();
+  expect(video.scenes[1]).toMatchObject({ avatarId: "stock_8", voiceId: samVoice });
+  expect(video.scenes[3]).toMatchObject({ avatarId: jordanAvatar, voiceId: jordanVoice });
+  expect(video.scenes[4]).toMatchObject({ avatarId: rileyAvatar, voiceId: "stock_voice_1" });
+  await page.request.delete(`/api/videos/${id}?permanent=true`);
+});
+
 test("photo avatar motion is set in the editor, kept with the video and its copy", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Moving portrait");
   await page.locator("textarea").fill("Welcome to the open house.");

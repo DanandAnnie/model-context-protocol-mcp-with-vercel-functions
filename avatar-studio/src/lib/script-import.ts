@@ -253,7 +253,7 @@ function insidePause(text: string, at: number): boolean {
  * as Chinese or Japanese is written) at `max`, between whole characters. Never inside a pause marker; undefined
  * when nothing fits. Only the first `max` characters are looked at, so a huge paragraph costs no more than a short one.
  */
-function head(text: string, max: number): string | undefined {
+export function head(text: string, max: number): string | undefined {
   if (text.length <= max) return text;
   const window = text.slice(0, max + 1);
   let sentence = -1;

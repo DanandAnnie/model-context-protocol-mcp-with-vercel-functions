@@ -569,3 +569,12 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - A clip kept before this change had no words to start with. It gets them when it is kept again.
     - The docs did not list `transcript` on a clip, and the README promised a script for recordings spoken again, which have no text.
     - Tests for a reload of the clip start, the Audio tab's fill, filling in words on older clips, and blank words were added.
+- Keep the words an audio clip says (`ad48066`): `PATCH /api/clips/:id` renames a clip or sets the words it says, and the editor's Audio tab offers "Keep these words with the clip" when a clip scene's script differs from them, so the next scene or video using the clip starts with them, for uploaded and recorded clips as well as kept recordings.
+  - An independent review found nothing blocking. Fixed before the commit:
+    - An edit could bring back a clip deleted at the same moment, without its audio, and could race a render's cached upload id. Edits, filled-in words, and cached ids are now written only over the row read; an edit of a deleted clip is a `404`.
+    - The focus fell to the page when the button gave way to its note, and a note added with its text is often not announced. The note now stays mounted and takes the focus.
+    - The note could name a clip whose words were never kept here. It now shows only for the clip it applies to.
+    - After one scene kept new words, another scene still holding the clip's earlier words no longer had them cleared by "Use a voice instead". Every set of words a clip has had while the editor is open now counts.
+    - An edited clip jumped to the top of the saved-clips list. It now keeps its place.
+    - Words padded with spaces past 5000 characters were refused. They are trimmed first.
+    - Tests for the delete race, the trimming, a reused clip starting with its words, going back to a voice, and an empty edit were added.

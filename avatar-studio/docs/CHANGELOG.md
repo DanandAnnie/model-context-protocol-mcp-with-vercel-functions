@@ -552,3 +552,12 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
   - An independent review found nothing significant. Fixed before the commit:
     - The codes for undetermined, several, no or private-use languages (`und`, `mul`, `zxx`, `mis`, `qaa`–`qtz`) passed the check. They are now refused, and ignored when HeyGen reports one, so a card cannot read "spoken in root".
     - HeyGen refusing the language got the generic message. It now says HeyGen Voice does not speak that language.
+- Keep a voice recording as an audio clip (`d1d0ddd`): a result of the voice changer lives at the renderer's link, signed for about an hour. "Keep as a clip" (`POST /api/voice-changer/changes/:id/clip`) reads the file once through the public-address guard and stores it as one of the account's audio clips, so a scene can lip-sync to it and a lip sync can use it after the link expires. The file's kind comes from its bytes, a WAV's length from its header and an MP3's from the renderer; the recording remembers the clip, and keeping it again returns that clip while it exists.
+  - An independent review found nothing serious. Fixed before the commit:
+    - A WAV whose header gives no length (float, 32-bit, extensible) fell back to the renderer's length and was kept, although an upload of the same file is refused. It is now refused too.
+    - A link the address guard refuses was a `502` to try again. It is now a `400` that says to download and upload the file instead.
+    - The button's name did not contain its visible text ("Keep as a clip"), its waiting state was hidden from screen readers, and the focus was lost when it gave way to the note. The name now starts with the visible text, the button stays focusable while it waits, and the focus moves to the note naming the clip.
+    - The route had no `maxDuration`, unlike its neighbours. It now has 30 seconds.
+    - A recording changed while being kept lost the link to its clip without a word. That is now logged.
+    - A lip sync asked for a recording over an hour old said only to make it again. It now names the clip kept of it, if there is one.
+    - The docs claimed "two requests at once make one" without "on one server instance", left out the `409` for a full clip list, and the README left out the hour and size limits.

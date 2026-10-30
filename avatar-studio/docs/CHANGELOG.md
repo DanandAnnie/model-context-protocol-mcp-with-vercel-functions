@@ -637,3 +637,10 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - Names were capped by code point, which the edit form (counting UTF-16 units) could then refuse, and could split an emoji. They are now within 120 UTF-16 units, cut between whole characters.
     - At the limit a missing source answered `429`; it is now looked up first and answers `404`. A copy no longer names the original's video as its source.
     - Unit tests now cover a removed clip, a given description, the source rule, and emoji names; the e2e test checks the announcement and scans the list with the copy in it; the docs give these rules and read in order.
+- Rename B-roll clips and photo shoots (`60320c8`): `PATCH /api/footage/:id` and `PATCH /api/shoots/:id` take a new title, and both pages offer Rename beside Delete; a retried start with the same key is still recognised after a rename.
+  - An independent review found nothing blocking. Fixed before the commit:
+    - A rename and a link renewal landing together could lose the renewal: the refresh kept `updatedAt` when only the link changed, so a rename could write the old link back, or a rename landing first made the refresh drop its new link. For a few minutes a shoot's photo could then not be used for a presenter. The refresh now always moves `updatedAt` and, on a miss, applies the renewal to the renamed row; tests cover both orders.
+    - The name a clip or shoot was started with, kept for retried starts, appeared in the account export. It is now left out, and the export tests check it.
+    - The clip rename answered `{ clip }` where the rest of the API says `footage`; it now answers `{ footage }`.
+    - Rename and Delete showed while the role was loading, so a viewer could meet a prompt and then a refusal. Both now wait for an editor role; the Delete icon meets 3:1 contrast and has a tooltip.
+    - A doc comment had moved off the delete it described, and the docs said nothing else changes on a rename (the update time does) and split the delete paragraph; all three are fixed.

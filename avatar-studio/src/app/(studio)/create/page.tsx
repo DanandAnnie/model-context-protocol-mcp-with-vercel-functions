@@ -14,6 +14,8 @@ import { CONVERSATION_PANEL_ID, ConversationImport, type CastTurn } from "@/comp
 import { isApple } from "@/components/QuickFind";
 import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { useVoicePreview } from "@/hooks/useVoicePreview";
+import { useScriptPlayer } from "@/hooks/useScriptPlayer";
+import { previewPlaylist } from "@/lib/script-preview";
 import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib/client";
 import { accentsFor, languageLabel, voiceTakesAccent } from "@/lib/language";
 import { MAX_SILENT_SEC, MIN_SILENT_SEC, silentProblem, silentSeconds, stripPauses } from "@/lib/pauses";
@@ -246,11 +248,19 @@ function CreateInner() {
   // Generated clips (the B-roll page) a scene can loop as its video background; only finished ones are offered.
   const { data: footageData, refetch: refetchFootage } = useApi<{ footage: Array<Pick<FootageJob, "id" | "title" | "status" | "durationSec" | "autoLength" | "aspect">>; available: boolean }>("/api/footage");
   const readyFootage = (footageData?.footage ?? []).filter((f) => f.status === "completed");
-  const { play, playingId, busyId } = useVoicePreview();
+  const { play, stop: stopVoice, playingId, busyId } = useVoicePreview();
+  // The whole video's script, scene after scene, before it is made; the scene being heard is selected as it plays.
+  const scriptPlayer = useScriptPlayer();
 
   const [title, setTitle] = useState("Untitled video");
   const [scenes, setScenes] = useState<Scene[]>([newScene()]);
   const [activeIdx, setActiveIdx] = useState(0);
+  // What it plays was read from the scenes as they were, so any change to them (an edit, a scene added or removed, a
+  // video loaded) stops it rather than play words that are no longer there or mark a scene that is gone.
+  useEffect(() => {
+    if (scriptPlayer.playingScene !== null) scriptPlayer.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only a change to the scenes stops it
+  }, [scenes]);
   // The scene selected now, for answers that arrive after the user may have moved on.
   const activeIdxNow = useRef(activeIdx);
   activeIdxNow.current = activeIdx;
@@ -794,6 +804,8 @@ function CreateInner() {
   // The layout as it renders, for the panel's summary and its Reset button.
   const shownLayout: SceneLayout = { ...layout, framing };
   const sceneVoice = (active.voiceId && voiceData?.voices.find((v) => v.id === active.voiceId)) || voice;
+  /** The voice a scene speaks in: its own, or the video's. */
+  const voiceFor = (sc: Scene) => (sc.voiceId && voiceData?.voices.find((v) => v.id === sc.voiceId)) || voice;
   // A scene's presenter or voice may have been deleted since the draft or the original video was
   // saved; once the lists are known, drop ids they no longer contain so the scene really does use
   // the video's choice (which is what the selects would otherwise claim) instead of failing to render.
@@ -1540,6 +1552,7 @@ function CreateInner() {
                     i === activeIdx ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                   } ${dragging === sc ? "opacity-50" : ""} ${dropTarget === i && dragging !== sc ? "ring-2 ring-brand-600 ring-offset-1" : ""}`}
                 >
+                  {scriptPlayer.playingScene === i && <Play className="h-3 w-3 fill-current text-brand-600" aria-hidden data-testid="scene-playing" />}
                   <span className="h-2.5 w-2.5 rounded-full border border-black/10" style={sc.background.type === "color" ? { background: sc.background.value } : sc.background.type === "video" ? { background: "linear-gradient(135deg,#0f172a,#475569)" } : { background: "linear-gradient(135deg,#94a3b8,#cbd5e1)" }} />
                   {i + 1}
                   {sc.script.trim() ? (
@@ -1549,6 +1562,10 @@ function CreateInner() {
                   )}
                 </button>
               ))}
+              {/* Which scene Listen to all scenes is playing, read out as it moves on (the selection stays where it is). */}
+              <span role="status" className="sr-only">
+                {scriptPlayer.playingScene !== null ? `Playing scene ${scriptPlayer.playingScene + 1} of ${scenes.length}` : ""}
+              </span>
               <button
                 type="button"
                 onClick={addScene}
@@ -1976,10 +1993,30 @@ function CreateInner() {
                     className="px-3 py-1.5"
                     disabled={!stripPauses(active.script).trim()}
                     loading={busyId === sceneVoice.id}
-                    onClick={() => play(sceneVoice, active.script.slice(0, 400).replace(/\[[^\]]*$/, ""), active.speed ?? speed).catch((e) => setErr(e.message))}
+                    onClick={() => {
+                      scriptPlayer.stop();
+                      play(sceneVoice, active.script.slice(0, 400).replace(/\[[^\]]*$/, ""), active.speed ?? speed).catch((e) => setErr(e.message));
+                    }}
                   >
                     {playingId === sceneVoice.id ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                     {playingId === sceneVoice.id ? "Stop" : "Listen"}
+                  </Button>
+                )}
+                {scenes.length > 1 && (
+                  // Every scene in turn, from the first, each in its own voice and pace, a clip as recorded, a silent hold as long as it lasts.
+                  <Button
+                    variant="secondary"
+                    className="px-3 py-1.5"
+                    disabled={scriptPlayer.playingScene === null && (canEdit === false || !previewPlaylist(scenes, voiceFor, speed).length)}
+                    title={scriptPlayer.playingScene !== null ? `Playing scene ${scriptPlayer.playingScene + 1}; press to stop` : canEdit === false ? undefined : "Hear every scene in turn, from the first, before the video is made; a change to the scenes stops it"}
+                    onClick={() => {
+                      if (scriptPlayer.playingScene !== null) return scriptPlayer.stop();
+                      stopVoice();
+                      scriptPlayer.start(previewPlaylist(scenes, voiceFor, speed)).catch((e) => setErr(e.message));
+                    }}
+                  >
+                    {scriptPlayer.playingScene !== null ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                    {scriptPlayer.playingScene !== null ? "Stop listening" : "Listen to all scenes"}
                   </Button>
                 )}
               </div>
@@ -2134,7 +2171,10 @@ function CreateInner() {
                         onSelect={() => setVoice(v)}
                         playing={playingId === v.id}
                         busy={busyId === v.id}
-                        onPreview={() => play(v, previewText || "Hi, this is a preview of my voice.", speed).catch((e) => setErr(e.message))}
+                        onPreview={() => {
+                          scriptPlayer.stop();
+                          play(v, previewText || "Hi, this is a preview of my voice.", speed).catch((e) => setErr(e.message));
+                        }}
                         favorite={favorites.voiceIds.has(v.id)}
                         onToggleFavorite={favorites.canToggle ? () => favorites.toggle("voice", v.id) : undefined}
                       />

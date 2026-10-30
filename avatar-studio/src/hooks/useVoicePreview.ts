@@ -14,6 +14,8 @@ export function useVoicePreview() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const objectUrl = useRef<string | null>(null);
+  // Each preview has its number, so one still loading when it is stopped (or another starts) never plays.
+  const run = useRef(0);
 
   const releaseObjectUrl = () => {
     if (objectUrl.current) {
@@ -23,11 +25,13 @@ export function useVoicePreview() {
   };
 
   const stop = useCallback(() => {
+    run.current++;
     audioRef.current?.pause();
     audioRef.current = null;
     releaseObjectUrl();
     if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
     setPlayingId(null);
+    setBusyId(null);
   }, []);
 
   useEffect(() => stop, [stop]);
@@ -55,6 +59,7 @@ export function useVoicePreview() {
         return;
       }
       stop();
+      const id = ++run.current;
       setBusyId(voice.id);
       try {
         const res = await fetch("/api/voices/preview", {
@@ -62,6 +67,7 @@ export function useVoicePreview() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ voiceId: voice.id, text, speed }),
         });
+        if (run.current !== id) return;
         if (res.status === 204) {
           if (voice.previewUrl) {
             const audio = new Audio(voice.previewUrl);
@@ -73,6 +79,7 @@ export function useVoicePreview() {
           }
         } else if (res.ok) {
           const blob = await res.blob();
+          if (run.current !== id) return;
           objectUrl.current = URL.createObjectURL(blob);
           const audio = new Audio(objectUrl.current);
           audio.onended = () => {
@@ -85,9 +92,9 @@ export function useVoicePreview() {
           const body = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(body.error ?? "Preview failed");
         }
-        setPlayingId(voice.id);
+        if (run.current === id) setPlayingId(voice.id);
       } finally {
-        setBusyId(null);
+        if (run.current === id) setBusyId(null);
       }
     },
     [playingId, speakInBrowser, stop],

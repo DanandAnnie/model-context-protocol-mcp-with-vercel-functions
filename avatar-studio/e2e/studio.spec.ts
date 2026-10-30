@@ -265,7 +265,8 @@ test("a scene can speak uploaded audio instead of a voice", async ({ page }) => 
   await expect(page.getByText("Scene 2: what the clip says")).toBeVisible();
   // An audio scene has no voice to pick and nothing to preview with one.
   await expect(page.getByLabel("Scene voice")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Listen" })).toHaveCount(0);
+  // (Listen to all scenes, for the whole video, stays.)
+  await expect(page.getByRole("button", { name: "Listen", exact: true })).toHaveCount(0);
   await page.locator("textarea").fill("Hi, I recorded this myself.");
   // The words typed can go with the clip, so the next scene using it starts with them.
   await page.getByRole("button", { name: "Keep these words with the clip" }).click();
@@ -1045,6 +1046,73 @@ test("a scene's presenter, voice, and pace are used on every scene in one change
   await page.getByRole("button", { name: "Generate video" }).click();
   const scenes = (await sent).postDataJSON().scenes as Array<{ avatarId?: string; voiceId?: string; speed?: number }>;
   expect(scenes.map((sc) => [sc.avatarId, sc.voiceId, sc.speed])).toEqual(Array(3).fill([avatarId, voiceId, 1.25]));
+});
+
+test("Listen to all scenes plays each scene in turn in its voice and pace, holds a silent one, and stops", async ({ page }) => {
+  // The browser's speech stands in for the provider's audio (the preview answers 204, as in demo mode); the stand-in
+  // records what is said and when, and finishes after a while the test sets.
+  await page.addInitScript(() => {
+    const w = window as unknown as { __said: Array<{ text: string; rate: number; at: number }>; __sayMs: number };
+    w.__said = [];
+    w.__sayMs = 50;
+    window.speechSynthesis.speak = (u: SpeechSynthesisUtterance) => {
+      w.__said.push({ text: u.text, rate: u.rate, at: performance.now() });
+      setTimeout(() => u.onend?.(new Event("end") as SpeechSynthesisEvent), w.__sayMs);
+    };
+    window.speechSynthesis.cancel = () => undefined;
+  });
+  const asked: Array<{ voiceId: string; text: string; speed: number }> = [];
+  await page.route("**/api/voices/preview", async (route) => {
+    asked.push(route.request().postDataJSON());
+    await route.fulfill({ status: 204 });
+  });
+  await page.reload();
+  const said = () => page.evaluate(() => (window as unknown as { __said: Array<{ text: string; rate: number; at: number }> }).__said);
+  await page.getByRole("textbox", { name: "Script", exact: true }).fill("First.");
+  // One scene has only its own Listen.
+  await expect(page.getByRole("button", { name: "Listen to all scenes" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
+  await page.getByRole("textbox", { name: "Scene 2 script" }).fill("Second.");
+  await page.getByTestId("scene-presenter").getByLabel("Scene speed").selectOption("1.25");
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
+  await page.getByRole("textbox", { name: "Scene 3 script" }).fill("[pause 1s]");
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
+  await page.getByRole("textbox", { name: "Scene 4 script" }).fill("Last.");
+  await page.getByRole("button", { name: /^Scene 2,/ }).click();
+  const listen = page.getByRole("button", { name: "Listen to all scenes" });
+  await listen.click();
+  await expect(page.getByRole("button", { name: "Stop listening" })).toBeVisible();
+  // The scene being heard is marked and read out; the selection stays where it was, so typing is never moved.
+  await expect(page.getByTestId("scene-playing")).toHaveCount(1);
+  await expect(page.getByRole("status").filter({ hasText: /^Playing scene \d of 4$/ })).toHaveCount(1);
+  await expect(listen).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId("scene-playing")).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Scene 2 script" })).toBeVisible();
+  const all = await said();
+  expect(all.map(({ text, rate }) => ({ text, rate }))).toEqual([
+    { text: "First.", rate: 1 },
+    { text: "Second.", rate: 1.25 },
+    { text: "Last.", rate: 1 },
+  ]);
+  // The silent scene held for its second between the second scene and the last.
+  expect(all[2].at - all[1].at).toBeGreaterThan(950);
+  expect(asked.map((a) => [a.text, a.speed])).toEqual([["First.", 1], ["Second.", 1.25], ["Last.", 1]]);
+  expect(new Set(asked.map((a) => a.voiceId)).size).toBe(1);
+  // Stopped while the first scene is being said, it says no more.
+  await page.evaluate(() => void ((window as unknown as { __sayMs: number }).__sayMs = 400));
+  await listen.click();
+  await expect.poll(async () => (await said()).length).toBe(4);
+  await page.getByRole("button", { name: "Stop listening" }).click();
+  await expect(listen).toBeVisible();
+  await page.waitForTimeout(1200);
+  expect(await said()).toHaveLength(4);
+  // A change to the scenes while it plays stops it, so it never plays words that are gone.
+  await listen.click();
+  await expect.poll(async () => (await said()).length).toBe(5);
+  await page.getByRole("textbox", { name: "Scene 2 script" }).fill("Second, reworded.");
+  await expect(listen).toBeVisible();
+  await page.waitForTimeout(1200);
+  expect(await said()).toHaveLength(5);
 });
 
 test("photo avatar motion is set in the editor, kept with the video and its copy", async ({ page }) => {

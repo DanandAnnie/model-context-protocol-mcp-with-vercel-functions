@@ -1354,6 +1354,26 @@ function CreateInner() {
     [...typedBySpeed].reduce((sum, [pace, scripts]) => sum + estimateSeconds(scripts.join("\n\n"), pace), 0);
   // A scene of only pauses is a silent one (the presenter holds without a word), but the video as a whole needs words.
   const allScenesFilled = scenes.every((sc) => sc.script.trim().length > 0) && scenes.some((sc) => sc.audioId || !silentSeconds(sc.script));
+  // The other scenes still without words (each needs some, or a pause, to be made; the selected one is left out, as
+  // its placeholder already says so and it may have just been added), and those of them with nothing of their own:
+  // no words, clip, on-screen text, presenter, voice, layout, or pace, and no picture but the one next to it, which can
+  // go in one step. The selected scene always stays, so removing them never leaves the video without one.
+  const wordless = scenes.flatMap((sc, i) => (sc !== active && !sc.script.trim() ? [i] : []));
+  const blank = wordless.filter((i) => {
+    const sc = scenes[i];
+    if (sc.audioId || sc.overlay?.text.trim() || sc.avatarId || sc.voiceId || sc.layout || sc.hidePresenter || sc.speed !== undefined) return false;
+    const near = [scenes[i - 1], scenes[i + 1]].filter(Boolean);
+    return sc.background.type === "color" || near.some((n) => backgroundsMatch(n.background, sc.background));
+  });
+  /** Removes the blank scenes named in the notice as one change Undo takes back, the selected scene staying selected. */
+  function removeBlankScenes() {
+    if (!blank.length) return;
+    const kept = scenes.filter((_, i) => !blank.includes(i));
+    changeScenes(`remove ${blank.length === 1 ? "blank scene " + (blank[0] + 1) : `${blank.length} blank scenes`}`, kept, { active: kept.indexOf(active) });
+    setImportNote(`Removed ${scenesPhrase(blank).replace(/^S/, "s")}, which ${blank.length === 1 ? "was" : "were"} blank.`);
+    // The notice and its buttons go with them, so the focus goes to Undo, which names the change.
+    requestAnimationFrame(() => undoButton.current?.focus());
+  }
   const silentIssue = scenes.map((sc) => (sc.audioId ? null : silentProblem(sc.script))).find(Boolean) ?? null;
   // The server takes up to 5000 characters of script across all scenes (joined by a blank line).
   const scriptChars = scenes.map((sc) => sc.script.trim()).join("\n\n").length;
@@ -2123,6 +2143,36 @@ function CreateInner() {
               disabled={canEdit === false}
               onChange={(overlay) => updateScene(activeIdx, { overlay })}
             />
+            {wordless.length > 0 && canEdit !== false && (
+              // Why Generate is off while another scene has no words, and the way to it. It sits below the script, so
+              // coming and going never moves the scene numbers or the script box.
+              <div data-testid="wordless-scenes" className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
+                <span role="status" className="mr-auto">
+                  {scenesPhrase(wordless)} {wordless.length === 1 ? "has" : "have"} no words yet; every scene needs some, or a pause to hold in silence, before the video can be generated.
+                </span>
+                <Button
+                  variant="secondary"
+                  className="px-3 py-1.5"
+                  onClick={() => {
+                    setActiveIdx(wordless[0]);
+                    requestAnimationFrame(() => scriptRef.current?.focus());
+                  }}
+                >
+                  Go to scene {wordless[0] + 1}
+                </Button>
+                {blank.length > 0 && (
+                  <Button
+                    variant="secondary"
+                    className="px-3 py-1.5"
+                    onClick={removeBlankScenes}
+                    disabled={!!slidesProgress}
+                    title="Scenes with nothing of their own: no words, clip, on-screen text, presenter, voice, layout, pace, or picture; Undo brings them back"
+                  >
+                    Remove {blank.length === 1 ? `blank scene ${blank[0] + 1}` : `${blank.length} blank scenes`}
+                  </Button>
+                )}
+              </div>
+            )}
           </Card>
         </div>
 

@@ -1163,6 +1163,65 @@ test("← and →, Home, and End move between scene tabs, the focus going with t
   await expect(tab(1)).toBeFocused();
 });
 
+test("other scenes without words are named below the script, one is a click away, and blank ones go in one change Undo takes back", async ({ page }) => {
+  await page.locator("input[placeholder='Video title']").fill("Gaps");
+  await page.getByRole("textbox", { name: "Script", exact: true }).fill("First.");
+  const notice = page.getByTestId("wordless-scenes");
+  const addScene = page.getByRole("button", { name: "Add scene", exact: true });
+  const tab = (n: number) => page.getByRole("button", { name: new RegExp(`^Scene ${n},`) });
+  // A scene just added is the selected one, which is not named: its own box already says it is empty.
+  await addScene.click();
+  await expect(notice).toHaveCount(0);
+  // A pause counts as words: a scene of one holds in silence.
+  await page.getByRole("textbox", { name: "Scene 2 script" }).fill("[pause 2s]");
+  await expect(notice).toHaveCount(0);
+  for (let i = 0; i < 4; i++) await addScene.click();
+  await expect(notice.getByRole("status")).toHaveText("Scenes 3, 4, and 5 have no words yet; every scene needs some, or a pause to hold in silence, before the video can be generated.");
+  // Scene 4 gets its own pace and scene 5 on-screen text: named still, but not blank, so they stay.
+  await tab(4).click();
+  await page.getByLabel("Scene speed").selectOption("0.75");
+  await tab(5).click();
+  await page.getByLabel(/On-screen text for scene 5/).fill("Call 555-0100");
+  await tab(1).click();
+  await expect(notice.getByRole("status")).toHaveText(/^Scenes 3, 4, 5, and 6 have no words yet/);
+  await expect(page.getByRole("button", { name: "Generate video" })).toBeDisabled();
+  // Go to scene 3 selects it and puts the cursor in its script; it is then left out, and so is its Remove.
+  await notice.getByRole("button", { name: "Go to scene 3" }).click();
+  await expect(page.getByRole("textbox", { name: "Scene 3 script" })).toBeFocused();
+  await expect(notice.getByRole("status")).toHaveText(/^Scenes 4, 5, and 6 have no words yet/);
+  await expect(notice.getByRole("button", { name: "Remove blank scene 6" })).toBeVisible();
+  // From scene 2, the two blank ones go in one change, scene 2 staying selected.
+  await tab(2).click();
+  await notice.getByRole("button", { name: "Remove 2 blank scenes" }).click();
+  await expect(page.getByTestId("import-note")).toHaveText("Removed scenes 3 and 6, which were blank.");
+  await expect(page.getByRole("button", { name: "Undo remove 2 blank scenes" })).toBeFocused();
+  await expect(tab(5)).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Scene 2 script" })).toHaveValue("[pause 2s]");
+  await expect(page.getByRole("textbox", { name: "Scene 2 script" })).toBeVisible();
+  await expect(notice.getByRole("status")).toHaveText(/^Scenes 3 and 4 have no words yet/);
+  await expect(notice.getByRole("button", { name: /^Remove/ })).toHaveCount(0);
+  // Words for both clear the notice and Generate is back.
+  await tab(3).click();
+  await page.getByRole("textbox", { name: "Scene 3 script" }).fill("Slowly now.");
+  await tab(4).click();
+  await page.getByRole("textbox", { name: "Scene 4 script" }).fill("Call us today.");
+  await expect(notice).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Generate video" })).toBeEnabled();
+  // Undo of the removal asks first, as scenes changed since, and brings the blank scenes back; Redo takes them out again.
+  let asked = "";
+  page.once("dialog", (d) => {
+    asked = d.message();
+    void d.accept();
+  });
+  await page.getByRole("button", { name: "Undo remove 2 blank scenes" }).click();
+  expect(asked).toContain("remove 2 blank scenes");
+  await expect(tab(6)).toBeVisible();
+  await expect(notice.getByRole("status")).toHaveText(/no words yet/);
+  page.once("dialog", (d) => void d.accept());
+  await page.getByRole("button", { name: "Redo remove 2 blank scenes" }).click();
+  await expect(tab(5)).toHaveCount(0);
+});
+
 test("photo avatar motion is set in the editor, kept with the video and its copy", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Moving portrait");
   await page.locator("textarea").fill("Welcome to the open house.");

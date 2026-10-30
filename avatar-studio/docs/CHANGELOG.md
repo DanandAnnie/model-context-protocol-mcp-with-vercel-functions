@@ -629,3 +629,11 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - A second save under the same name was not announced, and sighted users got no confirmation. Saves now show a note and are announced every time.
     - Smaller points: the card keeps its title heading while edited, the focus falls back to the list's heading when the Edit button is gone, a list read before a save is read again after it, and a template out of reach is "no longer available" rather than "already deleted".
     - Unit tests now cover two edits to different fields racing, a delete between read and write, and giving up after five tries; the docs give the `403`, the `409`, and the trimming.
+- Duplicate a saved template (`6cec3fe`): `POST /api/templates { fromTemplateId }` copies a template under "<name> (copy)" (then "(copy 2)" and on), and each saved template on the Templates page has a Duplicate button whose copy appears first with its Edit button focused, ready for a new name.
+  - An independent review found nothing blocking. Fixed before the commit:
+    - A click at the limit still sent a request and was answered by an error after the round trip. It now explains on the spot, with a visible note under the heading that the button points to.
+    - The focus moved to the copy even if the person had gone on to edit another card meanwhile. It now moves only if it is still where it was, or was lost.
+    - When the source had been deleted elsewhere, the focus fell to the page. It now goes to the list's heading.
+    - Names were capped by code point, which the edit form (counting UTF-16 units) could then refuse, and could split an emoji. They are now within 120 UTF-16 units, cut between whole characters.
+    - At the limit a missing source answered `429`; it is now looked up first and answers `404`. A copy no longer names the original's video as its source.
+    - Unit tests now cover a removed clip, a given description, the source rule, and emoji names; the e2e test checks the announcement and scans the list with the copy in it; the docs give these rules and read in order.

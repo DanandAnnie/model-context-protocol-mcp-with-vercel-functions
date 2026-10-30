@@ -1,7 +1,7 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
-import { Captions, ChevronLeft, ChevronRight, Clapperboard, Copy, Image as ImageIcon, Layers, MessagesSquare, Mic2, Palette, Pause, Play, Plus, Replace, Sparkles, Square, Trash2, Upload, Users, Wand2, X } from "lucide-react";
+import { Captions, ChevronLeft, ChevronRight, Clapperboard, Copy, Image as ImageIcon, Layers, Merge, MessagesSquare, Mic2, Palette, Pause, Play, Plus, Replace, Scissors, Sparkles, Square, Trash2, Upload, Users, Wand2, X } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { VoiceRow } from "@/components/VoicePicker";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -15,7 +15,7 @@ import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib/client";
 import { accentsFor, languageLabel, voiceTakesAccent } from "@/lib/language";
-import { silentProblem, silentSeconds, stripPauses } from "@/lib/pauses";
+import { MAX_SILENT_SEC, MIN_SILENT_SEC, silentProblem, silentSeconds, stripPauses } from "@/lib/pauses";
 import { countMatches, replaceAll } from "@/lib/find-replace";
 import { MAX_IMPORT_BYTES, MAX_SCRIPT_CHARS, decodeScript, legacyEncodingFor, scenesFromText } from "@/lib/script-import";
 import { renderPdf, slideScripts } from "@/lib/pdf-slides";
@@ -24,6 +24,7 @@ import { readDocx } from "@/lib/docx-text";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
 import { capSceneText, fitSceneTextEdit, sceneTextLength } from "@/lib/scene-text";
+import { mergeScenes, splitScene } from "@/lib/scene-split";
 import { graphemes } from "@/lib/text";
 import { takeAgentDraft, type AgentDraft } from "@/lib/agent-draft";
 import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, footageIdOf, footageLength, footagePath, type FootageJob, framingFor, isDefaultLayout, isPhotoAvatar, rendersOnAvatarV, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, type PhotoExpressiveness, VOICE_ACCENTS, type VoiceAccent, AVATAR_ENGINES, type AvatarEngine } from "@/lib/types";
@@ -524,6 +525,58 @@ function CreateInner() {
       }
       setSlidesProgress(null);
     }
+  }
+  /**
+   * Cuts the selected scene in two at the cursor: the words after it become the next scene, with the same presenter,
+   * voice, background, layout, and pace (the on-screen text stays with the first), and the cursor goes to its start.
+   */
+  function splitActiveScene() {
+    const at = scriptRef.current?.selectionStart ?? -1;
+    if (scenes.length >= MAX_SCENES) return setImportNote(`A video holds up to ${MAX_SCENES} scenes, so this one cannot be split.`);
+    const parts = splitScene(active, at);
+    if (!parts) {
+      return setImportNote(
+        `Put the cursor between two words where the scene should be split, with words on both sides; a side of only pauses must last ${MIN_SILENT_SEC} to ${MAX_SILENT_SEC} seconds.`,
+      );
+    }
+    const idx = activeIdx;
+    const next = [...scenes.slice(0, idx), ...parts, ...scenes.slice(idx + 1)];
+    // The cut becomes a blank line between scenes, so a script at the limit could go over it.
+    if (next.map((sc) => sc.script.trim()).join("\n\n").length > MAX_SCRIPT_CHARS) {
+      return setImportNote(`Splitting here would take the script past the ${MAX_SCRIPT_CHARS} characters a video holds; shorten it first.`);
+    }
+    setScenes(next);
+    setActiveIdx(idx + 1);
+    setImportNote(`Split scene ${idx + 1}: the words after the cursor are scene ${idx + 2} now.`);
+    requestAnimationFrame(() => {
+      scriptRef.current?.focus();
+      scriptRef.current?.setSelectionRange(0, 0);
+    });
+  }
+  /** Joins the selected scene and the next into one, after asking when the next one renders with settings that would go. */
+  function mergeWithNext() {
+    const idx = activeIdx;
+    if (idx >= scenes.length - 1) return;
+    const merged = mergeScenes(scenes[idx], scenes[idx + 1]);
+    if (!merged) return setImportNote(`Scenes ${idx + 1} and ${idx + 2} together would be a silent scene longer than ${MAX_SILENT_SEC} seconds, so they stay apart.`);
+    const { lost } = merged;
+    const list = lost.length > 1 ? `${lost.slice(0, -1).join(", ")} and ${lost[lost.length - 1]}` : lost[0];
+    const ask = `Merge scene ${idx + 2} into scene ${idx + 1}? Scene ${idx + 2}'s words join scene ${idx + 1}, which keeps its ${list}; scene ${idx + 2}'s ${lost.length > 1 ? "are" : "is"} dropped.`;
+    if (lost.length && !window.confirm(ask)) return;
+    const next = [...scenes.slice(0, idx), merged.scene, ...scenes.slice(idx + 2)];
+    if (next.length === 1) {
+      // A lone scene shows no presenter or voice of its own in the editor, so those become the video's (as its pace does).
+      const a = merged.scene.avatarId && avatarData?.avatars.find((x) => x.id === merged.scene.avatarId);
+      const v = merged.scene.voiceId && voiceData?.voices.find((x) => x.id === merged.scene.voiceId);
+      if (a) setAvatar(a);
+      if (v) setVoice(v);
+      const { avatarId: _a, voiceId: _v, ...rest } = merged.scene;
+      next[0] = rest;
+    }
+    setScenes(next);
+    setImportNote(`Merged scene ${idx + 2} into scene ${idx + 1}.`);
+    // When the merge leaves no scene after this one that can be merged, the button goes, so the focus goes to the merged words.
+    if (!next[idx + 1] || next[idx + 1].audioId) requestAnimationFrame(() => scriptRef.current?.focus());
   }
   /** Inserts a copy right after the scene (script, background, and presenter included) and selects it. */
   function duplicateScene(idx: number) {
@@ -1285,6 +1338,18 @@ function CreateInner() {
                   <Copy className="h-4 w-4" />
                 </button>
                 {scenes.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={mergeWithNext}
+                    disabled={canEdit === false || activeIdx >= scenes.length - 1 || !!active.audioId || !!scenes[activeIdx + 1]?.audioId}
+                    aria-label="Merge with next scene"
+                    title={active.audioId || scenes[activeIdx + 1]?.audioId ? "A scene that plays a recorded clip cannot be merged" : "Join the next scene's words to this one"}
+                    className="rounded-full p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40"
+                  >
+                    <Merge className="h-4 w-4" />
+                  </button>
+                )}
+                {scenes.length > 1 && (
                   <button type="button" onClick={() => removeScene(activeIdx)} aria-label="Remove scene" className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs text-slate-500 hover:bg-rose-50 hover:text-rose-700">
                     <Trash2 className="h-3.5 w-3.5" /> Remove scene {activeIdx + 1}
                   </button>
@@ -1543,6 +1608,11 @@ function CreateInner() {
                 {!active.audioId && (
                   <Button variant="secondary" className="px-3 py-1.5" onClick={insertPause} disabled={canEdit === false} title="Insert a pause at the cursor; change the number to make it longer (up to 10 seconds). A scene of only pauses is a silent one, the presenter holding without a word">
                     <Pause className="h-4 w-4" /> Pause
+                  </Button>
+                )}
+                {!active.audioId && (
+                  <Button variant="secondary" className="px-3 py-1.5" onClick={splitActiveScene} disabled={canEdit === false} title="Split this scene at the cursor: the words after it become the next scene, with the same presenter, voice, and background">
+                    <Scissors className="h-4 w-4" /> Split
                   </Button>
                 )}
                 {sceneVoice && !active.audioId && (

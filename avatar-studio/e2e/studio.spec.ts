@@ -619,6 +619,50 @@ test("a pasted conversation makes one scene per turn, each speaker cast with a p
   await page.request.delete(`/api/videos/${id}?permanent=true`);
 });
 
+test("a scene is split at the cursor and merged back with the next", async ({ page }) => {
+  const script = page.getByRole("textbox", { name: "Script", exact: true });
+  await script.fill("Welcome home. Let's look around.");
+  // The words after the cursor become the next scene, and the cursor goes to its start.
+  await script.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(13, 13));
+  await page.getByRole("button", { name: "Split", exact: true }).click();
+  await expect(page.getByTestId("import-note")).toHaveText("Split scene 1: the words after the cursor are scene 2 now.");
+  const second = page.getByRole("textbox", { name: "Scene 2 script" });
+  await expect(second).toHaveValue("Let's look around.");
+  await expect(second).toBeFocused();
+  expect(await second.evaluate((el: HTMLTextAreaElement) => el.selectionStart)).toBe(0);
+  // A cut with nothing on one side says where to put the cursor, and makes no scene.
+  await page.getByRole("button", { name: "Split", exact: true }).click();
+  const refused = "Put the cursor between two words where the scene should be split, with words on both sides; a side of only pauses must last 1 to 60 seconds.";
+  await expect(page.getByTestId("import-note")).toHaveText(refused);
+  await expect(page.getByRole("button", { name: /^Scene 3,/ })).toHaveCount(0);
+  // Nor is a word cut in half.
+  await page.getByTestId("import-note").getByRole("button", { name: "Dismiss" }).click();
+  await second.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(3, 3));
+  await page.getByRole("button", { name: "Split", exact: true }).click();
+  await expect(page.getByTestId("import-note")).toHaveText(refused);
+  await expect(page.getByRole("button", { name: /^Scene 3,/ })).toHaveCount(0);
+  // The last scene has nothing to merge with.
+  await expect(page.getByRole("button", { name: "Merge with next scene" })).toBeDisabled();
+  await page.getByLabel("Scene avatar").selectOption("stock_3");
+  await page.getByRole("button", { name: /^Scene 1,/ }).click();
+  await expect(page.getByRole("textbox", { name: "Scene 1 script" })).toHaveValue("Welcome home.");
+  // Merging asks first when the next scene has a presenter of its own, which goes.
+  let asked = "";
+  page.once("dialog", (d) => {
+    asked = d.message();
+    void d.dismiss();
+  });
+  await page.getByRole("button", { name: "Merge with next scene" }).click();
+  await expect.poll(() => asked).toBe("Merge scene 2 into scene 1? Scene 2's words join scene 1, which keeps its presenter; scene 2's is dropped.");
+  await expect(page.getByRole("button", { name: /^Scene 2,/ })).toBeVisible();
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: "Merge with next scene" }).click();
+  await expect(page.getByTestId("import-note")).toHaveText("Merged scene 2 into scene 1.");
+  await expect(page.getByRole("button", { name: /^Scene 2,/ })).toHaveCount(0);
+  await expect(script).toHaveValue("Welcome home.\n\nLet's look around.");
+  await expect(script).toBeFocused();
+});
+
 test("photo avatar motion is set in the editor, kept with the video and its copy", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Moving portrait");
   await page.locator("textarea").fill("Welcome to the open house.");

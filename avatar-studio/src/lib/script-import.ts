@@ -238,7 +238,7 @@ function paragraphs(lines: string[], markdown: boolean): string[] {
 }
 
 /** Whether a cut at `at` would split a pause marker (markers are short, so only the text around the cut is looked at). */
-function insidePause(text: string, at: number): boolean {
+export function insidePause(text: string, at: number): boolean {
   const from = Math.max(0, at - 24);
   for (const m of text.slice(from, at + 24).matchAll(PAUSE)) {
     const start = from + m.index!;

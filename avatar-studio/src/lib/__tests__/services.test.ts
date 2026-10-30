@@ -1033,6 +1033,66 @@ describe("saved templates", () => {
     assert.equal(await globalThis.__avatarStudioStore!.get("template", t.id), null);
   });
 
+  it("duplicates a template under a name of its own, within the cap", async () => {
+    const { copyTitle, createTemplate, deleteTemplate, getTemplate, listTemplates, templateInputSchema, MAX_TEMPLATES } = await import("../services/templates");
+    const t = await createTemplate(
+      templateInputSchema.parse({ title: "Open house", description: "Listing opener", aspect: "9:16", captions: true, speed: 1.2, scenes: [{ script: "Welcome.", background: { type: "color", value: "#fff" }, speed: 0.9 }] }),
+    );
+    const copy = await createTemplate(templateInputSchema.parse({ fromTemplateId: t.id }));
+    assert.notEqual(copy.id, t.id);
+    assert.equal(copy.title, "Open house (copy)");
+    const strip = ({ id: _i, title: _t, createdAt: _c, updatedAt: _u, ...rest }: typeof t) => rest;
+    assert.deepEqual(strip(copy), strip(t), "everything else is the same");
+    // The original is untouched, a second copy counts on, and a copy of a copy does not stack.
+    assert.equal((await getTemplate(t.id)).title, "Open house");
+    assert.equal((await createTemplate({ fromTemplateId: t.id })).title, "Open house (copy 2)");
+    assert.equal((await createTemplate({ fromTemplateId: copy.id })).title, "Open house (copy 3)");
+    // A name and description given are used; a blank description leaves none.
+    const named = await createTemplate(templateInputSchema.parse({ fromTemplateId: t.id, title: "Spring opener", description: "  " }));
+    assert.deepEqual([named.title, "description" in named], ["Spring opener", false]);
+    assert.equal((await createTemplate(templateInputSchema.parse({ fromTemplateId: t.id, description: "For spring" }))).description, "For spring");
+    assert.throws(() => templateInputSchema.parse({ fromTemplateId: t.id, fromVideoId: "vid_x" }), /not both/);
+    // Not another account's, not a missing one.
+    await assert.rejects(createTemplate({ fromTemplateId: t.id }, "someone-else"), /not found/);
+    await assert.rejects(createTemplate({ fromTemplateId: "tpl_missing" }), /not found/);
+    // The cap counts copies; at the cap a missing source is still "not found".
+    const have = (await listTemplates()).length;
+    for (let i = have; i < MAX_TEMPLATES; i++) await createTemplate({ fromTemplateId: t.id });
+    await assert.rejects(createTemplate({ fromTemplateId: t.id }), /up to 50 templates/);
+    await assert.rejects(createTemplate({ fromTemplateId: "tpl_missing" }), /not found/);
+    await deleteTemplate(copy.id);
+    // Names stay within 120 UTF-16 units (the form's limit too), cut between whole characters.
+    const long = copyTitle("é".repeat(120), []);
+    assert.equal(long.length, 120);
+    assert.ok(long.endsWith(" (copy)"));
+    const family = ["👨", "👩", "👧"].join(String.fromCharCode(0x200d));
+    const emoji = copyTitle(family.repeat(20), []);
+    assert.ok(emoji.length <= 120);
+    assert.equal(emoji.replace(" (copy)", "").length % family.length, 0, "no family is cut in half");
+    assert.equal(copyTitle("Intro (copy 7)", ["Intro (copy)"]), "Intro (copy 2)");
+  });
+
+  it("does not name a video as the source of a copy", async () => {
+    const { createTemplate, templateInputSchema } = await import("../services/templates");
+    const video = await createVideo(videoRequestSchema.parse({ title: "From video", script: "hi there", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }));
+    const saved = await createTemplate(templateInputSchema.parse({ fromVideoId: video.id }));
+    assert.equal(saved.sourceVideoId, video.id);
+    assert.equal("sourceVideoId" in (await createTemplate({ fromTemplateId: saved.id })), false);
+  });
+
+  it("gives a copied scene a plain background when its picture is gone", async () => {
+    const { createTemplate, templateInputSchema } = await import("../services/templates");
+    const { createBackdrop } = await import("../services/backdrops");
+    const store = globalThis.__avatarStudioStore!;
+    const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+    const pic = await createBackdrop({ name: "Lobby", image: `data:image/png;base64,${PNG.toString("base64")}` });
+    const t = await createTemplate(templateInputSchema.parse({ title: "With picture", scenes: [{ script: "Hi.", background: { type: "image", value: `/api/backdrops/${pic.id}` } }] }));
+    // Removed underneath, without the delete path that would have rewritten the template.
+    await store.remove("backdrop", pic.id);
+    const copy = await createTemplate({ fromTemplateId: t.id });
+    assert.equal(copy.scenes[0].background.type, "color");
+  });
+
   it("keeps a change that lands while a template is being renamed", async () => {
     const { createTemplate, editTemplate, getTemplate, templateInputSchema } = await import("../services/templates");
     const store = globalThis.__avatarStudioStore!;

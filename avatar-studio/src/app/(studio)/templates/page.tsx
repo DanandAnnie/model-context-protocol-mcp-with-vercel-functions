@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
-import { LayoutTemplate, Pencil, Trash2 } from "lucide-react";
+import { Copy, LayoutTemplate, Pencil, Trash2 } from "lucide-react";
 import { Card, ErrorBanner, SectionTitle, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { ApiError, api } from "@/lib/client";
@@ -9,7 +9,7 @@ import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { refocusIfLost } from "@/lib/focus";
 import { SCRIPT_TEMPLATES, type ScriptTemplate } from "@/lib/templates";
-import type { VideoTemplate } from "@/lib/types";
+import { MAX_TEMPLATES, type VideoTemplate } from "@/lib/types";
 import { stripPauses } from "@/lib/pauses";
 import { StudioTemplates } from "@/components/StudioTemplates";
 
@@ -31,6 +31,34 @@ export default function TemplatesPage() {
     setNote(null);
     requestAnimationFrame(() => setNote(message));
   };
+  // A copy is made next to the list, then its Edit button takes the focus so it can be renamed straight away.
+  const [focusEdit, setFocusEdit] = useState<string | null>(null);
+  const [copying, setCopying] = useState<string | null>(null);
+  const atLimit = (mine?.templates.length ?? 0) >= MAX_TEMPLATES;
+  async function duplicate(t: VideoTemplate) {
+    if (copying) return;
+    if (atLimit) return announce(`You have ${MAX_TEMPLATES} templates, the most you can keep; delete one to make a copy.`);
+    // The focus goes to the copy only if it is still where the person left it (or was lost meanwhile).
+    const from = document.activeElement;
+    setCopying(t.id);
+    setRemoveErr(null);
+    setNote(null);
+    try {
+      const { template } = await api<{ template: VideoTemplate }>("/api/templates", { method: "POST", body: JSON.stringify({ fromTemplateId: t.id }) });
+      setData((prev) => (prev ? { templates: [template, ...prev.templates.filter((x) => x.id !== template.id)] } : prev));
+      const now = document.activeElement;
+      if (now === from || !now || now === document.body || !now.isConnected) setFocusEdit(template.id);
+      announce(`Made a copy: “${template.title}”.`);
+      void refetch();
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        announce(`The template “${t.title}” is no longer available.`);
+        void refetch().then(() => refocusIfLost(mineHeading.current));
+      } else setRemoveErr(e instanceof Error ? e.message : "Could not copy the template");
+    } finally {
+      setCopying(null);
+    }
+  }
   // A deleted template's card (and the button pressed) is gone; the focus moves to the list's heading.
   const mineHeading = useRef<HTMLHeadingElement>(null);
   async function remove(t: VideoTemplate) {
@@ -63,6 +91,11 @@ export default function TemplatesPage() {
       <section className="mb-8" data-testid="my-templates">
         <h2 ref={mineHeading} tabIndex={-1} className="mb-1 text-sm font-semibold text-slate-900 focus:outline-none">My templates</h2>
         <p className="mb-4 text-xs text-slate-500">Save any video as a template from its page: scenes, presenter, voice, and settings come along.</p>
+        {atLimit && canEdit === true && (
+          <p id="templates-limit" className="-mt-2 mb-4 text-xs text-slate-600">
+            {MAX_TEMPLATES} of {MAX_TEMPLATES} templates: delete one to make a copy.
+          </p>
+        )}
         {mine && mine.templates.length === 0 ? (
           <p className="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-6 text-center text-sm text-slate-500">No saved templates yet.</p>
         ) : (
@@ -73,6 +106,11 @@ export default function TemplatesPage() {
                 template={t}
                 canEdit={canEdit === true}
                 fallbackFocus={mineHeading}
+                focusEdit={focusEdit === t.id}
+                onFocused={() => setFocusEdit(null)}
+                copying={copying === t.id}
+                atLimit={atLimit}
+                onDuplicate={() => void duplicate(t)}
                 onSaved={(saved) => {
                   setRemoveErr(null);
                   setData((prev) => (prev ? { templates: prev.templates.map((x) => (x.id === saved.id ? saved : x)) } : prev));
@@ -119,6 +157,11 @@ function MyTemplateCard(props: {
   template: VideoTemplate;
   canEdit: boolean;
   fallbackFocus: React.RefObject<HTMLElement | null>;
+  focusEdit: boolean;
+  onFocused: () => void;
+  copying: boolean;
+  atLimit: boolean;
+  onDuplicate: () => void;
   onSaved: (t: VideoTemplate) => void;
   onGone: () => void;
   onDelete: () => void;
@@ -148,6 +191,14 @@ function MyTemplateCard(props: {
       else refocusIfLost(props.fallbackFocus.current);
     }
   }, [editing, props.fallbackFocus]);
+  // Just made as a copy: the Edit button takes the focus, ready for a new name.
+  const { focusEdit, onFocused } = props;
+  useEffect(() => {
+    if (!focusEdit) return;
+    // Once, either way: a button not shown (the role changed meanwhile) must not grab the focus later.
+    editButton.current?.focus();
+    onFocused();
+  }, [focusEdit, onFocused]);
   // A save from elsewhere while the form is open: fields not touched here follow it.
   useEffect(() => {
     if (!editing) return;
@@ -265,6 +316,17 @@ function MyTemplateCard(props: {
             </Link>
             {props.canEdit && (
               <>
+                <button
+                  type="button"
+                  onClick={props.onDuplicate}
+                  aria-disabled={props.copying || props.atLimit || undefined}
+                  aria-describedby={props.atLimit ? "templates-limit" : undefined}
+                  aria-label={`Duplicate template ${t.title}`}
+                  title="Duplicate"
+                  className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50 hover:text-brand-700 aria-disabled:opacity-50"
+                >
+                  <Copy className="h-4 w-4" aria-hidden />
+                </button>
                 <button ref={editButton} type="button" onClick={open} aria-label={`Edit template ${t.title}`} title="Edit name and description" className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50 hover:text-brand-700">
                   <Pencil className="h-4 w-4" aria-hidden />
                 </button>

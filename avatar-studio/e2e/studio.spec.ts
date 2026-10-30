@@ -102,7 +102,7 @@ test("the library pages large batches and filters on the server", async ({ page 
   await expect(cards).toHaveCount(10);
 });
 
-test("a video can be saved as a template, reopened from it, and renamed", async ({ page }) => {
+test("a video can be saved as a template, reopened from it, renamed, and duplicated", async ({ page }) => {
   const made = await page.request.post("/api/videos", {
     data: {
       title: "Template source",
@@ -188,6 +188,21 @@ test("a video can be saved as a template, reopened from it, and renamed", async 
   expect((await page.request.patch("/api/templates/tpl_missing123", { data: { title: "Gone" } })).status()).toBe(404);
   const axe = await new AxeBuilder({ page }).include("[data-testid='my-templates']").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
   expect(axe.violations.map((v) => v.id)).toEqual([]);
+  // Duplicated beside it under a name of its own; the copy's Edit button takes the focus, ready for a new name.
+  await page.getByRole("button", { name: "Duplicate template Spring listing opener", exact: true }).click();
+  const copyCard = page.getByTestId("my-template").filter({ hasText: "Spring listing opener (copy)" });
+  await expect(copyCard.getByText("Spring and summer")).toBeVisible();
+  await expect(copyCard.getByRole("button", { name: "Edit template Spring listing opener (copy)" })).toBeFocused();
+  await expect(page.getByTestId("templates-note")).toHaveText("Made a copy: “Spring listing opener (copy)”.");
+  await expect(page.getByRole("status").filter({ hasText: "Made a copy: “Spring listing opener (copy)”." })).toHaveCount(1);
+  const copiedAxe = await new AxeBuilder({ page }).include("[data-testid='my-templates']").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(copiedAxe.violations.map((v) => v.id)).toEqual([]);
+  const copies = ((await (await page.request.get("/api/templates")).json()) as { templates: Array<{ title: string; scenes: unknown[] }> }).templates;
+  expect(copies.map((x) => x.title).sort()).toEqual(["Spring listing opener", "Spring listing opener (copy)"]);
+  expect(copies.every((x) => x.scenes.length === 2)).toBe(true);
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: "Delete template Spring listing opener (copy)", exact: true }).click();
+  await expect(copyCard).toHaveCount(0);
   // A viewer sees the template but cannot change or delete it.
   await page.route("**/api/workspaces", (route) =>
     route.request().method() === "GET"

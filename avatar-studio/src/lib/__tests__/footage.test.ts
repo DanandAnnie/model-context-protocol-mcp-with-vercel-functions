@@ -162,6 +162,16 @@ describe("generated clips", () => {
     assert.equal(after.scenes[0].hidePresenter, undefined, "the presenter comes back, as a colour cannot stand in for it");
   });
 
+  it("give a duplicated template's scene a plain background when the clip is gone", async () => {
+    const { createTemplate } = await import("../services");
+    const job = await finished(await startFootage(ask(), "u1"));
+    const tpl = await createTemplate({ title: "Kitchen tour", scenes: [{ script: "Welcome in.", background: { type: "video", value: footagePath(job.id) } }] } as never, "u1");
+    // Removed underneath, without the delete path that would have rewritten the template.
+    await getStore().remove("footage", job.id);
+    const copy = await createTemplate({ fromTemplateId: tpl.id } as never, "u1");
+    assert.equal(copy.scenes[0].background.type, "color");
+  });
+
   it("are not looked up for a renderer that shows its own background", async () => {
     const { rendersFootage } = await import("../services");
     const { DidAvatarProvider } = await import("../providers/avatar/did");

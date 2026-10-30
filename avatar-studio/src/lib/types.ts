@@ -760,6 +760,8 @@ export const MAX_CLIP_SECONDS = 90;
 
 /** Audio clips an account keeps. */
 export const MAX_CLIPS = 20;
+/** Saved templates an account may keep ("My templates"). */
+export const MAX_TEMPLATES = 50;
 
 /** Audio a scene can use instead of a voice; the bytes are stored separately and served by `/api/clips/:id`. */
 export interface AudioClip {

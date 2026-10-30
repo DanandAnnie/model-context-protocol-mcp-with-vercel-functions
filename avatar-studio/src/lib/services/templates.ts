@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
-import { MAX_SCENES, backdropIdOf, footageIdOf } from "../types";
+import { MAX_SCENES, MAX_TEMPLATES, backdropIdOf, footageIdOf } from "../types";
 import { silentProblem, silentSeconds } from "../pauses";
 import type { Video, VideoTemplate } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
@@ -12,7 +12,7 @@ import { getBackdrop, plainScene } from "./backdrops";
 import { getFootage } from "./footage";
 import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema } from "./videos";
 
-export const MAX_TEMPLATES = 50;
+export { MAX_TEMPLATES };
 
 const sceneSchema = z.object({
   script: z
@@ -34,11 +34,12 @@ const sceneSchema = z.object({
   overlay: sceneTextSchema.optional(),
 }).refine((sc) => !sc.hidePresenter || sc.background.type !== "color", { path: ["hidePresenter"], message: "A scene without the presenter shows its picture or video: give it an image or video background" });
 
-/** Either copy a video the owner has (`fromVideoId`, title optional) or spell the template out. */
+/** Copy a video the owner has (`fromVideoId`) or one of their templates (`fromTemplateId`), title optional, or spell the template out. */
 export const templateInputSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),
   description: z.string().trim().max(200).optional(),
   fromVideoId: z.string().min(1).optional(),
+  fromTemplateId: z.string().min(1).optional(),
   scenes: z
     .array(sceneSchema)
     .min(1)
@@ -60,7 +61,7 @@ export const templateInputSchema = z.object({
   avatarEngine: avatarEngineSchema,
   moreBlinking: moreBlinkingSchema,
   transparent: transparentSchema,
-}).refine((t) => !t.moreBlinking || t.avatarEngine === "avatar_v", { path: ["moreBlinking"], message: MORE_BLINKING_NEEDS_V }).refine((t) => !t.transparent || !t.scenes || (t.scenes.length === 1 && !t.scenes[0].hidePresenter), {
+}).refine((t) => !(t.fromVideoId && t.fromTemplateId), { path: ["fromTemplateId"], message: "Copy a video or a template, not both" }).refine((t) => !t.moreBlinking || t.avatarEngine === "avatar_v", { path: ["moreBlinking"], message: MORE_BLINKING_NEEDS_V }).refine((t) => !t.transparent || !t.scenes || (t.scenes.length === 1 && !t.scenes[0].hidePresenter), {
   path: ["transparent"],
   message: "A transparent background is for a one-scene template that shows the presenter",
 });
@@ -75,12 +76,46 @@ export async function getTemplate(id: string, ownerId: string = LOCAL_OWNER): Pr
   return owned(await getStore().get<VideoTemplate>("template", id), ownerId, `Template ${id}`);
 }
 
+/**
+ * The name a copy of `title` takes: "Intro (copy)", then "Intro (copy 2)" and on while those are taken; a copy of a
+ * copy counts on from the original's name rather than stacking "(copy) (copy)". Within 120 UTF-16 units (what both
+ * the schema and the edit form allow), cut between whole characters so an emoji or accented letter is never split.
+ */
+export function copyTitle(title: string, taken: Iterable<string>): string {
+  const used = new Set(taken);
+  const stem = title.replace(/\s*\(copy(?: \d+)?\)$/, "").trim() || title;
+  const graphemes = Array.from(new Intl.Segmenter().segment(stem), (g) => g.segment);
+  for (let n = 1; ; n++) {
+    const suffix = n === 1 ? " (copy)" : ` (copy ${n})`;
+    let cut = "";
+    for (const g of graphemes) {
+      if (cut.length + g.length + suffix.length > 120) break;
+      cut += g;
+    }
+    const name = `${cut.trimEnd()}${suffix}`;
+    if (!used.has(name)) return name;
+  }
+}
+
 export async function createTemplate(input: TemplateInput, ownerId: string = LOCAL_OWNER): Promise<VideoTemplate> {
-  if ((await getStore().list<VideoTemplate>("template", ownerId)).length >= MAX_TEMPLATES) {
+  // A copy's source is looked up first, so a missing one is a 404 whatever the count.
+  const source = input.fromTemplateId ? await getTemplate(input.fromTemplateId, ownerId) : null;
+  const existing = await getStore().list<VideoTemplate>("template", ownerId);
+  if (existing.length >= MAX_TEMPLATES) {
     throw new LimitError(`You can keep up to ${MAX_TEMPLATES} templates; delete one first`);
   }
   let base: Omit<VideoTemplate, "id" | "ownerId" | "createdAt" | "updatedAt">;
-  if (input.fromVideoId) {
+  if (source) {
+    // Everything the template holds, under a name of its own (or the one given). The copy was not saved from a video,
+    // so it does not name one as its source.
+    const { id: _id, ownerId: _owner, createdAt: _created, updatedAt: _updated, sourceVideoId: _video, ...rest } = source;
+    base = {
+      ...rest,
+      title: input.title ?? copyTitle(rest.title, existing.map((t) => t.title)),
+      ...(input.description !== undefined ? { description: input.description || undefined } : {}),
+    };
+    if (!base.description) delete base.description;
+  } else if (input.fromVideoId) {
     const video = await getStore().get<Video>("video", input.fromVideoId);
     if (!video) throw new NotFoundError(`Video ${input.fromVideoId} not found`);
     owned(video, ownerId, `Video ${input.fromVideoId}`);
@@ -143,15 +178,15 @@ export async function createTemplate(input: TemplateInput, ownerId: string = LOC
       ...(input.transparent ? { transparent: true as const } : {}),
     };
   }
-  // An uploaded background image must be the owner's and still there, as a render would check. Copied from a video,
-  // a scene whose image has since been deleted gets a plain background instead, so the video can still be kept as a template.
+  // An uploaded background image must be the owner's and still there, as a render would check. Copied from a video or
+  // a template, a scene whose image has since been deleted gets a plain background instead, so the copy can still be made.
   const ids = new Set(base.scenes.map((sc) => backdropIdOf(sc.background)).filter((id): id is string => !!id));
   const gone = new Set<string>();
   for (const id of ids) {
     try {
       await getBackdrop(id, ownerId);
     } catch (err) {
-      if (!input.fromVideoId || !(err instanceof NotFoundError)) throw err;
+      if (!(input.fromVideoId || input.fromTemplateId) || !(err instanceof NotFoundError)) throw err;
       gone.add(id);
     }
   }
@@ -160,7 +195,7 @@ export async function createTemplate(input: TemplateInput, ownerId: string = LOC
     try {
       await getFootage(id, ownerId);
     } catch (err) {
-      if (!input.fromVideoId || !(err instanceof NotFoundError)) throw err;
+      if (!(input.fromVideoId || input.fromTemplateId) || !(err instanceof NotFoundError)) throw err;
       gone.add(id);
     }
   }

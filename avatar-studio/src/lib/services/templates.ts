@@ -6,7 +6,7 @@ import { MAX_SCENES, backdropIdOf, footageIdOf } from "../types";
 import { silentProblem, silentSeconds } from "../pauses";
 import type { Video, VideoTemplate } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
-import { LimitError, NotFoundError, ValidationError } from "../errors";
+import { ConflictError, LimitError, NotFoundError, ValidationError } from "../errors";
 import { owned } from "./shared";
 import { getBackdrop, plainScene } from "./backdrops";
 import { getFootage } from "./footage";
@@ -166,6 +166,36 @@ export async function createTemplate(input: TemplateInput, ownerId: string = LOC
   }
   if (gone.size) base = { ...base, scenes: base.scenes.map((sc) => (gone.has(backdropIdOf(sc.background) ?? footageIdOf(sc.background) ?? "") ? plainScene(sc) : sc)) };
   return getStore().put("template", { ...base, id: newId("tpl"), ownerId, createdAt: nowIso(), updatedAt: nowIso() });
+}
+
+/** A template's name and description: `description: null` or blank removes it; at least one of the two. */
+export const templateEditSchema = z
+  .object({
+    title: z.string().trim().min(1, "Name the template").max(120, "A template's name is at most 120 characters").optional(),
+    description: z.string().trim().max(200, "A template's description is at most 200 characters").nullable().optional(),
+  })
+  .refine((e) => e.title !== undefined || e.description !== undefined, "Send a new name or description");
+
+/**
+ * Renames a template or changes its description; its scenes and settings are kept. The write is conditional on the
+ * row read, so a change landing meanwhile (an image deleted from its scenes, say) is read again and kept, and a
+ * template deleted meanwhile stays deleted.
+ */
+export async function editTemplate(id: string, input: z.infer<typeof templateEditSchema>, ownerId: string = LOCAL_OWNER): Promise<VideoTemplate> {
+  let current = await getTemplate(id, ownerId);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const next: VideoTemplate = { ...current, updatedAt: new Date(Math.max(Date.now(), Date.parse(current.updatedAt) + 1)).toISOString() };
+    if (input.title !== undefined) next.title = input.title;
+    if (input.description !== undefined) {
+      if (input.description) next.description = input.description;
+      else delete next.description;
+    }
+    if (await getStore().putIf("template", next, "updatedAt", current.updatedAt)) return next;
+    const again = await getStore().get<VideoTemplate>("template", id);
+    if (!again || again.ownerId !== current.ownerId) throw new NotFoundError(`Template ${id} not found`);
+    current = again;
+  }
+  throw new ConflictError("The template kept changing while it was being saved; try again");
 }
 
 export async function deleteTemplate(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {

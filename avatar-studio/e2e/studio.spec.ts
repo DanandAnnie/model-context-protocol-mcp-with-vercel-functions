@@ -102,7 +102,7 @@ test("the library pages large batches and filters on the server", async ({ page 
   await expect(cards).toHaveCount(10);
 });
 
-test("a video can be saved as a template and reopened from it", async ({ page }) => {
+test("a video can be saved as a template, reopened from it, and renamed", async ({ page }) => {
   const made = await page.request.post("/api/videos", {
     data: {
       title: "Template source",
@@ -143,11 +143,67 @@ test("a video can be saved as a template and reopened from it", async ({ page })
   } finally {
     await page.request.delete("/api/brand");
   }
-  // Delete it again from the Templates page.
+  // Renamed and described in place: the form takes the focus, Escape leaves it unchanged, Save keeps the rest.
   await page.goto("/templates");
+  // The only saved template here (the test ends by checking none are left); its title is hidden while it is edited.
+  await expect(page.getByTestId("my-template")).toHaveCount(1);
+  const card = page.getByTestId("my-template");
+  await card.getByRole("button", { name: "Edit template Listing opener" }).click();
+  await expect(card.getByLabel("Template name")).toBeFocused();
+  await card.getByLabel("Template name").fill("Discarded name");
+  await page.keyboard.press("Escape");
+  await expect(card.getByRole("button", { name: "Edit template Listing opener" })).toBeFocused();
+  await card.getByRole("button", { name: "Edit template Listing opener" }).click();
+  await expect(card.getByLabel("Template name")).toHaveValue("Listing opener");
+  const formAxe = await new AxeBuilder({ page }).include("[data-testid='my-templates']").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(formAxe.violations.map((v) => v.id)).toEqual([]);
+  // A name of spaces is refused at the field, which says why.
+  await card.getByLabel("Template name").fill("   ");
+  await card.getByRole("button", { name: "Save" }).click();
+  await expect(card.getByRole("alert")).toHaveText("Name the template");
+  await expect(card.getByLabel("Template name")).toHaveAttribute("aria-invalid", "true");
+  await expect(card.getByLabel("Template name")).toBeFocused();
+  await card.getByLabel("Template name").fill("Spring listing opener");
+  await card.getByLabel("Description (optional)").fill("For spring listings");
+  await card.getByRole("button", { name: "Save" }).click();
+  const renamed = page.getByTestId("my-template").filter({ hasText: "Spring listing opener" });
+  await expect(renamed.getByText("For spring listings")).toBeVisible();
+  await expect(renamed.getByRole("button", { name: "Edit template Spring listing opener" })).toBeFocused();
+  await expect(page.getByRole("status").filter({ hasText: "Saved the template “Spring listing opener”." })).toHaveCount(1);
+  const stored = ((await (await page.request.get("/api/templates")).json()) as { templates: Array<{ id: string; title: string; description?: string; scenes: unknown[] }> }).templates[0];
+  expect(stored).toMatchObject({ title: "Spring listing opener", description: "For spring listings" });
+  expect(stored.scenes).toHaveLength(2);
+  // Someone else renames it while the form is open here; saving only the description keeps their name.
+  await renamed.getByRole("button", { name: "Edit template Spring listing opener" }).click();
+  expect((await page.request.patch(`/api/templates/${stored.id}`, { data: { title: "Their opener" } })).ok()).toBe(true);
+  await renamed.getByLabel("Description (optional)").fill("Spring and summer");
+  await renamed.getByRole("button", { name: "Save" }).click();
+  const theirs = page.getByTestId("my-template").filter({ hasText: "Their opener" });
+  await expect(theirs.getByText("Spring and summer")).toBeVisible();
+  await expect(page.getByTestId("templates-note")).toHaveText("Saved the template “Their opener”.");
+  expect((await page.request.patch(`/api/templates/${stored.id}`, { data: { title: "Spring listing opener" } })).ok()).toBe(true);
+  await page.reload();
+  expect((await page.request.patch(`/api/templates/${stored.id}`, { data: {} })).status()).toBe(400);
+  expect((await page.request.patch(`/api/templates/${stored.id}`, { data: { title: " " } })).status()).toBe(400);
+  expect((await page.request.patch("/api/templates/tpl_missing123", { data: { title: "Gone" } })).status()).toBe(404);
+  const axe = await new AxeBuilder({ page }).include("[data-testid='my-templates']").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(axe.violations.map((v) => v.id)).toEqual([]);
+  // A viewer sees the template but cannot change or delete it.
+  await page.route("**/api/workspaces", (route) =>
+    route.request().method() === "GET"
+      ? route.fulfill({ json: { personalId: "demo-user", activeId: "ws_view", workspaces: [{ id: "ws_view", name: "Read only team", role: "viewer", members: [] }] } })
+      : route.continue(),
+  );
+  await page.reload();
+  await expect(page.getByTestId("view-only")).toContainText("not change or delete your saved templates");
+  await expect(renamed.getByRole("link", { name: "Use template" })).toBeVisible();
+  await expect(renamed.getByRole("button")).toHaveCount(0);
+  await page.unroute("**/api/workspaces");
+  await page.reload();
+  // Delete it again from the Templates page.
   page.once("dialog", (d) => d.accept());
-  await page.getByRole("button", { name: "Delete template Listing opener" }).click();
-  await expect(page.getByTestId("my-templates").getByText("Listing opener")).toHaveCount(0);
+  await page.getByRole("button", { name: "Delete template Spring listing opener" }).click();
+  await expect(page.getByTestId("my-templates").getByText("Spring listing opener")).toHaveCount(0);
   expect(((await (await page.request.get("/api/templates")).json()).templates as unknown[]).length).toBe(0);
 });
 

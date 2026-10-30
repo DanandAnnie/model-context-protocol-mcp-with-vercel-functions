@@ -1007,6 +1007,100 @@ describe("saved templates", () => {
     await assert.rejects(createTemplate({ fromVideoId: video.id }), /up to 50 templates/);
     assert.equal((await listTemplates()).length, MAX_TEMPLATES);
   });
+
+  it("renames a template and changes its description, keeping everything else", async () => {
+    const { createTemplate, deleteTemplate, editTemplate, getTemplate, templateEditSchema, templateInputSchema } = await import("../services/templates");
+    const t = await createTemplate(templateInputSchema.parse({ title: "Plain", description: "First", scenes: [{ script: "Hi.", background: { type: "color", value: "#fff" } }] }));
+    const renamed = await editTemplate(t.id, templateEditSchema.parse({ title: "  Listing opener  " }));
+    assert.deepEqual([renamed.title, renamed.description], ["Listing opener", "First"]);
+    assert.ok(renamed.updatedAt > t.updatedAt);
+    assert.deepEqual({ ...(await getTemplate(t.id)), title: t.title, updatedAt: t.updatedAt }, t, "only the name and the time changed");
+    assert.equal((await editTemplate(t.id, templateEditSchema.parse({ description: "For new listings" }))).description, "For new listings");
+    // Blank or null removes the description; the name stays.
+    const bare = await editTemplate(t.id, templateEditSchema.parse({ description: "   " }));
+    assert.equal("description" in bare, false);
+    assert.equal(bare.title, "Listing opener");
+    assert.equal("description" in (await editTemplate(t.id, templateEditSchema.parse({ description: null }))), false);
+    // What the form refuses.
+    assert.throws(() => templateEditSchema.parse({}), /new name or description/);
+    assert.throws(() => templateEditSchema.parse({ title: " " }), /Name the template/);
+    assert.throws(() => templateEditSchema.parse({ title: "x".repeat(121) }), /at most 120/);
+    assert.throws(() => templateEditSchema.parse({ description: "x".repeat(201) }), /at most 200/);
+    // Another owner's template, or one deleted, is not found and stays gone.
+    await assert.rejects(editTemplate(t.id, { title: "Mine now" }, "someone-else"), /not found/);
+    await deleteTemplate(t.id);
+    await assert.rejects(editTemplate(t.id, { title: "Back" }), /not found/);
+    assert.equal(await globalThis.__avatarStudioStore!.get("template", t.id), null);
+  });
+
+  it("keeps a change that lands while a template is being renamed", async () => {
+    const { createTemplate, editTemplate, getTemplate, templateInputSchema } = await import("../services/templates");
+    const store = globalThis.__avatarStudioStore!;
+    const t = await createTemplate(templateInputSchema.parse({ title: "Plain", scenes: [{ script: "Hi.", background: { type: "color", value: "#fff" } }] }));
+    // Between the rename's read and its write, something else rewrites the scenes (as deleting a picture does).
+    const putIf = store.putIf.bind(store);
+    let raced = false;
+    store.putIf = async (kind, item, field, expected) => {
+      if (!raced && kind === "template") {
+        raced = true;
+        const now = await store.get<typeof t>("template", t.id);
+        await store.put("template", { ...now!, scenes: [{ script: "Changed.", background: { type: "color", value: "#000" } }], updatedAt: new Date(Date.parse(now!.updatedAt) + 5).toISOString() });
+      }
+      return putIf(kind, item, field, expected);
+    };
+    try {
+      const renamed = await editTemplate(t.id, { title: "Renamed" });
+      assert.equal(renamed.title, "Renamed");
+      const stored = await getTemplate(t.id);
+      assert.equal(stored.title, "Renamed");
+      assert.deepEqual(stored.scenes.map((sc) => sc.script), ["Changed."]);
+    } finally {
+      store.putIf = putIf;
+    }
+  });
+
+  it("keeps both of two edits to different fields, stays deleted when deleted mid-edit, and gives up on a template that keeps changing", async () => {
+    const { createTemplate, deleteTemplate, editTemplate, getTemplate, templateInputSchema } = await import("../services/templates");
+    const store = globalThis.__avatarStudioStore!;
+    const t = await createTemplate(templateInputSchema.parse({ title: "Plain", scenes: [{ script: "Hi.", background: { type: "color", value: "#fff" } }] }));
+    const putIf = store.putIf.bind(store);
+    try {
+      // A description edit lands between a rename's read and its write: both survive.
+      let raced = false;
+      store.putIf = async (kind, item, field, expected) => {
+        if (!raced && kind === "template") {
+          raced = true;
+          store.putIf = putIf;
+          await editTemplate(t.id, { description: "Theirs" });
+        }
+        return putIf(kind, item, field, expected);
+      };
+      await editTemplate(t.id, { title: "Mine" });
+      assert.deepEqual([(await getTemplate(t.id)).title, (await getTemplate(t.id)).description], ["Mine", "Theirs"]);
+      // Changing on every attempt: five tries, then a conflict, and the name is not taken.
+      let tries = 0;
+      store.putIf = async (kind, item, field, expected) => {
+        tries++;
+        const now = await store.get<typeof t>("template", t.id);
+        await store.put("template", { ...now!, updatedAt: new Date(Date.parse(now!.updatedAt) + 1000).toISOString() });
+        return putIf(kind, item, field, expected);
+      };
+      await assert.rejects(editTemplate(t.id, { title: "Never" }), /kept changing/);
+      assert.equal(tries, 5);
+      store.putIf = putIf;
+      assert.equal((await getTemplate(t.id)).title, "Mine");
+      // Deleted between the read and the write: not found, and it stays deleted.
+      store.putIf = async (kind, item, field, expected) => {
+        store.putIf = putIf;
+        await deleteTemplate(t.id);
+        return putIf(kind, item, field, expected);
+      };
+      await assert.rejects(editTemplate(t.id, { title: "Back" }), /not found/);
+      assert.equal(await store.get("template", t.id), null);
+    } finally {
+      store.putIf = putIf;
+    }
+  });
 });
 
 describe("review fixes", () => {

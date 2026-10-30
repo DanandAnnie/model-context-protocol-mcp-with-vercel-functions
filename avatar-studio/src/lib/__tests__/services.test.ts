@@ -1523,16 +1523,55 @@ describe("brand kit", () => {
     assert.equal(applyPronunciations("Nair visited the ER", [{ word: "Nair", sayAs: "Nye-er" }, { word: "ER", sayAs: "E.R." }]), "Nye-er visited the E.R.", "a spelling is never fed to the other rules");
     assert.equal(applyPronunciations("alpha beta", [{ word: "alpha", sayAs: "beta" }, { word: "beta", sayAs: "gamma" }]), "beta gamma");
     assert.equal(applyPronunciations("Dr Lee", [{ word: "Dr", sayAs: "Doctor" }, { word: "Doctor", sayAs: "Dok-tor" }]), "Doctor Lee");
-    assert.deepEqual(parsePronunciations("Nair = Nye-er\nno rule here\n = empty\nSaaS=sass "), [{ word: "Nair", sayAs: "Nye-er" }, { word: "SaaS", sayAs: "sass" }]);
-    assert.equal(parsePronunciations(Array.from({ length: 60 }, (_, i) => `w${i} = x`).join("\n")).length, 60, "the page, not the parser, enforces the count");
+    assert.deepEqual(parsePronunciations("Nair = Nye-er\nno rule here\n = empty\nSaaS=sass ").rules, [{ word: "Nair", sayAs: "Nye-er" }, { word: "SaaS", sayAs: "sass" }]);
+    assert.equal(parsePronunciations(Array.from({ length: 60 }, (_, i) => `w${i} = x`).join("\n")).rules.length, 60, "the page, not the parser, enforces the count");
     assert.equal(formatPronunciations(rules.slice(0, 2)), "Nair = Nye-er\nNairobi = Nye-ROH-bee");
+    // A rule for one language: [Language] at the end, which must name one; an empty bracket is a rule for all.
+    const scoped = parsePronunciations("Nair = Naïr [French]\nZeno = Tsay-no [ German ]\nSaaS = sass []\nQ = queue [Klingon]\nA = b [sic]\nNair = [French]");
+    assert.deepEqual(scoped.rules, [{ word: "Nair", sayAs: "Naïr", language: "French" }, { word: "Zeno", sayAs: "Tsay-no", language: "German" }, { word: "SaaS", sayAs: "sass" }]);
+    assert.deepEqual(scoped.badLanguage, [{ line: 4, language: "Klingon" }, { line: 5, language: "sic" }], "a word that only looks like a code is no language");
+    assert.deepEqual(scoped.bad, [6], "a bracket with no spelling is pointed out, not dropped");
+    // A spelling that itself ends in a bracket (a kit saved before rules had languages) reads back as written.
+    const bracketed = [{ word: "Nair", sayAs: "Nye-er [1]" }, { word: "Zeno", sayAs: "Zee [no]", language: "French" }];
+    assert.equal(formatPronunciations(bracketed), "Nair = Nye-er [1] []\nZeno = Zee [no] [French]");
+    assert.deepEqual(parsePronunciations(formatPronunciations(bracketed)).rules, bracketed);
+    assert.equal(formatPronunciations(scoped.rules), "Nair = Naïr [French]\nZeno = Tsay-no [German]\nSaaS = sass");
+    assert.deepEqual(parsePronunciations(formatPronunciations(scoped.rules)).rules, scoped.rules, "the page reads back what it shows");
     const copy = spokenCopy({ script: "Hi Nair.", scenes: [{ script: "Bye Nair.", background: { type: "color" as const, value: "#fff" } }] }, rules);
     assert.equal(copy.script, "Hi Nye-er.");
     assert.equal(copy.scenes?.[0].script, "Bye Nye-er.");
+    // Each scene takes the rules for its voice's language (any region), a language's rule beating the rule for all;
+    // a voice with no known language takes only the rules for all.
+    const { pronunciationsFor } = await import("../pronounce");
+    const mixed = [{ word: "Nair", sayAs: "Nye-er" }, { word: "NAIR", sayAs: "Naïr", language: "French" }, { word: "Zeno", sayAs: "Tsay-no", language: "German" }, { word: "nair", sayAs: "Nah-eer", language: "French" }];
+    assert.deepEqual(pronunciationsFor(mixed, "fr-CA"), [{ word: "NAIR", sayAs: "Naïr" }], "the first rule for the language wins");
+    assert.deepEqual(pronunciationsFor(mixed, "German"), [{ word: "Nair", sayAs: "Nye-er" }, { word: "Zeno", sayAs: "Tsay-no" }]);
+    assert.deepEqual(pronunciationsFor(mixed, undefined), [{ word: "Nair", sayAs: "Nye-er" }]);
+    assert.deepEqual(pronunciationsFor(mixed, "Klingon"), [{ word: "Nair", sayAs: "Nye-er" }]);
+    // Providers' other codes and spellings for a language reach the rules written by its name.
+    const aliased = [{ word: "Ola", sayAs: "Oh-la", language: "Norwegian" }, { word: "Ola", sayAs: "Oh-lah", language: "Portuguese" }, { word: "Ola", sayAs: "Oh-lay", language: "Hebrew" }, { word: "Ola", sayAs: "Oh-lo", language: "Chinese" }];
+    assert.deepEqual(pronunciationsFor(aliased, "nb-NO"), [{ word: "Ola", sayAs: "Oh-la" }]);
+    assert.deepEqual(pronunciationsFor(aliased, "pt_BR"), [{ word: "Ola", sayAs: "Oh-lah" }]);
+    assert.deepEqual(pronunciationsFor(aliased, "iw-IL"), [{ word: "Ola", sayAs: "Oh-lay" }]);
+    assert.deepEqual(pronunciationsFor(aliased, "cmn-CN"), [{ word: "Ola", sayAs: "Oh-lo" }]);
+    const voices = { v_fr: { language: "fr-FR" }, v_de: { language: "de-DE" }, v_none: {} };
+    const each = spokenCopy({ script: "Nair and Zeno.", voiceId: "v_fr", scenes: [{ script: "Nair and Zeno.", background: { type: "color" as const, value: "#fff" } }, { script: "Nair and Zeno.", voiceId: "v_de", background: { type: "color" as const, value: "#fff" } }, { script: "Nair and Zeno.", voiceId: "v_none", background: { type: "color" as const, value: "#fff" } }] }, mixed, voices);
+    assert.equal(each.script, "Naïr and Zeno.");
+    assert.deepEqual(each.scenes?.map((sc) => sc.script), ["Naïr and Zeno.", "Nye-er and Tsay-no.", "Nye-er and Zeno."], "a scene without a voice of its own speaks in the video's");
 
     await saveBrandKit(brandKitSchema.parse({ primaryColor: "#0f766e", pronunciations: [{ word: " Nair ", sayAs: "Nye-er" }] }), "u-say");
     assert.deepEqual((await getBrandKit("u-say"))?.pronunciations, [{ word: "Nair", sayAs: "Nye-er" }]);
     assert.equal(brandKitSchema.safeParse({ primaryColor: "#0f766e", pronunciations: Array.from({ length: 51 }, (_, i) => ({ word: `w${i}`, sayAs: "x" })) }).success, false);
+    // A rule's language is kept (an empty one is a rule for all), must name a language, and a repeat of a word in the
+    // same language keeps the first; a spelling ending in "]" would read back as a language.
+    // A repeat in the same language, whatever its region or spelling (French (Canada), fr), keeps the first; a blank
+    // language is a rule for all; a spelling may end in a bracket.
+    const scopedKit = brandKitSchema.parse({ primaryColor: "#0f766e", pronunciations: [{ word: "Nair", sayAs: "Naïr", language: " French (Canada) " }, { word: "nair", sayAs: "Nah", language: "fr" }, { word: "Nair", sayAs: "Nye-er [1]", language: "  " }, { word: "Zeno", sayAs: "Zee-no", language: null }, { word: "zeno", sayAs: "Zay-no" }] });
+    assert.deepEqual((await saveBrandKit(scopedKit, "u-say-lang")).pronunciations, [{ word: "Nair", sayAs: "Naïr", language: "French (Canada)" }, { word: "Nair", sayAs: "Nye-er [1]" }, { word: "Zeno", sayAs: "Zee-no" }]);
+    await deleteBrandKit("u-say-lang");
+    for (const language of ["Klingon", "sic", "USA"]) {
+      assert.match(brandKitSchema.safeParse({ primaryColor: "#0f766e", pronunciations: [{ word: "Q", sayAs: "queue", language }] }).error?.message ?? "", /Name the pronunciation's language/, language);
+    }
     const proto = MockAvatarProvider.prototype as unknown as { createVideo: (req: { script: string; scenes?: Array<{ script: string }> }) => Promise<{ providerJobId: string }> };
     const realCreate = proto.createVideo;
     let heard: { script: string; scenes?: Array<{ script: string }> } | null = null;
@@ -1549,6 +1588,10 @@ describe("brand kit", () => {
       const other = await createVideo(videoRequestSchema.parse({ title: "P", script: "Meet Nair today.", avatarId: "stock_1", voiceId: "stock_voice_1" }), "u-other");
       assert.equal(other.script, "Meet Nair today.");
       assert.equal(heard!.script, "Meet Nair today.", "another account's kit does not apply");
+      // A render applies each scene the rules for its voice's language: a French scene voice hears the French rule.
+      await saveBrandKit(brandKitSchema.parse({ primaryColor: "#0f766e", pronunciations: [{ word: "Nair", sayAs: "Nye-er" }, { word: "Nair", sayAs: "Naïr", language: "French" }] }), "u-say");
+      await createVideo(videoRequestSchema.parse({ title: "P", avatarId: "stock_1", voiceId: "stock_voice_1", scenes: [{ script: "Meet Nair.", background: { type: "color", value: "#fff" } }, { script: "Salut Nair.", voiceId: "stock_voice_5", background: { type: "color", value: "#fff" } }] }), "u-say");
+      assert.deepEqual(heard!.scenes?.map((sc) => sc.script), ["Meet Nye-er.", "Salut Naïr."]);
     } finally {
       proto.createVideo = realCreate;
       await deleteBrandKit("u-say");

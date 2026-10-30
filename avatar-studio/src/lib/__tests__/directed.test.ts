@@ -273,6 +273,13 @@ describe("videos HeyGen's Video Agent directs", () => {
     const said = await directAgentVideo(videoAgentSchema.parse({ ...ASK, language: "French" }), "u1");
     assert.deepEqual(said.directed?.pronunciations, [{ word: "Nair", sayAs: "Nye-er" }, { word: "Zeno", sayAs: "Zee-no" }]);
     await assert.rejects(directAgentVideo(videoAgentSchema.parse({ ...ASK, language: "Klingon" }), "u1"), /pronunciations cannot be given to HeyGen's Video Agent in Klingon; choose a language such as English/);
+    // A rule for one language reaches only videos in it, and beats the rule for every language there; a kit whose
+    // rules are all for other languages gives a video in a language its rules cannot name nothing to refuse.
+    await saveBrandKit(brandKitSchema.parse({ primaryColor: "#112233", pronunciations: [{ word: "Nair", sayAs: "Nye-er" }, { word: "nair", sayAs: "Naïr", language: "French" }, { word: "Zeno", sayAs: "Tsay-no", language: "German" }] }), "u1");
+    assert.deepEqual((await directAgentVideo(videoAgentSchema.parse({ ...ASK, language: "French" }), "u1")).directed?.pronunciations, [{ word: "nair", sayAs: "Naïr" }]);
+    assert.deepEqual((await directAgentVideo(videoAgentSchema.parse({ ...ASK, language: "German (Austria)" }), "u1")).directed?.pronunciations, [{ word: "Nair", sayAs: "Nye-er" }, { word: "Zeno", sayAs: "Tsay-no" }]);
+    await saveBrandKit(brandKitSchema.parse({ primaryColor: "#112233", pronunciations: [{ word: "Zeno", sayAs: "Tsay-no", language: "German" }] }), "u1");
+    assert.equal((await directAgentVideo(videoAgentSchema.parse({ ...ASK, language: "Klingon" }), "u1")).directed?.pronunciations, undefined);
 
     forgetGlossary();
     const realFetch = globalThis.fetch;

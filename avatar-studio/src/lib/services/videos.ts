@@ -30,7 +30,7 @@ import { bumpViewsByDay } from "../insights";
 
 import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema } from "./schemas";
 import { getBrandKit } from "./brand";
-import { spokenCopy } from "../pronounce";
+import { pronunciationsFor, spokenCopy } from "../pronounce";
 import { clearComments } from "./comments";
 import { clearVideoLeads } from "./leads";
 import { clearHighlights } from "./highlights";
@@ -398,9 +398,10 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
     if (cast.backdrops && provider.prepareBackdrop) {
       for (const b of Object.values(cast.backdrops)) cast.backdrops[b.id] = await prepareBackdropOnce(provider, b, ownerId);
     }
-    // The renderer speaks the brand kit's pronunciations; the stored script and its captions keep the spelling.
+    // The renderer speaks the brand kit's pronunciations (each scene those for its voice's language); the stored
+    // script and its captions keep the spelling.
     const rules = (await getBrandKit(ownerId))?.pronunciations ?? [];
-    const { providerJobId } = await provider.createVideo(spokenCopy(base, rules), avatar, voice, cast);
+    const { providerJobId } = await provider.createVideo(spokenCopy(base, rules, cast.voices), avatar, voice, cast);
     base.providerJobId = providerJobId;
     base.status = "processing";
   } catch (err) {
@@ -1457,11 +1458,10 @@ async function createDirectedVideo(req: VideoRequest & { directed: NonNullable<V
   }
   // Checked and sent as they are now, each named as it is now: a picture, clip, or photo deleted since is refused.
   const given = req.directed.media?.length ? await directedFiles(req.directed.media, ownerId, provider) : null;
-  // The brand kit's pronunciations as it has them now, as for any render (the first rule for a word, as renders take
-  // it), where the renderer takes them: HeyGen's voice is given them in the video's language, so a language with no
-  // code its rules can name is refused rather than sent without them.
-  const kitSaid = provider.directedPronunciations ? ((await getBrandKit(ownerId))?.pronunciations ?? []) : [];
-  const said = kitSaid.filter((p, i) => kitSaid.findIndex((q) => q.word.trim().toLowerCase() === p.word.trim().toLowerCase()) === i);
+  // The brand kit's pronunciations as it has them now, as for any render (those for the video's language, the first
+  // rule for a word), where the renderer takes them: HeyGen's voice is given them in the video's language, so a
+  // language with no code its rules can name is refused rather than sent without them.
+  const said = provider.directedPronunciations ? pronunciationsFor((await getBrandKit(ownerId))?.pronunciations, req.directed.language) : [];
   if (said.length && !baseLanguageCode(req.directed.language)) throw new ValidationError(`Your brand kit's pronunciations cannot be given to HeyGen's Video Agent in ${req.directed.language}; choose a language such as English, Spanish, or French`);
   req = { ...req, directed: stripUndefined({ ...req.directed, avatarName: avatar?.name, voiceName: voice?.name, media: given?.media, pronunciations: said.length ? said : undefined }) };
   const base: Video = {

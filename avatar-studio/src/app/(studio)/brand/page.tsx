@@ -164,14 +164,22 @@ export default function BrandPage() {
   const accentValid = accent === "" || HEX.test(accent);
 
   async function save() {
-    const rules = parsePronunciations(pronunciations);
+    const { rules, bad, badLanguage } = parsePronunciations(pronunciations);
+    if (bad.length) {
+      setSaveErr(`Pronunciation, line ${bad[0]}: write it as word = how to say it, with [Language] at the end for one language only.`);
+      return;
+    }
+    if (badLanguage.length) {
+      setSaveErr(`Pronunciation, line ${badLanguage[0].line}: "${badLanguage[0].language.slice(0, 30)}" is not a language name (for example [French] or [Spanish]).`);
+      return;
+    }
     if (rules.length > MAX_PRONUNCIATIONS) {
       setSaveErr(`Up to ${MAX_PRONUNCIATIONS} pronunciations (you have ${rules.length}).`);
       return;
     }
-    const badRule = rules.find((r) => r.word.length > 40 || r.sayAs.length > 80);
+    const badRule = rules.find((r) => r.word.length > 40 || r.sayAs.length > 80 || (r.language?.length ?? 0) > 40);
     if (badRule) {
-      setSaveErr(`Pronunciation "${badRule.word.slice(0, 20)}": the word is at most 40 characters and the spelling at most 80.`);
+      setSaveErr(`Pronunciation "${badRule.word.slice(0, 20)}": the word is at most 40 characters, the spelling at most 80, and the language at most 40.`);
       return;
     }
     const terms = parseGlossary(glossary);
@@ -487,8 +495,8 @@ export default function BrandPage() {
               </select>
             </Field>
           </div>
-          <Field label="Pronunciation" hint="One per line, word = how to say it (for example Nair = Nye-er). Renders say it that way; scripts and captions keep the spelling. Up to 50.">
-            <textarea aria-label="Pronunciation" value={pronunciations} onChange={(e) => setPronunciations(e.target.value)} rows={3} placeholder={"Nair = Nye-er\nSaaS = sass"} className={`${inputClass} font-mono text-xs`} />
+          <Field label="Pronunciation" hint="One per line, word = how to say it (for example Nair = Nye-er), with [Language] at the end for one language only (Nair = Naïr [French]); it then applies where the voice speaks that language and beats a rule for every language. Renders say it that way; scripts and captions keep the spelling. Up to 50.">
+            <textarea aria-label="Pronunciation" value={pronunciations} onChange={(e) => setPronunciations(e.target.value)} rows={3} placeholder={"Nair = Nye-er\nNair = Naïr [French]\nSaaS = sass"} className={`${inputClass} font-mono text-xs`} />
           </Field>
           <Field label="Never translate" hint="One term per line: product names, slogans, handles. Translating a script, adding a subtitle language, or a dub that keeps the glossary leaves each one exactly as written (matched whole, ignoring case). Up to 50.">
             <textarea aria-label="Never translate" value={glossary} onChange={(e) => setGlossary(e.target.value)} rows={3} placeholder={"Acme Cloud\nNimbus"} className={`${inputClass} font-mono text-xs`} />

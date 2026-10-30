@@ -1168,6 +1168,8 @@ export interface ForcedTranslation {
 export interface Pronunciation {
   word: string;
   sayAs: string;
+  /** The language the rule is for (by name, such as "French"; any region); every language when absent. */
+  language?: string;
 }
 
 /** Per-owner branding applied to new videos and the public share page. */

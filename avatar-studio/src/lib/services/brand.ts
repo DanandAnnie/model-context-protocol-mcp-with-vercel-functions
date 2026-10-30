@@ -10,7 +10,7 @@ import { listVoices } from "./voices";
 import { getBackdrop } from "./backdrops";
 import { getFootage } from "./footage";
 import { backgroundSchema } from "./schemas";
-import { MAX_PRONUNCIATIONS } from "../pronounce";
+import { MAX_PRONUNCIATIONS, pronunciationLanguage } from "../pronounce";
 import { MAX_FORCED_TRANSLATIONS, MAX_FORCED_TRANSLATION_LENGTH, MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH, MIN_GLOSSARY_TERM_LENGTH } from "../glossary";
 import { servableLogo } from "../brand-logo";
 import { brandFromHtml, type BrandSuggestion } from "../brand-import";
@@ -31,8 +31,26 @@ export const brandKitSchema = z.object({
   accentColor: z.string().regex(HEX_COLOR, "Use a 6-digit hex color like #4f46e5").optional(),
   /** Image or video behind new scenes; a colour here is the same as leaving it out and using the primary colour. */
   defaultBackground: backgroundSchema.optional(),
-  /** Up to 50 rules; a word is matched whole and case-insensitively in every script handed to the renderer. */
-  pronunciations: z.array(z.object({ word: z.string().trim().min(1).max(40), sayAs: z.string().trim().min(1).max(80) })).max(MAX_PRONUNCIATIONS).optional(),
+  /**
+   * Up to 50 rules; a word is matched whole and case-insensitively in every script handed to the renderer, or only in
+   * those a voice speaks in `language` (any region); a repeat of a word in the same language (ignoring case and
+   * region) keeps the first.
+   */
+  pronunciations: z
+    .array(
+      z.object({
+        word: z.string().trim().min(1).max(40),
+        sayAs: z.string().trim().min(1).max(80),
+        language: z.preprocess(
+          (v) => (v === null || (typeof v === "string" && !v.trim()) ? undefined : v),
+          z.string().trim().min(2).max(40).refine((l) => !!pronunciationLanguage(l), "Name the pronunciation's language, for example French").optional(),
+        ),
+      }),
+    )
+    .max(MAX_PRONUNCIATIONS)
+    // Rules for one language are matched by language, not region: a second for the same word would never apply.
+    .transform((rules) => rules.filter((r, i) => rules.findIndex((u) => u.word.toLowerCase() === r.word.toLowerCase() && pronunciationLanguage(u.language) === pronunciationLanguage(r.language)) === i))
+    .optional(),
   /** Up to 50 terms of 2 to 60 characters, each matched whole and case-insensitively, that translations keep as written; repeats ignoring case are dropped. */
   glossary: z
     .array(z.string().trim().min(MIN_GLOSSARY_TERM_LENGTH, `A term to keep untranslated is at least ${MIN_GLOSSARY_TERM_LENGTH} characters`).max(MAX_GLOSSARY_TERM_LENGTH))
@@ -89,7 +107,7 @@ export async function saveBrandKit(input: z.infer<typeof brandKitSchema>, ownerI
     primaryColor: input.primaryColor.toLowerCase(),
     accentColor: input.accentColor?.toLowerCase(),
     ...(input.defaultBackground && input.defaultBackground.type !== "color" ? { defaultBackground: input.defaultBackground } : {}),
-    ...(input.pronunciations?.length ? { pronunciations: input.pronunciations } : {}),
+    ...(input.pronunciations?.length ? { pronunciations: input.pronunciations.map(({ word, sayAs, language }) => ({ word, sayAs, ...(language ? { language } : {}) })) } : {}),
     ...(input.glossary?.length ? { glossary: input.glossary } : {}),
     ...(input.forcedTranslations?.length ? { forcedTranslations: input.forcedTranslations.map(({ term, translation, language }) => ({ term, translation, ...(language ? { language } : {}) })) } : {}),
     defaultAvatarId: input.defaultAvatarId || undefined,

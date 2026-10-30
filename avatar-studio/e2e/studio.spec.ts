@@ -3017,7 +3017,11 @@ test("brand kit pre-fills the editor and brands the share page", async ({ page }
     await expect(page.getByRole("button", { name: "Save brand kit" })).toBeDisabled();
     await page.getByLabel("Default background URL").fill("https://example.com/brand-bg.jpg");
     await page.getByLabel(/Show all of it instead of cropping/).check();
-    await page.getByLabel("Pronunciation", { exact: true }).fill("Nair = Nye-er\nSaaS = sass");
+    // A rule for one language ends in [Language]; a bracket that names none is pointed out by line, not saved.
+    await page.getByLabel("Pronunciation", { exact: true }).fill("Nair = Nye-er\nNair = Naïr [French]\nSaaS = sass\nQ = queue [Klingon]");
+    await page.getByRole("button", { name: "Save brand kit" }).click();
+    await expect(page.getByText('Pronunciation, line 4: "Klingon" is not a language name (for example [French] or [Spanish]).')).toBeVisible();
+    await page.getByLabel("Pronunciation", { exact: true }).fill("Nair = Nye-er\nNair = Naïr [French]\nSaaS = sass");
     // Terms to keep untranslated: one per line, repeats (ignoring case) dropped.
     await page.getByLabel("Never translate").fill("Acme Cloud\n\nacme cloud\nNimbus");
     // An uploaded logo, laid over the share player as a watermark.
@@ -3028,12 +3032,12 @@ test("brand kit pre-fills the editor and brands the share page", async ({ page }
     await expect(page.getByText(/^Saved /)).toBeVisible();
     const kit = (await (await page.request.get("/api/brand")).json()).brand;
     expect(kit.defaultBackground).toEqual({ type: "image", value: "https://example.com/brand-bg.jpg", fit: "contain" });
-    expect(kit.pronunciations).toEqual([{ word: "Nair", sayAs: "Nye-er" }, { word: "SaaS", sayAs: "sass" }]);
+    expect(kit.pronunciations).toEqual([{ word: "Nair", sayAs: "Nye-er" }, { word: "Nair", sayAs: "Naïr", language: "French" }, { word: "SaaS", sayAs: "sass" }]);
     expect(kit.glossary).toEqual(["Acme Cloud", "Nimbus"]);
     expect(kit.watermark).toBe("bottom-right");
     expect(kit.logoUrl).toBe(`data:image/png;base64,${TINY_PNG}`);
     await page.reload();
-    await expect(page.getByLabel("Pronunciation", { exact: true })).toHaveValue("Nair = Nye-er\nSaaS = sass");
+    await expect(page.getByLabel("Pronunciation", { exact: true })).toHaveValue("Nair = Nye-er\nNair = Naïr [French]\nSaaS = sass");
     await expect(page.getByLabel("Never translate")).toHaveValue("Acme Cloud\nNimbus");
     await expect(page.getByLabel("Logo on the player")).toHaveValue("bottom-right");
     await expect(page.getByLabel(/Show all of it instead of cropping/)).toBeChecked();

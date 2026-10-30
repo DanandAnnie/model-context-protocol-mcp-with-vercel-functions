@@ -578,3 +578,15 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - An edited clip jumped to the top of the saved-clips list. It now keeps its place.
     - Words padded with spaces past 5000 characters were refused. They are trimmed first.
     - Tests for the delete race, the trimming, a reused clip starting with its words, going back to a voice, and an empty edit were added.
+- Assets page (`da4470d`): `/assets` lists the account's audio clips (length and kind, a player, the words they say, "Make a video", rename, delete, upload) and pictures (preview, rename, delete, upload) together, read-only for viewers, with a sidebar entry. `PATCH /api/backdrops/:id` renames a picture.
+  - An independent review found nothing blocking. Fixed before the commit:
+    - The words button went away once the words were kept, dropping the focus to the page. It now stays and says the words are kept.
+    - The status message sat in a hidden region until it had text, so its first message was often not announced. The region is now always present.
+    - The e2e test matched names a run left part-way could leave behind on a reused server. Its names are now unique per run and matched exactly.
+    - The sidebar could not scroll, so its last entries could be cut off on short screens, more so with one more entry. Its links now scroll.
+    - The clip limit was copied into the page. It now lives in `lib/types` beside the picture limit.
+    - The focus moved to a section's heading even when a delete failed, and that heading showed no focus ring. It now moves only after a delete, with a visible ring.
+    - Renaming something deleted elsewhere showed the server's message with its id. It now says it was already deleted.
+    - The upload buttons were disabled at the limit without saying why, and the picture buttons were under the 24px target size. Both are fixed.
+    - While the role loaded, editors briefly saw "No words kept with this clip". Nothing is said until the role is known.
+  - Also fixed: the full suite caught the editor bringing back a draft after "Generate video". An autosave still pending, or re-armed by data arriving before the page moved on, wrote the cleared draft back. Nothing autosaves once a render starts.

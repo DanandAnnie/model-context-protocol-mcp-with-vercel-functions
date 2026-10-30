@@ -595,3 +595,11 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The e2e step checked that a draft existed rather than that it held the words typed, so a reload could race the next save. It now waits for the words.
     - A start opened and left untouched saved a draft, because the title it gave the video counted as an edit, so later visits restored it ("Restored your unsent draft"). Such a title is no longer an edit, for clip starts too.
     - The picture's link had no visible text and a title that did not match its name. It now reads "Use", its title matches, and its icon is hidden from screen readers.
+- Search the Assets page (`888b9fa`): a search box narrows the clips (by name or the words they say) and the pictures (by name) and says how many of each match.
+  - An independent review found no blockers. Fixed before the commit:
+    - An edit that stopped matching made its card vanish with the focus inside it, and a new upload that did not match disappeared silently. What was uploaded or changed since the search was typed now stays in view.
+    - A search unmounted hidden clip cards and lost words typed into them. Cards now stay mounted and hidden, also when nothing matches.
+    - The match count was never announced. It is now a status line.
+    - Names were compared without Unicode normalization, so a decomposed "Café" did not match. Both sides are now folded as glossary terms are.
+    - The box disappeared when both lists emptied while a search stayed active. It now shows once either list has loaded.
+    - The e2e test did not search by a clip's words. It now does, and counts only visible cards.

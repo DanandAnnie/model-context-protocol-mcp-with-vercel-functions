@@ -119,11 +119,32 @@ export async function keepClip(input: { name: string; mimeType: AudioClipType; b
   return view(await getStore().put("clip", clip));
 }
 
+/** What can change on a clip once made: its name, and the words it says (`null` or blank forgets them). */
+export const clipEditSchema = z
+  .object({
+    name: z.string().trim().min(1, "Name the clip").max(80).optional(),
+    transcript: z.union([z.string().trim().max(5000, "What a clip says is at most 5000 characters, as a scene's script is"), z.null()]).optional(),
+  })
+  .refine((v) => v.name !== undefined || v.transcript !== undefined, { message: "Give the clip a new name or the words it says" });
+
+/** Renames a clip or sets the words it says; videos already made keep what they were made with. */
+export async function editClip(id: string, input: z.infer<typeof clipEditSchema>, ownerId: string = LOCAL_OWNER): Promise<AudioClip> {
+  const clip = await getClip(id, ownerId);
+  const { transcript: _old, ...rest } = clip;
+  void _old;
+  const words = input.transcript === undefined ? clip.transcript : input.transcript || undefined;
+  const next: AudioClip = { ...rest, ...(input.name !== undefined ? { name: input.name } : {}), ...(words ? { transcript: words } : {}) };
+  // Written only over the row read: a clip deleted meanwhile stays deleted rather than coming back without its audio.
+  if (!(await getStore().putIf("clip", next, "createdAt", clip.createdAt))) throw new NotFoundError(`Audio clip ${id} not found`);
+  return view(next);
+}
+
 /** Gives a clip without words the words it says (a clip kept before transcripts were); one that has words keeps them. */
 export async function addClipTranscript(clip: AudioClip, transcript: string): Promise<AudioClip> {
   const current = await getStore().get<AudioClip>("clip", clip.id);
   if (!current || current.transcript || !transcript.trim()) return clip;
-  return view(await getStore().put("clip", { ...current, transcript: transcript.trim() }));
+  const next = { ...current, transcript: transcript.trim() };
+  return (await getStore().putIf("clip", next, "createdAt", current.createdAt)) ? view(next) : clip;
 }
 
 /** The account's clip as the API shows it, or null when there is none by that id. */
@@ -148,7 +169,10 @@ export async function getClipAudio(id: string, ownerId: string = LOCAL_OWNER): P
 export async function saveClipAssetIds(clip: AudioClip, ids: Record<string, string>): Promise<AudioClip> {
   const current = await getStore().get<AudioClip>("clip", clip.id);
   if (!current) return { ...clip, providerAssetIds: { ...clip.providerAssetIds, ...ids } };
-  return getStore().put("clip", { ...current, providerAssetIds: { ...current.providerAssetIds, ...ids } });
+  const next = { ...current, providerAssetIds: { ...current.providerAssetIds, ...ids } };
+  // Like the edits above, only over a row that is still there: a clip deleted during a render stays deleted.
+  await getStore().putIf("clip", next, "createdAt", current.createdAt);
+  return next;
 }
 
 /** Deletes a clip and its audio. Videos already rendered keep their footage; a retry or copy that names it is refused. */

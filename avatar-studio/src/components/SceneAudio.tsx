@@ -14,6 +14,7 @@ import { MAX_CLIP_SECONDS, type AudioClip } from "@/lib/types";
 export function SceneAudio({
   clips,
   clipId,
+  script,
   disabled,
   onUse,
   onClear,
@@ -21,6 +22,8 @@ export function SceneAudio({
 }: {
   clips: AudioClip[];
   clipId?: string;
+  /** The scene's script: for a clip scene, what the clip says, which can be kept with the clip. */
+  script?: string;
   disabled?: boolean;
   onUse: (clip: AudioClip) => void;
   onClear: () => void;
@@ -30,6 +33,9 @@ export function SceneAudio({
   const [seconds, setSeconds] = useState(0);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // The clip whose words were just kept here, so the note names that clip only; and the note itself, kept mounted.
+  const [keptFor, setKeptFor] = useState<string | null>(null);
+  const keptNote = useRef<HTMLParagraphElement>(null);
   const recorder = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -100,6 +106,27 @@ export function SceneAudio({
     setRecording(false);
   }
 
+  // The scene's words, once typed, can go with the clip, so the next scene or video using it starts with them.
+  const known = clipId ? clips.find((c) => c.id === clipId) : undefined;
+  const words = script?.trim() ?? "";
+  const canKeepWords = !!known && !!words && words !== (known.transcript ?? "").trim();
+  async function keepWords() {
+    if (!known || busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const { clip: saved } = await api<{ clip: AudioClip }>(`/api/clips/${known.id}`, { method: "PATCH", body: JSON.stringify({ transcript: words }) });
+      onSaved(saved);
+      setKeptFor(saved.id);
+      // The button gives way to the note; the focus goes to it rather than to the page.
+      requestAnimationFrame(() => keptNote.current?.focus());
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "The words could not be kept with the clip");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (clip && !recording) {
     return (
       <div className="mb-3 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-slate-700" data-testid="scene-audio">
@@ -114,6 +141,15 @@ export function SceneAudio({
         </div>
         <audio controls preload="none" src={`/api/clips/${clip.id}`} className="mt-2 h-8 w-full" aria-label={`Play ${clip.name}`} />
         <p className="mt-1 text-slate-500">The presenter lip-syncs to this clip; the voice, speed, and pitch settings do not apply to it. Type what it says below for captions and search.</p>
+        {canKeepWords && !disabled && (
+          <button type="button" onClick={() => void keepWords()} aria-disabled={busy} className="mt-1 font-medium text-brand-700 hover:underline aria-disabled:opacity-50">
+            {busy ? "Keeping the words…" : "Keep these words with the clip"}
+          </button>
+        )}
+        <p ref={keptNote} tabIndex={-1} role="status" className="mt-1 text-slate-600 outline-none empty:hidden">
+          {keptFor === clipId && !canKeepWords ? "The words are kept with the clip: a scene that uses it starts with them." : ""}
+        </p>
+        <ErrorBanner message={err} />
       </div>
     );
   }

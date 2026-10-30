@@ -1,6 +1,6 @@
-import { errorResponse } from "@/lib/api-utils";
+import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { requireEditor, requireOwner } from "@/lib/owner";
-import { deleteClip, getClipAudio } from "@/lib/services";
+import { clipEditSchema, deleteClip, editClip, getClipAudio } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +19,17 @@ export async function GET(_req: Request, ctx: Ctx) {
         "X-Content-Type-Options": "nosniff",
       },
     });
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+/** Rename a clip or set the words it says: `{ name?, transcript? }` (`transcript: null` or blank forgets them) → `{ clip }`. */
+export async function PATCH(req: Request, ctx: Ctx) {
+  try {
+    const owner = await requireEditor();
+    const input = clipEditSchema.parse(await readJson(req));
+    return json({ clip: await editClip((await ctx.params).id, input, owner) });
   } catch (err) {
     return errorResponse(err);
   }

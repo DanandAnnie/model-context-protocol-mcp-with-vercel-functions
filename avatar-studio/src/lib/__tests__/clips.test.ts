@@ -6,9 +6,11 @@ import { MemoryStore } from "../store/memory";
 import { getStore } from "../store";
 import {
   MAX_CLIPS,
+  clipEditSchema,
   createClip,
   createVideo,
   deleteClip,
+  editClip,
   exportOwnerData,
   getClipAudio,
   listClips,
@@ -17,6 +19,7 @@ import {
   wavSeconds,
 } from "../services";
 import { LOCAL_OWNER } from "../owner-id";
+import { NotFoundError } from "../errors";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import type { AudioClip, Video } from "../types";
 
@@ -219,5 +222,52 @@ describe("audio scenes at the renderer", () => {
     assert.deepEqual(body!.script, { type: "audio", audio_url: "https://d-id.example/audio.wav" });
     const two = videoRequestSchema.parse({ ...one, scenes: [...one.scenes!, { script: "Typed.", background: { type: "color", value: "#ffffff" } }] });
     await assert.rejects(did.createVideo(two, ava, emma, { avatars: {}, voices: {}, clips: { [clip.id]: clip } }), /single-scene video/);
+  });
+
+  it("renames a clip and keeps, replaces, or forgets the words it says, for its owner only", async () => {
+    const clip = await createClip({ name: "Founder take", audio: dataUrl(wav(1)) }, "u1");
+    assert.equal(clip.transcript, undefined);
+    const said = await editClip(clip.id, clipEditSchema.parse({ transcript: "  Hi, I recorded this myself.  " }), "u1");
+    assert.deepEqual([said.name, said.transcript], ["Founder take", "Hi, I recorded this myself."]);
+    const renamed = await editClip(clip.id, clipEditSchema.parse({ name: " Founder intro " }), "u1");
+    assert.deepEqual([renamed.name, renamed.transcript], ["Founder intro", "Hi, I recorded this myself."], "a rename keeps the words");
+    assert.equal((await listClips("u1"))[0].transcript, "Hi, I recorded this myself.");
+    for (const forget of [null, "   "]) {
+      await editClip(clip.id, clipEditSchema.parse({ transcript: "Again." }), "u1");
+      assert.equal((await editClip(clip.id, clipEditSchema.parse({ transcript: forget }), "u1")).transcript, undefined, String(forget));
+    }
+    // The audio and the renderer's cached upload are untouched, and the API never shows the upload ids.
+    await getStore().put("clip", { ...(await getStore().get<AudioClip>("clip", clip.id))!, providerAssetIds: { heygen: "asset_1" } });
+    const kept = await editClip(clip.id, clipEditSchema.parse({ transcript: "Once more." }), "u1");
+    assert.equal(kept.providerAssetIds, undefined);
+    assert.deepEqual((await getStore().get<AudioClip>("clip", clip.id))!.providerAssetIds, { heygen: "asset_1" });
+    assert.equal((await getClipAudio(clip.id, "u1")).bytes.byteLength, wav(1).byteLength);
+    // Checked: something to change, a name, words no longer than a script; another account's clip is not found.
+    assert.throws(() => clipEditSchema.parse({}), /new name or the words/);
+    assert.throws(() => clipEditSchema.parse({ name: "  " }), /Name the clip/);
+    assert.throws(() => clipEditSchema.parse({ transcript: "x".repeat(5001) }), /at most 5000 characters/);
+    await assert.rejects(editClip(clip.id, clipEditSchema.parse({ name: "Theirs" }), "u2"), NotFoundError);
+    await assert.rejects(editClip("clip_missing", clipEditSchema.parse({ name: "Gone" }), "u1"), NotFoundError);
+    // A clip deleted between the read and the write stays deleted, rather than coming back without its audio.
+    const store = getStore();
+    const realGet = store.get.bind(store);
+    let deleted = false;
+    store.get = (async (kind: string, id: string) => {
+      const row = await realGet(kind as never, id);
+      if (kind === "clip" && id === clip.id && !deleted) {
+        deleted = true;
+        await store.remove("clip", clip.id);
+        await store.remove("clipaudio", `clipaudio_${clip.id}`);
+      }
+      return row;
+    }) as typeof store.get;
+    try {
+      await assert.rejects(editClip(clip.id, clipEditSchema.parse({ name: "Too late" }), "u1"), NotFoundError);
+    } finally {
+      store.get = realGet;
+    }
+    assert.equal(await getStore().get("clip", clip.id), null);
+    // Words padded past the limit are trimmed before they are measured.
+    assert.equal(clipEditSchema.parse({ transcript: ` ${"x".repeat(5000)}  ` }).transcript?.length, 5000);
   });
 });

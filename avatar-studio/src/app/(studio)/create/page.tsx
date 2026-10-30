@@ -262,11 +262,17 @@ function CreateInner() {
   const layout: SceneLayout = active.layout ?? DEFAULT_LAYOUT;
   // The default layout is stored as absent, so an untouched scene renders exactly as before.
   const setLayout = (value: SceneLayout) => updateScene(activeIdx, { layout: isDefaultLayout(value) ? undefined : value });
-  /** True when a scene's script is still exactly the words of the clip it uses. */
-  const clipWords = (sc: Scene) => {
-    const words = sc.audioId ? clips.find((c) => c.id === sc.audioId)?.transcript : undefined;
-    return !!words && sc.script.trim() === words.trim();
-  };
+  // Every set of words each clip has had while the editor is open: a scene filled with a clip's earlier words is still
+  // filled with the clip's words after another scene keeps new ones.
+  const clipWordsSeen = useRef(new Map<string, Set<string>>());
+  for (const c of clips) {
+    if (!c.transcript?.trim()) continue;
+    const seen = clipWordsSeen.current.get(c.id) ?? new Set<string>();
+    seen.add(c.transcript.trim());
+    clipWordsSeen.current.set(c.id, seen);
+  }
+  /** True when a scene's script is exactly words its clip has said, rather than words typed for it alone. */
+  const clipWords = (sc: Scene) => !!sc.audioId && !!sc.script.trim() && !!clipWordsSeen.current.get(sc.audioId)?.has(sc.script.trim());
   function updateScene(idx: number, patch: Partial<Scene>) {
     setScenes((prev) => prev.map((sc, i) => (i === idx ? withBackground({ ...sc, ...patch }, patch.background ?? sc.background) : sc)));
   }
@@ -1326,6 +1332,7 @@ function CreateInner() {
               key={`audio-${activeIdx}`}
               clips={clips}
               clipId={active.audioId}
+              script={active.script}
               disabled={canEdit === false}
               // A clip whose words are known fills a scene that has none yet, or still has the last clip's words; words
               // typed are kept. Those of a clip taken away go with it, so a voice never reads them by mistake.
@@ -1335,7 +1342,8 @@ function CreateInner() {
                 updateScene(activeIdx, { audioId: clip.id, voiceId: undefined, ...(script !== null ? { script } : {}) });
               }}
               onClear={() => updateScene(activeIdx, { audioId: undefined, ...(clipWords(active) ? { script: "" } : {}) })}
-              onSaved={(clip) => setClipData((prev) => ({ clips: [clip, ...(prev?.clips ?? []).filter((c) => c.id !== clip.id)] }))}
+              // A new clip goes first, as the list is newest first; an edited one stays where it is.
+              onSaved={(clip) => setClipData((prev) => ({ clips: prev?.clips.some((c) => c.id === clip.id) ? prev.clips.map((c) => (c.id === clip.id ? clip : c)) : [clip, ...(prev?.clips ?? [])] }))}
             />
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-semibold text-slate-900">

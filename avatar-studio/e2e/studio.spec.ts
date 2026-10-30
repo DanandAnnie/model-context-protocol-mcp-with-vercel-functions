@@ -195,6 +195,12 @@ test("a scene can speak uploaded audio instead of a voice", async ({ page }) => 
   await expect(page.getByLabel("Scene voice")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Listen" })).toHaveCount(0);
   await page.locator("textarea").fill("Hi, I recorded this myself.");
+  // The words typed can go with the clip, so the next scene using it starts with them.
+  await page.getByRole("button", { name: "Keep these words with the clip" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "The words are kept with the clip" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Keep these words with the clip" })).toHaveCount(0);
+  const founder = ((await (await page.request.get("/api/clips")).json()) as { clips: Array<{ name: string; transcript?: string }> }).clips.find((c) => c.name === "founder-take");
+  expect(founder?.transcript).toBe("Hi, I recorded this myself.");
   // The audio scene lasts exactly as long as its clip; the typed one is an estimate.
   await expect(page.getByTestId("scene-duration")).toHaveText(["~2s", "3s"]);
   // Each scene has its own audio panel, one at a time.
@@ -223,8 +229,13 @@ test("a scene can speak uploaded audio instead of a voice", async ({ page }) => 
   await page.goto("/create");
   await page.getByLabel("Use a saved clip").selectOption(clip.id);
   await expect(page.getByTestId("scene-audio-name")).toHaveText("founder-take");
+  // It starts with the words kept with it; going back to a voice takes them away, so a voice never reads them by mistake.
+  await expect(page.locator("textarea")).toHaveValue("Hi, I recorded this myself.");
   await page.getByRole("button", { name: "Use a voice instead" }).click();
   await expect(page.getByText("Or use your own audio")).toBeVisible();
+  await expect(page.locator("textarea")).toHaveValue("");
+  // An edit with nothing to change is refused.
+  expect((await page.request.patch(`/api/clips/${clip.id}`, { data: {} })).status()).toBe(400);
   // The API takes WAV or MP3 only, and reads a WAV's length itself.
   expect((await page.request.post("/api/clips", { data: { name: "Webm", audio: "data:audio/webm;base64,AAAA" } })).status()).toBe(400);
   expect((await page.request.delete(`/api/clips/${clip.id}`)).status()).toBe(204);

@@ -221,9 +221,13 @@ export default function PhotoShootPage() {
     try {
       const { shoot } = await api<{ shoot: Shoot }>(`/api/shoots/${s.id}`, { method: "PATCH", body: JSON.stringify({ title: name }) });
       setData((prev) => (prev ? { ...prev, shoots: prev.shoots.map((x) => (x.id === shoot.id ? shoot : x)) } : prev));
+      // A list check that left before the rename would answer with the old name; asking again retires it.
+      void refetch();
       setNote(`Renamed the photo shoot to “${shoot.title}”.`);
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) {
+        // Forgotten here, so the next check does not announce it as deleted elsewhere as well.
+        seen.current.delete(s.id);
         setData((prev) => (prev ? { ...prev, shoots: prev.shoots.filter((x) => x.id !== s.id) } : prev));
         setNote(`The photo shoot “${s.title}” is no longer available.`);
         focusAfterRender(() => headingRef.current);

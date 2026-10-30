@@ -774,6 +774,18 @@ test("a recording can be cleaned of filler words, from a link or the library, an
   expect(Object.keys(listed[0])).not.toContain("providerJobId");
   expect(listed.filter((c) => c.videoId === v.id)).toHaveLength(1);
   expect((await again.json()).cleanup.id).toBe(listed[0].id);
+  // Renamed in place; a retried start with the same key is still the same cleanup, and the name it was started with stays on the server.
+  const cleanupName = `Renamed cleanup ${Date.now().toString(36)}`;
+  page.once("dialog", (d) => void d.accept(cleanupName));
+  await item.getByRole("button", { name: /^Rename / }).click();
+  await expect(item.getByText(cleanupName, { exact: true })).toBeVisible();
+  await expect(page.locator('p[role="status"]').filter({ hasText: `Renamed the cleanup to “${cleanupName}”.` })).toHaveCount(1);
+  await expect(item.getByRole("button", { name: `Rename ${cleanupName}` })).toBeFocused();
+  const retried = (await (await page.request.post("/api/cleanups", { data: { videoId: v.id }, headers: { "Idempotency-Key": key } })).json()).cleanup as Record<string, unknown>;
+  expect([retried.id, retried.title]).toEqual([listed[0].id, cleanupName]);
+  expect(Object.keys(retried)).not.toContain("askedTitle");
+  expect((await page.request.patch(`/api/cleanups/${listed[0].id}`, { data: { title: " " } })).status()).toBe(400);
+  expect((await page.request.patch("/api/cleanups/cu_missing123", { data: { title: "Gone" } })).status()).toBe(404);
   // Deleting asks first, then focus stays on the page.
   page.once("dialog", (d) => d.accept());
   await item.getByRole("button", { name: /^Delete / }).click();
@@ -817,6 +829,18 @@ test("a video is lip-synced to an uploaded clip or a linked track, at the chosen
   const listed = (await (await page.request.get("/api/lipsyncs")).json()).lipsyncs as Array<Record<string, unknown>>;
   expect(Object.keys(listed[0])).not.toContain("providerJobId");
   expect((await again.json()).lipsync.id).toBe(listed[0].id);
+  // Renamed in place; a retried start with the same key is still the same lip sync, and the name it was started with stays on the server.
+  const lipsyncName = `Renamed lip sync ${Date.now().toString(36)}`;
+  page.once("dialog", (d) => void d.accept(lipsyncName));
+  await item.getByRole("button", { name: /^Rename / }).click();
+  await expect(item.getByText(lipsyncName, { exact: true })).toBeVisible();
+  await expect(page.locator('p[role="status"]').filter({ hasText: `Renamed the lip sync to “${lipsyncName}”.` })).toHaveCount(1);
+  await expect(item.getByRole("button", { name: `Rename ${lipsyncName}` })).toBeFocused();
+  const retried = (await (await page.request.post("/api/lipsyncs", { data: { videoId: v.id, clipId, mode: "precision" }, headers: { "Idempotency-Key": key } })).json()).lipsync as Record<string, unknown>;
+  expect([retried.id, retried.title]).toEqual([listed[0].id, lipsyncName]);
+  expect(Object.keys(retried)).not.toContain("askedTitle");
+  expect((await page.request.patch(`/api/lipsyncs/${listed[0].id}`, { data: { title: " " } })).status()).toBe(400);
+  expect((await page.request.patch("/api/lipsyncs/ls_missing123", { data: { title: "Gone" } })).status()).toBe(404);
   // A linked track must be a public https address; a private one is refused with the reason, at the fast default.
   await page.getByLabel("A link").nth(1).check();
   await page.getByLabel("Audio URL").fill("https://127.0.0.1/voice-over.mp3");
@@ -928,6 +952,18 @@ test("a catalog track found by describing it is mixed under a finished video, fo
     { trackId: "demo_effect_whoosh", name: "Whoosh", query: "whoosh transition", atSec: 1.5 },
     { trackId: "demo_effect_pop", name: "Pop", query: "whoosh transition", atSec: 2 },
   ]);
+  // Renamed in place; a retried start with the same key is still the same video with music, and the name it was started with stays on the server.
+  const mixName = `Renamed video with music ${Date.now().toString(36)}`;
+  page.once("dialog", (d) => void d.accept(mixName));
+  await item.getByRole("button", { name: /^Rename / }).click();
+  await expect(item.getByText(mixName, { exact: true })).toBeVisible();
+  await expect(page.locator('p[role="status"]').filter({ hasText: `Renamed the video with music to “${mixName}”.` })).toHaveCount(1);
+  await expect(item.getByRole("button", { name: new RegExp(`^Rename ${mixName}, `) })).toBeFocused();
+  const retried = (await (await page.request.post("/api/music", { data: request.postDataJSON(), headers: { "Idempotency-Key": request.headers()["idempotency-key"] } })).json()).mix as Record<string, unknown>;
+  expect([retried.id, retried.title]).toEqual([listed[0].id, mixName]);
+  expect(Object.keys(retried)).not.toContain("askedTitle");
+  expect((await page.request.patch(`/api/music/${listed[0].id}`, { data: { title: " " } })).status()).toBe(400);
+  expect((await page.request.patch("/api/music/mm_missing123", { data: { title: "Gone" } })).status()).toBe(404);
   // A suggestion searches at once.
   await page.getByRole("button", { name: "Cinematic and inspiring" }).click();
   await expect(tracks.getByLabel("Wide horizon", { exact: true })).toBeChecked();

@@ -38,6 +38,7 @@ export async function exportOwnerData(ownerId: string = LOCAL_OWNER): Promise<Ow
       if (kind === "highlight" || kind === "cleanup" || kind === "lipsync" || kind === "music") {
         delete copy.provider;
         delete copy.providerJobId;
+        delete copy.askedTitle;
       }
       // The renderer, the voice there, and the upload sent to it stay on the server.
       if (kind === "instantvoice" || kind === "voicechange") {

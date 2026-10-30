@@ -417,9 +417,13 @@ export default function FootagePage() {
     try {
       const { footage: clip } = await api<{ footage: Footage }>(`/api/footage/${f.id}`, { method: "PATCH", body: JSON.stringify({ title: name }) });
       setData((prev) => (prev ? { ...prev, footage: prev.footage.map((x) => (x.id === clip.id ? clip : x)) } : prev));
+      // A list check that left before the rename would answer with the old name; asking again retires it.
+      void refetch();
       setNote(`Renamed the clip to “${clip.title}”.`);
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) {
+        // Forgotten here, so the next check does not announce it as deleted elsewhere as well.
+        seen.current.delete(f.id);
         setData((prev) => (prev ? { ...prev, footage: prev.footage.filter((x) => x.id !== f.id) } : prev));
         setNote(`The clip “${f.title}” is no longer available.`);
         focusAfterRender(() => headingRef.current);

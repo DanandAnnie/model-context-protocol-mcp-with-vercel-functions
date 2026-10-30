@@ -1,12 +1,12 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Download, Eraser, Trash2 } from "lucide-react";
+import { Download, Eraser, Pencil, Trash2 } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
-import { api, formatDate, formatSeconds, isRefusal } from "@/lib/client";
+import { ApiError, api, formatDate, formatSeconds, isRefusal } from "@/lib/client";
 import type { CleanupJob, Video } from "@/lib/types";
 
 /** A cleanup as the server lists it: never the renderer or its job id. */
@@ -116,6 +116,29 @@ export default function CleanupPage() {
       if (isRefusal(e)) setRequestKey(newKey());
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function rename(c: Cleanup) {
+    const answer = window.prompt("Cleanup name", c.title);
+    const name = answer?.trim();
+    if (!name || name === c.title) return;
+    setErr(null);
+    setNote(null);
+    try {
+      const { cleanup: saved } = await api<{ cleanup: Cleanup }>(`/api/cleanups/${c.id}`, { method: "PATCH", body: JSON.stringify({ title: name }) });
+      setData((prev) => (prev ? { ...prev, cleanups: prev.cleanups.map((x) => (x.id === saved.id ? saved : x)) } : prev));
+      // A list check that left before the rename would answer with the old name; asking again retires it.
+      void refetch();
+      setNote(`Renamed the cleanup to “${saved.title}”.`);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        // Forgotten here, so the next check does not announce it as deleted elsewhere as well.
+        seen.current.delete(c.id);
+        setData((prev) => (prev ? { ...prev, cleanups: prev.cleanups.filter((x) => x.id !== c.id) } : prev));
+        setNote(`The cleanup “${c.title}” is no longer available.`);
+        focusAfterRender(() => headingRef.current);
+      } else setErr(e instanceof Error ? e.message : "The cleanup could not be renamed");
     }
   }
 
@@ -235,10 +258,15 @@ export default function CleanupPage() {
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       <StatusBadge status={c.status} />
-                      {canEdit !== false && (
-                        <button type="button" onClick={() => remove(c)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-rose-600" aria-label={`Delete ${c.title}`}>
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                      {canEdit === true && (
+                        <>
+                          <button type="button" onClick={() => void rename(c)} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-brand-700" aria-label={`Rename ${c.title}`} title="Rename">
+                            <Pencil className="h-4 w-4" aria-hidden />
+                          </button>
+                          <button type="button" onClick={() => remove(c)} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-rose-600" aria-label={`Delete ${c.title}`} title="Delete">
+                            <Trash2 className="h-4 w-4" aria-hidden />
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>

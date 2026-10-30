@@ -9,7 +9,7 @@ import { LOCAL_OWNER } from "../owner-id";
 import { createHash } from "node:crypto";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { assertPublicHttpUrl } from "../safe-url";
-import { owned, stripUndefined } from "./shared";
+import { owned, renameJob, stripUndefined, writeRefresh } from "./shared";
 import { getVideo } from "./videos";
 import { freshVideoUrl } from "./highlights";
 import { jobChecker } from "./job-checks";
@@ -41,6 +41,12 @@ export function publicCleanup(job: CleanupJob): PublicCleanup {
   void _p;
   void _j;
   return rest;
+}
+
+/** Renames one of the owner's cleanups: `{ title }` → it as the account sees it. */
+export async function renameCleanup(id: string, title: string, ownerId: string = LOCAL_OWNER): Promise<PublicCleanup> {
+  if (!cleanupIdSchema.safeParse(id).success) throw new NotFoundError("Cleanup not found");
+  return publicCleanup(await renameJob<CleanupJob>("cleanup", id, title, ownerId, "Cleanup"));
 }
 
 const checks = jobChecker<CleanupJob>((job) => refreshCleanup(job));
@@ -144,21 +150,17 @@ async function refreshCleanup(job: CleanupJob): Promise<CleanupJob> {
     if (!provider.cleanupStatus) return job;
     const out = await provider.cleanupStatus(job.providerJobId);
     const now = nowIso();
-    const { progress: _p, videoUrl: _v, thumbnailUrl: _t, error: _e, ...kept } = job;
-    void _p;
-    void _v;
-    void _t;
-    void _e;
     // The share removed is worked out from the two lengths when both are known (the renderer's own figure otherwise).
     const reductionPct = out.originalSec && out.outputSec !== undefined ? Math.round((1 - out.outputSec / out.originalSec) * 1000) / 10 : out.reductionPct;
-    const next: CleanupJob = {
-      ...kept,
-      ...stripUndefined({ ...out, reductionPct, progress: out.status === "processing" ? out.progress : undefined }),
-      checkedAt: now,
-      updatedAt: out.status !== job.status ? now : job.updatedAt,
-    };
-    // Written only over the record that was read, so a delete meanwhile stays deleted.
-    return (await getStore().putIf("cleanup", next, "updatedAt", job.updatedAt)) ? next : job;
+    // Built over the latest row (a rename may land while the renderer is asked), and written only over it.
+    return await writeRefresh<CleanupJob>("cleanup", job, (current) => {
+      const { progress: _p, videoUrl: _v, thumbnailUrl: _t, error: _e, ...kept } = current;
+      void _p;
+      void _v;
+      void _t;
+      void _e;
+      return { ...kept, ...stripUndefined({ ...out, reductionPct, progress: out.status === "processing" ? out.progress : undefined }), checkedAt: now };
+    });
   } catch (err) {
     console.error(`cleanup check failed for ${job.id}:`, err);
     return job;

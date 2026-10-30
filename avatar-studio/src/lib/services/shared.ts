@@ -42,19 +42,26 @@ export function stripUndefined<T extends object>(obj: T): T {
   return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined)) as T;
 }
 
-/** A new name for a generated clip or photo shoot: 1 to 120 characters, trimmed. */
+/** The kinds of renderer jobs that carry a title the account can change. */
+export type RenamableKind = Extract<ItemKind, "footage" | "shoot" | "cleanup" | "lipsync" | "music">;
+
+/** The kinds whose retried start is compared on the title it was started with (cleanups and lip syncs are not). */
+const TITLE_COMPARED: ReadonlySet<RenamableKind> = new Set(["footage", "shoot", "music"]);
+
+/** A new name for a generated clip, photo shoot, cleanup, lip sync, or video with music: 1 to 120 characters, trimmed. */
 export const jobRenameSchema = z.object({ title: z.string("A title is text").trim().min(1, "Give it a name").max(120, "A title is at most 120 characters") });
 
 /**
- * Renames one of the owner's generated clips or photo shoots. The name it was started with is kept (server only) so a
- * retried start with the same key is still recognised. The write is conditional on the row read and read again on a
- * miss, so a status change landing meanwhile is kept and a delete meanwhile stays a delete.
+ * Renames one of the owner's renderer jobs (a generated clip, photo shoot, cleanup, lip sync, or video with music). The
+ * name it was started with is kept (server only) where a retried start with the same key is compared on it, so the
+ * retry is still recognised. The write is conditional on the row read and read again on a miss, so a status change
+ * landing meanwhile is kept and a delete meanwhile stays a delete.
  */
-export async function renameJob<T extends { id: string; ownerId: string; title: string; askedTitle?: string; updatedAt: string }>(kind: Extract<ItemKind, "footage" | "shoot">, id: string, title: string, ownerId: string, what: string): Promise<T> {
+export async function renameJob<T extends { id: string; ownerId: string; title: string; askedTitle?: string; updatedAt: string }>(kind: RenamableKind, id: string, title: string, ownerId: string, what: string): Promise<T> {
   let current = owned(await getStore().get<T>(kind, id), ownerId, what);
   for (let attempt = 0; attempt < 5; attempt++) {
     if (current.title === title) return current;
-    const next: T = { ...current, title, askedTitle: current.askedTitle ?? current.title, updatedAt: nextUpdatedAt(current.updatedAt) };
+    const next: T = { ...current, title, ...(TITLE_COMPARED.has(kind) ? { askedTitle: current.askedTitle ?? current.title } : {}), updatedAt: nextUpdatedAt(current.updatedAt) };
     if (await getStore().putIf(kind, next, "updatedAt", current.updatedAt)) return next;
     current = owned(await getStore().get<T>(kind, id), ownerId, what);
   }
@@ -67,14 +74,17 @@ export function nextUpdatedAt(previous: string): string {
 }
 
 /**
- * Stores what the renderer said about a clip or shoot (`apply` builds the row from the latest one read). The write is
+ * Stores what the renderer said about a job (`apply` builds the row from the latest one read). The write is
  * conditional on that row and always moves its time on, so a rename landing meanwhile is read again and kept rather
- * than undone, and the renewal is not lost to it either. A row deleted meanwhile stays deleted: `job` is returned as it was.
+ * than undone, and the renewal is not lost to it either; a later answer another check stored meanwhile is kept as it is.
+ * A row deleted meanwhile stays deleted: `job` is returned as it was.
  */
-export async function writeRefresh<T extends { id: string; updatedAt: string }>(kind: Extract<ItemKind, "footage" | "shoot">, job: T, apply: (current: T) => T): Promise<T> {
+export async function writeRefresh<T extends { id: string; updatedAt: string; checkedAt?: string }>(kind: RenamableKind, job: T, apply: (current: T) => T): Promise<T> {
   let current: T | null = job;
   for (let attempt = 0; attempt < 3 && current; attempt++) {
     const next = { ...apply(current), updatedAt: nextUpdatedAt(current.updatedAt) };
+    // Another check (another server, say) stored a later answer meanwhile: it stands, rather than this one undoing it.
+    if (current !== job && current.checkedAt !== job.checkedAt && (current.checkedAt ?? "") >= (next.checkedAt ?? "")) return current;
     if (await getStore().putIf(kind, next, "updatedAt", current.updatedAt)) return next;
     current = await getStore().get<T>(kind, job.id);
   }

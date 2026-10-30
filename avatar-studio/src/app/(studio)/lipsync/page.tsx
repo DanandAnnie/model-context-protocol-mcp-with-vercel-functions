@@ -1,12 +1,12 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { AudioLines, Download, Trash2, Upload } from "lucide-react";
+import { AudioLines, Download, Pencil, Trash2, Upload } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
-import { api, formatDate, formatSeconds, isRefusal } from "@/lib/client";
+import { ApiError, api, formatDate, formatSeconds, isRefusal } from "@/lib/client";
 import { clipBody as clipFrom } from "@/lib/clip-upload";
 import { VOICE_RESULT_LINK_MS, type AudioClip, type LipsyncJob, type LipsyncMode, type Video, type VoiceChange } from "@/lib/types";
 
@@ -202,6 +202,29 @@ export default function LipsyncPage() {
     }
   }
 
+  async function rename(l: Lipsync) {
+    const answer = window.prompt("Lip sync name", l.title);
+    const name = answer?.trim();
+    if (!name || name === l.title) return;
+    setErr(null);
+    setNote(null);
+    try {
+      const { lipsync: saved } = await api<{ lipsync: Lipsync }>(`/api/lipsyncs/${l.id}`, { method: "PATCH", body: JSON.stringify({ title: name }) });
+      setData((prev) => (prev ? { ...prev, lipsyncs: prev.lipsyncs.map((x) => (x.id === saved.id ? saved : x)) } : prev));
+      // A list check that left before the rename would answer with the old name; asking again retires it.
+      void refetch();
+      setNote(`Renamed the lip sync to “${saved.title}”.`);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        // Forgotten here, so the next check does not announce it as deleted elsewhere as well.
+        seen.current.delete(l.id);
+        setData((prev) => (prev ? { ...prev, lipsyncs: prev.lipsyncs.filter((x) => x.id !== l.id) } : prev));
+        setNote(`The lip sync “${l.title}” is no longer available.`);
+        focusAfterRender(() => headingRef.current);
+      } else setErr(e instanceof Error ? e.message : "The lip sync could not be renamed");
+    }
+  }
+
   async function remove(l: Lipsync) {
     if (!window.confirm(`Delete “${l.title}”? Making it again uses another job.`)) return;
     setErr(null);
@@ -392,10 +415,15 @@ export default function LipsyncPage() {
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       <StatusBadge status={l.status} />
-                      {canEdit !== false && (
-                        <button type="button" onClick={() => remove(l)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-rose-600" aria-label={`Delete ${l.title}`}>
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                      {canEdit === true && (
+                        <>
+                          <button type="button" onClick={() => void rename(l)} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-brand-700" aria-label={`Rename ${l.title}`} title="Rename">
+                            <Pencil className="h-4 w-4" aria-hidden />
+                          </button>
+                          <button type="button" onClick={() => remove(l)} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-rose-600" aria-label={`Delete ${l.title}`} title="Delete">
+                            <Trash2 className="h-4 w-4" aria-hidden />
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>

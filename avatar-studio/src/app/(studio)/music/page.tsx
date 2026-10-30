@@ -1,16 +1,16 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Download, Music, Plus, Search, Trash2, X } from "lucide-react";
+import { Download, Music, Plus, Search, Pencil, Trash2, X } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
-import { api, formatDate, formatSeconds, isRefusal } from "@/lib/client";
+import { ApiError, api, formatDate, formatSeconds, isRefusal } from "@/lib/client";
 import { MAX_MUSIC_EFFECTS, MAX_MUSIC_VIDEO_SEC, MUSIC_VOLUMES, type MusicJob, type MusicTrack, type MusicVolume, type Video } from "@/lib/types";
 
 /** A mix as the server lists it: never the renderer or its job id. */
-type Mix = Omit<MusicJob, "ownerId" | "provider" | "providerJobId">;
+type Mix = Omit<MusicJob, "ownerId" | "provider" | "providerJobId" | "askedTitle">;
 /** A fresh key for one start (a UUID where the browser has one, as it does over https and on localhost). */
 const newKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`);
 /** Mixed videos' links are renewed by the server once this old; a page left open asks again when it is looked at. */
@@ -288,6 +288,29 @@ export default function MusicPage() {
     }
   }
 
+  async function rename(m: Mix) {
+    const answer = window.prompt("Video name", m.title);
+    const name = answer?.trim();
+    if (!name || name === m.title) return;
+    setErr(null);
+    setNote(null);
+    try {
+      const { mix: saved } = await api<{ mix: Mix }>(`/api/music/${m.id}`, { method: "PATCH", body: JSON.stringify({ title: name }) });
+      setData((prev) => (prev ? { ...prev, mixes: prev.mixes.map((x) => (x.id === saved.id ? saved : x)) } : prev));
+      // A list check that left before the rename would answer with the old name; asking again retires it.
+      void refetch();
+      setNote(`Renamed the video with music to “${saved.title}”.`);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        // Forgotten here, so the next check does not announce it as deleted elsewhere as well.
+        seen.current.delete(m.id);
+        setData((prev) => (prev ? { ...prev, mixes: prev.mixes.filter((x) => x.id !== m.id) } : prev));
+        setNote(`The video with music “${m.title}” is no longer available.`);
+        focusAfterRender(() => headingRef.current);
+      } else setErr(e instanceof Error ? e.message : "The video with music could not be renamed");
+    }
+  }
+
   async function remove(m: Mix) {
     if (!window.confirm(`Delete “${m.title}”? Making it again renders it again.`)) return;
     setErr(null);
@@ -514,9 +537,14 @@ export default function MusicPage() {
                     <div className="flex shrink-0 items-center gap-2">
                       <StatusBadge status={m.status} />
                       {canEdit === true && (
-                        <button type="button" onClick={() => remove(m)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-rose-600" aria-label={`Delete ${mixName(m)}`}>
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        <>
+                          <button type="button" onClick={() => void rename(m)} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-brand-700" aria-label={`Rename ${mixName(m)}`} title="Rename">
+                            <Pencil className="h-4 w-4" aria-hidden />
+                          </button>
+                          <button type="button" onClick={() => remove(m)} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-rose-600" aria-label={`Delete ${mixName(m)}`} title="Delete">
+                            <Trash2 className="h-4 w-4" aria-hidden />
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>

@@ -329,6 +329,47 @@ describe("background music", () => {
     }
   });
 
+  it("can be renamed, keeping the name it was started with on the server, and a check landing meanwhile keeps the rename", async () => {
+    const { renameMusicJob } = await import("../services");
+    const saved = clipMs.CLIP_MS;
+    const store = getStore();
+    const putIf = store.putIf.bind(store);
+    try {
+      clipMs.CLIP_MS = 60_000;
+      const videoId = (await finished("u1")).id;
+      const job = await startMusic(request(videoId, { title: "Started as" }), "u1", { key: "rename-key-1" });
+      const renamed = await renameMusicJob(job.id, "Renamed once", "u1");
+      assert.equal(renamed.title, "Renamed once");
+      assert.equal("askedTitle" in renamed, false, "the name it was started with is server only");
+      assert.ok(renamed.updatedAt > job.updatedAt);
+      assert.equal((await startMusic(request(videoId, { title: "Started as" }), "u1", { key: "rename-key-1" })).id, job.id, "a retried start is still the same one, renamed");
+      await assert.rejects(startMusic(request(videoId, { title: "Renamed once" }), "u1", { key: "rename-key-1" }), ConflictError, "a retry is compared on the title it was started with");
+      const twice = await renameMusicJob(job.id, "Renamed twice", "u1");
+      assert.equal((await store.get<MusicJob>("music", job.id))!.askedTitle, "Started as");
+      assert.doesNotMatch(JSON.stringify(await exportOwnerData("u1")), /askedTitle|Started as/, "nor is it in the account export");
+      assert.deepEqual(await renameMusicJob(job.id, "Renamed twice", "u1"), twice, "the same name again changes nothing");
+      // Not another account's, nor an unknown or malformed id.
+      await assert.rejects(renameMusicJob(job.id, "Mine", "u2"), NotFoundError);
+      await assert.rejects(renameMusicJob("mm_missing", "Gone", "u1"), NotFoundError);
+      await assert.rejects(renameMusicJob("../x", "Gone", "u1"), NotFoundError);
+      // It finishes while being renamed: the rename lands while the renderer is asked, and both are kept.
+      clipMs.CLIP_MS = 0;
+      forgetMusicChecks();
+      store.putIf = async (kind, item, field, expected) => {
+        store.putIf = putIf;
+        await renameMusicJob(job.id, "Renamed mid-check", "u1");
+        return putIf(kind, item, field, expected);
+      };
+      const [done] = await listMusicJobs("u1");
+      assert.deepEqual([done.title, done.status], ["Renamed mid-check", "completed"]);
+      const stored = (await store.get<MusicJob>("music", job.id))!;
+      assert.deepEqual([stored.title, stored.status, !!stored.videoUrl], ["Renamed mid-check", "completed", true]);
+    } finally {
+      store.putIf = putIf;
+      clipMs.CLIP_MS = saved;
+    }
+  });
+
   it("is not offered by a renderer without it", async () => {
     const { config } = await import("../config");
     const saved = { avatar: config.avatarProvider, key: config.didApiKey };

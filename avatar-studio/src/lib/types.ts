@@ -540,6 +540,8 @@ export interface MusicJob {
   id: string;
   ownerId: string;
   title: string;
+  /** The title it was started with, kept once it is renamed, so a retried start is still known to be the same. Server only. */
+  askedTitle?: string;
   videoId: string;
   /** The catalog track, and the description it was found with (asked again for its link when the mix starts). */
   trackId: string;

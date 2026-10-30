@@ -9,7 +9,7 @@ import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import { MAX_MUSIC_EFFECTS, MAX_MUSIC_VIDEO_SEC, MUSIC_VOLUMES, type MusicEffect, type MusicJob, type MusicTrack, type MusicVolume, type Video } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
-import { owned, stripUndefined } from "./shared";
+import { owned, renameJob, stripUndefined, writeRefresh } from "./shared";
 import { getVideo } from "./videos";
 import { freshVideoUrl } from "./highlights";
 import { jobChecker } from "./job-checks";
@@ -51,13 +51,20 @@ export function musicAvailable(): boolean {
 }
 
 /** What the account sees of a mix: never the renderer or its job id, which stay on the server. */
-export type PublicMusicJob = Omit<MusicJob, "ownerId" | "provider" | "providerJobId">;
+export type PublicMusicJob = Omit<MusicJob, "ownerId" | "provider" | "providerJobId" | "askedTitle">;
 export function publicMusicJob(job: MusicJob): PublicMusicJob {
-  const { ownerId: _o, provider: _p, providerJobId: _j, ...rest } = job;
+  const { ownerId: _o, provider: _p, providerJobId: _j, askedTitle: _t, ...rest } = job;
   void _o;
   void _p;
   void _j;
+  void _t;
   return rest;
+}
+
+/** Renames one of the owner's videos with music: `{ title }` → it as the account sees it. */
+export async function renameMusicJob(id: string, title: string, ownerId: string = LOCAL_OWNER): Promise<PublicMusicJob> {
+  if (!musicIdSchema.safeParse(id).success) throw new NotFoundError("Video with music not found");
+  return publicMusicJob(await renameJob<MusicJob>("music", id, title, ownerId, "Video with music"));
 }
 
 /**
@@ -122,7 +129,7 @@ export async function startMusic(input: z.infer<typeof musicRequestSchema>, owne
   const existing = opts.key ? await getStore().get<MusicJob>("music", id) : null;
   if (existing && existing.ownerId === ownerId) {
     // A title given must be the one kept; one left out took the video's, which is not read again here.
-    const same = existing.videoId === input.videoId && existing.trackId === input.trackId && existing.volume === input.volume && existing.query === input.query && sameEffects(existing.effects ?? [], input.effects) && (!input.title || existing.title === input.title);
+    const same = existing.videoId === input.videoId && existing.trackId === input.trackId && existing.volume === input.volume && existing.query === input.query && sameEffects(existing.effects ?? [], input.effects) && (!input.title || (existing.askedTitle ?? existing.title) === input.title);
     if (!same) throw new ConflictError("This Idempotency-Key was already used for another video with music; send a new key");
     return existing;
   }
@@ -218,13 +225,14 @@ async function refreshMusic(job: MusicJob): Promise<MusicJob> {
     if (!provider.musicMixStatus) return job;
     const out = await provider.musicMixStatus(job.providerJobId);
     const now = nowIso();
-    const { videoUrl: _v, durationSec: _d, error: _e, ...kept } = job;
-    void _v;
-    void _d;
-    void _e;
-    const next: MusicJob = { ...kept, ...stripUndefined(out), checkedAt: now, updatedAt: out.status !== job.status ? now : job.updatedAt };
-    // Written only over the record that was read, so a delete meanwhile stays deleted.
-    return (await getStore().putIf("music", next, "updatedAt", job.updatedAt)) ? next : job;
+    // Built over the latest row (a rename may land while the renderer is asked), and written only over it.
+    return await writeRefresh<MusicJob>("music", job, (current) => {
+      const { videoUrl: _v, durationSec: _d, error: _e, ...kept } = current;
+      void _v;
+      void _d;
+      void _e;
+      return { ...kept, ...stripUndefined(out), checkedAt: now };
+    });
   } catch (err) {
     console.error(`music check failed for ${job.id}:`, err);
     return job;

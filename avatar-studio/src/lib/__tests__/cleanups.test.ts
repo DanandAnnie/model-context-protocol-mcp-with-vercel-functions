@@ -220,6 +220,83 @@ describe("cleaned recordings", () => {
     }
   });
 
+  it("can be renamed, and a check landing meanwhile keeps the rename", async () => {
+    const { renameCleanup } = await import("../services");
+    const saved = clipMs.CLIP_MS;
+    const store = getStore();
+    const putIf = store.putIf.bind(store);
+    try {
+      clipMs.CLIP_MS = 60_000;
+      const job = await startCleanup(cleanupRequestSchema.parse({ sourceUrl: PUBLIC, title: "Started as" }), "u1", { key: "rename-key-1" });
+      const renamed = await renameCleanup(job.id, "Renamed once", "u1");
+      assert.equal(renamed.title, "Renamed once");
+      assert.equal("askedTitle" in renamed, false, "the name it was started with is server only");
+      assert.ok(renamed.updatedAt > job.updatedAt);
+      assert.equal((await startCleanup(cleanupRequestSchema.parse({ sourceUrl: PUBLIC, title: "Started as" }), "u1", { key: "rename-key-1" })).id, job.id, "a retried start is still the same one, renamed");
+      const twice = await renameCleanup(job.id, "Renamed twice", "u1");
+      assert.equal("askedTitle" in (await store.get<CleanupJob>("cleanup", job.id))!, false, "a cleanup's retry is not compared on its title, so the first one is not kept");
+      assert.doesNotMatch(JSON.stringify(await exportOwnerData("u1")), /askedTitle|Started as/, "nor is it in the account export");
+      assert.deepEqual(await renameCleanup(job.id, "Renamed twice", "u1"), twice, "the same name again changes nothing");
+      // Not another account's, nor an unknown or malformed id.
+      await assert.rejects(renameCleanup(job.id, "Mine", "u2"), NotFoundError);
+      await assert.rejects(renameCleanup("cu_missing", "Gone", "u1"), NotFoundError);
+      await assert.rejects(renameCleanup("../x", "Gone", "u1"), NotFoundError);
+      // It finishes while being renamed: the rename lands while the renderer is asked, and both are kept.
+      clipMs.CLIP_MS = 0;
+      forgetCleanupChecks();
+      store.putIf = async (kind, item, field, expected) => {
+        store.putIf = putIf;
+        await renameCleanup(job.id, "Renamed mid-check", "u1");
+        return putIf(kind, item, field, expected);
+      };
+      const [done] = await listCleanups("u1");
+      assert.deepEqual([done.title, done.status], ["Renamed mid-check", "completed"]);
+      const stored = (await store.get<CleanupJob>("cleanup", job.id))!;
+      assert.deepEqual([stored.title, stored.status, !!stored.videoUrl], ["Renamed mid-check", "completed", true]);
+    } finally {
+      store.putIf = putIf;
+      clipMs.CLIP_MS = saved;
+    }
+  });
+
+  it("keeps the later of two checks that land together, whichever writes first", async () => {
+    const saved = clipMs.CLIP_MS;
+    const store = getStore();
+    const putIf = store.putIf.bind(store);
+    try {
+      // This check hears "still cleaning", but a later one (on another server) stored the finished cleanup first.
+      clipMs.CLIP_MS = 60_000;
+      const a = await startCleanup(cleanupRequestSchema.parse({ sourceUrl: PUBLIC }), "u1");
+      const later = (current: CleanupJob): CleanupJob => ({ ...current, status: "completed", videoUrl: "https://93.184.216.34/clean.mp4", checkedAt: new Date(Date.now() + 60_000).toISOString(), updatedAt: new Date(Date.parse(current.updatedAt) + 5).toISOString() });
+      forgetCleanupChecks();
+      store.putIf = async (kind, item, field, expected) => {
+        store.putIf = putIf;
+        await store.put("cleanup", later((await store.get<CleanupJob>("cleanup", a.id))!));
+        return putIf(kind, item, field, expected);
+      };
+      const [kept] = await listCleanups("u1");
+      assert.deepEqual([kept.status, kept.videoUrl], ["completed", "https://93.184.216.34/clean.mp4"], "the finished answer is not undone");
+      assert.equal((await store.get<CleanupJob>("cleanup", a.id))!.status, "completed");
+      // This check hears "finished", and an earlier one stored "still cleaning" first: the finished answer is written.
+      await deleteCleanup(a.id, "u1");
+      const b = await startCleanup(cleanupRequestSchema.parse({ sourceUrl: PUBLIC }), "u1");
+      clipMs.CLIP_MS = 0;
+      forgetCleanupChecks();
+      store.putIf = async (kind, item, field, expected) => {
+        store.putIf = putIf;
+        const current = (await store.get<CleanupJob>("cleanup", b.id))!;
+        await store.put("cleanup", { ...current, progress: 40, checkedAt: new Date(Date.now() - 60_000).toISOString(), updatedAt: new Date(Date.parse(current.updatedAt) + 5).toISOString() });
+        return putIf(kind, item, field, expected);
+      };
+      const [done] = await listCleanups("u1");
+      assert.equal(done.status, "completed");
+      assert.equal((await store.get<CleanupJob>("cleanup", b.id))!.status, "completed");
+    } finally {
+      store.putIf = putIf;
+      clipMs.CLIP_MS = saved;
+    }
+  });
+
   it("is not offered by a renderer without it", async () => {
     const { config } = await import("../config");
     const saved = { avatar: config.avatarProvider, key: config.didApiKey };

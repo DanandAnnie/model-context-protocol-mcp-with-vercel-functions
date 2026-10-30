@@ -314,6 +314,45 @@ describe("lip syncs", () => {
     }
   });
 
+  it("can be renamed, and a check landing meanwhile keeps the rename", async () => {
+    const { renameLipsync } = await import("../services");
+    const saved = clipMs.CLIP_MS;
+    const store = getStore();
+    const putIf = store.putIf.bind(store);
+    try {
+      clipMs.CLIP_MS = 60_000;
+      const job = await startLipsync(lipsyncRequestSchema.parse({ sourceUrl: VIDEO, audioUrl: AUDIO, title: "Started as" }), "u1", { key: "rename-key-1" });
+      const renamed = await renameLipsync(job.id, "Renamed once", "u1");
+      assert.equal(renamed.title, "Renamed once");
+      assert.equal("askedTitle" in renamed, false, "the name it was started with is server only");
+      assert.ok(renamed.updatedAt > job.updatedAt);
+      assert.equal((await startLipsync(lipsyncRequestSchema.parse({ sourceUrl: VIDEO, audioUrl: AUDIO, title: "Started as" }), "u1", { key: "rename-key-1" })).id, job.id, "a retried start is still the same one, renamed");
+      const twice = await renameLipsync(job.id, "Renamed twice", "u1");
+      assert.equal("askedTitle" in (await store.get<LipsyncJob>("lipsync", job.id))!, false, "a lip sync's retry is not compared on its title, so the first one is not kept");
+      assert.doesNotMatch(JSON.stringify(await exportOwnerData("u1")), /askedTitle|Started as/, "nor is it in the account export");
+      assert.deepEqual(await renameLipsync(job.id, "Renamed twice", "u1"), twice, "the same name again changes nothing");
+      // Not another account's, nor an unknown or malformed id.
+      await assert.rejects(renameLipsync(job.id, "Mine", "u2"), NotFoundError);
+      await assert.rejects(renameLipsync("ls_missing", "Gone", "u1"), NotFoundError);
+      await assert.rejects(renameLipsync("../x", "Gone", "u1"), NotFoundError);
+      // It finishes while being renamed: the rename lands while the renderer is asked, and both are kept.
+      clipMs.CLIP_MS = 0;
+      forgetLipsyncChecks();
+      store.putIf = async (kind, item, field, expected) => {
+        store.putIf = putIf;
+        await renameLipsync(job.id, "Renamed mid-check", "u1");
+        return putIf(kind, item, field, expected);
+      };
+      const [done] = await listLipsyncs("u1");
+      assert.deepEqual([done.title, done.status], ["Renamed mid-check", "completed"]);
+      const stored = (await store.get<LipsyncJob>("lipsync", job.id))!;
+      assert.deepEqual([stored.title, stored.status, !!stored.videoUrl], ["Renamed mid-check", "completed", true]);
+    } finally {
+      store.putIf = putIf;
+      clipMs.CLIP_MS = saved;
+    }
+  });
+
   it("is not offered by a renderer without it", async () => {
     const { config } = await import("../config");
     const saved = { avatar: config.avatarProvider, key: config.didApiKey };

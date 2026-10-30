@@ -10,7 +10,7 @@ import type { LipsyncInput } from "../providers/types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { assertPublicHttpUrl } from "../safe-url";
-import { owned, stripUndefined } from "./shared";
+import { owned, renameJob, stripUndefined, writeRefresh } from "./shared";
 import { getVideo, prepareClipOnce } from "./videos";
 import { findClip, getClip } from "./clips";
 import { freshVideoUrl } from "./highlights";
@@ -59,6 +59,12 @@ export function publicLipsync(job: LipsyncJob): PublicLipsync {
   void _p;
   void _j;
   return rest;
+}
+
+/** Renames one of the owner's lip syncs: `{ title }` → it as the account sees it. */
+export async function renameLipsync(id: string, title: string, ownerId: string = LOCAL_OWNER): Promise<PublicLipsync> {
+  if (!lipsyncIdSchema.safeParse(id).success) throw new NotFoundError("Lip sync not found");
+  return publicLipsync(await renameJob<LipsyncJob>("lipsync", id, title, ownerId, "Lip sync"));
 }
 
 const checks = jobChecker<LipsyncJob>((job) => refreshLipsync(job));
@@ -212,13 +218,14 @@ async function refreshLipsync(job: LipsyncJob): Promise<LipsyncJob> {
     if (!provider.lipsyncStatus) return job;
     const out = await provider.lipsyncStatus(job.providerJobId);
     const now = nowIso();
-    const { videoUrl: _v, durationSec: _d, error: _e, ...kept } = job;
-    void _v;
-    void _d;
-    void _e;
-    const next: LipsyncJob = { ...kept, ...stripUndefined(out), checkedAt: now, updatedAt: out.status !== job.status ? now : job.updatedAt };
-    // Written only over the record that was read, so a delete meanwhile stays deleted.
-    return (await getStore().putIf("lipsync", next, "updatedAt", job.updatedAt)) ? next : job;
+    // Built over the latest row (a rename may land while the renderer is asked), and written only over it.
+    return await writeRefresh<LipsyncJob>("lipsync", job, (current) => {
+      const { videoUrl: _v, durationSec: _d, error: _e, ...kept } = current;
+      void _v;
+      void _d;
+      void _e;
+      return { ...kept, ...stripUndefined(out), checkedAt: now };
+    });
   } catch (err) {
     console.error(`lip sync check failed for ${job.id}:`, err);
     return job;

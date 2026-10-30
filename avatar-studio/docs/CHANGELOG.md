@@ -528,3 +528,12 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - A bracket-only line that was silently dropped. It is now pointed out by line.
     - A whitespace-only language that was a `400`. It now means every language.
   - Not changed: a multilingual voice with no language of its own does not fall back to the video's accent; it gets the rules for every language, as before.
+- Captions for text spoken in a voice, timed by HeyGen (`b8f8efa`): HeyGen Voice's text to speech can say when each word was said (`with_timestamps`, `original_words` and `original_characters`, at no extra cost). The studio now asks for that on every spoken text and keeps the timings in a `voicewords` row of their own, so the polled listing never loads them. A text with timings is listed as `timed: true`, and the Voice changer page offers its captions as SRT or WebVTT (`GET /api/voice-changer/changes/:id/captions`, viewers too; a `404` for anything without timings or another account's). Caption lines follow the words as said: a new line after a sentence, after a silence, when the line is full, or after 6 seconds, each shown from its first word to its last and never overlapping the next. Word timings are deleted with the text and the account and left out of the export. Unit tests cover parsing, line building, storage, deletion, and an older database that will not take the new row; the voice-changer e2e test downloads both formats.
+  - An independent review found these, all fixed before the commit:
+    - Characters of a script written without spaces were grouped only at blanks. A Chinese text became one 200-character line and the rest was lost. Each such character is now a word of its own.
+    - Cues could overlap when HeyGen's word times overlap. They no longer do.
+    - A space was added after East Asian punctuation and between characters outside the basic plane. The existing caption join is now used, and it reads whole characters.
+    - A single word wider than a line, such as a link, was never cut. It is now cut into pieces that share its time.
+    - Every listing loaded all word timings. They now live in their own row.
+    - An e2e check passed without the card it meant to check. It now names that card.
+  - Not changed: HeyGen's docs could not be reached from inside the review to confirm `with_timestamps` for every voice type. The API reference and changelog read beforehand document it for `/v3/models/audio/tts` and exclude no model or voice type.

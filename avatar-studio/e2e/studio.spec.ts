@@ -897,6 +897,50 @@ test("a scene's background is used on every scene in one change, which Undo take
   expect(scenes.map((sc) => !!sc.hidePresenter)).toEqual([false, true, true]);
 });
 
+test("Add scene puts the new scene right after the selected one, on its background", async ({ page }) => {
+  await page.getByRole("textbox", { name: "Script", exact: true }).fill("First.");
+  await page.getByRole("button", { name: "Background" }).click();
+  // Whatever colour the scenes start on (a brand kit's, say), scene 1 is given another one below.
+  const startColor = await page.getByLabel("Custom color").inputValue();
+  const marked = startColor === "#0f172a" ? "#be123c" : "#0f172a";
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
+  await page.getByRole("textbox", { name: "Scene 2 script" }).fill("Second.");
+  // With the last scene selected the new one goes at the end, as before, without a note.
+  await expect(page.getByRole("button", { name: "Add scene", exact: true })).not.toHaveAttribute("title");
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
+  await expect(page.getByTestId("import-note")).toHaveCount(0);
+  await page.getByRole("textbox", { name: "Scene 3 script" }).fill("Third.");
+  // From scene 1, on a colour of its own, the new scene comes second, on that colour.
+  await page.getByRole("button", { name: /^Scene 1,/ }).click();
+  await page.getByLabel(`Background ${marked}`).click();
+  await expect(page.getByRole("button", { name: "Add scene", exact: true })).toHaveAttribute("title", "Add a scene after scene 1");
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
+  await expect(page.getByTestId("import-note")).toHaveText("Added scene 2 after scene 1; scenes 2–3 are now 3–4.");
+  await expect(page.getByRole("textbox", { name: "Scene 2 script" })).toHaveValue("");
+  await expect(page.getByLabel("Custom color")).toHaveValue(marked);
+  await page.getByRole("button", { name: /^Scene 3,/ }).click();
+  await expect(page.getByRole("textbox", { name: "Scene 3 script" })).toHaveValue("Second.");
+  await expect(page.getByLabel("Custom color")).toHaveValue(startColor);
+  await page.getByRole("button", { name: /^Scene 4,/ }).click();
+  await expect(page.getByRole("textbox", { name: "Scene 4 script" })).toHaveValue("Third.");
+  // Undo takes the inserted scene out again; scene 1 keeps the colour it had before the add.
+  await page.getByRole("button", { name: "Undo add scene 2" }).click();
+  await expect(page.getByRole("button", { name: /^Scene 4,/ })).toHaveCount(0);
+  await page.getByRole("button", { name: /^Scene 1,/ }).click();
+  await expect(page.getByLabel("Custom color")).toHaveValue(marked);
+  await page.getByRole("button", { name: /^Scene 2,/ }).click();
+  await expect(page.getByRole("textbox", { name: "Scene 2 script" })).toHaveValue("Second.");
+  // From the second of three, one scene moves along; an add at the end then clears that note.
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
+  await expect(page.getByTestId("import-note")).toHaveText("Added scene 3 after scene 2; scene 3 is now scene 4.");
+  await expect(page.getByRole("textbox", { name: "Scene 3 script" })).toHaveValue("");
+  await page.getByRole("button", { name: /^Scene 4,/ }).click();
+  await expect(page.getByRole("textbox", { name: "Scene 4 script" })).toHaveValue("Third.");
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
+  await expect(page.getByTestId("import-note")).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Scene 5 script" })).toHaveValue("");
+});
+
 test("photo avatar motion is set in the editor, kept with the video and its copy", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Moving portrait");
   await page.locator("textarea").fill("Welcome to the open house.");

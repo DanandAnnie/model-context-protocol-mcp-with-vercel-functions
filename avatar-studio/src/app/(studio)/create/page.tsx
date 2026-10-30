@@ -378,9 +378,16 @@ function CreateInner() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, []);
+  /** Adds a blank scene right after the selected one, on its background (at the end when the last scene is selected). */
   function addScene() {
     if (scenes.length >= MAX_SCENES) return;
-    changeScenes(`add scene ${scenes.length + 1}`, [...scenes, newScene("", scenes[scenes.length - 1].background)], { active: scenes.length });
+    const at = scenes.indexOf(active) + 1;
+    changeScenes(`add scene ${at + 1}`, [...scenes.slice(0, at), newScene("", active.background), ...scenes.slice(at)], { active: at });
+    // An earlier note would describe some other change, so an add at the end clears it.
+    const n = scenes.length;
+    setImportNote(at === n ? null : `Added scene ${at + 1} after scene ${at}; ${at + 1 === n ? `scene ${n} is now scene ${n + 1}` : `scenes ${at + 1}–${n} are now ${at + 2}–${n + 1}`}.`);
+    // The last scene a video holds disables the button; the focus goes to the new scene's tab rather than the page.
+    if (n + 1 >= MAX_SCENES) requestAnimationFrame(() => sceneTabs.current[at]?.focus());
   }
   function removeScene(idx: number) {
     if (scenes.length <= 1) return;
@@ -1462,6 +1469,7 @@ function CreateInner() {
                 type="button"
                 onClick={addScene}
                 disabled={scenes.length >= MAX_SCENES}
+                title={scenes.length >= MAX_SCENES ? `A video holds up to ${MAX_SCENES} scenes` : activeIdx < scenes.length - 1 ? `Add a scene after scene ${activeIdx + 1}` : undefined}
                 className="inline-flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:border-brand-400 hover:text-brand-700 disabled:opacity-50"
               >
                 <Plus className="h-3.5 w-3.5" /> Add scene

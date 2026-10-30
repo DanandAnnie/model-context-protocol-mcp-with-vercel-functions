@@ -1115,6 +1115,54 @@ test("Listen to all scenes plays each scene in turn in its voice and pace, holds
   expect(await said()).toHaveLength(5);
 });
 
+test("← and →, Home, and End move between scene tabs, the focus going with the selection", async ({ page }) => {
+  await page.getByRole("textbox", { name: "Script", exact: true }).fill("First.");
+  for (const n of [2, 3, 4]) {
+    await page.getByRole("button", { name: "Add scene", exact: true }).click();
+    await page.getByRole("textbox", { name: `Scene ${n} script` }).fill(`Scene ${n} words.`);
+  }
+  const tab = (n: number) => page.getByRole("button", { name: new RegExp(`^Scene ${n},`) });
+  const at = async (n: number) => {
+    await expect(tab(n)).toBeFocused();
+    await expect(tab(n)).toHaveAttribute("aria-current", "true");
+  };
+  await expect(tab(1)).toHaveAttribute("aria-keyshortcuts", "ArrowLeft ArrowRight Home End");
+  await tab(1).click();
+  await page.keyboard.press("ArrowRight");
+  await at(2);
+  await expect(page.getByRole("textbox", { name: "Scene 2 script" })).toHaveValue("Scene 2 words.");
+  await page.keyboard.press("ArrowLeft");
+  await at(1);
+  // End and Home jump to the ends, not one step.
+  await page.keyboard.press("End");
+  await at(4);
+  await page.keyboard.press("ArrowLeft");
+  await at(3);
+  await page.keyboard.press("Home");
+  await at(1);
+  // Past either end there is nowhere to go; the selection stays.
+  await page.keyboard.press("ArrowLeft");
+  await at(1);
+  await page.keyboard.press("End");
+  await page.keyboard.press("ArrowRight");
+  await at(4);
+  // From a tab that has the focus but is not the selected scene, Home still goes to the first scene.
+  await tab(1).focus();
+  await expect(tab(4)).toHaveAttribute("aria-current", "true");
+  await page.keyboard.press("Home");
+  await at(1);
+  // With a modifier the keys are left alone (Shift+arrow belongs to the browser and assistive tech).
+  await page.keyboard.press("Shift+ArrowRight");
+  await at(1);
+  // The shortcuts list names them.
+  await page.keyboard.press("Control+/");
+  const dialog = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+  await expect(dialog).toContainText("Go to the scene before or after (on a scene's number in the Scenes row)");
+  await expect(dialog).toContainText("Go to the first or last scene (on a scene's number in the Scenes row)");
+  await page.keyboard.press("Escape");
+  await expect(tab(1)).toBeFocused();
+});
+
 test("photo avatar motion is set in the editor, kept with the video and its copy", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Moving portrait");
   await page.locator("textarea").fill("Welcome to the open house.");

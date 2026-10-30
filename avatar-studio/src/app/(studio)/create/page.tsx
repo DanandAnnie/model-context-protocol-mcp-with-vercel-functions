@@ -1513,12 +1513,24 @@ function CreateInner() {
                   key={i}
                   type="button"
                   onClick={() => setActiveIdx(i)}
+                  // ← and → go to the scene before or after, Home and End to the first and last, the focus going with them
+                  // once the scene is selected (so the tab it lands on already says it is the current one).
+                  onKeyDown={(e) => {
+                    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+                    const to = e.key === "ArrowLeft" ? i - 1 : e.key === "ArrowRight" ? i + 1 : e.key === "Home" ? 0 : e.key === "End" ? scenes.length - 1 : null;
+                    if (to === null) return;
+                    e.preventDefault();
+                    if (to < 0 || to >= scenes.length) return;
+                    setActiveIdx(to);
+                    requestAnimationFrame(() => sceneTabs.current[to]?.focus());
+                  }}
+                  aria-keyshortcuts={scenes.length > 1 ? "ArrowLeft ArrowRight Home End" : undefined}
                   aria-label={`Scene ${i + 1}${sc.script.trim() ? `, about ${formatSeconds(Math.max(1, sceneSeconds(sc)))}` : ", empty"}`}
                   aria-current={i === activeIdx ? "true" : undefined}
                   ref={(el) => {
                     sceneTabs.current[i] = el;
                   }}
-                  title={scenes.length > 1 && canEdit !== false ? "Drag onto another scene to move it there, or select it and use Move scene left or right" : undefined}
+                  title={scenes.length > 1 ? `${canEdit !== false ? "Drag onto another scene to move it there, or select it and use Move scene left or right. " : ""}← and → go to the scene before or after, Home and End to the first and last` : undefined}
                   draggable={scenes.length > 1 && canEdit !== false && !slidesProgress}
                   onDragStart={(e) => {
                     e.dataTransfer.effectAllowed = "move";

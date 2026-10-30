@@ -38,6 +38,11 @@ describe("keyboard shortcuts", () => {
     assert.deepEqual(mac.find((s) => s.does === "Redo it")!.keys, [["⌘", "⇧", "Z"]]);
     assert.deepEqual(pc.find((s) => s.does === "Redo it")!.keys, [["Ctrl", "Shift", "Z"], ["Ctrl", "Y"]]);
     // Quick find's first and last result take Ctrl on a Mac too, as its handler does.
-    assert.deepEqual(mac.find((s) => s.does.startsWith("Go to the first"))!.keys, [["Ctrl", "Home"], ["Ctrl", "End"]]);
+    assert.deepEqual(mac.find((s) => s.does === "Go to the first or last result")!.keys, [["Ctrl", "Home"], ["Ctrl", "End"]]);
+    // The scene row's keys are the same on every computer.
+    for (const list of [mac, pc]) {
+      assert.deepEqual(list.find((s) => s.does.startsWith("Go to the scene before or after"))!.keys, [["←"], ["→"]]);
+      assert.deepEqual(list.find((s) => s.does.startsWith("Go to the first or last scene"))!.keys, [["Home"], ["End"]]);
+    }
   });
 });

@@ -30,6 +30,8 @@ export function shortcutGroups(apple: boolean): Array<{ title: string; shortcuts
       title: "In the video editor",
       shortcuts: [
         { keys: [[mod, "Enter"]], does: "Generate the video, once it is ready to" },
+        { keys: [["←"], ["→"]], does: "Go to the scene before or after (on a scene's number in the Scenes row)" },
+        { keys: [["Home"], ["End"]], does: "Go to the first or last scene (on a scene's number in the Scenes row)" },
         { keys: [[mod, "Z"]], does: "Undo a scene change (outside a text box, whose own undo takes back typing)" },
         { keys: apple ? [[mod, shift, "Z"]] : [[mod, shift, "Z"], [mod, "Y"]], does: "Redo it" },
       ],

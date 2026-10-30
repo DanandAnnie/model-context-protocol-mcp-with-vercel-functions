@@ -10,7 +10,7 @@ import { getAvatarProvider, getAvatarProviderByName } from "../providers";
 import { MAX_CLIP_SECONDS, VOICE_RESULT_LINK_MS, type AudioClip, type AudioClipType, type InstantVoice, type PublicVoice, type SpokenWord, type VoiceChange, type VoiceChangeWords } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, LimitError, NotFoundError, UpstreamError, ValidationError } from "../errors";
-import { owned, stripUndefined } from "./shared";
+import { nextUpdatedAt, owned, renameJob, stripUndefined, writeRefresh } from "./shared";
 import { MAX_CLIP_BYTES, addClipTranscript, findClip, getClip, keepClip, looksMp3, wavSeconds } from "./clips";
 import { ResponseTooLargeError, safeFetch, type FetchLike } from "../safe-fetch";
 import { UnsafeUrlError } from "../safe-url";
@@ -54,6 +54,9 @@ export const instantVoiceSchema = z.object({
   /** One of the account's uploaded pictures, of the speaker's setting, whose ambience the voice takes on. */
   settingPictureId: z.string().regex(/^bd_[A-Za-z0-9_-]{1,64}$/, "Choose one of your pictures for the setting").optional(),
 });
+
+/** A new name for an instant voice, held to the same rule as the name it was made with. */
+export const instantVoiceRenameSchema = instantVoiceSchema.pick({ name: true });
 
 export const voiceChangeSchema = z.object({
   voiceId: z.string({ error: "Choose one of your instant voices" }).regex(/^iv_[A-Za-z0-9_-]{1,64}$/, "Choose one of your instant voices"),
@@ -123,22 +126,50 @@ export function voiceSpeechAvailable(): boolean {
 }
 
 /** What the account sees: never the renderer, its ids, or the upload sent to it. */
-export type PublicInstantVoice = Omit<InstantVoice, "ownerId" | "provider" | "providerVoiceId">;
-export type PublicVoiceChange = Omit<VoiceChange, "ownerId" | "provider" | "providerVoiceId" | "providerAudio">;
+export type PublicInstantVoice = Omit<InstantVoice, "ownerId" | "provider" | "providerVoiceId" | "askedName">;
+export type PublicVoiceChange = Omit<VoiceChange, "ownerId" | "provider" | "providerVoiceId" | "providerAudio" | "askedTitle">;
 export function publicInstantVoice(v: InstantVoice): PublicInstantVoice {
-  const { ownerId: _o, provider: _p, providerVoiceId: _v, ...rest } = v;
+  const { ownerId: _o, provider: _p, providerVoiceId: _v, askedName: _n, ...rest } = v;
   void _o;
   void _p;
   void _v;
+  void _n;
   return rest;
 }
 export function publicVoiceChange(c: VoiceChange): PublicVoiceChange {
-  const { ownerId: _o, provider: _p, providerVoiceId: _v, providerAudio: _a, ...rest } = c;
+  const { ownerId: _o, provider: _p, providerVoiceId: _v, providerAudio: _a, askedTitle: _t, ...rest } = c;
   void _o;
   void _p;
   void _v;
   void _a;
+  void _t;
   return rest;
+}
+
+/**
+ * Renames one of the account's instant voices, here only (the renderer's copy keeps the name it was made with). Two
+ * voices of one name cannot be told apart in the pickers, so a name another voice has is refused. The name it was made
+ * with is kept (server only) for a retried start with the same key.
+ */
+export async function renameInstantVoice(id: string, name: string, ownerId: string = LOCAL_OWNER): Promise<PublicInstantVoice> {
+  if (!instantVoiceIdSchema.safeParse(id).success) throw new NotFoundError("Instant voice not found");
+  let current = owned(await getStore().get<InstantVoice>("instantvoice", id), ownerId, "Instant voice");
+  for (let attempt = 0; attempt < 5; attempt++) {
+    if (current.name === name) return publicInstantVoice(current);
+    const lower = name.toLowerCase();
+    const mine = await getStore().list<InstantVoice>("instantvoice", ownerId);
+    if (mine.some((v) => v.id !== id && v.status !== "failed" && v.name.trim().toLowerCase() === lower)) throw new ConflictError(`You already have a voice named "${name}"; pick another name`);
+    const next: InstantVoice = { ...current, name, askedName: current.askedName ?? current.name, updatedAt: nextUpdatedAt(current.updatedAt) };
+    if (await getStore().putIf("instantvoice", next, "updatedAt", current.updatedAt)) return publicInstantVoice(next);
+    current = owned(await getStore().get<InstantVoice>("instantvoice", id), ownerId, "Instant voice");
+  }
+  throw new ConflictError("The voice kept changing while it was being renamed; try again");
+}
+
+/** Renames one of the account's recordings spoken in a voice: `{ title }` → it as the account sees it. */
+export async function renameVoiceChange(id: string, title: string, ownerId: string = LOCAL_OWNER): Promise<PublicVoiceChange> {
+  if (!voiceChangeIdSchema.safeParse(id).success) throw new NotFoundError("Recording not found");
+  return publicVoiceChange(await renameJob<VoiceChange>("voicechange", id, title, ownerId, "Recording"));
 }
 
 /** The row holding when each word of a spoken text was said. */
@@ -223,10 +254,13 @@ async function keepAsClip(change: VoiceChange, ownerId: string, fetchImpl?: Fetc
   if (seconds > MAX_CLIP_SECONDS) throw new ValidationError(`“${change.title}” is longer than ${MAX_CLIP_SECONDS} seconds, the most a clip holds`);
   // Spoken text keeps its words, so a scene lip-syncing to the clip starts with them as its script (and its captions).
   const clip = await keepClip({ name: change.title.slice(0, 80), mimeType, bytes, seconds, transcript: change.text }, ownerId);
-  // Remembered without touching `updatedAt`, which dates the renderer's link; a recording changed or deleted meanwhile keeps its own row.
-  const current = await getStore().get<VoiceChange>("voicechange", change.id);
-  if (current && !(await getStore().putIf("voicechange", { ...current, savedClipId: clip.id }, "updatedAt", current.updatedAt))) {
-    console.error(`voice change ${change.id}: changed while kept as clip ${clip.id}; the clip is not remembered on it`);
+  // Remembered on the latest row (read again when a rename lands meanwhile), moving its time on so a rename that read
+  // the row before this write misses and reads it again rather than dropping the clip (a finished recording's link is
+  // dated by `checkedAt`); a recording deleted meanwhile stays deleted.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const current = await getStore().get<VoiceChange>("voicechange", change.id);
+    if (!current || (await getStore().putIf("voicechange", { ...current, savedClipId: clip.id, updatedAt: nextUpdatedAt(current.updatedAt) }, "updatedAt", current.updatedAt))) break;
+    if (attempt === 2) console.error(`voice change ${change.id}: kept changing while kept as clip ${clip.id}; the clip is not remembered on it`);
   }
   return { clip, existing: false };
 }
@@ -316,7 +350,7 @@ export async function createInstantVoice(input: z.infer<typeof instantVoiceSchem
   const id = opts.key ? keyedId("iv", ownerId, opts.key) : newId("iv");
   const existing = opts.key ? await getStore().get<InstantVoice>("instantvoice", id) : null;
   if (existing && existing.ownerId === ownerId) {
-    if (existing.clipId !== input.clipId || existing.name !== input.name || existing.settingPictureId !== input.settingPictureId) throw new ConflictError("This Idempotency-Key was already used for another voice; send a new key");
+    if (existing.clipId !== input.clipId || (existing.askedName ?? existing.name) !== input.name || existing.settingPictureId !== input.settingPictureId) throw new ConflictError("This Idempotency-Key was already used for another voice; send a new key");
     return existing;
   }
   const provider = getAvatarProvider();
@@ -371,7 +405,9 @@ export async function instantVoicePreview(id: string, ownerId: string = LOCAL_OW
   const out = await provider.instantVoicePreview(voice.providerVoiceId);
   if (out.gone) {
     // It will not come back: marked failed, with why, so it is no longer offered for a recording or text.
-    await getStore().putIf("instantvoice", { ...voice, status: "failed", error: out.gone, updatedAt: nowIso() }, "updatedAt", voice.updatedAt);
+    // Written over the latest row, so a rename landing meanwhile neither stops it nor is undone by it.
+    const checkedAt = nowIso();
+    await writeRefresh<InstantVoice>("instantvoice", voice, (current) => ({ ...current, status: "failed", error: out.gone, checkedAt }));
     throw new ValidationError(`The voice "${voice.name}" can no longer be used: ${out.gone}`);
   }
   if (!out.url) throw new ValidationError(`There is no preview of "${voice.name}" yet; try again in a moment`);
@@ -394,10 +430,12 @@ async function refreshInstantVoice(voice: InstantVoice): Promise<InstantVoice> {
     if (!provider.instantVoiceStatus) return voice;
     const out = await provider.instantVoiceStatus(voice.providerVoiceId);
     const now = nowIso();
-    const { error: _e, ...kept } = voice;
-    void _e;
-    const next: InstantVoice = { ...kept, ...stripUndefined(out), checkedAt: now, updatedAt: out.status !== voice.status ? now : voice.updatedAt };
-    return (await getStore().putIf("instantvoice", next, "updatedAt", voice.updatedAt)) ? next : voice;
+    // Built over the latest row (a rename may land while the renderer is asked), and written only over it.
+    return await writeRefresh<InstantVoice>("instantvoice", voice, (current) => {
+      const { error: _e, ...kept } = current;
+      void _e;
+      return { ...kept, ...stripUndefined(out), checkedAt: now };
+    });
   } catch (err) {
     console.error(`instant voice check failed for ${voice.id}:`, err);
     return voice;
@@ -424,7 +462,7 @@ export async function startVoiceChange(input: z.infer<typeof voiceChangeSchema>,
   const id = opts.key ? keyedId("vc", ownerId, opts.key) : newId("vc");
   const existing = opts.key ? await getStore().get<VoiceChange>("voicechange", id) : null;
   if (existing && existing.ownerId === ownerId) {
-    const same = existing.voiceId === input.voiceId && existing.clipId === input.clipId && !!existing.removeNoise === input.removeNoise && (!input.title || existing.title === input.title);
+    const same = existing.voiceId === input.voiceId && existing.clipId === input.clipId && !!existing.removeNoise === input.removeNoise && (!input.title || (existing.askedTitle ?? existing.title) === input.title);
     if (!same) throw new ConflictError("This Idempotency-Key was already used for another recording; send a new key");
     return existing;
   }
@@ -457,8 +495,9 @@ export async function startVoiceChange(input: z.infer<typeof voiceChangeSchema>,
     const waitMs = Math.max(MIN_WAIT_MS, START_DEADLINE_MS - (Date.now() - arrived));
     const out = await provider.changeVoice({ voiceId: voice.providerVoiceId, assetId, removeNoise: input.removeNoise, key: id, waitMs });
     if (out.status === "processing") return change;
-    const done: VoiceChange = { ...change, status: "completed", audioUrl: out.audioUrl, durationSec: out.durationSec || clip.durationSec, checkedAt: nowIso(), updatedAt: nowIso() };
-    return (await getStore().putIf("voicechange", done, "updatedAt", change.updatedAt)) ? done : change;
+    // Written over the latest row: a rename landing while the renderer speaks is kept, and a delete stays a delete.
+    const checkedAt = nowIso();
+    return await writeRefresh<VoiceChange>("voicechange", change, (current) => ({ ...current, status: "completed", audioUrl: out.audioUrl, durationSec: out.durationSec || clip.durationSec, checkedAt }));
   } catch (err) {
     // Refused (the renderer says no to this request): nothing was made, so nothing is kept. Anything else may still be
     // running at the renderer, so it is followed with the same key rather than forgotten.
@@ -511,7 +550,7 @@ export async function startVoiceSpeech(input: z.infer<typeof voiceSpeechSchema>,
   if (existing && existing.ownerId === ownerId) {
     // A boost of 1 is HeyGen's default, so one stored as 1 (as an earlier version did) is the same delivery as none.
     const sameDelivery = existing.turbo === input.turbo && existing.free === input.free && existing.format === input.format && pronunciationLanguage(existing.language) === pronunciationLanguage(input.language) && (existing.expressivenessBoost ?? 1) === (input.expressivenessBoost ?? 1);
-    if (existing.voiceId !== input.voiceId || existing.text !== input.text || !sameDelivery || (input.title && existing.title !== input.title)) throw new ConflictError("This Idempotency-Key was already used for another recording; send a new key");
+    if (existing.voiceId !== input.voiceId || existing.text !== input.text || !sameDelivery || (input.title && (existing.askedTitle ?? existing.title) !== input.title)) throw new ConflictError("This Idempotency-Key was already used for another recording; send a new key");
     return existing;
   }
   const provider = getAvatarProvider();
@@ -546,10 +585,12 @@ export async function startVoiceSpeech(input: z.infer<typeof voiceSpeechSchema>,
     // The words' times go in a row of their own first; a store that will not take them (a database whose kinds
     // predate them) keeps the speech without captions rather than failing it.
     const timed = out.words?.length ? await keepWords(change, out.words) : false;
-    const done: VoiceChange = { ...change, status: "completed", audioUrl: out.audioUrl, ...(out.durationSec ? { durationSec: out.durationSec } : {}), ...(timed ? { timed: true as const } : {}), ...(out.spokenLanguage ? { spokenLanguage: out.spokenLanguage } : {}), checkedAt: nowIso(), updatedAt: nowIso() };
-    if (await getStore().putIf("voicechange", done, "updatedAt", change.updatedAt)) return done;
-    if (timed) await getStore().remove("voicewords", wordsRowId(change.id));
-    return change;
+    // Written over the latest row: a rename landing while the renderer speaks is kept (a speech not stored as done here
+    // is never asked for again), and a delete meanwhile stays a delete, without its words.
+    const checkedAt = nowIso();
+    const stored = await writeRefresh<VoiceChange>("voicechange", change, (current) => ({ ...current, status: "completed", audioUrl: out.audioUrl, ...(out.durationSec ? { durationSec: out.durationSec } : {}), ...(timed ? { timed: true as const } : {}), ...(out.spokenLanguage ? { spokenLanguage: out.spokenLanguage } : {}), checkedAt }));
+    if (stored.status !== "completed" && timed) await getStore().remove("voicewords", wordsRowId(change.id));
+    return stored;
   } catch (err) {
     // Nothing to follow: a refusal made nothing, and anything else is not asked again.
     await getStore().remove("voicechange", change.id);
@@ -591,10 +632,10 @@ export async function deleteVoiceChange(id: string, ownerId: string = LOCAL_OWNE
 /** Asks the renderer again for a conversion still running (same key, so not paid twice). Never throws. */
 async function refreshVoiceChange(change: VoiceChange): Promise<VoiceChange> {
   const now = nowIso();
-  let next: VoiceChange;
+  let next: Partial<VoiceChange>;
   try {
     const age = Date.now() - Date.parse(change.createdAt);
-    const giveUp: VoiceChange = { ...change, status: "failed", error: `The renderer did not finish speaking this ${change.text !== undefined ? "text" : "recording"}; try again`, checkedAt: now, updatedAt: now };
+    const giveUp: Partial<VoiceChange> = { status: "failed", error: `The renderer did not finish speaking this ${change.text !== undefined ? "text" : "recording"}; try again`, checkedAt: now };
     if (age > KEY_KEPT_MS || (change.text !== undefined && age > SPEECH_GIVE_UP_MS)) {
       next = giveUp;
     } else if (change.text !== undefined) {
@@ -605,15 +646,17 @@ async function refreshVoiceChange(change: VoiceChange): Promise<VoiceChange> {
       const provider = getAvatarProviderByName(change.provider);
       if (!provider.changeVoice || !change.providerAudio) return change;
       const out = await provider.changeVoice({ voiceId: change.providerVoiceId, assetId: change.providerAudio, removeNoise: !!change.removeNoise, key: change.id, waitMs: CHECK_WAIT_MS });
-      if (out.status === "completed") next = { ...change, status: "completed", audioUrl: out.audioUrl, durationSec: out.durationSec || change.durationSec, checkedAt: now, updatedAt: now };
-      else next = age > GIVE_UP_MS ? giveUp : { ...change, checkedAt: now };
+      if (out.status === "completed") next = { status: "completed", audioUrl: out.audioUrl, durationSec: out.durationSec || change.durationSec, checkedAt: now };
+      else next = age > GIVE_UP_MS ? giveUp : { checkedAt: now };
     }
   } catch (err) {
     if (!(err instanceof ValidationError)) {
       console.error(`voice change check failed for ${change.id}:`, err);
       return change;
     }
-    next = { ...change, status: "failed", error: err.message, checkedAt: now, updatedAt: now };
+    next = { status: "failed", error: err.message, checkedAt: now };
   }
-  return (await getStore().putIf("voicechange", next, "updatedAt", change.updatedAt)) ? next : change;
+  // Built over the latest row (a rename may land while the renderer is asked), and written only over it; one its start
+  // finished meanwhile keeps that answer rather than this check's.
+  return await writeRefresh<VoiceChange>("voicechange", change, (current) => (current.status === "processing" ? { ...current, ...next } : current));
 }

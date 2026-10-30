@@ -440,6 +440,8 @@ export interface InstantVoice {
   id: string;
   ownerId: string;
   name: string;
+  /** The name it was made with, kept once it is renamed, so a retried start is still known to be the same. Server only. */
+  askedName?: string;
   /** The audio clip it was made from. */
   clipId: string;
   /**
@@ -483,6 +485,8 @@ export interface VoiceChange {
   id: string;
   ownerId: string;
   title: string;
+  /** The title it was started with, kept once it is renamed, so a retried start is still known to be the same. Server only. */
+  askedTitle?: string;
   /** The instant voice it speaks in (`iv_…`), or for text one of HeyGen's public voices (`pv_…`), and its name then. */
   voiceId: string;
   voiceName: string;

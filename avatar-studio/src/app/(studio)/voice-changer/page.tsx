@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { AudioLines, Captions, Clapperboard, Download, FileAudio, Mic2, Play, Trash2, Type, Upload, Wand2 } from "lucide-react";
+import { AudioLines, Captions, Clapperboard, Download, FileAudio, Mic2, Pencil, Play, Trash2, Type, Upload, Wand2 } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
@@ -14,8 +14,8 @@ import { LANGUAGES } from "@/lib/stock";
 import { VOICE_RESULT_LINK_MS, type AudioClip, type Backdrop, type InstantVoice, type PublicVoice, type VoiceChange } from "@/lib/types";
 
 /** As the server lists them: never the renderer, its ids, or the upload sent to it. */
-type Voice = Omit<InstantVoice, "ownerId" | "provider" | "providerVoiceId">;
-type Change = Omit<VoiceChange, "ownerId" | "provider" | "providerVoiceId" | "providerAudio">;
+type Voice = Omit<InstantVoice, "ownerId" | "provider" | "providerVoiceId" | "askedName">;
+type Change = Omit<VoiceChange, "ownerId" | "provider" | "providerVoiceId" | "providerAudio" | "askedTitle">;
 
 /** As the server keeps it (`MAX_SPEECH_CHARS`). */
 const MAX_SPEECH_CHARS = 2000;
@@ -390,6 +390,51 @@ export default function VoiceChangerPage() {
     }
   }
 
+  async function renameVoice(v: Voice) {
+    const answer = window.prompt("Voice name", v.name);
+    const name = answer?.trim();
+    if (!name || name === v.name) return;
+    fail("lists")(null);
+    setNote(null);
+    try {
+      const { voice } = await api<{ voice: Voice }>(`/api/voice-changer/voices/${v.id}`, { method: "PATCH", body: JSON.stringify({ name }) });
+      setData((prev) => (prev ? { ...prev, voices: prev.voices.map((x) => (x.id === voice.id ? voice : x)) } : prev));
+      // A list check that left before the rename would answer with the old name; asking again retires it.
+      void refetch();
+      setNote(`Renamed the voice to “${voice.name}”.`);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        seen.current.delete(v.id);
+        setData((prev) => (prev ? { ...prev, voices: prev.voices.filter((x) => x.id !== v.id) } : prev));
+        setPreview((p) => (p?.voiceId === v.id ? null : p));
+        if (voiceId === v.id) setVoiceId("");
+        setNote(`The voice ${v.name} is no longer available.`);
+        focusAfterRender(() => voicesHeading.current);
+      } else fail("lists")(e instanceof Error ? e.message : "The voice could not be renamed");
+    }
+  }
+
+  async function renameChange(c: Change) {
+    const answer = window.prompt("Recording name", c.title);
+    const title = answer?.trim();
+    if (!title || title === c.title) return;
+    fail("lists")(null);
+    setNote(null);
+    try {
+      const { change } = await api<{ change: Change }>(`/api/voice-changer/changes/${c.id}`, { method: "PATCH", body: JSON.stringify({ title }) });
+      setData((prev) => (prev ? { ...prev, changes: prev.changes.map((x) => (x.id === change.id ? change : x)) } : prev));
+      void refetch();
+      setNote(`Renamed the recording to “${change.title}”.`);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        seen.current.delete(c.id);
+        setData((prev) => (prev ? { ...prev, changes: prev.changes.filter((x) => x.id !== c.id) } : prev));
+        setNote(`“${c.title}” is no longer available.`);
+        focusAfterRender(() => changesHeading.current);
+      } else fail("lists")(e instanceof Error ? e.message : "The recording could not be renamed");
+    }
+  }
+
   // A recording being kept as a clip, so its button waits rather than sending twice.
   const [keepingId, setKeepingId] = useState<string | null>(null);
   async function keepAsClip(c: Change) {
@@ -707,6 +752,11 @@ export default function VoiceChangerPage() {
                           </button>
                         )}
                         {canEdit === true && (
+                          <button type="button" onClick={() => void renameVoice(v)} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-brand-700" aria-label={`Rename the voice ${v.name}`} title="Rename">
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                        )}
+                        {canEdit === true && (
                           <button type="button" onClick={() => removeVoice(v)} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-rose-700" aria-label={`Delete the voice ${v.name}`}>
                             <Trash2 className="h-4 w-4" />
                           </button>
@@ -746,7 +796,12 @@ export default function VoiceChangerPage() {
                         <div className="flex shrink-0 items-center gap-2">
                           <StatusBadge status={c.status} />
                           {canEdit === true && (
-                            <button type="button" onClick={() => removeChange(c)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-rose-600" aria-label={`Delete ${c.title}, ${formatDate(c.createdAt)}`}>
+                            <button type="button" onClick={() => void renameChange(c)} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-brand-700" aria-label={`Rename ${c.title}, ${formatDate(c.createdAt)}`} title="Rename">
+                              <Pencil className="h-4 w-4" />
+                            </button>
+                          )}
+                          {canEdit === true && (
+                            <button type="button" onClick={() => removeChange(c)} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-rose-600" aria-label={`Delete ${c.title}, ${formatDate(c.createdAt)}`} title="Delete">
                               <Trash2 className="h-4 w-4" />
                             </button>
                           )}

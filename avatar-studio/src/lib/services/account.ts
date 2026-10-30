@@ -45,6 +45,8 @@ export async function exportOwnerData(ownerId: string = LOCAL_OWNER): Promise<Ow
         delete copy.provider;
         delete copy.providerVoiceId;
         delete copy.providerAudio;
+        delete copy.askedName;
+        delete copy.askedTitle;
       }
       if (kind === "footage") {
         delete copy.provider;

@@ -42,20 +42,20 @@ export function stripUndefined<T extends object>(obj: T): T {
   return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined)) as T;
 }
 
-/** The kinds of renderer jobs that carry a title the account can change. */
-export type RenamableKind = Extract<ItemKind, "footage" | "shoot" | "cleanup" | "lipsync" | "music">;
+/** The kinds of renderer jobs that carry a title (or, for an instant voice, a name) the account can change. */
+export type RenamableKind = Extract<ItemKind, "footage" | "shoot" | "cleanup" | "lipsync" | "music" | "voicechange" | "instantvoice">;
 
 /** The kinds whose retried start is compared on the title it was started with (cleanups and lip syncs are not). */
-const TITLE_COMPARED: ReadonlySet<RenamableKind> = new Set(["footage", "shoot", "music"]);
+const TITLE_COMPARED: ReadonlySet<RenamableKind> = new Set(["footage", "shoot", "music", "voicechange"]);
 
-/** A new name for a generated clip, photo shoot, cleanup, lip sync, or video with music: 1 to 120 characters, trimmed. */
+/** A new name for a generated clip, photo shoot, cleanup, lip sync, video with music, or recording: 1 to 120 characters, trimmed. */
 export const jobRenameSchema = z.object({ title: z.string("A title is text").trim().min(1, "Give it a name").max(120, "A title is at most 120 characters") });
 
 /**
- * Renames one of the owner's renderer jobs (a generated clip, photo shoot, cleanup, lip sync, or video with music). The
- * name it was started with is kept (server only) where a retried start with the same key is compared on it, so the
- * retry is still recognised. The write is conditional on the row read and read again on a miss, so a status change
- * landing meanwhile is kept and a delete meanwhile stays a delete.
+ * Renames one of the owner's renderer jobs (a generated clip, photo shoot, cleanup, lip sync, video with music, or
+ * recording in a voice). The name it was started with is kept (server only) where a retried start with the same key is
+ * compared on it, so the retry is still recognised. The write is conditional on the row read and read again on a miss,
+ * so a status change landing meanwhile is kept and a delete meanwhile stays a delete.
  */
 export async function renameJob<T extends { id: string; ownerId: string; title: string; askedTitle?: string; updatedAt: string }>(kind: RenamableKind, id: string, title: string, ownerId: string, what: string): Promise<T> {
   let current = owned(await getStore().get<T>(kind, id), ownerId, what);

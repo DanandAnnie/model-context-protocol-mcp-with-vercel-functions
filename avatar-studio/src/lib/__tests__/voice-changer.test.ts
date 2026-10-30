@@ -24,6 +24,8 @@ import {
   listVoiceChanges,
   publicInstantVoice,
   publicVoiceChange,
+  renameInstantVoice,
+  renameVoiceChange,
   voiceChangeCaptions,
   startVoiceChange,
   startVoiceSpeech,
@@ -759,7 +761,9 @@ describe("voice changer", () => {
     assert.equal(first.clip.providerAssetIds, undefined, "the clip is shown as the API shows clips");
     const after = (await getStore().get<VoiceChange>("voicechange", spoken.id))!;
     assert.equal(after.savedClipId, first.clip.id);
-    assert.equal(after.updatedAt, before.updatedAt, "keeping it does not make the renderer's link look newer");
+    // The renderer's link is dated by when it was checked (as the page and keeping it read it), which keeping leaves as it was.
+    assert.ok(before.checkedAt);
+    assert.equal(after.checkedAt, before.checkedAt, "keeping it does not make the renderer's link look newer");
     assert.equal(publicVoiceChange(after).savedClipId, first.clip.id);
     // Asked again: the same clip, made once.
     const again = await keepVoiceChangeAsClip(spoken.id, "u1");
@@ -847,5 +851,89 @@ describe("voice changer", () => {
     answer = () => new Response(float);
     await assert.rejects(keepVoiceChangeAsClip(change.id, "u1", fetchImpl), /WAV file for “Hello there in Host” is not one a clip can hold/);
     assert.equal((await getStore().list("clip", "u1")).length, 3, "only the three good files became clips");
+  });
+
+  it("renames a voice and a recording, a retried start still compared on the name it was made with", async () => {
+    const sample = await clip("u1", "Sample");
+    const made = await createInstantVoice(instantVoiceSchema.parse({ name: "Narrator", clipId: sample.id, agreed: true }), "u1", { key: "rename-voice-1" });
+    const voice = await renameInstantVoice(made.id, "Storyteller", "u1");
+    assert.equal(voice.name, "Storyteller");
+    assert.equal("askedName" in voice, false, "the name it was made with is server only");
+    assert.deepEqual((await listInstantVoices("u1")).map((v) => v.name), ["Storyteller"]);
+    assert.equal((await createInstantVoice(instantVoiceSchema.parse({ name: "Narrator", clipId: sample.id, agreed: true }), "u1", { key: "rename-voice-1" })).id, made.id);
+    await assert.rejects(createInstantVoice(instantVoiceSchema.parse({ name: "Storyteller", clipId: sample.id, agreed: true }), "u1", { key: "rename-voice-1" }), ConflictError);
+    // Two voices of one name cannot be told apart, so another voice's name is refused, whatever its case.
+    await ready("u1", "Reader");
+    await assert.rejects(renameInstantVoice(made.id, "reader", "u1"), /already have a voice named "reader"/);
+    const before = publicInstantVoice((await getStore().get<InstantVoice>("instantvoice", made.id))!);
+    assert.deepEqual(await renameInstantVoice(made.id, "Storyteller", "u1"), before, "the same name again changes nothing");
+    await assert.rejects(renameInstantVoice(made.id, "Mine", "u2"), NotFoundError);
+    await assert.rejects(renameInstantVoice("iv_missing", "Gone", "u1"), NotFoundError);
+    await assert.rejects(renameInstantVoice("../x", "Gone", "u1"), NotFoundError);
+    // A recording and spoken text, each started with a title.
+    const reader = await ready("u1", "Announcer");
+    const take = await clip("u1", "Line 4");
+    const change = await startVoiceChange(voiceChangeSchema.parse({ voiceId: reader.id, clipId: take.id, title: "Line 4 take" }), "u1", { key: "rename-change-1" });
+    const renamed = await renameVoiceChange(change.id, "Final take", "u1");
+    assert.deepEqual([renamed.title, "askedTitle" in renamed], ["Final take", false]);
+    assert.equal((await startVoiceChange(voiceChangeSchema.parse({ voiceId: reader.id, clipId: take.id, title: "Line 4 take" }), "u1", { key: "rename-change-1" })).id, change.id);
+    await assert.rejects(startVoiceChange(voiceChangeSchema.parse({ voiceId: reader.id, clipId: take.id, title: "Final take" }), "u1", { key: "rename-change-1" }), ConflictError);
+    const spoken = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: reader.id, text: "Hello there.", title: "Greeting" }), "u1", { key: "rename-speech-1" });
+    await renameVoiceChange(spoken.id, "Welcome", "u1");
+    assert.equal((await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: reader.id, text: "Hello there.", title: "Greeting" }), "u1", { key: "rename-speech-1" })).id, spoken.id);
+    assert.deepEqual((await listVoiceChanges("u1")).map((c) => c.title).sort(), ["Final take", "Welcome"]);
+    await assert.rejects(renameVoiceChange(change.id, "Mine", "u2"), NotFoundError);
+    await assert.rejects(renameVoiceChange("vc_missing", "Gone", "u1"), NotFoundError);
+    assert.doesNotMatch(JSON.stringify(await exportOwnerData("u1")), /askedName|askedTitle/, "nor are they in the account export");
+  });
+
+  it("keeps a rename that lands while text is spoken, a voice is made, or a recording is kept as a clip", async () => {
+    const store = getStore();
+    const putIf = store.putIf.bind(store);
+    const saved = clipMs.CLIP_MS;
+    try {
+      const voice = await ready("u1");
+      // Renamed while HeyGen speaks the text: the speech is stored as done, under the new name, with its words.
+      store.putIf = async (kind, item, field, expected) => {
+        store.putIf = putIf;
+        await renameVoiceChange(item.id, "Renamed mid-speech", "u1");
+        return putIf(kind, item, field, expected);
+      };
+      const spoken = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Welcome to the team." }), "u1");
+      assert.deepEqual([spoken.status, spoken.title, spoken.timed], ["completed", "Renamed mid-speech", true]);
+      const stored = (await store.get<VoiceChange>("voicechange", spoken.id))!;
+      assert.deepEqual([stored.status, stored.title, !!stored.audioUrl], ["completed", "Renamed mid-speech", true]);
+      assert.ok(await store.get<VoiceChangeWords>("voicewords", `voicewords_${spoken.id}`), "its words are kept");
+      // Renamed while it is kept as a clip: the clip is remembered on it, so keeping it again makes no second clip.
+      store.putIf = async (kind, item, field, expected) => {
+        if (kind !== "voicechange") return putIf(kind, item, field, expected);
+        store.putIf = putIf;
+        await renameVoiceChange(item.id, "Renamed while kept", "u1");
+        return putIf(kind, item, field, expected);
+      };
+      // A rename that read the row before the clip was remembered, and writes after it, misses and reads it again.
+      const readBefore = (await store.get<VoiceChange>("voicechange", spoken.id))!;
+      const { clip: kept } = await keepVoiceChangeAsClip(spoken.id, "u1");
+      assert.equal(await store.putIf("voicechange", { ...readBefore, title: "Stale rename" }, "updatedAt", readBefore.updatedAt), false);
+      assert.deepEqual([(await store.get<VoiceChange>("voicechange", spoken.id))!.savedClipId, (await store.get<VoiceChange>("voicechange", spoken.id))!.title], [kept.id, "Renamed while kept"]);
+      assert.deepEqual(await keepVoiceChangeAsClip(spoken.id, "u1"), { clip: kept, existing: true });
+      // Renamed while the renderer is asked whether a voice is ready: both are kept.
+      clipMs.CLIP_MS = 0;
+      const sample = await clip("u1", "Sample 2");
+      const making = await createInstantVoice(instantVoiceSchema.parse({ name: "Second", clipId: sample.id, agreed: true }), "u1");
+      forgetVoiceChangerChecks();
+      store.putIf = async (kind, item, field, expected) => {
+        store.putIf = putIf;
+        await renameInstantVoice(making.id, "Second, renamed", "u1");
+        return putIf(kind, item, field, expected);
+      };
+      const listed = (await listInstantVoices("u1")).find((v) => v.id === making.id)!;
+      assert.deepEqual([listed.name, listed.status], ["Second, renamed", "completed"]);
+      const row = (await store.get<InstantVoice>("instantvoice", making.id))!;
+      assert.deepEqual([row.name, row.status, row.askedName], ["Second, renamed", "completed", "Second"]);
+    } finally {
+      store.putIf = putIf;
+      clipMs.CLIP_MS = saved;
+    }
   });
 });

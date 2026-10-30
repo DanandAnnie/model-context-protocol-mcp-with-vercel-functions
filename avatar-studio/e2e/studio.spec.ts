@@ -1154,9 +1154,20 @@ test("an instant voice is made from a recording with the speaker's agreement, an
   await expect(livelyCard.getByTestId("voice-change-meta")).toContainText("from text · Turbo · expressiveness boost 40%");
   await expect(spokenCard.getByTestId("voice-change-meta")).not.toContainText("Turbo");
   await expect(spokenCard.getByTestId("voice-change-meta")).not.toContainText("expressiveness");
+  // Renamed in place; a retried start with the same key is still the same recording, compared on the title it was started with.
+  const livelyName = `Renamed recording ${Date.now().toString(36)}`;
+  page.once("dialog", (d) => void d.accept(livelyName));
+  await livelyCard.getByRole("button", { name: /^Rename / }).click();
+  const renamedCard = page.getByTestId("voice-change").filter({ hasText: livelyName });
+  await expect(page.locator('p[role="status"]').filter({ hasText: `Renamed the recording to “${livelyName}”.` })).toHaveCount(1);
+  await expect(renamedCard.getByRole("button", { name: new RegExp(`^Rename ${livelyName}, `) })).toBeFocused();
+  const livelyRetry = (await (await page.request.post("/api/voice-changer/speech", { data: (await lively).postDataJSON(), headers: { "Idempotency-Key": (await lively).headers()["idempotency-key"] } })).json()).change as Record<string, unknown>;
+  expect([livelyRetry.title, Object.keys(livelyRetry).includes("askedTitle")]).toEqual([livelyName, false]);
+  expect((await page.request.patch(`/api/voice-changer/changes/${livelyRetry.id}`, { data: { title: " " } })).status()).toBe(400);
+  expect((await page.request.patch("/api/voice-changer/changes/vc_missing123", { data: { title: "Gone" } })).status()).toBe(404);
   page.once("dialog", (d) => d.accept());
-  await livelyCard.getByRole("button", { name: /^Delete / }).click();
-  await expect(livelyCard).toHaveCount(0);
+  await renamedCard.getByRole("button", { name: /^Delete / }).click();
+  await expect(renamedCard).toHaveCount(0);
   // Turbo Free is sent with Turbo and shown with the recording; Turbo off takes Free with it. The file can be an MP3.
   await free.check();
   const fileFormat = page.getByRole("combobox", { name: /^File\b/ });
@@ -1284,9 +1295,21 @@ test("an instant voice is made from a recording with the speaker's agreement, an
   page.once("dialog", (d) => d.accept());
   await spokenCard.getByRole("button", { name: /^Delete / }).click();
   await expect(spokenCard).toHaveCount(0);
+  // A voice is renamed here (HeyGen keeps the name it was made with), offered under its new name, and a retried start
+  // with the same key is still compared on the name it was made with.
+  const voiceName = `Renamed ${name}`;
+  page.once("dialog", (d) => void d.accept(voiceName));
+  await voiceRow.getByRole("button", { name: `Rename the voice ${name}` }).click();
+  await expect(page.locator('p[role="status"]').filter({ hasText: `Renamed the voice to “${voiceName}”.` })).toHaveCount(1);
+  await expect(voiceRow.getByRole("button", { name: `Rename the voice ${voiceName}` })).toBeFocused();
+  await expect(page.getByRole("combobox", { name: /^Speaking voice\b/ }).locator("option", { hasText: voiceName })).toHaveCount(1);
+  const retriedVoice = (await (await page.request.post("/api/voice-changer/voices", { data: request.postDataJSON(), headers: { "Idempotency-Key": request.headers()["idempotency-key"] } })).json()).voice as Record<string, unknown>;
+  expect([retriedVoice.name, Object.keys(retriedVoice).includes("askedName")]).toEqual([voiceName, false]);
+  expect((await page.request.patch(`/api/voice-changer/voices/${retriedVoice.id}`, { data: { name: " " } })).status()).toBe(400);
+  expect((await page.request.patch("/api/voice-changer/voices/iv_missing123", { data: { name: "Gone" } })).status()).toBe(404);
   // Deleting asks first; the recording spoken already stays when its voice is deleted.
   page.once("dialog", (d) => d.accept());
-  await voiceRow.getByRole("button", { name: `Delete the voice ${name}` }).click();
+  await voiceRow.getByRole("button", { name: `Delete the voice ${voiceName}` }).click();
   await expect(page.getByTestId("instant-voices").locator("li").filter({ hasText: name })).toHaveCount(0);
   await expect(page.getByTestId("voice-change").filter({ hasText: name })).toHaveCount(1);
   page.once("dialog", (d) => d.accept());

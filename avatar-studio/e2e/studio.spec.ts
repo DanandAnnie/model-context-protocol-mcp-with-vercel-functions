@@ -226,7 +226,7 @@ test("each scene shows its own running time", async ({ page }) => {
   await page.goto("/create");
   await page.locator("textarea").fill(Array.from({ length: 25 }, (_, i) => `word${i}`).join(" "));
   await expect(page.getByTestId("script-length")).toHaveText("25 words · ~10s");
-  await page.getByRole("button", { name: "Add scene" }).click();
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
   // The new, empty scene carries the empty marker, not a duration.
   await expect(page.getByTestId("scene-duration")).toHaveCount(1);
   await page.locator("textarea").fill("one two three four five");
@@ -258,7 +258,7 @@ test("a scene can speak uploaded audio instead of a voice", async ({ page }) => 
   await page.goto("/create");
   await page.locator("input[placeholder='Video title']").fill("Recorded intro");
   await page.locator("textarea").fill("Typed opening line here.");
-  await page.getByRole("button", { name: "Add scene" }).click();
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
   // The browser converts the upload to WAV and saves it as a reusable clip; the scene then speaks it.
   await page.getByLabel("Upload scene audio").setInputFiles({ name: "founder-take.wav", mimeType: "audio/wav", buffer: toneWav(3) });
   await expect(page.getByTestId("scene-audio-name")).toHaveText("founder-take");
@@ -317,9 +317,9 @@ test("a scene can speak uploaded audio instead of a voice", async ({ page }) => 
 test("scenes can be duplicated and reordered", async ({ page }) => {
   await page.goto("/create");
   await page.locator("textarea").fill("A.");
-  await page.getByRole("button", { name: "Add scene" }).click();
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
   await page.locator("textarea").fill("B.");
-  await page.getByRole("button", { name: "Duplicate scene" }).click();
+  await page.getByRole("button", { name: "Duplicate scene", exact: true }).click();
   await expect(page.getByText("Scene 3 script")).toBeVisible();
   await expect(page.locator("textarea")).toHaveValue("B.");
   await page.locator("textarea").fill("C.");
@@ -389,7 +389,7 @@ test("the avatar library filters by gender and name", async ({ page }) => {
   await page.getByRole("button", { name: new RegExp(`^Renamed ${tag} Renamed ${tag}`) }).click();
   await expect(page.getByText(new RegExp(`Renamed ${tag} · James · `))).toBeVisible();
   // A scene's own presenter brings its default voice along too, unless the scene already chose a voice.
-  await page.getByRole("button", { name: "Add scene" }).click();
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
   await page.getByLabel("Scene avatar").selectOption({ label: "Ava Chen" });
   await expect(page.getByLabel("Scene voice")).toHaveValue("");
   await page.getByLabel("Scene avatar").selectOption({ label: `Renamed ${tag}` });
@@ -528,7 +528,7 @@ test("importing a script file makes one scene per section", async ({ page }) => 
 test("a pasted conversation makes one scene per turn, each speaker cast with a presenter and a voice", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Market chat");
   await page.locator("textarea").fill("A first draft.");
-  const open = page.getByRole("button", { name: "Conversation" });
+  const open = page.getByRole("button", { name: "Conversation", exact: true });
   await open.click();
   await expect(open).toHaveAttribute("aria-expanded", "true");
   const panel = page.getByTestId("conversation-import");
@@ -661,6 +661,79 @@ test("a scene is split at the cursor and merged back with the next", async ({ pa
   await expect(page.getByRole("button", { name: /^Scene 2,/ })).toHaveCount(0);
   await expect(script).toHaveValue("Welcome home.\n\nLet's look around.");
   await expect(script).toBeFocused();
+});
+
+test("scene changes are undone and redone, by button and by keyboard outside the script", async ({ page }) => {
+  const script = page.getByRole("textbox", { name: "Script", exact: true });
+  await script.fill("Welcome home.");
+  const undoButton = page.getByRole("button", { name: /^Undo/ });
+  const redoButton = page.getByRole("button", { name: /^Redo/ });
+  await expect(undoButton).toBeDisabled();
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
+  await expect(undoButton).toHaveAccessibleName("Undo add scene 2");
+  await undoButton.click();
+  await expect(page.getByTestId("import-note")).toHaveText("Undid: add scene 2.");
+  await expect(page.getByRole("button", { name: /^Scene 2,/ })).toHaveCount(0);
+  await expect(script).toHaveValue("Welcome home.");
+  // With nothing left to undo, the focus moves to Redo rather than being lost.
+  await expect(redoButton).toBeFocused();
+  await expect(redoButton).toHaveAccessibleName("Redo add scene 2");
+  await redoButton.click();
+  await expect(page.getByRole("button", { name: /^Scene 2,/ })).toBeVisible();
+  // The keyboard works outside a text field; inside the script, Ctrl+Z is the text box's own.
+  await page.getByRole("textbox", { name: "Scene 2 script" }).fill("A second scene.");
+  await page.getByRole("button", { name: "Remove scene", exact: true }).click();
+  await expect(page.getByRole("button", { name: /^Scene 2,/ })).toHaveCount(0);
+  await script.focus();
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(page.getByRole("button", { name: /^Scene 2,/ })).toHaveCount(0);
+  await expect(script).toHaveValue("Welcome home.");
+  await undoButton.focus();
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(page.getByTestId("import-note")).toHaveText("Undid: remove scene 2.");
+  // The removed scene comes back selected, with its words.
+  await expect(page.getByRole("textbox", { name: "Scene 2 script" })).toHaveValue("A second scene.");
+  await redoButton.focus();
+  await page.keyboard.press("ControlOrMeta+Shift+z");
+  await expect(page.getByRole("button", { name: /^Scene 2,/ })).toHaveCount(0);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(page.getByRole("button", { name: /^Scene 2,/ })).toBeVisible();
+  await page.keyboard.press("Control+y");
+  await expect(page.getByTestId("import-note")).toHaveText("Redid: remove scene 2.");
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(page.getByRole("button", { name: /^Scene 2,/ })).toBeVisible();
+  // Undoing over later edits asks first, as those edits would go too.
+  await page.getByRole("button", { name: "Duplicate scene", exact: true }).click();
+  await page.getByRole("textbox", { name: "Scene 3 script" }).fill("Changed after the copy.");
+  let asked = "";
+  page.once("dialog", (d) => {
+    asked = d.message();
+    void d.dismiss();
+  });
+  await undoButton.click();
+  await expect.poll(() => asked).toBe("Undo “duplicate scene 2”? The changes made since then go too (and come back if you redo it).");
+  await expect(page.getByRole("button", { name: /^Scene 3,/ })).toBeVisible();
+  page.once("dialog", (d) => void d.accept());
+  await undoButton.click();
+  await expect(page.getByRole("button", { name: /^Scene 3,/ })).toHaveCount(0);
+  // Redoing brings back the copy with the words typed into it after.
+  await redoButton.click();
+  await expect(page.getByRole("textbox", { name: "Scene 3 script" })).toHaveValue("Changed after the copy.");
+  await undoButton.click();
+  await expect(page.getByRole("button", { name: /^Scene 3,/ })).toHaveCount(0);
+  // A merge that leaves one scene makes its presenter the video's; undoing it gives the video its presenter back.
+  await page.getByRole("button", { name: /^Scene 1,/ }).click();
+  const videoAvatar = page.getByLabel("Scene avatar").locator("option").first();
+  const original = await videoAvatar.textContent();
+  await page.getByLabel("Scene avatar").selectOption("stock_4");
+  page.once("dialog", (d) => void d.accept());
+  await page.getByRole("button", { name: "Merge with next scene" }).click();
+  await expect(page.getByRole("button", { name: /^Scene 2,/ })).toHaveCount(0);
+  await undoButton.click();
+  await expect(page.getByTestId("import-note")).toHaveText("Undid: merge scene 2 into scene 1.");
+  await expect(page.getByRole("button", { name: /^Scene 2,/ })).toBeVisible();
+  await expect(page.getByLabel("Scene avatar")).toHaveValue("stock_4");
+  await expect(videoAvatar).toHaveText(original!);
 });
 
 test("photo avatar motion is set in the editor, kept with the video and its copy", async ({ page }) => {
@@ -834,7 +907,7 @@ test("a one-scene video can render over a transparent background, kept with the 
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByLabel("Transparent background", { exact: true })).toBeChecked();
   // A second scene cannot be transparent: the choice stays on screen but is not sent.
-  await page.getByRole("button", { name: "Add scene" }).click();
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
   await page.locator("textarea").fill("And here is the kitchen.");
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.locator("#transparent-hint")).toContainText("this one has more than one scene");
@@ -1432,10 +1505,10 @@ test("an instant voice is made from a recording with the speaker's agreement, an
   await expect(editor.locator("textarea").first()).toHaveValue("Welcome to the team, everyone.");
   await expect(editor.getByTestId("scene-audio-name")).toHaveText(`Welcome to the team in ${name}`);
   // In a scene's Audio tab, the clip's words fill an empty script; words typed are kept.
-  await editor.getByRole("button", { name: "Add scene" }).click();
+  await editor.getByRole("button", { name: "Add scene", exact: true }).click();
   await editor.getByLabel("Use a saved clip").selectOption(keptClips[0].id);
   await expect(editor.locator("textarea").first()).toHaveValue("Welcome to the team.");
-  await editor.getByRole("button", { name: "Add scene" }).click();
+  await editor.getByRole("button", { name: "Add scene", exact: true }).click();
   await editor.locator("textarea").first().fill("My own words.");
   await editor.getByLabel("Use a saved clip").selectOption(keptClips[0].id);
   await expect(editor.locator("textarea").first()).toHaveValue("My own words.");
@@ -2109,7 +2182,7 @@ test("a HeyGen Studio template is filled in and rendered as a library video", as
 test("a scene can leave the presenter out and let its picture fill the frame", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Kitchen tour");
   await page.locator("textarea").fill("Welcome in, let me show you around.");
-  await page.getByRole("button", { name: "Add scene" }).click();
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
   await page.locator("textarea").fill("The kitchen was redone last spring.");
   const show = page.getByRole("checkbox", { name: /Show the presenter in scene 2/ });
   // A colour cannot stand in for the presenter, so the choice waits for a picture or video.
@@ -2182,7 +2255,7 @@ test("a scene without the presenter gets the presenter back when its uploaded im
 test("multi-scene videos keep per-scene scripts and backgrounds", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Two scene demo");
   await page.locator("textarea").fill("Scene one says hello.");
-  await page.getByRole("button", { name: "Add scene" }).click();
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
   await page.locator("textarea").fill("Scene two says goodbye.");
   await page.getByRole("button", { name: "Background" }).click();
   await page.getByLabel("Background #0f172a").click();
@@ -3349,7 +3422,7 @@ test("the editor's chosen options, scene chips, and hints keep readable text on 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload();
   await page.locator("textarea").fill("Welcome in, let me show you around.");
-  await page.getByRole("button", { name: "Add scene" }).click();
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
   await page.locator("textarea").fill("The kitchen was redone last spring.");
   // Every node in view is judged: none fails, and none is left undecided.
   const contrast = async (...selectors: string[]) => {
@@ -4479,7 +4552,7 @@ test("a copy keeps its own unsent draft, apart from the editor's", async ({ page
 test("find and replace changes every scene's script, pause markers left whole", async ({ page }) => {
   const box = page.locator("textarea");
   await box.fill("Welcome to 12 Maple Street. [pause 2s] Maple trees line it.");
-  await page.getByRole("button", { name: "Add scene" }).click();
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
   await box.fill("Call about Maple Street today.");
   await page.getByRole("button", { name: "Find", exact: true }).click();
   await expect(page.getByLabel("Find", { exact: true })).toBeFocused();
@@ -4539,7 +4612,7 @@ test("a scene of only pauses is a silent one, held without a word", async ({ pag
   await expect(page.getByText("Every scene is silent; give at least one some words")).toBeVisible();
   await expect(page.getByRole("button", { name: "Generate video" })).toBeDisabled();
   await box.fill("Welcome home.");
-  await page.getByRole("button", { name: "Add scene" }).click();
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
   await page.getByRole("button", { name: "Pause", exact: true }).click();
   await expect(box).toHaveValue("[pause 1s] ");
   await box.fill("[pause 4s]");
@@ -4566,7 +4639,7 @@ test("a scene can show text on screen, placed, sized, and coloured, and a copy k
   await expect(stage).toHaveAttribute("data-position", "bottom");
   await expect(stage).toHaveCSS("color", "rgb(250, 204, 21)");
   // Another scene starts without text; clearing a field removes the text from its scene.
-  await page.getByRole("button", { name: "Add scene" }).click();
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
   await page.locator("textarea").fill("Priced to sell.");
   await expect(page.getByTestId("stage-text")).toHaveCount(0);
   await expect(page.getByLabel("On-screen text for scene 2")).toHaveValue("");
@@ -4736,7 +4809,7 @@ test("a script the AI writer replaced can be taken back", async ({ page }) => {
 test("a rewrite follows its scene when it moves, and is refused only when that scene was edited", async ({ page }) => {
   const box = page.locator("textarea");
   await box.fill("Hi there! One. Two. Three. Four.");
-  await page.getByRole("button", { name: "Add scene" }).click();
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
   await box.fill("The second scene's own words.");
   await page.getByRole("button", { name: /^Scene 1,/ }).click();
   // Each answer is held until the scenes have been changed.
@@ -4771,7 +4844,7 @@ test("a rewrite follows its scene when it moves, and is refused only when that s
 test("a rewrite of one scene leaves the scene being typed in selected", async ({ page }) => {
   const box = page.locator("textarea");
   await box.fill("Hi there! One. Two. Three. Four.");
-  await page.getByRole("button", { name: "Add scene" }).click();
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
   await page.getByRole("button", { name: /^Scene 1,/ }).click();
   let release!: () => void;
   const held = new Promise<void>((resolve) => (release = resolve));
@@ -4797,7 +4870,7 @@ test("a rewrite of one scene leaves the scene being typed in selected", async ({
 });
 
 test("the AI writer fills the empty scene it was opened on, even after it moves past another empty one", async ({ page }) => {
-  await page.getByRole("button", { name: "Add scene" }).click();
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
   await page.getByRole("button", { name: /^Scene 1,/ }).click();
   let release!: () => void;
   const held = new Promise<void>((resolve) => (release = resolve));

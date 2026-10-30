@@ -1,7 +1,7 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
-import { Captions, ChevronLeft, ChevronRight, Clapperboard, Copy, Image as ImageIcon, Layers, Merge, MessagesSquare, Mic2, Palette, Pause, Play, Plus, Replace, Scissors, Sparkles, Square, Trash2, Upload, Users, Wand2, X } from "lucide-react";
+import { Captions, ChevronLeft, ChevronRight, Clapperboard, Copy, Image as ImageIcon, Layers, Merge, MessagesSquare, Mic2, Palette, Pause, Play, Plus, Redo2, Replace, Scissors, Sparkles, Square, Trash2, Undo2, Upload, Users, Wand2, X } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { VoiceRow } from "@/components/VoicePicker";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -11,6 +11,7 @@ import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { SceneAudio } from "@/components/SceneAudio";
 import { BackdropPicker } from "@/components/BackdropPicker";
 import { CONVERSATION_PANEL_ID, ConversationImport, type CastTurn } from "@/components/ConversationImport";
+import { isApple } from "@/components/QuickFind";
 import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib/client";
@@ -25,6 +26,7 @@ import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
 import { capSceneText, fitSceneTextEdit, sceneTextLength } from "@/lib/scene-text";
 import { mergeScenes, splitScene } from "@/lib/scene-split";
+import { emptyHistory, record, redo, undo, type History } from "@/lib/scene-history";
 import { graphemes } from "@/lib/text";
 import { takeAgentDraft, type AgentDraft } from "@/lib/agent-draft";
 import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, footageIdOf, footageLength, footagePath, type FootageJob, framingFor, isDefaultLayout, isPhotoAvatar, rendersOnAvatarV, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, type PhotoExpressiveness, VOICE_ACCENTS, type VoiceAccent, AVATAR_ENGINES, type AvatarEngine } from "@/lib/types";
@@ -41,6 +43,16 @@ const DRAFT_KEY = "avatar-studio:draft";
 function draftKeyFor(spaces: { personalId: string; activeId: string } | null): string | null {
   return spaces ? (spaces.activeId === spaces.personalId ? DRAFT_KEY : `${DRAFT_KEY}:${spaces.activeId}`) : null;
 }
+
+/** What a scene change can change: the scenes, and the video's presenter, voice, pace, and format. */
+interface EditorState {
+  scenes: Scene[];
+  avatar: Avatar | null;
+  voice: Voice | null;
+  speed: number;
+  aspect: AspectRatio;
+}
+const sameEditorState = (a: EditorState, b: EditorState) => a.scenes === b.scenes && a.avatar?.id === b.avatar?.id && a.voice?.id === b.voice?.id && a.speed === b.speed && a.aspect === b.aspect;
 
 interface Draft {
   title: string;
@@ -276,17 +288,98 @@ function CreateInner() {
   /** True when a scene's script is exactly words its clip has said, rather than words typed for it alone. */
   const clipWords = (sc: Scene) => !!sc.audioId && !!sc.script.trim() && !!clipWordsSeen.current.get(sc.audioId)?.has(sc.script.trim());
   function updateScene(idx: number, patch: Partial<Scene>) {
-    setScenes((prev) => prev.map((sc, i) => (i === idx ? withBackground({ ...sc, ...patch }, patch.background ?? sc.background) : sc)));
+    setScenes((prev) => {
+      // A choice that changes nothing (the colour or framing already picked) leaves the scenes as they are, so it never
+      // counts as an edit made since a scene change.
+      const sc = prev[idx];
+      if (!sc || Object.entries(patch).every(([k, v]) => JSON.stringify(v) === JSON.stringify(sc[k as keyof Scene]))) return prev;
+      return prev.map((s, i) => (i === idx ? withBackground({ ...s, ...patch }, patch.background ?? s.background) : s));
+    });
   }
+  // Scene changes (added, removed, moved, duplicated, split, merged, imported) can be undone and redone, with what they
+  // changed of the video's own settings; typing is left to the text box's own undo.
+  const [sceneHistory, setSceneHistory] = useState<History<EditorState>>(emptyHistory);
+  // The video's settings a scene change can touch, as they are now (set where they are declared, below).
+  const videoNow = useRef<Omit<EditorState, "scenes">>({ avatar: null, voice: null, speed: 1, aspect: "16:9" });
+  const editorNow = (): EditorState => ({ scenes: scenesNow.current, ...videoNow.current });
+  /**
+   * Replaces the scenes as an action that can be undone, named as the Undo button says it ("remove scene 3"), with any
+   * of the video's settings the action changes. A lone scene's pace becomes the video's here (as the effect below does
+   * for a loaded one), so what is recorded is what the editor shows.
+   */
+  function changeScenes(label: string, next: Scene[], options: { active?: number; avatar?: Avatar; voice?: Voice; aspect?: AspectRatio } = {}) {
+    const before = editorNow();
+    const lone = next.length === 1 && next[0].speed ? next[0].speed : undefined;
+    const after: EditorState = {
+      scenes: lone ? [{ ...next[0], speed: undefined }] : next,
+      avatar: options.avatar ?? before.avatar,
+      voice: options.voice ?? before.voice,
+      speed: lone ?? before.speed,
+      aspect: options.aspect ?? before.aspect,
+    };
+    setSceneHistory((h) => record(h, { label, before, after }));
+    applyEditorState(after);
+    if (options.active !== undefined) setActiveIdx(options.active);
+  }
+  function applyEditorState(state: EditorState) {
+    scenesNow.current = state.scenes;
+    videoNow.current = { avatar: state.avatar, voice: state.voice, speed: state.speed, aspect: state.aspect };
+    setScenes(state.scenes);
+    setAvatar(state.avatar);
+    setVoice(state.voice);
+    setSpeed(state.speed);
+    setAspect(state.aspect);
+  }
+  /** Goes back (or forward) one scene change, after asking when the scenes or those settings have changed since, which goes too. */
+  function stepHistory(direction: "undo" | "redo") {
+    const current = editorNow();
+    const step = (direction === "undo" ? undo : redo)(sceneHistory, current, sameEditorState);
+    if (!step) return;
+    const verb = direction === "undo" ? "Undo" : "Redo";
+    if (step.changedSince && !window.confirm(`${verb} “${step.entry.label}”? The changes made since then go too (and come back if you ${direction === "undo" ? "redo" : "undo"} it).`)) return;
+    // The first scene the step changes is selected, so what came back (or went again) is in view.
+    const changed = step.state.scenes.findIndex((sc, i) => sc !== current.scenes[i]);
+    setSceneHistory(step.history);
+    applyEditorState(step.state);
+    setActiveIdx(changed >= 0 ? changed : Math.min(activeIdx, step.state.scenes.length - 1));
+    setImportNote(`${direction === "undo" ? "Undid" : "Redid"}: ${step.entry.label}.`);
+    // The button pressed is disabled once there is nothing left to step through; the focus goes to the other one. A
+    // control the step takes away (a scene's Merge or Remove, say) leaves the focus on Undo.
+    const pressed = direction === "undo" ? undoButton : redoButton;
+    const left = direction === "undo" ? step.history.past.length : step.history.future.length;
+    const focused = document.activeElement;
+    requestAnimationFrame(() => {
+      if (!left && focused === pressed.current) (direction === "undo" ? redoButton : undoButton).current?.focus();
+      else if (focused instanceof HTMLElement && !focused.isConnected) undoButton.current?.focus();
+    });
+  }
+  const undoButton = useRef<HTMLButtonElement>(null);
+  const redoButton = useRef<HTMLButtonElement>(null);
+  // Ctrl+Z (⌘Z on a Mac) undoes a scene change and Ctrl+Shift+Z or Ctrl+Y redoes it, outside a field whose own undo
+  // takes back typing. The letter is read from the layout (a German keyboard's Y sits where Z is on others), and from
+  // the key's place only on a layout without Latin letters.
+  const stepHistoryNow = useRef(stepHistory);
+  stepHistoryNow.current = stepHistory;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(isApple() ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.isContentEditable || t?.closest(`textarea, select, dialog[open], input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="color"])`)) return;
+      const letter = /^[a-z]$/i.test(e.key) ? e.key.toLowerCase() : e.code === "KeyZ" ? "z" : e.code === "KeyY" ? "y" : "";
+      if (letter !== "z" && !(letter === "y" && !isApple() && !e.shiftKey)) return;
+      e.preventDefault();
+      stepHistoryNow.current(letter === "z" && !e.shiftKey ? "undo" : "redo");
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
   function addScene() {
     if (scenes.length >= MAX_SCENES) return;
-    setScenes((prev) => [...prev, newScene("", prev[prev.length - 1].background)]);
-    setActiveIdx(scenes.length);
+    changeScenes(`add scene ${scenes.length + 1}`, [...scenes, newScene("", scenes[scenes.length - 1].background)], { active: scenes.length });
   }
   function removeScene(idx: number) {
     if (scenes.length <= 1) return;
-    setScenes((prev) => prev.filter((_, i) => i !== idx));
-    setActiveIdx(Math.max(0, idx - 1));
+    changeScenes(`remove scene ${idx + 1}`, scenes.filter((_, i) => i !== idx), { active: Math.max(0, idx - 1) });
   }
   // A move to either end disables the button pressed; the focus goes to the other one rather than being lost.
   const moveLeft = useRef<HTMLButtonElement>(null);
@@ -295,12 +388,9 @@ function CreateInner() {
   function moveScene(idx: number, dir: -1 | 1) {
     const j = idx + dir;
     if (j < 0 || j >= scenes.length) return;
-    setScenes((prev) => {
-      const next = [...prev];
-      [next[idx], next[j]] = [next[j], next[idx]];
-      return next;
-    });
-    setActiveIdx(j);
+    const next = [...scenes];
+    [next[idx], next[j]] = [next[j], next[idx]];
+    changeScenes(`move scene ${idx + 1} ${dir < 0 ? "earlier" : "later"}`, next, { active: j });
   }
   const importInput = useRef<HTMLInputElement>(null);
   const [importNote, setImportNote] = useState<string | null>(null);
@@ -334,8 +424,7 @@ function CreateInner() {
     // Anything already set up (a script, a clip, a presenter, a layout, more than one scene) is only replaced once confirmed.
     if (setUpScenes(scenes) && !window.confirm(`Replace the ${scenes.length === 1 ? "current scene" : `current ${scenes.length} scenes`} with ${doc.scenes.length === 1 ? "1 scene" : `${doc.scenes.length} scenes`} from ${file.name}?`)) return;
     const background = scenes[0].background;
-    setScenes(doc.scenes.map((script) => newScene(script, background)));
-    setActiveIdx(0);
+    changeScenes(`import ${file.name}`, doc.scenes.map((script) => newScene(script, background)), { active: 0 });
     if (doc.title && (!title.trim() || title === "Untitled video")) setTitle(doc.title);
     setImportNote(`Imported ${doc.scenes.length === 1 ? "1 scene" : `${doc.scenes.length} scenes`} from ${file.name}${doc.truncated ? `; the rest did not fit (a video holds up to ${MAX_SCENES} scenes and ${MAX_SCRIPT_CHARS} characters of script)` : ""}.`);
   }
@@ -351,15 +440,12 @@ function CreateInner() {
     const background = scenes[0].background;
     if (turns.length === 1) {
       // One scene has no presenter or voice of its own to show in the editor, so its speaker's become the video's.
-      const a = turns[0].avatarId && avatarData?.avatars.find((x) => x.id === turns[0].avatarId);
-      const v = turns[0].voiceId && voiceData?.voices.find((x) => x.id === turns[0].voiceId);
-      if (a) setAvatar(a);
-      if (v) setVoice(v);
-      setScenes([newScene(turns[0].script, background)]);
+      const a = (turns[0].avatarId && avatarData?.avatars.find((x) => x.id === turns[0].avatarId)) || undefined;
+      const v = (turns[0].voiceId && voiceData?.voices.find((x) => x.id === turns[0].voiceId)) || undefined;
+      changeScenes("make scenes from the conversation", [newScene(turns[0].script, background)], { active: 0, avatar: a, voice: v });
     } else {
-      setScenes(turns.map((t) => newScene(t.script, background, { avatarId: t.avatarId || undefined, voiceId: t.voiceId || undefined })));
+      changeScenes("make scenes from the conversation", turns.map((t) => newScene(t.script, background, { avatarId: t.avatarId || undefined, voiceId: t.voiceId || undefined })), { active: 0 });
     }
-    setActiveIdx(0);
     setImportNote(summary);
     closeConversation();
   }
@@ -416,8 +502,7 @@ function CreateInner() {
     // A scene per slide already showing pictures (the deck's PDF, imported first) keeps them.
     const sameCount = current.length === kept.length && current.some((sc) => sc.background.type !== "color");
     const shared = current.every((sc) => sc.background.type === current[0].background.type && sc.background.value === current[0].background.value) ? current[0].background : DEFAULT_BG;
-    setScenes(scripts.map((script, i) => newScene(script, sameCount ? current[i].background : shared)));
-    setActiveIdx(0);
+    changeScenes(`import ${file.name}`, scripts.map((script, i) => newScene(script, sameCount ? current[i].background : shared)), { active: 0 });
     const base = file.name.replace(/\.pptx$/i, "").slice(0, 60) || "Slides";
     setTitle((t) => (!t.trim() || t === "Untitled video" ? base : t));
     const withNotes = kept.filter((sl) => sl.notes).length;
@@ -492,10 +577,8 @@ function CreateInner() {
       // The new images join the list in the same update as the scenes, so the check for scenes naming an image that
       // is gone never sees one without the other.
       setBackdropData((d) => ({ backdrops: [...[...made].reverse(), ...(d?.backdrops ?? []).filter((b) => !made.some((m) => m.id === b.id))] }));
-      setScenes(made.map((b, i) => newScene(scripts[i], { type: "image", value: backdropPath(b.id) })));
-      setActiveIdx(0);
       // A format picked while the deck was importing is the user's choice and stays.
-      if (aspectNow.current === aspectBefore) setAspect(deckAspect);
+      changeScenes(`import ${file.name}`, made.map((b, i) => newScene(scripts[i], { type: "image", value: backdropPath(b.id) })), { active: 0, aspect: aspectNow.current === aspectBefore ? deckAspect : undefined });
       setTitle((t) => (!t.trim() || t === "Untitled video" ? base : t));
       const blank = scripts.filter((sc) => !sc.trim()).length;
       const fromText = deck ? texts.filter((text, i) => !notes[i] && text.trim()).length : 0;
@@ -545,8 +628,7 @@ function CreateInner() {
     if (next.map((sc) => sc.script.trim()).join("\n\n").length > MAX_SCRIPT_CHARS) {
       return setImportNote(`Splitting here would take the script past the ${MAX_SCRIPT_CHARS} characters a video holds; shorten it first.`);
     }
-    setScenes(next);
-    setActiveIdx(idx + 1);
+    changeScenes(`split scene ${idx + 1}`, next, { active: idx + 1 });
     setImportNote(`Split scene ${idx + 1}: the words after the cursor are scene ${idx + 2} now.`);
     requestAnimationFrame(() => {
       scriptRef.current?.focus();
@@ -564,16 +646,17 @@ function CreateInner() {
     const ask = `Merge scene ${idx + 2} into scene ${idx + 1}? Scene ${idx + 2}'s words join scene ${idx + 1}, which keeps its ${list}; scene ${idx + 2}'s ${lost.length > 1 ? "are" : "is"} dropped.`;
     if (lost.length && !window.confirm(ask)) return;
     const next = [...scenes.slice(0, idx), merged.scene, ...scenes.slice(idx + 2)];
+    // A lone scene shows no presenter or voice of its own in the editor, so those become the video's (as its pace does).
+    let lone: { avatar?: Avatar; voice?: Voice } = {};
     if (next.length === 1) {
-      // A lone scene shows no presenter or voice of its own in the editor, so those become the video's (as its pace does).
-      const a = merged.scene.avatarId && avatarData?.avatars.find((x) => x.id === merged.scene.avatarId);
-      const v = merged.scene.voiceId && voiceData?.voices.find((x) => x.id === merged.scene.voiceId);
-      if (a) setAvatar(a);
-      if (v) setVoice(v);
+      lone = {
+        avatar: (merged.scene.avatarId && avatarData?.avatars.find((x) => x.id === merged.scene.avatarId)) || undefined,
+        voice: (merged.scene.voiceId && voiceData?.voices.find((x) => x.id === merged.scene.voiceId)) || undefined,
+      };
       const { avatarId: _a, voiceId: _v, ...rest } = merged.scene;
       next[0] = rest;
     }
-    setScenes(next);
+    changeScenes(`merge scene ${idx + 2} into scene ${idx + 1}`, next, lone);
     setImportNote(`Merged scene ${idx + 2} into scene ${idx + 1}.`);
     // When the merge leaves no scene after this one that can be merged, the button goes, so the focus goes to the merged words.
     if (!next[idx + 1] || next[idx + 1].audioId) requestAnimationFrame(() => scriptRef.current?.focus());
@@ -581,8 +664,7 @@ function CreateInner() {
   /** Inserts a copy right after the scene (script, background, and presenter included) and selects it. */
   function duplicateScene(idx: number) {
     if (scenes.length >= MAX_SCENES) return;
-    setScenes((prev) => [...prev.slice(0, idx + 1), { ...prev[idx] }, ...prev.slice(idx + 1)]);
-    setActiveIdx(idx + 1);
+    changeScenes(`duplicate scene ${idx + 1}`, [...scenes.slice(0, idx + 1), { ...scenes[idx] }, ...scenes.slice(idx + 1)], { active: idx + 1 });
   }
   const [avatar, setAvatar] = useState<Avatar | null>(null);
   const [voice, setVoice] = useState<Voice | null>(null);
@@ -662,6 +744,7 @@ function CreateInner() {
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>(DEFAULT_CAPTION_STYLE);
   const isDefaultCaptionStyle = isDefaultCaptionStyleFn(captionStyle);
   const [speed, setSpeed] = useState(1);
+  videoNow.current = { avatar, voice, speed, aspect };
   // A lone scene's pace is the video's, which the slider sets: one left after a removal, or loaded from a copy or a
   // template, hands its speed to the slider (its own picker shows only with several scenes).
   const loneSpeed = scenes.length === 1 ? scenes[0].speed : undefined;
@@ -810,6 +893,9 @@ function CreateInner() {
       if (p) {
         setTitle(p.title);
         setScenes(p.scenes.map((sc) => newScene(sc.script, sc.background, { layout: restoredLayout(sc.layout) })));
+        // What the editor starts from (a plan, a draft, a template, a copy, a clip, a picture) is not a change to undo,
+        // and nothing done before it arrived can be undone over it.
+        setSceneHistory(emptyHistory());
         setActiveIdx(0);
         setAspect(p.aspect);
         setResolution(p.resolution);
@@ -825,6 +911,7 @@ function CreateInner() {
     if (!d) return;
     setTitle(d.title);
     setScenes(d.scenes.map((sc) => newScene(sc.script, sc.background, { ...sc, layout: restoredLayout(sc.layout) })));
+    setSceneHistory(emptyHistory());
     setActiveIdx(0);
     setAspect(d.aspect);
     setResolution(d.resolution ?? "1080p");
@@ -871,6 +958,7 @@ function CreateInner() {
     }
     setTitle("Untitled video");
     setScenes([newScene()]);
+    setSceneHistory(emptyHistory());
     setActiveIdx(0);
     setAspect("16:9");
     setResolution("1080p");
@@ -923,6 +1011,7 @@ function CreateInner() {
     if (t) {
       setTitle(t.title);
       setScenes([newScene(t.script)]);
+      setSceneHistory(emptyHistory());
       setActiveIdx(0);
       setAspect(t.aspect);
       return;
@@ -935,6 +1024,7 @@ function CreateInner() {
         if (cancelled) return;
         setTitle(template.title);
         setScenes(template.scenes.map((sc) => newScene(sc.script, sc.background, sc)));
+        setSceneHistory(emptyHistory());
         setActiveIdx(0);
         setAspect(template.aspect);
         setResolution(template.resolution ?? "1080p");
@@ -976,6 +1066,7 @@ function CreateInner() {
         }
         setTitle(`${video.title} (copy)`);
         setScenes(video.scenes?.length ? video.scenes.map((sc) => newScene(sc.script, sc.background, sc)) : [newScene(video.script, video.background)]);
+        setSceneHistory(emptyHistory());
         setActiveIdx(0);
         setAspect(video.aspect);
         setResolution(video.resolution ?? "1080p");
@@ -1012,6 +1103,7 @@ function CreateInner() {
     setTitle((t) => (t === "Untitled video" ? clip.name : t));
     startTitle.current = clip.name;
     setScenes((prev) => [newScene(clip.transcript ?? "", prev[0]?.background, { audioId: clip.id })]);
+    setSceneHistory(emptyHistory());
     setActiveIdx(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once the space (and so the draft key) and the clips are known
   }, [clipStart, spacesKnown, clipData, clipsError]);
@@ -1031,6 +1123,7 @@ function CreateInner() {
     setTitle((t) => (t === "Untitled video" ? picture.name : t));
     startTitle.current = picture.name;
     setScenes((prev) => [withBackground(prev[0] ?? newScene(), { type: "image", value: backdropPath(picture.id) })]);
+    setSceneHistory(emptyHistory());
     setActiveIdx(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once the space (and so the draft key) and the pictures are known
   }, [pictureStart, spacesKnown, backdropData, backdropError]);
@@ -1324,6 +1417,28 @@ function CreateInner() {
                 }}
               />
               <span className="ml-auto flex items-center gap-1">
+                <button
+                  ref={undoButton}
+                  type="button"
+                  onClick={() => stepHistory("undo")}
+                  disabled={!sceneHistory.past.length}
+                  aria-label={sceneHistory.past.length ? `Undo ${sceneHistory.past[sceneHistory.past.length - 1].label}` : "Undo"}
+                  title="Undo the last scene change (Ctrl+Z, or ⌘Z on a Mac, outside a text field)"
+                  className="rounded-full p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40"
+                >
+                  <Undo2 className="h-4 w-4" />
+                </button>
+                <button
+                  ref={redoButton}
+                  type="button"
+                  onClick={() => stepHistory("redo")}
+                  disabled={!sceneHistory.future.length}
+                  aria-label={sceneHistory.future.length ? `Redo ${sceneHistory.future[sceneHistory.future.length - 1].label}` : "Redo"}
+                  title="Redo the scene change undone (Ctrl+Shift+Z or Ctrl+Y, or ⌘⇧Z on a Mac, outside a text field)"
+                  className="rounded-full p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40"
+                >
+                  <Redo2 className="h-4 w-4" />
+                </button>
                 {scenes.length > 1 && (
                   <>
                     <button ref={moveLeft} type="button" onClick={() => { moveScene(activeIdx, -1); if (activeIdx === 1) requestAnimationFrame(() => moveRight.current?.focus()); }} disabled={activeIdx === 0} aria-label="Move scene left" title="Move scene earlier" className="rounded-full p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40">

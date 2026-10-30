@@ -561,3 +561,11 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - A recording changed while being kept lost the link to its clip without a word. That is now logged.
     - A lip sync asked for a recording over an hour old said only to make it again. It now names the clip kept of it, if there is one.
     - The docs claimed "two requests at once make one" without "on one server instance", left out the `409` for a full clip list, and the README left out the hour and size limits.
+- Make a video from a kept voice recording (`941622c`): a clip kept from text spoken in the voice changer carries that text as its `transcript`, and "Make a video" next to it opens the editor at `/create?clip=<id>` with one scene lip-syncing to the clip, its name as the title and its words as the script, in a draft of its own. Choosing such a clip in a scene's Audio tab fills an empty script.
+  - An independent review found nothing serious. Fixed before the commit:
+    - The clip start checked the draft store when the clips arrived rather than when the editor opened, so words typed while the clips loaded were either replaced or, once autosaved, made the start silently skip. It now decides by whether edits were kept when the editor opened, and never replaces typed words or a typed title.
+    - Whether the brand kit's default background applied depended on whether the brand kit or the clips loaded first. The clip start's scene now counts as fresh for it.
+    - Picking another clip in the Audio tab kept the first clip's words, and removing the clip left them for a voice to read. Words that are still exactly the last clip's are now replaced, or cleared with it.
+    - A clip kept before this change had no words to start with. It gets them when it is kept again.
+    - The docs did not list `transcript` on a clip, and the README promised a script for recordings spoken again, which have no text.
+    - Tests for a reload of the clip start, the Audio tab's fill, filling in words on older clips, and blank words were added.

@@ -498,10 +498,27 @@ export interface VoiceChange {
   /** The spoken result (a WAV); the renderer's link is signed for a limited time. */
   audioUrl?: string;
   durationSec?: number;
+  /** Text only: the renderer said when each word was said (HeyGen's `original_words`), kept in a `voicewords` row of their own for captions. */
+  timed?: true;
   error?: string;
   createdAt: string;
   updatedAt: string;
   checkedAt?: string;
+}
+
+/** When each word of a text spoken in a voice was said, beside the recording (`voicewords_<change id>`), so listings never load them. */
+export interface VoiceChangeWords {
+  id: string;
+  changeId: string;
+  ownerId: string;
+  words: SpokenWord[];
+}
+
+/** A word of spoken text and when it was said, in seconds from the start of the audio. */
+export interface SpokenWord {
+  text: string;
+  startSec: number;
+  endSec: number;
 }
 
 /** A library video with a background-music track mixed under its sound (a render of the renderer's own). */

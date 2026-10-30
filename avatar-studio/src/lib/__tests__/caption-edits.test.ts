@@ -108,3 +108,65 @@ describe("caption edits", () => {
     assert.equal((await getVideo(v.id, undefined, false)).captionCues?.[0].text, "Welcome, everyone.");
   });
 });
+
+describe("captions timed by their words", () => {
+  it("puts words into short lines at sentence ends, silences, and full lines, never overlapping", async () => {
+    const { wordCues, cuesToSrt } = await import("../captions");
+    const w = (text: string, startSec: number, endSec: number) => ({ text, startSec, endSec });
+    // A sentence end starts a new line; so does a silence of 0.6s or more.
+    const cues = wordCues([w("Welcome", 0, 0.4), w("aboard.", 0.4, 0.9), w("Today", 1, 1.3), w("we", 1.3, 1.4), w("ship", 2.2, 2.6)]);
+    assert.deepEqual(cues.map((c) => [c.startMs, c.endMs, c.text]), [[0, 900, "Welcome aboard."], [1000, 1700, "Today we"], [2200, 2900, "ship"]], "a line shows to its last word, and a short one 0.7s");
+    // A short line close to the next stays up only until the next begins.
+    assert.deepEqual(wordCues([w("Go.", 0, 0.2), w("Now", 0.4, 0.6)]).map((c) => [c.startMs, c.endMs]), [[0, 400], [400, 1100]]);
+    // A full line (64 characters) or one up for 6 seconds ends; a quote after the stop still ends the sentence.
+    const long = Array.from({ length: 20 }, (_, i) => w(`word${i}`, i * 0.2, i * 0.2 + 0.2));
+    assert.ok(wordCues(long).every((c) => c.text.length <= 64));
+    assert.equal(wordCues(long).map((c) => c.text).join(" "), long.map((x) => x.text).join(" "), "no word is lost or repeated");
+    const slow = Array.from({ length: 8 }, (_, i) => w(`w${i}`, i, i + 0.9));
+    assert.ok(wordCues(slow).every((c) => c.endMs - c.startMs <= 6_000));
+    assert.equal(wordCues([w('"Done."', 0, 0.5), w("Next", 0.5, 0.8)]).length, 2);
+    // Words of a script without spaces are joined without one; blank words are skipped.
+    assert.deepEqual(wordCues([w("你好", 0, 0.4), w("世界", 0.4, 0.8), w(" ", 0.8, 0.9)]).map((c) => c.text), ["你好世界"]);
+    assert.deepEqual(wordCues([]), []);
+    // Words said over each other never give overlapping lines, nor do two lines starting together.
+    const overlapping = wordCues([w("Hello.", 0, 1.2), w("Next", 1, 1.7), w("one.", 1.7, 1.7), w("Again", 1.7, 1.8)]);
+    overlapping.forEach((c, i) => assert.ok(c.endMs > c.startMs && (i === 0 || c.startMs >= overlapping[i - 1].endMs), JSON.stringify(overlapping)));
+    // East Asian punctuation and characters outside the basic plane are joined without a space.
+    assert.deepEqual(wordCues([w("你好，", 0, 0.4), w("世界。", 0.4, 0.8)]).map((c) => c.text), ["你好，世界。"]);
+    assert.deepEqual(wordCues([w("𠀀", 0, 0.2), w("𠀁", 0.2, 0.4)]).map((c) => c.text), ["𠀀𠀁"]);
+    // A word too long for a line (a link) is cut into lines sharing its time.
+    const link = `https://example.com/${"a".repeat(120)}`;
+    const cutUp = wordCues([w(link, 0, 4)]);
+    assert.ok(cutUp.length >= 2 && cutUp.every((c) => c.text.length <= 64));
+    assert.equal(cutUp.map((c) => c.text).join(""), link);
+    assert.deepEqual([cutUp[0].startMs, cutUp.at(-1)!.startMs < 4000, cutUp.at(-1)!.endMs >= 4000], [0, true, true], "the pieces share the word's time");
+    // A long run of Chinese characters becomes several lines (each character counts wider), none longer than 6 seconds.
+    const han = Array.from({ length: 300 }, (_, i) => w("字", i * 0.2, i * 0.2 + 0.2));
+    const hanCues = wordCues(han);
+    assert.ok(hanCues.length > 5 && hanCues.every((c) => Array.from(c.text).length <= 29 && c.endMs - c.startMs <= 6_000));
+    assert.equal(hanCues.map((c) => c.text).join(""), "字".repeat(300));
+    assert.match(cuesToSrt(cues), /^1\n00:00:00,000 --> 00:00:00,900\nWelcome aboard\.\n/);
+  });
+
+  it("reads HeyGen's word timings, or puts words together from its characters", async () => {
+    const { timedWords } = await import("../providers/avatar/heygen");
+    // Its words when sent: blank, unreadable, and backwards entries are dropped, times kept within the audio, in order.
+    assert.deepEqual(
+      timedWords([{ text: " late ", start_time: 1.5, end_time: 9 }, { text: "Hi", start_time: 0, end_time: 0.25 }, { text: "", start_time: 0.3, end_time: 0.4 }, { text: "x", start_time: 0.5, end_time: 0.2 }, { text: 4, start_time: 0, end_time: 1 }, { text: "bad", start_time: "a", end_time: 1 }, null], null, 2),
+      [{ text: "Hi", startSec: 0, endSec: 0.25 }, { text: "late", startSec: 1.5, endSec: 2 }],
+    );
+    // Only characters: a blank ends a word.
+    const chars = [..."Hi  all!"].map((c, i) => ({ text: c, start_time: i * 0.1, end_time: i * 0.1 + 0.1 }));
+    assert.deepEqual(timedWords(undefined, chars), [{ text: "Hi", startSec: 0, endSec: 0.2 }, { text: "all!", startSec: 0.4, endSec: 0.8 }]);
+    // Characters of a script written without spaces are words of their own, so nothing is cut off.
+    const han = Array.from({ length: 300 }, (_, i) => ({ text: i % 50 === 49 ? "。" : "字", start_time: i * 0.2, end_time: i * 0.2 + 0.2 }));
+    const hanWords = timedWords(undefined, han);
+    assert.equal(hanWords.length, 300);
+    assert.equal(hanWords.map((x) => x.text).join(""), han.map((c) => c.text).join(""));
+    // A very long word is kept whole up to 1,000 characters, never splitting a character in two.
+    assert.equal(timedWords([{ text: "a".repeat(999) + "😀x", start_time: 0, end_time: 1 }], null)[0].text, "a".repeat(999) + "😀");
+    // Words sent empty fall back to the characters; neither gives nothing.
+    assert.equal(timedWords([], chars).length, 2);
+    assert.deepEqual(timedWords(null, "nope"), []);
+  });
+});

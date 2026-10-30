@@ -988,7 +988,25 @@ test("an instant voice is made from a recording with the speaker's agreement, an
   const spokenCard = page.getByTestId("voice-change").filter({ hasText: `Welcome to the team in ${name}` });
   await expect(spokenCard).toBeFocused();
   await expect(spokenCard.getByTestId("voice-change-meta")).toContainText("from text");
-  await expect(spokenCard.getByRole("link", { name: /^Download / })).toHaveAttribute("href", /\/demo\/revoiced\.mp3$/);
+  await expect(spokenCard.getByRole("link", { name: /^Download (?!captions )/ })).toHaveAttribute("href", /\/demo\/revoiced\.mp3$/);
+  // Captions timed by when each word was said, as SRT or WebVTT; a recording spoken again has no words to time.
+  const srt = spokenCard.getByRole("link", { name: /^Download captions for .* as SRT/ });
+  const vtt = spokenCard.getByRole("link", { name: /^Download captions for .* as WebVTT/ });
+  await expect(srt).toBeVisible();
+  const srtFile = await page.request.get((await srt.getAttribute("href"))!);
+  expect(srtFile.status()).toBe(200);
+  expect(srtFile.headers()["content-disposition"]).toMatch(/^attachment; filename="Welcome_to_the_team_in_.+\.srt"$/);
+  expect(await srtFile.text()).toBe("1\n00:00:00,000 --> 00:00:01,600\nWelcome to the team.\n");
+  const vttFile = await page.request.get((await vtt.getAttribute("href"))!);
+  expect(vttFile.headers()["content-type"]).toContain("text/vtt");
+  expect(await vttFile.text()).toBe("WEBVTT\n\n1\n00:00:00.000 --> 00:00:01.600\nWelcome to the team.\n");
+  await expect(card).toBeVisible();
+  await expect(card.getByText("Captions")).toHaveCount(0);
+  const timedList = await (await page.request.get("/api/voice-changer")).json();
+  const timedChange = timedList.changes.find((c: { text?: string }) => c.text === "Welcome to the team.");
+  expect(timedChange.timed).toBe(true);
+  expect(Object.keys(timedChange)).not.toContain("words");
+  expect((await page.request.get(`/api/voice-changer/changes/${timedList.changes.find((c: { text?: string }) => c.text === undefined).id}/captions`)).status()).toBe(404);
   // Delivery: Turbo and an expressiveness boost, set from the keyboard, are sent and shown with the recording.
   const boost = page.getByRole("slider", { name: "Expressiveness boost" });
   await expect(boost).toHaveAttribute("aria-valuetext", "100 percent, the default");

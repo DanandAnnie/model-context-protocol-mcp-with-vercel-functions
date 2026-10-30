@@ -41,15 +41,20 @@ function fits(text: string): boolean {
   return width(text) <= MAX_CUE_CHARS;
 }
 
+/** Whether a character belongs to a script written without word spaces (or, for Korean, read at that density). */
+export function isUnspaced(char: string): boolean {
+  return UNSPACED.test(char);
+}
+
 /** Joins two cue pieces: no space after East Asian punctuation or between two characters of an unspaced script. */
 function join(a: string, b: string): string {
   if (!a) return b;
-  const tight = new RegExp(`[，、。！？]${CLOSERS}*$`, "u").test(a) || (UNSPACED.test(a.slice(-1)) && UNSPACED.test(b.charAt(0)));
+  const tight = new RegExp(`[，、。！？]${CLOSERS}*$`, "u").test(a) || (UNSPACED.test(Array.from(a).at(-1) ?? "") && UNSPACED.test(Array.from(b)[0] ?? ""));
   return tight ? a + b : `${a} ${b}`;
 }
 
-/** Cuts text that does not fit a cue into pieces that do: at the last space within the room when there is one, else by character. */
-function cut(text: string): string[] {
+/** Cuts text that does not fit a cue (`room` wide) into pieces that do: at the last space within the room when there is one, else by character. */
+function cut(text: string, room = MAX_CUE_CHARS): string[] {
   const chars = Array.from(text);
   const out: string[] = [];
   let start = 0;
@@ -57,7 +62,7 @@ function cut(text: string): string[] {
     let end = start;
     for (let w = 0; end < chars.length; end++) {
       w += UNSPACED.test(chars[end]) ? UNSPACED_CHAR_WIDTH : 1;
-      if (w > MAX_CUE_CHARS) break;
+      if (w > room) break;
     }
     if (end === chars.length) {
       out.push(chars.slice(start).join("").trim());
@@ -167,6 +172,65 @@ export function buildCues(script: string, durationSec: number, maxPauseShare = 0
       cursor = cues[cues.length - 1].endMs;
     });
     cursor += Math.round(gapMs[pi] * scale);
+  });
+  return cues;
+}
+
+/** Room in a caption timed by its words: two short lines. */
+const MAX_TIMED_CUE_CHARS = 64;
+/** Longest a caption timed by its words stays up, and the silence that starts a new one. */
+const MAX_TIMED_CUE_MS = 6_000;
+const TIMED_GAP_MS = 600;
+/** How long a caption timed by its words stays up at least, while the next one has not begun. */
+const MIN_TIMED_CUE_MS = 700;
+/** A word that ends a sentence, with any closing quote or bracket. */
+const ENDS_SENTENCE = new RegExp(`[.!?…。！？]${CLOSERS}*$`, "u");
+
+/**
+ * Captions for speech whose words' times are known (text spoken in a voice): words are put together in the order they
+ * were said into short lines (64 characters, an unspaced script's characters counting wider, a word too long for one
+ * line cut into pieces sharing its time), a new one after a sentence ends, after a silence, or when the line is full
+ * or has been up long enough. Each line shows from its first word to its last, a little longer when it would flash,
+ * and never overlaps the next. Words of scripts written without spaces are joined without one.
+ */
+export function wordCues(words: Array<{ text: string; startSec: number; endSec: number }>): Cue[] {
+  const pieces: Array<{ text: string; startMs: number; endMs: number }> = [];
+  for (const w of words) {
+    const text = w.text.replace(/\s+/g, " ").trim();
+    if (!text) continue;
+    const startMs = Math.round(w.startSec * 1000);
+    const endMs = Math.max(startMs, Math.round(w.endSec * 1000));
+    const parts = width(text) > MAX_TIMED_CUE_CHARS ? cut(text, MAX_TIMED_CUE_CHARS) : [text];
+    const total = parts.reduce((n, part) => n + width(part), 0);
+    let at = startMs;
+    parts.forEach((part, i) => {
+      const end = i === parts.length - 1 ? endMs : Math.round(at + ((endMs - startMs) * width(part)) / total);
+      pieces.push({ text: part, startMs: at, endMs: end });
+      at = end;
+    });
+  }
+  const lines: Array<{ text: string; startMs: number; endMs: number }> = [];
+  let line: { text: string; startMs: number; endMs: number } | null = null;
+  let endsSentence = false;
+  for (const p of pieces) {
+    const joined: string = line ? join(line.text, p.text) : p.text;
+    if (line && (endsSentence || p.startMs - line.endMs >= TIMED_GAP_MS || width(joined) > MAX_TIMED_CUE_CHARS || p.endMs - line.startMs > MAX_TIMED_CUE_MS)) {
+      lines.push(line);
+      line = null;
+    }
+    line = line ? { text: joined, startMs: line.startMs, endMs: Math.max(line.endMs, p.endMs) } : { ...p };
+    endsSentence = ENDS_SENTENCE.test(p.text);
+  }
+  if (line) lines.push(line);
+  // Each line starts no earlier than the one before ends and ends by the time the next starts.
+  const cues: Cue[] = [];
+  let prevEnd = 0;
+  lines.forEach((l, i) => {
+    const startMs = Math.max(l.startMs, prevEnd);
+    const next = lines[i + 1]?.startMs ?? Infinity;
+    const endMs = Math.max(startMs + 1, Math.min(Math.max(l.endMs, startMs + MIN_TIMED_CUE_MS), next));
+    cues.push({ index: i + 1, startMs, endMs, text: l.text });
+    prevEnd = endMs;
   });
   return cues;
 }

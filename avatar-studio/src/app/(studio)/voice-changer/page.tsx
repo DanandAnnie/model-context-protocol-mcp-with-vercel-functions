@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { AudioLines, Download, Mic2, Play, Trash2, Type, Upload, Wand2 } from "lucide-react";
+import { AudioLines, Captions, Download, Mic2, Play, Trash2, Type, Upload, Wand2 } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
@@ -694,6 +694,19 @@ export default function VoiceChangerPage() {
                           <a href={c.audioUrl} download target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:underline" aria-label={`Download ${c.title}, ${formatDate(c.createdAt)}`}>
                             <Download className="h-3 w-3" aria-hidden /> Download
                           </a>
+                          {c.timed && (
+                            // Captions timed by when each word was said, for a video editor or a player.
+                            <span className="inline-flex items-center gap-1 text-xs text-slate-600">
+                              <Captions className="h-3 w-3" aria-hidden /> Captions
+                              <a href={`/api/voice-changer/changes/${c.id}/captions`} download className="font-medium text-brand-700 hover:underline" aria-label={`Download captions for ${c.title} as SRT, ${formatDate(c.createdAt)}`}>
+                                SRT
+                              </a>
+                              <span aria-hidden>·</span>
+                              <a href={`/api/voice-changer/changes/${c.id}/captions?format=vtt`} download className="font-medium text-brand-700 hover:underline" aria-label={`Download captions for ${c.title} as WebVTT, ${formatDate(c.createdAt)}`}>
+                                VTT
+                              </a>
+                            </span>
+                          )}
                           {canEdit === true && Date.now() - Date.parse(c.checkedAt ?? c.updatedAt) <= VOICE_RESULT_LINK_MS && (
                             // Its voice on a video: the lip sync page with this recording chosen as the new audio.
                             <Link href={`/lipsync?voiceChange=${c.id}`} className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:underline" aria-label={`Lip-sync a video to ${c.title}, ${formatDate(c.createdAt)}`}>

@@ -7,15 +7,15 @@ import { assertNoRenewingPlan } from "../billing";
 import { ConflictError } from "../errors";
 import { madeLooksOf, rememberMadeLooks } from "./avatars";
 import { dropTwinVoice } from "./twins";
-import type { InstantVoice, MusicJob, TwinJob } from "../types";
+import type { InstantVoice, MusicJob, TwinJob, VoiceChange } from "../types";
 import { dropMusicRender } from "./music";
-import { dropInstantVoice } from "./voice-changer";
+import { dropInstantVoice, wordsRowId } from "./voice-changer";
 
 const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip", "videolead", "backdrop", "portrait", "highlight", "cleanup", "lipsync", "lookpack", "twin", "music", "instantvoice", "voicechange", "footage", "shoot"] as const;
 /**
  * Cover rows hold image bytes; the export describes each cover from its video (`cover.mimeType`, `cover.bytes`) instead
  * of loading them. Clip audio is never listed (each `clip` row names its own `clipaudio_<id>` row), so the export and
- * the deletion below never pull audio bytes.
+ * the deletion below never pull audio bytes; a spoken text's word times (`voicewords_<id>`) are left out the same way.
  */
 const EXPORT_KINDS = OWNER_KINDS.filter((k) => k !== "cover") as Exclude<(typeof OWNER_KINDS)[number], "cover">[];
 
@@ -120,6 +120,7 @@ export async function deleteOwnerData(ownerId: string = LOCAL_OWNER, opts: { bil
         // The clip's audio sits in its own row, removed by id so it is never loaded.
         if (kind === "clip") await getStore().remove("clipaudio", `clipaudio_${item.id}`);
         if (kind === "backdrop") await getStore().remove("backdropdata", `backdropdata_${item.id}`);
+        if (kind === "voicechange" && (item as VoiceChange).timed) await getStore().remove("voicewords", wordsRowId(item.id));
         // Looks made at the renderer stay there; they stay the studio's, never offered to other accounts. A twin's
         // voice that never became the account's (those went with the voices) is deleted there.
         await rememberMadeLooks(madeLooksOf(kind, item));

@@ -3,7 +3,7 @@ import { pauseSeconds, stripPauses } from "../../pauses";
 import { SAMPLE_PREVIEW_VIDEO, STOCK_AVATARS, portraitSvg } from "../../stock";
 import { demoAssetUrl } from "../../config";
 import { ConflictError, NotFoundError, ValidationError } from "../../errors";
-import type { AgentMessage, AgentStyle, AudioClip, Avatar, DirectedScene, MusicTrack, StudioTemplate, StudioTemplateDetail, VideoRequest } from "../../types";
+import type { AgentMessage, AgentStyle, AudioClip, Avatar, DirectedScene, MusicTrack, SpokenWord, StudioTemplate, StudioTemplateDetail, VideoRequest } from "../../types";
 import type { AgentFile, AvatarJobStatus, AvatarProvider, CleanupStatus, FootageStatus, HighlightInput, HighlightStatus, LipsyncStatus, ShootStatus } from "../types";
 import { SHOOT_ASPECTS, type ShootAspect } from "../../types";
 
@@ -303,10 +303,13 @@ export class MockAvatarProvider implements AvatarProvider {
     return { status: "completed", audioUrl: demoAssetUrl("/demo/revoiced.mp3"), durationSec: 0 };
   }
 
-  /** Demo text to speech: the same sample recording, its length as the text would take to read aloud. */
-  async speakText(input: { text: string }): Promise<{ status: "completed"; audioUrl: string; durationSec: number }> {
-    const words = input.text.trim().split(/\s+/).filter(Boolean).length;
-    return { status: "completed", audioUrl: demoAssetUrl("/demo/revoiced.mp3"), durationSec: Math.max(1, Math.round((words / 2.5) * 10) / 10) };
+  /** Demo text to speech: the same sample recording, its length as the text would take to read aloud, its words evenly timed. */
+  async speakText(input: { text: string }): Promise<{ status: "completed"; audioUrl: string; durationSec: number; words: SpokenWord[] }> {
+    const said = input.text.trim().split(/\s+/).filter(Boolean);
+    const durationSec = Math.max(1, Math.round((said.length / 2.5) * 10) / 10);
+    const each = durationSec / Math.max(1, said.length);
+    const words = said.map((text, i) => ({ text, startSec: Math.round(i * each * 1000) / 1000, endSec: Math.round((i + 1) * each * 1000) / 1000 }));
+    return { status: "completed", audioUrl: demoAssetUrl("/demo/revoiced.mp3"), durationSec, words };
   }
 
   async musicMixStatus(jobId: string): Promise<LipsyncStatus> {

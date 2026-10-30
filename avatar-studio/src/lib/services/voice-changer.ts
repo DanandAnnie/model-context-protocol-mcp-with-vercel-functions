@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
-import type { AudioClip, InstantVoice, PublicVoice, VoiceChange } from "../types";
+import type { AudioClip, InstantVoice, PublicVoice, SpokenWord, VoiceChange, VoiceChangeWords } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, LimitError, NotFoundError, UpstreamError, ValidationError } from "../errors";
 import { owned, stripUndefined } from "./shared";
@@ -17,6 +17,7 @@ import { prepareClipOnce } from "./videos";
 import { rememberMadeVoices } from "./voices";
 import { jobChecker } from "./job-checks";
 import { graphemes, withSuffix } from "../text";
+import { wordCues, type Cue } from "../captions";
 
 /** Instant voices an account keeps; another needs one deleted first. */
 export const MAX_INSTANT_VOICES = 10;
@@ -122,6 +123,28 @@ export function publicVoiceChange(c: VoiceChange): PublicVoiceChange {
   void _v;
   void _a;
   return rest;
+}
+
+/** The row holding when each word of a spoken text was said. */
+export const wordsRowId = (changeId: string) => `voicewords_${changeId}`;
+
+/** Keeps a spoken text's word times beside it; false when the store would not take them. */
+async function keepWords(change: VoiceChange, words: SpokenWord[]): Promise<boolean> {
+  try {
+    await getStore().put<VoiceChangeWords>("voicewords", { id: wordsRowId(change.id), changeId: change.id, ownerId: change.ownerId, words });
+    return true;
+  } catch (err) {
+    console.error(`voice speech ${change.id}: word timings not kept:`, err);
+    return false;
+  }
+}
+
+/** Caption lines for text spoken in a voice, timed by when its words were said; a 404 when it has no timings. */
+export async function voiceChangeCaptions(id: string, ownerId: string = LOCAL_OWNER): Promise<{ title: string; cues: Cue[] }> {
+  const change = owned(await getStore().get<VoiceChange>("voicechange", voiceChangeIdSchema.parse(id)), ownerId, "Recording");
+  const row = change.status === "completed" && change.timed ? await getStore().get<VoiceChangeWords>("voicewords", wordsRowId(change.id)) : null;
+  if (!row?.words.length || row.ownerId !== ownerId) throw new NotFoundError("This recording has no word timings to make captions from");
+  return { title: change.title, cues: wordCues(row.words) };
 }
 
 const keyedId = (prefix: string, ownerId: string, key: string) => `${prefix}_${createHash("sha256").update(`${ownerId}\0${prefix}\0${key}`).digest("base64url").slice(0, 32)}`;
@@ -432,8 +455,13 @@ export async function startVoiceSpeech(input: z.infer<typeof voiceSpeechSchema>,
     const waitMs = Math.max(MIN_WAIT_MS, START_DEADLINE_MS - (Date.now() - arrived));
     const out = await provider.speakText({ voiceId: voice.providerVoiceId, text: input.text, ...(input.turbo ? { turbo: true as const } : {}), ...(input.expressivenessBoost !== undefined ? { expressivenessBoost: input.expressivenessBoost } : {}), key: id, waitMs });
     if (out.status === "processing") throw new UpstreamError("HeyGen did not finish speaking the text in time; try again, or try a shorter text");
-    const done: VoiceChange = { ...change, status: "completed", audioUrl: out.audioUrl, ...(out.durationSec ? { durationSec: out.durationSec } : {}), checkedAt: nowIso(), updatedAt: nowIso() };
-    return (await getStore().putIf("voicechange", done, "updatedAt", change.updatedAt)) ? done : change;
+    // The words' times go in a row of their own first; a store that will not take them (a database whose kinds
+    // predate them) keeps the speech without captions rather than failing it.
+    const timed = out.words?.length ? await keepWords(change, out.words) : false;
+    const done: VoiceChange = { ...change, status: "completed", audioUrl: out.audioUrl, ...(out.durationSec ? { durationSec: out.durationSec } : {}), ...(timed ? { timed: true as const } : {}), checkedAt: nowIso(), updatedAt: nowIso() };
+    if (await getStore().putIf("voicechange", done, "updatedAt", change.updatedAt)) return done;
+    if (timed) await getStore().remove("voicewords", wordsRowId(change.id));
+    return change;
   } catch (err) {
     // Nothing to follow: a refusal made nothing, and anything else is not asked again.
     await getStore().remove("voicechange", change.id);
@@ -469,6 +497,7 @@ function speechTitle(text: string): string {
 export async function deleteVoiceChange(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
   const change = owned(await getStore().get<VoiceChange>("voicechange", voiceChangeIdSchema.parse(id)), ownerId, "Recording");
   await getStore().remove("voicechange", change.id);
+  if (change.timed) await getStore().remove("voicewords", wordsRowId(change.id));
 }
 
 /** Asks the renderer again for a conversion still running (same key, so not paid twice). Never throws. */

@@ -1,7 +1,7 @@
-import { AGENT_STYLE_TAGS, STUDIO_VARIABLE_TYPES, backdropIdOf, footageIdOf, isPhotoAvatar, rendersOnAvatarV, type AgentMessage, type AgentStyle, type AgentStyleTag, type AudioClip, type DirectedScene, type Avatar, type Backdrop, type Background, type Scene, type StudioTemplate, type StudioTemplateDetail, type StudioVariable, type VideoRequest, type Voice, type MusicTrack } from "../../types";
+import { AGENT_STYLE_TAGS, STUDIO_VARIABLE_TYPES, backdropIdOf, footageIdOf, isPhotoAvatar, rendersOnAvatarV, type AgentMessage, type AgentStyle, type AgentStyleTag, type AudioClip, type DirectedScene, type Avatar, type Backdrop, type Background, type Scene, type StudioTemplate, type StudioTemplateDetail, type StudioVariable, type VideoRequest, type Voice, type MusicTrack, type SpokenWord } from "../../types";
 import { silentSeconds, withBreakTags } from "../../pauses";
 import type { LookPackKey } from "../../look-packs";
-import { heygenBurnsCaptions } from "../../captions";
+import { heygenBurnsCaptions, isUnspaced } from "../../captions";
 import { baseLanguageCode, voiceTakesAccent } from "../../language";
 import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
@@ -821,7 +821,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     return this.voiceAudio(() => this.client.speechToSpeech(body, input.key, input.waitMs), { what: "recording", fix: "try a clearer recording" });
   }
 
-  async speakText(input: { voiceId: string; text: string; turbo?: true; expressivenessBoost?: number; key: string; waitMs: number }): Promise<{ status: "processing" } | { status: "completed"; audioUrl: string; durationSec: number }> {
+  async speakText(input: { voiceId: string; text: string; turbo?: true; expressivenessBoost?: number; key: string; waitMs: number }): Promise<{ status: "processing" } | { status: "completed"; audioUrl: string; durationSec: number; words?: SpokenWord[] }> {
     // Turbo speaks instant voices faster and cheaper. The boost is an instant-voice setting (the studio sends neither for
     // a public voice that is not instant), which HeyGen sets to its full 1 when none is sent, so a lower one, 0
     // included, is always sent.
@@ -830,8 +830,14 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       voice_id: input.voiceId,
       text: input.text,
       ...(input.expressivenessBoost !== undefined ? { expressiveness_boost: input.expressivenessBoost } : {}),
+      // When each word is said, for captions: the price is the same with them.
+      with_timestamps: true,
     };
-    return this.voiceAudio(() => this.client.textToSpeech(body, input.key, input.waitMs), { what: "text", fix: "check the text is plain prose in a supported language" });
+    let answer: Awaited<ReturnType<HeyGenClient["textToSpeech"]>> | undefined;
+    const out = await this.voiceAudio(async () => (answer = await this.client.textToSpeech(body, input.key, input.waitMs)), { what: "text", fix: "check the text is plain prose in a supported language" });
+    if (out.status !== "completed") return out;
+    const words = timedWords(answer?.original_words, answer?.original_characters, out.durationSec);
+    return words.length ? { ...out, words } : out;
   }
 
   /** One WAV spoken in an instant voice (speech to speech or text to speech), with HeyGen's refusals told apart. */
@@ -1256,4 +1262,44 @@ function shootFailure(code: string | null | undefined, message: string | null | 
   if (code === "multiple_faces_detected") return which ? `${which[0].toUpperCase()}${which.slice(1)} shows more than one person; use a picture of one person` : "One of the pictures shows more than one person; use pictures of one person";
   if (code === "generation_cancelled") return "The photo shoot was cancelled; make it again";
   return message?.trim() || "HeyGen could not make these photos";
+}
+
+/** Most words a speech's timings keep (its text is at most 2,000 characters), and the longest a word is kept. */
+const MAX_TIMED_WORDS = 2_500;
+const MAX_TIMED_WORD_CHARS = 1_000;
+
+/**
+ * When each word of a text was said, from HeyGen's timings: its words when it sends them, else words put together from
+ * its characters (split at spaces; each character of a script written without spaces a word of its own). An entry without text or with times that are not numbers in order is dropped,
+ * times are kept within the audio's length when it is known, and the words are kept in time order.
+ */
+export function timedWords(words: unknown, characters: unknown, durationSec = 0): SpokenWord[] {
+  const read = (rows: unknown) =>
+    (Array.isArray(rows) ? rows : []).flatMap((r) => {
+      const row = (r ?? {}) as { text?: unknown; start_time?: unknown; end_time?: unknown };
+      const start = Number(row.start_time);
+      const end = Number(row.end_time);
+      if (typeof row.text !== "string" || !Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start) return [];
+      const cap = durationSec > 0 ? durationSec : Infinity;
+      return [{ text: row.text, startSec: Math.min(start, cap), endSec: Math.min(end, cap) }];
+    });
+  let out = read(words).map((w) => ({ ...w, text: w.text.trim() })).filter((w) => w.text);
+  if (!out.length) {
+    // Characters grouped into words: a space (or any blank) ends one.
+    let current: SpokenWord | null = null;
+    for (const c of read(characters)) {
+      if (!c.text.trim() || isUnspaced(c.text)) {
+        if (current) out.push(current);
+        current = null;
+        if (c.text.trim()) out.push({ ...c });
+      } else if (current) {
+        current = { text: current.text + c.text, startSec: current.startSec, endSec: Math.max(current.endSec, c.endSec) };
+      } else {
+        current = { ...c };
+      }
+    }
+    if (current) out.push(current);
+  }
+  out = out.sort((a, b) => a.startSec - b.startSec).slice(0, MAX_TIMED_WORDS);
+  return out.map((w) => ({ text: Array.from(w.text).slice(0, MAX_TIMED_WORD_CHARS).join(""), startSec: Math.round(w.startSec * 1000) / 1000, endSec: Math.round(w.endSec * 1000) / 1000 }));
 }

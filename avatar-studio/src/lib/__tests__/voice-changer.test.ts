@@ -21,6 +21,7 @@ import {
   listVoiceChanges,
   publicInstantVoice,
   publicVoiceChange,
+  voiceChangeCaptions,
   startVoiceChange,
   startVoiceSpeech,
   voiceChangeSchema,
@@ -30,7 +31,7 @@ import { ConflictError, NotFoundError, UpstreamError, ValidationError } from "..
 import { providerStatus } from "../providers";
 import { MockAvatarProvider } from "../providers/avatar/mock";
 import { getStore } from "../store";
-import type { InstantVoice, VoiceChange } from "../types";
+import type { InstantVoice, VoiceChange, VoiceChangeWords } from "../types";
 
 beforeEach(() => {
   globalThis.__avatarStudioStore = new MemoryStore();
@@ -216,7 +217,7 @@ describe("voice changer", () => {
       await listPublicVoices();
       assert.equal(calls.length, 2, "kept for a few minutes");
       const spoken = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: "pv_pub_nadine", text: "Hello there." }), "u1");
-      assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1", voice_id: "pub_nadine", text: "Hello there." });
+      assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1", voice_id: "pub_nadine", text: "Hello there.", with_timestamps: true });
       assert.equal(spoken.audioUrl, "https://files.heygen.ai/generated/tts.wav");
       // A public voice HeyGen no longer has is chosen again, not made again, and the list is read afresh.
       await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: "pv_pub_ama", text: "Hello there." }), "u1"), /That HeyGen voice is no longer offered; choose another/);
@@ -279,9 +280,13 @@ describe("voice changer", () => {
     const voice = await ready("u1");
     const take = await clip("u1");
     await startVoiceChange(voiceChangeSchema.parse({ voiceId: voice.id, clipId: take.id }), "u1");
+    // A spoken text's word times go with it, and are not in the export (like clip audio).
+    const said = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Goodbye now." }), "u1");
+    assert.equal(said.timed, true);
     const out = (await exportOwnerData("u1")) as unknown as Record<string, Array<Record<string, unknown>>>;
     assert.equal(out.instantvoice.length, 1);
-    assert.equal(out.voicechange.length, 1);
+    assert.equal(out.voicechange.length, 2);
+    assert.equal("voicewords" in out, false);
     for (const row of [...out.instantvoice, ...out.voicechange]) for (const key of ["provider", "providerVoiceId", "providerAudio"]) assert.equal(key in row, false);
     const proto = MockAvatarProvider.prototype as unknown as { deleteInstantVoice: (id: string) => Promise<void> };
     const real = proto.deleteInstantVoice;
@@ -295,6 +300,7 @@ describe("voice changer", () => {
     assert.deepEqual(deleted, [voice.providerVoiceId], "the person's voice is deleted at the renderer");
     assert.deepEqual(await getStore().list("instantvoice", "u1"), []);
     assert.deepEqual(await getStore().list("voicechange", "u1"), []);
+    assert.equal(await getStore().get("voicewords", `voicewords_${said.id}`), null);
   });
 
   it("makes a voice set in a picture of the speaker's setting, sent to HeyGen inline and kept by name", async () => {
@@ -552,15 +558,18 @@ describe("voice changer", () => {
           throw err;
         }
         if (tts === "refuse") return Response.json({ error: { code: "invalid_parameter", message: "text language is not supported", param: "text" } }, { status: 400 });
-        return Response.json({ data: { audio_url: "https://files.heygen.ai/generated/speech.wav", duration: 3.4 } });
+        const words = [{ text: "Hi", start_time: 0, end_time: 0.3 }, { text: "there.", start_time: 0.3, end_time: 0.9 }, { text: "", start_time: 1, end_time: 1.1 }, { text: "Bye.", start_time: 1.6, end_time: 2 }, { text: "late", start_time: 2.5, end_time: "x" }];
+        const characters = [..."Hi yo"].map((c, i) => ({ text: c, start_time: i / 10, end_time: (i + 1) / 10 }));
+        return Response.json({ data: { audio_url: "https://files.heygen.ai/generated/speech.wav", duration: 3.4, ...(timings === "words" ? { original_words: words, original_characters: characters } : timings === "characters" ? { original_characters: characters } : {}) } });
       }
       return new Response("unexpected", { status: 500 });
     }) as typeof fetch;
+    let timings: "words" | "characters" | "none" = "none";
     Object.assign(config, { avatarProvider: "heygen", heygenApiKey: "hg_key" });
     try {
       // Not done in time: dropped with a 502 to try again, never asked for again (HeyGen documents no replay for text).
       await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Hello there." }), "u1", { key: "speech-hg-1" }), (e: unknown) => e instanceof UpstreamError && /did not finish speaking the text in time/.test((e as Error).message));
-      assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1", voice_id: "hv_1", text: "Hello there." });
+      assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1", voice_id: "hv_1", text: "Hello there.", with_timestamps: true });
       const key = calls.at(-1)!.idem!;
       assert.match(key, /^vc_/);
       assert.deepEqual(await listVoiceChanges("u1"), []);
@@ -578,12 +587,48 @@ describe("voice changer", () => {
       // Turbo and the boost reach HeyGen as its model and expressiveness_boost.
       tts = "done";
       await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Big news.", turbo: true, expressivenessBoost: 0.3 }), "u1");
-      assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1-turbo", voice_id: "hv_1", text: "Big news.", expressiveness_boost: 0.3 });
+      assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1-turbo", voice_id: "hv_1", text: "Big news.", expressiveness_boost: 0.3, with_timestamps: true });
       // HeyGen's default is its full boost: 1 sends nothing, and 0 is sent rather than left to that default.
       await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Big news.", expressivenessBoost: 1 }), "u1");
-      assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1", voice_id: "hv_1", text: "Big news." });
+      assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1", voice_id: "hv_1", text: "Big news.", with_timestamps: true });
       await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Calm news.", expressivenessBoost: 0 }), "u1");
-      assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1", voice_id: "hv_1", text: "Calm news.", expressiveness_boost: 0 });
+      assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1", voice_id: "hv_1", text: "Calm news.", expressiveness_boost: 0, with_timestamps: true });
+      // Each word's time comes back with the audio and is kept for captions in a row of its own (never loaded by the
+      // listing); a HeyGen that sends only characters has them put together into words.
+      const wordsOf = async (id: string) => (await getStore().get<VoiceChangeWords>("voicewords", `voicewords_${id}`))?.words;
+      timings = "words";
+      const timed = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Hi there. Bye." }), "u1");
+      assert.equal(timed.timed, true);
+      assert.equal("words" in timed, false);
+      assert.deepEqual(await wordsOf(timed.id), [{ text: "Hi", startSec: 0, endSec: 0.3 }, { text: "there.", startSec: 0.3, endSec: 0.9 }, { text: "Bye.", startSec: 1.6, endSec: 2 }]);
+      assert.equal(publicVoiceChange(timed).timed, true);
+      assert.deepEqual((await voiceChangeCaptions(timed.id, "u1")).cues.map((c) => [c.startMs, c.endMs, c.text]), [[0, 900, "Hi there."], [1600, 2300, "Bye."]]);
+      await assert.rejects(voiceChangeCaptions(timed.id, "u2"), NotFoundError);
+      await assert.rejects(voiceChangeCaptions("../x", "u1"));
+      timings = "characters";
+      const fromChars = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Hi yo" }), "u1");
+      assert.deepEqual(await wordsOf(fromChars.id), [{ text: "Hi", startSec: 0, endSec: 0.2 }, { text: "yo", startSec: 0.3, endSec: 0.5 }]);
+      // Deleting the text deletes its timings.
+      await deleteVoiceChange(fromChars.id, "u1");
+      assert.equal(await wordsOf(fromChars.id), undefined);
+      timings = "none";
+      const untimed = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Plain." }), "u1");
+      assert.equal(untimed.timed, undefined);
+      await assert.rejects(voiceChangeCaptions(untimed.id, "u1"), /no word timings/);
+      // A store that will not take the timings (a database whose kinds predate them) keeps the speech without captions.
+      timings = "words";
+      const store = getStore();
+      const realPut = store.put.bind(store);
+      store.put = (async (kind: string, item: { id: string }) => {
+        if (kind === "voicewords") throw new Error("violates check constraint studio_items_kind_check");
+        return realPut(kind as never, item as never);
+      }) as typeof store.put;
+      try {
+        const kept = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Old database." }), "u1");
+        assert.deepEqual([kept.status, kept.timed], ["completed", undefined]);
+      } finally {
+        store.put = realPut;
+      }
       // One left as being spoken (its request was cut off) is waited for while its start could still answer, then given
       // up, and never asked for.
       const cut: VoiceChange = { ...done, id: "vc_cut", status: "processing", audioUrl: undefined, createdAt: new Date(Date.now() - 30_000).toISOString() };

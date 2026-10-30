@@ -5679,11 +5679,59 @@ test("the Assets page keeps the account's audio clips and pictures: upload, word
   await expect(pictures.getByRole("link", { name: `Download ${front}`, exact: true })).toBeVisible();
   await expect(renamed.getByRole("button", { name: `Rename ${intro}`, exact: true })).toHaveCount(0);
   await expect(pictures.getByRole("button", { name: `Delete ${front}`, exact: true })).toHaveCount(0);
+  await expect(pictures.getByRole("checkbox")).toHaveCount(0);
   await page.unroute("**/api/workspaces");
   await page.reload();
   await expect(renamed.getByRole("button", { name: `Rename ${intro}`, exact: true })).toBeVisible();
   expect((await page.request.patch("/api/backdrops/bd_missing123", { data: { name: "Gone" } })).status()).toBe(404);
   expect((await page.request.patch(`/api/clips/${clipId}`, { data: { name: "  " } })).status()).toBe(400);
+  // Several pictures are deleted together. Only those the search shows count as selected, so one picked and then
+  // hidden by the search is left alone (and stays picked); the count is read out, a picture that could not be deleted
+  // stays selected to try again, and the focus goes to the list's heading.
+  const bulkOne = `${tag} bulk one`;
+  const bulkTwo = `${tag} bulk two`;
+  for (const name of [bulkOne, bulkTwo]) {
+    await page.getByLabel("Upload a picture").setInputFiles({ name: `${name}.png`, mimeType: "image/png", buffer: pixel });
+    await expect(pictures.getByRole("img", { name, exact: true })).toBeVisible();
+  }
+  const listed = (await (await page.request.get("/api/backdrops")).json()).backdrops as Array<{ id: string; name: string }>;
+  const [oneId, twoId] = [bulkOne, bulkTwo].map((n) => listed.find((b) => b.name === n)!.id);
+  const selection = page.getByTestId("picture-selection");
+  const selectedCount = selection.getByRole("status");
+  await pictures.getByRole("checkbox", { name: `Select ${front}`, exact: true }).check();
+  await search.fill(`${tag} bulk`);
+  await expect(selectedCount).toHaveText("");
+  await selection.getByRole("button", { name: "Select all shown" }).click();
+  await expect(selectedCount).toHaveText("2 of 2 selected");
+  await pictures.getByRole("checkbox", { name: `Select ${bulkTwo}`, exact: true }).uncheck();
+  await expect(selectedCount).toHaveText("1 of 2 selected");
+  // Clicking the name toggles the checkbox too.
+  await pictures.getByText(bulkTwo, { exact: true }).click();
+  await expect(selectedCount).toHaveText("2 of 2 selected");
+  // The second delete fails: the first goes, the second stays selected, and the reason is shown.
+  await page.route(`**/api/backdrops/${twoId}`, (route) => (route.request().method() === "DELETE" ? route.fulfill({ status: 503, json: { error: "Storage is busy" } }) : route.continue()));
+  let asked = "";
+  page.once("dialog", (d) => {
+    asked = d.message();
+    void d.accept();
+  });
+  await selection.getByRole("button", { name: "Delete 2 selected" }).click();
+  await expect(page.getByRole("alert").filter({ hasText: `Deleted 1 of 2 pictures; “${bulkTwo}” was not deleted: Storage is busy` })).toHaveCount(1);
+  expect(asked).toMatch(/^Delete these 2 pictures\?/);
+  await expect(page.getByRole("heading", { name: /^Pictures/ })).toBeFocused();
+  await expect(selectedCount).toHaveText("1 of 1 selected");
+  expect((await page.request.get(`/api/backdrops/${oneId}`)).status()).toBe(404);
+  await page.unroute(`**/api/backdrops/${twoId}`);
+  page.once("dialog", (d) => void d.accept());
+  await selection.getByRole("button", { name: "Delete 1 selected" }).click();
+  await expect(page.getByTestId("assets-note")).toHaveText(`Deleted the picture “${bulkTwo}”.`);
+  expect((await page.request.get(`/api/backdrops/${twoId}`)).status()).toBe(404);
+  // The picture hidden by the search was neither deleted nor unpicked; Clear selection unpicks it.
+  await search.fill("");
+  await expect(pictures.getByRole("img", { name: front, exact: true })).toBeVisible();
+  await expect(pictures.getByRole("checkbox", { name: `Select ${front}`, exact: true })).toBeChecked();
+  await selection.getByRole("button", { name: "Clear selection" }).click();
+  await expect(pictures.getByRole("checkbox", { name: `Select ${front}`, exact: true })).not.toBeChecked();
   page.once("dialog", (d) => d.accept());
   await pictures.getByRole("button", { name: `Delete ${front}`, exact: true }).click();
   await expect(page.getByTestId("assets-note")).toHaveText(`Deleted the picture “${front}”.`);

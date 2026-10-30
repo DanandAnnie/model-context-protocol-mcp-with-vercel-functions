@@ -151,6 +151,55 @@ export default function AssetsPage() {
     }
   }
 
+  // Pictures chosen for deleting together. Only those the search shows count, so nothing out of sight is deleted.
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
+  const selected = shownPictures.filter((b) => picked.has(b.id));
+  const [bulk, setBulk] = useState<{ done: number; total: number } | null>(null);
+  // Set at once, so a second click before React re-renders cannot start a second run.
+  const bulkRunning = useRef(false);
+  const selectionBar = useRef<HTMLDivElement>(null);
+  const pick = (id: string, on: boolean) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+
+  async function removeSelected() {
+    const chosen = selected;
+    if (!chosen.length || bulkRunning.current) return;
+    const what = chosen.length === 1 ? `the picture “${chosen[0].name}”` : `these ${chosen.length} pictures`;
+    if (!window.confirm(`Delete ${what}? Scenes, templates, and the brand kit using them go back to a plain background; videos already rendered keep them.`)) return;
+    // One at a time: each delete also rewrites the templates and brand kit that name the picture.
+    const failed: Array<{ id: string; name: string; message: string }> = [];
+    bulkRunning.current = true;
+    setBulk({ done: 0, total: chosen.length });
+    for (const [i, b] of chosen.entries()) {
+      try {
+        await api(`/api/backdrops/${b.id}`, { method: "DELETE" });
+        dropPicture(b.id);
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) dropPicture(b.id);
+        else failed.push({ id: b.id, name: b.name, message: e instanceof Error ? e.message : "the server did not say why" });
+      }
+      setBulk({ done: i + 1, total: chosen.length });
+    }
+    bulkRunning.current = false;
+    setBulk(null);
+    // What could not be deleted stays selected, to try again, as do pictures picked but hidden by the search.
+    const done = new Set(chosen.filter((b) => !failed.some((x) => x.id === b.id)).map((b) => b.id));
+    setPicked((prev) => new Set([...prev].filter((id) => !done.has(id))));
+    const gone = done.size;
+    if (failed.length) {
+      const kept = failed.length === 1 ? `“${failed[0].name}” was not deleted` : `“${failed[0].name}” and ${failed.length - 1} more were not deleted`;
+      fail(new Error(gone ? `Deleted ${gone} of ${chosen.length} pictures; ${kept}: ${failed[0].message}` : `${kept}: ${failed[0].message}`), "");
+    } else say(`Deleted ${gone === 1 ? `the picture “${chosen[0].name}”` : `${gone} pictures`}.`);
+    // The focus goes to the list's heading if it was on the selection bar (or nowhere), not if it has moved on meanwhile.
+    const at = document.activeElement;
+    if (!at || at === document.body || selectionBar.current?.contains(at)) picturesHeading.current?.focus();
+  }
+
   async function removePicture(b: Backdrop) {
     if (!window.confirm(`Delete the picture “${b.name}”? Scenes, templates, and the brand kit using it go back to a plain background; videos already rendered keep it.`)) return;
     try {
@@ -280,6 +329,28 @@ export default function AssetsPage() {
         ) : shownPictures.length === 0 ? (
           <p className="rounded-lg bg-slate-50 px-3 py-4 text-sm text-slate-600">No pictures match “{q.trim()}”.</p>
         ) : (
+          <>
+          {canEdit === true && (
+            <div ref={selectionBar} className="mb-3 flex flex-wrap items-center gap-2 text-xs" data-testid="picture-selection">
+              {/* Added to what is already picked, so a picture picked and then hidden by the search stays picked. */}
+              <button type="button" onClick={() => setPicked((prev) => new Set([...prev, ...shownPictures.map((b) => b.id)]))} disabled={!!bulk} className={uploadButton}>
+                {needle ? "Select all shown" : "Select all"}
+              </button>
+              {(selected.length > 0 || bulk) && (
+                <>
+                  <button type="button" onClick={() => setPicked(new Set())} disabled={!!bulk} className={uploadButton}>
+                    Clear selection
+                  </button>
+                  <button type="button" onClick={() => void removeSelected()} aria-disabled={!!bulk || undefined} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50 aria-disabled:opacity-60">
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden /> {bulk ? "Deleting…" : `Delete ${selected.length} selected`}
+                  </button>
+                </>
+              )}
+              <span role="status" className="text-slate-600">
+                {bulk ? `Deleting ${Math.min(bulk.done + 1, bulk.total)} of ${bulk.total}…` : selected.length ? `${selected.length} of ${shownPictures.length} selected` : ""}
+              </span>
+            </div>
+          )}
           <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4" data-testid="asset-pictures">
             {shownPictures.map((b) => (
               <li key={b.id}>
@@ -287,9 +358,13 @@ export default function AssetsPage() {
                   {/* eslint-disable-next-line @next/next/no-img-element -- the owner's own upload, served by the API */}
                   <img src={`/api/backdrops/${b.id}`} alt={b.name} loading="lazy" className="aspect-video w-full bg-slate-100 object-cover" />
                   <div className="p-2">
-                    <div className="truncate text-xs font-medium text-slate-900" title={b.name}>
-                      {b.name}
-                    </div>
+                    {/* A label, so the name is a larger target for the checkbox on a phone. */}
+                    <label className="flex items-center gap-1.5">
+                      {canEdit === true && <input type="checkbox" checked={picked.has(b.id)} disabled={!!bulk} onChange={(e) => pick(b.id, e.target.checked)} aria-label={`Select ${b.name}`} className="h-3.5 w-3.5 shrink-0 accent-brand-600" />}
+                      <span className="min-w-0 truncate text-xs font-medium text-slate-900" title={b.name}>
+                        {b.name}
+                      </span>
+                    </label>
                     <div className="text-[11px] text-slate-500">
                       {b.mimeType === "image/png" ? "PNG" : "JPEG"} · {formatDate(b.createdAt)}
                     </div>
@@ -320,6 +395,7 @@ export default function AssetsPage() {
               </li>
             ))}
           </ul>
+          </>
         )}
       </section>
     </>

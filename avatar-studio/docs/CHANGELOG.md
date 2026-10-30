@@ -619,3 +619,13 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - After a rename the menu still said "Name A–Z" over a list out of order, and choosing the same option again does nothing in a native menu. A "Sort again" button now appears when the list is out of order, and each sort is announced.
     - The e2e focus check would have passed without the held order. It now renames the first card to a name that sorts last, so the card would move without it.
     - The docs promised accents were always ignored; name order follows the browser's language (in Swedish, Ä sorts after Z). They now say so, and the unit tests pin the language and cover ties and the held-order helpers.
+- Rename a saved template (`f2b3b26`): `PATCH /api/templates/:id` changes a template's name or description and keeps everything else, and each saved template on the Templates page has an Edit button opening a form in the card (editors only, as Delete now is too; viewers see the view-only notice).
+  - An independent review found nothing blocking. Fixed before the commit:
+    - The form always sent both fields, so a description edit could undo another editor's rename made while it was open. It now sends only what was changed in it, and follows a save from elsewhere in fields not touched.
+    - Escape closed the form while saving, while an input method was composing, and from the description box, losing what was typed. It is now ignored there, as in the page's other forms, and Cancel waits for a save.
+    - A name of spaces was refused in a banner far from the form. It is now explained at the field, which is marked invalid and takes the focus.
+    - The viewer check in the e2e test could pass before the role had loaded. It now waits for the view-only notice.
+    - The accessibility scan ran with the form closed; it now also runs with it open.
+    - A second save under the same name was not announced, and sighted users got no confirmation. Saves now show a note and are announced every time.
+    - Smaller points: the card keeps its title heading while edited, the focus falls back to the list's heading when the Edit button is gone, a list read before a save is read again after it, and a template out of reach is "no longer available" rather than "already deleted".
+    - Unit tests now cover two edits to different fields racing, a delete between read and write, and giving up after five tries; the docs give the `403`, the `409`, and the trimming.

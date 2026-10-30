@@ -590,3 +590,8 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The upload buttons were disabled at the limit without saying why, and the picture buttons were under the 24px target size. Both are fixed.
     - While the role loaded, editors briefly saw "No words kept with this clip". Nothing is said until the role is known.
   - Also fixed: the full suite caught the editor bringing back a draft after "Generate video". An autosave still pending, or re-armed by data arriving before the page moved on, wrote the cleared draft back. Nothing autosaves once a render starts.
+- Start a video set against one of your pictures (`04206a9`): "Use in a video" on a picture of the Assets page opens the editor at `/create?picture=<id>` with the first scene set against it and the video named after it, in a draft of its own; the brand kit's default background does not replace it.
+  - An independent review found the editor logic sound. Fixed before the commit:
+    - The e2e step checked that a draft existed rather than that it held the words typed, so a reload could race the next save. It now waits for the words.
+    - A start opened and left untouched saved a draft, because the title it gave the video counted as an edit, so later visits restored it ("Restored your unsent draft"). Such a title is no longer an edit, for clip starts too.
+    - The picture's link had no visible text and a title that did not match its name. It now reads "Use", its title matches, and its icon is hidden from screen readers.

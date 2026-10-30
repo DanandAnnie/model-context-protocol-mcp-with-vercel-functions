@@ -4820,6 +4820,8 @@ test("a dub can follow the brand glossary: terms kept as written and fixed trans
     expect((await page.request.put("/api/brand", { data: { ...(before ?? {}), name: before?.name ?? "Acme", primaryColor: before?.primaryColor ?? "#0f766e", glossary: ["Acme Cloud", "Zeno"] } })).ok()).toBe(true);
     // The rules are written on the brand page, one per line; a line it cannot read is pointed out.
     await page.goto("/brand");
+    // The stored kit loads into the form after the page renders; typing before it would be overwritten by it.
+    await expect(page.getByLabel("Never translate")).toHaveValue("Acme Cloud\nZeno");
     const rules = page.getByLabel("Always translate as");
     await rules.fill("free trial = prueba gratis [Spanish]\nCEO PDG");
     await page.getByRole("button", { name: "Save brand kit" }).click();

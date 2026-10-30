@@ -106,17 +106,24 @@ export async function createClip(input: z.infer<typeof clipUploadSchema>, ownerI
 }
 
 /** Stores checked audio as a new clip, within the length and the account's number of clips. */
-export async function keepClip(input: { name: string; mimeType: AudioClipType; bytes: Uint8Array; seconds: number }, ownerId: string = LOCAL_OWNER): Promise<AudioClip> {
-  const { name, mimeType, bytes, seconds } = input;
+export async function keepClip(input: { name: string; mimeType: AudioClipType; bytes: Uint8Array; seconds: number; transcript?: string }, ownerId: string = LOCAL_OWNER): Promise<AudioClip> {
+  const { name, mimeType, bytes, seconds, transcript } = input;
   if (seconds < 0.5) throw new ValidationError("The clip is too short to speak (half a second at least)");
   if (seconds > MAX_CLIP_SECONDS) throw new ValidationError(`Clips can be at most ${MAX_CLIP_SECONDS} seconds long`);
   if ((await getStore().list<AudioClip>("clip", ownerId)).length >= MAX_CLIPS) {
     throw new ConflictError(`At most ${MAX_CLIPS} audio clips per account; delete one you no longer use`);
   }
-  const clip: AudioClip = { id: newId("clip"), ownerId, name, mimeType, bytes: bytes.byteLength, durationSec: Math.round(seconds * 10) / 10, createdAt: nowIso() };
+  const clip: AudioClip = { id: newId("clip"), ownerId, name, mimeType, bytes: bytes.byteLength, durationSec: Math.round(seconds * 10) / 10, ...(transcript?.trim() ? { transcript: transcript.trim() } : {}), createdAt: nowIso() };
   // Bytes first: a clip row that is listed always has its audio.
   await getStore().put<ClipAudio>("clipaudio", { id: audioRowId(clip.id), clipId: clip.id, ownerId, mimeType, data: Buffer.from(bytes).toString("base64") });
   return view(await getStore().put("clip", clip));
+}
+
+/** Gives a clip without words the words it says (a clip kept before transcripts were); one that has words keeps them. */
+export async function addClipTranscript(clip: AudioClip, transcript: string): Promise<AudioClip> {
+  const current = await getStore().get<AudioClip>("clip", clip.id);
+  if (!current || current.transcript || !transcript.trim()) return clip;
+  return view(await getStore().put("clip", { ...current, transcript: transcript.trim() }));
 }
 
 /** The account's clip as the API shows it, or null when there is none by that id. */

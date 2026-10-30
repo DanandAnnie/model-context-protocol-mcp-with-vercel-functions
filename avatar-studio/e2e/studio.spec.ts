@@ -1132,6 +1132,34 @@ test("an instant voice is made from a recording with the speaker's agreement, an
   expect((await page.request.get(`/api/clips/${keptClips[0].id}`)).headers()["content-type"]).toMatch(/^audio\/wav/);
   const keptAgain = await page.request.post(`/api/voice-changer/changes/${spokenRow.id}/clip`);
   expect([keptAgain.status(), ((await keptAgain.json()) as { clip: { id: string } }).clip.id]).toEqual([200, keptClips[0].id]);
+  // A presenter can speak it: the editor opens with one scene lip-syncing to the clip, its words as the script.
+  const makeVideo = spokenCard.getByRole("link", { name: /^Make a video: Welcome to the team in / });
+  await expect(makeVideo).toHaveAttribute("href", `/create?clip=${keptClips[0].id}`);
+  const editor = await page.context().newPage();
+  await editor.goto(`/create?clip=${keptClips[0].id}`);
+  await expect(editor.locator("input[placeholder='Video title']")).toHaveValue(`Welcome to the team in ${name}`);
+  await expect(editor.getByTestId("scene-audio-name")).toHaveText(`Welcome to the team in ${name}`);
+  await expect(editor.getByText("What the clip says")).toBeVisible();
+  await expect(editor.locator("textarea").first()).toHaveValue("Welcome to the team.");
+  // Its edits are kept in a draft of their own: a reload brings them back rather than the clip's words.
+  await editor.locator("textarea").first().fill("Welcome to the team, everyone.");
+  await expect.poll(() => editor.evaluate((id) => Object.entries(localStorage).some(([k, v]) => k.endsWith(`:clip:${id}`) && v.includes("everyone")), keptClips[0].id)).toBe(true);
+  await editor.reload();
+  await expect(editor.locator("textarea").first()).toHaveValue("Welcome to the team, everyone.");
+  await expect(editor.getByTestId("scene-audio-name")).toHaveText(`Welcome to the team in ${name}`);
+  // In a scene's Audio tab, the clip's words fill an empty script; words typed are kept.
+  await editor.getByRole("button", { name: "Add scene" }).click();
+  await editor.getByLabel("Use a saved clip").selectOption(keptClips[0].id);
+  await expect(editor.locator("textarea").first()).toHaveValue("Welcome to the team.");
+  await editor.getByRole("button", { name: "Add scene" }).click();
+  await editor.locator("textarea").first().fill("My own words.");
+  await editor.getByLabel("Use a saved clip").selectOption(keptClips[0].id);
+  await expect(editor.locator("textarea").first()).toHaveValue("My own words.");
+  // A clip that is gone says so and leaves the video empty.
+  await editor.goto("/create?clip=clip_madeup123");
+  await expect(editor.getByText("That audio clip is no longer available")).toBeVisible();
+  await expect(editor.getByTestId("scene-audio-name")).toHaveCount(0);
+  await editor.close();
   expect((await page.request.delete(`/api/clips/${keptClips[0].id}`)).ok()).toBe(true);
   for (const key of ["provider", "providerVoiceId", "providerAudio", "ownerId", "clipId"]) expect(Object.keys(spokenRow)).not.toContain(key);
   page.once("dialog", (d) => d.accept());

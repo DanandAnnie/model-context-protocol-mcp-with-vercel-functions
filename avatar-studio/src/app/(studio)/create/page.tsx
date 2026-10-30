@@ -262,6 +262,11 @@ function CreateInner() {
   const layout: SceneLayout = active.layout ?? DEFAULT_LAYOUT;
   // The default layout is stored as absent, so an untouched scene renders exactly as before.
   const setLayout = (value: SceneLayout) => updateScene(activeIdx, { layout: isDefaultLayout(value) ? undefined : value });
+  /** True when a scene's script is still exactly the words of the clip it uses. */
+  const clipWords = (sc: Scene) => {
+    const words = sc.audioId ? clips.find((c) => c.id === sc.audioId)?.transcript : undefined;
+    return !!words && sc.script.trim() === words.trim();
+  };
   function updateScene(idx: number, patch: Partial<Scene>) {
     setScenes((prev) => prev.map((sc, i) => (i === idx ? withBackground({ ...sc, ...patch }, patch.background ?? sc.background) : sc)));
   }
@@ -696,18 +701,23 @@ function CreateInner() {
   const spacesKnown = !!spaces || !!spacesError;
   const templateId = params.get("template");
   const fromId = params.get("from");
-  // A copy of a video or a template keeps its own draft, so editing one never overwrites the unsent draft of a plain
-  // visit, and a reload brings back the edits rather than the original.
-  const draftSource = fromId ? `from:${fromId}` : templateId ? `template:${templateId}` : "";
+  // A video spoken by one of the account's audio clips (?clip=, from a recording kept in the voice changer).
+  const clipStart = !fromId && !templateId ? params.get("clip") : null;
+  // A copy of a video, a template, or a clip keeps its own draft, so editing one never overwrites the unsent draft of a
+  // plain visit, and a reload brings back the edits rather than the original.
+  const draftSource = fromId ? `from:${fromId}` : templateId ? `template:${templateId}` : clipStart ? `clip:${clipStart}` : "";
   const editKey = draftKey && (draftSource ? `${draftKey}:${draftSource}` : draftKey);
   // A Video Agent plan to review (?plan=agent), read once: a refresh comes back to the autosaved draft of it.
   const agentPlan = useRef<AgentDraft | null | undefined>(undefined);
   const [fromAgent, setFromAgent] = useState(false);
 
+  // Whether the requested copy, template, or clip had kept edits when the editor opened (autosave writes more later).
+  const hadEdits = useRef(false);
   // Restore an unsent draft: a plain visit's, or the edits of the copy or template requested.
   useEffect(() => {
     if (hydrated.current || !spacesKnown) return;
     hydrated.current = true;
+    hadEdits.current = !!editKey && !!draftSource && !!readDraft(editKey);
     if (!draftSource && params.get("plan") === "agent") {
       if (agentPlan.current === undefined) agentPlan.current = takeAgentDraft();
       const p = agentPlan.current;
@@ -806,8 +816,9 @@ function CreateInner() {
     if (b.defaultResolution) setResolution(b.defaultResolution);
     if (templateId) return;
     if (b.defaultAspect) setAspect(b.defaultAspect);
-    setScenes((prev) => prev.map((sc) => (sc.script.trim() ? sc : withBackground(sc, b.defaultBackground ?? { type: "color", value: b.primaryColor }))));
-  }, [brandData, fromId, templateId, draftRestored, fromAgent]);
+    // A scene the clip start filled with the clip's words is as fresh as an empty one.
+    setScenes((prev) => prev.map((sc) => (sc.script.trim() && !(clipStart && sc.audioId === clipStart) ? sc : withBackground(sc, b.defaultBackground ?? { type: "color", value: b.primaryColor }))));
+  }, [brandData, fromId, templateId, draftRestored, fromAgent, clipStart]);
 
   // Pre-fill from a template (?template=) or an existing video (?from=), unless its edits were kept from before.
   const keptEdits = () => !!editKey && !!draftSource && !!readDraft(editKey);
@@ -889,6 +900,25 @@ function CreateInner() {
       .catch((e) => setErr(e instanceof Error ? e.message : "Could not load the original video"));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once the space (and so the draft key) is known
   }, [fromId, spacesKnown]);
+
+  // Start from a clip (?clip=): one scene lip-syncing to it, its words as the script when they are known. Once the
+  // clips are loaded; one that is gone says so and leaves an empty video.
+  const clipApplied = useRef(false);
+  useEffect(() => {
+    if (!clipStart || clipApplied.current || !hydrated.current || (!clipData && !clipsError)) return;
+    clipApplied.current = true;
+    // Kept edits came back with the draft; words typed while the clips were loading are not replaced either.
+    if (hadEdits.current || scenesNow.current.some(hasContent)) return;
+    const clip = clipData?.clips.find((c) => c.id === clipStart);
+    if (!clip) {
+      setErr(clipsError ? "Your audio clips could not be loaded, so the video cannot start from one; reload to try again." : "That audio clip is no longer available; choose another in a scene's Audio tab.");
+      return;
+    }
+    setTitle((t) => (t === "Untitled video" ? clip.name : t));
+    setScenes((prev) => [newScene(clip.transcript ?? "", prev[0]?.background, { audioId: clip.id })]);
+    setActiveIdx(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once the space (and so the draft key) and the clips are known
+  }, [clipStart, spacesKnown, clipData, clipsError]);
 
   // Default selections once data arrives: the first avatar, and its default voice if it has one
   // (a draft, template, copy, or brand kit applied below overrides both).
@@ -1297,8 +1327,14 @@ function CreateInner() {
               clips={clips}
               clipId={active.audioId}
               disabled={canEdit === false}
-              onUse={(clip) => updateScene(activeIdx, { audioId: clip.id, voiceId: undefined })}
-              onClear={() => updateScene(activeIdx, { audioId: undefined })}
+              // A clip whose words are known fills a scene that has none yet, or still has the last clip's words; words
+              // typed are kept. Those of a clip taken away go with it, so a voice never reads them by mistake.
+              onUse={(clip) => {
+                const wordsOfClip = clipWords(active);
+                const script = clip.transcript && (!active.script.trim() || wordsOfClip) ? clip.transcript : wordsOfClip ? "" : null;
+                updateScene(activeIdx, { audioId: clip.id, voiceId: undefined, ...(script !== null ? { script } : {}) });
+              }}
+              onClear={() => updateScene(activeIdx, { audioId: undefined, ...(clipWords(active) ? { script: "" } : {}) })}
               onSaved={(clip) => setClipData((prev) => ({ clips: [clip, ...(prev?.clips ?? []).filter((c) => c.id !== clip.id)] }))}
             />
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">

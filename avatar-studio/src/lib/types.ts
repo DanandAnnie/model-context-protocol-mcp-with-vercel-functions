@@ -766,6 +766,8 @@ export interface AudioClip {
   mimeType: AudioClipType;
   bytes: number;
   durationSec: number;
+  /** What the clip says, when known: the text of a voice changer recording it was kept from. A scene using it starts with it as its script. */
+  transcript?: string;
   /** Provider-side upload ids (HeyGen asset id, D-ID audio URL), cached after the first render. Never returned by the API. */
   providerAssetIds?: Record<string, string>;
   createdAt: string;

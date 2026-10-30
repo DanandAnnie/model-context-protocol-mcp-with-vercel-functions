@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { AudioLines, Captions, Download, FileAudio, Mic2, Play, Trash2, Type, Upload, Wand2 } from "lucide-react";
+import { AudioLines, Captions, Clapperboard, Download, FileAudio, Mic2, Play, Trash2, Type, Upload, Wand2 } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
@@ -776,9 +776,17 @@ export default function VoiceChangerPage() {
                             const kept = c.savedClipId ? clips.find((x) => x.id === c.savedClipId) : undefined;
                             if (kept) {
                               return (
-                                <span tabIndex={-1} className="inline-flex items-center gap-1 text-xs text-slate-600 outline-none focus:ring-2 focus:ring-brand-500" data-testid="voice-change-kept">
-                                  <FileAudio className="h-3 w-3" aria-hidden /> Kept as the clip “{kept.name}”
-                                </span>
+                                <>
+                                  <span tabIndex={-1} className="inline-flex items-center gap-1 text-xs text-slate-600 outline-none focus:ring-2 focus:ring-brand-500" data-testid="voice-change-kept">
+                                    <FileAudio className="h-3 w-3" aria-hidden /> Kept as the clip “{kept.name}”
+                                  </span>
+                                  {canEdit === true && (
+                                    // A presenter speaking it: the editor opens with one scene lip-syncing to the clip.
+                                    <Link href={`/create?clip=${kept.id}`} className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:underline" aria-label={`Make a video: ${c.title}, ${formatDate(c.createdAt)}`}>
+                                      <Clapperboard className="h-3 w-3" aria-hidden /> Make a video
+                                    </Link>
+                                  )}
+                                </>
                               );
                             }
                             if (canEdit !== true || Date.now() - Date.parse(c.checkedAt ?? c.updatedAt) > VOICE_RESULT_LINK_MS) return null;

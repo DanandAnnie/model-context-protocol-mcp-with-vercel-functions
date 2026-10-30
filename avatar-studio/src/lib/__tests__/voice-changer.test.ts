@@ -16,6 +16,7 @@ import {
   exportOwnerData,
   forgetVoiceChangerChecks,
   instantVoicePreview,
+  keepClip,
   keepVoiceChangeAsClip,
   instantVoiceSchema,
   listPublicVoices,
@@ -33,7 +34,7 @@ import { ConflictError, LimitError, NotFoundError, UpstreamError, ValidationErro
 import { providerStatus } from "../providers";
 import { MockAvatarProvider } from "../providers/avatar/mock";
 import { getStore } from "../store";
-import type { InstantVoice, VoiceChange, VoiceChangeWords } from "../types";
+import type { AudioClip, InstantVoice, VoiceChange, VoiceChangeWords } from "../types";
 
 beforeEach(() => {
   globalThis.__avatarStudioStore = new MemoryStore();
@@ -754,6 +755,7 @@ describe("voice changer", () => {
     assert.equal(first.clip.id, second.clip.id);
     assert.equal(first.existing, false);
     assert.deepEqual([first.clip.name, first.clip.mimeType, first.clip.durationSec], [spoken.title, "audio/wav", spoken.durationSec]);
+    assert.equal(first.clip.transcript, "Welcome to the spring open house, everyone.", "spoken text keeps its words with the clip");
     assert.equal(first.clip.providerAssetIds, undefined, "the clip is shown as the API shows clips");
     const after = (await getStore().get<VoiceChange>("voicechange", spoken.id))!;
     assert.equal(after.savedClipId, first.clip.id);
@@ -762,6 +764,14 @@ describe("voice changer", () => {
     // Asked again: the same clip, made once.
     const again = await keepVoiceChangeAsClip(spoken.id, "u1");
     assert.deepEqual([again.clip.id, again.existing], [first.clip.id, true]);
+    // A clip kept before clips carried their words gets them when asked again; words it has are kept.
+    const stored = (await getStore().get<AudioClip>("clip", first.clip.id))!;
+    const { transcript: _t, ...bare } = stored;
+    void _t;
+    await getStore().put("clip", bare);
+    assert.equal((await keepVoiceChangeAsClip(spoken.id, "u1")).clip.transcript, "Welcome to the spring open house, everyone.");
+    await getStore().put("clip", { ...stored, transcript: "Edited words." });
+    assert.equal((await keepVoiceChangeAsClip(spoken.id, "u1")).clip.transcript, "Edited words.");
     assert.equal((await getStore().list("clip", "u1")).length - 1, 1, "one clip beside the voice's sample");
     // The clip deleted: keeping it makes a new one.
     await deleteClip(first.clip.id, "u1");
@@ -782,6 +792,10 @@ describe("voice changer", () => {
     await assert.rejects(keepVoiceChangeAsClip(spoken.id, "u1"), /over an hour ago, and its link from the renderer has expired/);
     await assert.rejects(keepVoiceChangeAsClip("vc_missing", "u1"), NotFoundError);
     await assert.rejects(keepVoiceChangeAsClip("not-an-id", "u1"), /Unknown recording/);
+    // Words of only blanks are no words; others are kept trimmed.
+    const wav = new Uint8Array(Buffer.from(wavDataUrl().split(",")[1], "base64"));
+    assert.equal((await keepClip({ name: "Blank", mimeType: "audio/wav", bytes: wav, seconds: 1, transcript: "  \n " }, "u3")).transcript, undefined);
+    assert.equal((await keepClip({ name: "Said", mimeType: "audio/wav", bytes: wav, seconds: 1, transcript: " Hi there. " }, "u3")).transcript, "Hi there.");
   });
 
   it("reads HeyGen's file through the public-address guard and keeps only WAV or MP3 within the clip limits", async () => {
@@ -798,6 +812,10 @@ describe("voice changer", () => {
     const kept = await keepVoiceChangeAsClip(change.id, "u1", fetchImpl);
     assert.deepEqual(asked, [change.audioUrl]);
     assert.deepEqual([kept.clip.mimeType, kept.clip.durationSec], ["audio/wav", 1], "a WAV's length is read from the file, its kind from its bytes");
+    assert.equal(kept.clip.transcript, "Hello there.");
+    // A recording spoken again has no text of its own, so its clip has no words to start a scene with.
+    await getStore().put("voicechange", { ...change, id: "vc_heygen_sts", text: undefined, clipId: "clip_x" });
+    assert.equal((await keepVoiceChangeAsClip("vc_heygen_sts", "u1", fetchImpl)).clip.transcript, undefined);
     // An MP3 takes the length HeyGen reported.
     const mp3 = new Uint8Array([0x49, 0x44, 0x33, 4, 0, 0, 0, 0, 0, 0, 0xff, 0xfb, 0x90, 0x64]);
     answer = () => new Response(mp3);
@@ -828,6 +846,6 @@ describe("voice changer", () => {
     new DataView(float.buffer).setUint16(20, 3, true);
     answer = () => new Response(float);
     await assert.rejects(keepVoiceChangeAsClip(change.id, "u1", fetchImpl), /WAV file for “Hello there in Host” is not one a clip can hold/);
-    assert.equal((await getStore().list("clip", "u1")).length, 2, "only the two good files became clips");
+    assert.equal((await getStore().list("clip", "u1")).length, 3, "only the three good files became clips");
   });
 });

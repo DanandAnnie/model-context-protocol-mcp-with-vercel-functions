@@ -11,7 +11,7 @@ import { MAX_CLIP_SECONDS, VOICE_RESULT_LINK_MS, type AudioClip, type AudioClipT
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, LimitError, NotFoundError, UpstreamError, ValidationError } from "../errors";
 import { owned, stripUndefined } from "./shared";
-import { MAX_CLIP_BYTES, findClip, getClip, keepClip, looksMp3, wavSeconds } from "./clips";
+import { MAX_CLIP_BYTES, addClipTranscript, findClip, getClip, keepClip, looksMp3, wavSeconds } from "./clips";
 import { ResponseTooLargeError, safeFetch, type FetchLike } from "../safe-fetch";
 import { UnsafeUrlError } from "../safe-url";
 import { getBackdrop, getBackdropImage } from "./backdrops";
@@ -182,7 +182,8 @@ export async function keepVoiceChangeAsClip(id: string, ownerId: string = LOCAL_
 
 async function keepAsClip(change: VoiceChange, ownerId: string, fetchImpl?: FetchLike): Promise<{ clip: AudioClip; existing: boolean }> {
   const kept = change.savedClipId ? await findClip(change.savedClipId, ownerId) : null;
-  if (kept) return { clip: kept, existing: true };
+  // A clip kept from spoken text before clips carried their words gets them now.
+  if (kept) return { clip: !kept.transcript && change.text ? await addClipTranscript(kept, change.text) : kept, existing: true };
   if (change.status !== "completed" || !change.audioUrl) throw new ValidationError(`“${change.title}” is ${change.status === "failed" ? "a recording that could not be made" : "still being made"}; keep it once it is ready`);
   if (Date.now() - Date.parse(change.checkedAt ?? change.updatedAt) > VOICE_RESULT_LINK_MS) {
     throw new ValidationError(`“${change.title}” was made over an hour ago, and its link from the renderer has expired; make it again in the voice changer`);
@@ -220,7 +221,8 @@ async function keepAsClip(change: VoiceChange, ownerId: string, fetchImpl?: Fetc
   if (mimeType === "audio/wav" && seconds === null) throw new ValidationError(`The renderer's WAV file for “${change.title}” is not one a clip can hold (PCM, 8 to 24 bits); speak it again as an MP3`);
   if (seconds === null) throw new ValidationError(`The length of “${change.title}” is not known, so it cannot be kept as a clip`);
   if (seconds > MAX_CLIP_SECONDS) throw new ValidationError(`“${change.title}” is longer than ${MAX_CLIP_SECONDS} seconds, the most a clip holds`);
-  const clip = await keepClip({ name: change.title.slice(0, 80), mimeType, bytes, seconds }, ownerId);
+  // Spoken text keeps its words, so a scene lip-syncing to the clip starts with them as its script (and its captions).
+  const clip = await keepClip({ name: change.title.slice(0, 80), mimeType, bytes, seconds, transcript: change.text }, ownerId);
   // Remembered without touching `updatedAt`, which dates the renderer's link; a recording changed or deleted meanwhile keeps its own row.
   const current = await getStore().get<VoiceChange>("voicechange", change.id);
   if (current && !(await getStore().putIf("voicechange", { ...current, savedClipId: clip.id }, "updatedAt", current.updatedAt))) {

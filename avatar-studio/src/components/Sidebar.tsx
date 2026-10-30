@@ -1,36 +1,16 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMobileNav } from "@/components/MobileNav";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
-import { AudioLines, Camera, Clapperboard, Film, FolderOpen, Music, Wand2, Eraser, Home, Languages, Layers3, LayoutTemplate, LogOut, MessageSquare, Mic2, MonitorPlay, Palette, Settings, Users, Video, Sparkles, X } from "lucide-react";
+import { Clapperboard, LogOut, Search, Sparkles, X } from "lucide-react";
+import { NAV } from "@/components/nav";
+import { isApple, openQuickFind } from "@/components/QuickFind";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import type { ProviderStatus } from "@/lib/types";
 
-const NAV = [
-  { href: "/home", label: "Home", icon: Home },
-  { href: "/create", label: "Create video", icon: Clapperboard },
-  { href: "/agent", label: "Video Agent", icon: Sparkles },
-  { href: "/cinematic", label: "Cinematic", icon: Film },
-  { href: "/footage", label: "B-roll", icon: MonitorPlay },
-  { href: "/photos", label: "Photo shoot", icon: Camera },
-  { href: "/videos", label: "My videos", icon: Video },
-  { href: "/templates", label: "Templates", icon: LayoutTemplate },
-  { href: "/batch", label: "Personalize", icon: Layers3 },
-  { href: "/avatars", label: "Avatars", icon: Users },
-  { href: "/voices", label: "Voices", icon: Mic2 },
-  { href: "/assets", label: "Assets", icon: FolderOpen },
-  { href: "/translate", label: "Video translate", icon: Languages },
-  { href: "/cleanup", label: "Clean up", icon: Eraser },
-  { href: "/lipsync", label: "Lip sync", icon: AudioLines },
-  { href: "/music", label: "Music", icon: Music },
-  { href: "/voice-changer", label: "Voice changer", icon: Wand2 },
-  { href: "/interactive", label: "Interactive avatar", icon: MessageSquare },
-  { href: "/brand", label: "Brand kit", icon: Palette },
-  { href: "/settings", label: "Settings", icon: Settings },
-];
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -44,6 +24,11 @@ export function Sidebar() {
     router.refresh();
   }
   const { open, setOpen } = useMobileNav();
+  // The shortcut as this browser's keyboard has it (worked out after the first render, which the server also makes).
+  const [shortcut, setShortcut] = useState("Ctrl K");
+  useEffect(() => {
+    if (isApple()) setShortcut("⌘K");
+  }, []);
 
   // Close the drawer on navigation.
   useEffect(() => setOpen(false), [pathname, setOpen]);
@@ -56,7 +41,8 @@ export function Sidebar() {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     closeButton.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      // A dialog over the drawer (quick find) takes its own Escape; the drawer stays open beneath it.
+      if (e.key === "Escape" && !document.querySelector("dialog[open]")) setOpen(false);
     };
     document.addEventListener("keydown", onKey);
     return () => {
@@ -94,6 +80,21 @@ export function Sidebar() {
         >
           <Clapperboard className="h-4 w-4" /> Create video
         </Link>
+      </div>
+
+      <div className="px-3 pb-2">
+        <button
+          type="button"
+          onClick={openQuickFind}
+          aria-keyshortcuts="Control+K Meta+K"
+          className="flex w-full items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+        >
+          <Search className="h-4 w-4" aria-hidden />
+          <span className="flex-1 text-left">Search</span>
+          <kbd className="rounded border border-slate-200 px-1.5 text-[11px] font-sans text-slate-500" aria-hidden>
+            {shortcut}
+          </kbd>
+        </button>
       </div>
 
       <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3">

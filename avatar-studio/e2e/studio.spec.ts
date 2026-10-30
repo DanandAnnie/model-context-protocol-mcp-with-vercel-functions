@@ -5697,3 +5697,60 @@ test("the Assets page keeps the account's audio clips and pictures: upload, word
   const a11y = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
   expect(a11y.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
 });
+
+test("quick find opens with Ctrl+K and goes to a page, a video, or a template from the keyboard", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const v = await createVideoViaApi(page, `Quarterly kickoff ${tag}`);
+  await page.goto("/home");
+  const box = page.getByRole("combobox", { name: "Find a page, video, or template" });
+  const options = page.getByRole("listbox", { name: "Results" }).getByRole("option");
+  // Ctrl+K opens it over any page; with nothing typed it offers the pages, the first one highlighted.
+  await page.keyboard.press("Control+k");
+  await expect(box).toBeFocused();
+  await expect(options.first()).toHaveText(/^Home\s*Page$/);
+  await expect(options.first()).toHaveAttribute("aria-selected", "true");
+  await expect(box).toHaveAttribute("aria-activedescendant", (await options.first().getAttribute("id"))!);
+  // The dialog meets the accessibility rules.
+  const axe = await new AxeBuilder({ page }).include("dialog[aria-label='Quick find']").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(axe.violations).toEqual([]);
+  // A video is found by its title, ignoring case, and Enter opens it.
+  await box.fill(`QUARTERLY KICKOFF ${tag}`);
+  await expect(options).toHaveCount(1);
+  await expect(options.first()).toHaveText(new RegExp(`^Quarterly kickoff ${tag}\\s*Video$`));
+  await expect(page.getByRole("status").filter({ hasText: /^1 result$/ })).toHaveCount(1);
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(new RegExp(`/videos/${v.id}$`));
+  await expect(page.getByRole("dialog", { name: "Quick find" })).toBeHidden();
+  // From the sidebar's Search button: the arrow keys move through pages and templates, wrapping round.
+  const search = page.getByRole("button", { name: "Search", exact: true });
+  await search.click();
+  await expect(box).toBeFocused();
+  // Videos are searched a moment after typing stops; the results are marked busy until their answer is in.
+  const results = page.getByRole("listbox", { name: "Results" });
+  await box.fill("listing walkthrough");
+  await expect(results).toHaveAttribute("aria-busy", "false");
+  await expect(options.filter({ hasText: /Template$/ })).toHaveText([/^Property listing walkthrough\s*Template$/]);
+  await box.fill("voice");
+  await expect(results).toHaveAttribute("aria-busy", "false");
+  await expect(options.filter({ hasText: /Page$/ })).toHaveText([/^Voices/, /^Voice changer/]);
+  await page.keyboard.press("ArrowUp");
+  await expect(options.last()).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("ArrowDown");
+  await expect(options.first()).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/voice-changer$/);
+  // Nothing found says so; Escape closes it and the focus goes back to the button that opened it.
+  await search.click();
+  await box.fill("zzqx nothing here");
+  await expect(page.getByText("Nothing matches “zzqx nothing here”.")).toBeVisible();
+  await expect(results).toHaveCount(0);
+  expect((await new AxeBuilder({ page }).include("dialog[aria-label='Quick find']").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze()).violations).toEqual([]);
+  // Ctrl+K again while it is open leaves it as it is.
+  await page.keyboard.press("Control+k");
+  await expect(box).toHaveValue("zzqx nothing here");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Quick find" })).toBeHidden();
+  await expect(search).toBeFocused();
+  await expect(page).toHaveURL(/\/voice-changer$/);
+});

@@ -2,7 +2,9 @@
 import { z } from "zod";
 import { nowIso } from "../ids";
 import { getStore } from "../store";
-import { WATERMARK_CORNERS, backdropIdOf, footageIdOf, type BrandKit } from "../types";
+import { MAX_CLOSING_SCRIPT, MAX_SCENE_TEXT, WATERMARK_CORNERS, backdropIdOf, footageIdOf, type BrandKit } from "../types";
+import { silentProblem } from "../pauses";
+import { graphemes } from "../text";
 import { LOCAL_OWNER } from "../owner-id";
 import { ValidationError } from "../errors";
 import { getAvatar } from "./avatars";
@@ -80,6 +82,29 @@ export const brandKitSchema = z.object({
   defaultResolution: z.enum(["720p", "1080p"]).optional(),
   captionsByDefault: z.boolean().optional(),
   watermark: z.enum(WATERMARK_CORNERS).optional(),
+  /**
+   * The scene the editor's Closing scene button puts at the end of a video: what the presenter says (up to 1000
+   * characters, pauses allowed, as a scene's script) and text on screen, read as a scene's is (one line, its spaces
+   * collapsed, up to 120 characters as a reader counts them). Both blank means no closing scene.
+   */
+  closingScene: z
+    .object({
+      script: z.string().trim().max(MAX_CLOSING_SCRIPT).default(""),
+      text: z
+        .string()
+        .max(20_000)
+        .transform((t) => t.replace(/\s+/g, " ").trim())
+        .refine((t) => graphemes(t).length <= MAX_SCENE_TEXT, `On-screen text must be ${MAX_SCENE_TEXT} characters or fewer`)
+        .default(""),
+    })
+    .optional()
+    .superRefine((c, ctx) => {
+      if (!c || (!c.script && !c.text)) return;
+      // A scene cannot render without words (or a silent pause of a fitting length), so on-screen text alone is refused.
+      const silent = c.script ? silentProblem(c.script) : null;
+      if (!c.script) ctx.addIssue({ code: "custom", path: ["script"], message: "Add what the presenter says in the closing scene" });
+      else if (silent) ctx.addIssue({ code: "custom", path: ["script"], message: `The closing scene: ${silent}` });
+    }),
 });
 
 export const brandKitId = (ownerId: string) => `brand_${ownerId}`;
@@ -116,6 +141,7 @@ export async function saveBrandKit(input: z.infer<typeof brandKitSchema>, ownerI
     defaultResolution: input.defaultResolution,
     captionsByDefault: input.captionsByDefault,
     ...(input.watermark ? { watermark: input.watermark } : {}),
+    ...(input.closingScene?.script ? { closingScene: { script: input.closingScene.script, ...(input.closingScene.text ? { text: input.closingScene.text } : {}) } } : {}),
     updatedAt: nowIso(),
   };
   return getStore().put("brand", kit);

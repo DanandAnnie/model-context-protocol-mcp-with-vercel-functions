@@ -11,7 +11,7 @@ import { MAX_PRONUNCIATIONS, formatPronunciations, parsePronunciations } from "@
 import { MAX_FORCED_TRANSLATIONS, MAX_FORCED_TRANSLATION_LENGTH, MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH, MIN_GLOSSARY_TERM_LENGTH, formatForcedTranslations, parseForcedTranslations, parseGlossary } from "@/lib/glossary";
 import { LOGO_TYPES, logoDataUrlValid, logoFileType } from "@/lib/logo-types";
 import type { BrandSuggestion } from "@/lib/brand-import";
-import { backdropIdOf, footageIdOf, footageLength, footagePath, type FootageJob, type AspectRatio, type Avatar, type Backdrop, type BrandKit, type Resolution, type Voice, type WatermarkCorner } from "@/lib/types";
+import { MAX_CLOSING_SCRIPT, MAX_SCENE_TEXT, backdropIdOf, footageIdOf, footageLength, footagePath, type FootageJob, type AspectRatio, type Avatar, type Backdrop, type BrandKit, type Resolution, type Voice, type WatermarkCorner } from "@/lib/types";
 
 const DEFAULT_PRIMARY = "#4f46e5";
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -63,6 +63,8 @@ export default function BrandPage() {
   const [resolution, setResolution] = useState<Resolution | "">("");
   const [captions, setCaptions] = useState(false);
   const [watermark, setWatermark] = useState<WatermarkCorner | "">("");
+  const [closingScript, setClosingScript] = useState("");
+  const [closingText, setClosingText] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -103,6 +105,8 @@ export default function BrandPage() {
     setResolution(b.defaultResolution ?? "");
     setCaptions(!!b.captionsByDefault);
     setWatermark(b.watermark ?? "");
+    setClosingScript(b.closingScene?.script ?? "");
+    setClosingText(b.closingScene?.text ?? "");
     setSavedAt(b.updatedAt);
   }, [brandData]);
 
@@ -236,6 +240,7 @@ export default function BrandPage() {
           defaultResolution: resolution || undefined,
           captionsByDefault: captions,
           watermark: (logoUrl && watermark) || undefined,
+          closingScene: closingScript.trim() || closingText.trim() ? { script: closingScript, text: closingText } : undefined,
         }),
       });
       setSavedAt(brand.updatedAt);
@@ -268,6 +273,8 @@ export default function BrandPage() {
       setForced("");
       setCaptions(false);
       setWatermark("");
+      setClosingScript("");
+      setClosingText("");
       setSavedAt(null);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not remove the brand kit");
@@ -504,6 +511,16 @@ export default function BrandPage() {
           <Field label="Always translate as" hint="One rule per line, term = translation; add [Language] at the end for a rule in that language only. Translations, subtitle languages, and dubs that keep the glossary use the translation word for word, so pick a form that reads right without inflection. Up to 50.">
             <textarea aria-label="Always translate as" value={forced} onChange={(e) => setForced(e.target.value)} rows={3} placeholder={"CEO = Geschäftsführer [German]\nfree trial = essai gratuit [French]"} className={`${inputClass} font-mono text-xs`} />
           </Field>
+          <fieldset aria-describedby="closing-scene-about" className="space-y-3 rounded-lg border border-slate-200 p-4">
+            <legend className="px-1 text-sm font-medium text-slate-800">Closing scene</legend>
+            <p id="closing-scene-about" className="text-xs text-slate-500">The editor&apos;s Closing scene button puts this at the end of a video, on the brand background: a call to action, how to get in touch. Leave both blank for none.</p>
+            <Field label="What the presenter says" hintId="closing-script-hint" hint={`Up to ${MAX_CLOSING_SCRIPT} characters; [pause 1s] markers work as in a scene.`}>
+              <textarea aria-label="What the presenter says" aria-describedby="closing-script-hint" value={closingScript} onChange={(e) => setClosingScript(e.target.value)} rows={2} maxLength={MAX_CLOSING_SCRIPT} placeholder="Thanks for watching. Call us today to book your private showing." className={inputClass} />
+            </Field>
+            <Field label="On-screen text" hintId="closing-text-hint" hint={`Shown at the bottom of the closing scene, up to ${MAX_SCENE_TEXT} characters; about 20 fit across a portrait or square frame (the editor uses a smaller size when needed). No renderer draws on-screen text yet; the editor and the share page's chapters show it.`}>
+              <input aria-label="On-screen text" aria-describedby="closing-text-hint" value={closingText} onChange={(e) => setClosingText(e.target.value)} placeholder="acme.com · 555-0100" className={inputClass} />
+            </Field>
+          </fieldset>
           <ErrorBanner message={saveErr} />
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
             <span className="text-xs text-slate-500">{savedAt ? `Saved ${new Date(savedAt).toLocaleString()}` : "Not saved yet"}</span>

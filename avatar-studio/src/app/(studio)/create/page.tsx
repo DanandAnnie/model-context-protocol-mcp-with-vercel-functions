@@ -1,7 +1,7 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
-import { Captions, ChevronLeft, ChevronRight, Clapperboard, Copy, Image as ImageIcon, Layers, Merge, MessagesSquare, Mic2, Palette, Pause, Play, Plus, Redo2, Replace, Scissors, Sparkles, Square, Trash2, Undo2, Upload, Users, Wand2, X } from "lucide-react";
+import { Captions, ChevronLeft, ChevronRight, Clapperboard, Copy, Flag, Image as ImageIcon, Layers, Merge, MessagesSquare, Mic2, Palette, Pause, Play, Plus, Redo2, Replace, Scissors, Sparkles, Square, Trash2, Undo2, Upload, Users, Wand2, X } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { VoiceRow } from "@/components/VoicePicker";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -427,6 +427,31 @@ function CreateInner() {
     changeScenes(`import ${file.name}`, doc.scenes.map((script) => newScene(script, background)), { active: 0 });
     if (doc.title && (!title.trim() || title === "Untitled video")) setTitle(doc.title);
     setImportNote(`Imported ${doc.scenes.length === 1 ? "1 scene" : `${doc.scenes.length} scenes`} from ${file.name}${doc.truncated ? `; the rest did not fit (a video holds up to ${MAX_SCENES} scenes and ${MAX_SCRIPT_CHARS} characters of script)` : ""}.`);
+  }
+  /**
+   * Puts the brand kit's closing scene at the end, on the kit's background with its text at the bottom of the frame
+   * (in place of the one scene of a new video while it is still blank).
+   */
+  function addClosingScene() {
+    const kit = brandData?.brand;
+    const closing = kit?.closingScene;
+    if (!kit || !closing) return;
+    const background: Background = kit.defaultBackground ?? { type: "color", value: kit.primaryColor };
+    const last = scenes[scenes.length - 1];
+    if (last.script.trim() === closing.script && (last.overlay?.text ?? "") === (closing.text ?? "")) return setImportNote("The last scene is already the brand kit's closing scene.");
+    // Only a scene with nothing chosen for it yet (its words, presenter, layout, or a picture or video of its own) is taken over.
+    const sameBackground = (b: Background) => b.type === last.background.type && b.value === last.background.value;
+    const blank = scenes.length === 1 && !setUpScenes(scenes) && !last.hidePresenter && (sameBackground(background) || sameBackground(DEFAULT_BG));
+    if (!blank && scenes.length >= MAX_SCENES) return setImportNote(`A video holds up to ${MAX_SCENES} scenes, so the closing scene does not fit.`);
+    // The kit's text in the medium size when it fits across this video's frame, else the small one.
+    const overlay: SceneText | undefined = closing.text ? { text: closing.text, position: "bottom", ...(sceneTextFits({ text: closing.text }, aspect) ? {} : { size: "small" as const }) } : undefined;
+    const scene = newScene(closing.script, background, overlay ? { overlay } : {});
+    const next = blank ? [scene] : [...scenes, scene];
+    if (next.map((sc) => sc.script.trim()).join("\n\n").length > MAX_SCRIPT_CHARS) {
+      return setImportNote(`The closing scene would take the script past the ${MAX_SCRIPT_CHARS} characters a video holds; shorten it first.`);
+    }
+    changeScenes("add the closing scene", next, { active: next.length - 1 });
+    setImportNote(`Added the brand kit's closing scene as scene ${next.length}.`);
   }
   const [conversationOpen, setConversationOpen] = useState(false);
   const conversationButton = useRef<HTMLButtonElement>(null);
@@ -1383,6 +1408,17 @@ function CreateInner() {
               >
                 <MessagesSquare className="h-3.5 w-3.5" /> Conversation
               </button>
+              {brandData?.brand?.closingScene && (
+                <button
+                  type="button"
+                  onClick={addClosingScene}
+                  disabled={canEdit === false || !!slidesProgress}
+                  title="Add the brand kit's closing scene at the end: its words, on the brand background, with its text on screen"
+                  className="inline-flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:border-brand-400 hover:text-brand-700 disabled:opacity-50"
+                >
+                  <Flag className="h-3.5 w-3.5" /> Closing scene
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => slidesInput.current?.click()}

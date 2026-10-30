@@ -1243,7 +1243,18 @@ export interface BrandKit {
   captionsByDefault?: boolean;
   /** The logo laid over the share and embed player in this corner (the file itself is not changed). */
   watermark?: WatermarkCorner;
+  /** A scene the editor adds at the end of a video in one click: what the presenter says, and text shown on screen. */
+  closingScene?: BrandClosingScene;
   updatedAt: string;
+}
+
+/** The most a brand kit's closing scene says; a scene of a video holds more, but a closing line is short. */
+export const MAX_CLOSING_SCRIPT = 1000;
+
+export interface BrandClosingScene {
+  script: string;
+  /** On-screen text (a website, a phone number), at the bottom of the frame; none when absent. */
+  text?: string;
 }
 
 /** Personal API key. The secret is returned once at creation; only `hash` is stored. */

@@ -736,6 +736,67 @@ test("scene changes are undone and redone, by button and by keyboard outside the
   await expect(videoAvatar).toHaveText(original!);
 });
 
+test("the brand kit's closing scene is set on the brand page and added at the end of a video in one click", async ({ page }) => {
+  const before = (await (await page.request.get("/api/brand")).json()).brand as Record<string, unknown> | null;
+  try {
+    await page.goto("/brand");
+    await page.getByLabel("Primary color", { exact: true }).fill("#0f766e");
+    // On-screen text without words cannot make a scene, so it is refused with a reason.
+    await page.getByLabel("On-screen text").fill("acmehomes.com");
+    await page.getByRole("button", { name: "Save brand kit" }).click();
+    await expect(page.getByText("Add what the presenter says in the closing scene")).toBeVisible();
+    await page.getByLabel("What the presenter says").fill("Call us today to book a showing.");
+    await page.getByRole("button", { name: "Save brand kit" }).click();
+    await expect
+      .poll(async () => ((await (await page.request.get("/api/brand")).json()).brand as { closingScene?: unknown } | null)?.closingScene)
+      .toEqual({ script: "Call us today to book a showing.", text: "acmehomes.com" });
+    await page.reload();
+    await expect(page.getByLabel("What the presenter says")).toHaveValue("Call us today to book a showing.");
+    await expect(page.getByLabel("On-screen text")).toHaveValue("acmehomes.com");
+
+    await page.goto("/create");
+    await page.evaluate(() => localStorage.removeItem("avatar-studio:draft"));
+    await page.reload();
+    const closing = page.getByRole("button", { name: "Closing scene", exact: true });
+    // A new video's one blank scene becomes the closing scene rather than being left empty before it.
+    await closing.click();
+    await expect(page.getByTestId("import-note")).toHaveText("Added the brand kit's closing scene as scene 1.");
+    const script = page.getByRole("textbox", { name: "Script", exact: true });
+    await expect(script).toHaveValue("Call us today to book a showing.");
+    await page.getByRole("button", { name: "Undo add the closing scene" }).click();
+    await expect(script).toHaveValue("");
+    await script.fill("Welcome to 12 Elm Street.");
+    await closing.click();
+    await expect(page.getByTestId("import-note")).toHaveText("Added the brand kit's closing scene as scene 2.");
+    await expect(page.getByRole("textbox", { name: "Scene 2 script" })).toHaveValue("Call us today to book a showing.");
+    await expect(page.getByPlaceholder("Shown over the scene for its whole length")).toHaveValue("acmehomes.com");
+    await expect(page.getByLabel("Text position")).toHaveValue("bottom");
+    // On the kit's background (its primary colour, with no default picture).
+    await expect(page.getByRole("button", { name: /^Scene 2,/ }).locator("span").first()).toHaveCSS("background-color", "rgb(15, 118, 110)");
+    // A second click does not add it twice.
+    await closing.click();
+    await expect(page.getByTestId("import-note")).toHaveText("The last scene is already the brand kit's closing scene.");
+    await expect(page.getByRole("button", { name: /^Scene 3,/ })).toHaveCount(0);
+    await page.getByRole("button", { name: /^Scene 1,/ }).click();
+    await expect(page.getByRole("textbox", { name: "Scene 1 script" })).toHaveValue("Welcome to 12 Elm Street.");
+    // A kit without a closing scene offers no button.
+    await page.request.put("/api/brand", { data: { name: "Acme", primaryColor: "#0f766e" } });
+    await page.reload();
+    await expect(page.getByRole("button", { name: "Closing scene", exact: true })).toHaveCount(0);
+    // Removing the kit clears the closing scene from the form too, so the next save does not bring it back.
+    await page.request.put("/api/brand", { data: { name: "Acme", primaryColor: "#0f766e", closingScene: { script: "Bye.", text: "acme.com" } } });
+    await page.goto("/brand");
+    await expect(page.getByLabel("What the presenter says")).toHaveValue("Bye.");
+    page.once("dialog", (d) => void d.accept());
+    await page.getByRole("button", { name: "Remove brand kit" }).click();
+    await expect(page.getByLabel("What the presenter says")).toHaveValue("");
+    await expect(page.getByLabel("On-screen text")).toHaveValue("");
+  } finally {
+    const restored = before ? await page.request.put("/api/brand", { data: before }) : await page.request.delete("/api/brand");
+    expect(restored.ok()).toBe(true);
+  }
+});
+
 test("photo avatar motion is set in the editor, kept with the video and its copy", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Moving portrait");
   await page.locator("textarea").fill("Welcome to the open house.");

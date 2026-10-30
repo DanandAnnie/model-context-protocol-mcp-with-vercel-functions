@@ -5380,6 +5380,24 @@ test("the Assets page keeps the account's audio clips and pictures: upload, word
   page.once("dialog", (d) => d.accept(front));
   await pictures.getByRole("button", { name: `Rename ${lobby}`, exact: true }).click();
   await expect(pictures.getByRole("img", { name: front, exact: true })).toBeVisible();
+  // It starts a video set against it: the first scene shows it, named after it, kept in a draft of its own.
+  const pictureId = (await (await page.request.get("/api/backdrops")).json()).backdrops.find((b: { name: string }) => b.name === front).id as string;
+  await expect(pictures.getByRole("link", { name: `Use in a video: ${front}`, exact: true })).toHaveAttribute("href", `/create?picture=${pictureId}`);
+  const editor = await page.context().newPage();
+  await editor.goto(`/create?picture=${pictureId}`);
+  await expect(editor.locator("input[placeholder='Video title']")).toHaveValue(front);
+  await expect(editor.getByTestId("stage")).toHaveCSS("background-image", new RegExp(`/api/backdrops/${pictureId}`));
+  // Opened and left as it is, it keeps no draft.
+  await editor.waitForTimeout(800);
+  expect(await editor.evaluate((id) => Object.keys(localStorage).some((k) => k.endsWith(`:picture:${id}`)), pictureId)).toBe(false);
+  await editor.locator("textarea").first().fill("Welcome to the lobby.");
+  await expect.poll(() => editor.evaluate((id) => Object.entries(localStorage).some(([k, v]) => k.endsWith(`:picture:${id}`) && v.includes("Welcome to the lobby")), pictureId)).toBe(true);
+  await editor.reload();
+  await expect(editor.locator("textarea").first()).toHaveValue("Welcome to the lobby.");
+  await expect(editor.getByTestId("stage")).toHaveCSS("background-image", new RegExp(`/api/backdrops/${pictureId}`));
+  await editor.goto("/create?picture=bd_madeup123");
+  await expect(editor.getByText("That picture is no longer available")).toBeVisible();
+  await editor.close();
   expect((await page.request.patch("/api/backdrops/bd_missing123", { data: { name: "Gone" } })).status()).toBe(404);
   expect((await page.request.patch(`/api/clips/${clipId}`, { data: { name: "  " } })).status()).toBe(400);
   page.once("dialog", (d) => d.accept());

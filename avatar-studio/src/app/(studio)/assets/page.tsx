@@ -242,6 +242,9 @@ export default function AssetsPage() {
                     </div>
                     {canEdit === true && (
                       <>
+                        <Link href={`/create?picture=${b.id}`} aria-label={`Use in a video: ${b.name}`} title="Use in a video" className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-50">
+                          <Clapperboard className="h-3.5 w-3.5" aria-hidden /> Use
+                        </Link>
                         <button type="button" onClick={() => void renamePicture(b)} aria-label={`Rename ${b.name}`} className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand-700">
                           <Pencil className="h-3.5 w-3.5" />
                         </button>

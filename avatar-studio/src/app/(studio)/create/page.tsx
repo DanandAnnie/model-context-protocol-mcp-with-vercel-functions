@@ -709,9 +709,11 @@ function CreateInner() {
   const fromId = params.get("from");
   // A video spoken by one of the account's audio clips (?clip=, from a recording kept in the voice changer).
   const clipStart = !fromId && !templateId ? params.get("clip") : null;
+  // A video set against one of the account's pictures (?picture=, from the Assets page).
+  const pictureStart = !fromId && !templateId && !clipStart ? params.get("picture") : null;
   // A copy of a video, a template, or a clip keeps its own draft, so editing one never overwrites the unsent draft of a
   // plain visit, and a reload brings back the edits rather than the original.
-  const draftSource = fromId ? `from:${fromId}` : templateId ? `template:${templateId}` : clipStart ? `clip:${clipStart}` : "";
+  const draftSource = fromId ? `from:${fromId}` : templateId ? `template:${templateId}` : clipStart ? `clip:${clipStart}` : pictureStart ? `picture:${pictureStart}` : "";
   const editKey = draftKey && (draftSource ? `${draftKey}:${draftSource}` : draftKey);
   // A Video Agent plan to review (?plan=agent), read once: a refresh comes back to the autosaved draft of it.
   const agentPlan = useRef<AgentDraft | null | undefined>(undefined);
@@ -768,10 +770,13 @@ function CreateInner() {
   // Set once a render has started from this draft: the draft is cleared then, and no autosave may write it back while
   // the page is on its way to the video (a timer still pending, or one re-armed by data arriving meanwhile).
   const sent = useRef(false);
+  // The title a clip or picture start gave the video, so a start left untouched leaves no draft behind.
+  const startTitle = useRef<string | null>(null);
   // Autosave the editor state (debounced) so a refresh never loses work.
   useEffect(() => {
     if (!hydrated.current || !editKey || sent.current) return;
-    const empty = !scenes.some(hasContent) && title === "Untitled video";
+    // A clip or picture start names the video after it; that alone is not an edit worth a draft.
+    const empty = !scenes.some(hasContent) && (title === "Untitled video" || title === startTitle.current);
     const t = setTimeout(() => {
       if (sent.current) return;
       writeDraft(editKey, empty ? null : { title, scenes, aspect, resolution, captions, ...(isDefaultCaptionStyle ? {} : { captionStyle }), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...(expressiveness !== "low" ? { expressiveness } : {}), ...(motionPrompt ? { motionPrompt } : {}), ...(accent ? { accent } : {}), ...(avatarEngine !== "avatar_iv" ? { avatarEngine } : {}), ...(moreBlinking ? { moreBlinking } : {}), ...(transparent ? { transparent } : {}), avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
@@ -826,9 +831,11 @@ function CreateInner() {
     if (b.defaultResolution) setResolution(b.defaultResolution);
     if (templateId) return;
     if (b.defaultAspect) setAspect(b.defaultAspect);
-    // A scene the clip start filled with the clip's words is as fresh as an empty one.
-    setScenes((prev) => prev.map((sc) => (sc.script.trim() && !(clipStart && sc.audioId === clipStart) ? sc : withBackground(sc, b.defaultBackground ?? { type: "color", value: b.primaryColor }))));
-  }, [brandData, fromId, templateId, draftRestored, fromAgent, clipStart]);
+    // A scene the clip start filled with the clip's words is as fresh as an empty one; the picture a video was started
+    // against is kept.
+    const keep = (sc: Scene) => (!!sc.script.trim() && !(clipStart && sc.audioId === clipStart)) || (!!pictureStart && backdropIdOf(sc.background) === pictureStart);
+    setScenes((prev) => prev.map((sc) => (keep(sc) ? sc : withBackground(sc, b.defaultBackground ?? { type: "color", value: b.primaryColor }))));
+  }, [brandData, fromId, templateId, draftRestored, fromAgent, clipStart, pictureStart]);
 
   // Pre-fill from a template (?template=) or an existing video (?from=), unless its edits were kept from before.
   const keptEdits = () => !!editKey && !!draftSource && !!readDraft(editKey);
@@ -925,10 +932,30 @@ function CreateInner() {
       return;
     }
     setTitle((t) => (t === "Untitled video" ? clip.name : t));
+    startTitle.current = clip.name;
     setScenes((prev) => [newScene(clip.transcript ?? "", prev[0]?.background, { audioId: clip.id })]);
     setActiveIdx(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once the space (and so the draft key) and the clips are known
   }, [clipStart, spacesKnown, clipData, clipsError]);
+
+  // Start against a picture (?picture=): the first scene shows it, once the pictures are loaded; one that is gone says
+  // so and leaves an empty video.
+  const pictureApplied = useRef(false);
+  useEffect(() => {
+    if (!pictureStart || pictureApplied.current || !hydrated.current || (!backdropData && !backdropError)) return;
+    pictureApplied.current = true;
+    if (hadEdits.current || scenesNow.current.some(hasContent)) return;
+    const picture = backdropData?.backdrops.find((b) => b.id === pictureStart);
+    if (!picture) {
+      setErr(backdropError ? "Your pictures could not be loaded, so the video cannot start from one; reload to try again." : "That picture is no longer available; choose another in a scene's Background tab.");
+      return;
+    }
+    setTitle((t) => (t === "Untitled video" ? picture.name : t));
+    startTitle.current = picture.name;
+    setScenes((prev) => [withBackground(prev[0] ?? newScene(), { type: "image", value: backdropPath(picture.id) })]);
+    setActiveIdx(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once the space (and so the draft key) and the pictures are known
+  }, [pictureStart, spacesKnown, backdropData, backdropError]);
 
   // Default selections once data arrives: the first avatar, and its default voice if it has one
   // (a draft, template, copy, or brand kit applied below overrides both).

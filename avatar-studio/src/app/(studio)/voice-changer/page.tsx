@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { AudioLines, Captions, Download, Mic2, Play, Trash2, Type, Upload, Wand2 } from "lucide-react";
+import { AudioLines, Captions, Download, FileAudio, Mic2, Play, Trash2, Type, Upload, Wand2 } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
@@ -390,6 +390,27 @@ export default function VoiceChangerPage() {
     }
   }
 
+  // A recording being kept as a clip, so its button waits rather than sending twice.
+  const [keepingId, setKeepingId] = useState<string | null>(null);
+  async function keepAsClip(c: Change) {
+    // The button stays focusable while it waits (aria-disabled), so a second press is ignored here.
+    if (keepingId) return;
+    fail("lists")(null);
+    setKeepingId(c.id);
+    try {
+      const { clip } = await api<{ clip: AudioClip }>(`/api/voice-changer/changes/${c.id}/clip`, { method: "POST" });
+      setClipData((prev) => (prev ? { ...prev, clips: [clip, ...prev.clips.filter((x) => x.id !== clip.id)] } : prev));
+      setData((prev) => (prev ? { ...prev, changes: prev.changes.map((x) => (x.id === c.id ? { ...x, savedClipId: clip.id } : x)) } : prev));
+      setNote(`Kept ${c.title} as the audio clip “${clip.name}”. A scene can lip-sync to it, and it stays after the renderer's link expires.`);
+      // The button gives way to the note that names the clip; the focus goes with it.
+      focusAfterRender(() => changesRef.current?.querySelector<HTMLElement>(`[data-change="${c.id}"] [data-testid="voice-change-kept"]`));
+    } catch (e) {
+      fail("lists")(e instanceof Error ? e.message : "The recording could not be kept as a clip");
+    } finally {
+      setKeepingId(null);
+    }
+  }
+
   const voiceBeingMade = voices.some((v) => v.status === "processing");
   const voiceHint = ready.length ? "One of your instant voices." : voiceBeingMade ? "Your voice is being made; it is ready in a few seconds." : "Make a voice below first.";
   const voicePlaceholder = ready.length ? "Choose a voice" : voiceBeingMade ? "Being made…" : "No voices yet";
@@ -750,6 +771,23 @@ export default function VoiceChangerPage() {
                               </a>
                             </span>
                           )}
+                          {(() => {
+                            // Kept as a clip: named while that clip exists; otherwise offered while the renderer's link holds.
+                            const kept = c.savedClipId ? clips.find((x) => x.id === c.savedClipId) : undefined;
+                            if (kept) {
+                              return (
+                                <span tabIndex={-1} className="inline-flex items-center gap-1 text-xs text-slate-600 outline-none focus:ring-2 focus:ring-brand-500" data-testid="voice-change-kept">
+                                  <FileAudio className="h-3 w-3" aria-hidden /> Kept as the clip “{kept.name}”
+                                </span>
+                              );
+                            }
+                            if (canEdit !== true || Date.now() - Date.parse(c.checkedAt ?? c.updatedAt) > VOICE_RESULT_LINK_MS) return null;
+                            return (
+                              <button type="button" onClick={() => void keepAsClip(c)} aria-disabled={keepingId !== null} className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:underline aria-disabled:opacity-50" aria-label={`${keepingId === c.id ? "Keeping…" : "Keep as a clip"}: ${c.title}, ${formatDate(c.createdAt)}`}>
+                                <FileAudio className="h-3 w-3" aria-hidden /> {keepingId === c.id ? "Keeping…" : "Keep as a clip"}
+                              </button>
+                            );
+                          })()}
                           {canEdit === true && Date.now() - Date.parse(c.checkedAt ?? c.updatedAt) <= VOICE_RESULT_LINK_MS && (
                             // Its voice on a video: the lip sync page with this recording chosen as the new audio.
                             <Link href={`/lipsync?voiceChange=${c.id}`} className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:underline" aria-label={`Lip-sync a video to ${c.title}, ${formatDate(c.createdAt)}`}>

@@ -1119,6 +1119,20 @@ test("an instant voice is made from a recording with the speaker's agreement, an
   await expect(lipsyncPage.locator("#voice-gone")).toHaveCount(0);
   await expect(lipsyncPage.getByRole("button", { name: "Lip-sync video" })).toBeEnabled();
   await lipsyncPage.close();
+  // Kept as an audio clip, it outlives the renderer's link: one click makes one clip, named after the recording.
+  const kept = page.waitForResponse((r) => r.url().endsWith(`/api/voice-changer/changes/${spokenRow.id}/clip`) && r.request().method() === "POST");
+  await spokenCard.getByRole("button", { name: /^Keep as a clip: Welcome to the team in / }).click();
+  expect((await kept).status()).toBe(201);
+  await expect(spokenCard.getByTestId("voice-change-kept")).toHaveText(`Kept as the clip “Welcome to the team in ${name}”`);
+  await expect(spokenCard.getByTestId("voice-change-kept")).toBeFocused();
+  await expect(spokenCard.getByRole("button", { name: /^Keep as a clip/ })).toHaveCount(0);
+  await expect(page.getByText(`Kept Welcome to the team in ${name} as the audio clip`)).toBeVisible();
+  const keptClips = ((await (await page.request.get("/api/clips")).json()) as { clips: Array<{ id: string; name: string; mimeType: string }> }).clips.filter((c) => c.name === `Welcome to the team in ${name}`);
+  expect(keptClips.map((c) => c.mimeType)).toEqual(["audio/wav"]);
+  expect((await page.request.get(`/api/clips/${keptClips[0].id}`)).headers()["content-type"]).toMatch(/^audio\/wav/);
+  const keptAgain = await page.request.post(`/api/voice-changer/changes/${spokenRow.id}/clip`);
+  expect([keptAgain.status(), ((await keptAgain.json()) as { clip: { id: string } }).clip.id]).toEqual([200, keptClips[0].id]);
+  expect((await page.request.delete(`/api/clips/${keptClips[0].id}`)).ok()).toBe(true);
   for (const key of ["provider", "providerVoiceId", "providerAudio", "ownerId", "clipId"]) expect(Object.keys(spokenRow)).not.toContain(key);
   page.once("dialog", (d) => d.accept());
   await spokenCard.getByRole("button", { name: /^Delete / }).click();

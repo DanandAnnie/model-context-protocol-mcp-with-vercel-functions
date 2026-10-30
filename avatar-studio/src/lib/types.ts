@@ -508,6 +508,8 @@ export interface VoiceChange {
   durationSec?: number;
   /** Text only: the renderer said when each word was said (HeyGen's `original_words`), kept in a `voicewords` row of their own for captions. */
   timed?: true;
+  /** The audio clip it was last kept as (`POST …/clip`), so keeping it again returns that clip while it exists. */
+  savedClipId?: string;
   error?: string;
   createdAt: string;
   updatedAt: string;

@@ -200,6 +200,11 @@ export interface AvatarProvider {
    * "fr"; detected when absent), and `spokenLanguage` the code the renderer says it spoke in.
    */
   speakText?(input: { voiceId: string; text: string; turbo?: true; free?: true; mp3?: true; language?: string; expressivenessBoost?: number; key: string; waitMs: number }): Promise<{ status: "processing" } | { status: "completed"; audioUrl: string; durationSec: number; words?: SpokenWord[]; spokenLanguage?: string }>;
+  /**
+   * The demo renderer's stand-in for a spoken recording's file, made here rather than downloaded (its link is the
+   * studio's own sample, which the public-address guard rightly refuses on a local server). Real renderers have none.
+   */
+  demoSpeech?(seconds: number): Uint8Array;
   /** Where a music mix stands, with the video once it is ready (its link signed for a limited time). */
   musicMixStatus?(jobId: string): Promise<LipsyncStatus>;
   /** Deletes a music mix and its video at the renderer; one it no longer has counts as deleted. */

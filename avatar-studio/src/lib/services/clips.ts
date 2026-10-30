@@ -65,6 +65,11 @@ export function wavSeconds(bytes: Uint8Array): number | null {
   return dataSize / byteRate;
 }
 
+/** An MP3 starts with an ID3 tag or an MPEG audio frame sync. */
+export function looksMp3(b: Uint8Array): boolean {
+  return (b.length >= 3 && b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33) || (b.length >= 2 && b[0] === 0xff && (b[1] & 0xe0) === 0xe0);
+}
+
 function view(clip: AudioClip): AudioClip {
   const { providerAssetIds: _ids, ...rest } = clip;
   void _ids;
@@ -93,22 +98,31 @@ export async function createClip(input: z.infer<typeof clipUploadSchema>, ownerI
     if (read === null) throw new ValidationError("The WAV file is malformed");
     seconds = read;
   } else {
-    // An MP3 starts with an ID3 tag or an MPEG audio frame sync.
-    const b = decoded.bytes;
-    const looksMp3 = (b.length >= 3 && b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33) || (b.length >= 2 && b[0] === 0xff && (b[1] & 0xe0) === 0xe0);
-    if (!looksMp3) throw new ValidationError("The MP3 file is malformed");
+    if (!looksMp3(decoded.bytes)) throw new ValidationError("The MP3 file is malformed");
     if (!input.durationSec) throw new ValidationError("Give the length of an MP3 clip in durationSec");
     seconds = input.durationSec;
   }
+  return keepClip({ name: input.name, mimeType, bytes: decoded.bytes, seconds }, ownerId);
+}
+
+/** Stores checked audio as a new clip, within the length and the account's number of clips. */
+export async function keepClip(input: { name: string; mimeType: AudioClipType; bytes: Uint8Array; seconds: number }, ownerId: string = LOCAL_OWNER): Promise<AudioClip> {
+  const { name, mimeType, bytes, seconds } = input;
   if (seconds < 0.5) throw new ValidationError("The clip is too short to speak (half a second at least)");
   if (seconds > MAX_CLIP_SECONDS) throw new ValidationError(`Clips can be at most ${MAX_CLIP_SECONDS} seconds long`);
   if ((await getStore().list<AudioClip>("clip", ownerId)).length >= MAX_CLIPS) {
     throw new ConflictError(`At most ${MAX_CLIPS} audio clips per account; delete one you no longer use`);
   }
-  const clip: AudioClip = { id: newId("clip"), ownerId, name: input.name, mimeType, bytes: decoded.bytes.byteLength, durationSec: Math.round(seconds * 10) / 10, createdAt: nowIso() };
+  const clip: AudioClip = { id: newId("clip"), ownerId, name, mimeType, bytes: bytes.byteLength, durationSec: Math.round(seconds * 10) / 10, createdAt: nowIso() };
   // Bytes first: a clip row that is listed always has its audio.
-  await getStore().put<ClipAudio>("clipaudio", { id: audioRowId(clip.id), clipId: clip.id, ownerId, mimeType, data: Buffer.from(decoded.bytes).toString("base64") });
+  await getStore().put<ClipAudio>("clipaudio", { id: audioRowId(clip.id), clipId: clip.id, ownerId, mimeType, data: Buffer.from(bytes).toString("base64") });
   return view(await getStore().put("clip", clip));
+}
+
+/** The account's clip as the API shows it, or null when there is none by that id. */
+export async function findClip(id: string, ownerId: string = LOCAL_OWNER): Promise<AudioClip | null> {
+  const clip = await getStore().get<AudioClip>("clip", id);
+  return clip && clip.ownerId === ownerId ? view(clip) : null;
 }
 
 /** The stored clip with provider asset ids, for rendering. */

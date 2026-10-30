@@ -163,7 +163,16 @@ describe("lip syncs", () => {
       await assert.rejects(startLipsync(lipsyncRequestSchema.parse({ videoId: video.id, voiceChangeId: "vc_theirs" }), "u1"), /recording in another voice is no longer available/);
       await assert.rejects(startLipsync(lipsyncRequestSchema.parse({ videoId: video.id, voiceChangeId: "vc_gone" }), "u1"), /no longer available/);
       // Its link is good for about an hour, and only to the renderer that made it.
-      await assert.rejects(startLipsync(lipsyncRequestSchema.parse({ videoId: video.id, voiceChangeId: "vc_old" }), "u1"), /over an hour ago, and its link from the renderer has expired/);
+      await assert.rejects(startLipsync(lipsyncRequestSchema.parse({ videoId: video.id, voiceChangeId: "vc_old" }), "u1"), /over an hour ago, and its link from the renderer has expired; make it again/);
+      // One kept as an audio clip points to that clip, while it is the account's.
+      const keptClip: AudioClip = { id: "clip_kept", ownerId: "u1", name: "Welcome in Narrator", mimeType: "audio/wav", bytes: 100, durationSec: 2, createdAt: new Date().toISOString() };
+      await getStore().put("clip", keptClip);
+      const old = (await getStore().get<VoiceChange>("voicechange", "vc_old"))!;
+      await getStore().put("voicechange", { ...old, savedClipId: keptClip.id });
+      await assert.rejects(startLipsync(lipsyncRequestSchema.parse({ videoId: video.id, voiceChangeId: "vc_old" }), "u1"), /has expired; choose the audio clip “Welcome in Narrator” you kept of it instead/);
+      await getStore().put("clip", { ...keptClip, ownerId: "u2" });
+      await assert.rejects(startLipsync(lipsyncRequestSchema.parse({ videoId: video.id, voiceChangeId: "vc_old" }), "u1"), /has expired; make it again/);
+      await getStore().remove("clip", keptClip.id);
       await assert.rejects(startLipsync(lipsyncRequestSchema.parse({ videoId: video.id, voiceChangeId: "vc_other" }), "u1"), /made by another renderer/);
       assert.equal(sent.length, 1);
       // Exactly one audio source.

@@ -7,11 +7,13 @@ import { createHash } from "node:crypto";
 import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
-import type { AudioClip, InstantVoice, PublicVoice, SpokenWord, VoiceChange, VoiceChangeWords } from "../types";
+import { MAX_CLIP_SECONDS, VOICE_RESULT_LINK_MS, type AudioClip, type AudioClipType, type InstantVoice, type PublicVoice, type SpokenWord, type VoiceChange, type VoiceChangeWords } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, LimitError, NotFoundError, UpstreamError, ValidationError } from "../errors";
 import { owned, stripUndefined } from "./shared";
-import { getClip } from "./clips";
+import { MAX_CLIP_BYTES, findClip, getClip, keepClip, looksMp3, wavSeconds } from "./clips";
+import { ResponseTooLargeError, safeFetch, type FetchLike } from "../safe-fetch";
+import { UnsafeUrlError } from "../safe-url";
 import { getBackdrop, getBackdropImage } from "./backdrops";
 import { prepareClipOnce } from "./videos";
 import { rememberMadeVoices } from "./voices";
@@ -159,6 +161,72 @@ export async function voiceChangeCaptions(id: string, ownerId: string = LOCAL_OW
   const row = change.status === "completed" && change.timed ? await getStore().get<VoiceChangeWords>("voicewords", wordsRowId(change.id)) : null;
   if (!row?.words.length || row.ownerId !== ownerId) throw new NotFoundError("This recording has no word timings to make captions from");
   return { title: change.title, cues: wordCues(row.words) };
+}
+
+/** Keeps of a recording still being made, by recording, so a second click waits for the first rather than making two clips. */
+const keeping = new Map<string, Promise<{ clip: AudioClip; existing: boolean }>>();
+
+/**
+ * Keeps a finished recording as one of the account's audio clips, so a scene can lip-sync to it and a lip sync can use it
+ * after the renderer's link has expired. The renderer's file is read once, through the public-address guard, within the
+ * clip limits. Keeping it again returns the clip already made while that clip exists.
+ */
+export async function keepVoiceChangeAsClip(id: string, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<{ clip: AudioClip; existing: boolean }> {
+  const change = owned(await getStore().get<VoiceChange>("voicechange", voiceChangeIdSchema.parse(id)), ownerId, "Recording");
+  const running = keeping.get(change.id);
+  if (running) return running;
+  const work = keepAsClip(change, ownerId, fetchImpl).finally(() => keeping.delete(change.id));
+  keeping.set(change.id, work);
+  return work;
+}
+
+async function keepAsClip(change: VoiceChange, ownerId: string, fetchImpl?: FetchLike): Promise<{ clip: AudioClip; existing: boolean }> {
+  const kept = change.savedClipId ? await findClip(change.savedClipId, ownerId) : null;
+  if (kept) return { clip: kept, existing: true };
+  if (change.status !== "completed" || !change.audioUrl) throw new ValidationError(`“${change.title}” is ${change.status === "failed" ? "a recording that could not be made" : "still being made"}; keep it once it is ready`);
+  if (Date.now() - Date.parse(change.checkedAt ?? change.updatedAt) > VOICE_RESULT_LINK_MS) {
+    throw new ValidationError(`“${change.title}” was made over an hour ago, and its link from the renderer has expired; make it again in the voice changer`);
+  }
+  // The demo's file is made here; a real renderer's is read from its link, which needs no key of the studio's.
+  const demo = change.provider === "mock" ? getAvatarProviderByName("mock").demoSpeech : undefined;
+  const smaller = change.text !== undefined && change.format !== "mp3" ? "; speak it again as an MP3, which is smaller, or in shorter parts" : "; make it from a shorter recording";
+  const tooLarge = `“${change.title}” is too large to keep as an audio clip (${MAX_CLIP_BYTES / 1024 / 1024} MB at most)${smaller}`;
+  let bytes: Uint8Array;
+  if (demo) {
+    bytes = demo(change.durationSec || 3);
+  } else {
+    let res: Response;
+    try {
+      res = await safeFetch(change.audioUrl, { redirect: "error", signal: AbortSignal.timeout(20_000) }, "Recording link", fetchImpl, { maxBytes: MAX_CLIP_BYTES });
+    } catch (err) {
+      if (err instanceof ResponseTooLargeError) throw new ValidationError(tooLarge);
+      // A link the address guard refuses will not pass on a second try.
+      if (err instanceof UnsafeUrlError) throw new ValidationError(`The renderer's link to “${change.title}” cannot be read from here; download it and upload it as a clip instead`);
+      console.error(`voice change ${change.id}: recording not downloaded:`, err);
+      throw new UpstreamError(`“${change.title}” could not be downloaded from the renderer just now; try again in a few minutes`);
+    }
+    // A signed link the renderer no longer honours answers 403 or 404; that one will not come back.
+    if (res.status === 403 || res.status === 404 || res.status === 410) throw new ValidationError(`The renderer's link to “${change.title}” has expired; make it again in the voice changer`);
+    if (!res.ok) throw new UpstreamError(`“${change.title}” could not be downloaded from the renderer just now (${res.status}); try again in a few minutes`);
+    bytes = new Uint8Array(await res.arrayBuffer());
+  }
+  if (bytes.byteLength > MAX_CLIP_BYTES) throw new ValidationError(tooLarge);
+  // The file's own bytes decide its kind; the renderer's content type is not trusted.
+  const riff = bytes.byteLength >= 12 && String.fromCharCode(...bytes.subarray(0, 4)) === "RIFF" && String.fromCharCode(...bytes.subarray(8, 12)) === "WAVE";
+  const mimeType: AudioClipType | null = riff ? "audio/wav" : looksMp3(bytes) ? "audio/mpeg" : null;
+  if (!mimeType) throw new ValidationError(`The renderer's file for “${change.title}” is not WAV or MP3 audio, so it cannot be kept as a clip`);
+  // A WAV is kept only when its own header gives its length, as an uploaded one is; an MP3 takes the renderer's.
+  const seconds = mimeType === "audio/wav" ? wavSeconds(bytes) : change.durationSec || null;
+  if (mimeType === "audio/wav" && seconds === null) throw new ValidationError(`The renderer's WAV file for “${change.title}” is not one a clip can hold (PCM, 8 to 24 bits); speak it again as an MP3`);
+  if (seconds === null) throw new ValidationError(`The length of “${change.title}” is not known, so it cannot be kept as a clip`);
+  if (seconds > MAX_CLIP_SECONDS) throw new ValidationError(`“${change.title}” is longer than ${MAX_CLIP_SECONDS} seconds, the most a clip holds`);
+  const clip = await keepClip({ name: change.title.slice(0, 80), mimeType, bytes, seconds }, ownerId);
+  // Remembered without touching `updatedAt`, which dates the renderer's link; a recording changed or deleted meanwhile keeps its own row.
+  const current = await getStore().get<VoiceChange>("voicechange", change.id);
+  if (current && !(await getStore().putIf("voicechange", { ...current, savedClipId: clip.id }, "updatedAt", current.updatedAt))) {
+    console.error(`voice change ${change.id}: changed while kept as clip ${clip.id}; the clip is not remembered on it`);
+  }
+  return { clip, existing: false };
 }
 
 const keyedId = (prefix: string, ownerId: string, key: string) => `${prefix}_${createHash("sha256").update(`${ownerId}\0${prefix}\0${key}`).digest("base64url").slice(0, 32)}`;

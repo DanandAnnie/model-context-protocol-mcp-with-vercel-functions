@@ -11,10 +11,12 @@ import {
   createInstantVoice,
   deleteInstantVoice,
   deleteOwnerData,
+  deleteClip,
   deleteVoiceChange,
   exportOwnerData,
   forgetVoiceChangerChecks,
   instantVoicePreview,
+  keepVoiceChangeAsClip,
   instantVoiceSchema,
   listPublicVoices,
   listInstantVoices,
@@ -741,5 +743,91 @@ describe("voice changer", () => {
     }
     assert.equal((await listInstantVoices("u1")).length, 1, "the voice is kept to try again");
     assert.equal((await getStore().list("clip", "u1")).length, 1, "and so is the rest of the account");
+  });
+
+  it("keeps a finished recording as an audio clip once, while the renderer's link holds", async () => {
+    const voice = await ready("u1");
+    const spoken = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Welcome to the spring open house, everyone." }), "u1");
+    const before = (await getStore().get<VoiceChange>("voicechange", spoken.id))!;
+    // Two clicks at once make one clip.
+    const [first, second] = await Promise.all([keepVoiceChangeAsClip(spoken.id, "u1"), keepVoiceChangeAsClip(spoken.id, "u1")]);
+    assert.equal(first.clip.id, second.clip.id);
+    assert.equal(first.existing, false);
+    assert.deepEqual([first.clip.name, first.clip.mimeType, first.clip.durationSec], [spoken.title, "audio/wav", spoken.durationSec]);
+    assert.equal(first.clip.providerAssetIds, undefined, "the clip is shown as the API shows clips");
+    const after = (await getStore().get<VoiceChange>("voicechange", spoken.id))!;
+    assert.equal(after.savedClipId, first.clip.id);
+    assert.equal(after.updatedAt, before.updatedAt, "keeping it does not make the renderer's link look newer");
+    assert.equal(publicVoiceChange(after).savedClipId, first.clip.id);
+    // Asked again: the same clip, made once.
+    const again = await keepVoiceChangeAsClip(spoken.id, "u1");
+    assert.deepEqual([again.clip.id, again.existing], [first.clip.id, true]);
+    assert.equal((await getStore().list("clip", "u1")).length - 1, 1, "one clip beside the voice's sample");
+    // The clip deleted: keeping it makes a new one.
+    await deleteClip(first.clip.id, "u1");
+    const remade = await keepVoiceChangeAsClip(spoken.id, "u1");
+    assert.equal(remade.existing, false);
+    assert.notEqual(remade.clip.id, first.clip.id);
+    // Another account's recording is not found; one not ready, failed, or over an hour old is refused.
+    await assert.rejects(keepVoiceChangeAsClip(spoken.id, "u2"), NotFoundError);
+    const base = (await getStore().get<VoiceChange>("voicechange", spoken.id))!;
+    const { savedClipId: _kept, ...fresh } = base;
+    void _kept;
+    await getStore().put("voicechange", { ...fresh, status: "processing", audioUrl: undefined });
+    await assert.rejects(keepVoiceChangeAsClip(spoken.id, "u1"), /still being made; keep it once it is ready/);
+    await getStore().put("voicechange", { ...fresh, status: "failed", audioUrl: undefined });
+    await assert.rejects(keepVoiceChangeAsClip(spoken.id, "u1"), /could not be made/);
+    const old = new Date(Date.now() - 61 * 60 * 1000).toISOString();
+    await getStore().put("voicechange", { ...fresh, updatedAt: old, checkedAt: old });
+    await assert.rejects(keepVoiceChangeAsClip(spoken.id, "u1"), /over an hour ago, and its link from the renderer has expired/);
+    await assert.rejects(keepVoiceChangeAsClip("vc_missing", "u1"), NotFoundError);
+    await assert.rejects(keepVoiceChangeAsClip("not-an-id", "u1"), /Unknown recording/);
+  });
+
+  it("reads HeyGen's file through the public-address guard and keeps only WAV or MP3 within the clip limits", async () => {
+    const now = new Date().toISOString();
+    const change: VoiceChange = { id: "vc_heygen_keep", ownerId: "u1", title: "Hello there in Host", voiceId: "iv_x", voiceName: "Host", text: "Hello there.", provider: "heygen", providerVoiceId: "hv_x", status: "completed", audioUrl: "https://93.184.216.34/tts/a.wav?sig=1", durationSec: 1.2, createdAt: now, updatedAt: now };
+    const wav = Buffer.from(wavDataUrl().split(",")[1], "base64");
+    let answer: () => Response = () => new Response(wav, { headers: { "content-type": "application/octet-stream" } });
+    const asked: string[] = [];
+    const fetchImpl = async (url: string) => {
+      asked.push(url);
+      return answer();
+    };
+    await getStore().put("voicechange", change);
+    const kept = await keepVoiceChangeAsClip(change.id, "u1", fetchImpl);
+    assert.deepEqual(asked, [change.audioUrl]);
+    assert.deepEqual([kept.clip.mimeType, kept.clip.durationSec], ["audio/wav", 1], "a WAV's length is read from the file, its kind from its bytes");
+    // An MP3 takes the length HeyGen reported.
+    const mp3 = new Uint8Array([0x49, 0x44, 0x33, 4, 0, 0, 0, 0, 0, 0, 0xff, 0xfb, 0x90, 0x64]);
+    answer = () => new Response(mp3);
+    await getStore().put("voicechange", { ...change, format: "mp3" });
+    assert.deepEqual(((c) => [c.mimeType, c.durationSec])((await keepVoiceChangeAsClip(change.id, "u1", fetchImpl)).clip), ["audio/mpeg", 1.2]);
+    await getStore().put("voicechange", { ...change, format: "mp3", durationSec: 0 });
+    await assert.rejects(keepVoiceChangeAsClip(change.id, "u1", fetchImpl), /length of “Hello there in Host” is not known/);
+    // Not audio, an expired link, HeyGen down, and a file past the clip size.
+    await getStore().put("voicechange", change);
+    answer = () => new Response("<html>nope</html>", { headers: { "content-type": "audio/wav" } });
+    await assert.rejects(keepVoiceChangeAsClip(change.id, "u1", fetchImpl), /is not WAV or MP3 audio/);
+    answer = () => new Response("denied", { status: 403 });
+    await assert.rejects(keepVoiceChangeAsClip(change.id, "u1", fetchImpl), (e: unknown) => e instanceof ValidationError && /link to “Hello there in Host” has expired/.test((e as Error).message));
+    answer = () => new Response("busy", { status: 503 });
+    await assert.rejects(keepVoiceChangeAsClip(change.id, "u1", fetchImpl), (e: unknown) => e instanceof UpstreamError && /try again in a few minutes/.test((e as Error).message));
+    answer = () => new Response(new Uint8Array(3 * 1024 * 1024 + 1));
+    await assert.rejects(keepVoiceChangeAsClip(change.id, "u1", fetchImpl), /too large to keep as an audio clip \(3 MB at most\); speak it again as an MP3/);
+    await getStore().put("voicechange", { ...change, text: undefined, clipId: "clip_x" });
+    await assert.rejects(keepVoiceChangeAsClip(change.id, "u1", fetchImpl), /too large to keep as an audio clip \(3 MB at most\); make it from a shorter recording/);
+    // A link to a private address is never read.
+    asked.length = 0;
+    await getStore().put("voicechange", { ...change, audioUrl: "https://127.0.0.1/a.wav" });
+    await assert.rejects(keepVoiceChangeAsClip(change.id, "u1", fetchImpl), (e: unknown) => e instanceof ValidationError && /cannot be read from here; download it and upload it/.test((e as Error).message));
+    assert.deepEqual(asked, []);
+    // A WAV whose header gives no length (here 32-bit float) is not kept, as an upload of it would not be.
+    await getStore().put("voicechange", change);
+    const float = new Uint8Array(wav);
+    new DataView(float.buffer).setUint16(20, 3, true);
+    answer = () => new Response(float);
+    await assert.rejects(keepVoiceChangeAsClip(change.id, "u1", fetchImpl), /WAV file for “Hello there in Host” is not one a clip can hold/);
+    assert.equal((await getStore().list("clip", "u1")).length, 2, "only the two good files became clips");
   });
 });

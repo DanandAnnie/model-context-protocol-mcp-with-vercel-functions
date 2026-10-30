@@ -12,7 +12,7 @@ import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { assertPublicHttpUrl } from "../safe-url";
 import { owned, stripUndefined } from "./shared";
 import { getVideo, prepareClipOnce } from "./videos";
-import { getClip } from "./clips";
+import { findClip, getClip } from "./clips";
 import { freshVideoUrl } from "./highlights";
 import { jobChecker } from "./job-checks";
 import { withSuffix } from "../text";
@@ -114,7 +114,11 @@ export async function resolveLipsyncSources(input: z.infer<typeof lipsyncRequest
     if (voiceChange.status !== "completed" || !voiceChange.audioUrl) throw new ValidationError(voiceChange.status === "failed" ? `“${voiceChange.title}” could not be made; choose another recording` : `“${voiceChange.title}” is still being spoken; try again once it is ready`);
     // Its link is another renderer's, or past the time it is signed for: the renderer would fail the job after it started.
     if (voiceChange.provider !== provider.name) throw new ValidationError(`“${voiceChange.title}” was made by another renderer; make it again in the voice changer`);
-    if (Date.now() - Date.parse(voiceChange.checkedAt ?? voiceChange.updatedAt) > VOICE_RESULT_LINK_MS) throw new ValidationError(`“${voiceChange.title}” was made over an hour ago, and its link from the renderer has expired; make it again in the voice changer`);
+    if (Date.now() - Date.parse(voiceChange.checkedAt ?? voiceChange.updatedAt) > VOICE_RESULT_LINK_MS) {
+      // One kept as a clip is still there to use as the new audio.
+      const kept = voiceChange.savedClipId ? await findClip(voiceChange.savedClipId, ownerId) : null;
+      throw new ValidationError(`“${voiceChange.title}” was made over an hour ago, and its link from the renderer has expired; ${kept ? `choose the audio clip “${kept.name}” you kept of it instead` : "make it again in the voice changer"}`);
+    }
   } else if (input.clipId) {
     try {
       clip = await getClip(input.clipId, ownerId);

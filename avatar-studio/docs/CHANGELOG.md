@@ -612,3 +612,10 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The icon buttons were under 3:1 contrast. They are darker now.
     - The e2e test downloads before and after a rename, compares the picture's bytes, checks every picture action fits a 320px card, and checks a viewer can download but not change anything.
   - Also found: Chromium in a container with no locale saves any non-ASCII download name as "download". The e2e browser gets a UTF-8 locale, as desktops have.
+- Sort the Assets page (`39314ca`): a Sort menu orders the clips and pictures newest first, oldest first, or by name A–Z in the browser's language (digits by value), and holds that order so nothing moves from under the focus; "Sort again" appears once it no longer matches.
+  - An independent review found nothing blocking. Fixed before the commit:
+    - The menu took a row of its own: the shared input style's full width beat the narrower one. It now sits beside the search box, which the e2e test checks.
+    - Adding or deleting anything re-sorted both lists, which could move a card from under the focus mid-typing. The order is now set only when a sort is chosen or a list first loads; an upload appears first and a delete leaves the rest in place.
+    - After a rename the menu still said "Name A–Z" over a list out of order, and choosing the same option again does nothing in a native menu. A "Sort again" button now appears when the list is out of order, and each sort is announced.
+    - The e2e focus check would have passed without the held order. It now renames the first card to a name that sorts last, so the card would move without it.
+    - The docs promised accents were always ignored; name order follows the browser's language (in Swedish, Ä sorts after Z). They now say so, and the unit tests pin the language and cover ties and the held-order helpers.

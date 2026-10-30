@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Download, Eraser, Pencil, Trash2 } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
+import { ListSearch, useListSearch } from "@/components/ListSearch";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
@@ -83,6 +84,8 @@ export default function CleanupPage() {
   }, [refetch]);
 
   const items = data?.cleanups ?? [];
+  const search = useListSearch();
+  const shown = items.filter((c) => search.matches(c.id, c.title));
   // A different source is a different start: its own key, and an error about the last one no longer applies.
   function switchTo(next: "link" | "library") {
     setFrom(next);
@@ -106,6 +109,8 @@ export default function CleanupPage() {
       setSourceUrl("");
       setVideoId("");
       setTitle("");
+      // Shown even when a search is typed that it does not match.
+      search.pin(cleanup.id);
       setNote(`Cleaning up ${cleanup.title}; it appears here when it is ready.`);
       // Focus goes to the new cleanup, rather than being lost with the cleared form.
       focusAfterRender(() => listRef.current?.querySelector<HTMLElement>(`[data-cleanup="${cleanup.id}"]`) ?? sourceInput.current);
@@ -130,6 +135,7 @@ export default function CleanupPage() {
       setData((prev) => (prev ? { ...prev, cleanups: prev.cleanups.map((x) => (x.id === saved.id ? saved : x)) } : prev));
       // A list check that left before the rename would answer with the old name; asking again retires it.
       void refetch();
+      search.pin(saved.id);
       setNote(`Renamed the cleanup to “${saved.title}”.`);
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) {
@@ -146,7 +152,9 @@ export default function CleanupPage() {
     if (!window.confirm(`Delete “${c.title}”? Cleaning it again uses another job.`)) return;
     setErr(null);
     setNote(null);
-    const next = items[items.indexOf(c) + 1] ?? items[items.indexOf(c) - 1];
+    const next = shown[shown.indexOf(c) + 1] ?? shown[shown.indexOf(c) - 1];
+    // Kept in view while the delete is sent, so a search typed meanwhile cannot hide where the focus goes.
+    if (next) search.pin(next.id);
     try {
       // Forgotten before the request, so a check landing meanwhile does not announce it as deleted elsewhere.
       seen.current.delete(c.id);
@@ -234,11 +242,12 @@ export default function CleanupPage() {
           <h2 ref={headingRef} tabIndex={-1} className="mb-3 text-sm font-semibold text-slate-900 outline-none">
             Cleaned recordings
           </h2>
+          {data && (items.length > 0 || search.q) && <ListSearch search={search} label="Search cleanups" placeholder="Search by name" shown={shown.length} total={items.length} noun="cleanups" />}
           {!data ? null : items.length === 0 ? (
             <EmptyState icon={<Eraser className="h-8 w-8" />} title="No cleaned recordings yet" body="Clean up a recording on the left to get started." />
           ) : (
             <div className="space-y-3">
-              {items.map((c) => (
+              {shown.map((c) => (
                 <Card key={c.id} className="p-4 outline-none focus:ring-2 focus:ring-brand-500" data-testid="cleanup" data-cleanup={c.id} tabIndex={-1}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">

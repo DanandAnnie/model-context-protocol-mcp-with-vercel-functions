@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AudioLines, Captions, Clapperboard, Download, FileAudio, Mic2, Pencil, Play, Trash2, Type, Upload, Wand2 } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
+import { ListSearch, useListSearch } from "@/components/ListSearch";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
@@ -112,6 +113,9 @@ export default function VoiceChangerPage() {
   const clips = clipData?.clips ?? [];
   const voices = data?.voices ?? [];
   const changes = data?.changes ?? [];
+  // The recordings can be searched by name, what a text says, or the voice it is in.
+  const search = useListSearch();
+  const shownChanges = changes.filter((c) => search.matches(c.id, c.title, c.text, c.voiceName));
   const ready = voices.filter((v) => v.status === "completed");
   // HeyGen's public voices, to speak text in without making one.
   const { data: publicData, error: publicError, refetch: refetchPublic } = useApi<{ voices: PublicVoice[]; available: boolean }>("/api/voice-changer/public-voices");
@@ -261,6 +265,8 @@ export default function VoiceChangerPage() {
       void refetch();
       setChangeKey(newKey());
       setTitle("");
+      // Shown even when a search is typed that it does not match.
+      search.pin(change.id);
       setNote(change.status === "completed" ? `${change.title} is ready.` : `Speaking ${change.title}; it appears here when it is ready.`);
       focusAfterRender(() => changesRef.current?.querySelector<HTMLElement>(`[data-change="${change.id}"]`));
     } catch (e) {
@@ -293,6 +299,8 @@ export default function VoiceChangerPage() {
       void refetch();
       setSpeechKey(newKey());
       setSpeechTitle("");
+      // Shown even when a search is typed that it does not match.
+      search.pin(change.id);
       setNote(change.status === "completed" ? `${change.title} is ready.` : `Speaking ${change.title}; it appears here when it is ready.`);
       focusAfterRender(() => changesRef.current?.querySelector<HTMLElement>(`[data-change="${change.id}"]`));
     } catch (e) {
@@ -375,7 +383,9 @@ export default function VoiceChangerPage() {
   async function removeChange(c: Change) {
     if (!window.confirm(`Delete “${c.title}”? Making it again speaks it again.`)) return;
     fail("lists")(null);
-    const next = changes[changes.indexOf(c) + 1] ?? changes[changes.indexOf(c) - 1];
+    const next = shownChanges[shownChanges.indexOf(c) + 1] ?? shownChanges[shownChanges.indexOf(c) - 1];
+    // Kept in view while the delete is sent, so a search typed meanwhile cannot hide where the focus goes.
+    if (next) search.pin(next.id);
     try {
       seen.current.delete(c.id);
       await api(`/api/voice-changer/changes/${c.id}`, { method: "DELETE" });
@@ -424,6 +434,7 @@ export default function VoiceChangerPage() {
       const { change } = await api<{ change: Change }>(`/api/voice-changer/changes/${c.id}`, { method: "PATCH", body: JSON.stringify({ title }) });
       setData((prev) => (prev ? { ...prev, changes: prev.changes.map((x) => (x.id === change.id ? change : x)) } : prev));
       void refetch();
+      search.pin(change.id);
       setNote(`Renamed the recording to “${change.title}”.`);
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) {
@@ -442,6 +453,8 @@ export default function VoiceChangerPage() {
     if (keepingId) return;
     fail("lists")(null);
     setKeepingId(c.id);
+    // Kept in view while it is kept, so the focus can go to the note that names the clip.
+    search.pin(c.id);
     try {
       const { clip } = await api<{ clip: AudioClip }>(`/api/voice-changer/changes/${c.id}/clip`, { method: "POST" });
       setClipData((prev) => (prev ? { ...prev, clips: [clip, ...prev.clips.filter((x) => x.id !== clip.id)] } : prev));
@@ -772,11 +785,12 @@ export default function VoiceChangerPage() {
               <h2 ref={changesHeading} tabIndex={-1} className="mb-3 text-sm font-semibold text-slate-900 outline-none">
                 Recordings in other voices
               </h2>
+              {data && (changes.length > 0 || search.q) && <ListSearch search={search} label="Search recordings" placeholder="Search by name, words, or voice" shown={shownChanges.length} total={changes.length} noun="recordings" />}
               {!data ? null : changes.length === 0 ? (
                 <EmptyState icon={<Wand2 className="h-8 w-8" />} title="No recordings yet" body="Choose a voice and a recording, or write a text, to make one." />
               ) : (
                 <div className="space-y-3">
-                  {changes.map((c) => (
+                  {shownChanges.map((c) => (
                     <Card key={c.id} className="p-4 outline-none focus:ring-2 focus:ring-brand-500" data-testid="voice-change" data-change={c.id} tabIndex={-1}>
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">

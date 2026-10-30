@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { Camera, Clapperboard, Download, ImagePlus, Pencil, Trash2, UserRound, X } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
+import { ListSearch, useListSearch } from "@/components/ListSearch";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
@@ -114,6 +115,8 @@ export default function PhotoShootPage() {
   }, [refetch]);
 
   const items = data?.shoots ?? [];
+  const search = useListSearch();
+  const shown = items.filter((s) => search.matches(s.id, s.title));
   const canStart = canEdit !== false && data?.available !== false;
   const startNote = !identity.length
     ? "Add a photo of the person first."
@@ -201,6 +204,8 @@ export default function PhotoShootPage() {
       setScene(null);
       setTitle("");
       setConsent(false);
+      // Shown even when a search is typed that it does not match.
+      search.pin(shoot.id);
       setNote(`Making ${shoot.title}; the photos appear here when they are ready.`);
       focusAfterRender(() => listRef.current?.querySelector<HTMLElement>(`[data-shoot="${shoot.id}"]`) ?? sceneRef.current);
     } catch (e) {
@@ -223,6 +228,7 @@ export default function PhotoShootPage() {
       setData((prev) => (prev ? { ...prev, shoots: prev.shoots.map((x) => (x.id === shoot.id ? shoot : x)) } : prev));
       // A list check that left before the rename would answer with the old name; asking again retires it.
       void refetch();
+      search.pin(shoot.id);
       setNote(`Renamed the photo shoot to “${shoot.title}”.`);
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) {
@@ -239,7 +245,9 @@ export default function PhotoShootPage() {
     if (!window.confirm(`Delete “${s.title}”? Its photos go too; download any you want to keep first.`)) return;
     setListErr(null);
     setNote(null);
-    const next = items[items.indexOf(s) + 1] ?? items[items.indexOf(s) - 1];
+    const next = shown[shown.indexOf(s) + 1] ?? shown[shown.indexOf(s) - 1];
+    // Kept in view while the delete is sent, so a search typed meanwhile cannot hide where the focus goes.
+    if (next) search.pin(next.id);
     try {
       seen.current.delete(s.id);
       await api(`/api/shoots/${s.id}`, { method: "DELETE" });
@@ -386,12 +394,13 @@ export default function PhotoShootPage() {
           <h2 ref={headingRef} tabIndex={-1} className="mb-3 text-sm font-semibold text-slate-900 outline-none">
             Your photo shoots
           </h2>
+          {data && (items.length > 0 || search.q) && <ListSearch search={search} label="Search photo shoots" placeholder="Search by name" shown={shown.length} total={items.length} noun="photo shoots" />}
           <ErrorBanner message={listErr} />
           {!data ? null : items.length === 0 ? (
             <EmptyState icon={<Camera className="h-8 w-8" />} title="No photo shoots yet" body="Add photos of a person and a scene on the left to make one." />
           ) : (
             <div className="space-y-3">
-              {items.map((s) => (
+              {shown.map((s) => (
                 <Card key={s.id} className="p-4 outline-none focus:ring-2 focus:ring-brand-500" data-testid="shoot" data-shoot={s.id} tabIndex={-1}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">

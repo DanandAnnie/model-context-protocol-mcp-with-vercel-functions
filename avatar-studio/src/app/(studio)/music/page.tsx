@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Download, Music, Plus, Search, Pencil, Trash2, X } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
+import { ListSearch, useListSearch } from "@/components/ListSearch";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
@@ -138,6 +139,8 @@ export default function MusicPage() {
   }, [refetch, refetchLibrary]);
 
   const items = data?.mixes ?? [];
+  const listSearch = useListSearch();
+  const shown = items.filter((m) => listSearch.matches(m.id, m.title, m.trackName));
   // Any change to what would be mixed is a different start: its own key, and an error about the last one no longer applies.
   function changed() {
     setErr(null);
@@ -264,6 +267,8 @@ export default function MusicPage() {
       setRequestKey(newKey());
       setTitle("");
       setEffects([]);
+      // Shown even when a search is typed that it does not match.
+      listSearch.pin(mix.id);
       setNote(`Adding “${track.name}” to ${mix.title.replace(/ \(with music\)$/, "")}; it appears here when it is ready.`);
       focusAfterRender(() => listRef.current?.querySelector<HTMLElement>(`[data-mix="${mix.id}"]`) ?? videoRef.current);
     } catch (e) {
@@ -299,6 +304,7 @@ export default function MusicPage() {
       setData((prev) => (prev ? { ...prev, mixes: prev.mixes.map((x) => (x.id === saved.id ? saved : x)) } : prev));
       // A list check that left before the rename would answer with the old name; asking again retires it.
       void refetch();
+      listSearch.pin(saved.id);
       setNote(`Renamed the video with music to “${saved.title}”.`);
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) {
@@ -315,7 +321,9 @@ export default function MusicPage() {
     if (!window.confirm(`Delete “${m.title}”? Making it again renders it again.`)) return;
     setErr(null);
     setNote(null);
-    const next = items[items.indexOf(m) + 1] ?? items[items.indexOf(m) - 1];
+    const next = shown[shown.indexOf(m) + 1] ?? shown[shown.indexOf(m) - 1];
+    // Kept in view while the delete is sent, so a search typed meanwhile cannot hide where the focus goes.
+    if (next) listSearch.pin(next.id);
     try {
       // Forgotten before the request, so a check landing meanwhile does not announce it as deleted elsewhere.
       seen.current.delete(m.id);
@@ -518,11 +526,12 @@ export default function MusicPage() {
           <h2 ref={headingRef} tabIndex={-1} className="mb-3 text-sm font-semibold text-slate-900 outline-none">
             Videos with music
           </h2>
+          {data && (items.length > 0 || listSearch.q) && <ListSearch search={listSearch} label="Search videos with music" placeholder="Search by name or track" shown={shown.length} total={items.length} noun="videos with music" />}
           {!data ? null : items.length === 0 ? (
             <EmptyState icon={<Music className="h-8 w-8" />} title="No videos with music yet" body="Choose a video and find a track on the left to get started." />
           ) : (
             <div className="space-y-3">
-              {items.map((m) => (
+              {shown.map((m) => (
                 <Card key={m.id} className="p-4 outline-none focus:ring-2 focus:ring-brand-500" data-testid="mix" data-mix={m.id} tabIndex={-1}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">

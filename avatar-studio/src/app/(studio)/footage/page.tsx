@@ -2,6 +2,7 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Download, ImagePlus, MonitorPlay, Pencil, RotateCcw, Trash2, X } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
+import { ListSearch, useListSearch } from "@/components/ListSearch";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
@@ -130,6 +131,8 @@ export default function FootagePage() {
   }, [refetch]);
 
   const items = data?.footage ?? [];
+  const search = useListSearch();
+  const shown = items.filter((f) => search.matches(f.id, f.title, f.prompt));
   const canStart = canEdit !== false && data?.available !== false;
   const shortPrompt = prompt.trim().length < 10;
   const frame = use === "frame" ? picture : null;
@@ -360,6 +363,8 @@ export default function FootagePage() {
       setFeatures([]);
       setTake(null);
       setTitle("");
+      // Shown even when a search is typed that it does not match.
+      search.pin(footage.id);
       setNote(`Making ${footage.title}; it appears here when it is ready.`);
       // Focus goes to the new clip, rather than being lost with the cleared form.
       focusAfterRender(() => listRef.current?.querySelector<HTMLElement>(`[data-footage="${footage.id}"]`) ?? promptRef.current);
@@ -419,6 +424,7 @@ export default function FootagePage() {
       setData((prev) => (prev ? { ...prev, footage: prev.footage.map((x) => (x.id === clip.id ? clip : x)) } : prev));
       // A list check that left before the rename would answer with the old name; asking again retires it.
       void refetch();
+      search.pin(clip.id);
       setNote(`Renamed the clip to “${clip.title}”.`);
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) {
@@ -435,7 +441,9 @@ export default function FootagePage() {
     if (!window.confirm(`Delete “${f.title}”? Scenes that loop it can no longer be rendered, and making it again uses another job.`)) return;
     setListErr(null);
     setNote(null);
-    const next = items[items.indexOf(f) + 1] ?? items[items.indexOf(f) - 1];
+    const next = shown[shown.indexOf(f) + 1] ?? shown[shown.indexOf(f) - 1];
+    // Kept in view while the delete is sent, so a search typed meanwhile cannot hide where the focus goes.
+    if (next) search.pin(next.id);
     try {
       seen.current.delete(f.id);
       await api(`/api/footage/${f.id}`, { method: "DELETE" });
@@ -658,12 +666,13 @@ export default function FootagePage() {
           <h2 ref={headingRef} tabIndex={-1} className="mb-3 text-sm font-semibold text-slate-900 outline-none">
             Your clips
           </h2>
+          {data && (items.length > 0 || search.q) && <ListSearch search={search} label="Search clips" placeholder="Search by name or description" shown={shown.length} total={items.length} noun="clips" />}
           <ErrorBanner message={listErr} />
           {!data ? null : items.length === 0 ? (
             <EmptyState icon={<MonitorPlay className="h-8 w-8" />} title="No clips yet" body="Describe a shot on the left to make one." />
           ) : (
             <div className="space-y-3">
-              {items.map((f) => (
+              {shown.map((f) => (
                 <Card key={f.id} className="p-4 outline-none focus:ring-2 focus:ring-brand-500" data-testid="footage" data-footage={f.id} tabIndex={-1}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">

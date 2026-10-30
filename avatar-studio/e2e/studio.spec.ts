@@ -1165,6 +1165,22 @@ test("an instant voice is made from a recording with the speaker's agreement, an
   expect([livelyRetry.title, Object.keys(livelyRetry).includes("askedTitle")]).toEqual([livelyName, false]);
   expect((await page.request.patch(`/api/voice-changer/changes/${livelyRetry.id}`, { data: { title: " " } })).status()).toBe(400);
   expect((await page.request.patch("/api/voice-changer/changes/vc_missing123", { data: { title: "Gone" } })).status()).toBe(404);
+  // The recordings are searched by name, the words of a text, or the voice they are in, ignoring case; the count is read out.
+  const searchBox = page.getByRole("searchbox", { name: "Search recordings" });
+  const matched = page.getByTestId("list-matches");
+  await searchBox.fill(livelyName.toUpperCase());
+  await expect(page.getByTestId("voice-change")).toHaveCount(1);
+  await expect(renamedCard).toBeVisible();
+  await expect(matched).toHaveText(/^1 of \d+ recordings$/);
+  await searchBox.fill(name);
+  await expect(page.getByTestId("voice-change")).toHaveCount(3);
+  await searchBox.fill("no such recording");
+  await expect(page.getByTestId("voice-change")).toHaveCount(0);
+  await expect(page.getByText("Nothing here matches “no such recording”.")).toBeVisible();
+  await expect(matched).toHaveText(/^0 of \d+ recordings$/);
+  await searchBox.fill("");
+  await expect(matched).toHaveText("");
+  await expect(renamedCard).toBeVisible();
   page.once("dialog", (d) => d.accept());
   await renamedCard.getByRole("button", { name: /^Delete / }).click();
   await expect(renamedCard).toHaveCount(0);
@@ -1803,6 +1819,22 @@ test("a b-roll clip is made from a description, renamed, and loops behind a pres
   expect(Object.keys(retried)).not.toContain("askedTitle");
   expect((await page.request.patch(`/api/footage/${id}`, { data: { title: " " } })).status()).toBe(400);
   expect((await page.request.patch("/api/footage/ft_missing123", { data: { title: "Gone" } })).status()).toBe(404);
+  // The clips are searched by name or description, and one renamed during a search stays in view until it changes.
+  const clipSearch = page.getByRole("searchbox", { name: "Search clips" });
+  await clipSearch.fill(`kitchen ${tag}`);
+  await expect(page.getByTestId("footage")).toHaveCount(1);
+  await expect(page.getByTestId("list-matches")).toHaveText(/^1 of \d+ clips$/);
+  await clipSearch.fill(shotName.toLowerCase());
+  await expect(page.getByTestId("footage")).toHaveCount(1);
+  const keptName = `Kept in view ${tag}`;
+  page.once("dialog", (d) => void d.accept(keptName));
+  await item.getByRole("button", { name: /^Rename / }).click();
+  await expect(item.getByText(keptName, { exact: true })).toBeVisible();
+  await expect(item.getByRole("button", { name: `Rename ${keptName}` })).toBeFocused();
+  await clipSearch.fill(shotName);
+  await expect(page.getByTestId("footage")).toHaveCount(0);
+  await clipSearch.fill("");
+  await expect(item).toBeVisible();
   // In the editor the clip is offered as a scene's video background and previewed on the stage.
   await page.goto("/create");
   await page.getByRole("button", { name: "Background" }).click();

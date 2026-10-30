@@ -9,7 +9,7 @@ import { useCanEdit } from "@/hooks/useCanEdit";
 import { ApiError, api, formatDate, formatSeconds } from "@/lib/client";
 import { clipBody } from "@/lib/clip-upload";
 import { ASSET_SORTS, inRankOrder, inSortOrder, rankAssets, type AssetSort } from "@/lib/asset-sort";
-import { foldTerm } from "@/lib/glossary";
+import { useListSearch } from "@/components/ListSearch";
 import { toUploadable } from "@/lib/image-upload";
 import { MAX_BACKDROPS, MAX_CLIPS, type AudioClip, type Backdrop } from "@/lib/types";
 /** What the pictures route takes (3 MB decoded); larger pictures, and other formats, are redrawn as a JPEG first. */
@@ -30,15 +30,7 @@ export default function AssetsPage() {
   // A search narrows both lists: a clip by its name or the words it says, a picture by its name, compared in one case
   // and Unicode form (a file name from macOS can arrive decomposed). What was uploaded or changed since the search was
   // typed stays in view, so an edit or upload never vanishes from under the person (or their focus).
-  const [q, setQ] = useState("");
-  const [pinned, setPinned] = useState<ReadonlySet<string>>(new Set());
-  const search = (value: string) => {
-    setQ(value);
-    setPinned(new Set());
-  };
-  const pin = (id: string) => setPinned((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
-  const needle = foldTerm(q.trim());
-  const matches = (id: string, ...texts: Array<string | undefined>) => !needle || pinned.has(id) || texts.some((t) => !!t && foldTerm(t).includes(needle));
+  const { q, needle, search, pin, matches } = useListSearch();
   // The order is worked out when a sort is chosen and when each list first loads, and then held: a rename does not
   // move its card, an upload appears first, and a delete leaves the rest where they are, so nothing moves out from
   // under the person (or their focus). "Sort again" shows once the held order no longer matches the sort.

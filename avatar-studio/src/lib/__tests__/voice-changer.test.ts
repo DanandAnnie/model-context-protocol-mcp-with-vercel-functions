@@ -527,6 +527,9 @@ describe("voice changer", () => {
     // The file: an MP3 when asked for; HeyGen's WAV is the default, stored as absent.
     assert.deepEqual([parse({ format: "mp3" }).format, parse({ format: "wav" }).format, parse({}).format], ["mp3", undefined, undefined]);
     assert.throws(() => parse({ format: "ogg" }), /format is wav or mp3/);
+    // The text's language: a name or code, kept as given; blank lets HeyGen detect it; one naming no language is refused.
+    assert.deepEqual([parse({ language: " French " }).language, parse({ language: "es-MX" }).language, parse({ language: "" }).language, parse({ language: null }).language], ["French", "es-MX", undefined, undefined]);
+    for (const bad of ["Klingon", "sic", 7, "und", "mul", "zxx", "qaa"]) assert.throws(() => parse({ language: bad }), /Name the text's language|language is a language name or code/, String(bad));
     const voice = await ready("u1");
     const freebie = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Free words.", free: true }), "u1", { key: "speech-free" });
     assert.deepEqual([freebie.turbo, freebie.free, publicVoiceChange(freebie).free], [true, true, true]);
@@ -536,6 +539,10 @@ describe("voice changer", () => {
     const small = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Small file.", format: "mp3" }), "u1", { key: "speech-mp3" });
     assert.deepEqual([small.format, publicVoiceChange(small).format], ["mp3", "mp3"]);
     await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Small file." }), "u1", { key: "speech-mp3" }), ConflictError);
+    // The language is part of what a repeated key must match, by language rather than spelling.
+    const inFrench = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Salut.", language: "French" }), "u1", { key: "speech-fr" });
+    assert.equal((await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Salut.", language: "fr" }), "u1", { key: "speech-fr" })).id, inFrench.id);
+    await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Salut." }), "u1", { key: "speech-fr" }), ConflictError);
     const wav = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Big file." }), "u1", { key: "speech-wav" });
     assert.equal("format" in wav, false);
     assert.equal((await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Big file.", format: "wav" }), "u1", { key: "speech-wav" })).id, wav.id);
@@ -572,7 +579,7 @@ describe("voice changer", () => {
     const saved = { avatar: config.avatarProvider, key: config.heygenApiKey };
     const calls: Array<{ url: string; body: Record<string, unknown> | null; idem: string | null }> = [];
     const realFetch = globalThis.fetch;
-    let tts: "slow" | "done" | "refuse" | "busy" | "down" | "noMp3" = "slow";
+    let tts: "slow" | "done" | "refuse" | "busy" | "down" | "noMp3" | "noLanguage" = "slow";
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const body = typeof init?.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : null;
@@ -586,14 +593,18 @@ describe("voice changer", () => {
         if (tts === "refuse") return Response.json({ error: { code: "invalid_parameter", message: "text language is not supported", param: "text" } }, { status: 400 });
         if (tts === "busy") return Response.json({ error: { code: "rate_limit_exceeded", message: "free capacity exhausted" } }, { status: 429 });
         if (tts === "down") return Response.json({ error: { code: "internal_error", message: "service failure" } }, { status: 500 });
+        if (tts === "noLanguage") return Response.json({ error: { code: "invalid_parameter", message: "language is not supported by HeyGen Voice", param: "language" } }, { status: 400 });
         if (tts === "noMp3") return Response.json({ error: { code: "invalid_parameter", message: "output_format is not supported with with_timestamps", param: "output_format" } }, { status: 400 });
         const words = [{ text: "Hi", start_time: 0, end_time: 0.3 }, { text: "there.", start_time: 0.3, end_time: 0.9 }, { text: "", start_time: 1, end_time: 1.1 }, { text: "Bye.", start_time: 1.6, end_time: 2 }, { text: "late", start_time: 2.5, end_time: "x" }];
         const characters = [..."Hi yo"].map((c, i) => ({ text: c, start_time: i / 10, end_time: (i + 1) / 10 }));
-        return Response.json({ data: { audio_url: "https://files.heygen.ai/generated/speech.wav", duration: 3.4, ...(timings === "words" ? { original_words: words, original_characters: characters } : timings === "characters" ? { original_characters: characters } : {}) } });
+        // HeyGen names the language it spoke in: the one asked for, else the one it detected (here, English).
+        const spoken = contentLanguage ?? (typeof body?.language === "string" ? `${body.language}, en` : "en-US");
+        return Response.json({ data: { audio_url: "https://files.heygen.ai/generated/speech.wav", duration: 3.4, ...(timings === "words" ? { original_words: words, original_characters: characters } : timings === "characters" ? { original_characters: characters } : {}) } }, { headers: { "Content-Language": spoken } });
       }
       return new Response("unexpected", { status: 500 });
     }) as typeof fetch;
     let timings: "words" | "characters" | "none" = "none";
+    let contentLanguage: string | undefined;
     Object.assign(config, { avatarProvider: "heygen", heygenApiKey: "hg_key" });
     try {
       // Not done in time: dropped with a 502 to try again, never asked for again (HeyGen documents no replay for text).
@@ -622,6 +633,23 @@ describe("voice changer", () => {
       assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1", voice_id: "hv_1", text: "Big news.", with_timestamps: true });
       await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Calm news.", expressivenessBoost: 0 }), "u1");
       assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1", voice_id: "hv_1", text: "Calm news.", expressiveness_boost: 0, with_timestamps: true });
+      // The text's language reaches HeyGen as its base code; the language HeyGen spoke in is kept from Content-Language,
+      // and one that is no language tag is not.
+      const french = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Bonjour.", language: "French (Canada)" }), "u1");
+      assert.equal(calls.at(-1)!.body?.language, "fr");
+      assert.deepEqual([french.language, french.spokenLanguage], ["French (Canada)", "fr"]);
+      const detected = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Hello." }), "u1");
+      assert.equal("language" in calls.at(-1)!.body!, false, "none named lets HeyGen detect it");
+      assert.deepEqual([detected.language, detected.spokenLanguage], [undefined, "en-us"]);
+      for (const odd of ["<script>", "und", "zxx-Latn"]) {
+        contentLanguage = odd;
+        assert.equal((await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Hi." }), "u1")).spokenLanguage, undefined, odd);
+      }
+      contentLanguage = undefined;
+      // HeyGen refusing the language named is said as the language's; nothing is kept.
+      tts = "noLanguage";
+      await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Salve.", language: "la" }), "u1"), /does not speak that language; choose another/);
+      tts = "done";
       // An MP3 reaches HeyGen as its output_format, at its defaults for MP3.
       await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Small news.", format: "mp3" }), "u1");
       assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1", voice_id: "hv_1", text: "Small news.", output_format: { encoding: "mp3" }, with_timestamps: true });

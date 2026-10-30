@@ -2,7 +2,7 @@ import { AGENT_STYLE_TAGS, STUDIO_VARIABLE_TYPES, backdropIdOf, footageIdOf, isP
 import { silentSeconds, withBreakTags } from "../../pauses";
 import type { LookPackKey } from "../../look-packs";
 import { heygenBurnsCaptions, isUnspaced } from "../../captions";
-import { baseLanguageCode, voiceTakesAccent } from "../../language";
+import { baseLanguageCode, isSpecialLanguageCode, voiceTakesAccent } from "../../language";
 import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
 import { glossaryWith } from "../heygen-glossary";
@@ -821,7 +821,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     return this.voiceAudio(() => this.client.speechToSpeech(body, input.key, input.waitMs), { what: "recording", fix: "try a clearer recording" });
   }
 
-  async speakText(input: { voiceId: string; text: string; turbo?: true; free?: true; mp3?: true; expressivenessBoost?: number; key: string; waitMs: number }): Promise<{ status: "processing" } | { status: "completed"; audioUrl: string; durationSec: number; words?: SpokenWord[] }> {
+  async speakText(input: { voiceId: string; text: string; turbo?: true; free?: true; mp3?: true; language?: string; expressivenessBoost?: number; key: string; waitMs: number }): Promise<{ status: "processing" } | { status: "completed"; audioUrl: string; durationSec: number; words?: SpokenWord[]; spokenLanguage?: string }> {
     // Turbo speaks instant voices faster and cheaper. The boost is an instant-voice setting (the studio sends neither for
     // a public voice that is not instant), which HeyGen sets to its full 1 when none is sent, so a lower one, 0
     // included, is always sent.
@@ -831,6 +831,8 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       model: input.free ? "heygen-voice-1-turbo-free" : input.turbo ? "heygen-voice-1-turbo" : "heygen-voice-1",
       voice_id: input.voiceId,
       text: input.text,
+      // The text's language when the account names it; otherwise HeyGen works it out.
+      ...(input.language ? { language: input.language } : {}),
       ...(input.expressivenessBoost !== undefined ? { expressiveness_boost: input.expressivenessBoost } : {}),
       // An MP3 at HeyGen's defaults for it (44.1 kHz, 128 kbps); none asked for is its WAV.
       ...(input.mp3 ? { output_format: { encoding: "mp3" } } : {}),
@@ -846,11 +848,16 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       if (input.free && err instanceof LimitError) throw new LimitError("HeyGen's free speech is at its limit or busy just now; try again later, or speak the text without Free");
       // A refusal naming the file format (or the timings it is made with) is said as the MP3's.
       if (input.mp3 && err instanceof ValidationError && /output_format|timestamp/i.test(err.message)) throw new ValidationError("HeyGen would not make an MP3 of this text; choose WAV and try again");
+      // A refusal naming the language the account chose is said as the language's.
+      if (input.language && err instanceof ValidationError && /\blanguage\b/i.test(err.message)) throw new ValidationError("HeyGen Voice does not speak that language; choose another, or leave it to HeyGen to tell from the text");
       throw err;
     }
     if (out.status !== "completed") return out;
     const words = timedWords(answer?.original_words, answer?.original_characters, out.durationSec);
-    return words.length ? { ...out, words } : out;
+    // The language HeyGen spoke in (its Content-Language), kept only when it reads as a language tag.
+    const spoken = answer?.content_language?.trim().split(",")[0].trim().toLowerCase();
+    const spokenLanguage = spoken && /^[a-z]{2,3}(-[a-z0-9]{2,8})*$/.test(spoken) && !isSpecialLanguageCode(spoken) ? spoken : undefined;
+    return { ...out, ...(words.length ? { words } : {}), ...(spokenLanguage ? { spokenLanguage } : {}) };
   }
 
   /** The audio spoken in a voice (a WAV, or for text the MP3 asked for), with HeyGen's refusals told apart. */

@@ -993,6 +993,8 @@ test("an instant voice is made from a recording with the speaker's agreement, an
   const spokenCard = page.getByTestId("voice-change").filter({ hasText: `Welcome to the team in ${name}` });
   await expect(spokenCard).toBeFocused();
   await expect(spokenCard.getByTestId("voice-change-meta")).toContainText("from text");
+  // With no language chosen, HeyGen's own reading of it is shown.
+  await expect(spokenCard.getByTestId("voice-change-meta")).toContainText("spoken in English");
   await expect(spokenCard.getByRole("link", { name: /^Download (?!captions )/ })).toHaveAttribute("href", /\/demo\/revoiced\.mp3$/);
   // Captions timed by when each word was said, as SRT or WebVTT; a recording spoken again has no words to time.
   const srt = spokenCard.getByRole("link", { name: /^Download captions for .* as SRT/ });
@@ -1042,13 +1044,19 @@ test("an instant voice is made from a recording with the speaker's agreement, an
   await expect(fileFormat).toHaveValue("wav");
   await expect(fileFormat).toHaveAccessibleDescription(/smaller MP3/);
   await fileFormat.selectOption("mp3");
+  // The text's language can be named rather than left to HeyGen to tell.
+  const textLanguage = page.getByRole("combobox", { name: /^Language\b/ });
+  await expect(textLanguage).toHaveValue("");
+  await expect(textLanguage).toHaveAccessibleDescription(/leave it to HeyGen/);
+  await textLanguage.selectOption({ label: "Spanish" });
   await page.getByRole("textbox", { name: /^Title for the text\b/ }).fill("Free welcome");
   const freeSaid = page.waitForRequest((r) => r.url().endsWith("/api/voice-changer/speech") && r.method() === "POST");
   await speak.click();
-  expect((await freeSaid).postDataJSON()).toEqual({ voiceId: expect.stringMatching(/^iv_/), text: "Welcome to the team.", title: "Free welcome", turbo: true, free: true, expressivenessBoost: 0.4, format: "mp3" });
+  expect((await freeSaid).postDataJSON()).toEqual({ voiceId: expect.stringMatching(/^iv_/), text: "Welcome to the team.", title: "Free welcome", turbo: true, free: true, expressivenessBoost: 0.4, format: "mp3", language: "Spanish" });
   const freeCard = page.getByTestId("voice-change").filter({ hasText: "Free welcome" });
-  await expect(freeCard.getByTestId("voice-change-meta")).toContainText("from text · Turbo Free · expressiveness boost 40% · MP3");
+  await expect(freeCard.getByTestId("voice-change-meta")).toContainText("from text · Turbo Free · expressiveness boost 40% · MP3 · spoken in Spanish");
   await fileFormat.selectOption("wav");
+  await textLanguage.selectOption("");
   page.once("dialog", (d) => d.accept());
   await freeCard.getByRole("button", { name: /^Delete / }).click();
   await expect(freeCard).toHaveCount(0);

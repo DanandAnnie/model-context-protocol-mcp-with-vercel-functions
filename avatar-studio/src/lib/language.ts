@@ -62,6 +62,11 @@ export function baseLanguageCode(name: string): string | undefined {
   return languageCode(name) ?? name.trim().split(/\s+/).filter((w) => w.length > 3).map((w) => languageCode(w)).find(Boolean);
 }
 
+/** Codes that name no language to speak: undetermined, several, none, uncoded, and the private-use range. */
+export function isSpecialLanguageCode(code: string | undefined): boolean {
+  return !!code && /^(und|mul|zxx|mis|q[a-t][a-z])$/i.test(code.split("-")[0]);
+}
+
 /** A readable name for a provider language value ("en-GB" → "British English"); the value itself when unknown. */
 export function languageLabel(value: string): string {
   const tag = languageTag(value);

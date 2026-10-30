@@ -26,12 +26,12 @@ export interface GlossaryLists {
 export class HeyGenClient {
   constructor(private apiKey: string) {}
 
-  private async request<T>(url: string, init: RequestInit = {}): Promise<T> {
-    return (await this.envelope<T>(url, init)).data as T;
+  private async request<T>(url: string, init: RequestInit = {}, onHeaders?: (headers: Headers) => void): Promise<T> {
+    return (await this.envelope<T>(url, init, onHeaders)).data as T;
   }
 
-  /** The whole answer, for the few calls whose paging cursor sits next to `data`. */
-  private async envelope<T>(url: string, init: RequestInit = {}): Promise<{ data?: T } & Record<string, unknown>> {
+  /** The whole answer, for the few calls whose paging cursor sits next to `data`; `onHeaders` sees a success's headers. */
+  private async envelope<T>(url: string, init: RequestInit = {}, onHeaders?: (headers: Headers) => void): Promise<{ data?: T } & Record<string, unknown>> {
     const res = await fetch(url, {
       ...init,
       headers: {
@@ -49,6 +49,7 @@ export class HeyGenClient {
       const msg = typeof json.error === "string" ? json.error : json.error.message ?? "unknown error";
       throw new Error(`HeyGen error: ${msg}`);
     }
+    onHeaders?.(res.headers);
     return json;
   }
 
@@ -401,8 +402,12 @@ export class HeyGenClient {
    */
   textToSpeech(body: Record<string, unknown>, key: string, waitMs: number) {
     type Timed = Array<{ text?: unknown; start_time?: unknown; end_time?: unknown }> | null;
-    return this.request<{ audio_url?: string | null; duration?: number | null; original_words?: Timed; original_characters?: Timed }>(`${V3}/models/audio/tts`, { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": key }, signal: AbortSignal.timeout(waitMs) });
+    type Spoken = { audio_url?: string | null; duration?: number | null; original_words?: Timed; original_characters?: Timed };
+    // The language HeyGen spoke the text in (the one asked for, or the one it detected) comes as `Content-Language`.
+    let language: string | null = null;
+    return this.request<Spoken>(`${V3}/models/audio/tts`, { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": key }, signal: AbortSignal.timeout(waitMs) }, (h) => (language = h.get("content-language"))).then((data) => ({ ...data, content_language: language }));
   }
+
 
   /** Deletes a HyperFrames render and its video (`DELETE /v3/hyperframes/renders/{id}`). */
   async deleteHyperframesRender(id: string): Promise<void> {

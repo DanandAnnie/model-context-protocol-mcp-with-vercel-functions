@@ -18,6 +18,8 @@ import { rememberMadeVoices } from "./voices";
 import { jobChecker } from "./job-checks";
 import { graphemes, withSuffix } from "../text";
 import { wordCues, type Cue } from "../captions";
+import { pronunciationLanguage } from "../pronounce";
+import { isSpecialLanguageCode } from "../language";
 
 /** Instant voices an account keeps; another needs one deleted first. */
 export const MAX_INSTANT_VOICES = 10;
@@ -81,6 +83,11 @@ export const voiceSpeechSchema = z.object({
   free: z.boolean({ error: "free is true or false" }).optional(),
   /** The file HeyGen hands back: its WAV (the default, stored as absent) or an MP3 (smaller, at 44.1 kHz and 128 kbps). */
   format: z.enum(["wav", "mp3"], { error: "format is wav or mp3" }).optional(),
+  /** The text's language, by name ("French") or code ("fr", "fr-CA"); absent (or blank) lets HeyGen detect it. */
+  language: z.preprocess(
+    (v) => (v === null || (typeof v === "string" && !v.trim()) ? undefined : v),
+    z.string({ error: "language is a language name or code" }).trim().max(40, "language is a language name or code").refine((l) => !!pronunciationLanguage(l) && !isSpecialLanguageCode(pronunciationLanguage(l)), "Name the text's language, for example French, or leave it out").optional(),
+  ),
   /**
    * HeyGen's expressiveness boost, 0 to 1 in steps of 0.1. HeyGen applies 1 (its full boost) when none is sent, so 1
    * is stored as absent and anything lower, 0 included, is stored and sent.
@@ -433,7 +440,7 @@ export async function startVoiceSpeech(input: z.infer<typeof voiceSpeechSchema>,
   const existing = opts.key ? await getStore().get<VoiceChange>("voicechange", id) : null;
   if (existing && existing.ownerId === ownerId) {
     // A boost of 1 is HeyGen's default, so one stored as 1 (as an earlier version did) is the same delivery as none.
-    const sameDelivery = existing.turbo === input.turbo && existing.free === input.free && existing.format === input.format && (existing.expressivenessBoost ?? 1) === (input.expressivenessBoost ?? 1);
+    const sameDelivery = existing.turbo === input.turbo && existing.free === input.free && existing.format === input.format && pronunciationLanguage(existing.language) === pronunciationLanguage(input.language) && (existing.expressivenessBoost ?? 1) === (input.expressivenessBoost ?? 1);
     if (existing.voiceId !== input.voiceId || existing.text !== input.text || !sameDelivery || (input.title && existing.title !== input.title)) throw new ConflictError("This Idempotency-Key was already used for another recording; send a new key");
     return existing;
   }
@@ -452,6 +459,7 @@ export async function startVoiceSpeech(input: z.infer<typeof voiceSpeechSchema>,
     ...(input.turbo ? { turbo: true as const } : {}),
     ...(input.free ? { free: true as const } : {}),
     ...(input.format ? { format: input.format } : {}),
+    ...(input.language ? { language: input.language } : {}),
     ...(input.expressivenessBoost !== undefined ? { expressivenessBoost: input.expressivenessBoost } : {}),
     provider: provider.name,
     providerVoiceId: voice.providerVoiceId,
@@ -462,13 +470,13 @@ export async function startVoiceSpeech(input: z.infer<typeof voiceSpeechSchema>,
   await getStore().put("voicechange", change);
   try {
     const waitMs = Math.max(MIN_WAIT_MS, START_DEADLINE_MS - (Date.now() - arrived));
-    const out = await provider.speakText({ voiceId: voice.providerVoiceId, text: input.text, ...(input.turbo ? { turbo: true as const } : {}), ...(input.free ? { free: true as const } : {}), ...(input.format ? { mp3: true as const } : {}), ...(input.expressivenessBoost !== undefined ? { expressivenessBoost: input.expressivenessBoost } : {}), key: id, waitMs });
+    const out = await provider.speakText({ voiceId: voice.providerVoiceId, text: input.text, ...(input.turbo ? { turbo: true as const } : {}), ...(input.free ? { free: true as const } : {}), ...(input.format ? { mp3: true as const } : {}), ...(input.language ? { language: pronunciationLanguage(input.language) } : {}), ...(input.expressivenessBoost !== undefined ? { expressivenessBoost: input.expressivenessBoost } : {}), key: id, waitMs });
     // A free request not answered (a failure of HeyGen's shared free capacity, or no answer in time) is free speech's.
     if (out.status === "processing") throw new UpstreamError(input.free ? "HeyGen's free speech did not answer; try again, or speak the text without Free" : "HeyGen did not finish speaking the text in time; try again, or try a shorter text");
     // The words' times go in a row of their own first; a store that will not take them (a database whose kinds
     // predate them) keeps the speech without captions rather than failing it.
     const timed = out.words?.length ? await keepWords(change, out.words) : false;
-    const done: VoiceChange = { ...change, status: "completed", audioUrl: out.audioUrl, ...(out.durationSec ? { durationSec: out.durationSec } : {}), ...(timed ? { timed: true as const } : {}), checkedAt: nowIso(), updatedAt: nowIso() };
+    const done: VoiceChange = { ...change, status: "completed", audioUrl: out.audioUrl, ...(out.durationSec ? { durationSec: out.durationSec } : {}), ...(timed ? { timed: true as const } : {}), ...(out.spokenLanguage ? { spokenLanguage: out.spokenLanguage } : {}), checkedAt: nowIso(), updatedAt: nowIso() };
     if (await getStore().putIf("voicechange", done, "updatedAt", change.updatedAt)) return done;
     if (timed) await getStore().remove("voicewords", wordsRowId(change.id));
     return change;

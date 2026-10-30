@@ -9,6 +9,8 @@ import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { ApiError, api, formatDate, formatSeconds, isRefusal } from "@/lib/client";
 import { clipBody } from "@/lib/clip-upload";
+import { languageLabel } from "@/lib/language";
+import { LANGUAGES } from "@/lib/stock";
 import { VOICE_RESULT_LINK_MS, type AudioClip, type Backdrop, type InstantVoice, type PublicVoice, type VoiceChange } from "@/lib/types";
 
 /** As the server lists them: never the renderer, its ids, or the upload sent to it. */
@@ -146,6 +148,8 @@ export default function VoiceChangerPage() {
   const [speechBoost, setSpeechBoost] = useState(10);
   // The file HeyGen hands back: its WAV, or a smaller MP3.
   const [speechFormat, setSpeechFormat] = useState<"wav" | "mp3">("wav");
+  // The text's language; empty lets HeyGen work it out from the text.
+  const [speechLanguage, setSpeechLanguage] = useState("");
   const [speechKey, setSpeechKey] = useState(() => newKey());
   const [speaking, setSpeaking] = useState(false);
   const [voiceName, setVoiceName] = useState("");
@@ -281,6 +285,7 @@ export default function VoiceChangerPage() {
         ...(deliveryOff ? {} : { ...(speechTurbo ? { turbo: true, ...(speechFree ? { free: true } : {}) } : {}), ...(speechBoost !== 10 ? { expressivenessBoost: speechBoost / 10 } : {}) }),
         // Any voice can be spoken into an MP3, a professional one included.
         ...(speechFormat === "mp3" ? { format: "mp3" } : {}),
+        ...(speechLanguage ? { language: speechLanguage } : {}),
       };
       const body = { voiceId: speechVoiceId, text: speechText.trim(), ...(speechTitle.trim() ? { title: speechTitle.trim() } : {}), ...delivery };
       const { change } = await api<{ change: Change }>("/api/voice-changer/speech", { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": speechKey } });
@@ -559,6 +564,16 @@ export default function VoiceChangerPage() {
                     </p>
                   </div>
                 </fieldset>
+                <Field label="Language" hint="The text's language, or leave it to HeyGen to tell from the text." hintId="speech-language-hint">
+                  <select className={inputClass} value={speechLanguage} disabled={!editable || speaking} aria-describedby="speech-language-hint" onChange={(e) => (setSpeechLanguage(e.target.value), setSpeechKey(newKey()), fail("speech")(null))}>
+                    <option value="">Detect from the text</option>
+                    {LANGUAGES.map((l) => (
+                      <option key={l.code} value={l.code}>
+                        {l.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
                 <Field label="File" hint="WAV, HeyGen's default, or a smaller MP3 (44.1 kHz, 128 kbps)." hintId="speech-format-hint">
                   <select className={inputClass} value={speechFormat} disabled={!editable || speaking} aria-describedby="speech-format-hint" onChange={(e) => (setSpeechFormat(e.target.value === "mp3" ? "mp3" : "wav"), setSpeechKey(newKey()), fail("speech")(null))}>
                     <option value="wav">WAV</option>
@@ -703,6 +718,7 @@ export default function VoiceChangerPage() {
                             {c.free ? " · Turbo Free" : c.turbo ? " · Turbo" : ""}
                             {c.expressivenessBoost !== undefined && c.expressivenessBoost !== 1 ? ` · expressiveness boost ${Math.round(c.expressivenessBoost * 100)}%` : ""}
                             {c.format === "mp3" ? " · MP3" : ""}
+                            {c.spokenLanguage ? ` · spoken in ${languageLabel(c.spokenLanguage)}` : c.language ? ` · in ${c.language}` : ""}
                           </div>
                           {c.error && <div className="mt-1 text-xs text-rose-600">{c.error}</div>}
                         </div>

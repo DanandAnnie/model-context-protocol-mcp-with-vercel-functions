@@ -492,6 +492,10 @@ export interface VoiceChange {
   free?: true;
   /** Text only: spoken into an MP3 (HeyGen's `output_format`); absent is HeyGen's WAV. */
   format?: "mp3";
+  /** Text only: the text's language as the account named it (sent as its base code); absent is HeyGen's detection. */
+  language?: string;
+  /** Text only: the language the renderer says it spoke in (a code such as "fr", from HeyGen's Content-Language). */
+  spokenLanguage?: string;
   /** Text only: HeyGen's `expressiveness_boost`, 0 to 1; absent is HeyGen's default, its full boost of 1. */
   expressivenessBoost?: number;
   /** Renderer, the voice there, and the recording as it was sent (none for text), so one still running is asked for again. */

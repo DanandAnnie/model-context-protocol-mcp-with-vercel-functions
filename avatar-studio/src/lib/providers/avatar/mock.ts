@@ -303,13 +303,14 @@ export class MockAvatarProvider implements AvatarProvider {
     return { status: "completed", audioUrl: demoAssetUrl("/demo/revoiced.mp3"), durationSec: 0 };
   }
 
-  /** Demo text to speech: the same sample recording, its length as the text would take to read aloud, its words evenly timed. */
-  async speakText(input: { text: string }): Promise<{ status: "completed"; audioUrl: string; durationSec: number; words: SpokenWord[] }> {
+  /** Demo text to speech: the same sample recording, its length as the text would take to read aloud, its words evenly timed, in the language asked for. */
+  async speakText(input: { text: string; language?: string }): Promise<{ status: "completed"; audioUrl: string; durationSec: number; words: SpokenWord[]; spokenLanguage: string }> {
     const said = input.text.trim().split(/\s+/).filter(Boolean);
     const durationSec = Math.max(1, Math.round((said.length / 2.5) * 10) / 10);
     const each = durationSec / Math.max(1, said.length);
     const words = said.map((text, i) => ({ text, startSec: Math.round(i * each * 1000) / 1000, endSec: Math.round((i + 1) * each * 1000) / 1000 }));
-    return { status: "completed", audioUrl: demoAssetUrl("/demo/revoiced.mp3"), durationSec, words };
+    // The language asked for, else English, as a renderer that detected it would say.
+    return { status: "completed", audioUrl: demoAssetUrl("/demo/revoiced.mp3"), durationSec, words, spokenLanguage: input.language ?? "en" };
   }
 
   async musicMixStatus(jobId: string): Promise<LipsyncStatus> {

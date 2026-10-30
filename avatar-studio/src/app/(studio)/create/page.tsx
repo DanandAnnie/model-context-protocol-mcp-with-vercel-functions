@@ -20,6 +20,7 @@ import { MAX_SILENT_SEC, MIN_SILENT_SEC, silentProblem, silentSeconds, stripPaus
 import { countMatches, replaceAll } from "@/lib/find-replace";
 import { MAX_IMPORT_BYTES, MAX_SCRIPT_CHARS, decodeScript, legacyEncodingFor, scenesFromText } from "@/lib/script-import";
 import { SCENE_CLIPBOARD_KEY, copiedScene, parseCopiedScene, type CopiedScene } from "@/lib/scene-clipboard";
+import { castEverywhere, partsPhrase, scenesPhrase } from "@/lib/scene-cast";
 import { renderPdf, slideScripts } from "@/lib/pdf-slides";
 import { readPptx, type PptxSlide } from "@/lib/pptx-notes";
 import { readDocx } from "@/lib/docx-text";
@@ -444,6 +445,25 @@ function CreateInner() {
     const named = shown.length === 1 ? `Scene ${shown[0]} shows` : `Scenes ${shown.slice(0, -1).join(", ")} and ${shown[shown.length - 1]} show`;
     setImportNote(`Every scene now has scene ${from + 1}'s background.${shown.length ? ` ${named} the presenter again, since a color cannot fill the frame in the presenter's place.` : ""}`);
     // The button gives way to a line saying every scene has the background, so the focus goes to Undo, which names it.
+    requestAnimationFrame(() => undoButton.current?.focus());
+  }
+  // What the selected scene's presenter, voice, and pace would change on the others, and how the button names it:
+  // "this scene's" when it has any of its own, "the video's" when giving it means clearing the others' choices.
+  const castFrom = Math.min(activeIdx, scenes.length - 1);
+  const cast = scenes.length > 1 ? castEverywhere(scenes, castFrom) : null;
+  const castLabel = cast?.changed.length ? `Use ${cast.own ? "this scene's" : "the video's"} ${partsPhrase(cast.parts)} on every scene` : "";
+  /** Gives the other scenes the selected scene's presenter, voice, and pace, where each applies, as one change Undo takes back. */
+  function applyCastEverywhere() {
+    if (!cast?.changed.length) return;
+    const what = partsPhrase(cast.parts);
+    const many = cast.changed.length > 1;
+    changeScenes(`use ${cast.own ? `scene ${castFrom + 1}'s` : "the video's"} ${what} on every scene`, cast.scenes);
+    setImportNote(
+      cast.own
+        ? `${scenesPhrase(cast.changed)} now ${many ? "have" : "has"} scene ${castFrom + 1}'s ${what}.`
+        : `${scenesPhrase(cast.changed)} now ${many ? "use" : "uses"} the video's ${what} again.`,
+    );
+    // The button gives way once every scene matches, so the focus goes to Undo, which names the change.
     requestAnimationFrame(() => undoButton.current?.focus());
   }
   const importInput = useRef<HTMLInputElement>(null);
@@ -1749,6 +1769,17 @@ function CreateInner() {
                       <option key={v.id} value={v.id}>{v.name}</option>
                     ))}
                   </select>
+                )}
+                {!!cast?.changed.length && (
+                  <Button
+                    variant="secondary"
+                    className="px-2.5 py-1 text-xs"
+                    onClick={applyCastEverywhere}
+                    disabled={canEdit === false || !!slidesProgress}
+                    title={canEdit === false ? undefined : slidesProgress ? "Wait for the import to finish" : "A scene playing a recorded clip keeps its audio; Undo takes it back"}
+                  >
+                    {castLabel}
+                  </Button>
                 )}
               </div>
             )}

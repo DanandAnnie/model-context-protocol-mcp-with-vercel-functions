@@ -993,6 +993,60 @@ test("a scene copied in one video is pasted into another, in the same space only
   await other.close();
 });
 
+test("a scene's presenter, voice, and pace are used on every scene in one change, which Undo takes back", async ({ page }) => {
+  await page.locator("input[placeholder='Video title']").fill("Same cast");
+  await page.getByRole("textbox", { name: "Script", exact: true }).fill("First.");
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
+  await page.getByRole("textbox", { name: "Scene 2 script" }).fill("Second.");
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
+  await page.getByRole("textbox", { name: "Scene 3 script" }).fill("Third.");
+  const row = page.getByTestId("scene-presenter");
+  // Every scene uses the video's presenter and voice, so there is nothing to give.
+  await expect(row.getByRole("button", { name: /on every scene$/ })).toHaveCount(0);
+  await page.getByRole("button", { name: /^Scene 1,/ }).click();
+  await row.getByLabel("Scene avatar").selectOption({ index: 2 });
+  const avatarId = await row.getByLabel("Scene avatar").inputValue();
+  await row.getByLabel("Scene voice").selectOption({ index: 2 });
+  const voiceId = await row.getByLabel("Scene voice").inputValue();
+  await row.getByLabel("Scene speed").selectOption("1.25");
+  // With the Background tab open over a scene of its own colour, both buttons show, each named for what it gives.
+  await page.getByRole("button", { name: "Background" }).click();
+  await page.getByLabel("Background #0f172a").click();
+  await expect(page.getByRole("button", { name: "Use on every scene", exact: true })).toHaveCount(1);
+  const give = page.getByRole("button", { name: "Use this scene's presenter, voice, and pace on every scene" });
+  await expect(give).toHaveCount(1);
+  await give.click();
+  await expect(page.getByTestId("import-note")).toHaveText("Scenes 2 and 3 now have scene 1's presenter, voice, and pace.");
+  // Every scene matches, so the button is gone and the focus is on Undo, which names the change.
+  await expect(row.getByRole("button", { name: /on every scene$/ })).toHaveCount(0);
+  const undo = page.getByRole("button", { name: "Undo use scene 1's presenter, voice, and pace on every scene" });
+  await expect(undo).toBeFocused();
+  for (const n of [2, 3]) {
+    await page.getByRole("button", { name: new RegExp(`^Scene ${n},`) }).click();
+    await expect(row.getByLabel("Scene avatar")).toHaveValue(avatarId);
+    await expect(row.getByLabel("Scene voice")).toHaveValue(voiceId);
+    await expect(row.getByLabel("Scene speed")).toHaveValue("1.25");
+  }
+  // One Undo puts scenes 2 and 3 back on the video's; scene 1 keeps its own.
+  await undo.click();
+  await expect(page.getByRole("button", { name: /^Undo/ })).toHaveAccessibleName("Undo add scene 3");
+  await page.getByRole("button", { name: /^Scene 3,/ }).click();
+  await expect(row.getByLabel("Scene avatar")).toHaveValue("");
+  await expect(row.getByLabel("Scene voice")).toHaveValue("");
+  await expect(row.getByLabel("Scene speed")).toHaveValue("");
+  // Scene 3, on the video's, offers that back, said as what it is: clearing scene 1's own.
+  await page.getByRole("button", { name: "Use the video's presenter, voice, and pace on every scene" }).click();
+  await expect(page.getByTestId("import-note")).toHaveText("Scene 1 now uses the video's presenter, voice, and pace again.");
+  await page.getByRole("button", { name: "Undo use the video's presenter, voice, and pace on every scene" }).click();
+  // Given again from scene 1, the render gets the same presenter, voice, and pace for every scene.
+  await page.getByRole("button", { name: /^Scene 1,/ }).click();
+  await page.getByRole("button", { name: "Use this scene's presenter, voice, and pace on every scene" }).click();
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
+  await page.getByRole("button", { name: "Generate video" }).click();
+  const scenes = (await sent).postDataJSON().scenes as Array<{ avatarId?: string; voiceId?: string; speed?: number }>;
+  expect(scenes.map((sc) => [sc.avatarId, sc.voiceId, sc.speed])).toEqual(Array(3).fill([avatarId, voiceId, 1.25]));
+});
+
 test("photo avatar motion is set in the editor, kept with the video and its copy", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Moving portrait");
   await page.locator("textarea").fill("Welcome to the open house.");

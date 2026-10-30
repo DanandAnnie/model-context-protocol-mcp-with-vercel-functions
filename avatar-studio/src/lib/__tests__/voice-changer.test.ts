@@ -175,6 +175,7 @@ describe("voice changer", () => {
     await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: "pv_mockpv_nadine", text: "Welcome aboard.", turbo: true }), "u1"), /for instant voices, and Nadine is not one/);
     await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: "pv_mockpv_nadine", text: "Welcome aboard.", expressivenessBoost: 0.5 }), "u1"), /for instant voices/);
     await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: "pv_mockpv_nadine", text: "Welcome aboard.", free: true }), "u1"), /Turbo \(free or not\)/);
+    assert.equal((await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: "pv_mockpv_nadine", text: "Welcome aboard.", format: "mp3" }), "u1")).format, "mp3", "any voice speaks into an MP3");
     const atlas = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: "pv_mockpv_atlas", text: "Welcome aboard.", turbo: true, expressivenessBoost: 0.5 }), "u1");
     assert.deepEqual([atlas.turbo, atlas.expressivenessBoost], [true, 0.5]);
     const atlasFree = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: "pv_mockpv_atlas", text: "Welcome aboard.", free: true }), "u1");
@@ -523,11 +524,21 @@ describe("voice changer", () => {
     assert.deepEqual([parse({ free: true }).turbo, parse({ free: true }).free, parse({ turbo: true, free: true }).free, parse({ turbo: true, free: false }).free], [true, true, true, undefined]);
     assert.throws(() => parse({ turbo: false, free: true }), /free is Turbo at no charge/);
     assert.throws(() => parse({ free: "yes" }), /free is true or false/);
+    // The file: an MP3 when asked for; HeyGen's WAV is the default, stored as absent.
+    assert.deepEqual([parse({ format: "mp3" }).format, parse({ format: "wav" }).format, parse({}).format], ["mp3", undefined, undefined]);
+    assert.throws(() => parse({ format: "ogg" }), /format is wav or mp3/);
     const voice = await ready("u1");
     const freebie = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Free words.", free: true }), "u1", { key: "speech-free" });
     assert.deepEqual([freebie.turbo, freebie.free, publicVoiceChange(freebie).free], [true, true, true]);
     await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Free words.", turbo: true }), "u1", { key: "speech-free" }), ConflictError, "paid Turbo is another delivery");
     assert.equal((await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Free words.", turbo: true, free: true }), "u1", { key: "speech-free" })).id, freebie.id);
+    // An MP3 is kept with the recording and is part of what a repeated key must match; WAV spelled out is the default.
+    const small = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Small file.", format: "mp3" }), "u1", { key: "speech-mp3" });
+    assert.deepEqual([small.format, publicVoiceChange(small).format], ["mp3", "mp3"]);
+    await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Small file." }), "u1", { key: "speech-mp3" }), ConflictError);
+    const wav = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Big file." }), "u1", { key: "speech-wav" });
+    assert.equal("format" in wav, false);
+    assert.equal((await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Big file.", format: "wav" }), "u1", { key: "speech-wav" })).id, wav.id);
     // A Turbo recording kept from before Free existed replays for a retry with Turbo (and Free left out or false).
     const oldTurbo = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Old turbo.", turbo: true }), "u1", { key: "speech-old-turbo" });
     assert.equal("free" in oldTurbo, false);
@@ -561,7 +572,7 @@ describe("voice changer", () => {
     const saved = { avatar: config.avatarProvider, key: config.heygenApiKey };
     const calls: Array<{ url: string; body: Record<string, unknown> | null; idem: string | null }> = [];
     const realFetch = globalThis.fetch;
-    let tts: "slow" | "done" | "refuse" | "busy" | "down" = "slow";
+    let tts: "slow" | "done" | "refuse" | "busy" | "down" | "noMp3" = "slow";
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const body = typeof init?.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : null;
@@ -575,6 +586,7 @@ describe("voice changer", () => {
         if (tts === "refuse") return Response.json({ error: { code: "invalid_parameter", message: "text language is not supported", param: "text" } }, { status: 400 });
         if (tts === "busy") return Response.json({ error: { code: "rate_limit_exceeded", message: "free capacity exhausted" } }, { status: 429 });
         if (tts === "down") return Response.json({ error: { code: "internal_error", message: "service failure" } }, { status: 500 });
+        if (tts === "noMp3") return Response.json({ error: { code: "invalid_parameter", message: "output_format is not supported with with_timestamps", param: "output_format" } }, { status: 400 });
         const words = [{ text: "Hi", start_time: 0, end_time: 0.3 }, { text: "there.", start_time: 0.3, end_time: 0.9 }, { text: "", start_time: 1, end_time: 1.1 }, { text: "Bye.", start_time: 1.6, end_time: 2 }, { text: "late", start_time: 2.5, end_time: "x" }];
         const characters = [..."Hi yo"].map((c, i) => ({ text: c, start_time: i / 10, end_time: (i + 1) / 10 }));
         return Response.json({ data: { audio_url: "https://files.heygen.ai/generated/speech.wav", duration: 3.4, ...(timings === "words" ? { original_words: words, original_characters: characters } : timings === "characters" ? { original_characters: characters } : {}) } });
@@ -610,6 +622,16 @@ describe("voice changer", () => {
       assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1", voice_id: "hv_1", text: "Big news.", with_timestamps: true });
       await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Calm news.", expressivenessBoost: 0 }), "u1");
       assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1", voice_id: "hv_1", text: "Calm news.", expressiveness_boost: 0, with_timestamps: true });
+      // An MP3 reaches HeyGen as its output_format, at its defaults for MP3.
+      await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Small news.", format: "mp3" }), "u1");
+      assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1", voice_id: "hv_1", text: "Small news.", output_format: { encoding: "mp3" }, with_timestamps: true });
+      await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Small free news.", free: true, format: "mp3" }), "u1");
+      assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1-turbo-free", voice_id: "hv_1", text: "Small free news.", output_format: { encoding: "mp3" }, with_timestamps: true });
+      // HeyGen refusing the MP3 (or its timings) is said as the MP3's, with WAV to choose instead; a WAV is unaffected.
+      tts = "noMp3";
+      await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "No mp3.", format: "mp3" }), "u1"), /would not make an MP3 of this text; choose WAV/);
+      await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "No mp3." }), "u1"), /could not speak that text: output_format is not supported/);
+      tts = "done";
       // Free reaches HeyGen as its Turbo Free model; its limits running out is said as free speech's, and nothing is kept.
       await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Free news.", free: true }), "u1");
       assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1-turbo-free", voice_id: "hv_1", text: "Free news.", with_timestamps: true });

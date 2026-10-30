@@ -79,6 +79,8 @@ export const voiceSpeechSchema = z.object({
    * so `turbo: false` with it is refused. False (or absent) is stored as absent.
    */
   free: z.boolean({ error: "free is true or false" }).optional(),
+  /** The file HeyGen hands back: its WAV (the default, stored as absent) or an MP3 (smaller, at 44.1 kHz and 128 kbps). */
+  format: z.enum(["wav", "mp3"], { error: "format is wav or mp3" }).optional(),
   /**
    * HeyGen's expressiveness boost, 0 to 1 in steps of 0.1. HeyGen applies 1 (its full boost) when none is sent, so 1
    * is stored as absent and anything lower, 0 included, is stored and sent.
@@ -97,7 +99,7 @@ export const voiceSpeechSchema = z.object({
 })
   // Free is Turbo's free tier: asked for alone it turns Turbo on; asked for with Turbo off it is a contradiction.
   .refine((v) => !(v.free && v.turbo === false), { message: "free is Turbo at no charge; leave turbo out or send it as true", path: ["free"] })
-  .transform(({ turbo, free, ...rest }) => ({ ...rest, turbo: turbo || free ? (true as const) : undefined, free: free ? (true as const) : undefined }));
+  .transform(({ turbo, free, format, ...rest }) => ({ ...rest, turbo: turbo || free ? (true as const) : undefined, free: free ? (true as const) : undefined, format: format === "mp3" ? ("mp3" as const) : undefined }));
 
 export const instantVoiceIdSchema = z.string().regex(/^iv_[A-Za-z0-9_-]{1,64}$/, "Unknown instant voice");
 export const voiceChangeIdSchema = z.string().regex(/^vc_[A-Za-z0-9_-]{1,64}$/, "Unknown recording");
@@ -431,7 +433,7 @@ export async function startVoiceSpeech(input: z.infer<typeof voiceSpeechSchema>,
   const existing = opts.key ? await getStore().get<VoiceChange>("voicechange", id) : null;
   if (existing && existing.ownerId === ownerId) {
     // A boost of 1 is HeyGen's default, so one stored as 1 (as an earlier version did) is the same delivery as none.
-    const sameDelivery = existing.turbo === input.turbo && existing.free === input.free && (existing.expressivenessBoost ?? 1) === (input.expressivenessBoost ?? 1);
+    const sameDelivery = existing.turbo === input.turbo && existing.free === input.free && existing.format === input.format && (existing.expressivenessBoost ?? 1) === (input.expressivenessBoost ?? 1);
     if (existing.voiceId !== input.voiceId || existing.text !== input.text || !sameDelivery || (input.title && existing.title !== input.title)) throw new ConflictError("This Idempotency-Key was already used for another recording; send a new key");
     return existing;
   }
@@ -449,6 +451,7 @@ export async function startVoiceSpeech(input: z.infer<typeof voiceSpeechSchema>,
     text: input.text,
     ...(input.turbo ? { turbo: true as const } : {}),
     ...(input.free ? { free: true as const } : {}),
+    ...(input.format ? { format: input.format } : {}),
     ...(input.expressivenessBoost !== undefined ? { expressivenessBoost: input.expressivenessBoost } : {}),
     provider: provider.name,
     providerVoiceId: voice.providerVoiceId,
@@ -459,7 +462,7 @@ export async function startVoiceSpeech(input: z.infer<typeof voiceSpeechSchema>,
   await getStore().put("voicechange", change);
   try {
     const waitMs = Math.max(MIN_WAIT_MS, START_DEADLINE_MS - (Date.now() - arrived));
-    const out = await provider.speakText({ voiceId: voice.providerVoiceId, text: input.text, ...(input.turbo ? { turbo: true as const } : {}), ...(input.free ? { free: true as const } : {}), ...(input.expressivenessBoost !== undefined ? { expressivenessBoost: input.expressivenessBoost } : {}), key: id, waitMs });
+    const out = await provider.speakText({ voiceId: voice.providerVoiceId, text: input.text, ...(input.turbo ? { turbo: true as const } : {}), ...(input.free ? { free: true as const } : {}), ...(input.format ? { mp3: true as const } : {}), ...(input.expressivenessBoost !== undefined ? { expressivenessBoost: input.expressivenessBoost } : {}), key: id, waitMs });
     // A free request not answered (a failure of HeyGen's shared free capacity, or no answer in time) is free speech's.
     if (out.status === "processing") throw new UpstreamError(input.free ? "HeyGen's free speech did not answer; try again, or speak the text without Free" : "HeyGen did not finish speaking the text in time; try again, or try a shorter text");
     // The words' times go in a row of their own first; a store that will not take them (a database whose kinds

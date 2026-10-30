@@ -396,7 +396,7 @@ export class HeyGenClient {
   }
 
   /**
-   * Text spoken in a HeyGen Voice (`POST /v3/models/audio/tts`): one WAV, waited for; with `with_timestamps`, the time
+   * Text spoken in a HeyGen Voice (`POST /v3/models/audio/tts`): one file (a WAV, or the `output_format` asked for), waited for; with `with_timestamps`, the time
    * of each word and character of the text as sent.
    */
   textToSpeech(body: Record<string, unknown>, key: string, waitMs: number) {

@@ -821,7 +821,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     return this.voiceAudio(() => this.client.speechToSpeech(body, input.key, input.waitMs), { what: "recording", fix: "try a clearer recording" });
   }
 
-  async speakText(input: { voiceId: string; text: string; turbo?: true; free?: true; expressivenessBoost?: number; key: string; waitMs: number }): Promise<{ status: "processing" } | { status: "completed"; audioUrl: string; durationSec: number; words?: SpokenWord[] }> {
+  async speakText(input: { voiceId: string; text: string; turbo?: true; free?: true; mp3?: true; expressivenessBoost?: number; key: string; waitMs: number }): Promise<{ status: "processing" } | { status: "completed"; audioUrl: string; durationSec: number; words?: SpokenWord[] }> {
     // Turbo speaks instant voices faster and cheaper. The boost is an instant-voice setting (the studio sends neither for
     // a public voice that is not instant), which HeyGen sets to its full 1 when none is sent, so a lower one, 0
     // included, is always sent.
@@ -832,6 +832,8 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       voice_id: input.voiceId,
       text: input.text,
       ...(input.expressivenessBoost !== undefined ? { expressiveness_boost: input.expressivenessBoost } : {}),
+      // An MP3 at HeyGen's defaults for it (44.1 kHz, 128 kbps); none asked for is its WAV.
+      ...(input.mp3 ? { output_format: { encoding: "mp3" } } : {}),
       // When each word is said, for captions: the price is the same with them.
       with_timestamps: true,
     };
@@ -842,6 +844,8 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     } catch (err) {
       // Free speech is refused once the account's free requests or HeyGen's shared free capacity run out.
       if (input.free && err instanceof LimitError) throw new LimitError("HeyGen's free speech is at its limit or busy just now; try again later, or speak the text without Free");
+      // A refusal naming the file format (or the timings it is made with) is said as the MP3's.
+      if (input.mp3 && err instanceof ValidationError && /output_format|timestamp/i.test(err.message)) throw new ValidationError("HeyGen would not make an MP3 of this text; choose WAV and try again");
       throw err;
     }
     if (out.status !== "completed") return out;
@@ -849,7 +853,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     return words.length ? { ...out, words } : out;
   }
 
-  /** One WAV spoken in an instant voice (speech to speech or text to speech), with HeyGen's refusals told apart. */
+  /** The audio spoken in a voice (a WAV, or for text the MP3 asked for), with HeyGen's refusals told apart. */
   private async voiceAudio(ask: () => Promise<{ audio_url?: string | null; duration?: number | null }>, words: { what: string; fix: string }): Promise<{ status: "processing" } | { status: "completed"; audioUrl: string; durationSec: number }> {
     let out;
     try {

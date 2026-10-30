@@ -144,6 +144,8 @@ export default function VoiceChangerPage() {
   // Turbo at no charge (HeyGen's Turbo Free), within HeyGen's own limits; only with Turbo.
   const [speechFree, setSpeechFree] = useState(false);
   const [speechBoost, setSpeechBoost] = useState(10);
+  // The file HeyGen hands back: its WAV, or a smaller MP3.
+  const [speechFormat, setSpeechFormat] = useState<"wav" | "mp3">("wav");
   const [speechKey, setSpeechKey] = useState(() => newKey());
   const [speaking, setSpeaking] = useState(false);
   const [voiceName, setVoiceName] = useState("");
@@ -275,7 +277,11 @@ export default function VoiceChangerPage() {
     setNote(null);
     try {
       // A public voice that is not instant speaks without Turbo or the boost, which are kept for the next instant voice.
-      const delivery = deliveryOff ? {} : { ...(speechTurbo ? { turbo: true, ...(speechFree ? { free: true } : {}) } : {}), ...(speechBoost !== 10 ? { expressivenessBoost: speechBoost / 10 } : {}) };
+      const delivery = {
+        ...(deliveryOff ? {} : { ...(speechTurbo ? { turbo: true, ...(speechFree ? { free: true } : {}) } : {}), ...(speechBoost !== 10 ? { expressivenessBoost: speechBoost / 10 } : {}) }),
+        // Any voice can be spoken into an MP3, a professional one included.
+        ...(speechFormat === "mp3" ? { format: "mp3" } : {}),
+      };
       const body = { voiceId: speechVoiceId, text: speechText.trim(), ...(speechTitle.trim() ? { title: speechTitle.trim() } : {}), ...delivery };
       const { change } = await api<{ change: Change }>("/api/voice-changer/speech", { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": speechKey } });
       setData((prev) => (prev ? { ...prev, changes: [change, ...prev.changes.filter((c) => c.id !== change.id)] } : prev));
@@ -553,6 +559,12 @@ export default function VoiceChangerPage() {
                     </p>
                   </div>
                 </fieldset>
+                <Field label="File" hint="WAV, HeyGen's default, or a smaller MP3 (44.1 kHz, 128 kbps)." hintId="speech-format-hint">
+                  <select className={inputClass} value={speechFormat} disabled={!editable || speaking} aria-describedby="speech-format-hint" onChange={(e) => (setSpeechFormat(e.target.value === "mp3" ? "mp3" : "wav"), setSpeechKey(newKey()), fail("speech")(null))}>
+                    <option value="wav">WAV</option>
+                    <option value="mp3">MP3</option>
+                  </select>
+                </Field>
                 <Field label="Title for the text (optional)">
                   <input className={inputClass} value={speechTitle} maxLength={120} disabled={!editable || speaking} onChange={(e) => (setSpeechTitle(e.target.value), setSpeechKey(newKey()), fail("speech")(null))} placeholder="The text's first words, in the voice" />
                 </Field>
@@ -690,6 +702,7 @@ export default function VoiceChangerPage() {
                             {c.text !== undefined ? " · from text" : ""}
                             {c.free ? " · Turbo Free" : c.turbo ? " · Turbo" : ""}
                             {c.expressivenessBoost !== undefined && c.expressivenessBoost !== 1 ? ` · expressiveness boost ${Math.round(c.expressivenessBoost * 100)}%` : ""}
+                            {c.format === "mp3" ? " · MP3" : ""}
                           </div>
                           {c.error && <div className="mt-1 text-xs text-rose-600">{c.error}</div>}
                         </div>

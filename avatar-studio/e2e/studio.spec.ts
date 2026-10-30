@@ -1036,14 +1036,19 @@ test("an instant voice is made from a recording with the speaker's agreement, an
   page.once("dialog", (d) => d.accept());
   await livelyCard.getByRole("button", { name: /^Delete / }).click();
   await expect(livelyCard).toHaveCount(0);
-  // Turbo Free is sent with Turbo and shown with the recording; Turbo off takes Free with it.
+  // Turbo Free is sent with Turbo and shown with the recording; Turbo off takes Free with it. The file can be an MP3.
   await free.check();
+  const fileFormat = page.getByRole("combobox", { name: /^File\b/ });
+  await expect(fileFormat).toHaveValue("wav");
+  await expect(fileFormat).toHaveAccessibleDescription(/smaller MP3/);
+  await fileFormat.selectOption("mp3");
   await page.getByRole("textbox", { name: /^Title for the text\b/ }).fill("Free welcome");
   const freeSaid = page.waitForRequest((r) => r.url().endsWith("/api/voice-changer/speech") && r.method() === "POST");
   await speak.click();
-  expect((await freeSaid).postDataJSON()).toEqual({ voiceId: expect.stringMatching(/^iv_/), text: "Welcome to the team.", title: "Free welcome", turbo: true, free: true, expressivenessBoost: 0.4 });
+  expect((await freeSaid).postDataJSON()).toEqual({ voiceId: expect.stringMatching(/^iv_/), text: "Welcome to the team.", title: "Free welcome", turbo: true, free: true, expressivenessBoost: 0.4, format: "mp3" });
   const freeCard = page.getByTestId("voice-change").filter({ hasText: "Free welcome" });
-  await expect(freeCard.getByTestId("voice-change-meta")).toContainText("from text · Turbo Free · expressiveness boost 40%");
+  await expect(freeCard.getByTestId("voice-change-meta")).toContainText("from text · Turbo Free · expressiveness boost 40% · MP3");
+  await fileFormat.selectOption("wav");
   page.once("dialog", (d) => d.accept());
   await freeCard.getByRole("button", { name: /^Delete / }).click();
   await expect(freeCard).toHaveCount(0);

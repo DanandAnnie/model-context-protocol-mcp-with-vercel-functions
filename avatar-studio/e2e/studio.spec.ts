@@ -5398,6 +5398,25 @@ test("the Assets page keeps the account's audio clips and pictures: upload, word
   await editor.goto("/create?picture=bd_madeup123");
   await expect(editor.getByText("That picture is no longer available")).toBeVisible();
   await editor.close();
+  // A search narrows both lists, a clip by its name or its words, and says how many match.
+  const search = page.getByRole("searchbox", { name: "Search assets" });
+  await search.fill(tag);
+  await expect(page.getByTestId("assets-matches")).toHaveText(/^1 of \d+ clips · 1 of \d+ pictures$/);
+  await expect(page.getByTestId("asset-clip").filter({ visible: true })).toHaveCount(1);
+  await expect(pictures.getByRole("listitem")).toHaveCount(1);
+  // By its words too: kept with the clip while the search is on, it stays in view.
+  const introCard = page.getByTestId("asset-clip").filter({ hasText: intro });
+  await introCard.getByLabel("What it says").fill(`Lobby tour ${tag}`);
+  await introCard.getByRole("button", { name: "Keep these words with the clip" }).click();
+  await expect(introCard).toBeVisible();
+  await search.fill(`lobby TOUR ${tag}`);
+  await expect(page.getByTestId("assets-matches")).toHaveText(/^1 of \d+ clips · 0 of \d+ pictures$/);
+  await expect(introCard).toBeVisible();
+  await search.fill(`Open house intro ${tag}`);
+  await expect(page.getByText(`No pictures match “Open house intro ${tag}”.`)).toBeVisible();
+  await expect(page.getByTestId("asset-clip").filter({ hasText: intro })).toHaveCount(1);
+  await search.fill("");
+  await expect(page.getByTestId("assets-matches")).toHaveText("");
   expect((await page.request.patch("/api/backdrops/bd_missing123", { data: { name: "Gone" } })).status()).toBe(404);
   expect((await page.request.patch(`/api/clips/${clipId}`, { data: { name: "  " } })).status()).toBe(400);
   page.once("dialog", (d) => d.accept());

@@ -8,6 +8,7 @@ import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ApiError, api, formatDate, formatSeconds } from "@/lib/client";
 import { clipBody } from "@/lib/clip-upload";
+import { foldTerm } from "@/lib/glossary";
 import { toUploadable } from "@/lib/image-upload";
 import { MAX_BACKDROPS, MAX_CLIPS, type AudioClip, type Backdrop } from "@/lib/types";
 /** What the pictures route takes (3 MB decoded); larger pictures, and other formats, are redrawn as a JPEG first. */
@@ -25,6 +26,20 @@ export default function AssetsPage() {
   const picturesApi = useApi<{ backdrops: Backdrop[] }>("/api/backdrops");
   const clips = clipsApi.data?.clips ?? [];
   const pictures = picturesApi.data?.backdrops ?? [];
+  // A search narrows both lists: a clip by its name or the words it says, a picture by its name, compared in one case
+  // and Unicode form (a file name from macOS can arrive decomposed). What was uploaded or changed since the search was
+  // typed stays in view, so an edit or upload never vanishes from under the person (or their focus).
+  const [q, setQ] = useState("");
+  const [pinned, setPinned] = useState<ReadonlySet<string>>(new Set());
+  const search = (value: string) => {
+    setQ(value);
+    setPinned(new Set());
+  };
+  const pin = (id: string) => setPinned((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+  const needle = foldTerm(q.trim());
+  const matches = (id: string, ...texts: Array<string | undefined>) => !needle || pinned.has(id) || texts.some((t) => !!t && foldTerm(t).includes(needle));
+  const shownClips = clips.filter((c) => matches(c.id, c.name, c.transcript));
+  const shownPictures = pictures.filter((b) => matches(b.id, b.name));
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [uploading, setUploading] = useState<"clip" | "picture" | null>(null);
@@ -41,9 +56,15 @@ export default function AssetsPage() {
     setNote(null);
     setErr(e instanceof Error ? e.message : fallback);
   };
-  const putClip = (clip: AudioClip) => clipsApi.setData((prev) => ({ clips: prev?.clips.some((c) => c.id === clip.id) ? prev.clips.map((c) => (c.id === clip.id ? clip : c)) : [clip, ...(prev?.clips ?? [])] }));
+  const putClip = (clip: AudioClip) => {
+    pin(clip.id);
+    clipsApi.setData((prev) => ({ clips: prev?.clips.some((c) => c.id === clip.id) ? prev.clips.map((c) => (c.id === clip.id ? clip : c)) : [clip, ...(prev?.clips ?? [])] }));
+  };
   const dropClip = (id: string) => clipsApi.setData((prev) => (prev ? { clips: prev.clips.filter((c) => c.id !== id) } : prev));
-  const putPicture = (b: Backdrop) => picturesApi.setData((prev) => ({ backdrops: prev?.backdrops.some((x) => x.id === b.id) ? prev.backdrops.map((x) => (x.id === b.id ? b : x)) : [b, ...(prev?.backdrops ?? [])] }));
+  const putPicture = (b: Backdrop) => {
+    pin(b.id);
+    picturesApi.setData((prev) => ({ backdrops: prev?.backdrops.some((x) => x.id === b.id) ? prev.backdrops.map((x) => (x.id === b.id ? b : x)) : [b, ...(prev?.backdrops ?? [])] }));
+  };
   const dropPicture = (id: string) => picturesApi.setData((prev) => (prev ? { backdrops: prev.backdrops.filter((x) => x.id !== id) } : prev));
 
   async function uploadClip(file: File) {
@@ -151,6 +172,15 @@ export default function AssetsPage() {
         </p>
       )}
 
+      {(clipsApi.data || picturesApi.data) && (
+        <div className="mb-5 flex flex-wrap items-center gap-3">
+          <input type="search" aria-label="Search assets" aria-describedby="assets-matches" className={`${inputClass} max-w-sm`} placeholder="Search by name or by what a clip says" value={q} onChange={(e) => search(e.target.value)} />
+          <span id="assets-matches" role="status" className="text-xs text-slate-500" data-testid="assets-matches">
+            {needle ? `${shownClips.length} of ${clips.length} clips · ${shownPictures.length} of ${pictures.length} pictures` : ""}
+          </span>
+        </div>
+      )}
+
       <section className="mb-8" aria-labelledby="clips-heading">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 id="clips-heading" ref={clipsHeading} tabIndex={-1} className="rounded text-sm font-semibold text-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
@@ -185,8 +215,10 @@ export default function AssetsPage() {
           <EmptyState icon={<FileAudio className="h-8 w-8" />} title="No audio clips yet" body="Upload one here, record one in the editor's Audio tab, or keep a recording made in the voice changer." />
         ) : (
           <div className="space-y-3" data-testid="asset-clips">
+            {shownClips.length === 0 && <p className="rounded-lg bg-slate-50 px-3 py-4 text-sm text-slate-600">No clips match “{q.trim()}”.</p>}
+            {/* Every card stays mounted, hidden when it does not match, so words typed into one survive a search. */}
             {clips.map((clip) => (
-              <ClipCard key={clip.id} clip={clip} canEdit={canEdit === true} roleKnown={canEdit !== null} onRename={() => void renameClip(clip)} onDelete={() => void removeClip(clip)} onSaved={putClip} onGone={() => dropClip(clip.id)} onNote={say} onError={fail} />
+              <ClipCard key={clip.id} clip={clip} hidden={!shownClips.includes(clip)} canEdit={canEdit === true} roleKnown={canEdit !== null} onRename={() => void renameClip(clip)} onDelete={() => void removeClip(clip)} onSaved={putClip} onGone={() => dropClip(clip.id)} onNote={say} onError={fail} />
             ))}
           </div>
         )}
@@ -224,9 +256,11 @@ export default function AssetsPage() {
           <Skeleton className="h-32" />
         ) : pictures.length === 0 ? (
           <EmptyState icon={<ImageIcon className="h-8 w-8" />} title="No pictures yet" body="Upload one here or in the editor's Background tab; a scene can show it behind or instead of the presenter." />
+        ) : shownPictures.length === 0 ? (
+          <p className="rounded-lg bg-slate-50 px-3 py-4 text-sm text-slate-600">No pictures match “{q.trim()}”.</p>
         ) : (
           <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4" data-testid="asset-pictures">
-            {pictures.map((b) => (
+            {shownPictures.map((b) => (
               <li key={b.id}>
                 <Card className="overflow-hidden">
                   {/* eslint-disable-next-line @next/next/no-img-element -- the owner's own upload, served by the API */}
@@ -267,6 +301,8 @@ export default function AssetsPage() {
 /** One audio clip: play it, see and keep the words it says, start a video with it, rename or delete it. */
 function ClipCard(props: {
   clip: AudioClip;
+  /** Out of view because a search does not match it, but kept, with any words typed into it. */
+  hidden?: boolean;
   canEdit: boolean;
   /** False while the person's role is still being looked up: nothing is offered or ruled out yet. */
   roleKnown: boolean;
@@ -307,7 +343,7 @@ function ClipCard(props: {
 
   const wordsId = `clip-words-${clip.id}`;
   return (
-    <Card className="p-4" data-testid="asset-clip" data-clip={clip.id}>
+    <Card className="p-4" data-testid="asset-clip" data-clip={clip.id} hidden={props.hidden}>
       <div className="flex items-start gap-3">
         <AudioLines className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" aria-hidden />
         <div className="min-w-0 flex-1">

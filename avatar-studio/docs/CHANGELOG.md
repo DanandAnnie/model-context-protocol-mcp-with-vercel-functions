@@ -603,3 +603,12 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - Names were compared without Unicode normalization, so a decomposed "Café" did not match. Both sides are now folded as glossary terms are.
     - The box disappeared when both lists emptied while a search stayed active. It now shows once either list has loaded.
     - The e2e test did not search by a clip's words. It now does, and counts only visible cards.
+- Download clips and pictures from the Assets page (`8335f21`): `GET /api/clips/:id?download` and `GET /api/backdrops/:id?download` save the file under the name it was given (any script in `filename*`, an ASCII stand-in in `filename`, the extension from the stored type), and each card has a Download link, viewers included.
+  - An independent review found nothing blocking in the header, security, or authorization code. Fixed before the commit:
+    - The new link made the picture cards' actions overflow at 320px, hiding Delete. Actions now sit on their own row, which wraps, in the same order as on clip cards.
+    - A clip's audio is cached for an hour, so a download after a rename could save under the old name. A download is now revalidated every time.
+    - A name holding half of a UTF-16 pair made the download a 500. Such halves, control and invisible formatting characters (a right-to-left override could disguise a name), and characters Windows refuses are now left out.
+    - A trailing dot doubled the extension, the ASCII stand-in could end in a dot, and the length cap could split a character. All three are fixed, and the cap counts characters as a person sees them.
+    - The icon buttons were under 3:1 contrast. They are darker now.
+    - The e2e test downloads before and after a rename, compares the picture's bytes, checks every picture action fits a 320px card, and checks a viewer can download but not change anything.
+  - Also found: Chromium in a container with no locale saves any non-ASCII download name as "download". The e2e browser gets a UTF-8 locale, as desktops have.

@@ -1,5 +1,5 @@
 // Undo and redo for the editor's scene changes (a scene added, removed, moved, duplicated, split, or merged; scenes
-// imported). Typing is left to the text box's own undo. Pure, so the editor and the tests share it.
+// imported; one scene's background given to the others). Typing is left to the text box's own undo. Pure, so the editor and the tests share it.
 
 /** The most changes kept to undo; the oldest goes first. */
 export const MAX_HISTORY = 50;

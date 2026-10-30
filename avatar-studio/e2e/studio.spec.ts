@@ -832,6 +832,71 @@ test("a scene tab dragged onto another moves the scene there, a change Undo take
   await expect(page.getByTestId("import-note")).toHaveText("Moved scene 1 to 3.");
 });
 
+test("a scene's background is used on every scene in one change, which Undo takes back", async ({ page }) => {
+  await page.locator("input[placeholder='Video title']").fill("Same backdrop");
+  await page.getByRole("textbox", { name: "Script", exact: true }).fill("First.");
+  // One scene has nothing to share its background with.
+  await page.getByRole("button", { name: "Background" }).click();
+  await expect(page.getByTestId("background-scope")).toHaveCount(0);
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
+  await page.getByRole("textbox", { name: "Scene 2 script" }).fill("Second.");
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
+  await page.getByRole("textbox", { name: "Scene 3 script" }).fill("Third.");
+  // Scenes added after the first share its background, so there is nothing to copy yet.
+  await expect(page.getByTestId("background-scope")).toContainText("All of them have this one for now.");
+  await expect(page.getByRole("button", { name: "Use on every scene" })).toHaveCount(0);
+  // Scenes 2 and 3 get a picture without the presenter, scene 2's shown whole.
+  for (const n of [2, 3]) {
+    await page.getByRole("button", { name: new RegExp(`^Scene ${n},`) }).click();
+    await page.getByLabel("Image URL").fill("https://example.com/kitchen.jpg");
+    await page.getByRole("checkbox", { name: new RegExp(`Show the presenter in scene ${n}`) }).uncheck();
+  }
+  await page.getByRole("button", { name: /^Scene 2,/ }).click();
+  await page.getByRole("button", { name: /Show all of it/ }).click();
+  await page.getByRole("button", { name: /^Scene 1,/ }).click();
+  await page.getByLabel("Background #0f172a").click();
+  await page.getByRole("button", { name: "Use on every scene" }).click();
+  await expect(page.getByTestId("import-note")).toHaveText("Every scene now has scene 1's background. Scenes 2 and 3 show the presenter again, since a color cannot fill the frame in the presenter's place.");
+  await expect(page.getByTestId("background-scope")).toContainText("All of them have this one for now.");
+  // The button is gone, so the focus is on Undo, which names the change.
+  await expect(page.getByRole("button", { name: "Undo use scene 1's background on every scene" })).toBeFocused();
+  for (const n of [2, 3]) {
+    await page.getByRole("button", { name: new RegExp(`^Scene ${n},`) }).click();
+    await expect(page.getByRole("checkbox", { name: new RegExp(`Show the presenter in scene ${n}`) })).toBeChecked();
+    await expect(page.getByLabel("Custom color")).toHaveValue("#0f172a");
+  }
+  // One Undo takes it all back: the pictures, scene 2's fit, the presenter left out; scene 1 keeps its colour.
+  await page.getByRole("button", { name: "Undo use scene 1's background on every scene" }).click();
+  await expect(page.getByRole("button", { name: /^Undo/ })).toHaveAccessibleName("Undo add scene 3");
+  await page.getByRole("button", { name: /^Scene 2,/ }).click();
+  await expect(page.getByRole("checkbox", { name: /Show the presenter in scene 2/ })).not.toBeChecked();
+  await expect(page.getByLabel("Image URL")).toHaveValue("https://example.com/kitchen.jpg");
+  await expect(page.getByRole("button", { name: /Show all of it/ })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: /^Scene 3,/ }).click();
+  await expect(page.getByRole("checkbox", { name: /Show the presenter in scene 3/ })).not.toBeChecked();
+  await expect(page.getByRole("button", { name: /Fill the frame/ })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: /^Scene 1,/ }).click();
+  await expect(page.getByLabel("Custom color")).toHaveValue("#0f172a");
+  // Redo gives it again, and Undo takes it back once more.
+  await page.getByRole("button", { name: "Redo use scene 1's background on every scene" }).click();
+  await page.getByRole("button", { name: /^Scene 3,/ }).click();
+  await expect(page.getByRole("checkbox", { name: /Show the presenter in scene 3/ })).toBeChecked();
+  await page.getByRole("button", { name: "Undo use scene 1's background on every scene" }).click();
+  // From scene 2 the picture, shown whole, goes to the others; nothing about the presenter changes.
+  await page.getByRole("button", { name: /^Scene 2,/ }).click();
+  await page.getByRole("button", { name: "Use on every scene" }).click();
+  await expect(page.getByTestId("import-note")).toHaveText("Every scene now has scene 2's background.");
+  await page.getByRole("button", { name: /^Scene 3,/ }).click();
+  await expect(page.getByRole("button", { name: /Show all of it/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("checkbox", { name: /Show the presenter in scene 3/ })).not.toBeChecked();
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
+  await page.getByRole("button", { name: "Generate video" }).click();
+  const scenes = (await sent).postDataJSON().scenes as Array<{ script: string; background: unknown; hidePresenter?: boolean }>;
+  expect(scenes.map((sc) => sc.script)).toEqual(["First.", "Second.", "Third."]);
+  expect(scenes.map((sc) => sc.background)).toEqual(Array(3).fill({ type: "image", value: "https://example.com/kitchen.jpg", fit: "contain" }));
+  expect(scenes.map((sc) => !!sc.hidePresenter)).toEqual([false, true, true]);
+});
+
 test("photo avatar motion is set in the editor, kept with the video and its copy", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Moving portrait");
   await page.locator("textarea").fill("Welcome to the open house.");

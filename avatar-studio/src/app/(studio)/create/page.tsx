@@ -146,6 +146,9 @@ const withBackground = (sc: Scene, background: Background): Scene => {
   const { hidePresenter: _dropped, ...rest } = sc;
   return { ...rest, background };
 };
+/** The same colour (in any case), or the same picture or clip shown the same way (its fit is "cover" unless it says otherwise). */
+const backgroundsMatch = (a: Background, b: Background) =>
+  a.type === "color" || b.type === "color" ? a.type === b.type && a.value.toLowerCase() === b.value.toLowerCase() : a.type === b.type && a.value === b.value && (a.fit ?? "cover") === (b.fit ?? "cover");
 /** A scene as it is sent: one without the presenter has neither a presenter of its own nor a layout for one. */
 function sentScene(sc: Scene): Scene {
   if (!sc.hidePresenter) return sc;
@@ -298,7 +301,7 @@ function CreateInner() {
       return prev.map((s, i) => (i === idx ? withBackground({ ...s, ...patch }, patch.background ?? s.background) : s));
     });
   }
-  // Scene changes (added, removed, moved, duplicated, split, merged, imported) can be undone and redone, with what they
+  // Scene changes (added, removed, moved, duplicated, split, merged, imported, one background given to all) can be undone and redone, with what they
   // changed of the video's own settings; typing is left to the text box's own undo.
   const [sceneHistory, setSceneHistory] = useState<History<EditorState>>(emptyHistory);
   // The video's settings a scene change can touch, as they are now (set where they are declared, below).
@@ -421,6 +424,20 @@ function CreateInner() {
     requestAnimationFrame(() => sceneTabs.current[to]?.focus());
   }
   const focusAfterDrag = useRef<number | null>(null);
+  /** Gives every other scene the selected scene's background (and its fit), as one change Undo takes back. */
+  function applyBackgroundEverywhere() {
+    const from = scenes.indexOf(active);
+    const bg = active.background;
+    const changed = scenes.map((sc, i) => i !== from && !backgroundsMatch(sc.background, bg));
+    if (!changed.some(Boolean)) return;
+    // A colour cannot fill the frame in the presenter's place, so scenes without the presenter get it back.
+    const shown = scenes.flatMap((sc, i) => (changed[i] && bg.type === "color" && sc.hidePresenter ? [i + 1] : []));
+    changeScenes(`use scene ${from + 1}'s background on every scene`, scenes.map((sc, i) => (changed[i] ? withBackground(sc, bg) : sc)));
+    const named = shown.length === 1 ? `Scene ${shown[0]} shows` : `Scenes ${shown.slice(0, -1).join(", ")} and ${shown[shown.length - 1]} show`;
+    setImportNote(`Every scene now has scene ${from + 1}'s background.${shown.length ? ` ${named} the presenter again, since a color cannot fill the frame in the presenter's place.` : ""}`);
+    // The button gives way to a line saying every scene has the background, so the focus goes to Undo, which names it.
+    requestAnimationFrame(() => undoButton.current?.focus());
+  }
   const importInput = useRef<HTMLInputElement>(null);
   const [importNote, setImportNote] = useState<string | null>(null);
   /** Replaces the scenes with a text, Markdown, or Word document's, one per paragraph or section, on the first scene's background. */
@@ -2002,7 +2019,25 @@ function CreateInner() {
 
             {tab === "background" && (
               <div className="space-y-5">
-                {scenes.length > 1 && <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">Editing the background for scene {activeIdx + 1}. Each scene keeps its own background.</p>}
+                {scenes.length > 1 && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="background-scope">
+                    <p>Editing the background for scene {activeIdx + 1}. Each scene keeps its own background.</p>
+                    {scenes.every((sc) => backgroundsMatch(sc.background, background)) ? (
+                      <p className="text-slate-500">All of them have this one for now.</p>
+                    ) : (
+                      <Button
+                        variant="secondary"
+                        className="px-3 py-1.5"
+                        onClick={applyBackgroundEverywhere}
+                        disabled={canEdit === false || !!slidesProgress || clipMissing}
+                        aria-describedby={clipMissing ? "generated-clip-hint" : undefined}
+                        title={canEdit === false ? undefined : clipMissing ? "This scene's clip is gone or not ready; choose another background first" : "Give the other scenes this background (and its fit); Undo takes it back"}
+                      >
+                        Use on every scene
+                      </Button>
+                    )}
+                  </div>
+                )}
                 <div>
                   <div className="mb-2 text-sm font-medium text-slate-700">Solid color</div>
                   <div className="flex flex-wrap gap-2">

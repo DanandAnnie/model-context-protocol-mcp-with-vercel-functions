@@ -864,6 +864,8 @@ test("text is spoken in one of HeyGen's public voices, heard first, without the 
   await speakingVoice.selectOption({ label: "Atlas · English" });
   const turbo = page.getByRole("checkbox", { name: /^Turbo/ });
   await turbo.check();
+  const freeBox = page.getByRole("checkbox", { name: /^Free\b/ });
+  await freeBox.check();
   const boost = page.getByRole("slider", { name: "Expressiveness boost" });
   await boost.focus();
   await page.keyboard.press("ArrowLeft");
@@ -872,6 +874,8 @@ test("text is spoken in one of HeyGen's public voices, heard first, without the 
   await expect(page.getByLabel("Sample of the voice Nadine")).toHaveAttribute("src", /\/demo\/revoiced\.mp3$/);
   await expect(turbo).toBeDisabled();
   await expect(turbo).not.toBeChecked();
+  await expect(freeBox).toBeDisabled();
+  await expect(freeBox).not.toBeChecked();
   await expect(page.getByRole("group", { name: "Delivery" })).toHaveAccessibleDescription(/Nadine is one of HeyGen's professional voices/);
   await page.getByRole("textbox", { name: /^Text\b/ }).fill(`Welcome to the team ${tag}.`);
   const sent = page.waitForRequest((r) => r.url().endsWith("/api/voice-changer/speech") && r.method() === "POST");
@@ -883,6 +887,7 @@ test("text is spoken in one of HeyGen's public voices, heard first, without the 
   await speakingVoice.selectOption({ label: "Atlas · English" });
   await expect(turbo).toBeEnabled();
   await expect(turbo).toBeChecked();
+  await expect(freeBox).toBeChecked();
   await expect(boost).toHaveValue("9");
   await expect(page.getByLabel("Sample of the voice Atlas")).toBeVisible();
   page.once("dialog", (d) => d.accept());
@@ -1010,7 +1015,12 @@ test("an instant voice is made from a recording with the speaker's agreement, an
   // Delivery: Turbo and an expressiveness boost, set from the keyboard, are sent and shown with the recording.
   const boost = page.getByRole("slider", { name: "Expressiveness boost" });
   await expect(boost).toHaveAttribute("aria-valuetext", "100 percent, the default");
+  // Free is Turbo at no charge, so it waits for Turbo.
+  const free = page.getByRole("checkbox", { name: /^Free\b/ });
+  await expect(free).toBeDisabled();
   await page.getByRole("checkbox", { name: /^Turbo\b/ }).check();
+  await expect(free).toBeEnabled();
+  await expect(free).not.toBeChecked();
   await boost.focus();
   for (let i = 0; i < 6; i++) await page.keyboard.press("ArrowLeft");
   await expect(boost).toHaveAttribute("aria-valuetext", "40 percent");
@@ -1026,6 +1036,24 @@ test("an instant voice is made from a recording with the speaker's agreement, an
   page.once("dialog", (d) => d.accept());
   await livelyCard.getByRole("button", { name: /^Delete / }).click();
   await expect(livelyCard).toHaveCount(0);
+  // Turbo Free is sent with Turbo and shown with the recording; Turbo off takes Free with it.
+  await free.check();
+  await page.getByRole("textbox", { name: /^Title for the text\b/ }).fill("Free welcome");
+  const freeSaid = page.waitForRequest((r) => r.url().endsWith("/api/voice-changer/speech") && r.method() === "POST");
+  await speak.click();
+  expect((await freeSaid).postDataJSON()).toEqual({ voiceId: expect.stringMatching(/^iv_/), text: "Welcome to the team.", title: "Free welcome", turbo: true, free: true, expressivenessBoost: 0.4 });
+  const freeCard = page.getByTestId("voice-change").filter({ hasText: "Free welcome" });
+  await expect(freeCard.getByTestId("voice-change-meta")).toContainText("from text · Turbo Free · expressiveness boost 40%");
+  page.once("dialog", (d) => d.accept());
+  await freeCard.getByRole("button", { name: /^Delete / }).click();
+  await expect(freeCard).toHaveCount(0);
+  await page.getByRole("checkbox", { name: /^Turbo\b/ }).uncheck();
+  await expect(free).toBeDisabled();
+  await expect(free).not.toBeChecked();
+  await expect(free).toHaveAccessibleDescription("Turn on Turbo to choose it.");
+  // Turbo on again starts paid; Free is chosen afresh.
+  await page.getByRole("checkbox", { name: /^Turbo\b/ }).check();
+  await expect(free).not.toBeChecked();
   await page.getByRole("checkbox", { name: /^Turbo\b/ }).uncheck();
   await boost.fill("10");
   await expect(boost).toHaveAttribute("aria-valuetext", "100 percent, the default");

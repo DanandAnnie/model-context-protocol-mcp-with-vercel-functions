@@ -27,7 +27,7 @@ import {
   voiceChangeSchema,
   voiceSpeechSchema,
 } from "../services";
-import { ConflictError, NotFoundError, UpstreamError, ValidationError } from "../errors";
+import { ConflictError, LimitError, NotFoundError, UpstreamError, ValidationError } from "../errors";
 import { providerStatus } from "../providers";
 import { MockAvatarProvider } from "../providers/avatar/mock";
 import { getStore } from "../store";
@@ -174,8 +174,11 @@ describe("voice changer", () => {
     assert.deepEqual([nadine.status, nadine.voiceId, nadine.voiceName, nadine.title], ["completed", "pv_mockpv_nadine", "Nadine", "Welcome aboard in Nadine"]);
     await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: "pv_mockpv_nadine", text: "Welcome aboard.", turbo: true }), "u1"), /for instant voices, and Nadine is not one/);
     await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: "pv_mockpv_nadine", text: "Welcome aboard.", expressivenessBoost: 0.5 }), "u1"), /for instant voices/);
+    await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: "pv_mockpv_nadine", text: "Welcome aboard.", free: true }), "u1"), /Turbo \(free or not\)/);
     const atlas = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: "pv_mockpv_atlas", text: "Welcome aboard.", turbo: true, expressivenessBoost: 0.5 }), "u1");
     assert.deepEqual([atlas.turbo, atlas.expressivenessBoost], [true, 0.5]);
+    const atlasFree = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: "pv_mockpv_atlas", text: "Welcome aboard.", free: true }), "u1");
+    assert.deepEqual([atlasFree.turbo, atlasFree.free], [true, true], "a public instant voice speaks free too");
     await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: "pv_gone", text: "Hi." }), "u1"), /no longer offered/);
     assert.throws(() => voiceSpeechSchema.parse({ voiceId: "hv_1", text: "Hi." }), /one of HeyGen's/);
     // Retried with the same key, the same voice returns the same recording; another voice is another recording.
@@ -516,7 +519,19 @@ describe("voice changer", () => {
     for (const fine of [0.04, 0.33, 0.96]) assert.throws(() => parse({ expressivenessBoost: fine }), /steps of 0\.1/, "a finer value is refused, not rounded to another delivery");
     for (const bad of [-0.1, 1.1, "0.5", Number.NaN]) assert.throws(() => parse({ expressivenessBoost: bad }), /expressivenessBoost is a number from 0 to 1/);
     assert.throws(() => parse({ turbo: "yes" }), /turbo is true or false/);
+    // Free is Turbo at no charge: it turns Turbo on, is stored as absent when false, and contradicts Turbo off.
+    assert.deepEqual([parse({ free: true }).turbo, parse({ free: true }).free, parse({ turbo: true, free: true }).free, parse({ turbo: true, free: false }).free], [true, true, true, undefined]);
+    assert.throws(() => parse({ turbo: false, free: true }), /free is Turbo at no charge/);
+    assert.throws(() => parse({ free: "yes" }), /free is true or false/);
     const voice = await ready("u1");
+    const freebie = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Free words.", free: true }), "u1", { key: "speech-free" });
+    assert.deepEqual([freebie.turbo, freebie.free, publicVoiceChange(freebie).free], [true, true, true]);
+    await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Free words.", turbo: true }), "u1", { key: "speech-free" }), ConflictError, "paid Turbo is another delivery");
+    assert.equal((await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Free words.", turbo: true, free: true }), "u1", { key: "speech-free" })).id, freebie.id);
+    // A Turbo recording kept from before Free existed replays for a retry with Turbo (and Free left out or false).
+    const oldTurbo = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Old turbo.", turbo: true }), "u1", { key: "speech-old-turbo" });
+    assert.equal("free" in oldTurbo, false);
+    assert.equal((await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Old turbo.", turbo: true, free: false }), "u1", { key: "speech-old-turbo" })).id, oldTurbo.id);
     const lively = await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Big news today.", turbo: true, expressivenessBoost: 0.6 }), "u1", { key: "speech-delivery" });
     assert.deepEqual([lively.turbo, lively.expressivenessBoost], [true, 0.6]);
     assert.deepEqual([publicVoiceChange(lively).turbo, publicVoiceChange(lively).expressivenessBoost], [true, 0.6]);
@@ -546,7 +561,7 @@ describe("voice changer", () => {
     const saved = { avatar: config.avatarProvider, key: config.heygenApiKey };
     const calls: Array<{ url: string; body: Record<string, unknown> | null; idem: string | null }> = [];
     const realFetch = globalThis.fetch;
-    let tts: "slow" | "done" | "refuse" = "slow";
+    let tts: "slow" | "done" | "refuse" | "busy" | "down" = "slow";
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const body = typeof init?.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : null;
@@ -558,6 +573,8 @@ describe("voice changer", () => {
           throw err;
         }
         if (tts === "refuse") return Response.json({ error: { code: "invalid_parameter", message: "text language is not supported", param: "text" } }, { status: 400 });
+        if (tts === "busy") return Response.json({ error: { code: "rate_limit_exceeded", message: "free capacity exhausted" } }, { status: 429 });
+        if (tts === "down") return Response.json({ error: { code: "internal_error", message: "service failure" } }, { status: 500 });
         const words = [{ text: "Hi", start_time: 0, end_time: 0.3 }, { text: "there.", start_time: 0.3, end_time: 0.9 }, { text: "", start_time: 1, end_time: 1.1 }, { text: "Bye.", start_time: 1.6, end_time: 2 }, { text: "late", start_time: 2.5, end_time: "x" }];
         const characters = [..."Hi yo"].map((c, i) => ({ text: c, start_time: i / 10, end_time: (i + 1) / 10 }));
         return Response.json({ data: { audio_url: "https://files.heygen.ai/generated/speech.wav", duration: 3.4, ...(timings === "words" ? { original_words: words, original_characters: characters } : timings === "characters" ? { original_characters: characters } : {}) } });
@@ -593,6 +610,19 @@ describe("voice changer", () => {
       assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1", voice_id: "hv_1", text: "Big news.", with_timestamps: true });
       await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Calm news.", expressivenessBoost: 0 }), "u1");
       assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1", voice_id: "hv_1", text: "Calm news.", expressiveness_boost: 0, with_timestamps: true });
+      // Free reaches HeyGen as its Turbo Free model; its limits running out is said as free speech's, and nothing is kept.
+      await startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Free news.", free: true }), "u1");
+      assert.deepEqual(calls.at(-1)!.body, { model: "heygen-voice-1-turbo-free", voice_id: "hv_1", text: "Free news.", with_timestamps: true });
+      tts = "busy";
+      const kept = (await listVoiceChanges("u1")).length;
+      await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "More free news.", free: true }), "u1"), (e: unknown) => e instanceof LimitError && /free speech is at its limit or busy/.test((e as Error).message));
+      await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Paid news.", turbo: true }), "u1"), (e: unknown) => e instanceof LimitError && /speaking too many texts/.test((e as Error).message));
+      // A free request HeyGen fails (its shared free capacity, or no answer) is said as free speech's; a paid one as before.
+      tts = "down";
+      await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Down free.", free: true }), "u1"), (e: unknown) => e instanceof UpstreamError && /free speech did not answer; try again, or speak the text without Free/.test((e as Error).message));
+      await assert.rejects(startVoiceSpeech(voiceSpeechSchema.parse({ voiceId: voice.id, text: "Down paid." }), "u1"), (e: unknown) => e instanceof UpstreamError && /did not finish speaking the text in time/.test((e as Error).message));
+      assert.equal((await listVoiceChanges("u1")).length, kept);
+      tts = "done";
       // Each word's time comes back with the audio and is kept for captions in a row of its own (never loaded by the
       // listing); a HeyGen that sends only characters has them put together into words.
       const wordsOf = async (id: string) => (await getStore().get<VoiceChangeWords>("voicewords", `voicewords_${id}`))?.words;

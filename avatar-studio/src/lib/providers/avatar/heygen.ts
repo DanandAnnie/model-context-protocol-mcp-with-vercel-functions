@@ -821,12 +821,14 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     return this.voiceAudio(() => this.client.speechToSpeech(body, input.key, input.waitMs), { what: "recording", fix: "try a clearer recording" });
   }
 
-  async speakText(input: { voiceId: string; text: string; turbo?: true; expressivenessBoost?: number; key: string; waitMs: number }): Promise<{ status: "processing" } | { status: "completed"; audioUrl: string; durationSec: number; words?: SpokenWord[] }> {
+  async speakText(input: { voiceId: string; text: string; turbo?: true; free?: true; expressivenessBoost?: number; key: string; waitMs: number }): Promise<{ status: "processing" } | { status: "completed"; audioUrl: string; durationSec: number; words?: SpokenWord[] }> {
     // Turbo speaks instant voices faster and cheaper. The boost is an instant-voice setting (the studio sends neither for
     // a public voice that is not instant), which HeyGen sets to its full 1 when none is sent, so a lower one, 0
     // included, is always sent.
     const body = {
-      model: input.turbo ? "heygen-voice-1-turbo" : "heygen-voice-1",
+      // Turbo Free is Turbo at no charge, within HeyGen's per-user limits and shared capacity; it never falls back to
+      // a paid model.
+      model: input.free ? "heygen-voice-1-turbo-free" : input.turbo ? "heygen-voice-1-turbo" : "heygen-voice-1",
       voice_id: input.voiceId,
       text: input.text,
       ...(input.expressivenessBoost !== undefined ? { expressiveness_boost: input.expressivenessBoost } : {}),
@@ -834,7 +836,14 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       with_timestamps: true,
     };
     let answer: Awaited<ReturnType<HeyGenClient["textToSpeech"]>> | undefined;
-    const out = await this.voiceAudio(async () => (answer = await this.client.textToSpeech(body, input.key, input.waitMs)), { what: "text", fix: "check the text is plain prose in a supported language" });
+    let out;
+    try {
+      out = await this.voiceAudio(async () => (answer = await this.client.textToSpeech(body, input.key, input.waitMs)), { what: "text", fix: "check the text is plain prose in a supported language" });
+    } catch (err) {
+      // Free speech is refused once the account's free requests or HeyGen's shared free capacity run out.
+      if (input.free && err instanceof LimitError) throw new LimitError("HeyGen's free speech is at its limit or busy just now; try again later, or speak the text without Free");
+      throw err;
+    }
     if (out.status !== "completed") return out;
     const words = timedWords(answer?.original_words, answer?.original_characters, out.durationSec);
     return words.length ? { ...out, words } : out;

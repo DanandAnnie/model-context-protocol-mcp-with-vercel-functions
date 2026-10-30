@@ -488,6 +488,8 @@ export interface VoiceChange {
   removeNoise?: true;
   /** Text only: spoken by the renderer's faster, cheaper model (HeyGen Voice 1 Turbo); absent is its standard model. */
   turbo?: true;
+  /** Text only: Turbo at no charge (HeyGen Voice 1 Turbo Free), within HeyGen's own limits; always with `turbo`. */
+  free?: true;
   /** Text only: HeyGen's `expressiveness_boost`, 0 to 1; absent is HeyGen's default, its full boost of 1. */
   expressivenessBoost?: number;
   /** Renderer, the voice there, and the recording as it was sent (none for text), so one still running is asked for again. */

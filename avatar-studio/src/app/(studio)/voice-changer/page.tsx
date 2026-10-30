@@ -141,6 +141,8 @@ export default function VoiceChangerPage() {
   const [speechTitle, setSpeechTitle] = useState("");
   // How the text is delivered: HeyGen's Turbo model, and its expressiveness boost in tenths (10, its full boost, is its default).
   const [speechTurbo, setSpeechTurbo] = useState(false);
+  // Turbo at no charge (HeyGen's Turbo Free), within HeyGen's own limits; only with Turbo.
+  const [speechFree, setSpeechFree] = useState(false);
   const [speechBoost, setSpeechBoost] = useState(10);
   const [speechKey, setSpeechKey] = useState(() => newKey());
   const [speaking, setSpeaking] = useState(false);
@@ -273,7 +275,7 @@ export default function VoiceChangerPage() {
     setNote(null);
     try {
       // A public voice that is not instant speaks without Turbo or the boost, which are kept for the next instant voice.
-      const delivery = deliveryOff ? {} : { ...(speechTurbo ? { turbo: true } : {}), ...(speechBoost !== 10 ? { expressivenessBoost: speechBoost / 10 } : {}) };
+      const delivery = deliveryOff ? {} : { ...(speechTurbo ? { turbo: true, ...(speechFree ? { free: true } : {}) } : {}), ...(speechBoost !== 10 ? { expressivenessBoost: speechBoost / 10 } : {}) };
       const body = { voiceId: speechVoiceId, text: speechText.trim(), ...(speechTitle.trim() ? { title: speechTitle.trim() } : {}), ...delivery };
       const { change } = await api<{ change: Change }>("/api/voice-changer/speech", { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": speechKey } });
       setData((prev) => (prev ? { ...prev, changes: [change, ...prev.changes.filter((c) => c.id !== change.id)] } : prev));
@@ -507,10 +509,22 @@ export default function VoiceChangerPage() {
                 <fieldset className="space-y-3" disabled={!editable || speaking || deliveryOff} aria-describedby={deliveryOff ? "speech-delivery-off" : undefined}>
                   <legend className="mb-1 text-sm font-medium text-slate-700">Delivery</legend>
                   <label className="flex items-start gap-2 text-sm text-slate-700">
-                    <input type="checkbox" className="mt-0.5 accent-brand-600" checked={speechTurbo && !deliveryOff} onChange={(e) => (setSpeechTurbo(e.target.checked), setSpeechKey(newKey()), fail("speech")(null))} />
+                    <input type="checkbox" className="mt-0.5 accent-brand-600" checked={speechTurbo && !deliveryOff} onChange={(e) => (setSpeechTurbo(e.target.checked), e.target.checked || setSpeechFree(false), setSpeechKey(newKey()), fail("speech")(null))} />
                     <span>
                       Turbo
                       <span className="block text-xs text-slate-500">HeyGen&apos;s faster, cheaper model for instant voices.</span>
+                    </span>
+                  </label>
+                  <label className={`ml-6 flex items-start gap-2 text-sm ${speechTurbo && !deliveryOff ? "text-slate-700" : "text-slate-500"}`}>
+                    <input type="checkbox" className="mt-0.5 accent-brand-600" disabled={!speechTurbo} aria-describedby={speechTurbo ? undefined : "speech-free-needs-turbo"} checked={speechTurbo && speechFree && !deliveryOff} onChange={(e) => (setSpeechFree(e.target.checked), setSpeechKey(newKey()), fail("speech")(null))} />
+                    <span>
+                      Free
+                      <span className="block text-xs text-slate-500">Turbo at no charge, within HeyGen&apos;s own limits; it can be busy, and is never charged for instead.</span>
+                      {!speechTurbo && (
+                        <span id="speech-free-needs-turbo" className="block text-xs text-slate-500">
+                          Turn on Turbo to choose it.
+                        </span>
+                      )}
                     </span>
                   </label>
                   <div>
@@ -674,7 +688,7 @@ export default function VoiceChangerPage() {
                             {typeof c.durationSec === "number" && c.durationSec > 0 ? ` · ${formatSeconds(Math.max(1, Math.round(c.durationSec)))}` : ""}
                             {c.removeNoise ? " · noise removed" : ""}
                             {c.text !== undefined ? " · from text" : ""}
-                            {c.turbo ? " · Turbo" : ""}
+                            {c.free ? " · Turbo Free" : c.turbo ? " · Turbo" : ""}
                             {c.expressivenessBoost !== undefined && c.expressivenessBoost !== 1 ? ` · expressiveness boost ${Math.round(c.expressivenessBoost * 100)}%` : ""}
                           </div>
                           {c.error && <div className="mt-1 text-xs text-rose-600">{c.error}</div>}

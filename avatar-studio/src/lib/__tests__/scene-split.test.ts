@@ -2,7 +2,7 @@
 // Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mergeScenes, splitScene, splitScript } from "../scene-split";
+import { mergeScenes, moveItem, splitScene, splitScript } from "../scene-split";
 import type { Scene } from "../types";
 
 const bg = { type: "color" as const, value: "#fff" };
@@ -84,5 +84,14 @@ describe("mergeScenes", () => {
   it("never merges a scene that plays a recorded clip", () => {
     assert.equal(mergeScenes({ script: "A", background: bg, audioId: "c" }, { script: "B", background: bg }), null);
     assert.equal(mergeScenes({ script: "A", background: bg }, { script: "B", background: bg, audioId: "c" }), null);
+  });
+});
+
+describe("moveItem", () => {
+  it("moves one item to another place, the rest keeping their order", () => {
+    assert.deepEqual(moveItem(["a", "b", "c", "d"], 3, 0), ["d", "a", "b", "c"]);
+    assert.deepEqual(moveItem(["a", "b", "c", "d"], 0, 2), ["b", "c", "a", "d"]);
+    assert.deepEqual(moveItem(["a", "b", "c"], 1, 1), ["a", "b", "c"]);
+    assert.deepEqual(moveItem(["a", "b"], 0, 5), ["a", "b"]);
   });
 });

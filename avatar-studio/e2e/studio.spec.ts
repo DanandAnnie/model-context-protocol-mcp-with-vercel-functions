@@ -797,6 +797,41 @@ test("the brand kit's closing scene is set on the brand page and added at the en
   }
 });
 
+test("a scene tab dragged onto another moves the scene there, a change Undo takes back", async ({ page }) => {
+  await page.getByRole("textbox", { name: "Script", exact: true }).fill("First.");
+  // One scene has nowhere to go.
+  await expect(page.getByRole("button", { name: /^Scene 1,/ })).toHaveAttribute("draggable", "false");
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
+  await page.getByRole("textbox", { name: "Scene 2 script" }).fill("Second.");
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
+  await page.getByRole("textbox", { name: "Scene 3 script" }).fill("Third.");
+  await expect(page.getByRole("button", { name: /^Scene 3,/ })).toHaveAttribute("draggable", "true");
+  await page.getByRole("button", { name: /^Scene 3,/ }).dragTo(page.getByRole("button", { name: /^Scene 1,/ }));
+  await expect(page.getByTestId("import-note")).toHaveText("Moved scene 3 to 1.");
+  // The focus follows the moved tab to its new place.
+  await expect(page.getByRole("button", { name: /^Scene 1,/ })).toBeFocused();
+  // The moved scene is selected in its new place, and the others keep their order after it.
+  await expect(page.getByRole("textbox", { name: "Scene 1 script" })).toHaveValue("Third.");
+  await page.getByRole("button", { name: /^Scene 2,/ }).click();
+  await expect(page.getByRole("textbox", { name: "Scene 2 script" })).toHaveValue("First.");
+  await page.getByRole("button", { name: /^Scene 3,/ }).click();
+  await expect(page.getByRole("textbox", { name: "Scene 3 script" })).toHaveValue("Second.");
+  await page.getByRole("button", { name: "Undo move scene 3 to 1" }).click();
+  await page.getByRole("button", { name: /^Scene 1,/ }).click();
+  await expect(page.getByRole("textbox", { name: "Scene 1 script" })).toHaveValue("First.");
+  // Forward too: the first scene dropped on the last goes last, the others moving up.
+  await page.getByRole("button", { name: /^Scene 1,/ }).dragTo(page.getByRole("button", { name: /^Scene 3,/ }));
+  await expect(page.getByTestId("import-note")).toHaveText("Moved scene 1 to 3.");
+  await expect(page.getByRole("textbox", { name: "Scene 3 script" })).toHaveValue("First.");
+  await page.getByRole("button", { name: /^Scene 1,/ }).click();
+  await expect(page.getByRole("textbox", { name: "Scene 1 script" })).toHaveValue("Second.");
+  // A tab dropped on itself (a real drag, a few pixels across the same tab) changes nothing.
+  const second = page.getByRole("button", { name: /^Scene 2,/ });
+  await second.dragTo(second, { sourcePosition: { x: 4, y: 6 }, targetPosition: { x: 16, y: 10 } });
+  await expect(page.getByRole("button", { name: /^Undo/ })).toHaveAccessibleName("Undo move scene 1 to 3");
+  await expect(page.getByTestId("import-note")).toHaveText("Moved scene 1 to 3.");
+});
+
 test("photo avatar motion is set in the editor, kept with the video and its copy", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Moving portrait");
   await page.locator("textarea").fill("Welcome to the open house.");

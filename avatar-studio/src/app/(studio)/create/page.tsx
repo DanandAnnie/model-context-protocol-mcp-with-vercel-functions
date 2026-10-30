@@ -25,7 +25,7 @@ import { readDocx } from "@/lib/docx-text";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
 import { capSceneText, fitSceneTextEdit, sceneTextLength } from "@/lib/scene-text";
-import { mergeScenes, splitScene } from "@/lib/scene-split";
+import { mergeScenes, moveItem, splitScene } from "@/lib/scene-split";
 import { emptyHistory, record, redo, undo, type History } from "@/lib/scene-history";
 import { graphemes } from "@/lib/text";
 import { takeAgentDraft, type AgentDraft } from "@/lib/agent-draft";
@@ -35,6 +35,8 @@ const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
 /** Where the personal space's draft is kept; a workspace's has its id after it (see `draftKeyFor`). */
 const DRAFT_KEY = "avatar-studio:draft";
+/** The drag type a scene tab carries: only another tab takes it (a text field does not). */
+const SCENE_DRAG = "application/x-avatar-studio-scene";
 
 /**
  * Each space keeps its own draft: one started in Personal never shows up, or loses its uploaded images, in a
@@ -392,6 +394,33 @@ function CreateInner() {
     [next[idx], next[j]] = [next[j], next[idx]];
     changeScenes(`move scene ${idx + 1} ${dir < 0 ? "earlier" : "later"}`, next, { active: j });
   }
+  // A scene tab dragged onto another moves there (the arrow buttons do the same a step at a time). The drag carries
+  // the scene itself, so a change to the scenes meanwhile never moves another one, and a type of its own, which text
+  // fields do not take, so a tab let go over the script never types into it.
+  const dragged = useRef<Scene | null>(null);
+  // The dragged scene as shown (faded); the ref is what a drop reads, set as the drag starts.
+  const [dragging, setDragging] = useState<Scene | null>(null);
+  const [dropTarget, setDropTarget] = useState<number | null>(null);
+  const sceneTabs = useRef<Array<HTMLButtonElement | null>>([]);
+  function endDrag() {
+    dragged.current = null;
+    setDragging(null);
+    setDropTarget(null);
+  }
+  // A tab the scenes no longer have cannot finish its drag, so the drag is forgotten when they change.
+  useEffect(endDrag, [scenes]);
+  function dropScene(to: number) {
+    const from = dragged.current ? scenes.indexOf(dragged.current) : -1;
+    endDrag();
+    if (from < 0 || from === to || to < 0 || to >= scenes.length) return;
+    changeScenes(`move scene ${from + 1} to ${to + 1}`, moveItem(scenes, from, to), { active: to });
+    setImportNote(`Moved scene ${from + 1} to ${to + 1}.`);
+    // The browser keeps the focus where it was until the drag has ended, so the tab takes it then (and now, in case the
+    // dragged tab is gone and its drag never ends).
+    focusAfterDrag.current = to;
+    requestAnimationFrame(() => sceneTabs.current[to]?.focus());
+  }
+  const focusAfterDrag = useRef<number | null>(null);
   const importInput = useRef<HTMLInputElement>(null);
   const [importNote, setImportNote] = useState<string | null>(null);
   /** Replaces the scenes with a text, Markdown, or Word document's, one per paragraph or section, on the first scene's background. */
@@ -1366,9 +1395,42 @@ function CreateInner() {
                   onClick={() => setActiveIdx(i)}
                   aria-label={`Scene ${i + 1}${sc.script.trim() ? `, about ${formatSeconds(Math.max(1, sceneSeconds(sc)))}` : ", empty"}`}
                   aria-current={i === activeIdx ? "true" : undefined}
+                  ref={(el) => {
+                    sceneTabs.current[i] = el;
+                  }}
+                  title={scenes.length > 1 && canEdit !== false ? "Drag onto another scene to move it there, or select it and use Move scene left or right" : undefined}
+                  draggable={scenes.length > 1 && canEdit !== false && !slidesProgress}
+                  onDragStart={(e) => {
+                    e.dataTransfer.effectAllowed = "move";
+                    e.dataTransfer.setData(SCENE_DRAG, String(i));
+                    dragged.current = sc;
+                    // After the browser has taken the tab's picture for the drag, so the picture is not the faded tab.
+                    requestAnimationFrame(() => dragged.current === sc && setDragging(sc));
+                  }}
+                  onDragOver={(e) => {
+                    if (!e.dataTransfer.types.includes(SCENE_DRAG)) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    if (dropTarget !== i) setDropTarget(i);
+                  }}
+                  onDragLeave={(e) => {
+                    // Moving over the tab's own dot or duration is not leaving it.
+                    if (dropTarget === i && !e.currentTarget.contains(e.relatedTarget as Node | null)) setDropTarget(null);
+                  }}
+                  onDrop={(e) => {
+                    if (!e.dataTransfer.types.includes(SCENE_DRAG)) return;
+                    e.preventDefault();
+                    dropScene(i);
+                  }}
+                  onDragEnd={() => {
+                    endDrag();
+                    const to = focusAfterDrag.current;
+                    focusAfterDrag.current = null;
+                    if (to !== null) setTimeout(() => sceneTabs.current[to]?.focus(), 0);
+                  }}
                   className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${
                     i === activeIdx ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                  }`}
+                  } ${dragging === sc ? "opacity-50" : ""} ${dropTarget === i && dragging !== sc ? "ring-2 ring-brand-600 ring-offset-1" : ""}`}
                 >
                   <span className="h-2.5 w-2.5 rounded-full border border-black/10" style={sc.background.type === "color" ? { background: sc.background.value } : sc.background.type === "video" ? { background: "linear-gradient(135deg,#0f172a,#475569)" } : { background: "linear-gradient(135deg,#94a3b8,#cbd5e1)" }} />
                   {i + 1}

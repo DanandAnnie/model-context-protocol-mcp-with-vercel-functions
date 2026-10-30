@@ -63,3 +63,12 @@ export function mergeScenes(first: Scene, second: Scene): { scene: Scene; lost: 
   if (first.overlay && second.overlay && !same(first.overlay, second.overlay)) lost.push("on-screen text");
   return { scene: { ...first, script, ...(overlay ? { overlay } : {}) }, lost };
 }
+
+/** The list with the item at `from` moved to `to`, the others keeping their order; a copy, unchanged when either is out of range or they are the same. */
+export function moveItem<T>(list: readonly T[], from: number, to: number): T[] {
+  const next = [...list];
+  if (from === to || from < 0 || to < 0 || from >= list.length || to >= list.length) return next;
+  const [item] = next.splice(from, 1);
+  next.splice(to, 0, item);
+  return next;
+}

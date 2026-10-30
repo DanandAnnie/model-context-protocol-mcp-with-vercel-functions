@@ -86,11 +86,11 @@ export async function renameBackdrop(id: string, name: string, ownerId: string =
   return view(next);
 }
 
-export async function getBackdropImage(id: string, ownerId: string = LOCAL_OWNER): Promise<{ mimeType: BackdropType; bytes: Uint8Array }> {
-  await getBackdrop(id, ownerId);
+export async function getBackdropImage(id: string, ownerId: string = LOCAL_OWNER): Promise<{ name: string; mimeType: BackdropType; bytes: Uint8Array }> {
+  const backdrop = await getBackdrop(id, ownerId);
   const row = await getStore().get<BackdropData>("backdropdata", dataRowId(id));
   if (!row) throw new NotFoundError(`Background image ${id} has no image`);
-  return { mimeType: row.mimeType, bytes: new Uint8Array(Buffer.from(row.data, "base64")) };
+  return { name: backdrop.name, mimeType: row.mimeType, bytes: new Uint8Array(Buffer.from(row.data, "base64")) };
 }
 
 /**

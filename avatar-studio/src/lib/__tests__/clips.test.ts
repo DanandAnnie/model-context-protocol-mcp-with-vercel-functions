@@ -83,6 +83,8 @@ describe("audio clips", () => {
     assert.equal(listed.some((c) => "data" in c || "providerAssetIds" in c), false);
     const audio = await getClipAudio(clip.id);
     assert.equal(audio.bytes.byteLength, wav(2.5).byteLength);
+    // With its name and type, so a download is saved as "Intro take.wav".
+    assert.deepEqual([audio.name, audio.mimeType], ["Intro take", "audio/wav"]);
     // Another account sees neither the clip nor its audio.
     await assert.rejects(getClipAudio(clip.id, "user_other"), /not found/);
     assert.deepEqual(await listClips("user_other"), []);

@@ -1,7 +1,7 @@
 "use client";
 import { useRef, useState } from "react";
 import Link from "next/link";
-import { AudioLines, Clapperboard, FileAudio, Image as ImageIcon, ImagePlus, Pencil, Trash2, Upload } from "lucide-react";
+import { AudioLines, Clapperboard, Download, FileAudio, Image as ImageIcon, ImagePlus, Pencil, Trash2, Upload } from "lucide-react";
 import { Card, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { useApi } from "@/hooks/useApi";
@@ -17,8 +17,8 @@ const MAX_PICTURE_EDGE = 3840;
 
 /**
  * The account's assets in one place: the audio clips scenes and lip syncs speak (uploaded, recorded in the editor, or
- * kept from the voice changer) and the pictures scenes use as backgrounds. Each can be renamed or deleted here, a clip
- * can keep the words it says and start a video, and new ones can be uploaded.
+ * kept from the voice changer) and the pictures scenes use as backgrounds. Each can be downloaded, renamed, or deleted
+ * here, a clip can keep the words it says and start a video, and new ones can be uploaded.
  */
 export default function AssetsPage() {
   const canEdit = useCanEdit();
@@ -265,28 +265,35 @@ export default function AssetsPage() {
                 <Card className="overflow-hidden">
                   {/* eslint-disable-next-line @next/next/no-img-element -- the owner's own upload, served by the API */}
                   <img src={`/api/backdrops/${b.id}`} alt={b.name} loading="lazy" className="aspect-video w-full bg-slate-100 object-cover" />
-                  <div className="flex items-center gap-1 p-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-xs font-medium text-slate-900" title={b.name}>
-                        {b.name}
-                      </div>
-                      <div className="text-[11px] text-slate-500">
-                        {b.mimeType === "image/png" ? "PNG" : "JPEG"} · {formatDate(b.createdAt)}
-                      </div>
+                  <div className="p-2">
+                    <div className="truncate text-xs font-medium text-slate-900" title={b.name}>
+                      {b.name}
                     </div>
-                    {canEdit === true && (
-                      <>
+                    <div className="text-[11px] text-slate-500">
+                      {b.mimeType === "image/png" ? "PNG" : "JPEG"} · {formatDate(b.createdAt)}
+                    </div>
+                    {/* Actions get their own row, which wraps, so none is cut off on a narrow card. */}
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                      {canEdit === true && (
                         <Link href={`/create?picture=${b.id}`} aria-label={`Use in a video: ${b.name}`} title="Use in a video" className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-50">
                           <Clapperboard className="h-3.5 w-3.5" aria-hidden /> Use
                         </Link>
-                        <button type="button" onClick={() => void renamePicture(b)} aria-label={`Rename ${b.name}`} className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand-700">
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button>
-                        <button type="button" onClick={() => void removePicture(b)} aria-label={`Delete ${b.name}`} className="rounded p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-700">
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </>
-                    )}
+                      )}
+                      {/* Viewers may save a copy too: they can already see and download what the team made. */}
+                      <a href={`/api/backdrops/${b.id}?download`} download aria-label={`Download ${b.name}`} title="Download" className="rounded p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700">
+                        <Download className="h-3.5 w-3.5" aria-hidden />
+                      </a>
+                      {canEdit === true && (
+                        <>
+                          <button type="button" onClick={() => void renamePicture(b)} aria-label={`Rename ${b.name}`} title="Rename" className="rounded p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700">
+                            <Pencil className="h-3.5 w-3.5" aria-hidden />
+                          </button>
+                          <button type="button" onClick={() => void removePicture(b)} aria-label={`Delete ${b.name}`} title="Delete" className="rounded p-1.5 text-slate-500 hover:bg-rose-50 hover:text-rose-700">
+                            <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </Card>
               </li>
@@ -354,19 +361,26 @@ function ClipCard(props: {
             {formatSeconds(Math.max(1, Math.round(clip.durationSec)))} · {clip.mimeType === "audio/mpeg" ? "MP3" : "WAV"} · {formatDate(clip.createdAt)}
           </div>
         </div>
-        {canEdit && (
-          <div className="flex shrink-0 items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1">
+          {canEdit && (
             <Link href={`/create?clip=${clip.id}`} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-50" aria-label={`Make a video: ${clip.name}`}>
               <Clapperboard className="h-3.5 w-3.5" aria-hidden /> Make a video
             </Link>
-            <button type="button" onClick={props.onRename} aria-label={`Rename ${clip.name}`} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-brand-700">
-              <Pencil className="h-4 w-4" />
-            </button>
-            <button type="button" onClick={props.onDelete} aria-label={`Delete ${clip.name}`} className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-700">
-              <Trash2 className="h-4 w-4" />
-            </button>
-          </div>
-        )}
+          )}
+          <a href={`/api/clips/${clip.id}?download`} download aria-label={`Download ${clip.name}`} title="Download" className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-brand-700">
+            <Download className="h-4 w-4" aria-hidden />
+          </a>
+          {canEdit && (
+            <>
+              <button type="button" onClick={props.onRename} aria-label={`Rename ${clip.name}`} title="Rename" className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-brand-700">
+                <Pencil className="h-4 w-4" aria-hidden />
+              </button>
+              <button type="button" onClick={props.onDelete} aria-label={`Delete ${clip.name}`} title="Delete" className="rounded p-1 text-slate-500 hover:bg-rose-50 hover:text-rose-700">
+                <Trash2 className="h-4 w-4" aria-hidden />
+              </button>
+            </>
+          )}
+        </div>
       </div>
       <audio controls preload="none" src={`/api/clips/${clip.id}`} className="mt-3 h-8 w-full" aria-label={`Play ${clip.name}`} />
       <label htmlFor={wordsId} className="mt-3 block text-xs font-medium text-slate-700">

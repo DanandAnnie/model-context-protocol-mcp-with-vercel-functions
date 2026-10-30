@@ -10,7 +10,13 @@ export default defineConfig({
   workers: 1,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
-  use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" },
+  use: {
+    ...devices["Desktop Chrome"],
+    trace: "retain-on-failure",
+    // Chromium names a download in the system's file-name encoding; a container with no locale set (C/POSIX) saves
+    // any non-ASCII name as "download". Desktops run a UTF-8 locale, so the browser gets one here too.
+    launchOptions: { env: { ...process.env, LANG: "C.UTF-8", LC_ALL: "C.UTF-8" } },
+  },
   projects: [
     { name: "open", testMatch: /studio\.spec\.ts/, use: { baseURL: "http://localhost:3100" } },
     { name: "password", testMatch: /password\.spec\.ts/, use: { baseURL: "http://localhost:3102" } },

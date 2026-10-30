@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { AxeBuilder } from "@axe-core/playwright";
 import { strToU8, zipSync } from "fflate";
+import { readFile } from "node:fs/promises";
 import { parseCsv } from "../src/lib/csv";
 
 // Demo-mode flows. The mock renderer completes ~12s after submission.
@@ -5339,13 +5340,14 @@ test("a photo shoot's photo is brought to life as a b-roll clip's first frame, a
   expect((await page.request.delete(`/api/footage/${await clip.getAttribute("data-footage")}`)).ok()).toBe(true);
 });
 
-test("the Assets page keeps the account's audio clips and pictures: upload, words, rename, make a video, delete", async ({ page }) => {
+test("the Assets page keeps the account's audio clips and pictures: upload, words, rename, make a video, download, delete", async ({ page }) => {
   // Names unique to this run, so a run left part-way on a reused server does not match here.
   const tag = Date.now().toString(36);
   const take = `asset-take-${tag}`;
   const intro = `Open house intro ${tag}`;
   const lobby = `lobby-${tag}`;
-  const front = `Front lobby ${tag}`;
+  // Accented, so the browser has to read the name from filename* to save it as typed.
+  const front = `Café lobby ${tag}`;
   await page.goto("/assets");
   await expect(page.getByRole("heading", { name: "Assets", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Assets" }).first()).toHaveAttribute("href", "/assets");
@@ -5361,11 +5363,23 @@ test("the Assets page keeps the account's audio clips and pictures: upload, word
   const clipId = (await card.getAttribute("data-clip"))!;
   // It starts a video with its words as the script.
   await expect(card.getByRole("link", { name: `Make a video: ${take}`, exact: true })).toHaveAttribute("href", `/create?clip=${clipId}`);
+  // Downloaded under its name; after a rename, under the new one (a download is never served from cache by the old name).
+  const firstDownload = page.waitForEvent("download");
+  await card.getByRole("link", { name: `Download ${take}`, exact: true }).click();
+  expect((await firstDownload).suggestedFilename()).toBe(`${take}.wav`);
   // Renamed in place; the server keeps the words.
   page.once("dialog", (d) => d.accept(intro));
   await card.getByRole("button", { name: `Rename ${take}`, exact: true }).click();
   const renamed = page.getByTestId("asset-clip").filter({ hasText: intro });
   await expect(renamed.getByTestId("asset-clip-name")).toHaveText(intro);
+  // Under its new name now, with the audio the clip plays; played in the page, it is not a download.
+  const clipDownload = page.waitForEvent("download");
+  await renamed.getByRole("link", { name: `Download ${intro}`, exact: true }).click();
+  const savedClip = await clipDownload;
+  expect(savedClip.suggestedFilename()).toBe(`${intro}.wav`);
+  const played = await page.request.get(`/api/clips/${clipId}`);
+  expect(played.headers()["content-disposition"]).toBeUndefined();
+  expect((await readFile((await savedClip.path())!)).equals(await played.body())).toBe(true);
   const stored = ((await (await page.request.get("/api/clips")).json()) as { clips: Array<{ id: string; name: string; transcript?: string }> }).clips.find((c) => c.id === clipId);
   expect(stored).toMatchObject({ name: intro, transcript: "Welcome to the open house." });
   // Clearing the words forgets them.
@@ -5380,6 +5394,11 @@ test("the Assets page keeps the account's audio clips and pictures: upload, word
   page.once("dialog", (d) => d.accept(front));
   await pictures.getByRole("button", { name: `Rename ${lobby}`, exact: true }).click();
   await expect(pictures.getByRole("img", { name: front, exact: true })).toBeVisible();
+  const pictureDownload = page.waitForEvent("download");
+  await pictures.getByRole("link", { name: `Download ${front}`, exact: true }).click();
+  const savedPicture = await pictureDownload;
+  expect(savedPicture.suggestedFilename()).toBe(`${front}.png`);
+  expect((await readFile((await savedPicture.path())!)).equals(pixel)).toBe(true);
   // It starts a video set against it: the first scene shows it, named after it, kept in a draft of its own.
   const pictureId = (await (await page.request.get("/api/backdrops")).json()).backdrops.find((b: { name: string }) => b.name === front).id as string;
   await expect(pictures.getByRole("link", { name: `Use in a video: ${front}`, exact: true })).toHaveAttribute("href", `/create?picture=${pictureId}`);
@@ -5417,6 +5436,32 @@ test("the Assets page keeps the account's audio clips and pictures: upload, word
   await expect(page.getByTestId("asset-clip").filter({ hasText: intro })).toHaveCount(1);
   await search.fill("");
   await expect(page.getByTestId("assets-matches")).toHaveText("");
+  const pictureShown = await page.request.get(`/api/backdrops/${pictureId}`);
+  expect(pictureShown.headers()["content-disposition"]).toBeUndefined();
+  // On a phone-width screen every picture action stays inside its card.
+  const desktop = page.viewportSize()!;
+  await page.setViewportSize({ width: 320, height: 800 });
+  const pictureCard = pictures.getByRole("listitem").filter({ has: page.getByRole("img", { name: front, exact: true }) });
+  const cardBox = (await pictureCard.boundingBox())!;
+  for (const name of [`Use in a video: ${front}`, `Download ${front}`, `Rename ${front}`, `Delete ${front}`]) {
+    const box = (await pictureCard.getByRole(name.startsWith("Use") || name.startsWith("Download") ? "link" : "button", { name, exact: true }).boundingBox())!;
+    expect(box.x + box.width, name).toBeLessThanOrEqual(cardBox.x + cardBox.width);
+  }
+  await page.setViewportSize(desktop);
+  // A viewer sees both lists without changing them, and may still download.
+  await page.route("**/api/workspaces", (route) =>
+    route.request().method() === "GET"
+      ? route.fulfill({ json: { personalId: "demo-user", activeId: "ws_view", workspaces: [{ id: "ws_view", name: "Read only team", role: "viewer", members: [] }] } })
+      : route.continue(),
+  );
+  await page.reload();
+  await expect(renamed.getByRole("link", { name: `Download ${intro}`, exact: true })).toBeVisible();
+  await expect(pictures.getByRole("link", { name: `Download ${front}`, exact: true })).toBeVisible();
+  await expect(renamed.getByRole("button", { name: `Rename ${intro}`, exact: true })).toHaveCount(0);
+  await expect(pictures.getByRole("button", { name: `Delete ${front}`, exact: true })).toHaveCount(0);
+  await page.unroute("**/api/workspaces");
+  await page.reload();
+  await expect(renamed.getByRole("button", { name: `Rename ${intro}`, exact: true })).toBeVisible();
   expect((await page.request.patch("/api/backdrops/bd_missing123", { data: { name: "Gone" } })).status()).toBe(404);
   expect((await page.request.patch(`/api/clips/${clipId}`, { data: { name: "  " } })).status()).toBe(400);
   page.once("dialog", (d) => d.accept());

@@ -40,7 +40,10 @@ describe("background images", () => {
     const jpeg = await createBackdrop({ name: "Product", image: dataUrl(JPEG, "image/png") });
     assert.deepEqual([png.mimeType, png.bytes, jpeg.mimeType], ["image/png", PNG.byteLength, "image/jpeg"]);
     assert.match(png.id, /^bd_/);
-    assert.deepEqual(Array.from((await getBackdropImage(png.id)).bytes), Array.from(PNG));
+    const image = await getBackdropImage(png.id);
+    assert.deepEqual(Array.from(image.bytes), Array.from(PNG));
+    // With its name and type, so a download is saved as "Office.png".
+    assert.deepEqual([image.name, image.mimeType], ["Office", "image/png"]);
     await getStore().put("backdrop", { ...(await getStore().get<Backdrop>("backdrop", png.id))!, providerAssetIds: { heygen: "img_1" } });
     const listed = await listBackdrops();
     assert.deepEqual(listed.map((b) => b.name).sort(), ["Office", "Product"]);

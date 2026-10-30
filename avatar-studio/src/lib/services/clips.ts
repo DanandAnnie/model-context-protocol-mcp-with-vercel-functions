@@ -157,11 +157,11 @@ export async function getClip(id: string, ownerId: string = LOCAL_OWNER): Promis
   return owned(await getStore().get<AudioClip>("clip", id), ownerId, `Audio clip ${id}`);
 }
 
-export async function getClipAudio(id: string, ownerId: string = LOCAL_OWNER): Promise<{ mimeType: AudioClipType; bytes: Uint8Array }> {
-  await getClip(id, ownerId);
+export async function getClipAudio(id: string, ownerId: string = LOCAL_OWNER): Promise<{ name: string; mimeType: AudioClipType; bytes: Uint8Array }> {
+  const clip = await getClip(id, ownerId);
   const row = await getStore().get<ClipAudio>("clipaudio", audioRowId(id));
   if (!row) throw new NotFoundError(`Audio clip ${id} has no audio`);
-  return { mimeType: row.mimeType, bytes: new Uint8Array(Buffer.from(row.data, "base64")) };
+  return { name: clip.name, mimeType: row.mimeType, bytes: new Uint8Array(Buffer.from(row.data, "base64")) };
 }
 
 /** Records the provider's asset id for a clip so later renders (retries, copies) skip the upload. Keeps a clip deleted meanwhile deleted. */

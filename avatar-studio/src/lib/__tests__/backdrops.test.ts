@@ -6,6 +6,7 @@ import { MemoryStore } from "../store/memory";
 import { getStore } from "../store";
 import {
   MAX_BACKDROPS,
+  backdropRenameSchema,
   createBackdrop,
   createBatch,
   createVideo,
@@ -13,11 +14,13 @@ import {
   exportOwnerData,
   getBackdropImage,
   listBackdrops,
+  renameBackdrop,
   videoRequestSchema,
 } from "../services";
 import { MockAvatarProvider } from "../providers/avatar/mock";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import { backdropIdOf, backdropPath, type Backdrop } from "../types";
+import { NotFoundError } from "../errors";
 
 beforeEach(() => {
   globalThis.__avatarStudioStore = new MemoryStore();
@@ -295,5 +298,37 @@ describe("background images at the renderer", () => {
     assert.equal(legacy.providerAssetIds?.["heygen:asset"], "img_new", "a v1 upload id is uploaded again as a v3 asset");
     // The service's shortcut asks under the renderer's own key, so a v1 id does not skip the upload there either.
     assert.equal(heygen.assetKey, "heygen:asset");
+  });
+
+  it("renames a picture for its owner, keeping its image, its cached upload, and what names it", async () => {
+    const pic = await createBackdrop({ name: "Office", image: dataUrl(PNG) }, "u1");
+    await getStore().put("backdrop", { ...(await getStore().get<Backdrop>("backdrop", pic.id))!, providerAssetIds: { "heygen:asset": "img_1" } });
+    const renamed = await renameBackdrop(pic.id, backdropRenameSchema.parse({ name: "  Lobby  " }).name, "u1");
+    assert.equal(renamed.name, "Lobby");
+    assert.equal(renamed.providerAssetIds, undefined, "the API never shows the renderer's ids");
+    assert.deepEqual((await getStore().get<Backdrop>("backdrop", pic.id))!.providerAssetIds, { "heygen:asset": "img_1" });
+    assert.deepEqual(Array.from((await getBackdropImage(pic.id, "u1")).bytes), Array.from(PNG));
+    assert.equal((await listBackdrops("u1"))[0].name, "Lobby");
+    assert.throws(() => backdropRenameSchema.parse({ name: "  " }), /Name the picture/);
+    assert.throws(() => backdropRenameSchema.parse({ name: "x".repeat(81) }), /at most 80 characters/);
+    await assert.rejects(renameBackdrop(pic.id, "Theirs", "u2"), NotFoundError);
+    // One deleted between the read and the write stays deleted.
+    const store = getStore();
+    const realGet = store.get.bind(store);
+    let deleted = false;
+    store.get = (async (kind: string, id: string) => {
+      const row = await realGet(kind as never, id);
+      if (kind === "backdrop" && id === pic.id && !deleted) {
+        deleted = true;
+        await store.remove("backdrop", pic.id);
+      }
+      return row;
+    }) as typeof store.get;
+    try {
+      await assert.rejects(renameBackdrop(pic.id, "Too late", "u1"), NotFoundError);
+    } finally {
+      store.get = realGet;
+    }
+    assert.equal(await getStore().get("backdrop", pic.id), null);
   });
 });

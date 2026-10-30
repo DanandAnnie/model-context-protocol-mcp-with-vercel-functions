@@ -765,11 +765,15 @@ function CreateInner() {
     setDraftRestored(d.savedAt);
   }, [draftSource, params, editKey, spacesKnown]);
 
+  // Set once a render has started from this draft: the draft is cleared then, and no autosave may write it back while
+  // the page is on its way to the video (a timer still pending, or one re-armed by data arriving meanwhile).
+  const sent = useRef(false);
   // Autosave the editor state (debounced) so a refresh never loses work.
   useEffect(() => {
-    if (!hydrated.current || !editKey) return;
+    if (!hydrated.current || !editKey || sent.current) return;
     const empty = !scenes.some(hasContent) && title === "Untitled video";
     const t = setTimeout(() => {
+      if (sent.current) return;
       writeDraft(editKey, empty ? null : { title, scenes, aspect, resolution, captions, ...(isDefaultCaptionStyle ? {} : { captionStyle }), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...(expressiveness !== "low" ? { expressiveness } : {}), ...(motionPrompt ? { motionPrompt } : {}), ...(accent ? { accent } : {}), ...(avatarEngine !== "avatar_iv" ? { avatarEngine } : {}), ...(moreBlinking ? { moreBlinking } : {}), ...(transparent ? { transparent } : {}), avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
     }, 400);
     return () => clearTimeout(t);
@@ -998,6 +1002,7 @@ function CreateInner() {
         method: "POST",
         body: JSON.stringify({ title, scenes: scenes.map(sentScene), avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...motion, ...(sentAccent ? { accent: sentAccent } : {}), ...(avatarEngine !== "avatar_iv" && avatarVInUse ? { avatarEngine, ...(moreBlinking ? { moreBlinking: true } : {}) } : {}), ...(sentTransparent ? { transparent: true } : {}) }),
       });
+      sent.current = true;
       if (editKey) writeDraft(editKey, null);
       router.push(`/videos/${video.id}`);
     } catch (e) {

@@ -3376,7 +3376,7 @@ test("webhook settings reject private hosts and show the signing secret", async 
 test("pages have no WCAG 2.1 AA violations", async ({ page }) => {
   const v = await createVideoViaApi(page, "Accessible video");
   const agent = (await (await page.request.post("/api/agents", { data: { name: "Axe agent", avatarId: "stock_1" } })).json()).agent as { id: string };
-  const paths = ["/", "/login", "/home", "/create", "/agent", "/videos", `/videos/${v.id}`, "/templates", "/batch", "/avatars", "/voices", "/translate", "/cleanup", "/lipsync", "/music", "/cinematic", "/footage", "/photos", "/voice-changer", "/interactive", "/brand", "/settings", `/share/${v.id}`, `/talk/${agent.id}`, "/demo-consent"];
+  const paths = ["/", "/login", "/home", "/create", "/agent", "/videos", `/videos/${v.id}`, "/templates", "/batch", "/avatars", "/voices", "/assets", "/translate", "/cleanup", "/lipsync", "/music", "/cinematic", "/footage", "/photos", "/voice-changer", "/interactive", "/brand", "/settings", `/share/${v.id}`, `/talk/${agent.id}`, "/demo-consent"];
   const report: string[] = [];
   for (const path of paths) {
     await page.goto(path);
@@ -5337,4 +5337,61 @@ test("a photo shoot's photo is brought to life as a b-roll clip's first frame, a
   await expect(page.getByRole("alert").filter({ hasText: "no longer there" })).toHaveText("That photo shoot is no longer there; add a picture to open on instead.");
   await expect(page.getByLabel("No pictures")).toBeChecked();
   expect((await page.request.delete(`/api/footage/${await clip.getAttribute("data-footage")}`)).ok()).toBe(true);
+});
+
+test("the Assets page keeps the account's audio clips and pictures: upload, words, rename, make a video, delete", async ({ page }) => {
+  // Names unique to this run, so a run left part-way on a reused server does not match here.
+  const tag = Date.now().toString(36);
+  const take = `asset-take-${tag}`;
+  const intro = `Open house intro ${tag}`;
+  const lobby = `lobby-${tag}`;
+  const front = `Front lobby ${tag}`;
+  await page.goto("/assets");
+  await expect(page.getByRole("heading", { name: "Assets", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Assets" }).first()).toHaveAttribute("href", "/assets");
+  // An uploaded clip is listed with its length and kind, and can keep the words it says.
+  await page.getByLabel("Upload an audio clip").setInputFiles({ name: `${take}.wav`, mimeType: "audio/wav", buffer: toneWav(2) });
+  const card = page.getByTestId("asset-clip").filter({ hasText: take });
+  await expect(card).toContainText("2s · WAV");
+  await expect(page.getByTestId("assets-note")).toHaveText(`Uploaded the audio clip “${take}”.`);
+  await card.getByLabel("What it says").fill("Welcome to the open house.");
+  await card.getByRole("button", { name: "Keep these words with the clip" }).click();
+  await expect(page.getByTestId("assets-note")).toHaveText(`Kept the words with “${take}”: a scene that uses it starts with them.`);
+  await expect(card.getByRole("button", { name: "Words kept with the clip" })).toBeFocused();
+  const clipId = (await card.getAttribute("data-clip"))!;
+  // It starts a video with its words as the script.
+  await expect(card.getByRole("link", { name: `Make a video: ${take}`, exact: true })).toHaveAttribute("href", `/create?clip=${clipId}`);
+  // Renamed in place; the server keeps the words.
+  page.once("dialog", (d) => d.accept(intro));
+  await card.getByRole("button", { name: `Rename ${take}`, exact: true }).click();
+  const renamed = page.getByTestId("asset-clip").filter({ hasText: intro });
+  await expect(renamed.getByTestId("asset-clip-name")).toHaveText(intro);
+  const stored = ((await (await page.request.get("/api/clips")).json()) as { clips: Array<{ id: string; name: string; transcript?: string }> }).clips.find((c) => c.id === clipId);
+  expect(stored).toMatchObject({ name: intro, transcript: "Welcome to the open house." });
+  // Clearing the words forgets them.
+  await renamed.getByLabel("What it says").fill("");
+  await renamed.getByRole("button", { name: "Forget the words" }).click();
+  await expect(page.getByTestId("assets-note")).toHaveText(`“${intro}” no longer has words kept with it.`);
+  // A picture is uploaded, shown, renamed, and deleted.
+  const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+  await page.getByLabel("Upload a picture").setInputFiles({ name: `${lobby}.png`, mimeType: "image/png", buffer: pixel });
+  const pictures = page.getByTestId("asset-pictures");
+  await expect(pictures.getByRole("img", { name: lobby, exact: true })).toBeVisible();
+  page.once("dialog", (d) => d.accept(front));
+  await pictures.getByRole("button", { name: `Rename ${lobby}`, exact: true }).click();
+  await expect(pictures.getByRole("img", { name: front, exact: true })).toBeVisible();
+  expect((await page.request.patch("/api/backdrops/bd_missing123", { data: { name: "Gone" } })).status()).toBe(404);
+  expect((await page.request.patch(`/api/clips/${clipId}`, { data: { name: "  " } })).status()).toBe(400);
+  page.once("dialog", (d) => d.accept());
+  await pictures.getByRole("button", { name: `Delete ${front}`, exact: true }).click();
+  await expect(page.getByTestId("assets-note")).toHaveText(`Deleted the picture “${front}”.`);
+  await expect(page.getByRole("heading", { name: /^Pictures/ })).toBeFocused();
+  // Deleting the clip leaves the list and puts the focus on its heading.
+  page.once("dialog", (d) => d.accept());
+  await renamed.getByRole("button", { name: `Delete ${intro}`, exact: true }).click();
+  await expect(page.getByTestId("asset-clip").filter({ hasText: intro })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: /^Audio clips/ })).toBeFocused();
+  expect((await page.request.get(`/api/clips/${clipId}`)).status()).toBe(404);
+  const a11y = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(a11y.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
 });

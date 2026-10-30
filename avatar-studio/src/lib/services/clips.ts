@@ -9,13 +9,12 @@ import { getStore } from "../store";
 import { decodeDataUrl } from "../providers/image";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { LOCAL_OWNER } from "../owner-id";
-import { MAX_CLIP_SECONDS, type AudioClip, type AudioClipType } from "../types";
+import { MAX_CLIPS, MAX_CLIP_SECONDS, type AudioClip, type AudioClipType } from "../types";
 import { owned } from "./shared";
 
 /** Fits one request body on Vercel (4.5 MB) once base64-encoded: 3 MB is 4 MB as base64. */
 export const MAX_CLIP_BYTES = 3 * 1024 * 1024;
-export const MAX_CLIPS = 20;
-export { MAX_CLIP_SECONDS };
+export { MAX_CLIPS, MAX_CLIP_SECONDS };
 const CLIP_TYPES = new Set<AudioClipType>(["audio/wav", "audio/mpeg"]);
 
 export const clipUploadSchema = z.object({

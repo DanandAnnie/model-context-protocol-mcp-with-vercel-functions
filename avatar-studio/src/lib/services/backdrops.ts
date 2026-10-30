@@ -75,6 +75,17 @@ export async function getBackdrop(id: string, ownerId: string = LOCAL_OWNER): Pr
   return owned(await getStore().get<Backdrop>("backdrop", id), ownerId, `Background image ${id}`);
 }
 
+export const backdropRenameSchema = z.object({ name: z.string().trim().min(1, "Name the picture").max(80, "A picture's name is at most 80 characters") });
+
+/** Renames an uploaded picture; scenes, templates, and the brand kit name it by id, so they keep it. */
+export async function renameBackdrop(id: string, name: string, ownerId: string = LOCAL_OWNER): Promise<Backdrop> {
+  const backdrop = await getBackdrop(id, ownerId);
+  const next = { ...backdrop, name };
+  // Only over the row read: a picture deleted meanwhile stays deleted rather than coming back without its image.
+  if (!(await getStore().putIf("backdrop", next, "createdAt", backdrop.createdAt))) throw new NotFoundError(`Background image ${id} not found`);
+  return view(next);
+}
+
 export async function getBackdropImage(id: string, ownerId: string = LOCAL_OWNER): Promise<{ mimeType: BackdropType; bytes: Uint8Array }> {
   await getBackdrop(id, ownerId);
   const row = await getStore().get<BackdropData>("backdropdata", dataRowId(id));

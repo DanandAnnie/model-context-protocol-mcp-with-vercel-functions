@@ -758,6 +758,9 @@ export type AudioClipType = "audio/wav" | "audio/mpeg";
  */
 export const MAX_CLIP_SECONDS = 90;
 
+/** Audio clips an account keeps. */
+export const MAX_CLIPS = 20;
+
 /** Audio a scene can use instead of a voice; the bytes are stored separately and served by `/api/clips/:id`. */
 export interface AudioClip {
   id: string;

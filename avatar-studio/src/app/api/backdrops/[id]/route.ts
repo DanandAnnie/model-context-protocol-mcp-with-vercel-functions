@@ -1,6 +1,6 @@
-import { errorResponse } from "@/lib/api-utils";
+import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { requireEditor, requireOwner } from "@/lib/owner";
-import { deleteBackdrop, getBackdropImage } from "@/lib/services";
+import { backdropRenameSchema, deleteBackdrop, getBackdropImage, renameBackdrop } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +19,17 @@ export async function GET(_req: Request, ctx: Ctx) {
         "X-Content-Type-Options": "nosniff",
       },
     });
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+/** Rename a background image: `{ name }` → `{ backdrop }`. */
+export async function PATCH(req: Request, ctx: Ctx) {
+  try {
+    const owner = await requireEditor();
+    const { name } = backdropRenameSchema.parse(await readJson(req));
+    return json({ backdrop: await renameBackdrop((await ctx.params).id, name, owner) });
   } catch (err) {
     return errorResponse(err);
   }

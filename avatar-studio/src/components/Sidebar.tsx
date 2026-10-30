@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { useMobileNav } from "@/components/MobileNav";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
-import { AudioLines, Camera, Clapperboard, Film, Music, Wand2, Eraser, Home, Languages, Layers3, LayoutTemplate, LogOut, MessageSquare, Mic2, MonitorPlay, Palette, Settings, Users, Video, Sparkles, X } from "lucide-react";
+import { AudioLines, Camera, Clapperboard, Film, FolderOpen, Music, Wand2, Eraser, Home, Languages, Layers3, LayoutTemplate, LogOut, MessageSquare, Mic2, MonitorPlay, Palette, Settings, Users, Video, Sparkles, X } from "lucide-react";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import type { ProviderStatus } from "@/lib/types";
@@ -21,6 +21,7 @@ const NAV = [
   { href: "/batch", label: "Personalize", icon: Layers3 },
   { href: "/avatars", label: "Avatars", icon: Users },
   { href: "/voices", label: "Voices", icon: Mic2 },
+  { href: "/assets", label: "Assets", icon: FolderOpen },
   { href: "/translate", label: "Video translate", icon: Languages },
   { href: "/cleanup", label: "Clean up", icon: Eraser },
   { href: "/lipsync", label: "Lip sync", icon: AudioLines },
@@ -95,7 +96,7 @@ export function Sidebar() {
         </Link>
       </div>
 
-      <nav className="flex-1 space-y-0.5 px-3">
+      <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3">
         {NAV.map(({ href, label, icon: Icon }) => {
           const active = pathname === href || pathname.startsWith(`${href}/`);
           return (

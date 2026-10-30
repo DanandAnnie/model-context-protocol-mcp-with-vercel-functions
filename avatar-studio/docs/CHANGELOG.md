@@ -644,3 +644,10 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The clip rename answered `{ clip }` where the rest of the API says `footage`; it now answers `{ footage }`.
     - Rename and Delete showed while the role was loading, so a viewer could meet a prompt and then a refusal. Both now wait for an editor role; the Delete icon meets 3:1 contrast and has a tooltip.
     - A doc comment had moved off the delete it described, and the docs said nothing else changes on a rename (the update time does) and split the delete paragraph; all three are fixed.
+- Rename cleanups, lip syncs, and videos with music (`d8c0f4f`): `PATCH /api/cleanups/:id`, `/api/lipsyncs/:id`, and `/api/music/:id` take a new title, and the three pages offer Rename beside Delete (editors only); a status check landing during a rename keeps both, and a retried music start with the same key and title is still recognised after a rename.
+  - An independent review found nothing blocking. Fixed before the commit:
+    - When two status checks landed together (two servers, say), the one whose write missed applied its own answer again over the newer row, so a finished job could go back to "processing" and be announced as ready twice. A check now leaves a later answer it finds in place; this also covers B-roll clips and photo shoots, and a unit test lands the checks in both orders.
+    - A list check already on its way when a rename was saved could bring the old name back until the next check. Every rename (B-roll and photo shoots too) now asks for the list again, which retires the earlier check.
+    - A rename that found the item deleted said so, and then the next check replaced that with "deleted elsewhere". The item is now forgotten first (also on the B-roll and photo shoot pages).
+    - Cleanups and lip syncs kept the name they were started with, but their retries never compare titles, so it was never read. Only clips, shoots, and music, whose retries do compare it, keep it now.
+    - The unit test for renaming to the same name checked only the title; it now checks that nothing changed, the update time included.

@@ -537,3 +537,10 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - Every listing loaded all word timings. They now live in their own row.
     - An e2e check passed without the card it meant to check. It now names that card.
   - Not changed: HeyGen's docs could not be reached from inside the review to confirm `with_timestamps` for every voice type. The API reference and changelog read beforehand document it for `/v3/models/audio/tts` and exclude no model or voice type.
+- Free speech for instant voices (`c2a11c0`): HeyGen Voice's `heygen-voice-1-turbo-free` model is Turbo at no charge, within HeyGen's per-user limits and shared free capacity. It has no availability guarantee and is never switched to a paid model. The Voice changer page now offers it as Free under Turbo, and the speech endpoint takes `free`, which implies Turbo. A free start is part of what a repeated `Idempotency-Key` must match. HeyGen's limit or capacity refusal is a `429` that says free speech is at its limit or busy, and nothing is kept. A professional public voice refuses it as it refuses Turbo. Unit tests cover the schema, the model sent to HeyGen, the 429 and 500 messages, idempotency against older Turbo recordings, and a public instant voice; the voice-changer e2e tests send it, show it, and keep it off for a professional voice.
+  - An independent review found nothing blocking. Fixed before the commit:
+    - A free request HeyGen failed (a `500` from its shared capacity) or left unanswered was said to have taken too long for a long text. It now says free speech did not answer.
+    - Free stayed chosen when Turbo was turned off and on again. It is now cleared with Turbo.
+    - The disabled Free box did not say why. It now says to turn on Turbo.
+    - The route's comment did not list `free`.
+    - Test gaps for a public instant voice, an older Turbo recording replayed, and a professional voice in the browser were filled.

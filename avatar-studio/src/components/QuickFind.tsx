@@ -60,6 +60,8 @@ export function QuickFind() {
     const onKey = (e: KeyboardEvent) => {
       // ⌘K on a Mac (where Ctrl+K deletes to the end of a line), Ctrl+K elsewhere; the key's place, so any layout works.
       const modifier = isApple() ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+      // Over another dialog (the keyboard shortcuts), the keys are left alone, so a result is never opened behind it.
+      if (document.querySelector("dialog[open]") && !dialog.current?.open) return;
       if (modifier && !e.altKey && !e.shiftKey && (e.code === "KeyK" || e.key.toLowerCase() === "k")) {
         e.preventDefault();
         show();

@@ -1356,7 +1356,8 @@ function CreateInner() {
   generateNow.current = generate;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && canGenerate) {
+      // Not from a dialog over the editor (quick find's Enter opens a result there), as undo also leaves them alone.
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && canGenerate && !document.querySelector("dialog[open]")) {
         e.preventDefault();
         generateNow.current();
       }

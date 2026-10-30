@@ -4,9 +4,10 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useMobileNav } from "@/components/MobileNav";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
-import { Clapperboard, LogOut, Search, Sparkles, X } from "lucide-react";
+import { Clapperboard, Keyboard, LogOut, Search, Sparkles, X } from "lucide-react";
 import { NAV } from "@/components/nav";
 import { isApple, openQuickFind } from "@/components/QuickFind";
+import { openShortcuts } from "@/components/ShortcutsHelp";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import type { ProviderStatus } from "@/lib/types";
@@ -130,6 +131,14 @@ export function Sidebar() {
             Configure providers
           </Link>
         </div>
+        <button
+          type="button"
+          onClick={openShortcuts}
+          aria-keyshortcuts="Control+/ Meta+/"
+          className="mt-2 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100"
+        >
+          <Keyboard className="h-3.5 w-3.5" aria-hidden /> Keyboard shortcuts
+        </button>
         {status?.authEnabled && (
           <button onClick={signOut} className="mt-2 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100">
             <LogOut className="h-3.5 w-3.5" /> Sign out

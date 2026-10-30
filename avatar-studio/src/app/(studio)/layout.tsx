@@ -1,5 +1,6 @@
 import { MobileBar, MobileNavProvider } from "@/components/MobileNav";
 import { QuickFind } from "@/components/QuickFind";
+import { ShortcutsHelp } from "@/components/ShortcutsHelp";
 import { Sidebar } from "@/components/Sidebar";
 
 export default function StudioLayout({ children }: { children: React.ReactNode }) {
@@ -13,6 +14,7 @@ export default function StudioLayout({ children }: { children: React.ReactNode }
         </main>
       </div>
       <QuickFind />
+      <ShortcutsHelp />
     </MobileNavProvider>
   );
 }

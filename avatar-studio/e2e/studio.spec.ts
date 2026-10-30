@@ -6270,3 +6270,59 @@ test("quick find opens with Ctrl+K and goes to a page, a video, or a template fr
   await expect(search).toBeFocused();
   await expect(page).toHaveURL(/\/voice-changer$/);
 });
+
+test("the keyboard shortcuts open with Ctrl+/ or the sidebar, with this computer's keys, and keep the editor's keys", async ({ page }) => {
+  await page.locator("input[placeholder='Video title']").fill("Shortcut check");
+  const script = page.getByRole("textbox", { name: "Script", exact: true });
+  await script.fill("Welcome in.");
+  const dialog = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+  const renders: string[] = [];
+  page.on("request", (r) => r.url().endsWith("/api/videos") && r.method() === "POST" && renders.push(r.url()));
+  await page.keyboard.press("Control+/");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: "In the video editor" })).toBeVisible();
+  // Off a Mac the keys read Ctrl, and Ctrl+Y is offered for redo.
+  await expect(dialog).toContainText("Quick find: go to a page, a video, or a template");
+  await expect(dialog.locator("kbd").first()).toHaveText("Ctrl");
+  await expect(dialog).toContainText("Redo it");
+  await expect(dialog.getByText("Y", { exact: true })).toBeVisible();
+  const axe = await new AxeBuilder({ page }).include("dialog[aria-labelledby='shortcuts-title']").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(axe.violations).toEqual([]);
+  // The editor's Generate shortcut and quick find's keys do not reach the page behind it.
+  await page.keyboard.press("Control+Enter");
+  await page.keyboard.press("Control+k");
+  await expect(page.getByRole("dialog", { name: "Quick find" })).toBeHidden();
+  await page.waitForTimeout(300);
+  expect(renders).toEqual([]);
+  await expect(page).toHaveURL(/\/create/);
+  // Escape closes it, and the focus goes back to the script.
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(script).toBeFocused();
+  // From the sidebar's button, the same keys close it again, back on the button.
+  const button = page.getByRole("button", { name: "Keyboard shortcuts" });
+  await button.click();
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Control+/");
+  await expect(dialog).toBeHidden();
+  await expect(button).toBeFocused();
+  // Its Close button shuts it too; Ctrl+- (zoom out on a German keyboard, the US / key's place) does not open it.
+  await button.click();
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(button).toBeFocused();
+  await page.keyboard.press("Control+Minus");
+  await expect(dialog).toBeHidden();
+  // Over quick find, the keys are left to it.
+  await page.keyboard.press("Control+k");
+  await expect(page.getByRole("dialog", { name: "Quick find" })).toBeVisible();
+  await page.keyboard.press("Control+/");
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("combobox", { name: "Find a page, video, or template" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Quick find" })).toBeHidden();
+  expect(renders).toEqual([]);
+  // With the dialogs shut, the same Generate shortcut does start the video, so the check above held it back.
+  await page.keyboard.press("Control+Enter");
+  await page.waitForURL(/\/videos\/vid_/);
+});

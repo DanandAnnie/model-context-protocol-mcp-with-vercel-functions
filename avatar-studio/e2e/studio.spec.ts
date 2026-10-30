@@ -941,6 +941,58 @@ test("Add scene puts the new scene right after the selected one, on its backgrou
   await expect(page.getByRole("textbox", { name: "Scene 5 script" })).toHaveValue("");
 });
 
+test("a scene copied in one video is pasted into another, in the same space only", async ({ page }) => {
+  // A second editor, opened before anything is copied, has nothing to paste.
+  const other = await page.context().newPage();
+  await other.goto("/create");
+  await expect(other.getByRole("button", { name: /^Scene 1,/ })).toBeVisible();
+  await expect(other.getByRole("button", { name: "Paste scene" })).toHaveCount(0);
+  await page.getByRole("textbox", { name: "Script", exact: true }).fill("First.");
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
+  await page.getByRole("textbox", { name: "Scene 2 script" }).fill("The kitchen was redone last spring.");
+  await page.getByRole("button", { name: "Background" }).click();
+  await page.getByLabel("Image URL").fill("https://example.com/kitchen.jpg");
+  await page.getByRole("button", { name: /Show all of it/ }).click();
+  await page.getByRole("checkbox", { name: /Show the presenter in scene 2/ }).uncheck();
+  await expect(page.getByRole("button", { name: "Paste scene" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Copy scene" }).click();
+  await expect(page.getByTestId("import-note")).toHaveText("Copied scene 2. Paste scene puts it after the selected scene, in this video or another one in this space.");
+  // Pasted in the same video after scene 1, it is a scene of its own that Undo takes out.
+  await page.getByRole("button", { name: /^Scene 1,/ }).click();
+  await expect(page.getByRole("button", { name: "Paste scene" })).toHaveAttribute("title", "Paste the copied scene (“The kitchen was redone last spring.”) after scene 1");
+  await page.getByRole("button", { name: "Paste scene" }).click();
+  await expect(page.getByTestId("import-note")).toHaveText("Pasted the copied scene as scene 2.");
+  await expect(page.getByRole("textbox", { name: "Scene 2 script" })).toHaveValue("The kitchen was redone last spring.");
+  await expect(page.getByRole("checkbox", { name: /Show the presenter in scene 2/ })).not.toBeChecked();
+  await expect(page.getByLabel("Image URL")).toHaveValue("https://example.com/kitchen.jpg");
+  await expect(page.getByRole("button", { name: /Show all of it/ })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Undo paste scene 2" }).click();
+  await expect(page.getByRole("button", { name: /^Scene 3,/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Redo paste scene 2" })).toBeEnabled();
+  // The other editor hears of the copy and puts it in place of its one blank scene.
+  await expect(other.getByRole("button", { name: "Paste scene" })).toHaveAttribute("title", /in place of the blank scene$/);
+  await other.getByRole("button", { name: "Paste scene" }).click();
+  await expect(other.getByTestId("import-note")).toHaveText("Pasted the copied scene in place of the blank one.");
+  await expect(other.getByRole("button", { name: /^Scene 2,/ })).toHaveCount(0);
+  await expect(other.getByRole("textbox", { name: "Script", exact: true })).toHaveValue("The kitchen was redone last spring.");
+  await expect(other.getByRole("checkbox", { name: /Show the presenter/ })).not.toBeChecked();
+  // A copy made in another space (another workspace's pictures and clips) is not offered here.
+  await other.evaluate(() => {
+    const copy = JSON.parse(localStorage.getItem("avatar-studio:scene-clipboard")!);
+    localStorage.setItem("avatar-studio:scene-clipboard", JSON.stringify({ ...copy, space: "ws_somewhere_else" }));
+  });
+  await other.reload();
+  await expect(other.getByRole("button", { name: /^Scene 1,/ })).toBeVisible();
+  await expect(other.getByRole("button", { name: "Copy scene" })).toBeEnabled();
+  await expect(other.getByRole("button", { name: "Paste scene" })).toHaveCount(0);
+  // Copied again in this space, from the first editor, it is offered in the second without a reload.
+  await page.bringToFront();
+  await page.getByRole("button", { name: "Copy scene" }).click();
+  await other.bringToFront();
+  await expect(other.getByRole("button", { name: "Paste scene" })).toBeVisible();
+  await other.close();
+});
+
 test("photo avatar motion is set in the editor, kept with the video and its copy", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Moving portrait");
   await page.locator("textarea").fill("Welcome to the open house.");

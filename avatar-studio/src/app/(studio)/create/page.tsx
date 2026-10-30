@@ -1,7 +1,7 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
-import { Captions, ChevronLeft, ChevronRight, Clapperboard, Copy, Flag, Image as ImageIcon, Layers, Merge, MessagesSquare, Mic2, Palette, Pause, Play, Plus, Redo2, Replace, Scissors, Sparkles, Square, Trash2, Undo2, Upload, Users, Wand2, X } from "lucide-react";
+import { Captions, ChevronLeft, ChevronRight, Clapperboard, ClipboardCopy, ClipboardPaste, Copy, Flag, Image as ImageIcon, Layers, Merge, MessagesSquare, Mic2, Palette, Pause, Play, Plus, Redo2, Replace, Scissors, Sparkles, Square, Trash2, Undo2, Upload, Users, Wand2, X } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { VoiceRow } from "@/components/VoicePicker";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -19,6 +19,7 @@ import { accentsFor, languageLabel, voiceTakesAccent } from "@/lib/language";
 import { MAX_SILENT_SEC, MIN_SILENT_SEC, silentProblem, silentSeconds, stripPauses } from "@/lib/pauses";
 import { countMatches, replaceAll } from "@/lib/find-replace";
 import { MAX_IMPORT_BYTES, MAX_SCRIPT_CHARS, decodeScript, legacyEncodingFor, scenesFromText } from "@/lib/script-import";
+import { SCENE_CLIPBOARD_KEY, copiedScene, parseCopiedScene, type CopiedScene } from "@/lib/scene-clipboard";
 import { renderPdf, slideScripts } from "@/lib/pdf-slides";
 import { readPptx, type PptxSlide } from "@/lib/pptx-notes";
 import { readDocx } from "@/lib/docx-text";
@@ -954,6 +955,68 @@ function CreateInner() {
   // plain visit, and a reload brings back the edits rather than the original.
   const draftSource = fromId ? `from:${fromId}` : templateId ? `template:${templateId}` : clipStart ? `clip:${clipStart}` : pictureStart ? `picture:${pictureStart}` : "";
   const editKey = draftKey && (draftSource ? `${draftKey}:${draftSource}` : draftKey);
+  // A scene copied here or in another tab, kept by the browser; it is pasted only in the space it was copied in, whose
+  // pictures, clips, and recordings it may use.
+  const [clipboard, setClipboard] = useState<CopiedScene | null>(null);
+  useEffect(() => {
+    const read = () => {
+      try {
+        setClipboard(parseCopiedScene(window.localStorage.getItem(SCENE_CLIPBOARD_KEY)));
+      } catch {
+        setClipboard(null);
+      }
+    };
+    read();
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === SCENE_CLIPBOARD_KEY || e.key === null) read();
+    };
+    // A tab brought back from the browser's page cache, or frozen while in the background, can miss those events.
+    const onShow = () => {
+      if (document.visibilityState === "visible") read();
+    };
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("pageshow", read);
+    window.addEventListener("focus", read);
+    document.addEventListener("visibilitychange", onShow);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("pageshow", read);
+      window.removeEventListener("focus", read);
+      document.removeEventListener("visibilitychange", onShow);
+    };
+  }, []);
+  const pastable = clipboard && spaces && clipboard.space === spaces.activeId ? clipboard : null;
+  // A new video's one untouched scene (no words, nothing chosen for it, no picture or clip behind it) is replaced by a
+  // pasted one rather than left blank in front of it.
+  const loneBlank = scenes.length === 1 && !setUpScenes(scenes) && !scenes[0].hidePresenter && scenes[0].background.type === "color";
+  // The copied scene's words as the Paste button names them, without pause markers.
+  const pastableWords = pastable ? Array.from(pastable.scene.script.replace(/\[pause[^\]]*\]/gi, " ").replace(/\s+/g, " ").trim()) : [];
+  /** Keeps the selected scene for Paste scene, in this video or another one in the same space. */
+  function copyActiveScene() {
+    if (!spaces) return;
+    // A lone scene's pace is the video's (the editor moves it there), so the copy takes it back.
+    const copy = copiedScene(spaces.activeId, scenes.length === 1 && speed !== 1 && !active.audioId ? { ...active, speed } : active);
+    try {
+      window.localStorage.setItem(SCENE_CLIPBOARD_KEY, JSON.stringify(copy));
+    } catch {
+      return setImportNote("This browser would not keep the copy (its storage is off or full), so there is nothing to paste.");
+    }
+    setClipboard(copy);
+    setImportNote(`Copied scene ${scenes.indexOf(active) + 1}. Paste scene puts it after the selected scene, in this video or another one in this space.`);
+  }
+  /** Puts the copied scene after the selected one, or in place of a lone blank scene. */
+  function pasteScene() {
+    if (!pastable) return;
+    const blank = loneBlank;
+    if (!blank && scenes.length >= MAX_SCENES) return;
+    const c = pastable.scene;
+    const pasted = newScene(c.script, c.background, { ...c, layout: restoredLayout(c.layout) });
+    const at = blank ? 0 : scenes.indexOf(active) + 1;
+    changeScenes(`paste scene ${at + 1}`, blank ? [pasted] : [...scenes.slice(0, at), pasted, ...scenes.slice(at)], { active: at });
+    setImportNote(blank ? "Pasted the copied scene in place of the blank one." : `Pasted the copied scene as scene ${at + 1}.`);
+    // The last scene a video holds disables the button; the focus goes to the pasted scene's tab rather than the page.
+    if (!blank && scenes.length + 1 >= MAX_SCENES) requestAnimationFrame(() => sceneTabs.current[at]?.focus());
+  }
   // A Video Agent plan to review (?plan=agent), read once: a refresh comes back to the autosaved draft of it.
   const agentPlan = useRef<AgentDraft | null | undefined>(undefined);
   const [fromAgent, setFromAgent] = useState(false);
@@ -1474,6 +1537,25 @@ function CreateInner() {
               >
                 <Plus className="h-3.5 w-3.5" /> Add scene
               </button>
+              {pastable && (
+                <button
+                  type="button"
+                  onClick={pasteScene}
+                  disabled={canEdit === false || !!slidesProgress || scenes.length >= MAX_SCENES}
+                  title={
+                    canEdit === false
+                      ? "You can view this workspace's videos but not change them"
+                      : slidesProgress
+                        ? "Wait for the import to finish"
+                        : scenes.length >= MAX_SCENES
+                          ? `A video holds up to ${MAX_SCENES} scenes`
+                          : `Paste the copied scene (${pastableWords.length ? `“${pastableWords.slice(0, 40).join("")}${pastableWords.length > 40 ? "…" : ""}”` : "no words"}) ${loneBlank ? "in place of the blank scene" : `after scene ${activeIdx + 1}`}`
+                  }
+                  className="inline-flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:border-brand-400 hover:text-brand-700 disabled:opacity-50"
+                >
+                  <ClipboardPaste className="h-3.5 w-3.5" /> Paste scene
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => importInput.current?.click()}
@@ -1574,6 +1656,9 @@ function CreateInner() {
                 )}
                 <button type="button" onClick={() => duplicateScene(activeIdx)} disabled={scenes.length >= MAX_SCENES} aria-label="Duplicate scene" title="Duplicate this scene" className="rounded-full p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40">
                   <Copy className="h-4 w-4" />
+                </button>
+                <button type="button" onClick={copyActiveScene} disabled={!spaces} aria-label="Copy scene" title="Copy this scene, to paste it into this video or another one" className="rounded-full p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40">
+                  <ClipboardCopy className="h-4 w-4" />
                 </button>
                 {scenes.length > 1 && (
                   <button

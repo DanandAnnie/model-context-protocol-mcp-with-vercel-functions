@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useId, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { Check, Copy, Pencil } from "lucide-react";
 import { Button, Card, inputClass } from "@/components/ui";
 import { captionDurationSec, chaptersText, sceneChapters, videoChapters, youtubeReadsChapters, type Timed } from "@/lib/chapters";
@@ -8,7 +9,7 @@ import { capSceneName, sceneName } from "@/lib/scene-text";
 import { formatTimestamp } from "@/lib/text";
 import type { Video } from "@/lib/types";
 
-type ChapterVideo = Timed & { id?: string; status?: string; captionCues?: Array<{ startMs: number; endMs: number; text: string }> };
+type ChapterVideo = Timed & Partial<Pick<Video, "views" | "chapterViews">> & { id?: string; status?: string; captionCues?: Array<{ startMs: number; endMs: number; text: string }> };
 
 /**
  * A multi-scene video's chapters, one per scene, as the share page lists them, with a copy in the form a video
@@ -57,6 +58,9 @@ export function VideoChapters({ video, canEdit = false, onSaved }: { video: Chap
   if (chapters.length < 2 && !editable) return null;
   const text = chaptersText(chapters);
   const totalMs = captionDurationSec(video) * 1000;
+  // How many share-page viewers played each chapter, once any has: the views a video had before chapters were counted
+  // say nothing about its chapters, so they are neither shown as nobody's nor used as the share's base.
+  const reach = video.status === "completed" && Object.keys(video.chapterViews ?? {}).length > 0;
   // What each chapter is called without a name, so a field left blank says what it falls back to; a scene starting
   // within the same second as the chapter before it is no chapter whatever its name.
   const fallbacks = sceneChapters(video, { ignoreNames: true });
@@ -76,11 +80,12 @@ export function VideoChapters({ video, canEdit = false, onSaved }: { video: Chap
   }
   function open() {
     const now = scenes.map((sc) => sc.name ?? "");
-    setNames(now);
     setOpened(now);
     setError(null);
     setSaved(null);
-    requestAnimationFrame(() => firstField.current?.focus());
+    // Committed before the handler returns, so letters typed straight after Enter land in the first field.
+    flushSync(() => setNames(now));
+    firstField.current?.focus();
   }
   function close() {
     refocus.current = true;
@@ -201,6 +206,7 @@ export function VideoChapters({ video, canEdit = false, onSaved }: { video: Chap
               <li key={i} className="flex gap-3">
                 <span className="w-12 shrink-0 font-mono text-xs leading-5 text-slate-500">{formatTimestamp(c.startMs / 1000)}</span>
                 <span className="min-w-0 text-slate-700">{c.title}</span>
+                {reach && <ChapterReach played={video.chapterViews?.[String(c.scene)] ?? 0} />}
               </li>
             ))}
           </ol>
@@ -212,6 +218,7 @@ export function VideoChapters({ video, canEdit = false, onSaved }: { video: Chap
                 : video.captionCues?.length
                   ? "Times follow the corrected captions."
                   : "Times follow each scene's share of the video, as the captions do."}{" "}
+            {reach && "Viewers are those who played each chapter on the share page or an embed, once each per 10 minutes (a muted autoplay counts once the sound is on). "}
             {youtubeReadsChapters(chapters, totalMs)
               ? "Paste them into a YouTube description to show them as chapters there."
               : "YouTube shows chapters only when there are at least three, each 10 seconds or longer, so it would list these as plain text."}
@@ -221,5 +228,15 @@ export function VideoChapters({ video, canEdit = false, onSaved }: { video: Chap
         <p className="mt-2 text-xs text-slate-500">No chapters yet: a silent scene, or one starting within a second of the one before, is no chapter of its own. A title gives a silent scene one.</p>
       )}
     </Card>
+  );
+}
+
+/** Share-page viewers who played a chapter. */
+function ChapterReach({ played }: { played: number }) {
+  return (
+    <span className="ml-auto shrink-0 pl-2 text-xs leading-5 tabular-nums text-slate-500" data-testid="chapter-viewers">
+      {played} {played === 1 ? "viewer" : "viewers"}
+      <span className="sr-only"> played this chapter</span>
+    </span>
   );
 }

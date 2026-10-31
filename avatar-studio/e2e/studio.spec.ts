@@ -5740,6 +5740,59 @@ test("a multi-scene video has chapters: the share page jumps to a scene and the 
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
 
+test("share-page viewers who play a chapter are counted under it on the video page", async ({ page }) => {
+  const bg = { type: "color", value: "#0f172a" };
+  const v = await createVideoViaApi(page, `Reach ${Date.now().toString(36)}`, {
+    script: undefined,
+    scenes: [
+      { script: "Welcome to twelve Maple Street, a bright family home on a quiet road.", background: bg },
+      { script: "[pause 1s]", background: bg },
+      { script: "The kitchen was redone last spring.", background: bg },
+      { script: "Call Dana to book a showing.", background: bg },
+    ],
+  });
+  // Nothing is counted before the render completes, and no counts are shown.
+  const beacon = (data: unknown) => page.request.post(`/api/videos/${v.id}/watch`, { data });
+  expect((await (await beacon({ scene: 0 })).json()).counted).toBe(false);
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  // A view with no chapter played yet shows no counts on the video page: views say nothing about chapters.
+  await page.goto(`/share/${v.id}`);
+  const chapters = page.getByTestId("share-chapters");
+  await expect(chapters.getByRole("button")).toHaveCount(3);
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.views ?? 0).toBeGreaterThan(0);
+  await page.goto(`/videos/${v.id}`);
+  await expect(page.getByTestId("video-chapters").getByRole("listitem")).toHaveCount(3);
+  await expect(page.getByTestId("chapter-viewers")).toHaveCount(0);
+  // Playing a chapter from the share page counts this viewer under the scene it opens. The last one, so the playhead
+  // cannot run on into another chapter before the checks below.
+  await page.goto(`/share/${v.id}`);
+  await chapters.getByRole("button").nth(2).click();
+  const reach = async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.chapterViews ?? {};
+  await expect.poll(reach, { timeout: 15_000 }).toEqual({ "3": 1 });
+  await page.getByTestId("share-player").evaluate((el: HTMLVideoElement) => el.pause());
+  // The same viewer again is not counted twice; a silent scene is no chapter; a bad body is a 400; the answer says
+  // only whether it counted.
+  expect(await (await beacon({ scene: 3 })).json()).toEqual({ counted: false });
+  expect((await (await beacon({ scene: 1 })).json()).counted).toBe(false);
+  expect((await (await beacon({ scene: 2 })).json()).counted).toBe(true);
+  expect((await (await beacon({ scene: 2 })).json()).counted).toBe(false);
+  expect((await beacon({ scene: 20 })).status()).toBe(400);
+  expect((await beacon({ scene: "x" })).status()).toBe(400);
+  expect((await (await page.request.post(`/api/videos/${v.id}/watch`, { data: { scene: 0 }, headers: { "sec-fetch-site": "cross-site" } })).json()).counted).toBe(false);
+  // The video page lists each chapter's viewers beside it, and a renamed chapter keeps its count.
+  await page.goto(`/videos/${v.id}`);
+  const viewers = page.getByTestId("video-chapters").getByTestId("chapter-viewers");
+  await expect(viewers).toHaveCount(3);
+  await expect(viewers.nth(0)).toHaveText("0 viewers played this chapter");
+  await expect(viewers.nth(1)).toHaveText("1 viewer played this chapter");
+  await expect(viewers.nth(2)).toHaveText("1 viewer played this chapter");
+  await expect(page.getByTestId("chapters-card")).toContainText("Viewers are those who played each chapter on the share page or an embed, once each per 10 minutes (a muted autoplay counts once the sound is on).");
+  await page.getByRole("button", { name: "Edit titles" }).click();
+  await page.getByLabel("Scene 3 title", { exact: true }).fill("The kitchen");
+  await page.getByRole("button", { name: "Save titles" }).click();
+  await expect(page.getByTestId("video-chapters").getByRole("listitem").nth(1)).toHaveText(/The kitchen1 viewer played this chapter$/);
+});
+
 test("a video can be made in other sizes, each a new video with the same scenes", async ({ page }) => {
   const bg = { type: "color", value: "#0f172a" };
   const sizesTitle = `Sizes ${Date.now().toString(36)}`;

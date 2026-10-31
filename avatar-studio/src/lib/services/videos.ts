@@ -7,7 +7,7 @@ import { getStore } from "../store";
 import { EMPTY_WATCH, MAX_AGENT_MESSAGE, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
 import type { AgentMessage, AudioClip, Avatar, Backdrop, Background, CaptionCue, DirectedMedia, DirectedScene, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
 import { buildCues } from "../captions";
-import { captionDurationSec, sceneBoundsMs, type Timed } from "../chapters";
+import { captionDurationSec, sceneBoundsMs, videoChapters, type Timed } from "../chapters";
 import { graphemes, wellFormed } from "../text";
 import { pauseSeconds, silentProblem, silentSeconds, stripPauses } from "../pauses";
 import { baseLanguageCode } from "../language";
@@ -1081,7 +1081,7 @@ function withCounterLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
 }
 
 /** The counters that beacons own; an owner edit or provider update must never roll them back. */
-const COUNTER_FIELDS = ["views", "lastViewedAt", "viewsByDay", "watch", "ctaClicks", "lastCtaClickAt"] as const;
+const COUNTER_FIELDS = ["views", "lastViewedAt", "viewsByDay", "watch", "chapterViews", "ctaClicks", "lastCtaClickAt"] as const;
 /**
  * Fields other writers own, which an edit built from an earlier read must take from the stored
  * record rather than from its own copy: the counters, the subtitle tracks, which a translation adds
@@ -1158,7 +1158,11 @@ export function recordView(id: string, gate: () => boolean = () => true, shareCo
   });
 }
 
-export const watchSchema = z.object({ quarter: z.union([z.literal(25), z.literal(50), z.literal(75), z.literal(100)]) });
+export const watchSchema = z.union([
+  z.object({ quarter: z.union([z.literal(25), z.literal(50), z.literal(75), z.literal(100)]) }),
+  /** The chapter being played, by the scene it opens (from 0). */
+  z.object({ scene: z.number().int().min(0).max(MAX_SCENES - 1) }),
+]);
 export const WATCH_QUARTERS: readonly WatchQuarter[] = [25, 50, 75, 100];
 
 /**
@@ -1186,6 +1190,29 @@ export function recordWatch(
     }
     if (counted) await getStore().put("video", { ...video, watch });
     return { watch, counted };
+  });
+}
+
+/**
+ * Count a viewer playing a chapter of the share-page player, by the scene it opens. Only a scene that is a chapter
+ * counts (a silent scene of its own, or one starting within the same second as the chapter before, is none; the player
+ * also leaves out one timed past the clip's end); `gate` is the route's per-viewer window for that chapter.
+ */
+export function recordChapterView(
+  id: string,
+  scene: number,
+  gate: () => boolean = () => true,
+  shareCookie?: string,
+): Promise<{ counted: boolean }> {
+  return withCounterLock(id, async () => {
+    const video = await getStore().get<Video>("video", id);
+    if (!video || shareOffline(video)) throw new NotFoundError(`Video ${id} not found`);
+    // The answer says only whether it counted: the counts are the owner's, and a locked link's are no one else's.
+    if (video.status !== "completed" || !(await shareUnlocked(video, shareCookie))) return { counted: false };
+    if (!videoChapters(video).some((c) => c.scene === scene) || !gate()) return { counted: false };
+    const key = String(scene);
+    await getStore().put("video", { ...video, chapterViews: { ...video.chapterViews, [key]: (video.chapterViews?.[key] ?? 0) + 1 } });
+    return { counted: true };
   });
 }
 

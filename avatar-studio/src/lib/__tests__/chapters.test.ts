@@ -68,8 +68,8 @@ describe("chapters", () => {
       { durationSec: 20, captionCues: [{ startMs: 0, endMs: 14_000, text: "Hi, I'm Dana." }, { startMs: 15_000, endMs: 20_000, text: "Call the office today." }] },
     );
     assert.deepEqual(videoChapters(edited), [
-      { startMs: 0, title: "Hi, I'm Dana." },
-      { startMs: 15_000, title: "Call the office today." },
+      { startMs: 0, title: "Hi, I'm Dana.", scene: 0 },
+      { startMs: 15_000, title: "Call the office today.", scene: 1 },
     ]);
     // A silent scene keeps its own start and title when the captions are corrected, and the scene after it keeps its
     // own; a scene whose lines were all removed keeps its estimate rather than borrowing a neighbour's line.

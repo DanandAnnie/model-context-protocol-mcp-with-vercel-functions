@@ -13,6 +13,8 @@ export type Timed = Pick<Video, "script" | "durationSec" | "speed"> & Partial<Pi
 export interface Chapter {
   startMs: number;
   title: string;
+  /** The scene it opens, counted from 0: what share-page viewers who reach it are counted under. */
+  scene: number;
 }
 
 /** Whether the renderer speaks at the speeds asked for; D-ID keeps the voice's natural pace. */
@@ -143,12 +145,12 @@ export function sceneChapters(video: Timed & { captionCues?: Cue[] }, { ignoreNa
       // A clip whose lines were all removed has no words left to show.
       said = "";
     }
-    return { startMs, title: chapterTitle(sc, i, said) };
+    return { startMs, title: chapterTitle(sc, i, said), scene: i };
   });
 }
 
 /** Chapters as a video description lists them ("0:00 Welcome"), one a line, the form YouTube reads. */
-export function chaptersText(chapters: Chapter[]): string {
+export function chaptersText(chapters: Array<Pick<Chapter, "startMs" | "title">>): string {
   return chapters.map((c) => `${formatTimestamp(c.startMs / 1000)} ${c.title}`).join("\n");
 }
 
@@ -156,7 +158,7 @@ export function chaptersText(chapters: Chapter[]): string {
  * Whether YouTube would show these as chapters: at least three, the first at 0:00, each at least ten seconds long
  * (the last one's length taken from the running time).
  */
-export function youtubeReadsChapters(chapters: Chapter[], totalMs: number): boolean {
+export function youtubeReadsChapters(chapters: Array<Pick<Chapter, "startMs" | "title">>, totalMs: number): boolean {
   // Judged on the whole seconds the copied text gives, as YouTube reads them.
   const sec = (ms: number) => Math.floor(ms / 1000);
   if (chapters.length < 3 || sec(chapters[0].startMs) !== 0) return false;

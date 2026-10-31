@@ -52,6 +52,7 @@ export function ShareWatch({ body, autoplay, loop, focus = false, embed = false 
             autoplay={autoplay}
             loop={loop}
             tracks={player.tracks}
+            chapters={body.chapters}
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center p-10 text-center text-sm text-slate-400">

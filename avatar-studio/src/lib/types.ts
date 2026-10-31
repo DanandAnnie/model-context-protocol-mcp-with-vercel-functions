@@ -1125,6 +1125,11 @@ export interface Video extends VideoRequest {
   viewsByDay?: Record<string, number>;
   /** How far share-page viewers got: viewers who passed a quarter, half, three quarters, and the end (one per viewer per window). */
   watch?: WatchCounts;
+  /**
+   * Share-page viewers who played each chapter, keyed by the number of the scene it opens counted from 0 (`"0"`, `"2"`),
+   * so a renamed chapter keeps its count (one per viewer per chapter per window).
+   */
+  chapterViews?: Record<string, number>;
   /** Clicks on the share-page call to action (one per viewer per window). */
   ctaClicks?: number;
   lastCtaClickAt?: string;

@@ -1,5 +1,6 @@
 // Turning a text or Markdown document into scenes for the editor. Pure, so the editor and the tests share it.
 import { PAUSE_MARKER, silentProblem, stripPauses } from "./pauses";
+import { sceneName } from "./scene-text";
 import { MAX_SCENES } from "./types";
 
 /** The most a video's script may hold, all scenes together, as the video schema checks it (scenes joined by a blank line). */
@@ -22,6 +23,11 @@ export interface ImportedScript {
   scenes: string[];
   /** The document's top-level heading, offered as the video title. */
   title?: string;
+  /**
+   * Each scene's name, in order with `scenes`, from the Markdown heading that starts it (undefined for a scene with
+   * none). Present only when some scene has one and every scene is one section of the document, none joined to another.
+   */
+  names?: Array<string | undefined>;
   /** True when the document held more than a video takes (`MAX_SCENES` scenes, `MAX_SCRIPT_CHARS` characters) and the rest was left out. */
   truncated: boolean;
 }
@@ -281,6 +287,18 @@ export function head(text: string, max: number): string | undefined {
   return piece && hasWords(piece) ? piece : undefined;
 }
 
+/**
+ * A heading as a scene's name: "Kitchen" from "Scene 2: Kitchen" or "1. Kitchen", and none from a heading that only
+ * numbers its part ("Scene 2", "Part #3.", "2"), which says nothing the scene's number does not, or that has no letter
+ * or digit at all. A number with a decimal or range ("Section 2.1 Overview", "Step 1-2") is part of the name. Pause
+ * markers are left out. The words recognised as numbering a part are English ones.
+ */
+export function headingName(heading: string | undefined): string | undefined {
+  if (!heading) return undefined;
+  const name = stripPauses(heading).replace(/^\s*(?:(?:scene|part|section|slide|step|chapter)\s*#?\s*)?\d{1,3}\s*(?:[.:)\-–—](?![\d.])\s*|$)/i, "");
+  return /[\p{L}\p{N}]/u.test(name) ? sceneName(name) : undefined;
+}
+
 /** Paragraphs packed in order into at most `MAX_SCENES` scenes of about even length; joining keeps the separator, so the total is unchanged. */
 function pack(paras: string[]): string[] {
   if (paras.length <= MAX_SCENES) return paras;
@@ -496,6 +514,8 @@ export function scenesFromText(text: string, { markdown = true }: { markdown?: b
   };
   let title: string | undefined;
   const sections: string[][] = [[]];
+  // The heading that starts each section, as a scene's name; a `---` section and the one before any heading have none.
+  const sectionNames: Array<string | undefined> = [undefined];
   let explicit = false;
   let seen = false;
   let read = 0;
@@ -558,15 +578,18 @@ export function scenesFromText(text: string, { markdown = true }: { markdown?: b
       }
       explicit = true;
       sections.push([]);
+      sectionNames.push(headingName(name));
     } else if (BREAK.test(line) || (markdown && RULE.test(line))) {
       explicit = true;
       sections.push([]);
+      sectionNames.push(undefined);
     } else {
       sections[sections.length - 1].push(line);
       if (line.trim()) seen = true;
     }
   }
-  const blocks = explicit ? joinPauseOnly(sections.map((s) => paragraphs(s, markdown).join(SEPARATOR)).filter(Boolean), true) : joinPauseOnly(paragraphs(sections.flat(), markdown));
+  const texts = explicit ? sections.map((s, i) => ({ text: paragraphs(s, markdown).join(SEPARATOR), name: sectionNames[i] })).filter((t) => t.text) : [];
+  const blocks = explicit ? joinPauseOnly(texts.map((t) => t.text), true) : joinPauseOnly(paragraphs(sections.flat(), markdown));
 
   // Keep what a video holds, in order: blocks while the whole script fits, the next one cut to the room left.
   const kept: string[] = [];
@@ -590,5 +613,7 @@ export function scenesFromText(text: string, { markdown = true }: { markdown?: b
     scenes = scenes.slice(0, MAX_SCENES);
     truncated = true;
   }
-  return { scenes, ...(title ? { title } : {}), truncated };
+  // Names hold only while each scene is still one section: none joined to a pause-only one, none packed together.
+  const names = explicit && blocks.length === texts.length && scenes.length === kept.length ? texts.slice(0, scenes.length).map((t) => t.name) : [];
+  return { scenes, ...(title ? { title } : {}), ...(names.some(Boolean) ? { names } : {}), truncated };
 }

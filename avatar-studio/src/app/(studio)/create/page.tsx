@@ -536,7 +536,7 @@ function CreateInner() {
     const word = named || (bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04) || (bytes[0] === 0xd0 && bytes[1] === 0xcf && bytes[2] === 0x11 && bytes[3] === 0xe0);
     let doc: ReturnType<typeof scenesFromText>;
     if (word) {
-      // A Word document's headings start scenes (as a Markdown file's do) and its title names the video; its words are taken as written.
+      // A Word document's headings start scenes (as a Markdown file's do, though they do not name them) and its title names the video; its words are taken as written.
       try {
         const read = readDocx(bytes, file.name);
         doc = scenesFromText(read.text, { markdown: false });
@@ -553,9 +553,14 @@ function CreateInner() {
     // Anything already set up (a script, a clip, a presenter, a layout, more than one scene) is only replaced once confirmed.
     if (setUpScenes(scenes) && !window.confirm(`Replace the ${scenes.length === 1 ? "current scene" : `current ${scenes.length} scenes`} with ${doc.scenes.length === 1 ? "1 scene" : `${doc.scenes.length} scenes`} from ${file.name}?`)) return;
     const background = scenes[0].background;
-    changeScenes(`import ${file.name}`, doc.scenes.map((script) => newScene(script, background)), { active: 0 });
+    // A Markdown heading that starts a scene names it, which titles its tab and its chapter.
+    changeScenes(`import ${file.name}`, doc.scenes.map((script, i) => newScene(script, background, { name: doc.names?.[i] })), { active: 0 });
     if (doc.title && (!title.trim() || title === "Untitled video")) setTitle(doc.title);
-    setImportNote(`Imported ${doc.scenes.length === 1 ? "1 scene" : `${doc.scenes.length} scenes`} from ${file.name}${doc.truncated ? `; the rest did not fit (a video holds up to ${MAX_SCENES} scenes and ${MAX_SCRIPT_CHARS} characters of script)` : ""}.`);
+    const fromHeadings = doc.names?.filter(Boolean).length ?? 0;
+    const namesNote = !fromHeadings
+      ? ""
+      : `, ${fromHeadings === doc.scenes.length ? (fromHeadings === 1 ? "named from its heading" : "each named from its heading") : `${fromHeadings} named from ${fromHeadings === 1 ? "its heading" : "their headings"}`}`;
+    setImportNote(`Imported ${doc.scenes.length === 1 ? "1 scene" : `${doc.scenes.length} scenes`} from ${file.name}${namesNote}${doc.truncated ? `; the rest did not fit (a video holds up to ${MAX_SCENES} scenes and ${MAX_SCRIPT_CHARS} characters of script)` : ""}.`);
   }
   /** Saves every scene's words as a text file, scenes apart on --- lines, which Import script reads back scene for scene. */
   function downloadScript() {

@@ -21,6 +21,8 @@ describe("scenesFromText", () => {
     assert.deepEqual(scenesFromText(doc), {
       title: "Onboarding: week one",
       scenes: ["Hi, I'm Ava.\n\nHere is the plan.", "Read the handbook. Meet your buddy.", "See you soon!"],
+      // The headings that start scenes name them; the section after --- has none.
+      names: ["Hello", undefined, "Wrap up"],
       truncated: false,
     });
     // A title alone does not divide the document: its paragraphs are still a scene each.

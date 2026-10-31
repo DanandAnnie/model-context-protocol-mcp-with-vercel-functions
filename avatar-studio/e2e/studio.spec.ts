@@ -487,11 +487,14 @@ test("importing a script file makes one scene per section", async ({ page }) => 
   await expect(page.locator("textarea")).toHaveValue("A first draft.");
   page.once("dialog", (d) => d.accept());
   await page.getByLabel("Import a script file").setInputFiles({ name: "welcome.md", mimeType: "text/markdown", buffer: Buffer.from(doc) });
-  await expect(page.getByTestId("import-note")).toContainText("Imported 3 scenes from welcome.md.");
+  // A heading that starts a scene names it; the scenes before it and after --- have none.
+  await expect(page.getByTestId("import-note")).toContainText("Imported 3 scenes from welcome.md, 1 named from its heading.");
   await expect(page.locator("input[placeholder='Video title']")).toHaveValue("Welcome aboard");
   await expect(page.locator("textarea")).toHaveValue("Hi, I'm Ava.\n\nGlad you're here.");
-  await page.getByRole("button", { name: /^Scene 3,/ }).click();
+  await expect(page.getByTestId("scene-name-label")).toHaveText(["Wrap up"]);
+  await page.getByRole("button", { name: /^Scene 3, Wrap up,/ }).click();
   await expect(page.locator("textarea")).toHaveValue("See you Monday!");
+  await expect(page.getByLabel("Scene 3 name", { exact: true })).toHaveValue("Wrap up");
   // A file with no words changes nothing.
   await page.getByLabel("Import a script file").setInputFiles({ name: "empty.txt", mimeType: "text/plain", buffer: Buffer.from("\n---\n") });
   await expect(page.getByTestId("import-note")).toHaveText("No script found in empty.txt.");

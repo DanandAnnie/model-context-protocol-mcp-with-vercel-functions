@@ -3453,7 +3453,7 @@ test("share page offers a download only when the owner allows it", async ({ page
   const analytics = await page.request.get("/api/videos/analytics");
   expect(analytics.headers()["content-type"]).toContain("text/csv");
   const sheet = parseCsv(await analytics.text());
-  expect(sheet.columns).toEqual(["id", "title", "status", "created", "folder", "duration_sec", "views", "views_7d", "last_viewed", "watched_25", "watched_50", "watched_75", "watched_100", "finish_rate", "cta_clicks", "share_link"]);
+  expect(sheet.columns).toEqual(["id", "title", "status", "created", "folder", "duration_sec", "views", "views_7d", "last_viewed", "watched_25", "watched_50", "watched_75", "watched_100", "finish_rate", "cta_clicks", "share_link", "embed_views"]);
   const row = sheet.rows.find((r) => r.id === v.id)!;
   expect([row.watched_25, row.watched_50, row.watched_75, row.watched_100, row.cta_clicks]).toEqual(["1", "1", "1", "1", "1"]);
   expect(Number(row.views)).toBeGreaterThan(0);
@@ -5874,6 +5874,37 @@ test("a share-page description is drafted from the script, edited, and saved", a
   expect(draft.status()).toBe(200);
   expect((await draft.json()).description).toContain("Maple Street");
   expect((await page.request.post(`/api/videos/vid_missing/describe`)).status()).toBe(404);
+});
+
+test("share views count where they play: on the share page or in an embed on another site", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Places ${Date.now().toString(36)}`);
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  const counts = async () => {
+    const { video } = await (await page.request.get(`/api/videos/${v.id}`)).json();
+    return [video.views ?? 0, video.embedViews ?? 0];
+  };
+  // Each visit comes from its own viewer, as a viewer's repeat within ten minutes is not counted.
+  const viewer = `198.51.100.${Math.floor(Math.random() * 200) + 1}`;
+  await page.setExtraHTTPHeaders({ "x-forwarded-for": viewer });
+  // A page elsewhere embeds the player, as the Embed snippet or an oEmbed consumer does.
+  await page.setContent(`<iframe src="http://localhost:3100/share/${v.id}?embed=1" width="480" height="480"></iframe>`);
+  await expect(page.frameLocator("iframe").locator("video")).toBeVisible();
+  await expect.poll(counts).toEqual([1, 1]);
+  await page.setExtraHTTPHeaders({ "x-forwarded-for": `203.0.113.${Math.floor(Math.random() * 200) + 1}` });
+  await page.goto(`/share/${v.id}`);
+  await expect(page.locator("video")).toBeVisible();
+  await expect.poll(counts).toEqual([2, 1]);
+  await page.setExtraHTTPHeaders({});
+  await page.goto(`/videos/${v.id}`);
+  await expect(page.getByTestId("embed-views")).toHaveText("· , of which 1 in embeds");
+  await expect(page.getByTestId("embed-views").locator("[aria-hidden]")).toHaveText("· ");
+  // The beacon refuses only a place that is neither; a body that is not JSON is a share-page view, as an older page sends.
+  expect((await page.request.post(`/api/videos/${v.id}/view`, { data: { place: "email" } })).status()).toBe(400);
+  expect((await page.request.post(`/api/videos/${v.id}/view`, { data: "not json", headers: { "content-type": "application/json" } })).status()).toBe(200);
+  expect((await page.request.post(`/api/videos/${v.id}/view`)).status()).toBe(200);
+  // The analytics file carries the embedded share of the views.
+  const row = parseCsv(await (await page.request.get("/api/videos/analytics")).text()).rows.find((r) => r.id === v.id)!;
+  expect(row.embed_views).toBe("1");
 });
 
 test("titles suggested from the script fill the title field, and one is saved as a rename", async ({ page }) => {

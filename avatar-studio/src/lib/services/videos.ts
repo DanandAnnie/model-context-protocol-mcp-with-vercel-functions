@@ -1081,7 +1081,7 @@ function withCounterLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
 }
 
 /** The counters that beacons own; an owner edit or provider update must never roll them back. */
-const COUNTER_FIELDS = ["views", "lastViewedAt", "viewsByDay", "watch", "chapterViews", "ctaClicks", "lastCtaClickAt"] as const;
+const COUNTER_FIELDS = ["views", "embedViews", "lastViewedAt", "viewsByDay", "watch", "chapterViews", "ctaClicks", "lastCtaClickAt"] as const;
 /**
  * Fields other writers own, which an edit built from an earlier read must take from the stored
  * record rather than from its own copy: the counters, the subtitle tracks, which a translation adds
@@ -1146,17 +1146,23 @@ function updateKeepingCounters(id: string, ownerId: string, build: (stored: Vide
  * so a page opened while rendering is not a view. `gate` runs only for a countable view
  * (the route's per-viewer window), so an early visit does not use up the viewer's slot.
  */
-export function recordView(id: string, gate: () => boolean = () => true, shareCookie?: string): Promise<{ views: number; counted: boolean }> {
+export function recordView(id: string, gate: () => boolean = () => true, shareCookie?: string, place: ViewPlace = "page"): Promise<{ views: number; counted: boolean }> {
   return withCounterLock(id, async () => {
     const video = await getStore().get<Video>("video", id);
     if (!video || shareOffline(video)) throw new NotFoundError(`Video ${id} not found`);
     if (video.status !== "completed" || !(await shareUnlocked(video, shareCookie)) || !gate()) return { views: video.views ?? 0, counted: false };
     const views = (video.views ?? 0) + 1;
     const now = Date.now();
-    await getStore().put("video", { ...video, views, lastViewedAt: new Date(now).toISOString(), viewsByDay: bumpViewsByDay(video.viewsByDay, now) });
+    const embedViews = place === "embed" ? { embedViews: (video.embedViews ?? 0) + 1 } : {};
+    await getStore().put("video", { ...video, views, ...embedViews, lastViewedAt: new Date(now).toISOString(), viewsByDay: bumpViewsByDay(video.viewsByDay, now) });
     return { views, counted: true };
   });
 }
+
+/** Where a view was played: the share page a viewer opened, or its player in a frame on another page. */
+export type ViewPlace = "page" | "embed";
+/** The view beacon's body; one without a place is a view on the share page, and other fields are ignored. */
+export const viewSchema = z.object({ place: z.enum(["page", "embed"]).optional() });
 
 export const watchSchema = z.union([
   z.object({ quarter: z.union([z.literal(25), z.literal(50), z.literal(75), z.literal(100)]) }),

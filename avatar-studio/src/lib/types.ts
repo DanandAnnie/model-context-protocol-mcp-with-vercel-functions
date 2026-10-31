@@ -1121,6 +1121,8 @@ export interface Video extends VideoRequest {
   review?: VideoReview;
   /** Share page views (completed videos only; one per viewer per window). */
   views?: number;
+  /** Of `views`, those played in a frame on another page: the Embed snippet's, an oEmbed consumer's, or any other. */
+  embedViews?: number;
   lastViewedAt?: string;
   /** Views per UTC calendar day (`YYYY-MM-DD` → count) for the last 90 days, so the page can show views over time. */
   viewsByDay?: Record<string, number>;

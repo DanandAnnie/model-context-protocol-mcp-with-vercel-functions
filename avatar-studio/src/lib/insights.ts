@@ -60,7 +60,7 @@ export function viewsInLast(video: Pick<Video, "viewsByDay">, days: number, now 
   return viewsPerDay(video, now, days).reduce((n, d) => n + d.count, 0);
 }
 
-export const ANALYTICS_COLUMNS = ["id", "title", "status", "created", "folder", "duration_sec", "views", "views_7d", "last_viewed", "watched_25", "watched_50", "watched_75", "watched_100", "finish_rate", "cta_clicks", "share_link"] as const;
+export const ANALYTICS_COLUMNS = ["id", "title", "status", "created", "folder", "duration_sec", "views", "views_7d", "last_viewed", "watched_25", "watched_50", "watched_75", "watched_100", "finish_rate", "cta_clicks", "share_link", "embed_views"] as const;
 
 /** One spreadsheet row per video: what the owner sees on the video page, in a form that sorts and sums. */
 export function analyticsRows(videos: Video[], base: string, now = Date.now()): Array<Record<(typeof ANALYTICS_COLUMNS)[number], string | number | undefined>> {
@@ -76,6 +76,7 @@ export function analyticsRows(videos: Video[], base: string, now = Date.now()): 
       duration_sec: v.durationSec,
       views: v.views ?? 0,
       views_7d: viewsInLast(v, 7, now),
+      embed_views: v.embedViews ?? 0,
       last_viewed: v.lastViewedAt,
       watched_25: v.watch?.q25 ?? 0,
       watched_50: v.watch?.q50 ?? 0,

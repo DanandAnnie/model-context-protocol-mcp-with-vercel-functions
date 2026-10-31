@@ -965,10 +965,17 @@ export default function VideoDetailPage() {
                 <dl className="mt-3 space-y-2 text-sm">
                   <Row label="Status"><StatusBadge status={video.status} /></Row>
                   <Row label="Duration">{video.durationSec != null ? formatSeconds(video.durationSec) : "—"}</Row>
-                  <Row label="Share views">
+                  <Row label="Share views" wrap>
                     <span className="inline-flex items-center gap-1.5" title={video.lastViewedAt ? `Last viewed ${formatDate(video.lastViewedAt)}` : "No views yet"}>
                       <Eye className="h-3.5 w-3.5 text-slate-400" />
                       {video.views ?? 0}
+                      {(video.embedViews ?? 0) > 0 && (
+                        <span className="text-slate-500" data-testid="embed-views">
+                          <span aria-hidden>· </span>
+                          <span className="sr-only">, of which </span>
+                          {video.embedViews} in embeds
+                        </span>
+                      )}
                     </span>
                   </Row>
                   {video.status === "completed" && (

@@ -16,6 +16,7 @@ import { getBrandKit } from "./brand";
 import { copyTitle } from "./templates";
 import { cutToFit, tidyTitle } from "./videos";
 import { MAX_CONVERSATIONS_PER_AGENT, MAX_TRANSCRIPT_MESSAGES } from "../transcripts";
+import { bumpViewsByDay } from "../insights";
 import { chatSchema } from "./scripts";
 import { fetchPageText } from "../webpage";
 import type { FetchLike } from "../safe-fetch";
@@ -316,7 +317,13 @@ export async function talkToAgent(id: string, input: z.infer<typeof talkSchema>)
     const addTurn = (c: Conversation) => ({ ...c, messages: [...c.messages, ...turn].slice(-MAX_TRANSCRIPT_MESSAGES), updatedAt: now });
     if (isNew) await getStore().put("conversation", addTurn(conversation));
     else if ((await updateConversation(conversation, addTurn)) === "busy") console.error(`transcript turn for ${conversation.id} not recorded: the visit kept changing`);
-    await getStore().put("agent", { ...current, conversations: current.conversations + (isNew ? 1 : 0), messages: current.messages + 1 });
+    await getStore().put("agent", {
+      ...current,
+      conversations: current.conversations + (isNew ? 1 : 0),
+      // Counted on the day the visit started, the same instant its transcript is stamped with.
+      ...(isNew ? { visitsByDay: bumpViewsByDay(current.visitsByDay, Date.parse(now)) } : {}),
+      messages: current.messages + 1,
+    });
     if (isNew) await pruneConversations(agent);
   };
   await record().catch((err) => console.error("transcript write failed:", err));

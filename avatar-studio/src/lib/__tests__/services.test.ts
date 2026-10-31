@@ -2658,6 +2658,10 @@ describe("shared agents", () => {
     await talkToAgent(agent.id, { conversationId: first.conversationId, messages: [{ role: "user", content: "Hi" }, { role: "assistant", content: first.reply }, { role: "user", content: "When?" }] });
     const counted = await getAgent(agent.id, "u1");
     assert.equal(counted.conversations, 1, "a continued visit is one conversation");
+    // Visits are counted by the UTC day they start; a continued visit adds none.
+    const started = (await listConversations(agent.id, "u1"))[0].startedAt;
+    assert.deepEqual(counted.visitsByDay, { [started.slice(0, 10)]: 1 });
+    assert.equal("visitsByDay" in (await publicAgent(agent.id)), false, "the counts stay with the owner");
     assert.equal(counted.messages, 2);
 
     // Transcripts: owner-only, one per visit, capped per visit, cleared on demand and on delete.

@@ -7,6 +7,7 @@ import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } 
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
+import { DaySparkline } from "@/components/ViewSparkline";
 import { ListSearch, useListSearch } from "@/components/ListSearch";
 import { MAX_CONVERSATIONS_PER_AGENT, MAX_TRANSCRIPT_MESSAGES, MAX_TRANSCRIPT_QUERY, conversationMatches, conversationTexts, mostAsked } from "@/lib/transcripts";
 import { useLiveAvatar } from "@/hooks/useLiveAvatar";
@@ -661,6 +662,12 @@ export default function InteractivePage() {
                       {a.notes && <> · has notes</>}
                       {a.knowledgeUrl && <> · knows {(() => { try { return new URL(a.knowledgeUrl).hostname; } catch { return "a page"; } })()}</>}
                     </div>
+                    {/* Presenters from before visits were counted per day have no counts to draw yet. */}
+                    {a.conversations > 0 && a.visitsByDay && (
+                      <div className="mt-1">
+                        <DaySparkline byDay={a.visitsByDay} one="visit" many="visits" testId="visits-by-day" />
+                      </div>
+                    )}
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5">
                     <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => copy(url, a.id)} aria-label={`Copy link for ${a.name}`}>

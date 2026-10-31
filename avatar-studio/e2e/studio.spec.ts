@@ -5547,6 +5547,29 @@ test("one visit's transcript downloads as a text file with the visitor's details
   }
 });
 
+test("a shared presenter's row shows its visits per day for the last two weeks", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const res = await page.request.post("/api/agents", { data: { name: `Visits ${tag}`, avatarId: "stock_1" } });
+  const { id } = (await res.json()).agent as { id: string };
+  try {
+    const headers = { "x-forwarded-for": `198.51.100.${Math.floor(Math.random() * 200) + 1}` };
+    const first = (await (await page.request.post(`/api/talk/${id}`, { data: { messages: [{ role: "user", content: "Hi" }] }, headers })).json()) as { conversationId: string };
+    // A continued visit is not a new one; a second visitor is.
+    await page.request.post(`/api/talk/${id}`, { data: { conversationId: first.conversationId, messages: [{ role: "user", content: "And?" }] }, headers });
+    await page.request.post(`/api/talk/${id}`, { data: { messages: [{ role: "user", content: "Hello" }] }, headers });
+    // Deleting a transcript keeps the visit counted.
+    await page.request.delete(`/api/agents/${id}/conversations/${first.conversationId}`);
+    await page.goto("/interactive");
+    const row = page.getByTestId("agent-list").locator("li", { hasText: `Visits ${tag}` });
+    const visits = row.getByTestId("visits-by-day");
+    await expect(visits).toHaveAttribute("data-total", "2");
+    await expect(visits).toContainText("2 in 14 days");
+    await expect(visits.getByRole("img", { name: "Visits per day for the last 14 days, 2 in total" })).toBeVisible();
+  } finally {
+    await page.request.delete(`/api/agents/${id}`);
+  }
+});
+
 test("a presenter answers from reference notes, in the try-it chat and once shared, and they can be cleared", async ({ page }) => {
   const tag = Date.now().toString(36);
   const notes = `Showings for ${tag} run Saturdays, 10am to 2pm.\nThe lakeside cabin is listed at $450,000.`;

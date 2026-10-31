@@ -1396,6 +1396,8 @@ export interface Agent {
   brandStyle?: boolean;
   /** Visitor conversations started (first message of a session). */
   conversations: number;
+  /** Visits started per UTC day ("YYYY-MM-DD" → count), the last 90 days; kept when transcripts are deleted. */
+  visitsByDay?: Record<string, number>;
   messages: number;
   createdAt: string;
   updatedAt: string;

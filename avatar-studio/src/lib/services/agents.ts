@@ -13,6 +13,7 @@ import { afterResponse, owned } from "./shared";
 import { getAvatar } from "./avatars";
 import { listVoices } from "./voices";
 import { getBrandKit } from "./brand";
+import { copyTitle } from "./templates";
 import { chatSchema } from "./scripts";
 import { fetchPageText } from "../webpage";
 import type { FetchLike } from "../safe-fetch";
@@ -141,6 +142,38 @@ export async function createAgent(input: z.infer<typeof agentSchema>, ownerId: s
   const knowledge = knowledgeUrl ? await readKnowledge(knowledgeUrl, fetchImpl) : {};
   const now = nowIso();
   return getStore().put("agent", { id: newId("agent"), ownerId, ...rest, ...(greeting ? { greeting } : {}), ...(starters?.length ? { starters } : {}), ...snapshot, ...knowledge, conversations: 0, messages: 0, createdAt: now, updatedAt: now });
+}
+
+/**
+ * A copy of a saved presenter under a new id, so a new link: its setup and the page text it read (not read again), named
+ * "… (copy)", with no visits or transcripts. Its link starts off, so nothing new is public until the owner turns it on.
+ */
+export async function duplicateAgent(id: string, ownerId: string = LOCAL_OWNER): Promise<Agent> {
+  // The source is looked up first, so a missing one is a 404 whatever the count.
+  const source = await getAgent(id, ownerId);
+  const agents = await listAgents(ownerId);
+  if (agents.length >= MAX_AGENTS) throw new ValidationError(`At most ${MAX_AGENTS} agents per account`);
+  const now = nowIso();
+  // The setup field by field, so a field added later for one presenter's own record is not carried over unnoticed.
+  const copy: Agent = {
+    id: newId("agent"),
+    ownerId: source.ownerId,
+    name: copyTitle(source.name, agents.map((a) => a.name), 60),
+    avatarId: source.avatarId,
+    avatarName: source.avatarName,
+    avatarImageUrl: source.avatarImageUrl,
+    instructions: source.instructions,
+    language: source.language,
+    isPublic: false,
+    conversations: 0,
+    messages: 0,
+    createdAt: now,
+    updatedAt: now,
+  };
+  for (const key of ["voiceId", "voiceLanguage", "greeting", "starters", "knowledgeUrl", "knowledge", "knowledgeUpdatedAt", "collectEmail", "brandStyle"] as const) {
+    if (source[key] !== undefined) Object.assign(copy, { [key]: source[key] });
+  }
+  return getStore().put("agent", copy);
 }
 
 export async function updateAgent(id: string, patch: z.infer<typeof agentPatchSchema>, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<Agent> {

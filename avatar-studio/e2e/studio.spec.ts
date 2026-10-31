@@ -5307,6 +5307,43 @@ test("a saved presenter is edited in place, keeping its link, and editing can be
   }
 });
 
+
+test("a saved presenter is duplicated under a new link that starts off, and the copy is its own", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const made: string[] = [];
+  const agents = async () => (await (await page.request.get("/api/agents")).json()).agents as Array<Record<string, unknown> & { id: string; name: string }>;
+  const res = await page.request.post("/api/agents", { data: { name: `Copy me ${tag}`, avatarId: "stock_2", voiceId: "stock_voice_2", instructions: "Answer as the copy source.", greeting: "Hello from the source.", starters: ["Is it copied?"], language: "Spanish", collectEmail: true } });
+  const source = (await res.json()).agent as { id: string };
+  made.push(source.id);
+  try {
+    await page.goto("/interactive");
+    await page.getByRole("button", { name: `Duplicate Copy me ${tag}` }).click();
+    await expect(page.getByTestId("agent-list-note")).toHaveText(`Saved a copy, "Copy me ${tag} (copy)", with its link off. Edit it, then turn its link on to share it.`);
+    const copy = (await agents()).find((a) => a.name === `Copy me ${tag} (copy)`)!;
+    made.push(copy.id);
+    expect(copy.id).not.toBe(source.id);
+    expect(copy).toMatchObject({ avatarId: "stock_2", voiceId: "stock_voice_2", instructions: "Answer as the copy source.", greeting: "Hello from the source.", starters: ["Is it copied?"], language: "Spanish", collectEmail: true, isPublic: false, conversations: 0, messages: 0 });
+    // Its row says the link is off, and its public page is not served until it is turned on; the source's still is.
+    await expect(page.getByTestId("agent-list").locator("li", { hasText: `Copy me ${tag} (copy)` })).toContainText("link off");
+    expect((await page.request.get(`/api/talk/${copy.id}`)).status()).toBe(404);
+    expect((await page.request.get(`/api/talk/${source.id}`)).status()).toBe(200);
+    // Editing the copy leaves the source as it was.
+    await page.getByRole("button", { name: `Edit Copy me ${tag} (copy)` }).click();
+    await expect(page.getByLabel("Instructions")).toHaveValue("Answer as the copy source.");
+    await page.getByLabel("Instructions").fill("Answer as the copy.");
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByRole("heading", { name: "Presenter setup" })).toBeVisible();
+    const after = await agents();
+    expect(after.find((a) => a.id === copy.id)!.instructions).toBe("Answer as the copy.");
+    expect(after.find((a) => a.id === source.id)!.instructions).toBe("Answer as the copy source.");
+    // A second copy counts on.
+    await page.getByRole("button", { name: `Duplicate Copy me ${tag}`, exact: true }).click();
+    await expect(page.getByTestId("agent-list-note")).toContainText(`"Copy me ${tag} (copy 2)"`);
+    made.push((await agents()).find((a) => a.name === `Copy me ${tag} (copy 2)`)!.id);
+  } finally {
+    for (const id of made) await page.request.delete(`/api/agents/${id}`);
+  }
+});
 test("a presenter can word its replies in the brand kit's writing style, switched on when saved or from its row", async ({ page }) => {
   const before = (await (await page.request.get("/api/brand")).json()).brand as Record<string, unknown> | null;
   const tag = Date.now().toString(36);

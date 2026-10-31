@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Check, Code2, Copy, Link2, MessagesSquare, Pencil, Trash2 } from "lucide-react";
+import { Check, Code2, Copy, CopyPlus, Link2, MessagesSquare, Pencil, Trash2 } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { ChatPanel, type ChatTurn } from "@/components/ChatPanel";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -71,6 +71,9 @@ export default function InteractivePage() {
   const focusAfterRender = useFocusAfterRender();
   const [savedLink, setSavedLink] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  /** The presenter being copied, and what the last copy left to say beside the list. */
+  const [duplicating, setDuplicating] = useState<string | null>(null);
+  const [listNote, setListNote] = useState<{ text: string; error?: true } | null>(null);
   const [transcriptsFor, setTranscriptsFor] = useState<Agent | null>(null);
   const [transcripts, setTranscripts] = useState<Conversation[] | null>(null);
 
@@ -174,6 +177,7 @@ export default function InteractivePage() {
 
   /** Loads a saved presenter into the form, to change and save in place; a new presenter's draft is kept to come back to. */
   function startEdit(agent: Agent) {
+    setListNote(null);
     if (!editing) draft.current = formState();
     setSaveErr(null);
     setSavedLink(null);
@@ -301,6 +305,7 @@ export default function InteractivePage() {
   async function remove(agent: Agent) {
     if (!window.confirm(`Delete "${agent.name}"? Its public link stops working.`)) return;
     setSaveErr(null);
+    setListNote(null);
     try {
       await api(`/api/agents/${agent.id}`, { method: "DELETE" });
       if (savedLink?.endsWith(agent.id)) setSavedLink(null);
@@ -313,8 +318,23 @@ export default function InteractivePage() {
     }
   }
 
+  async function duplicate(agent: Agent) {
+    setDuplicating(agent.id);
+    setListNote(null);
+    try {
+      const { agent: made } = await api<{ agent: Agent }>(`/api/agents/${agent.id}/duplicate`, { method: "POST" });
+      await refetchAgents();
+      setListNote({ text: `Saved a copy, "${made.name}", with its link off. Edit it, then turn its link on to share it.` });
+    } catch (e) {
+      setListNote({ text: e instanceof Error ? e.message : "Could not copy the presenter", error: true });
+    } finally {
+      setDuplicating(null);
+    }
+  }
+
   async function patchAgent(agent: Agent, patch: Partial<Pick<Agent, "isPublic" | "collectEmail" | "brandStyle">>) {
     setSaveErr(null);
+    setListNote(null);
     try {
       await api(`/api/agents/${agent.id}`, { method: "PATCH", body: JSON.stringify(patch) });
       await refetchAgents();
@@ -482,6 +502,10 @@ export default function InteractivePage() {
         <Card className="p-5">
           <h3 className="text-sm font-semibold text-slate-900">Shared presenters</h3>
           <p className="mt-1 text-xs text-slate-500">Each one has a public page and a one-line website embed (a floating launcher that opens the chat). Turn a link off to pause it without deleting the setup.</p>
+          <div role="status" className="empty:hidden">
+            {listNote && !listNote.error && <p className="mt-2 text-xs text-emerald-800" data-testid="agent-list-note">{listNote.text}</p>}
+          </div>
+          {listNote?.error && <div className="mt-2"><ErrorBanner message={listNote.text} /></div>}
           <ul className="mt-3 divide-y divide-slate-100" data-testid="agent-list">
             {agentData?.agents.length === 0 && <li className="py-3 text-xs text-slate-500">Nothing shared yet.</li>}
             {agentData?.agents.map((a) => {
@@ -517,6 +541,17 @@ export default function InteractivePage() {
                       aria-label={`Edit ${a.name}`}
                     >
                       <Pencil className="h-3.5 w-3.5" /> Edit
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="px-2.5 py-1 text-xs"
+                      onClick={() => duplicate(a)}
+                      disabled={canEdit === false || saving || (duplicating !== null && duplicating !== a.id)}
+                      loading={duplicating === a.id}
+                      aria-label={`Duplicate ${a.name}`}
+                      title="Save a copy of the saved setup with a new link, which starts off"
+                    >
+                      <CopyPlus className="h-3.5 w-3.5" /> Duplicate
                     </Button>
                     <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => openTranscripts(a)} aria-label={`Transcripts for ${a.name}`}>
                       <MessagesSquare className="h-3.5 w-3.5" /> Transcripts

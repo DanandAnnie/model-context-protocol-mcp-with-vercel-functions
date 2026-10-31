@@ -1461,6 +1461,7 @@ export type ActivityKind =
   | "brand.removed"
   | "agent.created"
   | "agent.deleted"
+  | "agent.duplicated"
   | "video.review_requested"
   | "video.approved"
   | "video.changes_requested";

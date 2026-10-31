@@ -45,6 +45,8 @@ export function describeActivity(e: ActivityEvent, viewerId?: string): string {
       return `${who} removed the brand kit`;
     case "agent.created":
       return `${who} shared the presenter ${what}`.trimEnd();
+    case "agent.duplicated":
+      return `${who} copied a shared presenter as ${what}`.trimEnd();
     case "agent.deleted":
       return `${who} deleted the shared presenter ${what}`.trimEnd();
     case "video.review_requested":

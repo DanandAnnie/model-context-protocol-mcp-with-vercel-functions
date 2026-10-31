@@ -79,10 +79,10 @@ export async function getTemplate(id: string, ownerId: string = LOCAL_OWNER): Pr
 
 /**
  * The name a copy of `title` takes: "Intro (copy)", then "Intro (copy 2)" and on while those are taken; a copy of a
- * copy counts on from the original's name rather than stacking "(copy) (copy)". Within 120 UTF-16 units (what both
- * the schema and the edit form allow), cut between whole characters so an emoji or accented letter is never split.
+ * copy counts on from the original's name rather than stacking "(copy) (copy)". Within `max` UTF-16 units (120, what
+ * both the template schema and its edit form allow), cut between whole characters so an emoji or accented letter is never split.
  */
-export function copyTitle(title: string, taken: Iterable<string>): string {
+export function copyTitle(title: string, taken: Iterable<string>, max = 120): string {
   const used = new Set(taken);
   const stem = title.replace(/\s*\(copy(?: \d+)?\)$/, "").trim() || title;
   const graphemes = Array.from(new Intl.Segmenter().segment(stem), (g) => g.segment);
@@ -90,7 +90,7 @@ export function copyTitle(title: string, taken: Iterable<string>): string {
     const suffix = n === 1 ? " (copy)" : ` (copy ${n})`;
     let cut = "";
     for (const g of graphemes) {
-      if (cut.length + g.length + suffix.length > 120) break;
+      if (cut.length + g.length + suffix.length > max) break;
       cut += g;
     }
     const name = `${cut.trimEnd()}${suffix}`;

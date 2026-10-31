@@ -1905,15 +1905,17 @@ function CreateInner() {
                     aria-label={`Move scene ${scenes.indexOf(active) + 1} to`}
                     title="Move this scene to another place in the order"
                     disabled={canEdit === false || !!slidesProgress}
-                    className="rounded-full border border-slate-200 bg-white py-0.5 pl-2 pr-6 text-xs text-slate-600 disabled:opacity-40"
+                    className="max-w-[12rem] rounded-full border border-slate-200 bg-white py-0.5 pl-2 pr-6 text-xs text-slate-600 disabled:opacity-40"
                     value={scenes.indexOf(active)}
                     onChange={(e) => moveSceneTo(Number(e.target.value))}
                     onPointerDown={() => (moveRun.current = null)}
                     onBlur={() => (moveRun.current = null)}
                   >
-                    {scenes.map((_, i) => (
+                    {scenes.map((sc, i) => (
+                      // Each place names the scene there now, whose place the moved one takes (that one shifting toward where it
+                      // came from), so "Place 3: Kitchen" says where it lands without counting the tabs.
                       <option key={i} value={i}>
-                        {`Place ${i + 1}${i === scenes.indexOf(active) ? ` of ${scenes.length} (here)` : i === 0 ? " (first)" : i === scenes.length - 1 ? " (last)" : ""}`}
+                        {`Place ${i + 1}${i === scenes.indexOf(active) ? ` of ${scenes.length} (here)` : i === 0 ? " (first)" : i === scenes.length - 1 ? " (last)" : ""}${sceneName(sc.name) ? `: ${sceneName(sc.name)}` : ""}`}
                       </option>
                     ))}
                   </select>
@@ -2377,17 +2379,20 @@ function CreateInner() {
                 {scenes.map((sc, i) => (
                   <li key={i} aria-current={sc === active ? "true" : undefined} className={`rounded-lg border p-2 ${sc === active ? "border-brand-300 bg-brand-50/40" : "border-slate-200"}`}>
                     <div className="mb-1 flex items-center justify-between gap-2 text-xs">
-                      <span className={`font-semibold ${sc === active ? "text-brand-700" : "text-slate-700"}`}>
+                      <span id={`script-view-head-${i}`} className={`min-w-0 break-words font-semibold ${sc === active ? "text-brand-700" : "text-slate-700"}`}>
                         Scene {i + 1}
+                        {sceneName(sc.name) ? ` · ${sceneName(sc.name)}` : ""}
                         {sc.audioId ? " · clip" : ""}
                       </span>
-                      <span className="text-slate-500">
+                      <span className="shrink-0 text-slate-500">
                         {sc.script.trim() ? `${sc.audioId ? "" : "~"}${formatSeconds(Math.max(1, sceneSeconds(sc)))}` : "no words yet"}
                       </span>
                     </div>
                     <textarea
                       ref={sc === active ? scriptRef : undefined}
                       aria-label={sc.audioId ? `Scene ${i + 1}: what the clip says` : `Scene ${i + 1} script`}
+                      // The box's header, with the scene's name, is read with it.
+                      aria-describedby={sceneName(sc.name) ? `script-view-head-${i}` : undefined}
                       className={`${inputClass} min-h-[88px] resize-y leading-relaxed`}
                       value={sc.script}
                       onPointerDown={(e) => selectFromBox(i, e.currentTarget)}

@@ -1497,6 +1497,31 @@ test("Download script saves every scene's words, which Import script reads back 
   await expect(page.getByRole("textbox", { name: "Scene 3 script" })).toHaveValue("Thanks for watching.");
 });
 
+test("scene names show in the Move scene to list and in All scripts", async ({ page }) => {
+  await page.reload();
+  const addScene = page.getByRole("button", { name: "Add scene", exact: true });
+  await page.getByRole("textbox", { name: "Script", exact: true }).fill("Hook.");
+  await addScene.click();
+  await page.getByRole("textbox", { name: "Scene 2 script" }).fill("Kitchen.");
+  await addScene.click();
+  await page.getByRole("textbox", { name: "Scene 3 script" }).fill("Garden.");
+  await page.getByLabel("Scene 3 name", { exact: true }).fill("The garden");
+  await page.getByRole("button", { name: /^Scene 1,/ }).click();
+  const moveTo = page.getByRole("combobox", { name: "Move scene 1 to" });
+  await expect(moveTo.locator("option")).toHaveText(["Place 1 of 3 (here)", "Place 2", "Place 3 (last): The garden"]);
+  // By place (the option's value), not its text, which a name changes.
+  await moveTo.selectOption("2");
+  await expect(page.getByTestId("import-note")).toHaveText("Moved scene 1 to 3.");
+  // The named scene is now second, and All scripts names it there.
+  await page.getByRole("button", { name: "All scripts" }).click();
+  const view = page.getByTestId("script-view");
+  await expect(view.getByRole("listitem").nth(1)).toContainText("Scene 2 · The garden");
+  await expect(view.getByRole("listitem").nth(0)).not.toContainText("·");
+  // The box is described by its header, so its name is read with it.
+  await expect(view.getByRole("textbox", { name: "Scene 2 script" })).toHaveAccessibleDescription("Scene 2 · The garden");
+  await page.evaluate(() => localStorage.removeItem("avatar-studio:draft"));
+});
+
 test("Move scene to puts the selected scene at any place in one step Undo takes back", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Order");
   await page.getByRole("textbox", { name: "Script", exact: true }).fill("Hook.");

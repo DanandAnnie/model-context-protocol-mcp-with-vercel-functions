@@ -1,6 +1,7 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { Captions, ChevronLeft, ChevronRight, Clapperboard, ClipboardCopy, ClipboardPaste, Copy, Download, Flag, Hand, Image as ImageIcon, Layers, ListOrdered, Merge, MessagesSquare, Mic2, Palette, Pause, Play, Plus, Redo2, Replace, Rows3, Scissors, Sparkles, Square, Trash2, Undo2, Upload, Users, Wand2, X } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { VoiceRow } from "@/components/VoicePicker";
@@ -1681,15 +1682,17 @@ function CreateInner() {
                   type="button"
                   onClick={() => setActiveIdx(i)}
                   // ← and → go to the scene before or after, Home and End to the first and last, the focus going with them
-                  // once the scene is selected (so the tab it lands on already says it is the current one).
+                  // once the scene is selected (so the tab it lands on already says it is the current one). The selection is
+                  // committed and the focus moved before the handler returns, so a key pressed straight after (End, then →)
+                  // starts from the tab this one went to, not the one it left.
                   onKeyDown={(e) => {
                     if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
                     const to = e.key === "ArrowLeft" ? i - 1 : e.key === "ArrowRight" ? i + 1 : e.key === "Home" ? 0 : e.key === "End" ? scenes.length - 1 : null;
                     if (to === null) return;
                     e.preventDefault();
                     if (to < 0 || to >= scenes.length) return;
-                    setActiveIdx(to);
-                    requestAnimationFrame(() => sceneTabs.current[to]?.focus());
+                    flushSync(() => setActiveIdx(to));
+                    sceneTabs.current[to]?.focus();
                   }}
                   aria-keyshortcuts={scenes.length > 1 ? "ArrowLeft ArrowRight Home End" : undefined}
                   aria-label={`Scene ${i + 1}${sceneName(sc.name) ? `, ${sceneName(sc.name)}` : ""}${sc.script.trim() ? `, about ${formatSeconds(Math.max(1, sceneSeconds(sc)))}` : ", empty"}`}

@@ -7,9 +7,9 @@ import { getStore } from "../store";
 import type { Agent, Conversation } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { dispatchNotification, getNotifySettings } from "../notifications";
-import { NotFoundError, ValidationError } from "../errors";
+import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { getStreamingProvider } from "../streaming";
-import { afterResponse, owned } from "./shared";
+import { afterResponse, nextUpdatedAt, owned } from "./shared";
 import { getAvatar } from "./avatars";
 import { listVoices } from "./voices";
 import { getBrandKit } from "./brand";
@@ -105,7 +105,9 @@ export async function captureLead(agentId: string, input: z.infer<typeof leadSch
   const conversation = await getStore().get<Conversation>("conversation", input.conversationId);
   if (!conversation || conversation.agentId !== agentId) throw new NotFoundError("Conversation not found");
   const now = nowIso();
-  await getStore().put("conversation", { ...conversation, visitor: { email: input.email, name: input.name }, updatedAt: now });
+  const written = await updateConversation(conversation, (c) => ({ ...c, visitor: { email: input.email, name: input.name } }));
+  if (written === "gone") throw new NotFoundError("Conversation not found");
+  if (written === "busy") throw new ConflictError("The conversation is busy; try again");
   const settings = await getNotifySettings(agent.ownerId).catch(() => null);
   if (settings) {
     await afterResponse(() => dispatchNotification(settings, "lead.captured", {
@@ -115,7 +117,7 @@ export async function captureLead(agentId: string, input: z.infer<typeof leadSch
       conversationId: conversation.id,
       email: input.email,
       name: input.name,
-      lastMessage: conversation.messages.filter((m) => m.role === "user").at(-1)?.content,
+      lastMessage: written.messages.filter((m) => m.role === "user").at(-1)?.content,
       capturedAt: now,
     }));
   }
@@ -301,19 +303,38 @@ export async function talkToAgent(id: string, input: z.infer<typeof talkSchema>)
   if (conversation && conversation.agentId !== agent.id) conversation = null; // a token from another presenter starts fresh
   const isNew = !conversation;
   if (!conversation) conversation = { id: newId("conv"), ownerId: agent.ownerId, agentId: agent.id, messages: [], startedAt: now, updatedAt: now };
-  const messages = [...conversation.messages, { role: "user" as const, content: last.content, at: now }, { role: "assistant" as const, content: reply, at: now }].slice(-MAX_TRANSCRIPT_MESSAGES);
+  const turn = [{ role: "user" as const, content: last.content, at: now }, { role: "assistant" as const, content: reply, at: now }];
   // Transcripts and counters are best effort; a lost write never fails the visitor's turn.
   const record = async () => {
     // The chat took seconds: count on the stored row so an edit or rename that landed meanwhile is kept,
     // and write nothing for a presenter deleted meanwhile rather than bringing it back.
     const current = await getStore().get<Agent>("agent", agent.id);
     if (!current) return;
-    await getStore().put("conversation", { ...conversation, messages, updatedAt: now });
+    const addTurn = (c: Conversation) => ({ ...c, messages: [...c.messages, ...turn].slice(-MAX_TRANSCRIPT_MESSAGES), updatedAt: now });
+    if (isNew) await getStore().put("conversation", addTurn(conversation));
+    else if ((await updateConversation(conversation, addTurn)) === "busy") console.error(`transcript turn for ${conversation.id} not recorded: the visit kept changing`);
     await getStore().put("agent", { ...current, conversations: current.conversations + (isNew ? 1 : 0), messages: current.messages + 1 });
     if (isNew) await pruneConversations(agent);
   };
   await record().catch((err) => console.error("transcript write failed:", err));
   return { reply, conversationId: conversation.id };
+}
+
+/**
+ * Writes a change to a stored visit only while the row is the one the change was made from, re-reading and retrying when
+ * a turn or an email landed meanwhile, so neither is lost. Each write moves `updatedAt` past the row's own (it is the
+ * version the next write checks), so two in the same millisecond cannot both match. Returns the row written, `"gone"` for
+ * a visit its owner deleted meanwhile (not written back), or `"busy"` when other writes kept landing first.
+ */
+async function updateConversation(first: Conversation, change: (c: Conversation) => Conversation): Promise<Conversation | "gone" | "busy"> {
+  let row: Conversation | null = first;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    if (!row) return "gone";
+    const next = { ...change(row), updatedAt: nextUpdatedAt(row.updatedAt) };
+    if (await getStore().putIf("conversation", next, "updatedAt", row.updatedAt)) return next;
+    row = await getStore().get<Conversation>("conversation", first.id);
+  }
+  return "busy";
 }
 
 async function pruneConversations(agent: Agent) {
@@ -328,6 +349,19 @@ export async function listConversations(agentId: string, ownerId: string = LOCAL
   await getAgent(agentId, ownerId);
   const all = (await getStore().list<Conversation>("conversation", ownerId)).filter((c) => c.agentId === agentId);
   return all.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, limit);
+}
+
+/**
+ * Deletes one visit's transcript; `false` when the presenter has no such visit (already deleted, or rolled over at the
+ * limit), while a presenter that is not the owner's is a `NotFoundError`. A visitor who comes back with its id starts a
+ * new visit, as after "Delete all"; the presenter's conversation count, which counts visits ever made, is kept.
+ */
+export async function deleteConversation(agentId: string, conversationId: string, ownerId: string = LOCAL_OWNER): Promise<boolean> {
+  await getAgent(agentId, ownerId);
+  const conversation = await getStore().get<Conversation>("conversation", conversationId);
+  if (!conversation || conversation.agentId !== agentId || conversation.ownerId !== ownerId) return false;
+  await getStore().remove("conversation", conversationId);
+  return true;
 }
 
 export async function clearConversations(agentId: string, ownerId: string = LOCAL_OWNER): Promise<number> {

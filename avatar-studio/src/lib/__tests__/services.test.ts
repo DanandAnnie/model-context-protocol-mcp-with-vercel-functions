@@ -32,6 +32,7 @@ import {
   updateAgent,
   listConversations,
   clearConversations,
+  deleteConversation,
   MAX_TRANSCRIPT_MESSAGES,
   captureLead,
   listVoices,
@@ -2671,7 +2672,54 @@ describe("shared agents", () => {
     for (let i = 0; i < MAX_TRANSCRIPT_MESSAGES; i++) conv = (await talkToAgent(agent.id, { conversationId: conv, messages: [{ role: "user", content: `turn ${i}` }] })).conversationId;
     const capped = (await listConversations(agent.id, "u1")).find((c) => c.id === conv)!;
     assert.equal(capped.messages.length, MAX_TRANSCRIPT_MESSAGES, "transcript is capped per visit");
-    assert.equal(await clearConversations(agent.id, "u1"), 2);
+    // One visit at a time: only its owner's, only under its own presenter, and gone for good.
+    await assert.rejects(deleteConversation(agent.id, first.conversationId, "u2"), /not found/);
+    // A presenter that is not the owner's is an error; a visit it does not have is simply not deleted.
+    assert.equal(await deleteConversation(agent.id, "conv_nope", "u1"), false);
+    const sibling = await createAgent(agentSchema.parse({ name: "Sibling", avatarId: "stock_1", voiceId: "stock_voice_2" }), "u1");
+    assert.equal(await deleteConversation(sibling.id, first.conversationId, "u1"), false);
+    await deleteAgent(sibling.id, "u1");
+    assert.equal(await deleteConversation(agent.id, first.conversationId, "u1"), true);
+    assert.equal(await deleteConversation(agent.id, first.conversationId, "u1"), false);
+    // An email left on a deleted visit does not bring it back.
+    await assert.rejects(captureLead(agent.id, { conversationId: first.conversationId, email: "late@example.com" }), /Conversation not found/);
+    assert.deepEqual((await listConversations(agent.id, "u1")).map((c) => c.id), [conv]);
+    assert.equal((await getAgent(agent.id, "u1")).conversations, 2, "the count of visits made is kept");
+    // A write that lands between a turn's read and its write: the turn re-reads and keeps it, and a delete is not undone.
+    const { getStore } = await import("../store");
+    type Conversation = import("../types").Conversation;
+    const store = getStore();
+    const putIf = store.putIf.bind(store);
+    const slipIn = (meddle: () => Promise<unknown>) => {
+      let done = false;
+      store.putIf = (async (kind: Parameters<typeof putIf>[0], item: { id: string }, field: string, expected: string) => {
+        if (!done && kind === "conversation") {
+          done = true;
+          await meddle();
+        }
+        return putIf(kind, item, field, expected);
+      }) as typeof store.putIf;
+    };
+    try {
+      // An email left while the turn was on its way.
+      const before = (await store.get<Conversation>("conversation", conv))!;
+      slipIn(() => captureLead(agent.id, { conversationId: conv, email: "both@example.com" }));
+      await talkToAgent(agent.id, { conversationId: conv, messages: [{ role: "user", content: "One more" }] });
+      const both = (await store.get<Conversation>("conversation", conv))!;
+      assert.equal(both.visitor?.email, "both@example.com", "the email that landed meanwhile is kept");
+      assert.equal(both.messages.at(-2)?.content, "One more", "and so is the turn");
+      assert.ok(both.updatedAt > before.updatedAt, "each write moves the version on");
+      slipIn(() => deleteConversation(agent.id, conv, "u1"));
+      await talkToAgent(agent.id, { conversationId: conv, messages: [{ role: "user", content: "Still there?" }] });
+      assert.equal(await store.get("conversation", conv), null, "a visit deleted meanwhile is not written back");
+    } finally {
+      store.putIf = putIf;
+    }
+    // A visitor who comes back with a deleted visit's id starts a new one.
+    const back = await talkToAgent(agent.id, { conversationId: first.conversationId, messages: [{ role: "user", content: "Back again" }] });
+    assert.notEqual(back.conversationId, first.conversationId);
+    assert.deepEqual((await listConversations(agent.id, "u1")).map((c) => c.id), [back.conversationId]);
+    assert.equal(await clearConversations(agent.id, "u1"), 1);
     assert.deepEqual(await listConversations(agent.id, "u1"), []);
 
     await updateAgent(agent.id, { isPublic: false }, "u1");

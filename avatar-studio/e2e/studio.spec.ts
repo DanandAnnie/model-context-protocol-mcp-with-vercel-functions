@@ -5464,6 +5464,44 @@ test("the questions visitors most often open with are listed with their counts, 
   }
 });
 
+test("one visit's transcript can be deleted, leaving the others and the visit count", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const res = await page.request.post("/api/agents", { data: { name: `Delete one ${tag}`, avatarId: "stock_1" } });
+  const { id } = (await res.json()).agent as { id: string };
+  try {
+    const headers = { "x-forwarded-for": `198.51.100.${Math.floor(Math.random() * 200) + 1}` };
+    for (const content of [`Keep this ${tag}`, `Remove this ${tag}`]) {
+      expect((await page.request.post(`/api/talk/${id}`, { data: { messages: [{ role: "user", content }] }, headers })).status()).toBe(200);
+    }
+    await page.goto("/interactive");
+    await page.getByRole("button", { name: `Transcripts for Delete one ${tag}` }).click();
+    const list = page.getByTestId("transcript-list").locator("> li");
+    await expect(list).toHaveCount(2);
+    const doomed = list.filter({ hasText: `Remove this ${tag}` });
+    await doomed.locator("summary").click();
+    // Asked first; dismissing keeps it.
+    const button = doomed.getByRole("button", { name: /^Delete this conversation from / });
+    page.once("dialog", (d) => d.dismiss());
+    await button.click();
+    await expect(list).toHaveCount(2);
+    expect(((await (await page.request.get(`/api/agents/${id}/conversations`)).json()).conversations as unknown[]).length).toBe(2);
+    page.once("dialog", (d) => d.accept());
+    await button.click();
+    await expect(list).toHaveCount(1);
+    await expect(list.first()).toContainText(`Keep this ${tag}`);
+    await expect(page.getByRole("heading", { name: `Conversations with Delete one ${tag}` })).toBeFocused();
+    const kept = (await (await page.request.get(`/api/agents/${id}/conversations`)).json()).conversations as Array<{ id: string }>;
+    expect(kept).toHaveLength(1);
+    // A visit it does not have is not deleted; a presenter that is not there is a 404.
+    expect(await (await page.request.delete(`/api/agents/${id}/conversations/conv_nope`)).json()).toEqual({ deleted: false });
+    expect((await page.request.delete(`/api/agents/agent_nope/conversations/${kept[0].id}`)).status()).toBe(404);
+    const agent = ((await (await page.request.get("/api/agents")).json()).agents as Array<{ id: string; conversations: number }>).find((a) => a.id === id)!;
+    expect(agent.conversations).toBe(2);
+  } finally {
+    await page.request.delete(`/api/agents/${id}`);
+  }
+});
+
 test("a presenter answers from reference notes, in the try-it chat and once shared, and they can be cleared", async ({ page }) => {
   const tag = Date.now().toString(36);
   const notes = `Showings for ${tag} run Saturdays, 10am to 2pm.\nThe lakeside cabin is listed at $450,000.`;

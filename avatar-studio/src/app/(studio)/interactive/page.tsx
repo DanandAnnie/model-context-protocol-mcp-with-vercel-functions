@@ -78,6 +78,10 @@ export default function InteractivePage() {
   const setupHeading = useRef<HTMLHeadingElement>(null);
   const mostAskedHeading = useRef<HTMLHeadingElement>(null);
   const leadsBox = useRef<HTMLInputElement>(null);
+  const transcriptsHeading = useRef<HTMLHeadingElement>(null);
+  const [transcriptErr, setTranscriptErr] = useState<string | null>(null);
+  /** The visit whose delete is on its way, so a second click cannot ask again. */
+  const [deletingVisit, setDeletingVisit] = useState<string | null>(null);
   const focusAfterRender = useFocusAfterRender();
   const [savedLink, setSavedLink] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
@@ -114,6 +118,7 @@ export default function InteractivePage() {
     transcriptSearch.search("");
     setLeadsOnly(false);
     setOpening(null);
+    setTranscriptErr(null);
     setSaveErr(null);
     try {
       const { conversations } = await api<{ conversations: Conversation[] }>(`/api/agents/${agent.id}/conversations`);
@@ -131,14 +136,38 @@ export default function InteractivePage() {
     setTranscriptsFor(null);
   }
 
+  /**
+   * Deletes one visit's transcript. One already gone (kept visits roll over at the limit) answers `deleted: false` and
+   * leaves the list too; any error, a presenter no longer the owner's included, is shown and the visit kept.
+   */
+  async function deleteTranscript(agent: Agent, c: Conversation) {
+    if (deletingVisit || !window.confirm(`Delete this conversation from ${formatDate(c.startedAt)}? This cannot be undone.`)) return;
+    const load = transcriptsLoad.current;
+    setTranscriptErr(null);
+    setDeletingVisit(c.id);
+    try {
+      await api(`/api/agents/${agent.id}/conversations/${encodeURIComponent(c.id)}`, { method: "DELETE" });
+      if (load !== transcriptsLoad.current) return;
+      setTranscripts((now) => now?.filter((x) => x.id !== c.id) ?? now);
+      // Its row and button are gone, so the focus goes to the panel's heading rather than to the page; focus moved
+      // elsewhere while the delete ran stays there.
+      focusAfterRender(() => (document.activeElement && document.activeElement !== document.body ? null : transcriptsHeading.current));
+    } catch (e) {
+      if (load === transcriptsLoad.current) setTranscriptErr(e instanceof Error ? e.message : "Could not delete the conversation");
+    } finally {
+      setDeletingVisit(null);
+    }
+  }
+
   async function clearTranscripts(agent: Agent) {
     if (!window.confirm("Delete all saved conversations for this presenter?")) return;
     const load = transcriptsLoad.current;
+    setTranscriptErr(null);
     try {
       await api(`/api/agents/${agent.id}/conversations`, { method: "DELETE" });
       if (load === transcriptsLoad.current) setTranscripts([]);
     } catch (e) {
-      if (load === transcriptsLoad.current) setSaveErr(e instanceof Error ? e.message : "Could not delete transcripts");
+      if (load === transcriptsLoad.current) setTranscriptErr(e instanceof Error ? e.message : "Could not delete transcripts");
     }
   }
 
@@ -698,7 +727,7 @@ export default function InteractivePage() {
           {transcriptsFor && (
             <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="transcripts">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h4 className="text-sm font-semibold text-slate-900">Conversations with {transcriptsFor.name}</h4>
+                <h4 ref={transcriptsHeading} tabIndex={-1} className="text-sm font-semibold text-slate-900 focus:outline-none">Conversations with {transcriptsFor.name}</h4>
                 <div className="flex gap-2">
                   {transcripts && transcripts.length > 0 && (
                     <a
@@ -714,7 +743,7 @@ export default function InteractivePage() {
                       {narrowed ? "Download matches (CSV)" : "Download CSV"}
                     </a>
                   )}
-                  {transcripts && transcripts.length > 0 && (
+                  {transcripts && transcripts.length > 0 && canEdit !== false && (
                     <button type="button" onClick={() => clearTranscripts(transcriptsFor)} className="text-xs text-slate-500 hover:text-rose-700">
                       Delete all
                     </button>
@@ -724,6 +753,7 @@ export default function InteractivePage() {
                   </button>
                 </div>
               </div>
+              <ErrorBanner message={transcriptErr} />
               <p className="mt-1 text-xs text-slate-500">Newest first, up to {MAX_CONVERSATIONS_PER_AGENT} visits; each visit keeps its last 40 messages. Visitors are told conversations may be kept.</p>
               {transcripts === null ? (
                 <p className="mt-3 text-xs text-slate-500">Loading…</p>
@@ -819,6 +849,19 @@ export default function InteractivePage() {
                             </li>
                           ))}
                         </ol>
+                        {canEdit !== false && (
+                          <div className="border-t border-slate-100 px-3 py-2 text-right">
+                            <button
+                              type="button"
+                              onClick={() => deleteTranscript(transcriptsFor, c)}
+                              disabled={deletingVisit !== null}
+                              aria-label={`Delete this conversation from ${formatDate(c.startedAt)}`}
+                              className="text-xs text-slate-500 hover:text-rose-700 disabled:opacity-60"
+                            >
+                              {deletingVisit === c.id ? "Deleting…" : "Delete this conversation"}
+                            </button>
+                          </div>
+                        )}
                       </details>
                     </li>
                   ))}

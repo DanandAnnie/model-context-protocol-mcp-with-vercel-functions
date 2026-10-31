@@ -7,6 +7,7 @@ import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } 
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
+import { ListSearch, useListSearch } from "@/components/ListSearch";
 import { useLiveAvatar } from "@/hooks/useLiveAvatar";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { api, formatDate } from "@/lib/client";
@@ -76,27 +77,46 @@ export default function InteractivePage() {
   const [listNote, setListNote] = useState<{ text: string; error?: true } | null>(null);
   const [transcriptsFor, setTranscriptsFor] = useState<Agent | null>(null);
   const [transcripts, setTranscripts] = useState<Conversation[] | null>(null);
+  /** Which opening of the panel a load answers, so a slow load for one presenter never fills another's. */
+  const transcriptsLoad = useRef(0);
+  const transcriptSearch = useListSearch();
+  const [leadsOnly, setLeadsOnly] = useState(false);
+  const shownTranscripts = (transcripts ?? []).filter(
+    (c) => (!leadsOnly || !!c.visitor?.email) && transcriptSearch.matches(c.id, c.visitor?.email, c.visitor?.name, ...c.messages.map((m) => m.content)),
+  );
+  const leadCount = (transcripts ?? []).filter((c) => c.visitor?.email).length;
 
   async function openTranscripts(agent: Agent) {
+    const load = ++transcriptsLoad.current;
     setTranscriptsFor(agent);
     setTranscripts(null);
+    transcriptSearch.search("");
+    setLeadsOnly(false);
     setSaveErr(null);
     try {
       const { conversations } = await api<{ conversations: Conversation[] }>(`/api/agents/${agent.id}/conversations`);
-      setTranscripts(conversations);
+      if (load === transcriptsLoad.current) setTranscripts(conversations);
     } catch (e) {
+      if (load !== transcriptsLoad.current) return;
       setSaveErr(e instanceof Error ? e.message : "Could not load transcripts");
       setTranscriptsFor(null);
     }
   }
 
+  /** Closing the panel (or the presenter going) leaves any load still under way with nothing to fill. */
+  function closeTranscripts() {
+    transcriptsLoad.current++;
+    setTranscriptsFor(null);
+  }
+
   async function clearTranscripts(agent: Agent) {
     if (!window.confirm("Delete all saved conversations for this presenter?")) return;
+    const load = transcriptsLoad.current;
     try {
       await api(`/api/agents/${agent.id}/conversations`, { method: "DELETE" });
-      setTranscripts([]);
+      if (load === transcriptsLoad.current) setTranscripts([]);
     } catch (e) {
-      setSaveErr(e instanceof Error ? e.message : "Could not delete transcripts");
+      if (load === transcriptsLoad.current) setSaveErr(e instanceof Error ? e.message : "Could not delete transcripts");
     }
   }
 
@@ -311,7 +331,7 @@ export default function InteractivePage() {
       if (savedLink?.endsWith(agent.id)) setSavedLink(null);
       if (editingRef.current?.id === agent.id) cancelEdit();
       // Its transcripts went with it; a panel left open would offer a download that no longer exists.
-      if (transcriptsFor?.id === agent.id) setTranscriptsFor(null);
+      if (transcriptsFor?.id === agent.id) closeTranscripts();
       await refetchAgents();
     } catch (e) {
       setSaveErr(e instanceof Error ? e.message : "Could not delete the presenter");
@@ -596,7 +616,7 @@ export default function InteractivePage() {
                       Delete all
                     </button>
                   )}
-                  <button type="button" onClick={() => setTranscriptsFor(null)} className="text-xs text-slate-500 hover:text-slate-900">
+                  <button type="button" onClick={closeTranscripts} className="text-xs text-slate-500 hover:text-slate-900">
                     Close
                   </button>
                 </div>
@@ -607,8 +627,24 @@ export default function InteractivePage() {
               ) : transcripts.length === 0 ? (
                 <p className="mt-3 text-xs text-slate-500">No conversations yet.</p>
               ) : (
-                <ul className="mt-3 space-y-2">
-                  {transcripts.map((c) => (
+                <>
+                <div className="mt-3">
+                  {/* Counted against what the checkbox leaves, so a visit it hides never reads as a match or a miss. */}
+                  <ListSearch
+                    search={transcriptSearch}
+                    label={`Search conversations with ${transcriptsFor.name}`}
+                    placeholder="Search words, emails, or names"
+                    shown={shownTranscripts.length}
+                    total={leadsOnly ? leadCount : transcripts.length}
+                    noun={leadsOnly ? "visits that left an email" : "conversations"}
+                  />
+                  <label className="mb-3 flex items-center gap-1.5 text-xs text-slate-700">
+                    <input type="checkbox" checked={leadsOnly} onChange={(e) => setLeadsOnly(e.target.checked)} disabled={leadCount === 0 && !leadsOnly} />
+                    Only visits that left an email ({leadCount})
+                  </label>
+                </div>
+                <ul className="space-y-2" data-testid="transcript-list">
+                  {shownTranscripts.map((c) => (
                     <li key={c.id}>
                       <details className="rounded-lg border border-slate-200 bg-white">
                         <summary className="cursor-pointer select-none px-3 py-2 text-xs text-slate-700">
@@ -627,6 +663,7 @@ export default function InteractivePage() {
                     </li>
                   ))}
                 </ul>
+                </>
               )}
             </div>
           )}

@@ -5344,6 +5344,54 @@ test("a saved presenter is duplicated under a new link that starts off, and the 
     for (const id of made) await page.request.delete(`/api/agents/${id}`);
   }
 });
+
+test("a presenter's transcripts can be searched by words or visitor, and narrowed to visits that left an email", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const res = await page.request.post("/api/agents", { data: { name: `Transcripts ${tag}`, avatarId: "stock_1", collectEmail: true } });
+  const { id } = (await res.json()).agent as { id: string };
+  try {
+    // A visitor of its own, so the per-client limits on turns and emails are this test's alone.
+    const visitor = { "x-forwarded-for": `198.51.100.${Math.floor(Math.random() * 200) + 1}` };
+    const talk = async (content: string) => ((await (await page.request.post(`/api/talk/${id}`, { data: { messages: [{ role: "user", content }] }, headers: visitor })).json()) as { conversationId: string }).conversationId;
+    const lead = await talk(`Is the lakeside cabin ${tag} still for sale?`);
+    await talk("Do you handle rentals downtown?");
+    expect((await page.request.post(`/api/talk/${id}/lead`, { data: { conversationId: lead, email: `buyer-${tag}@example.com`, name: "Rowan" }, headers: visitor })).status()).toBe(200);
+    await page.goto("/interactive");
+    await page.getByRole("button", { name: `Transcripts for Transcripts ${tag}` }).click();
+    const list = page.getByTestId("transcript-list").locator("> li");
+    await expect(list).toHaveCount(2);
+    // Words from any message, then the visitor's email or name.
+    const box = page.getByRole("searchbox", { name: `Search conversations with Transcripts ${tag}` });
+    await box.fill("LAKESIDE");
+    await expect(list).toHaveCount(1);
+    await expect(page.getByTestId("list-matches")).toHaveText("1 of 2 conversations");
+    await expect(list.first()).toContainText(`buyer-${tag}@example.com`);
+    await box.fill("rowan");
+    await expect(list).toHaveCount(1);
+    await box.fill("no such words");
+    await expect(list).toHaveCount(0);
+    await expect(page.getByText("Nothing here matches “no such words”.")).toBeVisible();
+    await box.fill("");
+    await expect(list).toHaveCount(2);
+    // Only the visit that left an email.
+    const leads = page.getByRole("checkbox", { name: "Only visits that left an email (1)" });
+    await leads.check();
+    await expect(list).toHaveCount(1);
+    await expect(list.first()).toContainText("Rowan");
+    // With it on, a search counts only what it leaves: the rentals visit left no email, so it is no match here.
+    await box.fill("rentals");
+    await expect(list).toHaveCount(0);
+    await expect(page.getByTestId("list-matches")).toHaveText("0 of 1 visits that left an email");
+    // Opening the panel again starts with the whole list, the search and the box cleared.
+    await page.getByTestId("transcripts").getByRole("button", { name: "Close", exact: true }).click();
+    await page.getByRole("button", { name: `Transcripts for Transcripts ${tag}` }).click();
+    await expect(list).toHaveCount(2);
+    await expect(box).toHaveValue("");
+    await expect(page.getByRole("checkbox", { name: /^Only visits that left an email/ })).not.toBeChecked();
+  } finally {
+    await page.request.delete(`/api/agents/${id}`);
+  }
+});
 test("a presenter can word its replies in the brand kit's writing style, switched on when saved or from its row", async ({ page }) => {
   const before = (await (await page.request.get("/api/brand")).json()).brand as Record<string, unknown> | null;
   const tag = Date.now().toString(36);

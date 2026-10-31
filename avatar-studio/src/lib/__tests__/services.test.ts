@@ -33,6 +33,7 @@ import {
   listConversations,
   clearConversations,
   deleteConversation,
+  getConversation,
   MAX_TRANSCRIPT_MESSAGES,
   captureLead,
   listVoices,
@@ -2674,10 +2675,15 @@ describe("shared agents", () => {
     assert.equal(capped.messages.length, MAX_TRANSCRIPT_MESSAGES, "transcript is capped per visit");
     // One visit at a time: only its owner's, only under its own presenter, and gone for good.
     await assert.rejects(deleteConversation(agent.id, first.conversationId, "u2"), /not found/);
+    // One visit, read by its owner under its own presenter only.
+    assert.equal((await getConversation(agent.id, first.conversationId, "u1")).conversation.messages[2].content, "When?");
+    await assert.rejects(getConversation(agent.id, first.conversationId, "u2"), /not found/);
+    await assert.rejects(getConversation(agent.id, "conv_nope", "u1"), /Conversation not found/);
     // A presenter that is not the owner's is an error; a visit it does not have is simply not deleted.
     assert.equal(await deleteConversation(agent.id, "conv_nope", "u1"), false);
     const sibling = await createAgent(agentSchema.parse({ name: "Sibling", avatarId: "stock_1", voiceId: "stock_voice_2" }), "u1");
     assert.equal(await deleteConversation(sibling.id, first.conversationId, "u1"), false);
+    await assert.rejects(getConversation(sibling.id, first.conversationId, "u1"), /Conversation not found/);
     await deleteAgent(sibling.id, "u1");
     assert.equal(await deleteConversation(agent.id, first.conversationId, "u1"), true);
     assert.equal(await deleteConversation(agent.id, first.conversationId, "u1"), false);

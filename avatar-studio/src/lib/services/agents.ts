@@ -15,7 +15,7 @@ import { listVoices } from "./voices";
 import { getBrandKit } from "./brand";
 import { copyTitle } from "./templates";
 import { cutToFit, tidyTitle } from "./videos";
-import { MAX_CONVERSATIONS_PER_AGENT } from "../transcripts";
+import { MAX_CONVERSATIONS_PER_AGENT, MAX_TRANSCRIPT_MESSAGES } from "../transcripts";
 import { chatSchema } from "./scripts";
 import { fetchPageText } from "../webpage";
 import type { FetchLike } from "../safe-fetch";
@@ -95,7 +95,11 @@ export function withKnowledge(agent: Pick<Agent, "instructions" | "notes" | "kno
 export const leadSchema = z.object({
   conversationId: z.string().regex(/^conv_[a-z0-9]+$/),
   email: z.string().trim().email().max(200),
-  name: z.string().trim().max(80).optional(),
+  // One line: a name that breaks lines could pass for another line of a downloaded transcript. Tabs (two pasted
+  // spreadsheet cells) are spaces.
+  name: z
+    .preprocess((v) => (typeof v === "string" ? v.replace(/\t/g, " ") : v), z.string().trim().max(80).regex(/^[^\p{Cc}\p{Zl}\p{Zp}]*$/u, "A name is one line of text"))
+    .optional(),
 });
 
 /** A visitor leaves contact details on a conversation. Notifies the owner's webhook as lead.captured. */
@@ -284,8 +288,7 @@ export const talkSchema = z.object({
 });
 
 /** Transcript limits: per visit and per presenter (oldest visits are dropped). */
-export const MAX_TRANSCRIPT_MESSAGES = 40;
-export { MAX_CONVERSATIONS_PER_AGENT };
+export { MAX_CONVERSATIONS_PER_AGENT, MAX_TRANSCRIPT_MESSAGES };
 
 /** A visitor's turn with a public agent. Records the transcript and counts conversations and messages. */
 export async function talkToAgent(id: string, input: z.infer<typeof talkSchema>): Promise<{ reply: string; conversationId: string }> {
@@ -349,6 +352,14 @@ export async function listConversations(agentId: string, ownerId: string = LOCAL
   await getAgent(agentId, ownerId);
   const all = (await getStore().list<Conversation>("conversation", ownerId)).filter((c) => c.agentId === agentId);
   return all.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, limit);
+}
+
+/** One visit's transcript with its presenter, for the owner; `NotFoundError` for a visit the presenter does not have. */
+export async function getConversation(agentId: string, conversationId: string, ownerId: string = LOCAL_OWNER): Promise<{ agent: Agent; conversation: Conversation }> {
+  const agent = await getAgent(agentId, ownerId);
+  const conversation = await getStore().get<Conversation>("conversation", conversationId);
+  if (!conversation || conversation.agentId !== agentId || conversation.ownerId !== ownerId) throw new NotFoundError("Conversation not found");
+  return { agent, conversation };
 }
 
 /**

@@ -5502,6 +5502,51 @@ test("one visit's transcript can be deleted, leaving the others and the visit co
   }
 });
 
+test("one visit's transcript downloads as a text file with the visitor's details and each message", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const res = await page.request.post("/api/agents", { data: { name: `Export ${tag}`, avatarId: "stock_1", collectEmail: true } });
+  const { id } = (await res.json()).agent as { id: string };
+  try {
+    const headers = { "x-forwarded-for": `198.51.100.${Math.floor(Math.random() * 200) + 1}` };
+    const turn = await page.request.post(`/api/talk/${id}`, { data: { messages: [{ role: "user", content: `Is the cabin ${tag} for sale?` }] }, headers });
+    const { conversationId, reply } = (await turn.json()) as { conversationId: string; reply: string };
+    expect((await page.request.post(`/api/talk/${id}/lead`, { data: { conversationId, email: `export-${tag}@example.com`, name: "Rowan" }, headers })).status()).toBe(200);
+    await page.goto("/interactive");
+    await page.getByRole("button", { name: `Transcripts for Export ${tag}` }).click();
+    const visit = page.getByTestId("transcript-list").locator("> li").first();
+    await visit.locator("summary").click();
+    const link = visit.getByRole("link", { name: /^Download \(\.txt\)/ });
+    const download = await page.request.get((await link.getAttribute("href"))!);
+    expect(download.headers()["content-type"]).toContain("text/plain");
+    expect(download.headers()["content-disposition"]).toMatch(new RegExp(`^attachment; filename="conversation-export-${tag}-\\d{4}-\\d{2}-\\d{2}\\.txt"; filename\\*=UTF-8''conversation-Export%20${tag}-`));
+    const text = await download.text();
+    expect(text.split("\n").slice(0, 5).map((l) => l.replace(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC/, "T"))).toEqual([
+      `Conversation with Export ${tag}`,
+      "Started: T",
+      "Last message: T",
+      "Visitor name: Rowan",
+      `Visitor email: export-${tag}@example.com`,
+    ]);
+    expect(text).toContain(`] Visitor: Is the cabin ${tag} for sale?`);
+    // The reply is cut into indented lines of at most 76 characters; folded back, it reads as sent.
+    expect(text).toContain(`] Presenter: `);
+    // Continuation lines open with four spaces and a left-to-right mark, which takes no column.
+    const lines = text.split("\n").map((l) => l.replace("\u200E", ""));
+    expect(lines.every((l) => Array.from(l).length <= 76)).toBe(true);
+    const replyAt = lines.findIndex((l) => l.includes(`] Presenter: `));
+    const folded = [lines[replyAt].split(`] Presenter: `)[1], ...lines.slice(replyAt + 1).filter((l) => l.startsWith("    ")).map((l) => l.trim())].join(" ");
+    expect(folded.replace(/\s+/g, " ")).toBe(reply.replace(/\s+/g, " ").trim());
+    // A name that breaks lines is refused, so it cannot pass for another line of the file.
+    expect((await page.request.post(`/api/talk/${id}/lead`, { data: { conversationId, email: `export-${tag}@example.com`, name: "Rowan\nStarted: never" }, headers })).status()).toBe(400);
+    // The same visit as JSON, and nothing for a visit the presenter does not have.
+    const json = (await (await page.request.get(`/api/agents/${id}/conversations/${conversationId}`)).json()).conversation as { id: string };
+    expect(json.id).toBe(conversationId);
+    expect((await page.request.get(`/api/agents/${id}/conversations/conv_nope?format=txt`)).status()).toBe(404);
+  } finally {
+    await page.request.delete(`/api/agents/${id}`);
+  }
+});
+
 test("a presenter answers from reference notes, in the try-it chat and once shared, and they can be cleared", async ({ page }) => {
   const tag = Date.now().toString(36);
   const notes = `Showings for ${tag} run Saturdays, 10am to 2pm.\nThe lakeside cabin is listed at $450,000.`;

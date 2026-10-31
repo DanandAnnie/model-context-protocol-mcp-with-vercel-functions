@@ -8,7 +8,7 @@ import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { ListSearch, useListSearch } from "@/components/ListSearch";
-import { MAX_CONVERSATIONS_PER_AGENT, MAX_TRANSCRIPT_QUERY, conversationMatches, conversationTexts, mostAsked } from "@/lib/transcripts";
+import { MAX_CONVERSATIONS_PER_AGENT, MAX_TRANSCRIPT_MESSAGES, MAX_TRANSCRIPT_QUERY, conversationMatches, conversationTexts, mostAsked } from "@/lib/transcripts";
 import { useLiveAvatar } from "@/hooks/useLiveAvatar";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { api, formatDate } from "@/lib/client";
@@ -754,7 +754,7 @@ export default function InteractivePage() {
                 </div>
               </div>
               <ErrorBanner message={transcriptErr} />
-              <p className="mt-1 text-xs text-slate-500">Newest first, up to {MAX_CONVERSATIONS_PER_AGENT} visits; each visit keeps its last 40 messages. Visitors are told conversations may be kept.</p>
+              <p className="mt-1 text-xs text-slate-500">Newest first, up to {MAX_CONVERSATIONS_PER_AGENT} visits; each visit keeps its last {MAX_TRANSCRIPT_MESSAGES} messages. Visitors are told conversations may be kept.</p>
               {transcripts === null ? (
                 <p className="mt-3 text-xs text-slate-500">Loading…</p>
               ) : transcripts.length === 0 ? (
@@ -849,8 +849,16 @@ export default function InteractivePage() {
                             </li>
                           ))}
                         </ol>
-                        {canEdit !== false && (
-                          <div className="border-t border-slate-100 px-3 py-2 text-right">
+                        <div className="flex flex-wrap justify-end gap-3 border-t border-slate-100 px-3 py-2">
+                          <a
+                            href={`/api/agents/${encodeURIComponent(transcriptsFor.id)}/conversations/${encodeURIComponent(c.id)}?format=txt`}
+                            download
+                            aria-label={`Download (.txt) of the conversation from ${formatDate(c.startedAt)}`}
+                            className="text-xs text-brand-700 hover:underline"
+                          >
+                            Download (.txt)
+                          </a>
+                          {canEdit !== false && (
                             <button
                               type="button"
                               onClick={() => deleteTranscript(transcriptsFor, c)}
@@ -860,8 +868,8 @@ export default function InteractivePage() {
                             >
                               {deletingVisit === c.id ? "Deleting…" : "Delete this conversation"}
                             </button>
-                          </div>
-                        )}
+                          )}
+                        </div>
                       </details>
                     </li>
                   ))}

@@ -112,8 +112,11 @@ const SCENE_SPEEDS = [0.75, 0.85, 0.9, 1, 1.1, 1.15, 1.25];
 
 /** The title's limit in the video request schema. */
 const MAX_TITLE_CHARS = 120;
-/** What `POST /api/videos/:id/language-copy` answers: one script per scene, and a voice in the language for each voice. */
-type LanguageCopyAnswer = { language: string; scripts: string[]; voices: Record<string, string> };
+/**
+ * What `POST /api/videos/:id/language-copy` answers: per scene its script, on-screen text, and name translated (null
+ * where it has none), and a voice in the language for each voice.
+ */
+type LanguageCopyAnswer = { language: string; scripts: string[]; voices: Record<string, string>; overlays?: (string | null)[]; names?: (string | null)[] };
 /** A deck larger than this is refused before pdf.js reads it. */
 const MAX_PDF_BYTES = 50_000_000;
 /** A PowerPoint file larger than this is refused before it is unpacked (its pictures and video count, though only its text is read). */
@@ -1388,7 +1391,17 @@ function CreateInner() {
   function applyCopy(video: Video, copy?: LanguageCopyAnswer) {
     let copied: Scene[] = video.scenes?.length ? video.scenes.map((sc) => newScene(sc.script, sc.background, sc)) : [newScene(video.script, video.background)];
     if (copy) {
-      copied = copied.map((sc, i) => ({ ...sc, script: copy.scripts[i] ?? sc.script, ...(sc.voiceId ? { voiceId: copy.voices[sc.voiceId] ?? sc.voiceId } : {}) }));
+      copied = copied.map((sc, i) => {
+        const overlay = copy.overlays?.[i];
+        const name = copy.names?.[i];
+        return {
+          ...sc,
+          script: copy.scripts[i] ?? sc.script,
+          ...(sc.voiceId ? { voiceId: copy.voices[sc.voiceId] ?? sc.voiceId } : {}),
+          ...(overlay && sc.overlay ? { overlay: { ...sc.overlay, text: overlay } } : {}),
+          ...(name ? { name } : {}),
+        };
+      });
     }
     // Within the title's limit, the original's words cut to leave room for what marks the copy.
     setTitle(withSuffix(video.title, copy ? ` (${copy.language})` : " (copy)", MAX_TITLE_CHARS));
@@ -1468,7 +1481,7 @@ function CreateInner() {
         applyCopy(copySource, copy);
         const unvoiced = !copy.voices[copySource.voiceId];
         setTranslatedNote(
-          `Translated into ${copy.language}: read each scene's script before you make it; on-screen text and scene names stay as they were.${unvoiced ? ` None of your voices speaks ${copy.language}, so the voice is the original's; choose one that does.` : ""}`,
+          `Translated into ${copy.language}, on-screen text and scene names too: read each scene before you make it.${unvoiced ? ` None of your voices speaks ${copy.language}, so the voice is the original's; choose one that does.` : ""}`,
         );
         setCopySource(null);
         setCopyDone(true);

@@ -5883,7 +5883,7 @@ test("a video is copied into another language: every scene translated, a voice t
     script: undefined,
     voiceId: "stock_voice_2",
     scenes: [
-      { script: "Welcome to twelve Maple Street. [pause 2s] It's a bright home.", background: bg },
+      { script: "Welcome to twelve Maple Street. [pause 2s] It's a bright home.", background: bg, name: "Welcome", overlay: { text: "Open house Saturday", position: "bottom" } },
       { script: "Call Dana to book a showing.", background: bg },
     ],
   });
@@ -5895,21 +5895,25 @@ test("a video is copied into another language: every scene translated, a voice t
   await form.getByRole("button", { name: "Open the copy" }).click();
   await expect(page).toHaveURL(new RegExp(`/create\\?from=${v.id}&language=Spanish$`));
   // The copy waits for its translation, then says what to do with it.
-  await expect(page.getByTestId("language-copy-note")).toHaveText("Translated into Spanish: read each scene's script before you make it; on-screen text and scene names stay as they were.");
+  await expect(page.getByTestId("language-copy-note")).toHaveText("Translated into Spanish, on-screen text and scene names too: read each scene before you make it.");
   await expect(page.locator("input[placeholder='Video title']")).toHaveValue(`${original} (Spanish)`);
   // What is made is the translated copy, spoken by the Spanish voice of the same gender; the original is unchanged.
   const made = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
   await page.getByRole("button", { name: "Generate video" }).click();
-  const body = (await made).postDataJSON() as { title: string; voiceId: string; scenes: Array<{ script: string }> };
+  const body = (await made).postDataJSON() as { title: string; voiceId: string; scenes: Array<{ script: string; name?: string; overlay?: { text: string; position?: string } }> };
   expect(body.title).toBe(`${original} (Spanish)`);
   expect(body.voiceId).toBe("stock_voice_4");
   expect(body.scenes.map((sc) => sc.script)).toEqual(["[Spanish] Welcome to twelve Maple Street. [pause 2s] It's a bright home.", "[Spanish] Call Dana to book a showing."]);
+  // The scene's name and on-screen text are translated with it, the text keeping its place on screen.
+  expect(body.scenes[0].name).toBe("[Spanish] Welcome");
+  expect(body.scenes[0].overlay).toEqual({ text: "[Spanish] Open house Saturday", position: "bottom" });
+  expect(body.scenes[1].name).toBeUndefined();
   const kept = (await (await page.request.get(`/api/videos/${v.id}`)).json()).video;
   expect(kept.scenes[0].script).toBe("Welcome to twelve Maple Street. [pause 2s] It's a bright home.");
   // A language no voice speaks keeps the original voice and says so; one the studio does not know is refused.
   await page.goto(`/create?from=${v.id}&language=Hindi`);
   await expect(page.getByTestId("language-copy-note")).toHaveText(
-    "Translated into Hindi: read each scene's script before you make it; on-screen text and scene names stay as they were. None of your voices speaks Hindi, so the voice is the original's; choose one that does.",
+    "Translated into Hindi, on-screen text and scene names too: read each scene before you make it. None of your voices speaks Hindi, so the voice is the original's; choose one that does.",
   );
   // A copy that cannot be translated is held, with nothing saved for it, and offers the translation again or a plain copy.
   await page.goto(`/create?from=${v.id}&language=Klingonese`);

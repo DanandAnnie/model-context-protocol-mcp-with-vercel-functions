@@ -90,6 +90,69 @@ describe("languageCopy", () => {
     }
   });
 
+  it("translates on-screen text and scene names too, each within its limit", async () => {
+    const v = await createVideo(
+      videoRequestSchema.parse({
+        title: "T",
+        avatarId: STOCK_AVATARS[0].id,
+        voiceId: STOCK_VOICES[0].id,
+        scenes: [
+          { script: "Welcome home.", background: bg, name: "Kitchen", overlay: { text: "Open house Saturday", position: "bottom" } },
+          { script: "Call Dana.", background: bg, name: "A".repeat(38), overlay: { text: "B".repeat(118) } },
+          { script: "Thanks.", background: bg },
+        ],
+      }),
+      OWNER,
+    );
+    const copy = await languageCopy(v.id, { language: "Spanish" }, OWNER);
+    assert.deepEqual(copy.names, ["[Spanish] Kitchen", `[Spanish] ${"A".repeat(30)}`, null]);
+    assert.deepEqual(copy.overlays, ["[Spanish] Open house Saturday", `[Spanish] ${"B".repeat(110)}`, null]);
+    assert.equal(copy.names[1]!.length, 40, "a name is cut to its 40 characters");
+    assert.equal(copy.overlays[1]!.length, 120, "on-screen text is cut to its 120");
+  });
+
+  it("translates labels as labels, keeps those without letters, and survives one it cannot translate", async () => {
+    const v = await createVideo(
+      videoRequestSchema.parse({
+        title: "T",
+        avatarId: STOCK_AVATARS[0].id,
+        voiceId: STOCK_VOICES[0].id,
+        scenes: [
+          { script: "Welcome home.", background: bg, name: "Kitchen", overlay: { text: "$450,000" } },
+          { script: "Call Dana.", background: bg, name: "2026", overlay: { text: "Dana Lee, Listing agent" } },
+        ],
+      }),
+      OWNER,
+    );
+    const mock = new MockScriptProvider();
+    const asked: Array<{ script: string; label?: boolean }> = [];
+    setScriptProvider({
+      ...mock,
+      name: mock.name,
+      describe: mock.describe.bind(mock),
+      titles: mock.titles.bind(mock),
+      generate: mock.generate.bind(mock),
+      plan: mock.plan.bind(mock),
+      chat: mock.chat.bind(mock),
+      revise: async (input) => {
+        asked.push({ script: input.script, label: input.label });
+        if (input.script === "Kitchen") throw new Error("The script writer declined this request.");
+        return mock.revise(input);
+      },
+    });
+    try {
+      const copy = await languageCopy(v.id, { language: "Spanish" }, OWNER);
+      // The price and the year have no letters and are not sent; the name it would not translate keeps its own words.
+      assert.deepEqual(copy.overlays, [null, "[Spanish] Dana Lee, Listing agent"]);
+      assert.deepEqual(copy.names, [null, null]);
+      assert.deepEqual(copy.scripts, ["[Spanish] Welcome home.", "[Spanish] Call Dana."]);
+      assert.deepEqual(asked.filter((a) => a.label).map((a) => a.script).sort(), ["Dana Lee, Listing agent", "Kitchen"]);
+      assert.ok(asked.filter((a) => !a.label).every((a) => !a.script.includes("$")), "scripts are not asked as labels");
+    } finally {
+      setScriptProvider(undefined);
+    }
+  });
+
   it("leaves a scene lip-synced to a recording as it is", async () => {
     const v = await createVideo(videoRequestSchema.parse({ title: "T", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, scenes: [{ script: "Hello there.", background: bg }, { script: "Thanks.", background: bg }] }), OWNER);
     const stored = await getVideo(v.id, OWNER, false);

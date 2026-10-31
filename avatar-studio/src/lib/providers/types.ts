@@ -259,7 +259,7 @@ export interface ScriptProvider {
    * the token `[[T{i+1}]]` in the script stands for (a brand term kept untranslated), so the words around
    * it can agree with it; the caller puts the term back itself.
    */
-  revise(input: { script: string; action: ScriptAction; tone?: string; language?: string; terms?: string[] }): Promise<string>;
+  revise(input: { script: string; action: ScriptAction; tone?: string; language?: string; terms?: string[]; label?: boolean }): Promise<string>;
   /** One conversational turn for the interactive avatar: the presenter answers in character, briefly, for speech. */
   chat(input: { persona: ChatPersona; messages: ChatMessage[] }): Promise<string>;
   /**

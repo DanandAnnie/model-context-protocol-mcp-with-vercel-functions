@@ -4,7 +4,9 @@ import { baseLanguageCode, isSpecialLanguageCode, languageTag } from "../languag
 import { stripPauses } from "../pauses";
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, LimitError, ValidationError } from "../errors";
-import type { Voice } from "../types";
+import { MAX_SCENE_NAME, type Voice } from "../types";
+import { capSceneText } from "../scene-text";
+import { graphemes } from "../text";
 import { reviseScript } from "./scripts";
 import { getVideo } from "./videos";
 import { listVoices } from "./voices";
@@ -49,13 +51,21 @@ export interface LanguageCopy {
   scripts: string[];
   /** For each voice the video speaks in, one of the account's voices that speaks the language, where there is one. */
   voices: Record<string, string>;
+  /** Each scene's on-screen text translated, in order, within its limit; null for a scene without any. */
+  overlays: (string | null)[];
+  /** Each scene's name translated (its tab and chapter title), in order, within its limit; null for a scene without one. */
+  names: (string | null)[];
 }
+
+/** A name cut to the limit as a reader counts it, its spaces collapsed, as the scene schema keeps one. */
+const capName = (raw: string) => graphemes(raw.replace(/\s+/g, " ").trim()).slice(0, MAX_SCENE_NAME).join("").trim();
 
 /**
  * Every scene's words translated into `language` as the editor's Translate does (pause markers kept, the brand kit's
  * terms left as they are and its fixed translations used), and, for each voice the video speaks in, a voice in that
  * language: the same voice when it already speaks it, else one of the same gender, else any. A scene lip-synced to a
- * recording, or with only pauses, is left as it is. Nothing is saved; the editor opens the copy to review.
+ * recording, or with only pauses, keeps its script; on-screen text and scene names are translated too, each cut to its
+ * limit. Nothing is saved; the editor opens the copy to review.
  */
 export async function languageCopy(
   id: string,
@@ -75,18 +85,42 @@ export async function languageCopy(
   if (!allowed()) throw new LimitError("Too many copies translated for now; try again in an hour");
   // A few scenes at a time, in their places: twenty one after another could outlast the request, twenty at once would
   // crowd the script writer. A copy that takes too long is given up with a reason rather than cut off.
+  // On-screen text and scene names go with the scripts, so the copy reads in one language throughout.
   const scripts = scenes.map((sc) => sc.script);
-  const todo = scenes.flatMap((sc, i) => (sc.audioId || !stripPauses(sc.script).trim() ? [] : [i]));
+  const overlays: (string | null)[] = scenes.map(() => null);
+  const names: (string | null)[] = scenes.map(() => null);
+  // A label's translation longer than its place is cut to fit it, as the editor does with pasted text; one cut to
+  // nothing leaves the original standing.
+  type Job = { kind: "script" | "overlay" | "name"; i: number; text: string };
+  const todo: Job[] = scenes.flatMap((sc, i) => {
+    const jobs: Job[] = [];
+    if (!sc.audioId && stripPauses(sc.script).trim()) jobs.push({ kind: "script", i, text: sc.script });
+    // A label without letters ("$450,000", "2026") has nothing to translate and is kept exactly as it is.
+    const overlay = "overlay" in sc ? sc.overlay?.text.trim() : undefined;
+    if (overlay && /\p{L}/u.test(overlay)) jobs.push({ kind: "overlay", i, text: overlay });
+    const name = "name" in sc ? sc.name?.trim() : undefined;
+    if (name && /\p{L}/u.test(name)) jobs.push({ kind: "name", i, text: name });
+    return jobs;
+  });
   const started = Date.now();
   let next = 0;
   // Once one scene fails the copy has failed: the other workers start no more scenes for an answer already given.
   let failed = false;
   const worker = async () => {
     while (!failed && next < todo.length) {
-      const i = todo[next++];
+      const job = todo[next++];
       try {
         if (Date.now() - started > DEADLINE_MS) throw new ValidationError("This video took too long to translate at once; try again, or translate a few scenes in the editor");
-        scripts[i] = await reviseScript({ script: scenes[i].script, action: "translate", language }, ownerId);
+        if (job.kind !== "script") {
+          // A label the script writer will not translate keeps its own words rather than failing the whole copy.
+          const out = await reviseScript({ script: job.text, action: "translate", language, label: true }, ownerId).catch(() => null);
+          if (out === null) continue;
+          if (job.kind === "overlay") overlays[job.i] = capSceneText(out.replace(/\s+/g, " ").trim()) || null;
+          else names[job.i] = capName(out) || null;
+          continue;
+        }
+        scripts[job.i] = await reviseScript({ script: job.text, action: "translate", language }, ownerId);
+
       } catch (e) {
         failed = true;
         throw e;
@@ -100,7 +134,7 @@ export async function languageCopy(
     const match = voiceFor(all, voiceId, code);
     if (match) voices[voiceId] = match;
   }
-  return { language, scripts, voices };
+  return { language, scripts, voices, overlays, names };
 }
 
 /**

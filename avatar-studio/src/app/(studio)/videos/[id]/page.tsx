@@ -878,7 +878,7 @@ export default function VideoDetailPage() {
                         ))}
                       </datalist>
                       <p id="language-copy-hint" className="text-xs text-slate-500">
-                        A copy opens in the editor with every scene&apos;s script translated and a voice that speaks the language, to read before you make it. Clips, silent scenes, on-screen text, and scene names stay as they are.
+                        A copy opens in the editor with each scene's script, on-screen text, and name translated, and a voice that speaks the language, to read before you make it. Clips and silent scenes keep their words.
                       </p>
                       <Button type="submit" className="w-full px-3 py-1.5 text-xs" disabled={!copyLanguage.trim()}>
                         Open the copy

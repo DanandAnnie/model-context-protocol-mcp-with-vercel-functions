@@ -6,11 +6,11 @@ import { languageCopy, languageCopySchema } from "@/lib/services";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-/** Copies one account may have translated an hour: each asks the script writer once per scene. */
+/** Copies one account may have translated an hour: each asks the script writer once per script, on-screen text, and name. */
 const COPIES_PER_OWNER = 20;
 const WINDOW_MS = 60 * 60 * 1000;
 
-/** `{ language }` → `{ language, scripts, voices }`: the video's scenes translated and a voice in that language for each of its voices. Nothing is saved. */
+/** `{ language }` → `{ language, scripts, voices, overlays, names }`: the video's scenes translated and a voice in that language for each of its voices. Nothing is saved. */
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     const owner = await requireEditor();

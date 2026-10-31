@@ -41,6 +41,8 @@ export const reviseSchema = z.object({
   action: z.enum(["shorten", "expand", "tone", "translate", "polish"]),
   tone: z.enum(["friendly", "professional", "formal", "energetic", "calm"]).optional(),
   language: z.string().trim().min(2).max(40).optional(),
+  /** A short on-screen label (a title, a name and role) rather than a script to speak; for translations. */
+  label: z.boolean().optional(),
 });
 
 /**

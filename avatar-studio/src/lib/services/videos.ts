@@ -37,7 +37,7 @@ import { clearHighlights } from "./highlights";
 import { clearCleanups } from "./cleanups";
 import { clearLipsyncs } from "./lipsyncs";
 import { clearMusicJobs } from "./music";
-import { reviseScript } from "./scripts";
+import { reviseScript, writingStyleOf } from "./scripts";
 import { RELINK_MS, RETRY_FINISHED_MS } from "./job-checks";
 import { config } from "../config";
 export { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneNameSchema, sceneTextSchema };
@@ -2085,23 +2085,23 @@ async function wordsToWriteFrom(id: string, ownerId: string, what: string): Prom
 
 /**
  * A draft of a video's share-page description, written by the script provider from its title and what the presenter
- * says (pause markers left out); nothing is saved, the editor reviews it first. The draft is one paragraph, cut at a
- * word to fit `MAX_DESCRIPTION`.
+ * says (pause markers left out), in the brand kit's writing style; nothing is saved, the editor reviews it first. The
+ * draft is one paragraph, cut at a word to fit `MAX_DESCRIPTION`.
  */
 export async function describeVideo(id: string, ownerId: string = LOCAL_OWNER): Promise<string> {
   const { video, script } = await wordsToWriteFrom(id, ownerId, "describe");
-  const draft = draftDescription(await getScriptProvider().describe({ title: video.title, script }));
+  const draft = draftDescription(await getScriptProvider().describe({ title: video.title, script, ...(await writingStyleOf(ownerId)) }));
   if (!draft) throw new Error("The script writer returned no description. Try again.");
   return draft;
 }
 
 /**
- * Titles for a video the script provider suggests from its current title and what the presenter says; nothing is
- * saved, the editor picks one and saves it as a rename. Refused as `describeVideo` is.
+ * Titles for a video the script provider suggests from its current title and what the presenter says, in the brand
+ * kit's writing style; nothing is saved, the editor picks one and saves it as a rename. Refused as `describeVideo` is.
  */
 export async function suggestTitles(id: string, ownerId: string = LOCAL_OWNER): Promise<string[]> {
   const { video, script } = await wordsToWriteFrom(id, ownerId, "title");
-  const titles = titleSuggestions(await getScriptProvider().titles({ title: video.title, script }), video.title);
+  const titles = titleSuggestions(await getScriptProvider().titles({ title: video.title, script, ...(await writingStyleOf(ownerId)) }), video.title);
   if (!titles.length) throw new Error("The script writer returned no titles. Try again.");
   return titles;
 }

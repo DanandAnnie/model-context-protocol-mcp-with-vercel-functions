@@ -529,7 +529,7 @@ export default function BrandPage() {
           <Field
             label="Writing style"
             hintId="writing-style-hint"
-            hint="How your brand sounds, in a few sentences: words to use or avoid, how formal, who you speak to. Claude follows it when it writes a script, plans a video in the Video Agent (not one HeyGen's agent directs), or shortens, expands, polishes, or changes the tone of one (a tone you pick when changing the tone wins); translations keep the voice of the script."
+            hint="How your brand sounds, in a few sentences: words to use or avoid, how formal, who you speak to. Claude follows it when it writes a script, plans a video in the Video Agent (not one HeyGen's agent directs), or shortens, expands, polishes, or changes the tone of one (a tone you pick when changing the tone wins), and when it drafts a video's share-page description or title ideas; translations keep the voice of the script."
           >
             <textarea
               aria-label="Writing style"

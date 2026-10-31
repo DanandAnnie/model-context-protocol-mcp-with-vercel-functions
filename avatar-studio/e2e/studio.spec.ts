@@ -977,6 +977,7 @@ test("the brand kit's writing style is set on the brand page, counted as it is t
     await field.fill(`  ${style}  `);
     await expect(page.locator("#writing-style-count")).toHaveText(`${style.length + 4} of 600 characters`);
     await expect(page.locator("#writing-style-hint")).toContainText("not one HeyGen's agent directs");
+    await expect(page.locator("#writing-style-hint")).toContainText("share-page description or title ideas");
     // At the limit the count says so, and a screen reader hears it once.
     await field.fill("a".repeat(600));
     await expect(page.locator("#writing-style-count")).toContainText("Limit reached");

@@ -267,12 +267,12 @@ export interface ScriptProvider {
    * The short description shown under a video on its share page and in link previews, from its title and what the
    * presenter says: one to three plain sentences in the script's language, from the script's facts only.
    */
-  describe(input: { title: string; script: string }): Promise<string>;
+  describe(input: { title: string; script: string; style?: string }): Promise<string>;
   /**
    * Up to three titles for a video from its current title and what the presenter says, one per entry, in the script's
    * language and from its facts only; the caller tidies and limits them.
    */
-  titles(input: { title: string; script: string }): Promise<string[]>;
+  titles(input: { title: string; script: string; style?: string }): Promise<string[]>;
   /** A whole video from one prompt (the Video Agent): a title, a frame orientation, and the scenes in order. */
   plan(input: { prompt: string; lengthSec: number; language: string; source?: string; style?: string }): Promise<VideoPlan>;
 }

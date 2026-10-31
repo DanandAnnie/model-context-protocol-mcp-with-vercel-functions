@@ -11,6 +11,7 @@ import { DaySparkline } from "@/components/ViewSparkline";
 import { ListSearch, useListSearch } from "@/components/ListSearch";
 import { MAX_CONVERSATIONS_PER_AGENT, MAX_TRANSCRIPT_MESSAGES, MAX_TRANSCRIPT_QUERY, conversationMatches, conversationTexts, mostAsked } from "@/lib/transcripts";
 import { useLiveAvatar } from "@/hooks/useLiveAvatar";
+import { hasNewVisits, markVisitsSeen, mergeSeenVisits, parseSeenVisits, seedSeenVisits, type SeenVisits } from "@/lib/seen-visits";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ApiError, api, formatDate } from "@/lib/client";
 import { MAX_AGENT_NOTES, MAX_VISIT_NOTE, type Agent, type Avatar, type BrandKit, type Conversation, type ProviderStatus, type Voice } from "@/lib/types";
@@ -30,6 +31,27 @@ type FormState = {
   brandStyle: boolean;
 };
 
+/** Where this browser keeps what it has shown of each presenter's visits (`SeenVisits`), for the "New visits" mark. */
+const SEEN_KEY = "avatar-studio:visits-seen";
+
+function readSeen(): SeenVisits | null {
+  try {
+    return parseSeenVisits(window.localStorage.getItem(SEEN_KEY));
+  } catch {
+    // Storage blocked: nothing can be remembered between loads, so no row is marked.
+    return null;
+  }
+}
+
+/** Saves the record, merged with what another tab may have saved meanwhile. */
+function writeSeen(seen: SeenVisits) {
+  try {
+    window.localStorage.setItem(SEEN_KEY, JSON.stringify(mergeSeenVisits(parseSeenVisits(window.localStorage.getItem(SEEN_KEY)), seen)));
+  } catch {
+    // Storage full or blocked: what was opened is remembered only until the page is left.
+  }
+}
+
 const DEFAULT_INSTRUCTIONS = "You represent a real estate team. Help visitors with open houses, listings, and how to book a showing. Be warm and concise.";
 
 /**
@@ -43,6 +65,35 @@ export default function InteractivePage() {
   const { data: voiceData } = useApi<{ voices: Voice[] }>("/api/voices");
   const { data: status } = useApi<ProviderStatus>("/api/status");
   const { data: agentData, refetch: refetchAgents } = useApi<{ agents: Agent[]; shareOrigin?: string }>("/api/agents");
+  /**
+   * What this browser has shown of each presenter's visits, so a row says "New visits" once one starts after its
+   * transcripts were last opened here; the first time a workspace's presenters are listed, what they had counts as seen.
+   * `null` until read, and for good when storage is blocked.
+   */
+  const [seen, setSeen] = useState<SeenVisits | null>(null);
+  const storageRead = useRef(false);
+  useEffect(() => {
+    if (!agentData) return;
+    let record = seen;
+    if (!storageRead.current) {
+      storageRead.current = true;
+      record = readSeen();
+    }
+    if (!record) return;
+    const seeded = seedSeenVisits(record, agentData.agents);
+    if (seeded) writeSeen(seeded);
+    if (seeded || record !== seen) setSeen(seeded ?? record);
+  }, [agentData, seen]);
+  /** Called once a presenter's transcripts are on the page, with the newest visit among them. */
+  function markSeen(agent: Agent, conversations: Conversation[]) {
+    const at = [agent.lastVisitAt ?? "", ...conversations.map((c) => c.startedAt)].reduce((a, b) => (b > a ? b : a), "");
+    setSeen((now) => {
+      if (!now) return now;
+      const next = markVisitsSeen(now, agent.id, at);
+      if (next !== now) writeSeen(next);
+      return next;
+    });
+  }
   // Public links use the server's public origin (APP_URL when set), not whichever host this tab is on.
   const linkOrigin = () => agentData?.shareOrigin || window.location.origin;
   const [avatar, setAvatar] = useState<Avatar | null>(null);
@@ -144,7 +195,9 @@ export default function InteractivePage() {
     setSaveErr(null);
     try {
       const { conversations } = await api<{ conversations: Conversation[] }>(`/api/agents/${agent.id}/conversations`);
-      if (load === transcriptsLoad.current) setTranscripts(conversations);
+      if (load !== transcriptsLoad.current) return;
+      setTranscripts(conversations);
+      markSeen(agent, conversations);
     } catch (e) {
       if (load !== transcriptsLoad.current) return;
       setSaveErr(e instanceof Error ? e.message : "Could not load transcripts");
@@ -797,6 +850,11 @@ export default function InteractivePage() {
                       {a.conversations} {a.conversations === 1 ? "conversation" : "conversations"} · {a.messages} {a.messages === 1 ? "question" : "questions"} · {a.isPublic ? "link on" : "link off"} · {formatDate(a.createdAt)}
                       {a.notes && <> · has notes</>}
                       {a.knowledgeUrl && <> · knows {(() => { try { return new URL(a.knowledgeUrl).hostname; } catch { return "a page"; } })()}</>}
+                      {seen && hasNewVisits(seen, a) && (
+                        <span className="ml-1.5 rounded bg-brand-100 px-1.5 py-0.5 font-medium text-brand-800" data-testid="new-visits">
+                          New visits
+                        </span>
+                      )}
                     </div>
                     {/* Presenters from before visits were counted per day have no counts to draw yet. */}
                     {a.conversations > 0 && a.visitsByDay && (

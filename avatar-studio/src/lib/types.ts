@@ -1401,6 +1401,8 @@ export interface Agent {
   conversations: number;
   /** Visits started per UTC day ("YYYY-MM-DD" → count), the last 90 days; kept when transcripts are deleted. */
   visitsByDay?: Record<string, number>;
+  /** When the newest visit started, so the owner's page can show visits made since its transcripts were last opened. */
+  lastVisitAt?: string;
   messages: number;
   createdAt: string;
   updatedAt: string;

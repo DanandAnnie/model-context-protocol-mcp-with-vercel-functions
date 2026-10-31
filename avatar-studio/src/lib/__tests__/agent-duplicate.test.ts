@@ -29,7 +29,7 @@ describe("duplicating a saved presenter", () => {
       brandStyle: true,
     }), OWNER);
     // A page it read, and visits it had, as a saved presenter would.
-    await getStore().put("agent", { ...agent, knowledgeUrl: "https://example.com/about", knowledge: "We sell homes.", knowledgeUpdatedAt: agent.createdAt, conversations: 4, visitsByDay: { "2026-10-30": 4 }, messages: 9 } satisfies Agent);
+    await getStore().put("agent", { ...agent, knowledgeUrl: "https://example.com/about", knowledge: "We sell homes.", knowledgeUpdatedAt: agent.createdAt, conversations: 4, visitsByDay: { "2026-10-30": 4 }, lastVisitAt: "2026-10-30T12:00:00.000Z", messages: 9 } satisfies Agent);
     const visit: Conversation = { id: "conv_dup1", ownerId: OWNER, agentId: agent.id, messages: [{ role: "user", content: "Hi", at: agent.createdAt }], startedAt: agent.createdAt, updatedAt: agent.createdAt };
     await getStore().put("conversation", visit);
     const copy = await duplicateAgent(agent.id, OWNER);
@@ -42,6 +42,7 @@ describe("duplicating a saved presenter", () => {
     assert.equal(copy.isPublic, false);
     assert.deepEqual({ conversations: copy.conversations, messages: copy.messages }, { conversations: 0, messages: 0 });
     assert.equal(copy.visitsByDay, undefined, "a copy starts with no visits");
+    assert.equal(copy.lastVisitAt, undefined);
     assert.deepEqual(
       [copy.avatarId, copy.voiceId, copy.avatarName, copy.instructions, copy.greeting, copy.starters, copy.language, copy.collectEmail, copy.brandStyle, copy.knowledgeUrl, copy.knowledge],
       [STOCK_AVATARS[1].id, STOCK_VOICES[1].id, agent.avatarName, "Answer as Dana.", "Hi there.", ["Open houses?"], "Spanish", true, true, "https://example.com/about", "We sell homes."],

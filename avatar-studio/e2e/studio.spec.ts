@@ -5648,6 +5648,45 @@ test("a visit can be marked followed up, listed apart, and carried in the downlo
   }
 });
 
+test("a presenter's row says when visits came in since its transcripts were last opened in this browser", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const res = await page.request.post("/api/agents", { data: { name: `Fresh ${tag}`, avatarId: "stock_1" } });
+  const { id } = (await res.json()).agent as { id: string };
+  const headers = { "x-forwarded-for": `198.51.100.${Math.floor(Math.random() * 200) + 1}` };
+  const visit = async (content: string, conversationId?: string) => {
+    const turn = await page.request.post(`/api/talk/${id}`, { data: { messages: [{ role: "user", content }], ...(conversationId ? { conversationId } : {}) }, headers });
+    expect(turn.status()).toBe(200);
+    return ((await turn.json()) as { conversationId: string }).conversationId;
+  };
+  try {
+    await page.goto("/interactive");
+    const row = page.getByTestId("agent-list").locator("li", { hasText: `Fresh ${tag}` });
+    await expect(row).toContainText("0 conversations");
+    await expect(row.getByTestId("new-visits")).toHaveCount(0);
+    // A visit after this browser first saw the presenter is new until its transcripts are opened.
+    const first = await visit(`First ${tag}`);
+    await page.reload();
+    await expect(row.getByTestId("new-visits")).toHaveText("New visits");
+    await page.getByRole("button", { name: `Transcripts for Fresh ${tag}` }).click();
+    await expect(page.getByTestId("transcript-list").locator("> li")).toHaveCount(1);
+    await expect(row.getByTestId("new-visits")).toHaveCount(0);
+    // Remembered across loads; a later visit is new again, while a turn in a visit already seen is not.
+    await visit(`More ${tag}`, first);
+    await page.reload();
+    await expect(row).toContainText("1 conversation · 2 questions");
+    await expect(row.getByTestId("new-visits")).toHaveCount(0);
+    await visit(`Second ${tag}`);
+    await page.reload();
+    await expect(row.getByTestId("new-visits")).toBeVisible();
+    // With storage blocked after the page loaded, opening the transcripts still clears the badge for this load.
+    await page.evaluate(() => Object.defineProperty(window, "localStorage", { get: () => { throw new Error("blocked"); } }));
+    await page.getByRole("button", { name: `Transcripts for Fresh ${tag}` }).click();
+    await expect(row.getByTestId("new-visits")).toHaveCount(0);
+  } finally {
+    await page.request.delete(`/api/agents/${id}`);
+  }
+});
+
 test("a visit keeps a private note, found by the search and carried in both downloads", async ({ page }) => {
   const tag = Date.now().toString(36);
   const res = await page.request.post("/api/agents", { data: { name: `Noted ${tag}`, avatarId: "stock_1" } });

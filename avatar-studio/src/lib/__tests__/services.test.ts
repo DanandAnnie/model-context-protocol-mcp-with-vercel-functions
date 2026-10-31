@@ -2666,6 +2666,9 @@ describe("shared agents", () => {
     assert.deepEqual(counted.visitsByDay, { [started.slice(0, 10)]: 1 });
     assert.equal("visitsByDay" in (await publicAgent(agent.id)), false, "the counts stay with the owner");
     assert.equal(counted.messages, 2);
+    // The newest visit's start is kept for the owner's page, and a continued visit does not move it.
+    assert.equal(counted.lastVisitAt, started);
+    assert.equal("lastVisitAt" in (await publicAgent(agent.id)), false);
 
     // Transcripts: owner-only, one per visit, capped per visit, cleared on demand and on delete.
     const transcripts = await listConversations(agent.id, "u1");

@@ -321,7 +321,8 @@ export async function talkToAgent(id: string, input: z.infer<typeof talkSchema>)
       ...current,
       conversations: current.conversations + (isNew ? 1 : 0),
       // Counted on the day the visit started, the same instant its transcript is stamped with.
-      ...(isNew ? { visitsByDay: bumpViewsByDay(current.visitsByDay, Date.parse(now)) } : {}),
+      // The newest visit's start; a slower write for an earlier visit does not move it back.
+      ...(isNew ? { visitsByDay: bumpViewsByDay(current.visitsByDay, Date.parse(now)), lastVisitAt: current.lastVisitAt && current.lastVisitAt > now ? current.lastVisitAt : now } : {}),
       messages: current.messages + 1,
     });
     if (isNew) await pruneConversations(agent);

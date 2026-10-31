@@ -301,6 +301,8 @@ export interface ChatPersona {
   /** What the presenter knows and how it should behave, written by the owner; a knowledge page, when read, follows `KNOWLEDGE_MARKER`. */
   instructions: string;
   language: string;
+  /** The brand kit's writing style, for how replies are worded, when the owner turned it on for the presenter. */
+  style?: string;
 }
 
 /** Marks where the owner's instructions end and a knowledge page's text begins in `ChatPersona.instructions`. */

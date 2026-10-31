@@ -1387,6 +1387,8 @@ export interface Agent {
   isPublic: boolean;
   /** Ask visitors for an email after the first reply. */
   collectEmail?: boolean;
+  /** Word replies in the brand kit's writing style (the kit's as it is at each turn); off when absent. */
+  brandStyle?: boolean;
   /** Visitor conversations started (first message of a session). */
   conversations: number;
   messages: number;

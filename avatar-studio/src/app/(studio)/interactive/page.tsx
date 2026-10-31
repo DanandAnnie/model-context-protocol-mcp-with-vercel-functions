@@ -32,6 +32,7 @@ export default function InteractivePage() {
   const [language, setLanguage] = useState("English");
   const [agentName, setAgentName] = useState("");
   const [collectEmail, setCollectEmail] = useState(false);
+  const [brandStyle, setBrandStyle] = useState(false);
   const [knowledgeUrl, setKnowledgeUrl] = useState("");
   const [greeting, setGreeting] = useState("");
   const [starters, setStarters] = useState("");
@@ -95,7 +96,7 @@ export default function InteractivePage() {
 
   async function ask(messages: ChatTurn[]) {
     if (!avatar) throw new Error("Pick a presenter first");
-    const { reply } = await api<{ reply: string }>("/api/chat", { method: "POST", body: JSON.stringify({ avatarId: avatar.id, instructions, language, messages }) });
+    const { reply } = await api<{ reply: string }>("/api/chat", { method: "POST", body: JSON.stringify({ avatarId: avatar.id, instructions, language, messages, ...(brandStyle ? { brandStyle } : {}) }) });
     return reply;
   }
 
@@ -111,7 +112,7 @@ export default function InteractivePage() {
     try {
       const { agent } = await api<{ agent: Agent }>("/api/agents", {
         method: "POST",
-        body: JSON.stringify({ name: agentName.trim() || avatar.name, avatarId: avatar.id, voiceId: voice?.id, instructions, language, isPublic: true, collectEmail, ...(greeting.trim() ? { greeting: greeting.trim() } : {}), ...(starterList.length ? { starters: starterList } : {}), ...(knowledgeUrl.trim() ? { knowledgeUrl: knowledgeUrl.trim() } : {}) }),
+        body: JSON.stringify({ name: agentName.trim() || avatar.name, avatarId: avatar.id, voiceId: voice?.id, instructions, language, isPublic: true, collectEmail, brandStyle, ...(greeting.trim() ? { greeting: greeting.trim() } : {}), ...(starterList.length ? { starters: starterList } : {}), ...(knowledgeUrl.trim() ? { knowledgeUrl: knowledgeUrl.trim() } : {}) }),
       });
       setSavedLink(`${linkOrigin()}/talk/${agent.id}`);
       setAgentName("");
@@ -150,7 +151,7 @@ export default function InteractivePage() {
     }
   }
 
-  async function patchAgent(agent: Agent, patch: Partial<Pick<Agent, "isPublic" | "collectEmail">>) {
+  async function patchAgent(agent: Agent, patch: Partial<Pick<Agent, "isPublic" | "collectEmail" | "brandStyle">>) {
     setSaveErr(null);
     try {
       await api(`/api/agents/${agent.id}`, { method: "PATCH", body: JSON.stringify(patch) });
@@ -242,6 +243,20 @@ export default function InteractivePage() {
               <input type="checkbox" checked={collectEmail} onChange={(e) => setCollectEmail(e.target.checked)} className="h-4 w-4 accent-brand-600" />
               Ask visitors for an email after the first reply (sent to your webhook as <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">lead.captured</code>)
             </label>
+            <label className="mt-2 flex items-center gap-2 text-xs text-slate-700">
+              <input type="checkbox" checked={brandStyle} onChange={(e) => setBrandStyle(e.target.checked)} aria-describedby="agent-brand-style-hint" className="h-4 w-4 accent-brand-600" />
+              Word replies in the brand kit&apos;s writing style
+            </label>
+            {/* Outside the label, so the hint is read once, as the box's description; said only once the kit is known. */}
+            <p id="agent-brand-style-hint" className="ml-6 mt-0.5 text-xs text-slate-500">
+              {!brandData
+                ? ""
+                : brandData.brand?.writingStyle
+                  ? status?.script === "mock"
+                    ? "The style on the Brand page, as it is at each reply, once Claude writes the replies (the demo writer does not follow it)."
+                    : "The style on the Brand page, as it is at each reply; this chat tries it too."
+                  : "The brand kit has no writing style yet; add one on the Brand page and replies follow it."}
+            </p>
             {savedLink && (
               <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900" data-testid="agent-link">
                 <code className="break-all">{savedLink}</code>
@@ -290,6 +305,16 @@ export default function InteractivePage() {
                     </Button>
                     <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => patchAgent(a, { collectEmail: !a.collectEmail })} aria-label={`${a.collectEmail ? "Stop collecting" : "Collect"} emails for ${a.name}`} title="Ask visitors for an email after the first reply">
                       {a.collectEmail ? "Emails on" : "Emails off"}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="px-2.5 py-1 text-xs"
+                      onClick={() => patchAgent(a, { brandStyle: !a.brandStyle })}
+                      aria-label={`Brand style for ${a.name}`}
+                      aria-pressed={!!a.brandStyle}
+                      title="Word replies in the brand kit's writing style"
+                    >
+                      {a.brandStyle ? "Brand style on" : "Brand style off"}
                     </Button>
                     <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => remove(a)} aria-label={`Delete ${a.name}`}>
                       <Trash2 className="h-3.5 w-3.5" />

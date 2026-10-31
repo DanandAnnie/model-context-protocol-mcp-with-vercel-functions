@@ -43,6 +43,8 @@ const agentFields = {
   isPublic: z.boolean(),
   /** Ask visitors for an email after the first reply. */
   collectEmail: z.boolean(),
+  /** Word replies in the brand kit's writing style. */
+  brandStyle: z.boolean(),
 };
 
 export const agentSchema = z.object({
@@ -54,6 +56,7 @@ export const agentSchema = z.object({
   language: agentFields.language.default("English"),
   isPublic: agentFields.isPublic.default(true),
   collectEmail: agentFields.collectEmail.default(false),
+  brandStyle: agentFields.brandStyle.default(false),
 });
 
 /** Any subset of the fields, none defaulted; `knowledgeUrl: null` forgets the page, a URL (the same one included) reads it again. */
@@ -201,7 +204,10 @@ export async function talkToAgent(id: string, input: z.infer<typeof talkSchema>)
   if (!agent || !agent.isPublic) throw new NotFoundError("This presenter is not available");
   const last = input.messages[input.messages.length - 1];
   if (last.role !== "user") throw new ValidationError("The last message must be from the visitor");
-  const reply = await getScriptProvider().chat({ persona: { name: agent.avatarName, instructions: withKnowledge(agent), language: agent.language }, messages: input.messages });
+  // The kit's style as it is now, so an edit on the Brand page reaches a presenter already shared; the style only words
+  // the reply, so a kit that cannot be read leaves it out rather than failing the visitor's turn.
+  const style = agent.brandStyle ? (await getBrandKit(agent.ownerId).catch(() => null))?.writingStyle : undefined;
+  const reply = await getScriptProvider().chat({ persona: { name: agent.avatarName, instructions: withKnowledge(agent), language: agent.language, ...(style ? { style } : {}) }, messages: input.messages });
 
   const now = nowIso();
   let conversation = input.conversationId ? await getStore().get<Conversation>("conversation", input.conversationId) : null;

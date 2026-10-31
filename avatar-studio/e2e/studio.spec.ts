@@ -5221,6 +5221,46 @@ test("the microphone button is hidden when the browser cannot transcribe", async
   await expect(page.getByRole("button", { name: "Speak a question" })).toHaveCount(0);
 });
 
+test("a presenter can word its replies in the brand kit's writing style, switched on when saved or from its row", async ({ page }) => {
+  const before = (await (await page.request.get("/api/brand")).json()).brand as Record<string, unknown> | null;
+  const tag = Date.now().toString(36);
+  let made: string | undefined;
+  try {
+    await page.request.put("/api/brand", { data: { name: "Acme", primaryColor: "#0f766e" } });
+    await page.goto("/interactive");
+    const box = page.getByRole("checkbox", { name: "Word replies in the brand kit's writing style", exact: true });
+    await expect(box).not.toBeChecked();
+    await expect(page.locator("#agent-brand-style-hint")).toHaveText("The brand kit has no writing style yet; add one on the Brand page and replies follow it.");
+    await page.request.put("/api/brand", { data: { name: "Acme", primaryColor: "#0f766e", writingStyle: "Warm and plain." } });
+    await page.reload();
+    // The demo writer does not follow a style, and the hint says so.
+    await expect(page.locator("#agent-brand-style-hint")).toHaveText("The style on the Brand page, as it is at each reply, once Claude writes the replies (the demo writer does not follow it).");
+    // The page's own chat sends the switch with its question.
+    await box.check();
+    const asked = page.waitForRequest((r) => r.url().endsWith("/api/chat") && r.method() === "POST");
+    await page.getByLabel("Your message").fill("Hello");
+    await page.getByLabel("Your message").press("Enter");
+    expect(JSON.parse((await asked).postData() ?? "{}").brandStyle).toBe(true);
+    await page.getByLabel("Agent name").fill(`Styled ${tag}`);
+    await page.getByRole("button", { name: "Save and get link" }).click();
+    made = (await page.getByTestId("agent-link").locator("code").innerText()).trim().split("/talk/")[1];
+    const stored = async () => ((await (await page.request.get("/api/agents")).json()).agents as { id: string; brandStyle?: boolean }[]).find((a) => a.id === made)?.brandStyle;
+    expect(await stored()).toBe(true);
+    // Each saved presenter has its own switch.
+    const toggle = page.getByRole("button", { name: `Brand style for Styled ${tag}` });
+    await expect(toggle).toHaveText("Brand style on");
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await toggle.click();
+    await expect(toggle).toHaveText("Brand style off");
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(await stored()).toBe(false);
+  } finally {
+    if (made) await page.request.delete(`/api/agents/${made}`);
+    const restored = before ? await page.request.put("/api/brand", { data: before }) : await page.request.delete("/api/brand");
+    expect(restored.ok()).toBe(true);
+  }
+});
+
 test("website embed script adds a launcher that opens the talk page", async ({ page }) => {
   const agent = (await (await page.request.post("/api/agents", { data: { name: "Embed agent", avatarId: "stock_2" } })).json()).agent as { id: string };
   try {

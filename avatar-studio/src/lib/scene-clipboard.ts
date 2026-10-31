@@ -2,6 +2,7 @@
 // reaches the editor in another tab, and it names the space it came from: its pictures, clips, and recordings belong
 // to that space, so it is pasted there only. Pure, so the editor and the tests share it.
 import type { Background, Scene } from "./types";
+import { sceneName } from "./scene-text";
 import { MAX_SCRIPT_CHARS } from "./script-import";
 
 export const SCENE_CLIPBOARD_KEY = "avatar-studio:scene-clipboard";
@@ -56,6 +57,8 @@ export function parseCopiedScene(raw: string | null): CopiedScene | null {
   const background = asBackground(sc.background);
   if (!str(sc.script, MAX_SCRIPT_CHARS) || !background) return null;
   const out: Scene = { script: sc.script, background };
+  const name = sceneName(sc.name);
+  if (name) out.name = name;
   const avatarId = id(sc.avatarId);
   const voiceId = id(sc.voiceId);
   const audioId = id(sc.audioId);

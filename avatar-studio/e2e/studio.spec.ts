@@ -5552,6 +5552,50 @@ test("on-screen text survives a reload, a voice that is gone, and warns when it 
   await expect.poll(() => field.evaluate((el: HTMLInputElement) => el.selectionStart)).toBe(60);
 });
 
+test("a scene's name is shown on its tab, kept with the draft, and titles its chapter", async ({ page }) => {
+  await page.reload();
+  // A video of one scene has no chapters, so there is nothing to name.
+  await expect(page.getByLabel(/^Scene( \d+)? name$/)).toHaveCount(0);
+  await page.getByRole("textbox", { name: "Script", exact: true }).fill("Welcome to twelve Maple Street.");
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
+  await page.getByRole("textbox", { name: "Scene 2 script" }).fill("The kitchen was redone last spring.");
+  const name = page.getByLabel("Scene 2 name", { exact: true });
+  await name.fill("  The   kitchen ");
+  await expect(page.getByRole("button", { name: /^Scene 2, The kitchen, about / })).toBeVisible();
+  await expect(page.getByTestId("scene-name-label")).toHaveText("The kitchen");
+  // Kept with the draft as typed, and read back with its spaces collapsed.
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("avatar-studio:draft") ?? "")).toContain("The   kitchen");
+  await page.reload();
+  await page.getByRole("button", { name: /^Scene 2, The kitchen,/ }).click();
+  await expect(page.getByLabel("Scene 2 name", { exact: true })).toHaveValue("The kitchen");
+  await page.getByRole("button", { name: /^Scene 1,/ }).click();
+  await expect(page.getByLabel("Scene 1 name", { exact: true })).toHaveValue("");
+  // Down to one scene, a named one keeps its field until the name is cleared.
+  page.once("dialog", (d) => void d.accept());
+  await page.getByRole("button", { name: "Remove scene" }).click();
+  await expect(page.getByLabel("Scene name", { exact: true })).toHaveValue("The kitchen");
+  await page.getByLabel("Scene name", { exact: true }).fill("");
+  await expect(page.getByLabel(/^Scene( \d+)? name$/)).toHaveCount(0);
+  await page.evaluate(() => localStorage.removeItem("avatar-studio:draft"));
+
+  // A name titles the scene's chapter, before its on-screen text and its words.
+  const bg = { type: "color", value: "#0f172a" };
+  const v = await createVideoViaApi(page, `Named scenes ${Date.now().toString(36)}`, {
+    script: undefined,
+    scenes: [
+      { name: "Welcome", script: "Welcome to twelve Maple Street, a bright family home on a quiet road.", background: bg, overlay: { text: "12 Maple Street" } },
+      { name: "The kitchen", script: "The kitchen was redone last spring with quartz counters and an island.", background: bg },
+      { script: "Call Dana to book a showing this weekend.", background: bg },
+    ],
+  });
+  await page.goto(`/videos/${v.id}`);
+  const list = page.getByTestId("video-chapters");
+  await expect(list.getByRole("listitem")).toHaveCount(3);
+  await expect(list.getByRole("listitem").nth(0)).toHaveText("0:00Welcome");
+  await expect(list.getByRole("listitem").nth(1)).toHaveText(/^\d+:\d\dThe kitchen$/);
+  await expect(list.getByRole("listitem").nth(2)).toContainText("Call Dana to book a showing this weekend.");
+});
+
 test("a multi-scene video has chapters: the share page jumps to a scene and the video page copies them for YouTube", async ({ page, context }) => {
   const bg = { type: "color", value: "#0f172a" };
   const v = await createVideoViaApi(page, `Chapters ${Date.now().toString(36)}`, {

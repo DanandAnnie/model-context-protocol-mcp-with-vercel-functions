@@ -1,8 +1,8 @@
 // On-screen text as the editor keeps it: its length limit, counted as stored (the characters a reader sees once the
 // spaces are collapsed) and enforced on an edit by cutting only what was typed or pasted; the colours offered for it;
-// and its style (position, size, and colour) given to other scenes.
+// its style (position, size, and colour) given to other scenes; and a scene's name.
 import { graphemes } from "./text";
-import { MAX_SCENE_TEXT, type SceneText } from "./types";
+import { MAX_SCENE_NAME, MAX_SCENE_TEXT, type SceneText } from "./types";
 
 /** On-screen text's length as stored: the characters a reader sees once the spaces are collapsed. */
 export const sceneTextLength = (raw: string) => graphemes(raw.replace(/\s+/g, " ").trim()).length;
@@ -90,4 +90,18 @@ export function textStyleTargets(overlays: readonly (SceneText | undefined)[], f
   const style = overlays[from];
   if (!style?.text.trim()) return [];
   return overlays.flatMap((o, i) => (i !== from && o?.text.trim() && !sameTextStyle(o, style) ? [i] : []));
+}
+
+/** A name being typed, cut to MAX_SCENE_NAME characters as a reader counts them (a flag or an emoji with a skin tone is one), spaces kept. */
+export const capSceneName = (raw: string) => {
+  const chars = graphemes(raw);
+  return chars.length <= MAX_SCENE_NAME ? raw : chars.slice(0, MAX_SCENE_NAME).join("");
+};
+/**
+ * A scene's name as it is kept: its spaces collapsed and trimmed, cut to MAX_SCENE_NAME characters (never inside an
+ * emoji), or undefined for anything blank or not text (a name from a draft, a copy, or a template another build saved).
+ */
+export function sceneName(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  return capSceneName(raw.replace(/\s+/g, " ").trim()).trim() || undefined;
 }

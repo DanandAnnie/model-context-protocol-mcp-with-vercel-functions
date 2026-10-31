@@ -2,7 +2,7 @@
 // imports no service, so any service may import it without creating a cycle.
 import { z } from "zod";
 import { graphemes } from "../text";
-import { AVATAR_ENGINES, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, VOICE_ACCENTS, BACKGROUND_FITS, CAPTION_FONTS, CAPTION_POSITIONS, CAPTION_LOOKS, CAPTION_SIZES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SIZES, VOICE_EMOTIONS, backdropIdOf, footageIdOf } from "../types";
+import { AVATAR_ENGINES, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, VOICE_ACCENTS, BACKGROUND_FITS, CAPTION_FONTS, CAPTION_POSITIONS, CAPTION_LOOKS, CAPTION_SIZES, MAX_SCENE_NAME, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SIZES, VOICE_EMOTIONS, backdropIdOf, footageIdOf } from "../types";
 
 export const backgroundSchema = z
   .object({ type: z.enum(["color", "image", "video"]), value: z.string().min(1).max(2000, "A background must be a colour or a URL of at most 2000 characters"), fit: z.enum(BACKGROUND_FITS).optional() })
@@ -57,6 +57,13 @@ export const sceneLayoutSchema = z
   .object({ scale: z.number().min(0.5).max(1.5), x: z.number().min(-1).max(1), y: z.number().min(-1).max(1), framing: z.enum(PRESENTER_FRAMINGS).optional() })
   // The full frame is the default, stored as absent like the default look of a caption.
   .transform(({ framing, ...rest }) => (framing && framing !== "full" ? { ...rest, framing } : rest));
+/** A scene's name: its spaces collapsed, at most MAX_SCENE_NAME characters as a reader counts them, and a blank one stored as absent. */
+export const sceneNameSchema = z
+  .string()
+  .max(2_000)
+  .transform((n) => n.replace(/\s+/g, " ").trim())
+  .refine((n) => graphemes(n).length <= MAX_SCENE_NAME, `A scene name must be ${MAX_SCENE_NAME} characters or fewer`)
+  .transform((n) => n || undefined);
 /** A scene's on-screen text; see `SceneText`. One line, its spaces collapsed; the default place, size, and colour are stored as absent. */
 export const sceneTextSchema = z
   .object({

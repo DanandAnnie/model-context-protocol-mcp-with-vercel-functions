@@ -6,7 +6,7 @@ import { pauseSeconds, stripPauses } from "./pauses";
 import { formatTimestamp, graphemes } from "./text";
 import type { Scene, Video } from "./types";
 
-export type TimedScene = Pick<Scene, "script" | "speed" | "audioSeconds"> & Partial<Pick<Scene, "overlay" | "audioId">>;
+export type TimedScene = Pick<Scene, "script" | "speed" | "audioSeconds"> & Partial<Pick<Scene, "overlay" | "audioId" | "name">>;
 export type Timed = Pick<Video, "script" | "durationSec" | "speed"> & Partial<Pick<Video, "provider">> & { scenes?: TimedScene[] };
 
 /** A scene a viewer can jump to: where it starts and what to call it. */
@@ -67,9 +67,9 @@ function shortTitle(text: string): string {
   return `${(word > cut.length / 2 ? cut.slice(0, word) : cut).replace(/[\s,;:.!?…-]+$/, "")}…`;
 }
 
-/** A scene's chapter title: its on-screen text, else the start of what it says (`said`), else what it is. */
+/** A scene's chapter title: its name, else its on-screen text, else the start of what it says (`said`), else what it is. */
 function chapterTitle(scene: TimedScene, index: number, said: string): string {
-  const text = scene.overlay?.text.replace(/\s+/g, " ").trim() || said.replace(/\s+/g, " ").trim();
+  const text = scene.name?.replace(/\s+/g, " ").trim() || scene.overlay?.text.replace(/\s+/g, " ").trim() || said.replace(/\s+/g, " ").trim();
   if (!text) return scene.audioId ? `Scene ${index + 1}` : "Opening";
   // A caption line can end mid-sentence on a comma; a title does not.
   return shortTitle(text.replace(/[\s,;:–-]+$/, "") || text);
@@ -103,9 +103,9 @@ function cuesByScene(video: Timed, bounds: Array<{ startMs: number; endMs: numbe
  * One chapter per scene of a video of two scenes or more, starting where its scene does; none otherwise.
  *
  * - When an editor corrected the captions, a scene's chapter starts at its first corrected line (see `cuesByScene`)
- *   and, without on-screen text, takes its lines' words, so a jump lands where the transcript says and a word removed
+ *   and, without a name or on-screen text, takes its lines' words, so a jump lands where the transcript says and a word removed
  *   from the captions is not shown again. A scene left with no line keeps its estimated start and its script's words.
- * - A silent scene with no on-screen text is no chapter of its own (it would say only "Pause"), unless it opens the
+ * - A silent scene with no name or on-screen text is no chapter of its own (it would say only "Pause"), unless it opens the
  *   video, whose first chapter is always at 0:00.
  * - Scenes that would start within the same second as the chapter before are left out, so no two chapters share a time.
  */
@@ -116,7 +116,7 @@ export function videoChapters(video: Timed & { captionCues?: Cue[] }): Chapter[]
   const chapters: Chapter[] = [];
   video.scenes!.forEach((sc, i) => {
     const silent = !sc.audioId && !stripPauses(sc.script).trim();
-    if (i > 0 && silent && !sc.overlay?.text.trim()) return;
+    if (i > 0 && silent && !sc.overlay?.text.trim() && !sc.name?.trim()) return;
     let startMs = i === 0 ? 0 : bounds[i].startMs;
     let said = stripPauses(sc.script);
     const lines = own?.[i] ?? [];

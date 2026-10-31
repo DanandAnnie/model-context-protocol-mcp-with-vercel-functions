@@ -29,6 +29,8 @@ export type AvatarSource = "stock" | "custom" | "provider";
 
 /** Upper bound on scenes per video, shared by the editor and the request schema. */
 export const MAX_SCENES = 20;
+/** Longest scene name, in characters. */
+export const MAX_SCENE_NAME = 40;
 
 export interface Avatar {
   id: string;
@@ -701,6 +703,8 @@ export interface SceneText {
 }
 
 export interface Scene {
+  /** What the editor and the viewer call the scene ("Kitchen", "Pricing"): its tab's label and its chapter's title. */
+  name?: string;
   /** Spoken text for this scene. */
   script: string;
   background: Background;

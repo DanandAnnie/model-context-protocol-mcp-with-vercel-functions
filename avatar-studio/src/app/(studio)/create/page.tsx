@@ -31,7 +31,7 @@ import { readPptx, type PptxSlide } from "@/lib/pptx-notes";
 import { readDocx } from "@/lib/docx-text";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
-import { capSceneText, fitSceneTextEdit, sceneTextLength, textHidden, textStyleTargets, textSwatches, withTextStyle, type TextSwatch } from "@/lib/scene-text";
+import { capSceneName, capSceneText, fitSceneTextEdit, sceneName, sceneTextLength, textHidden, textStyleTargets, textSwatches, withTextStyle, type TextSwatch } from "@/lib/scene-text";
 import { mergeScenes, moveItem, splitParagraphs, splitScene } from "@/lib/scene-split";
 import { amendLast, emptyHistory, record, redo, undo, type History, type HistoryEntry } from "@/lib/scene-history";
 import { graphemes } from "@/lib/text";
@@ -128,9 +128,9 @@ function scrollParent(el: HTMLElement): Element {
 }
 
 /** Whether the scenes hold anything worth asking about before they are replaced: a script, a clip, a presenter, a layout, on-screen text, or more than one scene. */
-const setUpScenes = (list: Scene[]) => list.length > 1 || list.some((sc) => sc.script.trim() || sc.audioId || sc.avatarId || sc.voiceId || sc.layout || sc.overlay?.text.trim());
-/** Whether a scene holds anything a draft should keep: a script or on-screen text. */
-const hasContent = (sc: Scene) => !!(sc.script.trim() || sc.overlay?.text.trim());
+const setUpScenes = (list: Scene[]) => list.length > 1 || list.some((sc) => sc.script.trim() || sc.audioId || sc.avatarId || sc.voiceId || sc.layout || sc.overlay?.text.trim() || sceneName(sc.name));
+/** Whether a scene holds anything a draft should keep: a script, on-screen text, or a name. */
+const hasContent = (sc: Scene) => !!(sc.script.trim() || sc.overlay?.text.trim() || sceneName(sc.name));
 
 /**
  * The PowerPoint slides that match a PDF of the same deck page for page. PowerPoint leaves hidden slides out when it
@@ -143,7 +143,8 @@ function slidesForPages(slides: PptxSlide[], pages: number): { slides: PptxSlide
   return { slides: shown, matches: shown.length === pages };
 }
 
-const newScene = (script = "", background: Background = DEFAULT_BG, presenter: Pick<Scene, "avatarId" | "voiceId" | "layout" | "audioId" | "speed" | "overlay" | "hidePresenter"> = {}): Scene => ({
+const newScene = (script = "", background: Background = DEFAULT_BG, presenter: Pick<Scene, "name" | "avatarId" | "voiceId" | "layout" | "audioId" | "speed" | "overlay" | "hidePresenter"> = {}): Scene => ({
+  ...(sceneName(presenter.name) ? { name: sceneName(presenter.name) } : {}),
   script,
   background,
   // Only a picture or video can stand in for the presenter.
@@ -1497,12 +1498,12 @@ function CreateInner() {
   const allScenesFilled = scenes.every((sc) => sc.script.trim().length > 0) && scenes.some((sc) => sc.audioId || !silentSeconds(sc.script));
   // The other scenes still without words (each needs some, or a pause, to be made; the selected one is left out, as
   // its placeholder already says so and it may have just been added), and those of them with nothing of their own:
-  // no words, clip, on-screen text, presenter, voice, layout, or pace, and no picture but the one next to it, which can
+  // no name, words, clip, on-screen text, presenter, voice, layout, or pace, and no picture but the one next to it, which can
   // go in one step. The selected scene always stays, so removing them never leaves the video without one.
   const wordless = scenes.flatMap((sc, i) => (sc !== active && !sc.script.trim() ? [i] : []));
   const blank = wordless.filter((i) => {
     const sc = scenes[i];
-    if (sc.audioId || sc.overlay?.text.trim() || sc.avatarId || sc.voiceId || sc.layout || sc.hidePresenter || sc.speed !== undefined) return false;
+    if (sceneName(sc.name) || sc.audioId || sc.overlay?.text.trim() || sc.avatarId || sc.voiceId || sc.layout || sc.hidePresenter || sc.speed !== undefined) return false;
     const near = [scenes[i - 1], scenes[i + 1]].filter(Boolean);
     return sc.background.type === "color" || near.some((n) => backgroundsMatch(n.background, sc.background));
   });
@@ -1686,7 +1687,7 @@ function CreateInner() {
                     requestAnimationFrame(() => sceneTabs.current[to]?.focus());
                   }}
                   aria-keyshortcuts={scenes.length > 1 ? "ArrowLeft ArrowRight Home End" : undefined}
-                  aria-label={`Scene ${i + 1}${sc.script.trim() ? `, about ${formatSeconds(Math.max(1, sceneSeconds(sc)))}` : ", empty"}`}
+                  aria-label={`Scene ${i + 1}${sceneName(sc.name) ? `, ${sceneName(sc.name)}` : ""}${sc.script.trim() ? `, about ${formatSeconds(Math.max(1, sceneSeconds(sc)))}` : ", empty"}`}
                   aria-current={i === activeIdx ? "true" : undefined}
                   ref={(el) => {
                     sceneTabs.current[i] = el;
@@ -1728,6 +1729,7 @@ function CreateInner() {
                   {scriptPlayer.playingScene === i && <Play className="h-3 w-3 fill-current text-brand-600" aria-hidden data-testid="scene-playing" />}
                   <span className="h-2.5 w-2.5 rounded-full border border-black/10" style={sc.background.type === "color" ? { background: sc.background.value } : sc.background.type === "video" ? { background: "linear-gradient(135deg,#0f172a,#475569)" } : { background: "linear-gradient(135deg,#94a3b8,#cbd5e1)" }} />
                   {i + 1}
+                  {sceneName(sc.name) && <span className="max-w-[9rem] truncate" data-testid="scene-name-label">{sceneName(sc.name)}</span>}
                   {sc.script.trim() ? (
                     <span className={`font-normal ${i === activeIdx ? "text-brand-600" : "text-slate-500"}`} data-testid="scene-duration">{sc.audioId ? "" : "~"}{formatSeconds(Math.max(1, sceneSeconds(sc)))}</span>
                   ) : (
@@ -1953,6 +1955,26 @@ function CreateInner() {
                   <X className="h-3.5 w-3.5" />
                 </button>
               </p>
+            )}
+            {(scenes.length > 1 || sceneName(active.name)) && (
+              // A name titles the scene's tab and, on the share page, its chapter (before its on-screen text or first words).
+              // A lone scene has no chapters, so its field shows only while it still has a name to clear.
+              <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="scene-name">
+                <label htmlFor="scene-name-input" className="font-medium">
+                  {scenes.length > 1 ? `Scene ${activeIdx + 1} name` : "Scene name"}
+                </label>
+                <input
+                  id="scene-name-input"
+                  className={`${inputClass} w-auto min-w-0 flex-1 py-1 text-xs`}
+                  value={active.name ?? ""}
+                  disabled={canEdit === false}
+                  placeholder="Optional: “Kitchen”, “Pricing”; titles its chapter"
+                  // Cut at MAX_SCENE_NAME characters as a reader counts them, so a flag or an emoji is never split; a
+                  // composition (an input method building a character) is left alone until it ends.
+                  onChange={(e) => updateScene(activeIdx, { name: ((e.nativeEvent as InputEvent).isComposing ? e.target.value : capSceneName(e.target.value)) || undefined })}
+                  onCompositionEnd={(e) => updateScene(activeIdx, { name: capSceneName(e.currentTarget.value) || undefined })}
+                />
+              </div>
             )}
             <div className="mb-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="scene-show-presenter">
               <label className="flex items-start gap-2">
@@ -2422,7 +2444,7 @@ function CreateInner() {
                     className="px-3 py-1.5"
                     onClick={removeBlankScenes}
                     disabled={!!slidesProgress}
-                    title="Scenes with nothing of their own: no words, clip, on-screen text, presenter, voice, layout, pace, or picture; Undo brings them back"
+                    title="Scenes with nothing of their own: no name, words, clip, on-screen text, presenter, voice, layout, pace, or picture; Undo brings them back"
                   >
                     Remove {blank.length === 1 ? `blank scene ${blank[0] + 1}` : `${blank.length} blank scenes`}
                   </Button>

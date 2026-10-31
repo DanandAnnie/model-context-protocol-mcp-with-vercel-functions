@@ -10,7 +10,7 @@ import { ConflictError, LimitError, NotFoundError, ValidationError } from "../er
 import { owned } from "./shared";
 import { getBackdrop, plainScene } from "./backdrops";
 import { getFootage } from "./footage";
-import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema } from "./videos";
+import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneNameSchema, sceneTextSchema } from "./videos";
 
 export { MAX_TEMPLATES };
 
@@ -32,6 +32,7 @@ const sceneSchema = z.object({
   speed: z.number().min(0.5).max(1.5).optional(),
   layout: sceneLayoutSchema.optional(),
   overlay: sceneTextSchema.optional(),
+  name: sceneNameSchema.optional(),
 }).refine((sc) => !sc.hidePresenter || sc.background.type !== "color", { path: ["hidePresenter"], message: "A scene without the presenter shows its picture or video: give it an image or video background" });
 
 /** Copy a video the owner has (`fromVideoId`) or one of their templates (`fromTemplateId`), title optional, or spell the template out. */
@@ -133,6 +134,7 @@ export async function createTemplate(input: TemplateInput, ownerId: string = LOC
       ...(sc.speed ? { speed: sc.speed } : {}),
       ...(sc.layout ? { layout: sc.layout } : {}),
       ...(sc.overlay ? { overlay: sc.overlay } : {}),
+      ...(sc.name ? { name: sc.name } : {}),
     }));
     base = {
       title: input.title ?? video.title,

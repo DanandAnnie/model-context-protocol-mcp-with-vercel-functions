@@ -28,7 +28,7 @@ import { clearCover, setCover } from "../cover";
 import { posterUrl, shareOffline } from "../client";
 import { bumpViewsByDay } from "../insights";
 
-import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema } from "./schemas";
+import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneNameSchema, sceneTextSchema } from "./schemas";
 import { getBrandKit } from "./brand";
 import { pronunciationsFor, spokenCopy } from "../pronounce";
 import { clearComments } from "./comments";
@@ -40,7 +40,7 @@ import { clearMusicJobs } from "./music";
 import { reviseScript } from "./scripts";
 import { RELINK_MS, RETRY_FINISHED_MS } from "./job-checks";
 import { config } from "../config";
-export { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneTextSchema };
+export { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneNameSchema, sceneTextSchema };
 
 export const videoRequestSchema = z
   .object({
@@ -50,6 +50,8 @@ export const videoRequestSchema = z
     scenes: z
       .array(
         z.object({
+          /** What the scene is called in the editor and its chapter's title. */
+          name: sceneNameSchema.optional(),
           // A scene of only pauses is a silent one, the presenter holding without a word (HeyGen's silent voice).
           // (Its length is checked below, where an audio scene, whose script is only what the clip says, is known.)
           script: z.string().trim().min(1).max(5000),

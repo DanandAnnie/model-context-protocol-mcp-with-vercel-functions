@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { nowIso } from "../ids";
 import { getStore } from "../store";
-import { MAX_CLOSING_SCRIPT, MAX_SCENE_TEXT, WATERMARK_CORNERS, backdropIdOf, footageIdOf, type BrandKit } from "../types";
+import { MAX_CLOSING_SCRIPT, MAX_SCENE_TEXT, WATERMARK_CORNERS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, type BrandKit } from "../types";
 import { silentProblem } from "../pauses";
 import { graphemes } from "../text";
 import { LOCAL_OWNER } from "../owner-id";
@@ -11,7 +11,7 @@ import { getAvatar } from "./avatars";
 import { listVoices } from "./voices";
 import { getBackdrop } from "./backdrops";
 import { getFootage } from "./footage";
-import { backgroundSchema } from "./schemas";
+import { backgroundSchema, captionStyleSchema } from "./schemas";
 import { MAX_PRONUNCIATIONS, pronunciationLanguage } from "../pronounce";
 import { MAX_FORCED_TRANSLATIONS, MAX_FORCED_TRANSLATION_LENGTH, MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH, MIN_GLOSSARY_TERM_LENGTH } from "../glossary";
 import { servableLogo } from "../brand-logo";
@@ -81,6 +81,7 @@ export const brandKitSchema = z.object({
   defaultAspect: z.enum(["16:9", "9:16", "1:1"]).optional(),
   defaultResolution: z.enum(["720p", "1080p"]).optional(),
   captionsByDefault: z.boolean().optional(),
+  captionStyle: captionStyleSchema.optional(),
   watermark: z.enum(WATERMARK_CORNERS).optional(),
   /**
    * The scene the editor's Closing scene button puts at the end of a video: what the presenter says (up to 1000
@@ -140,6 +141,7 @@ export async function saveBrandKit(input: z.infer<typeof brandKitSchema>, ownerI
     defaultAspect: input.defaultAspect,
     defaultResolution: input.defaultResolution,
     captionsByDefault: input.captionsByDefault,
+    ...(input.captionStyle && !isDefaultCaptionStyle(input.captionStyle) ? { captionStyle: input.captionStyle } : {}),
     ...(input.watermark ? { watermark: input.watermark } : {}),
     ...(input.closingScene?.script ? { closingScene: { script: input.closingScene.script, ...(input.closingScene.text ? { text: input.closingScene.text } : {}) } } : {}),
     updatedAt: nowIso(),

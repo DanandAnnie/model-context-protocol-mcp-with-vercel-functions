@@ -3519,6 +3519,48 @@ test("a custom cover image replaces the poster everywhere", async ({ page }) => 
   expect(await coverBytes()).toBe(atThree);
 });
 
+test("the brand kit's caption style is where new videos start", async ({ page }) => {
+  try {
+    await page.goto("/brand");
+    await page.getByPlaceholder("Acme Realty").fill("Caption Co");
+    await page.getByLabel("Captions on by default").check();
+    const kitStyle = page.getByTestId("brand-caption-style");
+    await kitStyle.getByRole("group", { name: "Caption position" }).getByRole("button", { name: "top" }).click();
+    await kitStyle.getByRole("group", { name: "Caption size" }).getByRole("button", { name: "large" }).click();
+    await kitStyle.getByRole("group", { name: "Caption look" }).getByRole("button", { name: "yellow" }).click();
+    await kitStyle.getByRole("group", { name: "Caption font" }).getByRole("button", { name: "serif" }).click();
+    await expect(page.getByText("Captions: on, top, large, yellow, serif")).toBeVisible();
+    await page.getByRole("button", { name: "Save brand kit" }).click();
+    await expect(page.getByText(/^Saved /)).toBeVisible();
+    expect((await (await page.request.get("/api/brand")).json()).brand.captionStyle).toEqual({ position: "top", size: "large", look: "yellow", font: "serif" });
+    await page.reload();
+    await expect(kitStyle.getByRole("group", { name: "Caption look" }).getByRole("button", { name: "yellow" })).toHaveAttribute("aria-pressed", "true");
+    // A new video starts captioned in the kit's style, which it can change for itself.
+    await page.goto("/create");
+    await page.getByRole("button", { name: "Settings" }).click();
+    await expect(page.getByRole("checkbox", { name: /Captions/ })).toBeChecked();
+    const style = page.getByTestId("caption-style");
+    await expect(style.getByRole("group", { name: "Caption position" }).getByRole("button", { name: "top" })).toHaveAttribute("aria-pressed", "true");
+    await expect(style.getByRole("group", { name: "Caption size" }).getByRole("button", { name: "large" })).toHaveAttribute("aria-pressed", "true");
+    await expect(style.getByRole("group", { name: "Caption look" }).getByRole("button", { name: "yellow" })).toHaveAttribute("aria-pressed", "true");
+    await expect(style.getByRole("group", { name: "Caption font" }).getByRole("button", { name: "serif" })).toHaveAttribute("aria-pressed", "true");
+    await style.getByRole("group", { name: "Caption look" }).getByRole("button", { name: "bold" }).click();
+    await expect(style.getByRole("group", { name: "Caption look" }).getByRole("button", { name: "bold" })).toHaveAttribute("aria-pressed", "true");
+    // Removing the kit puts its caption style back to the default with everything else.
+    await page.evaluate(() => localStorage.removeItem("avatar-studio:draft"));
+    await page.goto("/brand");
+    await expect(kitStyle.getByRole("group", { name: "Caption look" }).getByRole("button", { name: "yellow" })).toHaveAttribute("aria-pressed", "true");
+    page.once("dialog", (d) => void d.accept());
+    await page.getByRole("button", { name: "Remove brand kit" }).click();
+    await expect(kitStyle.getByRole("group", { name: "Caption look" }).getByRole("button", { name: "classic" })).toHaveAttribute("aria-pressed", "true");
+    await expect(kitStyle.getByRole("group", { name: "Caption position" }).getByRole("button", { name: "bottom" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByText("Captions: off, bottom, medium, classic, sans")).toBeVisible();
+  } finally {
+    await page.evaluate(() => localStorage.removeItem("avatar-studio:draft")).catch(() => {});
+    expect([204, 404]).toContain((await page.request.delete("/api/brand")).status());
+  }
+});
+
 test("discarding a restored draft resets its voice settings", async ({ page }) => {
   await page.goto("/create");
   await page.locator("textarea").fill("A draft with a mood.");

@@ -4,6 +4,8 @@ import { Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState 
 import { Captions, ChevronLeft, ChevronRight, Clapperboard, ClipboardCopy, ClipboardPaste, Copy, Download, Flag, Image as ImageIcon, Layers, ListOrdered, Merge, MessagesSquare, Mic2, Palette, Pause, Play, Plus, Redo2, Replace, Rows3, Scissors, Sparkles, Square, Trash2, Undo2, Upload, Users, Wand2, X } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { VoiceRow } from "@/components/VoicePicker";
+import { CaptionStyleFields } from "@/components/CaptionStyleFields";
+import { CAPTION_FONT_STACKS, restoredCaptionStyle } from "@/lib/caption-style";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
@@ -34,7 +36,7 @@ import { mergeScenes, moveItem, splitParagraphs, splitScene } from "@/lib/scene-
 import { amendLast, emptyHistory, record, redo, undo, type History, type HistoryEntry } from "@/lib/scene-history";
 import { graphemes } from "@/lib/text";
 import { takeAgentDraft, type AgentDraft } from "@/lib/agent-draft";
-import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, footageIdOf, footageLength, footagePath, type FootageJob, framingFor, isDefaultLayout, isPhotoAvatar, rendersOnAvatarV, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, type PhotoExpressiveness, VOICE_ACCENTS, type VoiceAccent, AVATAR_ENGINES, type AvatarEngine } from "@/lib/types";
+import { DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, footageIdOf, footageLength, footagePath, type FootageJob, framingFor, isDefaultLayout, isPhotoAvatar, rendersOnAvatarV, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, type PhotoExpressiveness, VOICE_ACCENTS, type VoiceAccent, AVATAR_ENGINES, type AvatarEngine } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -182,13 +184,6 @@ function restoredOverlay(o: SceneText | undefined): SceneText | undefined {
 const TEXT_POSITION_LABELS = { top: "Top", center: "Middle", bottom: "Bottom" } as const;
 const TEXT_SIZE_LABELS = { small: "Small", medium: "Medium", large: "Large" } as const;
 const FRAMING_LABELS: Record<PresenterFraming, string> = { full: "Full", closeUp: "Close-up", circle: "Circle" };
-/** The same stacks the share player's captions use (globals.css), so the stage previews the chosen typeface. */
-const CAPTION_FONT_STACKS: Record<CaptionFont, string> = {
-  sans: "inherit",
-  serif: 'Georgia, "Times New Roman", serif',
-  rounded: 'ui-rounded, "SF Pro Rounded", "Arial Rounded MT Bold", "Nunito", system-ui, sans-serif',
-  mono: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
-};
 /** A scene layout from a draft another build saved: a framing this build does not offer is dropped and the size and offset kept in bounds. */
 const clamp = (v: unknown, lo: number, hi: number, fallback: number) => (typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback);
 const restoredLayout = (l: SceneLayout | undefined): SceneLayout | undefined => {
@@ -197,16 +192,6 @@ const restoredLayout = (l: SceneLayout | undefined): SceneLayout | undefined => 
   const out: SceneLayout = { scale: clamp(l.scale, 0.5, 1.5, 1), x: clamp(l.x, -1, 1, 0), y: clamp(l.y, -1, 1, 0), ...(framing ? { framing } : {}) };
   return isDefaultLayout(out) ? undefined : out;
 };
-/** A caption style from a draft an older build saved: any value this build does not offer falls back to the default. */
-const restoredCaptionStyle = (s: CaptionStyle): CaptionStyle =>
-  withoutDefaults({
-    position: CAPTION_POSITIONS.includes(s.position) ? s.position : DEFAULT_CAPTION_STYLE.position,
-    size: CAPTION_SIZES.includes(s.size) ? s.size : DEFAULT_CAPTION_STYLE.size,
-    look: s.look && CAPTION_LOOKS.includes(s.look) ? s.look : undefined,
-    font: s.font && CAPTION_FONTS.includes(s.font) ? s.font : undefined,
-  });
-/** A caption style with the default look and font left out, as the server stores it. */
-const withoutDefaults = ({ look, font, ...rest }: CaptionStyle): CaptionStyle => ({ ...rest, ...(look && look !== "classic" ? { look } : {}), ...(font && font !== "sans" ? { font } : {}) });
 /** An expressiveness this build offers, or "low" (HeyGen's default) for anything else. */
 const asExpressiveness = (v: unknown): PhotoExpressiveness => ((PHOTO_EXPRESSIVENESS as readonly unknown[]).includes(v) ? (v as PhotoExpressiveness) : "low");
 /** A gesture description from a draft, a copy, or a template: a string within the limit, or none. */
@@ -1177,6 +1162,7 @@ function CreateInner() {
         setAspect(p.aspect);
         setResolution(p.resolution);
         setCaptions(p.captions);
+        setCaptionStyle(p.captionStyle ?? DEFAULT_CAPTION_STYLE);
         setPrefill({ avatarId: p.avatarId, voiceId: p.voiceId });
         setFromAgent(true);
         return;
@@ -1194,7 +1180,7 @@ function CreateInner() {
     setResolution(d.resolution ?? "1080p");
     setCaptions(d.captions);
     // A draft is the browser's own copy, saved by whatever build ran then: keep only a look and typeface this build offers.
-    setCaptionStyle(d.captionStyle ? restoredCaptionStyle(d.captionStyle) : DEFAULT_CAPTION_STYLE);
+    setCaptionStyle(restoredCaptionStyle(d.captionStyle));
     setSpeed(d.speed);
     setPitch(d.pitch ?? 0);
     // A draft is the browser's own copy, so a value no longer offered is dropped rather than sent.
@@ -1270,6 +1256,7 @@ function CreateInner() {
     // A Video Agent plan already carries the kit's presenter, voice, background, captions, and quality.
     if (!b || fromId || draftRestored || fromAgent || templateId?.startsWith("tpl_")) return;
     if (b.captionsByDefault != null) setCaptions(b.captionsByDefault);
+    if (b.captionStyle) setCaptionStyle(restoredCaptionStyle(b.captionStyle));
     if (b.defaultAvatarId || b.defaultVoiceId) setPrefill({ avatarId: b.defaultAvatarId, voiceId: b.defaultVoiceId });
     if (b.defaultResolution) setResolution(b.defaultResolution);
     if (templateId) return;
@@ -2734,42 +2721,7 @@ function CreateInner() {
                   <div className="rounded-lg border border-slate-200 px-3 py-3" data-testid="caption-style">
                     <div className="text-sm font-medium text-slate-800">Caption style</div>
                     <div className="mt-0.5 text-xs text-slate-500">Where subtitles sit, how big they read, and how they look in the share player. The WebVTT file carries the position as a cue setting; the SRT download carries none of the style. A renderer that burns captions into the video leaves them off, so this style is the only one and the downloaded video carries no captions.</div>
-                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                      <div role="group" aria-label="Caption position" className="flex gap-1">
-                        {CAPTION_POSITIONS.map((pos) => (
-                          <button key={pos} type="button" aria-pressed={captionStyle.position === pos} onClick={() => setCaptionStyle({ ...captionStyle, position: pos })} className={`flex-1 rounded-lg border px-2 py-1.5 text-xs font-medium capitalize ${captionStyle.position === pos ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}>
-                            {pos}
-                          </button>
-                        ))}
-                      </div>
-                      <div role="group" aria-label="Caption size" className="flex gap-1">
-                        {CAPTION_SIZES.map((size) => (
-                          <button key={size} type="button" aria-pressed={captionStyle.size === size} onClick={() => setCaptionStyle({ ...captionStyle, size })} className={`flex-1 rounded-lg border px-2 py-1.5 text-xs font-medium capitalize ${captionStyle.size === size ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}>
-                            {size}
-                          </button>
-                        ))}
-                      </div>
-                      <div role="group" aria-label="Caption look" className="flex gap-1 sm:col-span-2">
-                        {CAPTION_LOOKS.map((look) => {
-                          const on = (captionStyle.look ?? "classic") === look;
-                          return (
-                            <button key={look} type="button" aria-pressed={on} onClick={() => setCaptionStyle(withoutDefaults({ ...captionStyle, look }))} className={`flex-1 rounded-lg border px-2 py-1.5 text-xs font-medium capitalize ${on ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}>
-                              {look}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <div role="group" aria-label="Caption font" className="flex gap-1 sm:col-span-2">
-                        {CAPTION_FONTS.map((font) => {
-                          const on = (captionStyle.font ?? "sans") === font;
-                          return (
-                            <button key={font} type="button" aria-pressed={on} onClick={() => setCaptionStyle(withoutDefaults({ ...captionStyle, font }))} style={{ fontFamily: CAPTION_FONT_STACKS[font] }} className={`flex-1 rounded-lg border px-2 py-1.5 text-xs font-medium capitalize ${on ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}>
-                              {font}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
+                    <CaptionStyleFields value={captionStyle} onChange={setCaptionStyle} />
                   </div>
                 )}
               </div>

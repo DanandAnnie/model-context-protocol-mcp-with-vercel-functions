@@ -1241,6 +1241,8 @@ export interface BrandKit {
   defaultAspect?: AspectRatio;
   defaultResolution?: Resolution;
   captionsByDefault?: boolean;
+  /** Where captions sit, how big they read, their look, and typeface in new videos; the default style when absent. */
+  captionStyle?: CaptionStyle;
   /** The logo laid over the share and embed player in this corner (the file itself is not changed). */
   watermark?: WatermarkCorner;
   /** A scene the editor adds at the end of a video in one click: what the presenter says, and text shown on screen. */

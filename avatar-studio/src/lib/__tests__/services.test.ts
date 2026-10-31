@@ -1658,6 +1658,15 @@ describe("brand kit", () => {
     assert.equal(await getBrandKit("u1"), null);
   });
 
+  it("keeps a caption style for new videos, and none when it is the default one", async () => {
+    const styled = await saveBrandKit(brandKitSchema.parse({ primaryColor: "#0f766e", captionStyle: { position: "top", size: "large", look: "bold", font: "serif" } }), "u-cap");
+    assert.deepEqual(styled.captionStyle, { position: "top", size: "large", look: "bold", font: "serif" });
+    const plain = await saveBrandKit(brandKitSchema.parse({ primaryColor: "#0f766e", captionStyle: { position: "bottom", size: "medium", look: "classic", font: "sans" } }), "u-cap");
+    assert.equal("captionStyle" in plain, false, "the default style is what an unset one means");
+    assert.equal(brandKitSchema.safeParse({ primaryColor: "#0f766e", captionStyle: { position: "side", size: "medium" } }).success, false);
+    await deleteBrandKit("u-cap");
+  });
+
   it("keeps an image or video default background, never a colour one", async () => {
     const image = await saveBrandKit(brandKitSchema.parse({ primaryColor: "#0f766e", defaultBackground: { type: "image", value: "https://cdn.example.com/bg.jpg" } }), "u-bg");
     assert.deepEqual(image.defaultBackground, { type: "image", value: "https://cdn.example.com/bg.jpg" });

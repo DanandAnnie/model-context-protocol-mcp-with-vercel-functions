@@ -6,12 +6,14 @@ import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { BackdropPicker } from "@/components/BackdropPicker";
+import { CaptionStyleFields } from "@/components/CaptionStyleFields";
+import { CAPTION_FONT_STACKS, restoredCaptionStyle } from "@/lib/caption-style";
 import { api, isDarkHex } from "@/lib/client";
 import { MAX_PRONUNCIATIONS, formatPronunciations, parsePronunciations } from "@/lib/pronounce";
 import { MAX_FORCED_TRANSLATIONS, MAX_FORCED_TRANSLATION_LENGTH, MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH, MIN_GLOSSARY_TERM_LENGTH, formatForcedTranslations, parseForcedTranslations, parseGlossary } from "@/lib/glossary";
 import { LOGO_TYPES, logoDataUrlValid, logoFileType } from "@/lib/logo-types";
 import type { BrandSuggestion } from "@/lib/brand-import";
-import { MAX_CLOSING_SCRIPT, MAX_SCENE_TEXT, backdropIdOf, footageIdOf, footageLength, footagePath, type FootageJob, type AspectRatio, type Avatar, type Backdrop, type BrandKit, type Resolution, type Voice, type WatermarkCorner } from "@/lib/types";
+import { DEFAULT_CAPTION_STYLE, MAX_CLOSING_SCRIPT, MAX_SCENE_TEXT, backdropIdOf, isDefaultCaptionStyle, type CaptionStyle, footageIdOf, footageLength, footagePath, type FootageJob, type AspectRatio, type Avatar, type Backdrop, type BrandKit, type Resolution, type Voice, type WatermarkCorner } from "@/lib/types";
 
 const DEFAULT_PRIMARY = "#4f46e5";
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -62,6 +64,7 @@ export default function BrandPage() {
   const [aspect, setAspect] = useState<AspectRatio | "">("");
   const [resolution, setResolution] = useState<Resolution | "">("");
   const [captions, setCaptions] = useState(false);
+  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>(DEFAULT_CAPTION_STYLE);
   const [watermark, setWatermark] = useState<WatermarkCorner | "">("");
   const [closingScript, setClosingScript] = useState("");
   const [closingText, setClosingText] = useState("");
@@ -104,6 +107,7 @@ export default function BrandPage() {
     setAspect(b.defaultAspect ?? "");
     setResolution(b.defaultResolution ?? "");
     setCaptions(!!b.captionsByDefault);
+    setCaptionStyle(restoredCaptionStyle(b.captionStyle));
     setWatermark(b.watermark ?? "");
     setClosingScript(b.closingScene?.script ?? "");
     setClosingText(b.closingScene?.text ?? "");
@@ -239,6 +243,7 @@ export default function BrandPage() {
           defaultAspect: aspect || undefined,
           defaultResolution: resolution || undefined,
           captionsByDefault: captions,
+          captionStyle: isDefaultCaptionStyle(captionStyle) ? undefined : captionStyle,
           watermark: (logoUrl && watermark) || undefined,
           closingScene: closingScript.trim() || closingText.trim() ? { script: closingScript, text: closingText } : undefined,
         }),
@@ -272,6 +277,7 @@ export default function BrandPage() {
       setGlossary("");
       setForced("");
       setCaptions(false);
+      setCaptionStyle(DEFAULT_CAPTION_STYLE);
       setWatermark("");
       setClosingScript("");
       setClosingText("");
@@ -502,6 +508,13 @@ export default function BrandPage() {
               </select>
             </Field>
           </div>
+          <div className="rounded-lg border border-slate-200 px-3 py-3" data-testid="brand-caption-style">
+            <div className="text-sm font-medium text-slate-800">Caption style</div>
+            <div className="mt-0.5 text-xs text-slate-500">
+              Where subtitles sit in new videos, how big they read, and how they look in the share player; each video can change it in the editor. A style other than the default is shown in the share player only: HeyGen then leaves captions out of the video file.
+            </div>
+            <CaptionStyleFields value={captionStyle} onChange={setCaptionStyle} />
+          </div>
           <Field label="Pronunciation" hint="One per line, word = how to say it (for example Nair = Nye-er), with [Language] at the end for one language only (Nair = Naïr [French]); it then applies where the voice speaks that language and beats a rule for every language. Renders say it that way; scripts and captions keep the spelling. Up to 50.">
             <textarea aria-label="Pronunciation" value={pronunciations} onChange={(e) => setPronunciations(e.target.value)} rows={3} placeholder={"Nair = Nye-er\nNair = Naïr [French]\nSaaS = sass"} className={`${inputClass} font-mono text-xs`} />
           </Field>
@@ -548,10 +561,12 @@ export default function BrandPage() {
               </div>
             </div>
             <div
-              className={`mx-4 mb-4 flex aspect-video items-end rounded-lg p-3 text-xs ${isDarkHex(primaryValid ? primary : DEFAULT_PRIMARY) ? "text-white/90" : "text-slate-800"}`}
+              className={`mx-4 mb-4 flex aspect-video justify-center rounded-lg p-3 text-xs ${captions && captionStyle.position === "top" ? "items-start" : "items-end"} ${isDarkHex(primaryValid ? primary : DEFAULT_PRIMARY) ? "text-white/90" : "text-slate-800"}`}
               style={{ background: primaryValid ? primary : DEFAULT_PRIMARY }}
             >
-              <span className="rounded bg-black/40 px-2 py-1 text-white">{captions ? "Captions on" : "Scene background"}</span>
+              <span className="rounded bg-black/40 px-2 py-1 text-white" style={captions ? { fontFamily: CAPTION_FONT_STACKS[captionStyle.font ?? "sans"] } : undefined}>
+                {captions ? "Captions on" : "Scene background"}
+              </span>
             </div>
           </Card>
           <Card className="p-4 text-sm text-slate-600">
@@ -561,7 +576,7 @@ export default function BrandPage() {
               <li>Voice: {voiceName ?? "first in the library"}</li>
               <li>Aspect: {aspect || "16:9"}</li>
               <li>Quality: {resolution || "1080p"}</li>
-              <li>Captions: {captions ? "on" : "off"}</li>
+              <li>Captions: {captions ? "on" : "off"}, {captionStyle.position}, {captionStyle.size}, {captionStyle.look ?? "classic"}, {captionStyle.font ?? "sans"}</li>
               <li>Background: {bgType === "clip" && bgUrl.trim() ? "generated clip" : bgType === "video" && bgUrl.trim() ? "looping video" : bgType === "image" && bgUrl.trim() ? (backdropIdOf({ type: "image", value: bgUrl.trim() }) ? "uploaded image" : "image") : primaryValid ? primary : DEFAULT_PRIMARY}</li>
             </ul>
             <p className="mt-3 text-xs text-slate-500">Templates keep their own aspect ratio; copies keep every setting of the original.</p>

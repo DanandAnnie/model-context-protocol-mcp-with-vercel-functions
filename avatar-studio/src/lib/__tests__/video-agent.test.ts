@@ -83,6 +83,14 @@ describe("video agent", () => {
     assert.equal(draft.voiceId, voice.id);
     assert.equal(draft.resolution, "720p");
     assert.equal(draft.captions, false);
+    assert.equal(draft.captionStyle, undefined, "a kit without a caption style leaves the default");
+    await saveBrandKit(brandKitSchema.parse({ name: "Acme", primaryColor: "#1e3a8a", captionStyle: { position: "top", size: "small", look: "yellow" } }));
+    assert.deepEqual((await planVideo(videoAgentSchema.parse({ prompt: "Welcome new customers to Acme" }))).captionStyle, { position: "top", size: "small", look: "yellow" });
+    // A video made straight away keeps the style when it has captions, and none without them.
+    assert.deepEqual((await generateAgentVideo(videoAgentSchema.parse({ prompt: "Welcome new customers to Acme" }))).video.captionStyle, { position: "top", size: "small", look: "yellow" });
+    await saveBrandKit(brandKitSchema.parse({ name: "Acme", primaryColor: "#1e3a8a", captionsByDefault: false, captionStyle: { position: "top", size: "small", look: "yellow" } }));
+    assert.equal((await generateAgentVideo(videoAgentSchema.parse({ prompt: "Welcome new customers to Acme" }))).video.captionStyle, undefined);
+    await saveBrandKit(brandKitSchema.parse({ name: "Acme", primaryColor: "#1e3a8a", defaultAvatarId: avatar.id, defaultVoiceId: voice.id, defaultResolution: "720p", captionsByDefault: false }));
     assert.ok(draft.scenes.every((sc) => sc.background.type === "color" && sc.background.value === "#1e3a8a"));
     // A presenter and voice asked for win over the kit's.
     const chosen = await planVideo(videoAgentSchema.parse({ prompt: "Welcome new customers", avatarId: STOCK_AVATARS[1].id, voiceId: STOCK_VOICES[0].id }));

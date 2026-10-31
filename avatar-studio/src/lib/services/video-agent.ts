@@ -7,7 +7,7 @@ import { NotFoundError, ValidationError } from "../errors";
 import { stripPauses } from "../pauses";
 import { fetchPageText } from "../webpage";
 import type { FetchLike } from "../safe-fetch";
-import { MAX_DIRECTED_BRIEF, MAX_DIRECTED_MEDIA, MAX_DOCUMENT_CHARS, MAX_SCENES, type AgentStyle, type DirectedMedia, type AspectRatio, type Avatar, type Background, type Resolution, type SceneLayout, type Video } from "../types";
+import { MAX_DIRECTED_BRIEF, MAX_DIRECTED_MEDIA, MAX_DOCUMENT_CHARS, MAX_SCENES, type AgentStyle, type DirectedMedia, type AspectRatio, type Avatar, type Background, type CaptionStyle, type Resolution, type SceneLayout, type Video } from "../types";
 import { getAvatar, listAvatars } from "./avatars";
 import { getBrandKit } from "./brand";
 import { listVoices } from "./voices";
@@ -82,6 +82,8 @@ export interface VideoAgentDraft {
   aspect: AspectRatio;
   resolution: Resolution;
   captions: boolean;
+  /** The brand kit's caption style, when it has one. */
+  captionStyle?: CaptionStyle;
 }
 
 const ASPECTS: Record<Exclude<VideoAgentInput["orientation"], "auto">, AspectRatio> = { landscape: "16:9", portrait: "9:16", square: "1:1" };
@@ -189,6 +191,7 @@ export async function planVideo(input: VideoAgentInput, ownerId: string = LOCAL_
     resolution: kit?.defaultResolution ?? "1080p",
     // Agent videos are watched on mute as often as not: captions on unless the kit says otherwise.
     captions: kit?.captionsByDefault ?? true,
+    ...(kit?.captionStyle ? { captionStyle: kit.captionStyle } : {}),
   };
 }
 
@@ -203,7 +206,9 @@ export async function generateAgentVideo(input: VideoAgentInput, ownerId: string
   // Before the page fetch and the planner call, so an owner at the monthly limit is not charged for a plan.
   await enforceRenderLimit(ownerId);
   const draft = await planVideo(input, ownerId, fetchImpl);
-  const video = await createVideo(videoRequestSchema.parse(draft), ownerId);
+  // The kit's caption style rides with the plan for the editor; a video rendered without captions keeps none.
+  const { captionStyle, ...rest } = draft;
+  const video = await createVideo(videoRequestSchema.parse({ ...rest, ...(draft.captions && captionStyle ? { captionStyle } : {}) }), ownerId);
   return { video, draft };
 }
 

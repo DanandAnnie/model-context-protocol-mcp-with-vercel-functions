@@ -8,7 +8,8 @@ import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { api } from "@/lib/client";
 import { decodeScript, legacyEncodingFor } from "@/lib/script-import";
-import { VOICE_EMOTIONS, rendersOnAvatarV, type AspectRatio, type Avatar, type Background, type BrandKit, type CaptionStyle, type PhotoExpressiveness, type VoiceAccent, type AvatarEngine, type Resolution, type Voice, type VideoTemplate, type VoiceEmotion } from "@/lib/types";
+import { restoredCaptionStyle } from "@/lib/caption-style";
+import { VOICE_EMOTIONS, isDefaultCaptionStyle, rendersOnAvatarV, type AspectRatio, type Avatar, type Background, type BrandKit, type CaptionStyle, type PhotoExpressiveness, type VoiceAccent, type AvatarEngine, type Resolution, type Voice, type VideoTemplate, type VoiceEmotion } from "@/lib/types";
 
 const MAX_BATCH_SCRIPT = 5000;
 
@@ -24,6 +25,13 @@ interface Preview {
   /** Rows whose filled-in script is empty or too long, in words. */
   problem?: string | null;
   samples: Array<{ label: string; script: string }>;
+}
+
+/** The brand kit's caption style as this build reads it, or none when the kit has none (or only the default). */
+function kitCaptionStyle(kit: BrandKit | null | undefined): CaptionStyle | undefined {
+  if (!kit?.captionStyle) return undefined;
+  const style = restoredCaptionStyle(kit.captionStyle);
+  return isDefaultCaptionStyle(style) ? undefined : style;
 }
 
 export default function BatchPage() {
@@ -42,7 +50,8 @@ export default function BatchPage() {
   const [speed, setSpeed] = useState(1);
   const [pitch, setPitch] = useState(0);
   const [emotion, setEmotion] = useState<VoiceEmotion | "">("");
-  // Set only by a saved template: the batch API takes them, the page has no controls of its own for them.
+  // Set by a saved template (and the caption style by the brand kit too): the batch API takes them, the page has no
+  // controls of its own for them.
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle | undefined>();
   const [background, setBackground] = useState<Background | undefined>();
   const [carried, setCarried] = useState<{ expressiveness?: PhotoExpressiveness; motionPrompt?: string; accent?: VoiceAccent; avatarEngine?: AvatarEngine; moreBlinking?: true; transparent?: true }>({});
@@ -79,6 +88,8 @@ export default function BatchPage() {
     if (b.defaultAspect && !touched.current.has("aspect")) setAspect(b.defaultAspect);
     if (b.defaultResolution && !touched.current.has("resolution")) setResolution(b.defaultResolution);
     if (b.captionsByDefault != null && !touched.current.has("captions")) setCaptions(b.captionsByDefault);
+    // A template brings its own caption style; otherwise the rows are captioned in the kit's.
+    setCaptionStyle((prev) => prev ?? kitCaptionStyle(b));
   }, [brandData, brandError, avatarData, voiceData, startedFrom]);
   /** A presenter picked by hand brings its own voice, when it has one. */
   function pickAvatar(id: string) {
@@ -116,8 +127,9 @@ export default function BatchPage() {
     setCarriedNote("");
     const t = templateData?.templates.find((x) => x.id === id);
     if (!t) {
-      // "None": drop the settings the page has no controls for, so they do not ride along unseen.
-      setCaptionStyle(undefined);
+      // "None": drop the settings the page has no controls for, so they do not ride along unseen; the brand kit's
+      // caption style is where the rows start again.
+      setCaptionStyle(kitCaptionStyle(brandData?.brand));
       setBackground(undefined);
       setCarried({});
       setCast(null);

@@ -737,6 +737,57 @@ test("scene changes are undone and redone, by button and by keyboard outside the
   await expect(videoAvatar).toHaveText(original!);
 });
 
+test("the brand kit's colours are one-click swatches for a scene's on-screen text", async ({ page }) => {
+  const before = (await (await page.request.get("/api/brand")).json()).brand as Record<string, unknown> | null;
+  try {
+    // Without a brand kit there is only the colour picker.
+    if (before) expect((await page.request.delete("/api/brand")).ok()).toBe(true);
+    await page.goto("/create");
+    await page.evaluate(() => localStorage.removeItem("avatar-studio:draft"));
+    const brandLoaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/brand");
+    await page.reload();
+    await brandLoaded;
+    await page.getByRole("textbox", { name: "Script", exact: true }).fill("Welcome to 12 Elm Street.");
+    await page.getByPlaceholder("Shown over the scene for its whole length").fill("12 Elm Street");
+    await expect(page.getByLabel("Text colour")).toBeVisible();
+    await expect(page.getByRole("group", { name: "Colour swatches" })).toHaveCount(0);
+
+    expect((await page.request.put("/api/brand", { data: { name: "Acme", primaryColor: "#0F766E", accentColor: "#f59e0b" } })).ok()).toBe(true);
+    // A fresh editor, so the kit's primary colour becomes the scene's background.
+    await page.evaluate(() => localStorage.removeItem("avatar-studio:draft"));
+    await page.reload();
+    await page.getByPlaceholder("Shown over the scene for its whole length").fill("12 Elm Street");
+    const swatches = page.getByRole("group", { name: "Colour swatches" });
+    await expect(swatches.getByRole("button")).toHaveCount(3);
+    const white = swatches.getByRole("button", { name: "White text" });
+    const primary = swatches.getByRole("button", { name: "Brand primary text" });
+    const accent = swatches.getByRole("button", { name: "Brand accent text" });
+    await expect(primary).toHaveAttribute("title", "Brand primary: #0f766e");
+    await expect(white).toHaveAttribute("aria-pressed", "true");
+    await primary.click();
+    await expect(primary).toHaveAttribute("aria-pressed", "true");
+    await expect(white).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByLabel("Text colour")).toHaveValue("#0f766e");
+    await expect(page.getByTestId("stage-text")).toHaveCSS("color", "rgb(15, 118, 110)");
+    // On the kit's primary colour as the background, text in that colour cannot be read, and the editor says so.
+    const hidden = page.getByText("This colour hardly shows on the scene's background colour");
+    await expect(hidden).toBeVisible();
+    await accent.click();
+    await expect(hidden).toHaveCount(0);
+    await expect(page.getByTestId("stage-text")).toHaveCSS("color", "rgb(245, 158, 11)");
+    // A colour picked by hand that matches no swatch leaves them all unpressed; white goes back to the default.
+    await page.getByLabel("Text colour").fill("#123456");
+    await expect(swatches.getByRole("button", { pressed: true })).toHaveCount(0);
+    await white.click();
+    await expect(page.getByTestId("stage-text")).toHaveCSS("color", "rgb(255, 255, 255)");
+    await expect(white).toHaveAttribute("aria-pressed", "true");
+  } finally {
+    await page.evaluate(() => localStorage.removeItem("avatar-studio:draft")).catch(() => {});
+    const restored = before ? await page.request.put("/api/brand", { data: before }) : await page.request.delete("/api/brand");
+    expect(restored.ok()).toBe(true);
+  }
+});
+
 test("the brand kit's opening scene is set on the brand page and added at the start of a video in one click", async ({ page }) => {
   const before = (await (await page.request.get("/api/brand")).json()).brand as Record<string, unknown> | null;
   try {

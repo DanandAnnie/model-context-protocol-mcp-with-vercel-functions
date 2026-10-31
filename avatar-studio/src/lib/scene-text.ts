@@ -1,5 +1,5 @@
-// On-screen text's length limit as the editor keeps it: counted as stored (the characters a reader sees once the
-// spaces are collapsed), and enforced on an edit by cutting only what was typed or pasted.
+// On-screen text as the editor keeps it: its length limit, counted as stored (the characters a reader sees once the
+// spaces are collapsed) and enforced on an edit by cutting only what was typed or pasted; and the colours offered for it.
 import { graphemes } from "./text";
 import { MAX_SCENE_TEXT } from "./types";
 
@@ -32,3 +32,39 @@ export function fitSceneTextEdit(prev: string, next: string): { text: string; ca
   const added = inserted.slice(0, keep).join("");
   return { text: head + added + tail, caret: head.length + added.length };
 }
+
+export interface TextSwatch {
+  label: string;
+  /** `#rrggbb`, lower case. */
+  color: string;
+}
+/**
+ * The colours offered for on-screen text in one click: white (the default), then the brand kit's primary and accent
+ * colours. A brand colour that repeats one before it (a white primary, an accent the same as the primary) is left out.
+ */
+export function textSwatches(kit: { primaryColor?: string; accentColor?: string } | null | undefined): TextSwatch[] {
+  const out: TextSwatch[] = [{ label: "White", color: "#ffffff" }];
+  const add = (label: string, raw: string | undefined) => {
+    const color = raw?.toLowerCase();
+    if (color && /^#[0-9a-f]{6}$/.test(color) && !out.some((s) => s.color === color)) out.push({ label, color });
+  };
+  add("Brand primary", kit?.primaryColor);
+  add("Brand accent", kit?.accentColor);
+  return out;
+}
+
+/** The WCAG contrast ratio of two `#rrggbb` colours, from 1 (the same) to 21 (black on white). */
+export function contrastRatio(a: string, b: string): number {
+  const luminance = (hex: string) => {
+    const [r, g, bl] = [1, 3, 5].map((i) => {
+      const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+  };
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+/** Whether text in `color` would hardly show on a scene's plain colour `background` (contrast under 1.5:1). */
+export const textHidden = (color: string, background: string) =>
+  /^#[0-9a-f]{6}$/i.test(color) && /^#[0-9a-f]{6}$/i.test(background) && contrastRatio(color, background) < 1.5;

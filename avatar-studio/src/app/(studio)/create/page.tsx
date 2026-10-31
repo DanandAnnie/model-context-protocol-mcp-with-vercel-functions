@@ -31,7 +31,7 @@ import { readPptx, type PptxSlide } from "@/lib/pptx-notes";
 import { readDocx } from "@/lib/docx-text";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
-import { capSceneText, fitSceneTextEdit, sceneTextLength } from "@/lib/scene-text";
+import { capSceneText, fitSceneTextEdit, sceneTextLength, textHidden, textSwatches, type TextSwatch } from "@/lib/scene-text";
 import { mergeScenes, moveItem, splitParagraphs, splitScene } from "@/lib/scene-split";
 import { amendLast, emptyHistory, record, redo, undo, type History, type HistoryEntry } from "@/lib/scene-history";
 import { graphemes } from "@/lib/text";
@@ -2368,6 +2368,8 @@ function CreateInner() {
               aspect={aspect}
               captionsAt={captions ? captionStyle.position : undefined}
               scene={scenes.length > 1 ? activeIdx + 1 : undefined}
+              swatches={textSwatches(brandData?.brand)}
+              backdrop={active.background.type === "color" ? active.background.value : undefined}
               disabled={canEdit === false}
               onChange={(overlay) => updateScene(activeIdx, { overlay })}
             />
@@ -2953,8 +2955,12 @@ function FindReplace({
   );
 }
 
-/** A scene's on-screen text: what it says, and where, how large, and in what colour it shows. Cleared text removes it. */
-function SceneTextFields({ overlay, aspect, captionsAt, scene, disabled, onChange }: { overlay?: SceneText; aspect: AspectRatio; captionsAt?: CaptionStyle["position"]; scene?: number; disabled: boolean; onChange: (overlay: SceneText | undefined) => void }) {
+/**
+ * A scene's on-screen text: what it says, and where, how large, and in what colour it shows. Cleared text removes it.
+ * With a brand kit, its colours sit beside the colour picker as one-click swatches. On a plain colour background
+ * (`backdrop`), text that would hardly show on it is pointed out.
+ */
+function SceneTextFields({ overlay, aspect, captionsAt, scene, swatches = [], backdrop, disabled, onChange }: { overlay?: SceneText; aspect: AspectRatio; captionsAt?: CaptionStyle["position"]; scene?: number; swatches?: TextSwatch[]; backdrop?: string; disabled: boolean; onChange: (overlay: SceneText | undefined) => void }) {
   const id = useId();
   const text = overlay?.text ?? "";
   const shown = text.replace(/\s+/g, " ").trim();
@@ -3005,6 +3011,26 @@ function SceneTextFields({ overlay, aspect, captionsAt, scene, disabled, onChang
             Colour
             <input type="color" aria-label="Text colour" disabled={disabled} value={overlay?.color ?? "#ffffff"} onChange={(e) => set({ color: e.target.value })} className="h-8 w-10 cursor-pointer rounded border border-slate-200 bg-white p-0.5" />
           </label>
+          {swatches.length > 1 && (
+            <span role="group" aria-label="Colour swatches" className="inline-flex items-center gap-1.5">
+              {swatches.map((sw) => {
+                const on = (overlay?.color ?? "#ffffff") === sw.color;
+                return (
+                  <button
+                    key={sw.color}
+                    type="button"
+                    aria-label={`${sw.label} text`}
+                    aria-pressed={on}
+                    title={`${sw.label}: ${sw.color}`}
+                    disabled={disabled}
+                    onClick={() => set({ color: sw.color })}
+                    className={`h-6 w-6 rounded-full border border-slate-400 disabled:cursor-not-allowed disabled:opacity-50 ${on ? "ring-2 ring-brand-600 ring-offset-1" : ""}`}
+                    style={{ backgroundColor: sw.color }}
+                  />
+                );
+              })}
+            </span>
+          )}
         </div>
       )}
       {shown && (
@@ -3013,6 +3039,9 @@ function SceneTextFields({ overlay, aspect, captionsAt, scene, disabled, onChang
           <p className="text-slate-500">Shown in the preview and kept with the scene. HeyGen&apos;s current API has no text element, so the rendered video does not carry it yet.</p>
           {!sceneTextFits({ ...overlay, text: shown }, aspect) && (
             <p role="alert" className="font-medium text-amber-700">Too long for one line across a {aspect} frame at this size: shorten it or choose a smaller size, or it runs off the edges.</p>
+          )}
+          {backdrop && textHidden(overlay?.color ?? "#ffffff", backdrop) && (
+            <p className="text-amber-700">This colour hardly shows on the scene&apos;s background colour; choose another so the text can be read.</p>
           )}
           {captionsAt && position === captionsAt && (
             <p className="text-amber-700">Captions sit at the {captionsAt} too and may cover this text; move one of them.</p>

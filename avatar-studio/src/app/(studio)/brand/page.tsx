@@ -59,6 +59,8 @@ export default function BrandPage() {
   const [glossary, setGlossary] = useState("");
   const [forced, setForced] = useState("");
   const [writingStyle, setWritingStyle] = useState("");
+  // The site a writing style was drafted from, until the person edits it, so the field says it is a draft to read.
+  const [styleDraftFrom, setStyleDraftFrom] = useState<string | null>(null);
   const [logoNotice, setLogoNotice] = useState<string | null>(null);
   const [avatarId, setAvatarId] = useState("");
   const [voiceId, setVoiceId] = useState("");
@@ -141,8 +143,8 @@ export default function BrandPage() {
   }
 
   // The form as it stands now, read when the website's answer arrives (the person may have typed meanwhile).
-  const formNow = useRef({ name, logoUrl, primary, accent });
-  formNow.current = { name, logoUrl, primary, accent };
+  const formNow = useRef({ name, logoUrl, primary, accent, writingStyle });
+  formNow.current = { name, logoUrl, primary, accent, writingStyle };
 
   async function importSite() {
     if (!site.trim() || importing) return;
@@ -153,11 +155,15 @@ export default function BrandPage() {
     try {
       const { suggestion: s } = await api<{ suggestion: BrandSuggestion }>("/api/brand/import", { method: "POST", body: JSON.stringify({ url: site.trim() }) });
       const host = new URL(s.sourceUrl).host;
-      const { name, logoUrl, primary, accent } = formNow.current;
+      const { name, logoUrl, primary, accent, writingStyle } = formNow.current;
       // What is already filled in (typed, uploaded, or saved) is replaced only when the person agrees.
       const colours = !!s.primaryColor && (primary.toLowerCase() !== DEFAULT_PRIMARY || !!accent) && (primary.toLowerCase() !== s.primaryColor || (accent || undefined) !== s.accentColor);
-      const clashes = [s.name && name.trim() && name.trim() !== s.name ? "name" : "", s.logoUrl && logoUrl && logoUrl !== s.logoUrl ? "logo" : "", colours ? "colours" : ""].filter(Boolean);
-      const replace = !clashes.length || window.confirm(`Replace your ${clashes.join(" and ").replace(/ and (?=.* and )/, ", ")} with the ones from ${host}? Cancel keeps yours and fills in only what is empty.`);
+      const clashes = [
+        s.name && name.trim() && name.trim() !== s.name ? "name" : "",
+        s.logoUrl && logoUrl && logoUrl !== s.logoUrl ? "logo" : "",
+        colours ? "colours" : "",
+      ].filter(Boolean);
+      const replace = !clashes.length || window.confirm(`Replace your ${clashes.join(" and ").replace(/ and (?=.* and )/g, ", ")} with the ones from ${host}? Cancel keeps yours and fills in only what is empty.`);
       const found: string[] = [];
       if (s.name && (replace || !name.trim())) (setName(s.name), found.push("the name"));
       if (s.logoUrl && (replace || !logoUrl)) (setLogoUrl(s.logoUrl), setLogoNotice(null), found.push("a logo"));
@@ -165,6 +171,13 @@ export default function BrandPage() {
         setPrimary(s.primaryColor);
         setAccent(s.accentColor ?? "");
         found.push(s.accentColor ? "two colours" : "a colour");
+      }
+      // A writing style is often written by hand, so it is asked about on its own; the draft is marked as one to read.
+      const styleClash = !!s.writingStyle && !!writingStyle.trim() && writingStyle.trim() !== s.writingStyle;
+      if (s.writingStyle && (!styleClash || window.confirm(`Replace your writing style with a draft from ${host}'s text? Cancel keeps yours.`))) {
+        setWritingStyle(s.writingStyle);
+        setStyleDraftFrom(host);
+        found.push("a draft writing style");
       }
       setImportNote(found.length ? `Filled in ${found.join(", ").replace(/, ([^,]*)$/, " and $1")} from ${host}. Check them, then save the brand kit.` : `Kept what you had; ${host} offered nothing for the empty fields.`);
     } catch (e) {
@@ -257,6 +270,7 @@ export default function BrandPage() {
         }),
       });
       setSavedAt(brand.updatedAt);
+      setStyleDraftFrom(null);
     } catch (e) {
       setSaveErr(e instanceof Error ? e.message : "Could not save the brand kit");
     } finally {
@@ -285,6 +299,7 @@ export default function BrandPage() {
       setGlossary("");
       setForced("");
       setWritingStyle("");
+      setStyleDraftFrom(null);
       setCaptions(false);
       setCaptionStyle(DEFAULT_CAPTION_STYLE);
       setWatermark("");
@@ -533,14 +548,22 @@ export default function BrandPage() {
           >
             <textarea
               aria-label="Writing style"
-              aria-describedby="writing-style-hint writing-style-count"
+              aria-describedby={`writing-style-hint writing-style-count${styleDraftFrom ? " writing-style-draft" : ""}`}
               value={writingStyle}
-              onChange={(e) => setWritingStyle(e.target.value)}
+              onChange={(e) => {
+                setWritingStyle(e.target.value);
+                setStyleDraftFrom(null);
+              }}
               rows={3}
               maxLength={MAX_WRITING_STYLE}
               placeholder="Warm and plain-spoken, like a neighbour who knows the market. Say “home”, not “property”. No exclamation marks."
               className={inputClass}
             />
+            {styleDraftFrom && (
+              <span id="writing-style-draft" className="mt-1 block text-xs font-medium text-amber-800">
+                Drafted by Claude from {styleDraftFrom}&apos;s text: read it, and edit anything that is not how you write, before saving.
+              </span>
+            )}
             <span id="writing-style-count" className={`mt-1 block text-xs ${writingStyle.length >= MAX_WRITING_STYLE ? "font-medium text-rose-700" : "text-slate-500"}`}>
               {writingStyle.length >= MAX_WRITING_STYLE ? `Limit reached: ${MAX_WRITING_STYLE} of ${MAX_WRITING_STYLE} characters; anything more is left out.` : `${writingStyle.length} of ${MAX_WRITING_STYLE} characters`}
             </span>

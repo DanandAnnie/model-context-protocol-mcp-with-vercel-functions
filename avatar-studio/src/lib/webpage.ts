@@ -17,17 +17,121 @@ export function decodeEntities(s: string): string {
   });
 }
 
-/** Title and readable body text of an HTML document. Prefers <article> or <main>, drops nav, scripts, and styles. */
-export function extractReadableText(html: string): { title: string; text: string } {
-  const title = decodeEntities(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] ?? "").replace(/\s+/g, " ").trim();
-  let body = html;
-  const focus = /<article[\s>][\s\S]*?<\/article>/i.exec(html)?.[0] ?? /<main[\s>][\s\S]*?<\/main>/i.exec(html)?.[0];
-  if (focus) body = focus;
-  body = body
-    .replace(/<(script|style|noscript|template|svg|nav|header|footer|aside|form)[\s>][\s\S]*?<\/\1>/gi, " ")
-    .replace(/<!--[\s\S]*?-->/g, " ")
+/** Elements whose content is never part of a page's readable text. */
+const UNREAD = new Set(["script", "style", "noscript", "template", "svg", "nav", "header", "footer", "aside", "form"]);
+/** Elements without content, which a hidden marker hides on their own. */
+const VOID = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"]);
+/** How many hidden elements may be scanned for a close that never comes before hidden markers are no longer followed. */
+const MAX_UNCLOSED_HIDDEN = 20;
+
+/**
+ * Upper-case ASCII letters lower-cased, and nothing else: tag names are ASCII, and a full lower-casing can change the
+ * text's length (Turkish "İ" becomes two characters), which would shift every position found in it from the page's.
+ */
+function asciiLower(html: string): string {
+  return html.replace(/[A-Z]+/g, (run) => run.toLowerCase());
+}
+
+/**
+ * Whether an opening tag's attributes (lower-cased) hide it from a reader: `hidden` (but not `hidden="until-found"`,
+ * which a browser's find reveals), `aria-hidden="true"`, or an inline style of `display: none` or `visibility: hidden`.
+ * Each attribute is read with its own value, so words inside another's value (`title="a hidden gem"`) are not markers.
+ */
+function hides(attrs: string): boolean {
+  const attr = /([^\s"'=/<>]+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s"'<>]+))?/g;
+  for (let a = attr.exec(attrs); a; a = attr.exec(attrs)) {
+    const value = (a[2] ?? "").replace(/^["']|["']$/g, "").trim();
+    if (a[1] === "hidden" && value !== "until-found") return true;
+    if (a[1] === "aria-hidden" && value === "true") return true;
+    if (a[1] === "style" && /display\s*:\s*none|visibility\s*:\s*hidden/.test(value)) return true;
+  }
+  return false;
+}
+
+/**
+ * The page without what a reader does not see: comments, scripts, styles, navigation and the other `UNREAD` elements,
+ * and, with `dropHidden`, elements marked hidden (with whatever they hold). One pass, in time linear in the page's size
+ * whatever its markup: a tag's name must end where its attributes begin, so a run of letters is read once, and a
+ * closing tag looked for and not found is not looked for again, so unclosed tags keep their content.
+ */
+function withoutUnread(html: string, lower: string, dropHidden: boolean): string {
+  const tag = /<!--|<([a-z][a-z0-9-]*)(?=[\s/>])([^<>]*)>/g;
+  const noClose = new Set<string>();
+  let unclosedHidden = 0;
+  let out = "";
+  let from = 0;
+  for (let m = tag.exec(lower); m; m = tag.exec(lower)) {
+    if (m[0] === "<!--") {
+      const end = lower.indexOf("-->", m.index + 4);
+      out += `${html.slice(from, m.index)} `;
+      if (end < 0) return out;
+      from = tag.lastIndex = end + 3;
+      continue;
+    }
+    const name = m[1];
+    const opened = m.index + m[0].length;
+    const selfClosed = m[2].trimEnd().endsWith("/");
+    let skipTo = -1;
+    if (UNREAD.has(name)) {
+      // A self-closed `<svg/>` holds nothing; it is the tag alone that goes.
+      if (selfClosed) skipTo = opened;
+      else if (!noClose.has(name)) {
+        const close = lower.indexOf(`</${name}>`, opened);
+        if (close < 0) noClose.add(name);
+        else skipTo = close + name.length + 3;
+      }
+    } else if (dropHidden && hides(m[2])) {
+      if (VOID.has(name) || selfClosed) skipTo = opened;
+      else if (unclosedHidden < MAX_UNCLOSED_HIDDEN) {
+        // The matching close: elements of the same name opened inside it are counted, so a hidden div's own divs go too.
+        const same = new RegExp(`<(/?)${name}(?=[\\s/>])[^<>]*>`, "g");
+        same.lastIndex = opened;
+        let depth = 1;
+        for (let t = same.exec(lower); t; t = same.exec(lower)) {
+          depth += t[1] ? -1 : 1;
+          if (!depth) {
+            skipTo = same.lastIndex;
+            break;
+          }
+        }
+        if (skipTo < 0) unclosedHidden++;
+      }
+    }
+    if (skipTo < 0) continue;
+    out += `${html.slice(from, m.index)} `;
+    from = tag.lastIndex = skipTo;
+  }
+  return out + html.slice(from);
+}
+
+/** The first `<name …>…</name>` of the page, found without backtracking; none when it is never closed. */
+function firstElement(html: string, lower: string, name: string): { html: string; lower: string } | undefined {
+  const open = new RegExp(`<${name}[\\s>]`).exec(lower);
+  if (!open) return undefined;
+  const close = lower.indexOf(`</${name}>`, open.index);
+  if (close < 0) return undefined;
+  const end = close + name.length + 3;
+  return { html: html.slice(open.index, end), lower: lower.slice(open.index, end) };
+}
+
+/**
+ * Title and readable body text of an HTML document, in time linear in the page's size whatever its markup. The text is
+ * the page's first `<article>`, else its `<main>` (with `preferMain`, `<main>` first: a brand's own words rather than
+ * one card of its home page), else the whole page, without comments, scripts, styles, navigation, headers, footers,
+ * asides, forms, templates, and svg; with `dropHidden`, elements marked hidden go too (left in by default, since an
+ * answer folded away in an FAQ is still the page's to write from).
+ */
+export function extractReadableText(html: string, options: { dropHidden?: boolean; preferMain?: boolean } = {}): { title: string; text: string } {
+  const lower = asciiLower(html);
+  const titleOpen = lower.indexOf("<title");
+  const titleStart = titleOpen < 0 ? -1 : lower.indexOf(">", titleOpen);
+  const titleEnd = titleStart < 0 ? -1 : lower.indexOf("</title>", titleStart);
+  const title = decodeEntities(titleEnd < 0 ? "" : html.slice(titleStart + 1, titleEnd)).replace(/\s+/g, " ").trim();
+  const order = options.preferMain ? ["main", "article"] : ["article", "main"];
+  const focus = firstElement(html, lower, order[0]) ?? firstElement(html, lower, order[1]) ?? { html, lower };
+  const body = withoutUnread(focus.html, focus.lower, options.dropHidden === true)
     .replace(/<br\s*\/?>|<\/(p|div|li|h[1-6]|tr|section|blockquote)>/gi, "\n")
-    .replace(/<[^>]+>/g, " ");
+    .replace(/<[^<>]*>/g, " ");
   const text = decodeEntities(body)
     .split("\n")
     .map((line) => line.replace(/\s+/g, " ").trim())

@@ -4,8 +4,13 @@ import { rateLimit } from "@/lib/rate-limit";
 import { brandImportSchema, importBrandFromWebsite } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
+// Room for the page's fetch and Claude's description of how it writes.
+export const maxDuration = 60;
 
-/** `{ url }` → `{ suggestion }`: a brand name, logo, and colours read from that public web page, for the form to review. */
+/**
+ * `{ url }` → `{ suggestion }`: a brand name, logo, and colours read from that public web page, and with Claude a
+ * writing style drafted from its text, for the form to review.
+ */
 export async function POST(req: Request) {
   try {
     const owner = await requireEditor();

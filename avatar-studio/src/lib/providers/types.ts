@@ -264,6 +264,11 @@ export interface ScriptProvider {
   /** One conversational turn for the interactive avatar: the presenter answers in character, briefly, for speech. */
   chat(input: { persona: ChatPersona; messages: ChatMessage[] }): Promise<string>;
   /**
+   * How a brand writes, read from its website's text, for a brand kit's writing style: a few sentences of guidance in
+   * the page's own terms. A writer that cannot read a voice (the demo one) has none, and an import then suggests none.
+   */
+  brandStyle?(input: { name?: string; text: string; timeoutMs?: number }): Promise<string>;
+  /**
    * The short description shown under a video on its share page and in link previews, from its title and what the
    * presenter says: one to three plain sentences in the script's language, from the script's facts only.
    */

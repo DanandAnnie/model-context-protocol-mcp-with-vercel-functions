@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Dialog, type Page } from "@playwright/test";
 import { AxeBuilder } from "@axe-core/playwright";
 import { strToU8, zipSync } from "fflate";
 import { readFile } from "node:fs/promises";
@@ -4408,11 +4408,18 @@ test("the brand kit can be filled in from a website, for review before saving", 
   await expect(page.getByTestId("brand-import-status")).toContainText(/public|private|not allowed/i);
   // A public site is read on the server (stood in for here); its details fill the form and nothing is saved yet.
   await page.route("**/api/brand/import", (route) =>
-    route.fulfill({ json: { suggestion: { sourceUrl: "https://www.maple.example/", name: "Maple Street Realty", logoUrl: "http://localhost:3100/demo/poster.svg", primaryColor: "#0f766e", accentColor: "#f59e0b" } } }),
+    route.fulfill({
+      json: { suggestion: { sourceUrl: "https://www.maple.example/", name: "Maple Street Realty", logoUrl: "http://localhost:3100/demo/poster.svg", primaryColor: "#0f766e", accentColor: "#f59e0b", writingStyle: "Warm and neighbourly, speaking to families." } },
+    }),
   );
   await page.getByLabel("Website address").fill("maple.example");
   await page.getByLabel("Website address").press("Enter");
-  await expect(page.getByTestId("brand-import-status")).toHaveText("Filled in the name, a logo and two colours from www.maple.example. Check them, then save the brand kit.");
+  await expect(page.getByTestId("brand-import-status")).toHaveText("Filled in the name, a logo, two colours and a draft writing style from www.maple.example. Check them, then save the brand kit.");
+  const style = page.getByRole("textbox", { name: "Writing style" });
+  await expect(style).toHaveValue("Warm and neighbourly, speaking to families.");
+  // The draft says where it came from, read with the field, until it is edited.
+  await expect(page.locator("#writing-style-draft")).toHaveText("Drafted by Claude from www.maple.example's text: read it, and edit anything that is not how you write, before saving.");
+  await expect(style).toHaveAttribute("aria-describedby", /writing-style-draft/);
   await expect(page.getByPlaceholder("Acme Realty")).toHaveValue("Maple Street Realty");
   await expect(page.getByLabel("Primary color", { exact: true })).toHaveValue("#0f766e");
   await expect(page.getByLabel("Accent color", { exact: true })).toHaveValue("#f59e0b");
@@ -4420,13 +4427,22 @@ test("the brand kit can be filled in from a website, for review before saving", 
   expect((await (await page.request.get("/api/brand")).json()).brand?.name ?? "").not.toBe("Maple Street Realty");
   // A second site asks before replacing what is filled in; declining keeps it.
   await page.unroute("**/api/brand/import");
-  await page.route("**/api/brand/import", (route) => route.fulfill({ json: { suggestion: { sourceUrl: "https://other.example/", name: "Other Co", primaryColor: "#dc2626" } } }));
-  let asked = "";
-  page.once("dialog", (d) => ((asked = d.message()), d.dismiss()));
+  await page.route("**/api/brand/import", (route) => route.fulfill({ json: { suggestion: { sourceUrl: "https://other.example/", name: "Other Co", primaryColor: "#dc2626", writingStyle: "Bold and brief." } } }));
+  // The writing style, often written by hand, is asked about on its own.
+  const asked: string[] = [];
+  const decline = (d: Dialog) => (asked.push(d.message()), void d.dismiss());
+  page.on("dialog", decline);
+  await style.fill("Plain and kind, in my own words.");
+  await expect(page.locator("#writing-style-draft")).toHaveCount(0);
   await page.getByLabel("Website address").fill("other.example");
   await page.getByRole("button", { name: "Fill in" }).click();
   await expect(page.getByTestId("brand-import-status")).toHaveText("Kept what you had; other.example offered nothing for the empty fields.");
-  expect(asked).toBe("Replace your name and colours with the ones from other.example? Cancel keeps yours and fills in only what is empty.");
+  page.off("dialog", decline);
+  expect(asked).toEqual([
+    "Replace your name and colours with the ones from other.example? Cancel keeps yours and fills in only what is empty.",
+    "Replace your writing style with a draft from other.example's text? Cancel keeps yours.",
+  ]);
+  await expect(style).toHaveValue("Plain and kind, in my own words.");
   await expect(page.getByPlaceholder("Acme Realty")).toHaveValue("Maple Street Realty");
   await expect(page.getByLabel("Primary color", { exact: true })).toHaveValue("#0f766e");
 });

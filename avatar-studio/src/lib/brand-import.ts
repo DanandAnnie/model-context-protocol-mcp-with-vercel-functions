@@ -14,6 +14,8 @@ export interface BrandSuggestion {
   /** Lower-case `#rrggbb` colours. */
   primaryColor?: string;
   accentColor?: string;
+  /** How the site writes, drafted by Claude from its text, for the kit's writing style; up to `MAX_WRITING_STYLE`. */
+  writingStyle?: string;
 }
 
 /** Longest opening tag read; a longer one is skipped. */

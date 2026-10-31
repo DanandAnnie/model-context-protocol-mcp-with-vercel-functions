@@ -17,7 +17,8 @@ import { MAX_FORCED_TRANSLATIONS, MAX_FORCED_TRANSLATION_LENGTH, MAX_GLOSSARY_TE
 import { servableLogo } from "../brand-logo";
 import { brandFromHtml, type BrandSuggestion } from "../brand-import";
 import type { FetchLike } from "../safe-fetch";
-import { fetchPageHtml } from "../webpage";
+import { extractReadableText, fetchPageHtml } from "../webpage";
+import { getScriptProvider } from "../providers";
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
@@ -171,6 +172,7 @@ export const brandImportSchema = z.object({ url: z.string().trim().min(1, "Enter
  * as https). Up to three redirects are followed, each to a public address; nothing is saved.
  */
 export async function importBrandFromWebsite(input: z.infer<typeof brandImportSchema>, fetchImpl?: FetchLike): Promise<BrandSuggestion> {
+  const started = Date.now();
   // "acme.com:8080" names a port, not a scheme; only "scheme://" is taken as given.
   const raw = /^[a-z][a-z\d+.-]*:\/\//i.test(input.url) ? input.url : `https://${input.url}`;
   let page: { html: string; url: string };
@@ -186,6 +188,87 @@ export async function importBrandFromWebsite(input: z.infer<typeof brandImportSc
     throw new ValidationError("That page could not be read for brand details; fill the kit in by hand");
   }
   if (!suggestion.name && !suggestion.logoUrl && !suggestion.primaryColor) throw new ValidationError("That page names no brand name, logo, or colour; fill the kit in by hand");
-  return suggestion;
+  const writingStyle = await styleFromPage(page.html, suggestion.name, STYLE_BUDGET_MS - (Date.now() - started));
+  return writingStyle ? { ...suggestion, writingStyle } : suggestion;
+}
+
+/** The fewest characters of readable text a page needs before its writing is worth describing. */
+const MIN_STYLE_SOURCE = 200;
+/** How long into an import its style may still be drafted, within the route's minute; a draft needs at least the floor. */
+const STYLE_BUDGET_MS = 50_000;
+const STYLE_FLOOR_MS = 5_000;
+const STYLE_TIMEOUT_MS = 20_000;
+/** Top-level domains a web address in a drafted style would most likely end in. */
+const TLDS = "com|net|org|io|co|ca|uk|us|au|nz|ie|de|fr|es|it|nl|be|ch|at|se|no|dk|fi|pl|pt|br|mx|in|jp|realty|homes|house|estate|properties|app|dev|ai|info|biz|site|online|shop|store|example";
+
+/**
+ * Whether a drafted style carries what no style needs, and a page could plant in it: a web address, an email address,
+ * or a phone number. The brand's own name is set aside first, so a brand named for its domain ("Realtor.com") can be
+ * named; numbers count as a phone only with nine digits or more, and not as a span of years or a figure in thousands.
+ */
+export function carriesContact(style: string, brandName?: string): boolean {
+  const name = brandName?.trim();
+  const text = name ? style.replace(new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), " ") : style;
+  if (/https?:\/\/|\bwww\./i.test(text)) return true;
+  if (/[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}/i.test(text)) return true;
+  if (new RegExp(`\\b[a-z0-9][a-z0-9-]*\\.(?:${TLDS})\\b(?!\\.\\w)`, "i").test(text)) return true;
+  for (const run of text.match(/\+?\d[\d\s().-]{7,}\d/g) ?? []) {
+    const digits = run.replace(/\D/g, "").length;
+    const years = /^\d{4}\s*[-–]\s*\d{4}$/.test(run.trim());
+    const thousands = /^\d{1,3}(?:[ .,]\d{3})+$/.test(run.trim());
+    if (digits >= 9 && !years && !thousands) return true;
+  }
+  return false;
+}
+
+/**
+ * How a page writes, as the script writer describes it from the page's readable text (what a reader sees: scripts,
+ * navigation, and hidden elements left out), tidied to one paragraph and cut to fit the kit's writing style. Best
+ * effort: a page with too little text, a writer that cannot read a voice or finds none, one that fails, declines, or
+ * runs past the time left, or a draft that carries an address or phone number gives none, and the rest of the import
+ * stands.
+ */
+async function styleFromPage(html: string, name: string | undefined, budgetMs: number): Promise<string | undefined> {
+  const provider = getScriptProvider();
+  if (!provider.brandStyle || budgetMs < STYLE_FLOOR_MS) return undefined;
+  // The brand's own words: its main content before one card of its home page, and none of what the page hides.
+  const { text } = extractReadableText(html, { dropHidden: true, preferMain: true });
+  if (text.length < MIN_STYLE_SOURCE) return undefined;
+  let style: string;
+  try {
+    style = await provider.brandStyle({ ...(name ? { name } : {}), text, timeoutMs: Math.min(STYLE_TIMEOUT_MS, budgetMs) });
+  } catch {
+    return undefined;
+  }
+  const tidy = unquoted(style.replace(/\s+/g, " ").trim());
+  if (!tidy || /^NONE\b/i.test(tidy) || carriesContact(tidy, name)) return undefined;
+  return cutStyle(tidy);
+}
+
+/**
+ * A style the writer wrapped whole in quotes, unwrapped: double quotes may hold apostrophes ("doesn't"), single ones
+ * nothing quoted; quotes that only name a word inside it are kept.
+ */
+function unquoted(style: string): string {
+  const m = /^(?:"([^"“”]*)"|“([^"“”]*)”|'([^'"“”]*)')$/.exec(style);
+  return (m ? (m[1] ?? m[2] ?? m[3]) : style).trim();
+}
+
+/**
+ * A writing style cut to fit `MAX_WRITING_STYLE`, as the kit stores it: after the last whole sentence that fits when
+ * there is one past half the limit, else at the last space, else at the limit itself (text without spaces, such as
+ * Japanese), never between the halves of a character outside the Basic Multilingual Plane.
+ */
+export function cutStyle(style: string): string {
+  if (style.length <= MAX_WRITING_STYLE) return style;
+  // One character past the limit shows whether the cut falls at the end of a sentence or between words.
+  const cut = style.slice(0, MAX_WRITING_STYLE + 1);
+  const half = MAX_WRITING_STYLE / 2;
+  const sentence = Math.max(-1, ...[...cut.matchAll(/[.!?。！？](?=\s|$)/g)].map((m) => m.index + 1).filter((end) => end <= MAX_WRITING_STYLE));
+  if (sentence >= half) return cut.slice(0, sentence);
+  const space = cut.search(/\s\S*$/);
+  if (space >= half) return cut.slice(0, space).trimEnd();
+  const end = /[\ud800-\udbff]/.test(style[MAX_WRITING_STYLE - 1]) ? MAX_WRITING_STYLE - 1 : MAX_WRITING_STYLE;
+  return style.slice(0, end);
 }
 

@@ -5716,6 +5716,13 @@ test("a multi-scene video has chapters: the share page jumps to a scene and the 
   const copied = await page.evaluate(() => navigator.clipboard.readText());
   expect(copied.split("\n")).toHaveLength(3);
   expect(copied).toMatch(/^0:00 12 Maple Street\n\d+:\d\d The kitchen was redone last spring with quartz counters and…\n\d+:\d\d Call Dana to book a showing this weekend\.$/);
+  // Each chapter copies a share link that starts there; the first one's is the plain link.
+  await page.getByTestId("chapter-link").nth(1).click();
+  const chapterLink = await page.evaluate(() => navigator.clipboard.readText());
+  expect(chapterLink).toMatch(new RegExp(`/share/${v.id}\\?t=\\d+(\\.\\d+)?$`));
+  await expect(page.getByText(/^Link to \d+:\d\d copied\.$/)).toBeVisible();
+  await page.getByTestId("chapter-link").first().click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toMatch(new RegExp(`/share/${v.id}$`));
   // The same chapters as a WebVTT chapters file, for players and hosts that read one.
   await expect(page.getByRole("link", { name: "Chapters file" })).toHaveAttribute("href", `/api/videos/${v.id}/captions?format=chapters`);
   const file = await page.request.get(`/api/videos/${v.id}/captions?format=chapters`);
@@ -5753,6 +5760,22 @@ test("a multi-scene video has chapters: the share page jumps to a scene and the 
   await player.evaluate((el: HTMLVideoElement) => (el.currentTime = 0));
   await expect(chapters.getByRole("button").first()).toHaveAttribute("aria-current", "true");
   await expect(chapters.locator('[aria-current="true"]')).toHaveCount(1);
+  // The chapter's link starts the player inside that chapter, which the list marks as the one playing; opening it
+  // without pressing play counts no watch-through. A time past the end, one that is not a time, or a repeated t
+  // starts at 0.
+  const linkUrl = new URL(chapterLink);
+  const at = Number(linkUrl.searchParams.get("t"));
+  const watchBefore = (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.watch ?? {};
+  await page.goto(`${linkUrl.pathname}${linkUrl.search}`);
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.currentTime)).toBeGreaterThanOrEqual(at - 0.01);
+  await expect(chapters.getByRole("button").nth(1)).toHaveAttribute("aria-current", "true");
+  await page.waitForTimeout(500);
+  expect((await (await page.request.get(`/api/videos/${v.id}`)).json()).video.watch ?? {}).toEqual(watchBefore);
+  for (const t of ["1h", "soon", "5&t=6"]) {
+    await page.goto(`/share/${v.id}?t=${t}`);
+    await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.readyState)).toBeGreaterThanOrEqual(1);
+    expect(await player.evaluate((el: HTMLVideoElement) => el.currentTime)).toBe(0);
+  }
   // On a phone the chapter titles are cut with an ellipsis rather than pushing the page sideways.
   await page.setViewportSize({ width: 390, height: 800 });
   await page.reload();

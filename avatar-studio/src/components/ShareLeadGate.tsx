@@ -11,7 +11,7 @@ import { ShareWatch } from "./ShareWatch";
  * away rather than after a reload, because an embedded page in a browser that blocks third-party cookies would
  * otherwise never remember the pass.
  */
-export function ShareLeadGate({ videoId, brandName, autoplay, loop, embed = false }: { videoId: string; brandName?: string; autoplay: boolean; loop: boolean; embed?: boolean }) {
+export function ShareLeadGate({ videoId, brandName, autoplay, loop, start, embed = false }: { videoId: string; brandName?: string; autoplay: boolean; loop: boolean; start?: number; embed?: boolean }) {
   const [body, setBody] = useState<ShareBody | null>(null);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -33,7 +33,7 @@ export function ShareLeadGate({ videoId, brandName, autoplay, loop, embed = fals
     }
   }
 
-  if (body) return <ShareWatch body={body} autoplay={autoplay} loop={loop} focus embed={embed} />;
+  if (body) return <ShareWatch body={body} autoplay={autoplay} loop={loop} start={start} focus embed={embed} />;
 
   const field = "w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-slate-500 focus:outline-none";
   return (

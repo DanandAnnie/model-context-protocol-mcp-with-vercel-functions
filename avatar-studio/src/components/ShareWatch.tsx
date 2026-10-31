@@ -10,7 +10,7 @@ import { ShareChapters } from "./ShareChapters";
 import { ViewBeacon } from "./ViewBeacon";
 
 /** A share page's player, button, download link, description, and transcript, from what the server let this viewer see. */
-export function ShareWatch({ body, autoplay, loop, focus = false, embed = false }: { body: ShareBody; autoplay: boolean; loop: boolean; focus?: boolean; embed?: boolean }) {
+export function ShareWatch({ body, autoplay, loop, start, focus = false, embed = false }: { body: ShareBody; autoplay: boolean; loop: boolean; start?: number; focus?: boolean; embed?: boolean }) {
   // Shown in place of the email form, it takes the focus the form's button had, rather than leaving it on the page.
   const frameRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -51,6 +51,7 @@ export function ShareWatch({ body, autoplay, loop, focus = false, embed = false 
             trackDefault={player.trackDefault}
             autoplay={autoplay}
             loop={loop}
+            start={start}
             tracks={player.tracks}
             chapters={body.chapters}
           />

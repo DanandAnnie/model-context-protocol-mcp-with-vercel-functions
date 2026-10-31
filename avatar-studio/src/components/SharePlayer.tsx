@@ -1,5 +1,5 @@
 "use client";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { chaptersPlayed, type PlayMark } from "@/lib/chapter-play";
 import { SHARE_PLAYER_ID, shareTrackId } from "@/lib/share-player";
 import { wellFormed } from "@/lib/text";
@@ -24,6 +24,7 @@ export function SharePlayer({
   trackDefault = true,
   autoplay = false,
   loop = false,
+  start,
   tracks = [],
   chapters = [],
 }: {
@@ -38,6 +39,8 @@ export function SharePlayer({
   /** Start muted on load (browsers allow muted autoplay only); used by embeds. */
   autoplay?: boolean;
   loop?: boolean;
+  /** Seconds to start at (a share link's `?t=`), once the clip's length is known; ignored past its end. */
+  start?: number;
   /** Translated subtitle tracks the video carries, offered in the CC menu. */
   tracks?: Array<{ language: string; code?: string }>;
   /** Where each chapter starts and the scene it opens, in order. */
@@ -46,6 +49,21 @@ export function SharePlayer({
   const reported = useRef<WatchQuarter | 0>(0);
   const queue = useRef<Promise<void>>(Promise.resolve());
   const played = useRef(new Set<number>());
+  const started = useRef(false);
+  // Once: a later metadata load (a source refreshed) must not pull the viewer back to the link's time.
+  // Applied once the clip's length is known (a streamed file may report it only after its metadata).
+  const startAt = (el: HTMLVideoElement) => {
+    if (!start || started.current || !(el.readyState >= 1) || !Number.isFinite(el.duration) || el.duration <= 0) return;
+    started.current = true;
+    if (start < el.duration - 0.5) el.currentTime = start;
+  };
+  // The server-rendered player may have its metadata before this script runs, and so before the handler is there.
+  useEffect(() => {
+    const el = document.getElementById(SHARE_PLAYER_ID) as HTMLVideoElement | null;
+    if (el) startAt(el);
+    // Only on mount; later loads come through the handler.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // The chapter and time of the last time update while playing, cleared by a seek.
   const last = useRef<PlayMark>(null);
   const send = (body: { quarter: WatchQuarter } | { scene: number }) => {
@@ -87,12 +105,15 @@ export function SharePlayer({
       onTimeUpdate={(e) => {
         const el = e.currentTarget;
         reportChapter(el);
-        if (!Number.isFinite(el.duration) || el.duration <= 0) return;
+        // Only playback reaches a point: a link's start time, or a seek while paused, moves the playhead without it.
+        if (el.paused || !Number.isFinite(el.duration) || el.duration <= 0) return;
         const pct = (el.currentTime / el.duration) * 100;
         // A looping video never ends, so the last half second counts as the end.
         const reached = loop && el.duration - el.currentTime < 0.5 ? 100 : pct >= 75 ? 75 : pct >= 50 ? 50 : pct >= 25 ? 25 : 0;
         if (reached) report(reached);
       }}
+      onLoadedMetadata={(e) => startAt(e.currentTarget)}
+      onDurationChange={(e) => startAt(e.currentTarget)}
       onSeeking={() => {
         last.current = null;
       }}

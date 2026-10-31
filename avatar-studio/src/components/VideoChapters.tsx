@@ -1,12 +1,13 @@
 "use client";
 import { useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { Check, Copy, Download, Pencil } from "lucide-react";
+import { Check, Copy, Download, Link2, Pencil } from "lucide-react";
 import { Button, Card, inputClass } from "@/components/ui";
 import { captionDurationSec, chaptersText, sceneChapters, videoChapters, youtubeReadsChapters, type Timed } from "@/lib/chapters";
 import { api } from "@/lib/client";
 import { capSceneName, sceneName } from "@/lib/scene-text";
 import { formatTimestamp } from "@/lib/text";
+import { shareLinkAt } from "@/lib/share-time";
 import type { Video } from "@/lib/types";
 
 type ChapterVideo = Timed & Partial<Pick<Video, "views" | "chapterViews" | "deletedAt">> & { id?: string; status?: string; captionCues?: Array<{ startMs: number; endMs: number; text: string }> };
@@ -16,7 +17,18 @@ type ChapterVideo = Timed & Partial<Pick<Video, "views" | "chapterViews" | "dele
  * description takes ("0:00 Welcome"), so a video posted to YouTube keeps them. An editor can retitle them after the
  * video is made: each scene's name is its chapter's title, saved without rendering again.
  */
-export function VideoChapters({ video, canEdit = false, onSaved }: { video: ChapterVideo; canEdit?: boolean; onSaved?: (video: Video) => void }) {
+export function VideoChapters({
+  video,
+  canEdit = false,
+  onSaved,
+  shareOrigin,
+}: {
+  video: ChapterVideo;
+  canEdit?: boolean;
+  onSaved?: (video: Video) => void;
+  /** Where share links live, when it is not this page's own origin. */
+  shareOrigin?: string;
+}) {
   const [copied, setCopied] = useState(false);
   const [names, setNames] = useState<string[] | null>(null);
   // The names as they were when the form opened: what a field is compared with to know whether it was changed here,
@@ -55,6 +67,10 @@ export function VideoChapters({ video, canEdit = false, onSaved }: { video: Chap
     refocusField.current = false;
     firstField.current?.focus();
   }, [saving, error]);
+  // A link to the share page that starts at a chapter (`?t=`), for a made video that is not in the trash. Declared
+  // before the early return below, as every hook must be, so a change in what the card shows keeps their order.
+  const [linkCopied, setLinkCopied] = useState<number | null>(null);
+  const linkable = video.status === "completed" && !video.deletedAt && !!video.id;
   if (chapters.length < 2 && !editable) return null;
   const text = chaptersText(chapters);
   const totalMs = captionDurationSec(video) * 1000;
@@ -91,6 +107,20 @@ export function VideoChapters({ video, canEdit = false, onSaved }: { video: Chap
     refocus.current = true;
     setNames(null);
     setError(null);
+  }
+  async function copyLinkAt(i: number, startMs: number, nextMs?: number) {
+    const url = shareLinkAt(`${(shareOrigin || window.location.origin).replace(/\/$/, "")}/share/${video.id}`, startMs, nextMs);
+    try {
+      await navigator.clipboard.writeText(url);
+      setLinkCopied(i);
+      // Emptied first, so a second copy of the same link is announced again.
+      setSaved(null);
+      const message = `Link to ${formatTimestamp(startMs / 1000)} copied.`;
+      setTimeout(() => setSaved(message), 50);
+      setTimeout(() => setLinkCopied((at) => (at === i ? null : at)), 2000);
+    } catch {
+      window.prompt("Copy this link", url);
+    }
   }
   async function save() {
     if (!names || !video.id || saving) return;
@@ -218,6 +248,18 @@ export function VideoChapters({ video, canEdit = false, onSaved }: { video: Chap
                 <span className="w-12 shrink-0 font-mono text-xs leading-5 text-slate-500">{formatTimestamp(c.startMs / 1000)}</span>
                 <span className="min-w-0 text-slate-700">{c.title}</span>
                 {reach && <ChapterReach played={video.chapterViews?.[String(c.scene)] ?? 0} />}
+                {linkable && (
+                  <button
+                    type="button"
+                    onClick={() => void copyLinkAt(i, c.startMs, chapters[i + 1]?.startMs)}
+                    className={`${reach ? "" : "ml-auto "}-my-0.5 shrink-0 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800`}
+                    aria-label={`Copy a link to ${c.title}, at ${formatTimestamp(c.startMs / 1000)}`}
+                    title="Copy a link that starts here"
+                    data-testid="chapter-link"
+                  >
+                    {linkCopied === i ? <Check className="h-4 w-4" /> : <Link2 className="h-4 w-4" />}
+                  </button>
+                )}
               </li>
             ))}
           </ol>

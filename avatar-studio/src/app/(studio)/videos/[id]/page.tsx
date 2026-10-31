@@ -1331,7 +1331,7 @@ export default function VideoDetailPage() {
                   </>
                 )}
               </Card>
-              <VideoChapters video={video} canEdit={canEdit === true && !video.deletedAt} onSaved={(next) => {
+              <VideoChapters video={video} shareOrigin={shareOrigin} canEdit={canEdit === true && !video.deletedAt} onSaved={(next) => {
                   applyServer(next);
                   // A status poll that started before the save would land after it with the old names.
                   void refetch();

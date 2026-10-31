@@ -1,4 +1,4 @@
-// The brand kit's closing scene: what the editor's Closing scene button puts at the end of a video.
+// The brand kit's opening and closing scenes: what the editor's Opening scene and Closing scene buttons put at the start and end of a video.
 // Run with: npm test
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
@@ -43,5 +43,26 @@ describe("brand kit closing scene", () => {
     assert.equal(parsed.success && parsed.data.closingScene?.text, "acme.com 555-0100");
     // A flag is one character to a reader, though two code points.
     assert.equal(kit({ script: "Hi.", text: "🇺🇸".repeat(MAX_SCENE_TEXT) }).success, true);
+  });
+});
+
+describe("brand kit opening scene", () => {
+  it("is saved and read as the closing scene is, apart from it", async () => {
+    await saveBrandKit(
+      brandKitSchema.parse({ name: "Acme", primaryColor: "#4f46e5", openingScene: { script: "  Hi, I'm Dana. ", text: " Acme \n Realty " }, closingScene: { script: "Call us.", text: "" } }),
+    );
+    const saved = await getBrandKit();
+    assert.deepEqual(saved?.openingScene, { script: "Hi, I'm Dana.", text: "Acme Realty" });
+    assert.deepEqual(saved?.closingScene, { script: "Call us." });
+    await saveBrandKit(brandKitSchema.parse({ name: "Acme", primaryColor: "#4f46e5", openingScene: { script: "", text: "" } }));
+    assert.equal((await getBrandKit())?.openingScene, undefined);
+  });
+
+  it("refuses a title without words, naming the opening scene, and a silent scene of the wrong length", () => {
+    const textOnly = brandKitSchema.safeParse({ name: "Acme", primaryColor: "#4f46e5", openingScene: { script: "", text: "Acme" } });
+    assert.equal(textOnly.success, false);
+    assert.match(JSON.stringify(textOnly.error?.issues), /Add what the presenter says in the opening scene/);
+    assert.equal(brandKitSchema.safeParse({ name: "Acme", primaryColor: "#4f46e5", openingScene: { script: "[pause 0.5s]" } }).success, false);
+    assert.equal(brandKitSchema.safeParse({ name: "Acme", primaryColor: "#4f46e5", openingScene: { script: "[pause 2s]" } }).success, true);
   });
 });

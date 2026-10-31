@@ -21,6 +21,32 @@ import { fetchPageHtml } from "../webpage";
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
+/**
+ * A scene the editor adds in one click at the start or end of a video: what the presenter says (up to 1000
+ * characters, pauses allowed, as a scene's script) and text on screen, read as a scene's is (one line, its spaces
+ * collapsed, up to 120 characters as a reader counts them). Both blank means none.
+ */
+function bookendScene(which: "opening" | "closing") {
+  return z
+    .object({
+      script: z.string().trim().max(MAX_CLOSING_SCRIPT).default(""),
+      text: z
+        .string()
+        .max(20_000)
+        .transform((t) => t.replace(/\s+/g, " ").trim())
+        .refine((t) => graphemes(t).length <= MAX_SCENE_TEXT, `The ${which} scene's on-screen text must be ${MAX_SCENE_TEXT} characters or fewer`)
+        .default(""),
+    })
+    .optional()
+    .superRefine((c, ctx) => {
+      if (!c || (!c.script && !c.text)) return;
+      // A scene cannot render without words (or a silent pause of a fitting length), so on-screen text alone is refused.
+      const silent = c.script ? silentProblem(c.script) : null;
+      if (!c.script) ctx.addIssue({ code: "custom", path: ["script"], message: `Add what the presenter says in the ${which} scene` });
+      else if (silent) ctx.addIssue({ code: "custom", path: ["script"], message: `The ${which} scene: ${silent}` });
+    });
+}
+
 export const brandKitSchema = z.object({
   name: z.string().trim().max(80).default(""),
   logoUrl: z
@@ -83,29 +109,10 @@ export const brandKitSchema = z.object({
   captionsByDefault: z.boolean().optional(),
   captionStyle: captionStyleSchema.optional(),
   watermark: z.enum(WATERMARK_CORNERS).optional(),
-  /**
-   * The scene the editor's Closing scene button puts at the end of a video: what the presenter says (up to 1000
-   * characters, pauses allowed, as a scene's script) and text on screen, read as a scene's is (one line, its spaces
-   * collapsed, up to 120 characters as a reader counts them). Both blank means no closing scene.
-   */
-  closingScene: z
-    .object({
-      script: z.string().trim().max(MAX_CLOSING_SCRIPT).default(""),
-      text: z
-        .string()
-        .max(20_000)
-        .transform((t) => t.replace(/\s+/g, " ").trim())
-        .refine((t) => graphemes(t).length <= MAX_SCENE_TEXT, `On-screen text must be ${MAX_SCENE_TEXT} characters or fewer`)
-        .default(""),
-    })
-    .optional()
-    .superRefine((c, ctx) => {
-      if (!c || (!c.script && !c.text)) return;
-      // A scene cannot render without words (or a silent pause of a fitting length), so on-screen text alone is refused.
-      const silent = c.script ? silentProblem(c.script) : null;
-      if (!c.script) ctx.addIssue({ code: "custom", path: ["script"], message: "Add what the presenter says in the closing scene" });
-      else if (silent) ctx.addIssue({ code: "custom", path: ["script"], message: `The closing scene: ${silent}` });
-    }),
+  /** The scene the editor's Opening scene button puts at the start of a video; see `bookendScene`. */
+  openingScene: bookendScene("opening"),
+  /** The scene the editor's Closing scene button puts at the end of a video, read the same way. */
+  closingScene: bookendScene("closing"),
 });
 
 export const brandKitId = (ownerId: string) => `brand_${ownerId}`;
@@ -144,6 +151,7 @@ export async function saveBrandKit(input: z.infer<typeof brandKitSchema>, ownerI
     ...(input.captionStyle && !isDefaultCaptionStyle(input.captionStyle) ? { captionStyle: input.captionStyle } : {}),
     ...(input.watermark ? { watermark: input.watermark } : {}),
     ...(input.closingScene?.script ? { closingScene: { script: input.closingScene.script, ...(input.closingScene.text ? { text: input.closingScene.text } : {}) } } : {}),
+    ...(input.openingScene?.script ? { openingScene: { script: input.openingScene.script, ...(input.openingScene.text ? { text: input.openingScene.text } : {}) } } : {}),
     updatedAt: nowIso(),
   };
   return getStore().put("brand", kit);

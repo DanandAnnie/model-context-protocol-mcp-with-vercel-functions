@@ -1247,15 +1247,17 @@ export interface BrandKit {
   watermark?: WatermarkCorner;
   /** A scene the editor adds at the end of a video in one click: what the presenter says, and text shown on screen. */
   closingScene?: BrandClosingScene;
+  /** A scene the editor puts at the start of a video in one click: a greeting, and a title shown on screen. */
+  openingScene?: BrandClosingScene;
   updatedAt: string;
 }
 
-/** The most a brand kit's closing scene says; a scene of a video holds more, but a closing line is short. */
+/** The most a brand kit's opening or closing scene says; a scene of a video holds more, but a greeting or a closing line is short. */
 export const MAX_CLOSING_SCRIPT = 1000;
 
+/** A brand kit's opening or closing scene: what the presenter says, and text on screen (a title across the middle of an opening scene, a website or phone number at the bottom of a closing one); none when absent. */
 export interface BrandClosingScene {
   script: string;
-  /** On-screen text (a website, a phone number), at the bottom of the frame; none when absent. */
   text?: string;
 }
 

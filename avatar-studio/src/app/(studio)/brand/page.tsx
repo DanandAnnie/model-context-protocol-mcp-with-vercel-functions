@@ -66,6 +66,8 @@ export default function BrandPage() {
   const [captions, setCaptions] = useState(false);
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>(DEFAULT_CAPTION_STYLE);
   const [watermark, setWatermark] = useState<WatermarkCorner | "">("");
+  const [openingScript, setOpeningScript] = useState("");
+  const [openingText, setOpeningText] = useState("");
   const [closingScript, setClosingScript] = useState("");
   const [closingText, setClosingText] = useState("");
   const [saving, setSaving] = useState(false);
@@ -109,6 +111,8 @@ export default function BrandPage() {
     setCaptions(!!b.captionsByDefault);
     setCaptionStyle(restoredCaptionStyle(b.captionStyle));
     setWatermark(b.watermark ?? "");
+    setOpeningScript(b.openingScene?.script ?? "");
+    setOpeningText(b.openingScene?.text ?? "");
     setClosingScript(b.closingScene?.script ?? "");
     setClosingText(b.closingScene?.text ?? "");
     setSavedAt(b.updatedAt);
@@ -245,6 +249,7 @@ export default function BrandPage() {
           captionsByDefault: captions,
           captionStyle: isDefaultCaptionStyle(captionStyle) ? undefined : captionStyle,
           watermark: (logoUrl && watermark) || undefined,
+          openingScene: openingScript.trim() || openingText.trim() ? { script: openingScript, text: openingText } : undefined,
           closingScene: closingScript.trim() || closingText.trim() ? { script: closingScript, text: closingText } : undefined,
         }),
       });
@@ -279,6 +284,8 @@ export default function BrandPage() {
       setCaptions(false);
       setCaptionStyle(DEFAULT_CAPTION_STYLE);
       setWatermark("");
+      setOpeningScript("");
+      setOpeningText("");
       setClosingScript("");
       setClosingText("");
       setSavedAt(null);
@@ -524,6 +531,16 @@ export default function BrandPage() {
           <Field label="Always translate as" hint="One rule per line, term = translation; add [Language] at the end for a rule in that language only. Translations, subtitle languages, and dubs that keep the glossary use the translation word for word, so pick a form that reads right without inflection. Up to 50.">
             <textarea aria-label="Always translate as" value={forced} onChange={(e) => setForced(e.target.value)} rows={3} placeholder={"CEO = Geschäftsführer [German]\nfree trial = essai gratuit [French]"} className={`${inputClass} font-mono text-xs`} />
           </Field>
+          <fieldset aria-describedby="opening-scene-about" className="space-y-3 rounded-lg border border-slate-200 p-4">
+            <legend className="px-1 text-sm font-medium text-slate-800">Opening scene</legend>
+            <p id="opening-scene-about" className="text-xs text-slate-500">The editor&apos;s Opening scene button puts this at the start of a video, on the brand background: a greeting, who you are. Leave both blank for none.</p>
+            <Field label="What the presenter says first" hintId="opening-script-hint" hint={`Up to ${MAX_CLOSING_SCRIPT} characters; [pause 1s] markers work as in a scene.`}>
+              <textarea aria-label="What the presenter says first" aria-describedby="opening-script-hint" value={openingScript} onChange={(e) => setOpeningScript(e.target.value)} rows={2} maxLength={MAX_CLOSING_SCRIPT} placeholder="Hi, I'm Dana. Here's what's new this week." className={inputClass} />
+            </Field>
+            <Field label="Title on screen" hintId="opening-text-hint" hint={`Shown across the middle of the opening scene, up to ${MAX_SCENE_TEXT} characters; about 20 fit across a portrait or square frame (the editor uses a smaller size when needed). No renderer draws on-screen text yet; the editor and the share page's chapters show it.`}>
+              <input aria-label="Title on screen" aria-describedby="opening-text-hint" value={openingText} onChange={(e) => setOpeningText(e.target.value)} placeholder="Your team · Your town" className={inputClass} />
+            </Field>
+          </fieldset>
           <fieldset aria-describedby="closing-scene-about" className="space-y-3 rounded-lg border border-slate-200 p-4">
             <legend className="px-1 text-sm font-medium text-slate-800">Closing scene</legend>
             <p id="closing-scene-about" className="text-xs text-slate-500">The editor&apos;s Closing scene button puts this at the end of a video, on the brand background: a call to action, how to get in touch. Leave both blank for none.</p>

@@ -1,7 +1,7 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Captions, ChevronLeft, ChevronRight, Clapperboard, ClipboardCopy, ClipboardPaste, Copy, Download, Flag, Image as ImageIcon, Layers, ListOrdered, Merge, MessagesSquare, Mic2, Palette, Pause, Play, Plus, Redo2, Replace, Rows3, Scissors, Sparkles, Square, Trash2, Undo2, Upload, Users, Wand2, X } from "lucide-react";
+import { Captions, ChevronLeft, ChevronRight, Clapperboard, ClipboardCopy, ClipboardPaste, Copy, Download, Flag, Hand, Image as ImageIcon, Layers, ListOrdered, Merge, MessagesSquare, Mic2, Palette, Pause, Play, Plus, Redo2, Replace, Rows3, Scissors, Sparkles, Square, Trash2, Undo2, Upload, Users, Wand2, X } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { VoiceRow } from "@/components/VoicePicker";
 import { CaptionStyleFields } from "@/components/CaptionStyleFields";
@@ -556,6 +556,32 @@ function CreateInner() {
       : `, which Import script reads back as ${kept === 1 ? "1 scene" : `${kept} scenes`}`;
     const left = empty.length ? ` (${scenesPhrase(empty).replace(/^S/, "s")}, without words, ${empty.length === 1 ? "is" : "are"} left out)` : "";
     setImportNote(`Downloading the script as ${name}${back}${left}. It holds the words only: presenters, voices, backgrounds, clips, and on-screen text stay in the editor.`);
+  }
+  /**
+   * Puts the brand kit's opening scene at the start, on the kit's background with its title across the middle of the
+   * frame (in place of the one scene of a new video while it is still blank), the scenes after it moving along.
+   */
+  function addOpeningScene() {
+    const kit = brandData?.brand;
+    const opening = kit?.openingScene;
+    if (!kit || !opening) return;
+    const background: Background = kit.defaultBackground ?? { type: "color", value: kit.primaryColor };
+    const first = scenes[0];
+    if (first.script.trim() === opening.script && (first.overlay?.text ?? "") === (opening.text ?? "")) return setImportNote("The first scene is already the brand kit's opening scene.");
+    // Only a scene with nothing chosen for it yet (its words, presenter, layout, or a picture or video of its own) is taken over.
+    const sameBackground = (b: Background) => b.type === first.background.type && b.value === first.background.value;
+    const blank = scenes.length === 1 && !setUpScenes(scenes) && !first.hidePresenter && (sameBackground(background) || sameBackground(DEFAULT_BG));
+    if (!blank && scenes.length >= MAX_SCENES) return setImportNote(`A video holds up to ${MAX_SCENES} scenes, so the opening scene does not fit.`);
+    // The kit's title in the medium size when it fits across this video's frame, else the small one.
+    const overlay: SceneText | undefined = opening.text ? { text: opening.text, position: "center", ...(sceneTextFits({ text: opening.text }, aspect) ? {} : { size: "small" as const }) } : undefined;
+    const scene = newScene(opening.script, background, overlay ? { overlay } : {});
+    const next = blank ? [scene] : [scene, ...scenes];
+    if (next.map((sc) => sc.script.trim()).join("\n\n").length > MAX_SCRIPT_CHARS) {
+      return setImportNote(`The opening scene would take the script past the ${MAX_SCRIPT_CHARS} characters a video holds; shorten it first.`);
+    }
+    changeScenes("add the opening scene", next, { active: 0 });
+    const n = scenes.length;
+    setImportNote(blank ? "Added the brand kit's opening scene as scene 1." : `Added the brand kit's opening scene as scene 1; ${n === 1 ? "scene 1 is now scene 2" : `scenes 1–${n} are now 2–${n + 1}`}.`);
   }
   /**
    * Puts the brand kit's closing scene at the end, on the kit's background with its text at the bottom of the frame
@@ -1751,6 +1777,17 @@ function CreateInner() {
               >
                 <MessagesSquare className="h-3.5 w-3.5" /> Conversation
               </button>
+              {brandData?.brand?.openingScene && (
+                <button
+                  type="button"
+                  onClick={addOpeningScene}
+                  disabled={canEdit === false || !!slidesProgress}
+                  title="Add the brand kit's opening scene at the start: its words, on the brand background, with its title on screen"
+                  className="inline-flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:border-brand-400 hover:text-brand-700 disabled:opacity-50"
+                >
+                  <Hand className="h-3.5 w-3.5" /> Opening scene
+                </button>
+              )}
               {brandData?.brand?.closingScene && (
                 <button
                   type="button"

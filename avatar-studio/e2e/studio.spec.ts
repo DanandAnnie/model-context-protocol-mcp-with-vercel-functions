@@ -5813,6 +5813,46 @@ test("share-page viewers who play a chapter are counted under it on the video pa
   await expect(page.getByTestId("video-chapters").getByRole("listitem").nth(1)).toHaveText(/The kitchen1 viewer played this chapter$/);
 });
 
+test("a share-page description is drafted from the script, edited, and saved", async ({ page }) => {
+  const bg = { type: "color", value: "#0f172a" };
+  const v = await createVideoViaApi(page, `Describe ${Date.now().toString(36)}`, {
+    script: undefined,
+    scenes: [
+      { script: "Welcome to twelve Maple Street. [pause 2s] It's a bright family home.", background: bg },
+      { script: "Call Dana to book a showing.", background: bg },
+    ],
+  });
+  await page.goto(`/videos/${v.id}`);
+  const field = page.getByLabel("Share page description", { exact: true });
+  await expect(field).toHaveValue("");
+  // Words typed and not saved are kept unless the editor agrees to replace them.
+  await field.fill("My own words.");
+  page.once("dialog", (d) => void d.dismiss());
+  await page.getByRole("button", { name: "Write it from the script" }).click();
+  await expect(field).toHaveValue("My own words.");
+  page.once("dialog", (d) => void d.accept());
+  await page.getByRole("button", { name: "Write it from the script" }).click();
+  // The draft fills the field, pauses left out, for the editor to read: the focus goes there and nothing is saved yet.
+  await expect(field).toHaveValue("Welcome to twelve Maple Street. It's a bright family home. Call Dana to book a showing.");
+  await expect(field).toBeFocused();
+  await expect(page.getByRole("status").filter({ hasText: "A draft from the script" })).toBeVisible();
+  expect((await (await page.request.get(`/api/videos/${v.id}`)).json()).video.description).toBeUndefined();
+  await field.press("End");
+  await field.pressSequentially(" Open Saturday.");
+  await page.getByRole("button", { name: "Save description" }).click();
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.description).toBe(
+    "Welcome to twelve Maple Street. It's a bright family home. Call Dana to book a showing. Open Saturday.",
+  );
+  await expect(page.getByRole("status").filter({ hasText: "A draft from the script" })).toHaveCount(0);
+  await page.goto(`/share/${v.id}`);
+  await expect(page.getByTestId("share-description")).toHaveText("Welcome to twelve Maple Street. It's a bright family home. Call Dana to book a showing. Open Saturday.");
+  // The API drafts for editors only and saves nothing; a video without words of its own is refused.
+  const draft = await page.request.post(`/api/videos/${v.id}/describe`);
+  expect(draft.status()).toBe(200);
+  expect((await draft.json()).description).toContain("Maple Street");
+  expect((await page.request.post(`/api/videos/vid_missing/describe`)).status()).toBe(404);
+});
+
 test("a video can be made in other sizes, each a new video with the same scenes", async ({ page }) => {
   const bg = { type: "color", value: "#0f172a" };
   const sizesTitle = `Sizes ${Date.now().toString(36)}`;

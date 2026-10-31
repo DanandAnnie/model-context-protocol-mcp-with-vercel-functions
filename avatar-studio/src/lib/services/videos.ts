@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import { newId, nowIso } from "../ids";
-import { getAvatarProvider, getAvatarProviderByName } from "../providers";
+import { getAvatarProvider, getAvatarProviderByName, getScriptProvider } from "../providers";
 import { getStore } from "../store";
 import { EMPTY_WATCH, MAX_AGENT_MESSAGE, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
 import type { AgentMessage, AudioClip, Avatar, Backdrop, Background, CaptionCue, DirectedMedia, DirectedScene, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
@@ -2054,4 +2054,46 @@ async function renewLinks(provider: AvatarProvider, video: Video, fallback: Prev
 /** Forgets when previews were last asked for (tests). */
 export function forgetGifChecks(): void {
   gifAttempted.clear();
+}
+
+/** The most a share-page description holds, as `videoPatchSchema` takes it. */
+export const MAX_DESCRIPTION = 500;
+
+/**
+ * A draft of a video's share-page description, written by the script provider from its title and what the presenter
+ * says (pause markers left out); nothing is saved, the editor reviews it first. A video with no words of its own to go
+ * by (a cinematic shot, one HeyGen's Video Agent wrote, or one of only pauses) is refused. The draft is one paragraph,
+ * cut at a word to fit `MAX_DESCRIPTION`.
+ */
+export async function describeVideo(id: string, ownerId: string = LOCAL_OWNER): Promise<string> {
+  const video = await getVideo(id, ownerId, false);
+  if (video.deletedAt) throw new ConflictError("Restore the video from the trash first");
+  if (video.cinematic || video.directed) throw new ValidationError("This video has no script of its own to describe");
+  const script = stripPauses(video.scenes?.length ? video.scenes.map((sc) => sc.script).join("\n\n") : video.script).trim();
+  if (!script) throw new ValidationError("This video has no words to describe");
+  const draft = draftDescription(await getScriptProvider().describe({ title: video.title, script }));
+  if (!draft) throw new Error("The script writer returned no description. Try again.");
+  return draft;
+}
+
+/** A model's answer as a description: one paragraph, no wrapping quotes, cut at a word with an ellipsis past the limit. */
+export function draftDescription(raw: string): string {
+  let text = wellFormed(raw).replace(/\s+/g, " ").trim();
+  // Only a matching pair of double quotes wrapping the whole answer, with none of its kind inside, is the model
+  // quoting itself; a single quote at either end is far more often an apostrophe ('Tis, the Smiths').
+  const quoted = /^(["“])(.*)(["”])$/s.exec(text);
+  if (quoted) {
+    const [, open, inner, close] = quoted;
+    const pair = (open === '"' && close === '"') || (open === "“" && close === "”");
+    if (pair && !inner.includes(open) && !inner.includes(close)) text = inner.trim();
+  }
+  // The limit is counted as the field counts it (UTF-16 units), and the cut never splits a character.
+  if (text.length <= MAX_DESCRIPTION) return text;
+  let cut = "";
+  for (const ch of graphemes(text)) {
+    if (cut.length + ch.length > MAX_DESCRIPTION - 1) break;
+    cut += ch;
+  }
+  const atWord = cut.replace(/\s+\S*$/, "");
+  return `${(atWord.length >= cut.length / 2 ? atWord : cut).trimEnd()}…`;
 }

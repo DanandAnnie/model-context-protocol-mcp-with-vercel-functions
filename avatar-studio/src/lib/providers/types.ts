@@ -262,6 +262,11 @@ export interface ScriptProvider {
   revise(input: { script: string; action: ScriptAction; tone?: string; language?: string; terms?: string[] }): Promise<string>;
   /** One conversational turn for the interactive avatar: the presenter answers in character, briefly, for speech. */
   chat(input: { persona: ChatPersona; messages: ChatMessage[] }): Promise<string>;
+  /**
+   * The short description shown under a video on its share page and in link previews, from its title and what the
+   * presenter says: one to three plain sentences in the script's language, from the script's facts only.
+   */
+  describe(input: { title: string; script: string }): Promise<string>;
   /** A whole video from one prompt (the Video Agent): a title, a frame orientation, and the scenes in order. */
   plan(input: { prompt: string; lengthSec: number; language: string; source?: string }): Promise<VideoPlan>;
 }

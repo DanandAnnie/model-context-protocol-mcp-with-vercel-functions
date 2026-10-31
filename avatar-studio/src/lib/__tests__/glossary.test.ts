@@ -16,6 +16,7 @@ const aggressive: ScriptProvider = {
   name: "aggressive",
   generate: async () => "",
   chat: async () => "",
+  describe: async () => "",
   plan: async () => ({ title: "", orientation: "landscape", scenes: [] }),
   revise: async ({ script, action, terms }) => {
     seen.push(script);

@@ -18,7 +18,7 @@ import { AgentConversation } from "@/components/AgentConversation";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { captionsBurnedIn } from "@/lib/captions";
-import { silentSeconds } from "@/lib/pauses";
+import { silentSeconds, stripPauses } from "@/lib/pauses";
 import { languageLabel } from "@/lib/language";
 import { useApi } from "@/hooks/useApi";
 import { ApiError, api, formatDate, formatSeconds, isDarkHex, emailSnippet, posterUrl, purgeAt, shareExpired } from "@/lib/client";
@@ -438,6 +438,29 @@ export default function VideoDetailPage() {
   const [descDraft, setDescDraft] = useState<string | null>(null);
   const [descBusy, setDescBusy] = useState(false);
   const [descErr, setDescErr] = useState<string | null>(null);
+  // A draft written from the script fills the field for the editor to read and save; nothing is saved by itself.
+  const [descWriting, setDescWriting] = useState(false);
+  const [descNote, setDescNote] = useState<string | null>(null);
+  const descField = useRef<HTMLTextAreaElement>(null);
+  async function writeDescription() {
+    if (!video || descWriting) return;
+    // Words typed here and not saved yet are not swapped for a draft without asking.
+    const unsaved = descDraft !== null && descDraft.trim() !== "" && descDraft.trim() !== (video.description ?? "").trim();
+    if (unsaved && !window.confirm("Replace what is in the description box with a draft from the script?")) return;
+    setDescWriting(true);
+    setDescErr(null);
+    setDescNote(null);
+    try {
+      const { description } = await api<{ description: string }>(`/api/videos/${video.id}/describe`, { method: "POST" });
+      setDescDraft(description);
+      setDescNote("A draft from the script: read it, change what you like, and save it.");
+      descField.current?.focus();
+    } catch (e) {
+      setDescErr(e instanceof Error ? e.message : "Could not write a description");
+    } finally {
+      setDescWriting(false);
+    }
+  }
   async function saveDescription() {
     if (!video || descBusy || descDraft === null) return;
     setDescBusy(true);
@@ -446,6 +469,7 @@ export default function VideoDetailPage() {
       const { video: next } = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify({ description: descDraft.trim() }) });
       applyServer(next);
       setDescDraft(null);
+      setDescNote(null);
       void refetch();
     } catch (e) {
       setDescErr(e instanceof Error ? e.message : "Could not save the description");
@@ -1141,19 +1165,38 @@ export default function VideoDetailPage() {
                   }}
                 >
                   <textarea
+                    ref={descField}
                     className={`${inputClass} min-h-[72px]`}
                     aria-label="Share page description"
                     placeholder="What viewers should know before they press play"
                     maxLength={500}
                     value={descDraft ?? video.description ?? ""}
-                    onChange={(e) => setDescDraft(e.target.value)}
+                    // Not typed into while a draft is being written, which would replace the typing when it lands.
+                    readOnly={descWriting}
+                    aria-busy={descWriting || undefined}
+                    onChange={(e) => {
+                      setDescDraft(e.target.value);
+                      setDescNote(null);
+                    }}
                   />
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <Button type="submit" className="px-3 py-1.5 text-xs" loading={descBusy} disabled={descDraft === null || descDraft.trim() === (video.description ?? "")}>
                       Save description
                     </Button>
-                    {descErr && <span className="text-xs text-rose-600">{descErr}</span>}
+                    {canEdit === true && !video.deletedAt && !described && !video.studioTemplate && hasWords(video) && (
+                      <Button type="button" variant="secondary" className="px-3 py-1.5 text-xs" loading={descWriting} disabled={descBusy} onClick={() => void writeDescription()}>
+                        {!descWriting && <Sparkles className="h-3.5 w-3.5" />} Write it from the script
+                      </Button>
+                    )}
+                    {descErr && (
+                      <span role="alert" className="text-xs text-rose-600">
+                        {descErr}
+                      </span>
+                    )}
                   </div>
+                  <p role="status" className={descNote ? "text-xs text-slate-500" : "sr-only"}>
+                    {descNote ?? ""}
+                  </p>
                 </form>
               </Card>
               <Card className="p-4" data-testid="share-cta-card">
@@ -1356,3 +1399,7 @@ function copyRendered(html: string, text: string): boolean {
   return done;
 }
 
+/** Whether a video's script holds any words to write from, its pause markers aside. */
+function hasWords(video: Video): boolean {
+  return !!stripPauses(video.scenes?.length ? video.scenes.map((sc) => sc.script).join(" ") : video.script).trim();
+}

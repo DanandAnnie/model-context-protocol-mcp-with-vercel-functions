@@ -18,6 +18,7 @@ const scripted: ScriptProvider = {
   name: "scripted",
   generate: async () => "",
   chat: async () => "",
+  describe: async () => "",
   revise: async ({ script }) => script,
   plan: async (input) => {
     asked.push(input);

@@ -23,6 +23,17 @@ export class MockScriptProvider implements ScriptProvider {
     return tone === "formal" ? body.replace("Hi there!", "Hello.") : body;
   }
 
+  async describe({ script }: { title: string; script: string }) {
+    // Demo: the script's opening sentences, as many as fit a short description.
+    const sentences = script.replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s+/).filter(Boolean);
+    const picked: string[] = [];
+    for (const sentence of sentences) {
+      if (picked.length && [...picked, sentence].join(" ").length > 220) break;
+      picked.push(sentence);
+    }
+    return picked.join(" ");
+  }
+
   async revise({ script, action, tone, language }: { script: string; action: ScriptAction; tone?: string; language?: string }) {
     const sentences = script.replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s+/).filter(Boolean);
     switch (action) {

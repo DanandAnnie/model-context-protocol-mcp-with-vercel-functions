@@ -1296,6 +1296,39 @@ test("One scene per paragraph cuts a scene at its blank lines in one change Undo
   await expect(page.getByRole("textbox", { name: "Scene 4 script" })).toHaveValue("Bye.");
 });
 
+test("Download script saves every scene's words, which Import script reads back scene for scene", async ({ page }) => {
+  const download = page.getByRole("button", { name: "Download script" });
+  await expect(download).toBeDisabled();
+  await page.locator("input[placeholder='Video title']").fill("Open house: 12 Elm St");
+  await page.getByRole("textbox", { name: "Script", exact: true }).fill("Welcome home.\n\nThis is the kitchen.");
+  const addScene = page.getByRole("button", { name: "Add scene", exact: true });
+  await addScene.click();
+  await page.getByRole("textbox", { name: "Scene 2 script" }).fill("[pause 2s]");
+  await addScene.click();
+  await page.getByRole("textbox", { name: "Scene 3 script" }).fill("Thanks for watching.");
+  // A scene without words is left out, which the note says.
+  await addScene.click();
+  const saved = page.waitForEvent("download");
+  await download.click();
+  const file = await saved;
+  expect(file.suggestedFilename()).toBe("Open house 12 Elm St.txt");
+  const text = await readFile(await file.path(), "utf8");
+  expect(text).toBe("\uFEFFWelcome home.\n\nThis is the kitchen.\n\n---\n\n[pause 2s]\n\n---\n\nThanks for watching.\n");
+  await expect(page.getByTestId("import-note")).toHaveText(
+    "Downloading the script as Open house 12 Elm St.txt, which Import script reads back as 3 scenes (scene 4, without words, is left out). It holds the words only: presenters, voices, backgrounds, clips, and on-screen text stay in the editor.",
+  );
+  // The file itself, read back into the editor after asking, gives the same three scenes.
+  page.once("dialog", (d) => void d.accept());
+  await page.getByLabel("Import a script file").setInputFiles(await file.path());
+  await expect(page.getByTestId("import-note")).toHaveText(/^Imported 3 scenes from /);
+  await expect(page.getByRole("button", { name: /^Scene 4,/ })).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Scene 1 script" })).toHaveValue("Welcome home.\n\nThis is the kitchen.");
+  await page.getByRole("button", { name: /^Scene 2,/ }).click();
+  await expect(page.getByRole("textbox", { name: "Scene 2 script" })).toHaveValue("[pause 2s]");
+  await page.getByRole("button", { name: /^Scene 3,/ }).click();
+  await expect(page.getByRole("textbox", { name: "Scene 3 script" })).toHaveValue("Thanks for watching.");
+});
+
 test("photo avatar motion is set in the editor, kept with the video and its copy", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Moving portrait");
   await page.locator("textarea").fill("Welcome to the open house.");

@@ -1,7 +1,7 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Captions, ChevronLeft, ChevronRight, Clapperboard, ClipboardCopy, ClipboardPaste, Copy, Flag, Image as ImageIcon, Layers, ListOrdered, Merge, MessagesSquare, Mic2, Palette, Pause, Play, Plus, Redo2, Replace, Rows3, Scissors, Sparkles, Square, Trash2, Undo2, Upload, Users, Wand2, X } from "lucide-react";
+import { Captions, ChevronLeft, ChevronRight, Clapperboard, ClipboardCopy, ClipboardPaste, Copy, Download, Flag, Image as ImageIcon, Layers, ListOrdered, Merge, MessagesSquare, Mic2, Palette, Pause, Play, Plus, Redo2, Replace, Rows3, Scissors, Sparkles, Square, Trash2, Undo2, Upload, Users, Wand2, X } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { VoiceRow } from "@/components/VoicePicker";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -20,6 +20,7 @@ import { api, estimateSeconds, formatSeconds, isDarkHex, wordCount } from "@/lib
 import { accentsFor, languageLabel, voiceTakesAccent } from "@/lib/language";
 import { MAX_SILENT_SEC, MIN_SILENT_SEC, silentProblem, silentSeconds, stripPauses } from "@/lib/pauses";
 import { countMatches, replaceAll } from "@/lib/find-replace";
+import { scriptFile, scriptFileName } from "@/lib/script-export";
 import { MAX_IMPORT_BYTES, MAX_SCRIPT_CHARS, decodeScript, legacyEncodingFor, scenesFromText } from "@/lib/script-import";
 import { SCENE_CLIPBOARD_KEY, copiedScene, parseCopiedScene, type CopiedScene } from "@/lib/scene-clipboard";
 import { castEverywhere, partsPhrase, scenesPhrase } from "@/lib/scene-cast";
@@ -520,6 +521,31 @@ function CreateInner() {
     changeScenes(`import ${file.name}`, doc.scenes.map((script) => newScene(script, background)), { active: 0 });
     if (doc.title && (!title.trim() || title === "Untitled video")) setTitle(doc.title);
     setImportNote(`Imported ${doc.scenes.length === 1 ? "1 scene" : `${doc.scenes.length} scenes`} from ${file.name}${doc.truncated ? `; the rest did not fit (a video holds up to ${MAX_SCENES} scenes and ${MAX_SCRIPT_CHARS} characters of script)` : ""}.`);
+  }
+  /** Saves every scene's words as a text file, scenes apart on --- lines, which Import script reads back scene for scene. */
+  function downloadScript() {
+    const text = scriptFile(scenes.map((sc) => sc.script));
+    if (!text) return;
+    const name = scriptFileName(title);
+    const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    // Some browsers read the file after the click returns (or once a save dialog is answered), so it is kept a while.
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    const empty = scenes.flatMap((sc, i) => (sc.script.trim() ? [] : [i]));
+    const kept = scenes.length - empty.length;
+    // What Import script will make of it: a script past the limit is cut, and a silent scene too short or long joins the one before.
+    const back = scriptTooLong
+      ? `; Import script keeps its first ${MAX_SCRIPT_CHARS} characters`
+      : silentIssue
+      ? ""
+      : `, which Import script reads back as ${kept === 1 ? "1 scene" : `${kept} scenes`}`;
+    const left = empty.length ? ` (${scenesPhrase(empty).replace(/^S/, "s")}, without words, ${empty.length === 1 ? "is" : "are"} left out)` : "";
+    setImportNote(`Downloading the script as ${name}${back}${left}. It holds the words only: presenters, voices, backgrounds, clips, and on-screen text stay in the editor.`);
   }
   /**
    * Puts the brand kit's closing scene at the end, on the kit's background with its text at the bottom of the frame
@@ -1687,6 +1713,19 @@ function CreateInner() {
                 className="inline-flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:border-brand-400 hover:text-brand-700 disabled:opacity-50"
               >
                 <Upload className="h-3.5 w-3.5" /> Import script
+              </button>
+              <button
+                type="button"
+                onClick={downloadScript}
+                disabled={scenes.every((sc) => !sc.script.trim()) || !!slidesProgress}
+                title={
+                  scenes.every((sc) => !sc.script.trim())
+                    ? "Write a scene's words first; they are what the file holds"
+                    : "Save every scene's words as a text file, scenes apart on --- lines, to read, share, or edit elsewhere; Import script reads it back, a scene for each (line breaks within a paragraph become spaces)"
+                }
+                className="inline-flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:border-brand-400 hover:text-brand-700 disabled:opacity-50"
+              >
+                <Download className="h-3.5 w-3.5" /> Download script
               </button>
               <button
                 ref={conversationButton}

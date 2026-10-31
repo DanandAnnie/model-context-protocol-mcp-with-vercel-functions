@@ -26,7 +26,8 @@ export interface ImportedScript {
   truncated: boolean;
 }
 
-const BREAK = /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/;
+/** A line of three or more `-`, `*`, or `_` (spaces between allowed), which starts a new scene. */
+export const BREAK = /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/;
 /** Lines of only `=` or only `#` divide too, when they are not a heading's underline or a heading. */
 const RULE = /^\s{0,3}(?:=+|#+)\s*$/;
 const SETEXT = /^\s{0,3}=+\s*$/;

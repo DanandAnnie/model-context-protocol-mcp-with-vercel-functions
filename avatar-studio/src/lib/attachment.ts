@@ -23,6 +23,21 @@ const UNSAFE = /(?:[\p{Cc}/\\"<>:|?*]|(?![\u200C\u200D])\p{Cf})+/gu;
 const LOOSE_ENDS = /^[.\s]+|[.\s]+$/g;
 
 /**
+ * A name made safe to save a file under: lone surrogates, control and invisible formatting characters, and the
+ * characters Windows refuses taken out, spaces collapsed, loose dots and spaces trimmed, a trailing extension in
+ * `exts` dropped (so it is not doubled), and cut at `max` characters as a person sees them. Empty when nothing is left.
+ */
+export function safeFileStem(name: string, exts: string[] = [], max = MAX_NAME): string {
+  let stem = name.replace(LONE_SURROGATE, "").normalize("NFC").replace(UNSAFE, " ").replace(/\s+/g, " ").replace(LOOSE_ENDS, "");
+  const dot = stem.lastIndexOf(".");
+  if (dot > 0 && exts.includes(stem.slice(dot + 1).toLowerCase())) stem = stem.slice(0, dot).replace(LOOSE_ENDS, "");
+  // Cut by what a person sees as one character, so an emoji sequence or an accented letter is never split.
+  const graphemes = Array.from(new Intl.Segmenter().segment(stem), (s) => s.segment);
+  if (graphemes.length > max) stem = graphemes.slice(0, max).join("").replace(LOOSE_ENDS, "");
+  return stem;
+}
+
+/**
  * A `Content-Disposition` that saves a stored file under the name it was given: `name` as typed (any script, up to
  * 80 characters) in `filename*`, and an ASCII fallback in `filename` for clients that do not read it. The extension
  * follows `mimeType`, never the name, and is not doubled when the name already ends in it ("intro.wav" stays
@@ -31,12 +46,7 @@ const LOOSE_ENDS = /^[.\s]+|[.\s]+$/g;
 export function attachmentDisposition(name: string, mimeType: string, fallback = "download"): string {
   const exts = EXTENSIONS[mimeType] ?? [];
   const ext = exts[0] ? `.${exts[0]}` : "";
-  let stem = name.replace(LONE_SURROGATE, "").normalize("NFC").replace(UNSAFE, " ").replace(/\s+/g, " ").replace(LOOSE_ENDS, "");
-  const dot = stem.lastIndexOf(".");
-  if (dot > 0 && exts.includes(stem.slice(dot + 1).toLowerCase())) stem = stem.slice(0, dot).replace(LOOSE_ENDS, "");
-  // Cut by what a person sees as one character, so an emoji sequence or an accented letter is never split.
-  const graphemes = Array.from(new Intl.Segmenter().segment(stem), (s) => s.segment);
-  if (graphemes.length > MAX_NAME) stem = graphemes.slice(0, MAX_NAME).join("").replace(LOOSE_ENDS, "");
+  const stem = safeFileStem(name, exts);
   const ascii =
     stem
       .normalize("NFKD")

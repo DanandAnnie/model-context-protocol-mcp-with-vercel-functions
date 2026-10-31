@@ -23,6 +23,15 @@ export function record<T>(history: History<T>, entry: HistoryEntry<T>): History<
   return { past: [...history.past, entry].slice(-MAX_HISTORY), future: [] };
 }
 
+/**
+ * The history with its last change replaced by `entry`, which carries on from it (one move made in several steps
+ * becomes one change), or taken out when `entry` leaves the state as it was before. Nothing is left to redo.
+ */
+export function amendLast<T>(history: History<T>, entry: HistoryEntry<T>, same: Same<T> = identical): History<T> {
+  const past = history.past.slice(0, -1);
+  return { past: same(entry.before, entry.after) ? past : [...past, entry], future: [] };
+}
+
 /** Whether two states are the same; by identity unless the caller says otherwise (the editor replaces rather than changes its scenes). */
 export type Same<T> = (a: T, b: T) => boolean;
 const identical = <T>(a: T, b: T) => a === b;

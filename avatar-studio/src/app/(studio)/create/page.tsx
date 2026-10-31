@@ -31,7 +31,7 @@ import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
 import { capSceneText, fitSceneTextEdit, sceneTextLength } from "@/lib/scene-text";
 import { mergeScenes, moveItem, splitParagraphs, splitScene } from "@/lib/scene-split";
-import { emptyHistory, record, redo, undo, type History } from "@/lib/scene-history";
+import { amendLast, emptyHistory, record, redo, undo, type History, type HistoryEntry } from "@/lib/scene-history";
 import { graphemes } from "@/lib/text";
 import { takeAgentDraft, type AgentDraft } from "@/lib/agent-draft";
 import { CAPTION_FONTS, CAPTION_LOOKS, CAPTION_POSITIONS, CAPTION_SIZES, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, footageIdOf, footageLength, footagePath, type FootageJob, framingFor, isDefaultLayout, isPhotoAvatar, rendersOnAvatarV, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionFont, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, type PhotoExpressiveness, VOICE_ACCENTS, type VoiceAccent, AVATAR_ENGINES, type AvatarEngine } from "@/lib/types";
@@ -391,7 +391,7 @@ function CreateInner() {
     const onKey = (e: KeyboardEvent) => {
       if (!(isApple() ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) || e.altKey) return;
       const t = e.target as HTMLElement | null;
-      if (t?.isContentEditable || t?.closest(`textarea, select, dialog[open], input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="color"])`)) return;
+      if (t?.isContentEditable || t?.closest(`textarea, select:not([data-scene-move]), dialog[open], input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="color"])`)) return;
       const letter = /^[a-z]$/i.test(e.key) ? e.key.toLowerCase() : e.code === "KeyZ" ? "z" : e.code === "KeyY" ? "y" : "";
       if (letter !== "z" && !(letter === "y" && !isApple() && !e.shiftKey)) return;
       e.preventDefault();
@@ -441,6 +441,31 @@ function CreateInner() {
   }
   // A tab the scenes no longer have cannot finish its drag, so the drag is forgotten when they change.
   useEffect(endDrag, [scenes]);
+  const moveToList = useRef<HTMLSelectElement>(null);
+  // The arrow keys on a closed list choose each place on the way (each a change), so the moves made from the list
+  // while it keeps the focus are one change: Undo takes the scene back to where it started.
+  const moveRun = useRef<{ scene: Scene; from: number; entry: HistoryEntry<EditorState> } | null>(null);
+  /** Moves the selected scene straight to a place in the order (the arrow buttons step, a drag goes anywhere a tab is). */
+  function moveSceneTo(to: number) {
+    const from = scenes.indexOf(active);
+    if (from < 0 || from === to || to < 0 || to >= scenes.length) return;
+    const before = editorNow();
+    const after: EditorState = { ...before, scenes: moveItem(before.scenes, from, to) };
+    const run = moveRun.current;
+    const continuing = run && run.scene === active && sceneHistory.past[sceneHistory.past.length - 1] === run.entry ? run : null;
+    const origin = continuing ? continuing.from : from;
+    const entry = { label: `move scene ${origin + 1} to ${to + 1}`, before: continuing ? continuing.entry.before : before, after };
+    // Back where it started is the same scenes in the same order, though in a new list.
+    const sameOrder = (a: EditorState, b: EditorState) => sameEditorState({ ...a, scenes: b.scenes }, b) && a.scenes.length === b.scenes.length && a.scenes.every((sc, i) => sc === b.scenes[i]);
+    const history = continuing ? amendLast(sceneHistory, entry, sameOrder) : record(sceneHistory, entry);
+    setSceneHistory(history);
+    moveRun.current = history.past[history.past.length - 1] === entry ? { scene: active, from: origin, entry } : null;
+    applyEditorState(after);
+    setActiveIdx(to);
+    setImportNote(origin === to ? `Scene ${to + 1} is back where it was.` : `Moved scene ${origin + 1} to ${to + 1}.`);
+    // The list names the scene it moves, which is now another number, so it keeps the focus for the next move.
+    requestAnimationFrame(() => moveToList.current?.focus());
+  }
   function dropScene(to: number) {
     const from = dragged.current ? scenes.indexOf(dragged.current) : -1;
     endDrag();
@@ -1783,7 +1808,7 @@ function CreateInner() {
                   e.target.value = "";
                 }}
               />
-              <span className="ml-auto flex items-center gap-1">
+              <span className="ml-auto flex flex-wrap items-center justify-end gap-1">
                 <button
                   ref={undoButton}
                   type="button"
@@ -1815,6 +1840,28 @@ function CreateInner() {
                       <ChevronRight className="h-4 w-4" />
                     </button>
                   </>
+                )}
+                {scenes.length > 2 && (
+                  // A long way in one step, with the keyboard or a screen reader too, where a drag is out of reach.
+                  // Ctrl+Z works from it too (a list has no undo of its own); a pick by pointer, or leaving it, starts a new change.
+                  <select
+                    ref={moveToList}
+                    data-scene-move
+                    aria-label={`Move scene ${scenes.indexOf(active) + 1} to`}
+                    title="Move this scene to another place in the order"
+                    disabled={canEdit === false || !!slidesProgress}
+                    className="rounded-full border border-slate-200 bg-white py-0.5 pl-2 pr-6 text-xs text-slate-600 disabled:opacity-40"
+                    value={scenes.indexOf(active)}
+                    onChange={(e) => moveSceneTo(Number(e.target.value))}
+                    onPointerDown={() => (moveRun.current = null)}
+                    onBlur={() => (moveRun.current = null)}
+                  >
+                    {scenes.map((_, i) => (
+                      <option key={i} value={i}>
+                        {`Place ${i + 1}${i === scenes.indexOf(active) ? ` of ${scenes.length} (here)` : i === 0 ? " (first)" : i === scenes.length - 1 ? " (last)" : ""}`}
+                      </option>
+                    ))}
+                  </select>
                 )}
                 <button type="button" onClick={() => duplicateScene(activeIdx)} disabled={scenes.length >= MAX_SCENES} aria-label="Duplicate scene" title="Duplicate this scene" className="rounded-full p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40">
                   <Copy className="h-4 w-4" />

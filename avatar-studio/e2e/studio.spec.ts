@@ -1329,6 +1329,64 @@ test("Download script saves every scene's words, which Import script reads back 
   await expect(page.getByRole("textbox", { name: "Scene 3 script" })).toHaveValue("Thanks for watching.");
 });
 
+test("Move scene to puts the selected scene at any place in one step Undo takes back", async ({ page }) => {
+  await page.locator("input[placeholder='Video title']").fill("Order");
+  await page.getByRole("textbox", { name: "Script", exact: true }).fill("Hook.");
+  const addScene = page.getByRole("button", { name: "Add scene", exact: true });
+  await addScene.click();
+  // With two scenes the arrows are enough; the list comes with a third.
+  await expect(page.getByRole("combobox", { name: /^Move scene \d+ to$/ })).toHaveCount(0);
+  await page.getByRole("textbox", { name: "Scene 2 script" }).fill("Kitchen.");
+  await addScene.click();
+  await page.getByRole("textbox", { name: "Scene 3 script" }).fill("Garden.");
+  await addScene.click();
+  await page.getByRole("textbox", { name: "Scene 4 script" }).fill("Call us.");
+  const tab = (n: number) => page.getByRole("button", { name: new RegExp(`^Scene ${n},`) });
+  await tab(1).click();
+  const moveTo = page.getByRole("combobox", { name: "Move scene 1 to" });
+  await expect(moveTo.locator("option:checked")).toHaveText("Place 1 of 4 (here)");
+  await moveTo.selectOption({ label: "Place 3" });
+  await expect(page.getByTestId("import-note")).toHaveText("Moved scene 1 to 3.");
+  await expect(tab(3)).toHaveAttribute("aria-current", "true");
+  await expect(page.getByRole("textbox", { name: "Scene 3 script" })).toHaveValue("Hook.");
+  // The list follows the scene to its new place and keeps the focus there.
+  const moved = page.getByRole("combobox", { name: "Move scene 3 to" });
+  await expect(moved).toBeFocused();
+  await expect(moved.locator("option:checked")).toHaveText("Place 3 of 4 (here)");
+  await tab(1).click();
+  await expect(page.getByRole("textbox", { name: "Scene 1 script" })).toHaveValue("Kitchen.");
+  await tab(2).click();
+  await expect(page.getByRole("textbox", { name: "Scene 2 script" })).toHaveValue("Garden.");
+  await page.getByRole("button", { name: "Undo move scene 1 to 3" }).click();
+  await tab(1).click();
+  await expect(page.getByRole("textbox", { name: "Scene 1 script" })).toHaveValue("Hook.");
+  // With the keyboard, each arrow on the closed list moves the scene a place; while the list has the focus that is one
+  // change, which one Ctrl+Z (working from the list) takes back.
+  const list = page.getByRole("combobox", { name: "Move scene 1 to" });
+  await list.focus();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await expect(page.getByTestId("import-note")).toHaveText("Moved scene 1 to 4.");
+  await expect(page.getByRole("combobox", { name: "Move scene 4 to" })).toBeFocused();
+  await expect(page.getByRole("button", { name: "Undo move scene 1 to 4" })).toBeVisible();
+  await page.keyboard.press("Control+z");
+  await expect(page.getByTestId("import-note")).toHaveText("Undid: move scene 1 to 4.");
+  await expect(page.getByRole("button", { name: "Undo add scene 4" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Redo move scene 1 to 4" })).toBeVisible();
+  await tab(1).click();
+  await expect(page.getByRole("textbox", { name: "Scene 1 script" })).toHaveValue("Hook.");
+  // Back where it started counts as no change at all.
+  await list.focus();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowUp");
+  await expect(page.getByTestId("import-note")).toHaveText("Scene 1 is back where it was.");
+  await expect(page.getByRole("button", { name: "Undo add scene 4" })).toBeVisible();
+  // A narrow screen wraps the scene's buttons rather than scrolling the page sideways.
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.locator("main").evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+});
+
 test("photo avatar motion is set in the editor, kept with the video and its copy", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Moving portrait");
   await page.locator("textarea").fill("Welcome to the open house.");

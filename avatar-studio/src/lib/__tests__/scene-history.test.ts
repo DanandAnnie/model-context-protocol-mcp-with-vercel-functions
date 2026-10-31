@@ -2,7 +2,7 @@
 // Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { MAX_HISTORY, emptyHistory, record, redo, undo } from "../scene-history";
+import { MAX_HISTORY, amendLast, emptyHistory, record, redo, undo } from "../scene-history";
 
 describe("scene history", () => {
   it("undoes and redoes a change, in order", () => {
@@ -66,5 +66,20 @@ describe("scene history", () => {
     for (let i = 0; i < MAX_HISTORY + 5; i++) h = record(h, { label: `n${i}`, before: i, after: i + 1 });
     assert.equal(h.past.length, MAX_HISTORY);
     assert.equal(h.past[0].label, "n5");
+  });
+});
+
+describe("amendLast", () => {
+  it("replaces the last change with one carrying on from it, so one undo takes the whole of it back", () => {
+    let h = record(record(emptyHistory<string>(), { label: "add", before: "a", after: "ab" }), { label: "move 1 to 2", before: "ab", after: "ba" });
+    h = amendLast(h, { label: "move 1 to 3", before: "ab", after: "bxa" });
+    assert.deepEqual(h.past.map((e) => e.label), ["add", "move 1 to 3"]);
+    const step = undo(h, "bxa");
+    assert.equal(step?.state, "ab");
+  });
+
+  it("takes the last change out when it ends where it began, and leaves nothing to redo", () => {
+    const h = amendLast(record(emptyHistory<string>(), { label: "move 1 to 2", before: "ab", after: "ba" }), { label: "move 1 to 1", before: "ab", after: "ab" });
+    assert.deepEqual(h, { past: [], future: [] });
   });
 });

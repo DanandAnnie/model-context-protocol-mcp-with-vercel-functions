@@ -5624,6 +5624,74 @@ test("a scene's name is shown on its tab, kept with the draft, and titles its ch
   await expect(list.getByRole("listitem").nth(2)).toContainText("Call Dana to book a showing this weekend.");
 });
 
+test("a made video's chapter titles are edited on its page without rendering it again", async ({ page }) => {
+  const bg = { type: "color", value: "#0f172a" };
+  const v = await createVideoViaApi(page, `Retitle ${Date.now().toString(36)}`, {
+    script: undefined,
+    scenes: [
+      { name: "Welcome", script: "Welcome to twelve Maple Street, a bright family home on a quiet road.", background: bg },
+      { script: "The kitchen was redone last spring with quartz counters and an island.", background: bg },
+      { script: "Call Dana to book a showing this weekend.", background: bg },
+    ],
+  });
+  await page.goto(`/videos/${v.id}`);
+  const list = page.getByTestId("video-chapters");
+  await expect(list.getByRole("listitem").nth(1)).toHaveText(/^\d+:\d\dThe kitchen was redone/);
+  const edit = page.getByRole("button", { name: "Edit titles" });
+  await edit.click();
+  const form = page.getByRole("form", { name: "Chapter titles" });
+  const field = (n: number) => form.getByLabel(`Scene ${n} title`, { exact: true });
+  await expect(field(1)).toBeFocused();
+  await expect(field(1)).toHaveValue("Welcome");
+  // A field left blank shows what its chapter falls back to, as the chapter list cuts it.
+  await expect(field(1)).toHaveAttribute("placeholder", "Welcome to twelve Maple Street, a bright family home on a…");
+  await expect(field(2)).toHaveAttribute("placeholder", /^The kitchen was redone/);
+  // Escape and Cancel leave everything as it was, the focus back on Edit titles.
+  await field(2).fill("Nope");
+  await page.keyboard.press("Escape");
+  await expect(form).toHaveCount(0);
+  await expect(edit).toBeFocused();
+  await edit.click();
+  await expect(field(2)).toHaveValue("");
+  await form.getByRole("button", { name: "Cancel" }).click();
+  await expect(edit).toBeFocused();
+  await expect(list.getByRole("listitem").nth(1)).toHaveText(/^\d+:\d\dThe kitchen was redone/);
+  await edit.click();
+  await field(1).fill("");
+  await field(2).fill("The kitchen");
+  await field(2).press("Enter");
+  await expect(form).toHaveCount(0);
+  await expect(edit).toBeFocused();
+  await expect(page.getByRole("status").filter({ hasText: "Saved 2 chapter titles." })).toHaveCount(1);
+  await expect(list.getByRole("listitem").nth(0)).toHaveText(/^0:00Welcome to twelve Maple Street/);
+  await expect(list.getByRole("listitem").nth(1)).toHaveText(/^\d+:\d\dThe kitchen$/);
+  const stored = (await (await page.request.get(`/api/videos/${v.id}`)).json()).video as { scenes: Array<{ name?: string }> };
+  expect(stored.scenes.map((sc) => sc.name ?? null)).toEqual([null, "The kitchen", null]);
+  // Only the scenes named in a request change; one the video does not have is refused.
+  const third = await page.request.patch(`/api/videos/${v.id}`, { data: { sceneNames: { "3": "Book a showing" } } });
+  expect(third.ok()).toBe(true);
+  expect(((await third.json()).video as { scenes: Array<{ name?: string }> }).scenes.map((sc) => sc.name ?? null)).toEqual([null, "The kitchen", "Book a showing"]);
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { sceneNames: { "4": "Nope" } } })).status()).toBe(400);
+
+  // A video with no chapters yet (its second scene is silent) can get them by giving that scene a title.
+  const quiet = await createVideoViaApi(page, `Quiet ${Date.now().toString(36)}`, {
+    script: undefined,
+    scenes: [
+      { script: "Welcome to twelve Maple Street, a bright family home on a quiet road.", background: bg },
+      { script: "[pause 5s]", background: bg },
+    ],
+  });
+  await page.goto(`/videos/${quiet.id}`);
+  await expect(page.getByTestId("chapters-card").getByText(/^No chapters yet/)).toBeVisible();
+  await expect(page.getByTestId("video-chapters")).toHaveCount(0);
+  await page.getByRole("button", { name: "Edit titles" }).click();
+  await expect(field(2)).toHaveAttribute("placeholder", /^No chapter yet/);
+  await field(2).fill("A look around");
+  await form.getByRole("button", { name: "Save titles" }).click();
+  await expect(page.getByTestId("video-chapters").getByRole("listitem")).toHaveCount(2);
+  await expect(page.getByTestId("video-chapters").getByRole("listitem").nth(1)).toHaveText(/^\d+:\d\dA look around$/);
+});
+
 test("a multi-scene video has chapters: the share page jumps to a scene and the video page copies them for YouTube", async ({ page, context }) => {
   const bg = { type: "color", value: "#0f172a" };
   const v = await createVideoViaApi(page, `Chapters ${Date.now().toString(36)}`, {

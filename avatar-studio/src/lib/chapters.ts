@@ -110,13 +110,29 @@ function cuesByScene(video: Timed, bounds: Array<{ startMs: number; endMs: numbe
  * - Scenes that would start within the same second as the chapter before are left out, so no two chapters share a time.
  */
 export function videoChapters(video: Timed & { captionCues?: Cue[] }): Chapter[] {
+  const chapters: Chapter[] = [];
+  for (const chapter of sceneChapters(video)) {
+    if (!chapter) continue;
+    const previous = chapters.at(-1);
+    if (previous && Math.floor(chapter.startMs / 1000) <= Math.floor(previous.startMs / 1000)) continue;
+    chapters.push(chapter);
+  }
+  return chapters;
+}
+
+/**
+ * Each scene's chapter, in order, before those starting within the same second as the one before are left out: where
+ * it starts and its title, or null for a scene that is no chapter (see `videoChapters`). With `ignoreNames`, titled as
+ * if no scene had a name, which is what a cleared name falls back to. Empty for a video of one scene.
+ */
+export function sceneChapters(video: Timed & { captionCues?: Cue[] }, { ignoreNames = false }: { ignoreNames?: boolean } = {}): Array<Chapter | null> {
   const bounds = sceneBoundsMs(video);
   if (!bounds) return [];
   const own = video.captionCues?.length ? cuesByScene(video, bounds, video.captionCues) : null;
-  const chapters: Chapter[] = [];
-  video.scenes!.forEach((sc, i) => {
+  return video.scenes!.map((scene, i) => {
+    const sc = ignoreNames ? { ...scene, name: undefined } : scene;
     const silent = !sc.audioId && !stripPauses(sc.script).trim();
-    if (i > 0 && silent && !sc.overlay?.text.trim() && !sc.name?.trim()) return;
+    if (i > 0 && silent && !sc.overlay?.text.trim() && !sc.name?.trim()) return null;
     let startMs = i === 0 ? 0 : bounds[i].startMs;
     let said = stripPauses(sc.script);
     const lines = own?.[i] ?? [];
@@ -127,11 +143,8 @@ export function videoChapters(video: Timed & { captionCues?: Cue[] }): Chapter[]
       // A clip whose lines were all removed has no words left to show.
       said = "";
     }
-    const previous = chapters.at(-1);
-    if (previous && Math.floor(startMs / 1000) <= Math.floor(previous.startMs / 1000)) return;
-    chapters.push({ startMs, title: chapterTitle(sc, i, said) });
+    return { startMs, title: chapterTitle(sc, i, said) };
   });
-  return chapters;
 }
 
 /** Chapters as a video description lists them ("0:00 Welcome"), one a line, the form YouTube reads. */

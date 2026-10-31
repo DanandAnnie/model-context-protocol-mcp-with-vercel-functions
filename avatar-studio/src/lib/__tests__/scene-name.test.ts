@@ -12,7 +12,7 @@ import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import type { Scene, Video } from "../types";
 
 beforeEach(() => {
-  (globalThis as { __avatarStore?: MemoryStore }).__avatarStore = new MemoryStore();
+  globalThis.__avatarStudioStore = new MemoryStore();
 });
 
 const bg = { type: "color" as const, value: "#0f172a" };

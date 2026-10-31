@@ -937,10 +937,25 @@ export const videoPatchSchema = z
       })
       .nullable()
       .optional(),
+    /**
+     * New names for some of the scenes, for their chapters' titles, keyed by scene number from 1 (null or blank clears
+     * one); the scenes left out keep theirs, so two editors retitling different chapters do not undo each other.
+     */
+    sceneNames: z
+      .record(
+        z
+          .string()
+          .regex(/^[1-9]\d?$/, "Scene numbers start at 1")
+          .refine((k) => Number(k) <= MAX_SCENES, `A video has at most ${MAX_SCENES} scenes`),
+        sceneNameSchema.nullable(),
+      )
+      .refine((names) => Object.keys(names).length > 0, "Name at least one scene")
+      .optional(),
   })
   .refine(
     (p) =>
       p.title !== undefined ||
+      p.sceneNames !== undefined ||
       p.description !== undefined ||
       p.folder !== undefined ||
       p.shareDownload !== undefined ||
@@ -953,10 +968,34 @@ export const videoPatchSchema = z
     "Nothing to update",
   );
 
+/** Scene names from a patch, keyed by scene index; refused before anything is written when the video has no such scene. */
+function sceneRenames(video: Video, names: Record<string, string | null | undefined>): Map<number, string | undefined> {
+  const count = video.scenes?.length ?? 0;
+  if (count < 2) throw new ValidationError("Only a video of two scenes or more has chapters to name");
+  const renames = new Map<number, string | undefined>();
+  for (const [key, name] of Object.entries(names)) {
+    const n = Number(key);
+    if (n > count) throw new ValidationError(`The video has ${count} scenes, so it has no scene ${n}`);
+    renames.set(n - 1, name || undefined);
+  }
+  return renames;
+}
+/** The scenes with new names (or none) where `renames` says, every other field and scene as it was. */
+function renamedScenes(scenes: Scene[] | undefined, renames: Map<number, string | undefined>): Scene[] | undefined {
+  return scenes?.map((sc, i) => {
+    if (!renames.has(i)) return sc;
+    const { name: _old, ...rest } = sc;
+    const name = renames.get(i);
+    return name ? { ...rest, name } : rest;
+  });
+}
+
 export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSchema>, ownerId: string = LOCAL_OWNER): Promise<Video> {
   const existing = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
   // A trashed video past its retention is gone (see getVideo); writing it would only feed the purge.
   if (purgeDue(existing, Date.now())) throw new NotFoundError(`Video ${id} not found`);
+  // Checked before the cover or password is written, so a refused request changes nothing.
+  const renames = patch.sceneNames ? sceneRenames(existing, patch.sceneNames) : undefined;
   const next: Video = { ...existing, updatedAt: nowIso() };
   if (patch.title !== undefined) next.title = patch.title;
   if (patch.description !== undefined) {
@@ -1011,7 +1050,12 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
     (patch.description !== undefined && (patch.description || undefined) !== existing.description) ||
     patch.cover !== undefined ||
     (patch.shareCta !== undefined && JSON.stringify(patch.shareCta ?? null) !== JSON.stringify(existing.shareCta ?? null));
-  return putKeepingCounters(next, { dropApproval: publicChange });
+  // The names go onto the scenes as stored when the write happens, and whether one changes is judged against them too,
+  // so a request that read the scenes earlier neither writes back the names it saw nor misjudges the approval.
+  return putKeepingCounters(next, {
+    dropApproval: (stored) => publicChange || (!!renames && [...renames].some(([i, name]) => stored.scenes?.[i]?.name !== name)),
+    ...(renames ? { scenes: (stored) => renamedScenes(stored, renames) } : {}),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1051,10 +1095,14 @@ const CONCURRENT_FIELDS = [...COUNTER_FIELDS, "subtitles", "captionCues", "delet
  * Writes a video built from `base` while keeping whatever counters, subtitle tracks, and trash mark
  * the stored record holds by then: an edit that read the record before a scrypt or a network round
  * trip must not undo the views, watch marks, and clicks counted meanwhile, drop (or bring back) a
- * track a translation added or removed meanwhile, or undo a trash or restore. Runs under the
- * video's counter lock.
+ * track a translation added or removed meanwhile, or undo a trash or restore. The scenes are the
+ * stored ones too (`opts.scenes` renames them), so an edit cannot write back scene names it read
+ * before another request changed them. Runs under the video's counter lock.
  */
-function putKeepingCounters(base: Video, opts: { dropApproval?: boolean } = {}): Promise<Video> {
+function putKeepingCounters(
+  base: Video,
+  opts: { dropApproval?: boolean | ((stored: Video) => boolean); scenes?: (stored: Scene[] | undefined) => Scene[] | undefined } = {},
+): Promise<Video> {
   return withCounterLock(base.id, async () => {
     const stored = await getStore().get<Video>("video", base.id);
     // Deleted (or purged) between the caller's read and this write: never bring it back without its side records.
@@ -1064,7 +1112,12 @@ function putKeepingCounters(base: Video, opts: { dropApproval?: boolean } = {}):
     const theirs: Partial<Video> = {};
     for (const field of CONCURRENT_FIELDS) if (stored[field] !== undefined) Object.assign(theirs, { [field]: stored[field] });
     // An approval covers what viewers of the share page see; changing that sends the video back to "not reviewed".
-    if (opts.dropApproval && theirs.review?.status === "approved") delete theirs.review;
+    const drop = typeof opts.dropApproval === "function" ? opts.dropApproval(stored) : opts.dropApproval;
+    if (drop && theirs.review?.status === "approved") delete theirs.review;
+    // The scenes as stored, not as read before this request's awaits: another request may have renamed them meanwhile.
+    const scenes = opts.scenes ? opts.scenes(stored.scenes) : stored.scenes;
+    if (scenes) next.scenes = scenes;
+    else delete next.scenes;
     return getStore().put("video", { ...next, ...theirs });
   });
 }

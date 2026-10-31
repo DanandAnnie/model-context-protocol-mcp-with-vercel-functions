@@ -1288,7 +1288,11 @@ export default function VideoDetailPage() {
                   </>
                 )}
               </Card>
-              <VideoChapters video={video} />
+              <VideoChapters video={video} canEdit={canEdit === true && !video.deletedAt} onSaved={(next) => {
+                  applyServer(next);
+                  // A status poll that started before the save would land after it with the old names.
+                  void refetch();
+                }} />
               {/* Offered once the role is known to allow it, so a viewer never sees a button the server would refuse. */}
               {(canEdit === true || video.resizedFrom) && !video.studioTemplate && !described && <OtherSizes video={video} canEdit={canEdit === true} />}
               {video.status === "completed" && canEdit !== null && <HighlightClips video={video} canEdit={canEdit === true} />}

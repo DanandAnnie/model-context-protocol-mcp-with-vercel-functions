@@ -1362,6 +1362,9 @@ export interface Workspace {
   updatedAt: string;
 }
 
+/** Longest reference notes a presenter keeps, in characters (as long as the text kept from a knowledge page). */
+export const MAX_AGENT_NOTES = 6000;
+
 /** A saved interactive presenter that visitors can talk to on a public page. */
 export interface Agent {
   id: string;
@@ -1382,6 +1385,8 @@ export interface Agent {
   knowledgeUrl?: string;
   knowledge?: string;
   knowledgeUpdatedAt?: string;
+  /** Reference text the owner wrote for replies (prices, hours, policies), kept server-side like the instructions. */
+  notes?: string;
   language: string;
   /** Visitors can open /talk/:id without signing in. */
   isPublic: boolean;

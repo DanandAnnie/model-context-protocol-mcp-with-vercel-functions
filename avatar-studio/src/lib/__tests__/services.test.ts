@@ -2566,8 +2566,8 @@ describe("interactive avatar", () => {
     assert.ok(withKnowledge(agent).startsWith("You represent Hillcrest Dental.\n\n" + KNOWLEDGE_MARKER));
     assert.match(withKnowledge(agent), /untrusted reference material/);
     const { splitKnowledge } = await import("../providers/types");
-    assert.deepEqual(splitKnowledge(withKnowledge(agent)), { own: "You represent Hillcrest Dental.", reference: agent.knowledge });
-    assert.deepEqual(splitKnowledge("Plain"), { own: "Plain", reference: "" });
+    assert.deepEqual(splitKnowledge(withKnowledge(agent)), { own: "You represent Hillcrest Dental.", notes: "", reference: agent.knowledge });
+    assert.deepEqual(splitKnowledge("Plain"), { own: "Plain", notes: "", reference: "" });
     assert.equal(withKnowledge({ instructions: "Plain", knowledgeUrl: undefined, knowledge: undefined }), "Plain");
 
     const hello = await talkToAgent(agent.id, { messages: [{ role: "user", content: "Hi" }] });

@@ -5392,6 +5392,44 @@ test("a presenter's transcripts can be searched by words or visitor, and narrowe
     await page.request.delete(`/api/agents/${id}`);
   }
 });
+
+test("a presenter answers from reference notes, in the try-it chat and once shared, and they can be cleared", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const notes = `Showings for ${tag} run Saturdays, 10am to 2pm.\nThe lakeside cabin is listed at $450,000.`;
+  let id = "";
+  try {
+    await page.goto("/interactive");
+    await page.getByLabel("Reference notes").fill(notes);
+    await expect(page.locator("#agent-notes-count")).toHaveText(`${notes.length} / 6000`);
+    // The try-it chat answers from what is typed, before anything is saved.
+    await page.getByLabel("Your message").fill("When are the showings?");
+    await page.getByRole("button", { name: "Send" }).click();
+    await expect(page.locator("[data-testid=chat-log] [data-role=assistant]").first()).toHaveText(`From my notes: Showings for ${tag} run Saturdays, 10am to 2pm.`);
+    await page.getByLabel("Agent name").fill(`Notes ${tag}`);
+    await page.getByRole("button", { name: "Save and get link" }).click();
+    const link = (await page.getByTestId("agent-link").locator("code").innerText()).trim();
+    id = link.split("/talk/")[1];
+    const row = page.getByTestId("agent-list").locator("li", { hasText: `Notes ${tag}` });
+    await expect(row).toContainText("has notes");
+    // Kept server-side: the visitor view never carries them, and a visitor's question is answered from them.
+    expect(JSON.stringify(await (await page.request.get(`/api/talk/${id}`)).json())).not.toContain("lakeside");
+    const turn = await page.request.post(`/api/talk/${id}`, { data: { messages: [{ role: "user", content: "What is the lakeside cabin listed at?" }] }, headers: { "x-forwarded-for": `198.51.100.${Math.floor(Math.random() * 200) + 1}` } });
+    expect((await turn.json()).reply).toBe("From my notes: The lakeside cabin is listed at $450,000.");
+    // A saved presenter's notes load into the form; emptying them and saving removes them.
+    await expect(page.getByLabel("Reference notes")).toHaveValue("");
+    await page.getByRole("button", { name: `Edit Notes ${tag}` }).click();
+    await expect(page.getByLabel("Reference notes")).toHaveValue(notes);
+    await page.getByLabel("Reference notes").fill("");
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByRole("heading", { name: "Presenter setup" })).toBeVisible();
+    const saved = ((await (await page.request.get("/api/agents")).json()).agents as Array<{ id: string; notes?: string }>).find((a) => a.id === id)!;
+    expect(saved.notes).toBeUndefined();
+    await expect(row).not.toContainText("has notes");
+    expect((await page.request.post("/api/agents", { data: { name: "Long", avatarId: "stock_1", notes: "x".repeat(6001) } })).status()).toBe(400);
+  } finally {
+    if (id) await page.request.delete(`/api/agents/${id}`);
+  }
+});
 test("a presenter can word its replies in the brand kit's writing style, switched on when saved or from its row", async ({ page }) => {
   const before = (await (await page.request.get("/api/brand")).json()).brand as Record<string, unknown> | null;
   const tag = Date.now().toString(36);

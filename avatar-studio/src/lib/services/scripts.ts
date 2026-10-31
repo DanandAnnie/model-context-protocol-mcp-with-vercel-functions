@@ -3,6 +3,8 @@ import { protectPauses } from "../pauses";
 import { forcedFor, protectTerms } from "../glossary";
 import { z } from "zod";
 import { getScriptProvider } from "../providers";
+import { withNotes } from "../providers/types";
+import { MAX_AGENT_NOTES } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ValidationError } from "../errors";
 import { fetchPageText } from "../webpage";
@@ -77,6 +79,8 @@ export async function reviseScript(input: z.infer<typeof reviseSchema>, ownerId:
 export const chatSchema = z.object({
   avatarId: z.string().min(1),
   instructions: z.string().trim().max(2000).default(""),
+  /** The reference notes typed for the presenter, so the try-it chat answers from them as the saved one will. */
+  notes: z.string().trim().max(MAX_AGENT_NOTES).optional(),
   language: z.string().trim().min(2).max(40).default("English"),
   messages: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().trim().min(1).max(2000) })).min(1).max(40),
   /** Word the reply in the brand kit's writing style, as a saved presenter with it turned on does. */
@@ -88,5 +92,5 @@ export async function chatWithAvatar(input: z.infer<typeof chatSchema>, ownerId:
   if (input.messages[input.messages.length - 1].role !== "user") throw new ValidationError("The last message must be from the visitor");
   const avatar = await getAvatar(input.avatarId, ownerId);
   const style = input.brandStyle ? (await writingStyleOf(ownerId).catch(() => ({ style: undefined }))).style : undefined;
-  return getScriptProvider().chat({ persona: { name: avatar.name, instructions: input.instructions, language: input.language, ...(style ? { style } : {}) }, messages: input.messages });
+  return getScriptProvider().chat({ persona: { name: avatar.name, instructions: withNotes(input.instructions, input.notes), language: input.language, ...(style ? { style } : {}) }, messages: input.messages });
 }

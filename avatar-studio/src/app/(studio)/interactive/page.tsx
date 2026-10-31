@@ -11,7 +11,7 @@ import { ListSearch, useListSearch } from "@/components/ListSearch";
 import { useLiveAvatar } from "@/hooks/useLiveAvatar";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { api, formatDate } from "@/lib/client";
-import type { Agent, Avatar, BrandKit, Conversation, ProviderStatus, Voice } from "@/lib/types";
+import { MAX_AGENT_NOTES, type Agent, type Avatar, type BrandKit, type Conversation, type ProviderStatus, type Voice } from "@/lib/types";
 
 /** The whole setup form, so a new presenter's draft can be put back after an edit, and an edit compared with what it loaded. */
 type FormState = {
@@ -22,6 +22,7 @@ type FormState = {
   language: string;
   greeting: string;
   starters: string;
+  notes: string;
   knowledgeUrl: string;
   collectEmail: boolean;
   brandStyle: boolean;
@@ -50,6 +51,7 @@ export default function InteractivePage() {
   const [collectEmail, setCollectEmail] = useState(false);
   const [brandStyle, setBrandStyle] = useState(false);
   const [knowledgeUrl, setKnowledgeUrl] = useState("");
+  const [notes, setNotes] = useState("");
   const [greeting, setGreeting] = useState("");
   const [starters, setStarters] = useState("");
   const starterList = starters.split("\n").map((s) => s.trim()).filter(Boolean).slice(0, 3);
@@ -152,11 +154,11 @@ export default function InteractivePage() {
 
   async function ask(messages: ChatTurn[]) {
     if (!avatar) throw new Error("Pick a presenter first");
-    const { reply } = await api<{ reply: string }>("/api/chat", { method: "POST", body: JSON.stringify({ avatarId: avatar.id, instructions, language, messages, ...(brandStyle ? { brandStyle } : {}) }) });
+    const { reply } = await api<{ reply: string }>("/api/chat", { method: "POST", body: JSON.stringify({ avatarId: avatar.id, instructions, language, messages, ...(notes.trim() ? { notes: notes.trim() } : {}), ...(brandStyle ? { brandStyle } : {}) }) });
     return reply;
   }
 
-  const formState = (): FormState => ({ avatar, voice, agentName, instructions, language, greeting, starters, knowledgeUrl, collectEmail, brandStyle });
+  const formState = (): FormState => ({ avatar, voice, agentName, instructions, language, greeting, starters, notes, knowledgeUrl, collectEmail, brandStyle });
   function setForm(f: FormState) {
     setAvatar(f.avatar);
     setVoice(f.voice);
@@ -165,6 +167,7 @@ export default function InteractivePage() {
     setLanguage(f.language);
     setGreeting(f.greeting);
     setStarters(f.starters);
+    setNotes(f.notes);
     setKnowledgeUrl(f.knowledgeUrl);
     setCollectEmail(f.collectEmail);
     setBrandStyle(f.brandStyle);
@@ -187,10 +190,11 @@ export default function InteractivePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- follows the presenter's stored switches only
   }, [agentData, switchesFor]);
 
-  /** Empties the fields one presenter has and the next does not share: its name, opening line, questions, and page. */
+  /** Empties the fields one presenter has and the next does not share: its name, opening line, questions, notes, and page. */
   function clearOwnFields() {
     setAgentName("");
     setKnowledgeUrl("");
+    setNotes("");
     setGreeting("");
     setStarters("");
   }
@@ -212,6 +216,7 @@ export default function InteractivePage() {
       language: agent.language,
       greeting: agent.greeting ?? "",
       starters: (agent.starters ?? []).join("\n"),
+      notes: agent.notes ?? "",
       knowledgeUrl: agent.knowledgeUrl ?? "",
       collectEmail: !!agent.collectEmail,
       brandStyle: !!agent.brandStyle,
@@ -280,6 +285,7 @@ export default function InteractivePage() {
         if (instructions !== was.instructions) patch.instructions = instructions;
         if (language !== was.language) patch.language = language;
         if (greeting.trim() !== was.greeting) patch.greeting = greeting.trim();
+        if (notes.trim() !== was.notes) patch.notes = notes.trim();
         if (starterList.join("\n") !== (editing.starters ?? []).join("\n")) patch.starters = starterList;
         if (collectEmail !== was.collectEmail) patch.collectEmail = collectEmail;
         if (brandStyle !== was.brandStyle) patch.brandStyle = brandStyle;
@@ -299,7 +305,7 @@ export default function InteractivePage() {
       } else {
         ({ agent } = await api<{ agent: Agent }>("/api/agents", {
           method: "POST",
-          body: JSON.stringify({ name, avatarId: avatar.id, voiceId: voice?.id, instructions, language, isPublic: true, collectEmail, brandStyle, ...(greeting.trim() ? { greeting: greeting.trim() } : {}), ...(starterList.length ? { starters: starterList } : {}), ...(knowledgeUrl.trim() ? { knowledgeUrl: knowledgeUrl.trim() } : {}) }),
+          body: JSON.stringify({ name, avatarId: avatar.id, voiceId: voice?.id, instructions, language, isPublic: true, collectEmail, brandStyle, ...(greeting.trim() ? { greeting: greeting.trim() } : {}), ...(starterList.length ? { starters: starterList } : {}), ...(notes.trim() ? { notes: notes.trim() } : {}), ...(knowledgeUrl.trim() ? { knowledgeUrl: knowledgeUrl.trim() } : {}) }),
         }));
         setSavedLink(`${linkOrigin()}/talk/${agent.id}`);
         clearOwnFields();
@@ -451,6 +457,25 @@ export default function InteractivePage() {
             <Field label="Reply language">
               <input value={language} onChange={(e) => setLanguage(e.target.value)} className={inputClass} maxLength={40} />
             </Field>
+            <Field
+              label="Reference notes (optional)"
+              hintId="agent-notes-hint"
+              hint="Facts the presenter answers from, such as prices, hours, and policies, in your own words. The try-it chat uses them as you type. They are kept off the public page, but the presenter may repeat anything in them to a visitor, so leave out what is not for the public."
+            >
+              <textarea
+                aria-label="Reference notes"
+                aria-describedby="agent-notes-hint agent-notes-count"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={4}
+                maxLength={MAX_AGENT_NOTES}
+                placeholder={"Showings run Saturdays, 10am to 2pm.\nWe answer calls within one business day."}
+                className={inputClass}
+              />
+              <span id="agent-notes-count" className={`mt-1 block text-xs ${notes.length >= MAX_AGENT_NOTES ? "font-medium text-rose-700" : "text-slate-500"}`}>
+                {notes.length} / {MAX_AGENT_NOTES}
+              </span>
+            </Field>
             <Field label="Knowledge page (optional)" hint="A public web page read once when the presenter is saved; its text becomes reference material for replies and is never shown to visitors.">
               <input aria-label="Knowledge page URL" value={knowledgeUrl} onChange={(e) => setKnowledgeUrl(e.target.value)} placeholder="https://…/about-us" className={inputClass} maxLength={2000} type="url" />
             </Field>
@@ -536,6 +561,7 @@ export default function InteractivePage() {
                     <div className="truncate text-sm font-medium text-slate-900">{a.name}</div>
                     <div className="text-xs text-slate-500">
                       {a.conversations} {a.conversations === 1 ? "conversation" : "conversations"} · {a.messages} {a.messages === 1 ? "question" : "questions"} · {a.isPublic ? "link on" : "link off"} · {formatDate(a.createdAt)}
+                      {a.notes && <> · has notes</>}
                       {a.knowledgeUrl && <> · knows {(() => { try { return new URL(a.knowledgeUrl).hostname; } catch { return "a page"; } })()}</>}
                     </div>
                   </div>

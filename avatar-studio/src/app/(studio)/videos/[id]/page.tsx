@@ -70,6 +70,13 @@ export default function VideoDetailPage() {
     titleButton.current?.focus();
   }, [editing]);
   const [draftTitle, setDraftTitle] = useState("");
+  // Titles the script writer suggests, offered under the header until one is saved; picking one opens the title field
+  // with it, which saves as a typed title does (Enter or leaving the field) and Escape leaves the title as it was.
+  const [titleIdeas, setTitleIdeas] = useState<string[] | null>(null);
+  const [titlesBusy, setTitlesBusy] = useState(false);
+  const [titlesErr, setTitlesErr] = useState<string | null>(null);
+  const firstTitleIdea = useRef<HTMLButtonElement>(null);
+  const suggestButton = useRef<HTMLButtonElement>(null);
   const [renameErr, setRenameErr] = useState<string | null>(null);
   const [savedTemplate, setSavedTemplate] = useState<string | null>(null);
   // The button turns into a link once saved; the focus moves to the link rather than falling to the page.
@@ -190,6 +197,8 @@ export default function VideoDetailPage() {
       applyServer(res.video);
       void refetch();
       setRenameErr(null);
+      setTitleIdeas(null);
+      setTitlesErr(null);
       setEditing(false);
     } catch (e) {
       // The field stays open with the error; a later save (a click elsewhere) must not pull the focus back.
@@ -197,6 +206,27 @@ export default function VideoDetailPage() {
       setRenameErr(e instanceof Error ? e.message : "Could not rename");
     } finally {
       savingTitle.current = false;
+    }
+  }
+
+  async function suggestTitlesFromScript() {
+    if (!video || titlesBusy) return;
+    setTitlesBusy(true);
+    setTitlesErr(null);
+    // Cleared first, so ideas asked for again are announced again even when as many come back.
+    setTitleIdeas(null);
+    try {
+      const { titles } = await api<{ titles: string[] }>(`/api/videos/${video.id}/titles`, { method: "POST" });
+      setTitleIdeas(titles);
+      // The focus goes to the ideas only from the button (or nowhere): someone typing elsewhere while the script writer
+      // works keeps their place, where a key pressed on an idea would open the title field with it.
+      const active = document.activeElement;
+      if (!active || active === document.body || active === suggestButton.current) focusAfterRender(() => firstTitleIdea.current);
+    } catch (e) {
+      setTitleIdeas(null);
+      setTitlesErr(e instanceof Error ? e.message : "Could not suggest titles");
+    } finally {
+      setTitlesBusy(false);
     }
   }
 
@@ -656,6 +686,11 @@ export default function VideoDetailPage() {
             subtitle={`Created ${formatDate(video.createdAt)} · ${video.aspect}${video.resolution ? ` · ${video.resolution}` : ""} · ${video.provider}`}
             action={
               <div className="flex flex-wrap items-center gap-2">
+                {canEdit === true && !video.deletedAt && !described && !video.studioTemplate && hasWords(video) && (
+                  <Button ref={suggestButton} type="button" variant="secondary" loading={titlesBusy} onClick={() => void suggestTitlesFromScript()}>
+                    {!titlesBusy && <Sparkles className="h-4 w-4" />} Suggest titles
+                  </Button>
+                )}
                 {video.videoUrl && (
                   <a href={video.videoUrl} download target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700">
                     <Download className="h-4 w-4" /> Download
@@ -830,6 +865,56 @@ export default function VideoDetailPage() {
               </div>
             }
           />
+          <p role="status" className="sr-only">
+            {titleIdeas ? `${titleIdeas.length === 1 ? "One title" : `${titleIdeas.length} titles`} suggested from the script` : ""}
+          </p>
+          {/* Hidden while the title field is open: a click on an idea would blur the field and save what it holds. */}
+          {!editing && (titleIdeas || titlesErr) && (
+            <div className="mb-4 rounded-lg border border-slate-200 bg-white px-4 py-3" data-testid="title-ideas">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <p className="text-sm font-medium text-slate-800">Titles from the script</p>
+                <button
+                  type="button"
+                  className="text-xs text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline"
+                  onClick={() => {
+                    setTitleIdeas(null);
+                    setTitlesErr(null);
+                    // The panel goes with the focused button; the focus goes back to where the ideas came from.
+                    focusAfterRender(() => suggestButton.current ?? titleButton.current);
+                  }}
+                >
+                  Dismiss
+                </button>
+              </div>
+              {titleIdeas && (
+                <>
+                  <p className="text-xs text-slate-500">Pick one to edit it as the title: Enter or a click elsewhere saves it, and Escape keeps the title as it is.</p>
+                  <ul className="mt-2 flex flex-wrap gap-2">
+                    {titleIdeas.map((idea, i) => (
+                      <li key={idea} className="min-w-0 max-w-full">
+                        <button
+                          ref={i === 0 ? firstTitleIdea : undefined}
+                          type="button"
+                          className="max-w-full rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-left text-sm text-slate-800 [overflow-wrap:anywhere] hover:border-brand-300 hover:bg-brand-50"
+                          onClick={() => {
+                            setDraftTitle(idea);
+                            setEditing(true);
+                          }}
+                        >
+                          {idea}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              {titlesErr && (
+                <p role="alert" className="text-xs text-rose-600">
+                  {titlesErr}
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-[2fr_1fr]">
             <Card className="overflow-hidden">

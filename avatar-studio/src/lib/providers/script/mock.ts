@@ -1,3 +1,4 @@
+import { graphemes } from "../../text";
 import { splitKnowledge, type ChatMessage, type ChatPersona, type ScriptAction, type ScriptProvider, type VideoPlan } from "../types";
 
 /** Template-based script writer used when no LLM key is configured. */
@@ -32,6 +33,22 @@ export class MockScriptProvider implements ScriptProvider {
       picked.push(sentence);
     }
     return picked.join(" ");
+  }
+
+  async titles({ script }: { title: string; script: string }) {
+    // Demo: the script's first three sentences, each a title of at most 60 characters cut at a word.
+    const sentences = script.replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s+/).filter(Boolean);
+    return sentences.slice(0, 3).map((sentence) => {
+      if (sentence.length <= 60) return sentence;
+      let cut = "";
+      for (const ch of graphemes(sentence)) {
+        if (cut.length + ch.length > 59) break;
+        cut += ch;
+      }
+      // At a word when the next character starts one, so a whole word is kept when it fits exactly.
+      const atWord = /\s/.test(sentence[cut.length] ?? " ") ? cut : cut.replace(/\s+\S*$/, "");
+      return `${(atWord || cut).trimEnd()}…`;
+    });
   }
 
   async revise({ script, action, tone, language }: { script: string; action: ScriptAction; tone?: string; language?: string }) {

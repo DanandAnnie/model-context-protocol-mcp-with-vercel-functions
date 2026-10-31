@@ -5876,6 +5876,56 @@ test("a share-page description is drafted from the script, edited, and saved", a
   expect((await page.request.post(`/api/videos/vid_missing/describe`)).status()).toBe(404);
 });
 
+test("titles suggested from the script fill the title field, and one is saved as a rename", async ({ page }) => {
+  const bg = { type: "color", value: "#0f172a" };
+  const original = `Titles ${Date.now().toString(36)}`;
+  const v = await createVideoViaApi(page, original, {
+    script: undefined,
+    scenes: [
+      { script: "Welcome to twelve Maple Street. [pause 2s] It's a bright family home.", background: bg },
+      { script: "Call Dana to book a showing.", background: bg },
+    ],
+  });
+  await page.goto(`/videos/${v.id}`);
+  const suggest = page.getByRole("button", { name: "Suggest titles" });
+  // The button sits beside the page's actions, not in the heading, whose name stays the title.
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(original);
+  await suggest.click();
+  // The demo writer offers the script's first three sentences, pauses left out; the focus goes to the first.
+  const ideas = page.getByTestId("title-ideas").getByRole("listitem");
+  await expect(ideas).toHaveText(["Welcome to twelve Maple Street", "It's a bright family home", "Call Dana to book a showing"]);
+  await expect(ideas.first().getByRole("button")).toBeFocused();
+  await expect(page.getByRole("status").filter({ hasText: "3 titles suggested from the script" })).toBeAttached();
+  expect((await (await page.request.get(`/api/videos/${v.id}`)).json()).video.title).toBe(original);
+  // Dismiss puts the focus back on the button; asking again offers them again.
+  await page.getByTestId("title-ideas").getByRole("button", { name: "Dismiss" }).click();
+  await expect(page.getByTestId("title-ideas")).toHaveCount(0);
+  await expect(suggest).toBeFocused();
+  await suggest.click();
+  await expect(ideas).toHaveCount(3);
+  // A pick opens the title field with it; Escape keeps the title and brings the ideas back.
+  await ideas.nth(2).getByRole("button").click();
+  const field = page.getByLabel("Video title", { exact: true });
+  await expect(field).toHaveValue("Call Dana to book a showing");
+  await expect(field).toBeFocused();
+  await expect(page.getByTestId("title-ideas")).toHaveCount(0);
+  await field.press("Escape");
+  await expect(page.getByRole("heading", { name: original })).toBeVisible();
+  await ideas.nth(0).getByRole("button").click();
+  await field.press("End");
+  await field.pressSequentially(" today");
+  await field.press("Enter");
+  await expect(page.getByRole("heading", { name: "Welcome to twelve Maple Street today" })).toBeVisible();
+  await expect(page.getByTestId("title-ideas")).toHaveCount(0);
+  expect((await (await page.request.get(`/api/videos/${v.id}`)).json()).video.title).toBe("Welcome to twelve Maple Street today");
+  // The API renames nothing; a missing video is a 404.
+  const res = await page.request.post(`/api/videos/${v.id}/titles`);
+  expect(res.status()).toBe(200);
+  expect((await res.json()).titles).toEqual(["Welcome to twelve Maple Street", "It's a bright family home", "Call Dana to book a showing"]);
+  expect((await (await page.request.get(`/api/videos/${v.id}`)).json()).video.title).toBe("Welcome to twelve Maple Street today");
+  expect((await page.request.post(`/api/videos/vid_missing/titles`)).status()).toBe(404);
+});
+
 test("a video can be made in other sizes, each a new video with the same scenes", async ({ page }) => {
   const bg = { type: "color", value: "#0f172a" };
   const sizesTitle = `Sizes ${Date.now().toString(36)}`;

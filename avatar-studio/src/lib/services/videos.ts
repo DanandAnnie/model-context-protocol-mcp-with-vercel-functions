@@ -2058,42 +2058,107 @@ export function forgetGifChecks(): void {
 
 /** The most a share-page description holds, as `videoPatchSchema` takes it. */
 export const MAX_DESCRIPTION = 500;
+/** Matches the title's limit in the create and update schemas. */
+export const MAX_TITLE = 120;
+/** How many titles a suggestion offers. */
+export const TITLE_SUGGESTIONS = 3;
+
+/**
+ * What the presenter of a video says, pause markers left out, for a draft written from it. A video with no words of
+ * its own to go by (a cinematic shot, one HeyGen's Video Agent wrote, or one of only pauses) is refused, as is one in
+ * the trash.
+ */
+async function wordsToWriteFrom(id: string, ownerId: string, what: string): Promise<{ video: Video; script: string }> {
+  const video = await getVideo(id, ownerId, false);
+  if (video.deletedAt) throw new ConflictError("Restore the video from the trash first");
+  if (video.cinematic || video.directed) throw new ValidationError(`This video has no script of its own to ${what}`);
+  const script = stripPauses(video.scenes?.length ? video.scenes.map((sc) => sc.script).join("\n\n") : video.script).trim();
+  if (!script) throw new ValidationError(`This video has no words to ${what}`);
+  return { video, script };
+}
 
 /**
  * A draft of a video's share-page description, written by the script provider from its title and what the presenter
- * says (pause markers left out); nothing is saved, the editor reviews it first. A video with no words of its own to go
- * by (a cinematic shot, one HeyGen's Video Agent wrote, or one of only pauses) is refused. The draft is one paragraph,
- * cut at a word to fit `MAX_DESCRIPTION`.
+ * says (pause markers left out); nothing is saved, the editor reviews it first. The draft is one paragraph, cut at a
+ * word to fit `MAX_DESCRIPTION`.
  */
 export async function describeVideo(id: string, ownerId: string = LOCAL_OWNER): Promise<string> {
-  const video = await getVideo(id, ownerId, false);
-  if (video.deletedAt) throw new ConflictError("Restore the video from the trash first");
-  if (video.cinematic || video.directed) throw new ValidationError("This video has no script of its own to describe");
-  const script = stripPauses(video.scenes?.length ? video.scenes.map((sc) => sc.script).join("\n\n") : video.script).trim();
-  if (!script) throw new ValidationError("This video has no words to describe");
+  const { video, script } = await wordsToWriteFrom(id, ownerId, "describe");
   const draft = draftDescription(await getScriptProvider().describe({ title: video.title, script }));
   if (!draft) throw new Error("The script writer returned no description. Try again.");
   return draft;
 }
 
-/** A model's answer as a description: one paragraph, no wrapping quotes, cut at a word with an ellipsis past the limit. */
-export function draftDescription(raw: string): string {
-  let text = wellFormed(raw).replace(/\s+/g, " ").trim();
-  // Only a matching pair of double quotes wrapping the whole answer, with none of its kind inside, is the model
-  // quoting itself; a single quote at either end is far more often an apostrophe ('Tis, the Smiths').
-  const quoted = /^(["“])(.*)(["”])$/s.exec(text);
-  if (quoted) {
-    const [, open, inner, close] = quoted;
-    const pair = (open === '"' && close === '"') || (open === "“" && close === "”");
-    if (pair && !inner.includes(open) && !inner.includes(close)) text = inner.trim();
+/**
+ * Titles for a video the script provider suggests from its current title and what the presenter says; nothing is
+ * saved, the editor picks one and saves it as a rename. Refused as `describeVideo` is.
+ */
+export async function suggestTitles(id: string, ownerId: string = LOCAL_OWNER): Promise<string[]> {
+  const { video, script } = await wordsToWriteFrom(id, ownerId, "title");
+  const titles = titleSuggestions(await getScriptProvider().titles({ title: video.title, script }), video.title);
+  if (!titles.length) throw new Error("The script writer returned no titles. Try again.");
+  return titles;
+}
+
+/**
+ * A model's lines as titles: list marks, wrapping quotes or bold, and a closing full stop taken off, each one line cut
+ * at a word to fit `MAX_TITLE`; blanks, repeats (in any case), and the video's current title are left out, and at most
+ * `TITLE_SUGGESTIONS` are kept.
+ */
+export function titleSuggestions(lines: string[], current = ""): string[] {
+  const seen = new Set([tidyTitle(current).toLocaleLowerCase()]);
+  const out: string[] = [];
+  for (const line of lines) {
+    const text = tidyTitle(line);
+    // A line ending in a colon introduces the list ("Here are three titles:") rather than being one.
+    if (!text || text.endsWith(":")) continue;
+    const title = cutToFit(text, MAX_TITLE);
+    const key = title.toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(title);
+    if (out.length === TITLE_SUGGESTIONS) break;
   }
-  // The limit is counted as the field counts it (UTF-16 units), and the cut never splits a character.
-  if (text.length <= MAX_DESCRIPTION) return text;
+  return out;
+}
+
+/** One line as a title: list marks, wrapping quotes or bold, and a closing full stop taken off, in any nesting. */
+function tidyTitle(line: string): string {
+  let text = wellFormed(line).replace(/\s+/g, " ").trim();
+  for (let before = ""; before !== text; ) {
+    before = text;
+    text = text.replace(/^(?:[-*•–]|\d{1,2}[.):]|#{1,6})(?:\s+|$)/, "").replace(/^\*\*(.+)\*\*$/, "$1").trim();
+    // One full stop closing the title goes; an ellipsis, "?", "!", or an abbreviation's stop (U.S.) is the title's own.
+    text = unquoted(text).replace(/(?<!\.)(?<!\.\p{L})\.$/u, "").trim();
+  }
+  return text;
+}
+
+/**
+ * Only a matching pair of double quotes wrapping the whole text, with none of its kind inside, is the model quoting
+ * itself; a single quote at either end is far more often an apostrophe ('Tis, the Smiths').
+ */
+function unquoted(text: string): string {
+  const quoted = /^(["“])(.*)(["”])$/s.exec(text);
+  if (!quoted) return text;
+  const [, open, inner, close] = quoted;
+  const pair = (open === '"' && close === '"') || (open === "“" && close === "”");
+  return pair && !inner.includes(open) && !inner.includes(close) ? inner.trim() : text;
+}
+
+/** The text cut at a word with an ellipsis past `max`, counted as a field counts it (UTF-16 units), never splitting a character. */
+function cutToFit(text: string, max: number): string {
+  if (text.length <= max) return text;
   let cut = "";
   for (const ch of graphemes(text)) {
-    if (cut.length + ch.length > MAX_DESCRIPTION - 1) break;
+    if (cut.length + ch.length > max - 1) break;
     cut += ch;
   }
   const atWord = cut.replace(/\s+\S*$/, "");
   return `${(atWord.length >= cut.length / 2 ? atWord : cut).trimEnd()}…`;
+}
+
+/** A model's answer as a description: one paragraph, no wrapping quotes, cut at a word with an ellipsis past the limit. */
+export function draftDescription(raw: string): string {
+  return cutToFit(unquoted(wellFormed(raw).replace(/\s+/g, " ").trim()), MAX_DESCRIPTION);
 }

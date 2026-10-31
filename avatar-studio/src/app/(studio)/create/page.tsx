@@ -1,7 +1,7 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Captions, ChevronLeft, ChevronRight, Clapperboard, ClipboardCopy, ClipboardPaste, Copy, Flag, Image as ImageIcon, Layers, ListOrdered, Merge, MessagesSquare, Mic2, Palette, Pause, Play, Plus, Redo2, Replace, Scissors, Sparkles, Square, Trash2, Undo2, Upload, Users, Wand2, X } from "lucide-react";
+import { Captions, ChevronLeft, ChevronRight, Clapperboard, ClipboardCopy, ClipboardPaste, Copy, Flag, Image as ImageIcon, Layers, ListOrdered, Merge, MessagesSquare, Mic2, Palette, Pause, Play, Plus, Redo2, Replace, Rows3, Scissors, Sparkles, Square, Trash2, Undo2, Upload, Users, Wand2, X } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { VoiceRow } from "@/components/VoicePicker";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -29,7 +29,7 @@ import { readDocx } from "@/lib/docx-text";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
 import { capSceneText, fitSceneTextEdit, sceneTextLength } from "@/lib/scene-text";
-import { mergeScenes, moveItem, splitScene } from "@/lib/scene-split";
+import { mergeScenes, moveItem, splitParagraphs, splitScene } from "@/lib/scene-split";
 import { emptyHistory, record, redo, undo, type History } from "@/lib/scene-history";
 import { graphemes } from "@/lib/text";
 import { takeAgentDraft, type AgentDraft } from "@/lib/agent-draft";
@@ -752,6 +752,22 @@ function CreateInner() {
       scriptRef.current?.focus();
       scriptRef.current?.setSelectionRange(0, 0);
     });
+  }
+  // The selected scene cut at its blank lines, one scene per paragraph (null when it has one, or is a clip).
+  const paragraphScenes = useMemo(() => splitParagraphs(active), [active]);
+  /** Cuts the selected scene into one scene per paragraph, as one change Undo takes back, the first of them selected. */
+  function splitIntoParagraphs() {
+    const parts = paragraphScenes;
+    if (!parts) return;
+    const idx = scenes.indexOf(active);
+    if (scenes.length - 1 + parts.length > MAX_SCENES) {
+      return setImportNote(`Cutting scene ${idx + 1} into its ${parts.length} paragraphs would make ${scenes.length - 1 + parts.length} scenes; a video holds up to ${MAX_SCENES}, so it stays as it is.`);
+    }
+    changeScenes(`split scene ${idx + 1} into ${parts.length} scenes`, [...scenes.slice(0, idx), ...parts, ...scenes.slice(idx + 1)], { active: idx });
+    const n = scenes.length;
+    const moved = idx + 1 < n ? ` ${idx + 2 === n ? `Scene ${n} is` : `Scenes ${idx + 2}–${n} are`} now ${idx + 2 === n ? `scene ${n + parts.length - 1}` : `${idx + 1 + parts.length}–${n + parts.length - 1}`}.` : "";
+    setImportNote(`Scene ${idx + 1} is now scenes ${idx + 1}–${idx + parts.length}, one per paragraph.${moved}`);
+    requestAnimationFrame(() => scriptRef.current?.focus());
   }
   /** Joins the selected scene and the next into one, after asking when the next one renders with settings that would go. */
   function mergeWithNext() {
@@ -2070,6 +2086,22 @@ function CreateInner() {
                 {!active.audioId && (
                   <Button variant="secondary" className="px-3 py-1.5" onClick={splitActiveScene} disabled={canEdit === false} title="Split this scene at the cursor: the words after it become the next scene, with the same presenter, voice, and background">
                     <Scissors className="h-4 w-4" /> Split
+                  </Button>
+                )}
+                {!active.audioId && (
+                  // Always there for a scene that speaks, so it never appears mid-typing and moves the script box.
+                  <Button
+                    variant="secondary"
+                    className="px-3 py-1.5"
+                    onClick={splitIntoParagraphs}
+                    disabled={canEdit === false || !paragraphScenes}
+                    title={
+                      paragraphScenes
+                        ? `Make each of this scene's ${paragraphScenes.length} paragraphs a scene of its own, with the same presenter, voice, and background, the on-screen text staying with the first`
+                        : "Separate the scene's paragraphs with a blank line to make each a scene of its own"
+                    }
+                  >
+                    <Rows3 className="h-4 w-4" /> One scene per paragraph
                   </Button>
                 )}
                 {sceneVoice && !active.audioId && (

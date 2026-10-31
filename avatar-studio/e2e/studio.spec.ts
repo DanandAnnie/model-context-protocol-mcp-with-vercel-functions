@@ -1266,6 +1266,36 @@ test("All scripts shows every scene's script in one column, a box selecting its 
   await expect(page.getByRole("textbox", { name: "Scene 1 script" })).toHaveValue("Welcome in. [pause 1s] ");
 });
 
+test("One scene per paragraph cuts a scene at its blank lines in one change Undo takes back", async ({ page }) => {
+  await page.locator("input[placeholder='Video title']").fill("Tour");
+  const script = page.getByRole("textbox", { name: "Script", exact: true });
+  await script.fill("Welcome home.\n\nThis is the kitchen.\n\nThanks for watching.");
+  const perParagraph = page.getByRole("button", { name: "One scene per paragraph" });
+  await perParagraph.click();
+  const tab = (n: number) => page.getByRole("button", { name: new RegExp(`^Scene ${n},`) });
+  await expect(tab(3)).toBeVisible();
+  await expect(page.getByTestId("import-note")).toHaveText("Scene 1 is now scenes 1–3, one per paragraph.");
+  await expect(page.getByRole("textbox", { name: "Scene 1 script" })).toHaveValue("Welcome home.");
+  await expect(page.getByRole("textbox", { name: "Scene 1 script" })).toBeFocused();
+  // One paragraph left: the button stays where it is, off, so the script box never moves.
+  await expect(perParagraph).toBeDisabled();
+  await expect(perParagraph).toHaveAttribute("title", /blank line/);
+  await tab(3).click();
+  await expect(page.getByRole("textbox", { name: "Scene 3 script" })).toHaveValue("Thanks for watching.");
+  await page.getByRole("button", { name: "Undo split scene 1 into 3 scenes" }).click();
+  await expect(tab(2)).toHaveCount(0);
+  await expect(script).toHaveValue("Welcome home.\n\nThis is the kitchen.\n\nThanks for watching.");
+  // A scene in the middle: the ones after it move along, which the note says.
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
+  await page.getByRole("textbox", { name: "Scene 2 script" }).fill("Bye.");
+  await expect(perParagraph).toBeDisabled();
+  await tab(1).click();
+  await perParagraph.click();
+  await expect(page.getByTestId("import-note")).toHaveText("Scene 1 is now scenes 1–3, one per paragraph. Scene 2 is now scene 4.");
+  await tab(4).click();
+  await expect(page.getByRole("textbox", { name: "Scene 4 script" })).toHaveValue("Bye.");
+});
+
 test("photo avatar motion is set in the editor, kept with the video and its copy", async ({ page }) => {
   await page.locator("input[placeholder='Video title']").fill("Moving portrait");
   await page.locator("textarea").fill("Welcome to the open house.");

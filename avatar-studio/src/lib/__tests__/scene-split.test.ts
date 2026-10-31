@@ -2,7 +2,7 @@
 // Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mergeScenes, moveItem, splitScene, splitScript } from "../scene-split";
+import { mergeScenes, moveItem, scriptParagraphs, splitParagraphs, splitScene, splitScript } from "../scene-split";
 import type { Scene } from "../types";
 
 const bg = { type: "color" as const, value: "#fff" };
@@ -93,5 +93,65 @@ describe("moveItem", () => {
     assert.deepEqual(moveItem(["a", "b", "c", "d"], 0, 2), ["b", "c", "a", "d"]);
     assert.deepEqual(moveItem(["a", "b", "c"], 1, 1), ["a", "b", "c"]);
     assert.deepEqual(moveItem(["a", "b"], 0, 5), ["a", "b"]);
+  });
+});
+
+describe("scriptParagraphs", () => {
+  it("cuts at blank lines, even ones holding spaces, and drops empty parts", () => {
+    assert.deepEqual(scriptParagraphs("One.\n\nTwo.\n  \n\n\nThree.\n"), ["One.", "Two.", "Three."]);
+    assert.deepEqual(scriptParagraphs("One line.\nThe same paragraph."), ["One line.\nThe same paragraph."]);
+    assert.deepEqual(scriptParagraphs("  \n\n "), []);
+  });
+
+  it("reads Windows line endings, and leaves a blank line inside a pause marker alone", () => {
+    assert.deepEqual(scriptParagraphs("One.\r\n\r\nTwo."), ["One.", "Two."]);
+    assert.deepEqual(scriptParagraphs("Hi. [pause\n\n2s] there.\n\nBye."), ["Hi. [pause\n\n2s] there.", "Bye."]);
+  });
+});
+
+describe("splitParagraphs", () => {
+  const scene: Scene = {
+    script: "Welcome home.\n\nThe kitchen.\n\n[pause 2s]",
+    background: bg,
+    avatarId: "a1",
+    voiceId: "v1",
+    speed: 0.9,
+    layout: { scale: 1.2, x: 0.5, y: 0 },
+    overlay: { text: "123 Main St", position: "bottom", size: "medium", color: "#ffffff" },
+  };
+
+  it("makes each paragraph a scene with the same settings, the on-screen text staying with the first", () => {
+    const parts = splitParagraphs(scene);
+    assert.ok(parts);
+    assert.deepEqual(parts.map((p) => p.script), ["Welcome home.", "The kitchen.", "[pause 2s]"]);
+    for (const p of parts) {
+      assert.equal(p.avatarId, "a1");
+      assert.equal(p.voiceId, "v1");
+      assert.equal(p.speed, 0.9);
+      assert.deepEqual(p.layout, scene.layout);
+      assert.deepEqual(p.background, bg);
+    }
+    assert.deepEqual(parts[0].overlay, scene.overlay);
+    assert.equal(parts[1].overlay, undefined);
+    assert.equal(parts[2].overlay, undefined);
+  });
+
+  it("joins a paragraph of pauses too short or long to be a silent scene to the one before, or the one after", () => {
+    const scripts = (script: string) => splitParagraphs({ script, background: bg })?.map((p) => p.script) ?? null;
+    assert.deepEqual(scripts("Welcome.\n\n[pause 0.5s]\n\nKitchen."), ["Welcome. [pause 0.5s]", "Kitchen."]);
+    assert.deepEqual(scripts("[pause 0.5s]\n\nWelcome.\n\nKitchen."), ["[pause 0.5s] Welcome.", "Kitchen."]);
+    assert.deepEqual(scripts("Welcome.\n\n[pause 10s] [pause 10s] [pause 10s] [pause 10s] [pause 10s] [pause 10s] [pause 10s]"), null);
+  });
+
+  it("refuses one paragraph, a recorded clip, and a script of only pauses", () => {
+    assert.equal(splitParagraphs({ script: "Just one.", background: bg }), null);
+    assert.equal(splitParagraphs({ script: "One.\n\nTwo.", background: bg, audioId: "c1" }), null);
+    assert.equal(splitParagraphs({ script: "[pause 2s]\n\n[pause 3s]", background: bg }), null);
+  });
+
+  it("leaves the scene it cuts as it was", () => {
+    const before = JSON.stringify(scene);
+    splitParagraphs(scene);
+    assert.equal(JSON.stringify(scene), before);
   });
 });

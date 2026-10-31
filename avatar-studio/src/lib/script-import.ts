@@ -415,7 +415,7 @@ function withoutDataImages(text: string): string {
  * with `keepSilent`, a section of only pauses set apart by headings or `---` is kept as a silent scene when its length
  * fits one (a document of nothing but pauses still gives no scenes).
  */
-function joinPauseOnly(blocks: string[], keepSilent = false): string[] {
+export function joinPauseOnly(blocks: string[], keepSilent = false): string[] {
   const out: string[] = [];
   const pending: string[] = [];
   const anyWords = blocks.some(hasWords);

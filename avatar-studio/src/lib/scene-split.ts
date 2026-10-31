@@ -1,7 +1,7 @@
 // Splitting a scene in two at the cursor and merging a scene with the next, as HeyGen's editor does. Pure, so the
 // editor and the tests share it.
 import { silentProblem, silentSeconds } from "./pauses";
-import { insidePause } from "./script-import";
+import { insidePause, joinPauseOnly } from "./script-import";
 import type { Scene } from "./types";
 
 /** Letters of scripts written with spaces between words: a cut between two of them falls inside a word. */
@@ -32,6 +32,36 @@ export function splitScene(scene: Scene, at: number): [Scene, Scene] | null {
   if (!parts) return null;
   const { overlay: _kept, ...rest } = scene;
   return [{ ...scene, script: parts[0] }, { ...rest, script: parts[1] }];
+}
+
+/**
+ * The script's paragraphs: its parts between blank lines (but not one inside a pause marker), each trimmed, the empty
+ * ones left out.
+ */
+export function scriptParagraphs(script: string): string[] {
+  const parts: string[] = [];
+  let from = 0;
+  for (const m of script.matchAll(/\n[^\S\n]*\n/g)) {
+    if (insidePause(script, m.index + 1)) continue;
+    parts.push(script.slice(from, m.index));
+    from = m.index + m[0].length;
+  }
+  parts.push(script.slice(from));
+  return parts.map((part) => part.trim()).filter(Boolean);
+}
+
+/**
+ * A scene cut into one scene per paragraph, each keeping its presenter, voice, background, layout, and pace, the
+ * on-screen text staying with the first. A paragraph of only pauses is a silent scene of its own when its length fits
+ * one, and otherwise joins the paragraph before it (or after it), as a script import does. Null when that leaves fewer
+ * than two, or the scene speaks a recorded clip.
+ */
+export function splitParagraphs(scene: Scene): Scene[] | null {
+  if (scene.audioId) return null;
+  const parts = joinPauseOnly(scriptParagraphs(scene.script), true);
+  if (parts.length < 2 || parts.some((part) => silentProblem(part))) return null;
+  const { overlay: _kept, ...rest } = scene;
+  return parts.map((script, i) => (i === 0 ? { ...scene, script } : { ...rest, script }));
 }
 
 /** What the second of two merged scenes renders with that the first does not, in words. */

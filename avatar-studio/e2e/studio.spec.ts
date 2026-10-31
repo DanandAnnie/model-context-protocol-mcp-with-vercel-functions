@@ -4265,7 +4265,7 @@ test("captions are served as SRT and VTT, security headers are set", async ({ pa
   await expect(page.getByTestId("share-player")).toHaveClass(/cue-look-yellow/);
   await expect(page.getByTestId("share-player")).toHaveClass(/cue-font-serif/);
   // The track is on from the start: the demo renderer (like D-ID, or HeyGen with a style) burns no captions into the file.
-  await expect(page.getByTestId("share-player").locator("track")).toHaveAttribute("default", "");
+  await expect(page.getByTestId("share-player").locator('track[kind="subtitles"]')).toHaveAttribute("default", "");
   await page.goto(`/videos/${v.id}`);
   await expect(page.getByText("On · top, large, yellow, serif type")).toBeVisible();
   // The editor offers the style once captions are on, previews it on the stage, and a copy keeps it.
@@ -5716,10 +5716,30 @@ test("a multi-scene video has chapters: the share page jumps to a scene and the 
   const copied = await page.evaluate(() => navigator.clipboard.readText());
   expect(copied.split("\n")).toHaveLength(3);
   expect(copied).toMatch(/^0:00 12 Maple Street\n\d+:\d\d The kitchen was redone last spring with quartz counters and…\n\d+:\d\d Call Dana to book a showing this weekend\.$/);
+  // The same chapters as a WebVTT chapters file, for players and hosts that read one.
+  await expect(page.getByRole("link", { name: "Chapters file" })).toHaveAttribute("href", `/api/videos/${v.id}/captions?format=chapters`);
+  const file = await page.request.get(`/api/videos/${v.id}/captions?format=chapters`);
+  expect(file.status()).toBe(200);
+  expect(file.headers()["content-type"]).toContain("text/vtt");
+  expect(file.headers()["content-disposition"]).toMatch(/\.chapters\.vtt"$/);
+  const vtt = await file.text();
+  expect(vtt).toMatch(/^WEBVTT\n\n1\n00:00:00\.000 --> 00:00:\d\d\.\d{3}\n12 Maple Street\n\n2\n/);
+  expect(vtt.match(/ --> /g)).toHaveLength(3);
+  expect((await page.request.get(`/api/videos/${v.id}/captions?format=chapters&lang=French`)).status()).toBe(400);
+  const single = await createVideoViaApi(page, `One scene ${Date.now().toString(36)}`, { script: "Just the one scene here." });
+  expect((await page.request.get(`/api/videos/${single.id}/captions?format=chapters`)).status()).toBe(404);
 
   await page.goto(`/share/${v.id}`);
   const chapters = page.getByTestId("share-chapters");
   await expect(page.getByRole("heading", { name: "Chapters", exact: true })).toBeVisible();
+  // The player carries them as its chapters track too.
+  await expect(page.getByTestId("share-player").locator('track[kind="chapters"]')).toHaveAttribute("src", `/api/videos/${v.id}/captions?format=chapters`);
+  // It loads (a chapters track left disabled would never be fetched), and the transcript still follows the script.
+  await expect
+    .poll(() => page.getByTestId("share-player").evaluate((el: HTMLVideoElement) => Array.from(el.textTracks).find((t) => t.kind === "chapters")?.cues?.length ?? 0))
+    .toBe(3);
+  expect(await page.getByTestId("share-player").evaluate((el: HTMLVideoElement) => Array.from(el.textTracks).find((t) => t.kind === "chapters")?.mode)).not.toBe("disabled");
+  await expect(page.getByRole("heading", { name: "Transcript", exact: true })).toBeVisible();
   await expect(chapters.getByRole("button")).toHaveCount(3);
   await expect(chapters.getByRole("button").first()).toHaveAttribute("aria-current", "true");
   const player = page.getByTestId("share-player");

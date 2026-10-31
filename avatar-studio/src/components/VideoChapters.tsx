@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { Check, Copy, Pencil } from "lucide-react";
+import { Check, Copy, Download, Pencil } from "lucide-react";
 import { Button, Card, inputClass } from "@/components/ui";
 import { captionDurationSec, chaptersText, sceneChapters, videoChapters, youtubeReadsChapters, type Timed } from "@/lib/chapters";
 import { api } from "@/lib/client";
@@ -9,7 +9,7 @@ import { capSceneName, sceneName } from "@/lib/scene-text";
 import { formatTimestamp } from "@/lib/text";
 import type { Video } from "@/lib/types";
 
-type ChapterVideo = Timed & Partial<Pick<Video, "views" | "chapterViews">> & { id?: string; status?: string; captionCues?: Array<{ startMs: number; endMs: number; text: string }> };
+type ChapterVideo = Timed & Partial<Pick<Video, "views" | "chapterViews" | "deletedAt">> & { id?: string; status?: string; captionCues?: Array<{ startMs: number; endMs: number; text: string }> };
 
 /**
  * A multi-scene video's chapters, one per scene, as the share page lists them, with a copy in the form a video
@@ -132,6 +132,17 @@ export function VideoChapters({ video, canEdit = false, onSaved }: { video: Chap
             <Button variant="secondary" className="px-3 py-1.5" onClick={copy}>
               {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />} {copied ? "Copied" : "Copy for YouTube"}
             </Button>
+          )}
+          {chapters.length >= 2 && video.id && video.status === "completed" && !video.deletedAt && (
+            // The chapters as a WebVTT chapters file, for players and hosts that read one (the share page's player does).
+            <a
+              href={`/api/videos/${video.id}/captions?format=chapters`}
+              download
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
+              title="The chapters as a WebVTT chapters file, for video players and hosts that read one"
+            >
+              <Download className="h-4 w-4" /> Chapters file
+            </a>
           )}
         </div>
       </div>

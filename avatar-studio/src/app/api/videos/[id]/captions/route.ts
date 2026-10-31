@@ -1,9 +1,10 @@
 import { cookies } from "next/headers";
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { cuesToSrt, cuesToVtt } from "@/lib/captions";
+import { captionDurationSec, chaptersVtt, listedChapters, videoChapters } from "@/lib/chapters";
 import { LOCAL_OWNER, optionalOwner, requireEditor } from "@/lib/owner";
 import { shareCookieName, shareGateCookieName, shareGatePassed, shareUnlocked } from "@/lib/share-lock";
-import { NotFoundError, PUBLIC_ACCESS, captionCuesFor, captionCuesSchema, getVideo, resetCaptionCues, saveCaptionCues, subtitleCues, subtitlesFor } from "@/lib/services";
+import { NotFoundError, PUBLIC_ACCESS, ValidationError, captionCuesFor, captionCuesSchema, getVideo, resetCaptionCues, saveCaptionCues, subtitleCues, subtitlesFor } from "@/lib/services";
 import type { Video } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +12,8 @@ export const dynamic = "force-dynamic";
 /**
  * Subtitles: the corrected captions when an editor saved some, else lines derived from the script, timed to the
  * rendered duration. `?format=vtt` for WebVTT, `?format=json` for `{ cues, edited }`, SRT otherwise; `?lang=`
- * serves a translated track the video carries.
+ * serves a translated track the video carries. `?format=chapters` serves the video's chapters as a WebVTT chapters
+ * file instead, under the same rules (a video with fewer than two chapters has none).
  */
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
@@ -44,6 +46,16 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
       if (!isOwner && !shareGatePassed(video, jar.get(shareGateCookieName(id))?.value)) {
         return json({ error: "Enter your email on the share page to get the captions" }, { status: 401 });
       }
+    }
+    if (format === "chapters") {
+      if (lang) throw new ValidationError("Chapters come in the script's language only");
+      const totalMs = captionDurationSec(video) * 1000;
+      const chapters = listedChapters(videoChapters(video), totalMs);
+      if (chapters.length < 2) throw new NotFoundError("This video has no chapters");
+      const filename = `${video.title.replace(/[^\w.-]+/g, "_").slice(0, 60) || "video"}.chapters.vtt`;
+      return new Response(chaptersVtt(chapters, totalMs), {
+        headers: { "Content-Type": "text/vtt; charset=utf-8", "Content-Disposition": `attachment; filename="${filename}"`, "Cache-Control": "no-store" },
+      });
     }
     // A translated track, when asked for; the timing still follows the original script's length and scenes.
     const track = lang ? subtitlesFor(video, lang) : undefined;

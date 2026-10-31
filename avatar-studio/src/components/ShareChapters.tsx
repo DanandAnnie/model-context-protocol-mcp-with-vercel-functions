@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { formatTimestamp } from "@/lib/text";
-import type { Chapter } from "@/lib/chapters";
+import { listedChapters, type Chapter } from "@/lib/chapters";
 
 /**
  * The share page's chapters: one per scene, each playing the video from where its scene starts, the one playing
@@ -11,7 +11,7 @@ export function ShareChapters({ playerId, chapters: all }: { playerId: string; c
   const [active, setActive] = useState(0);
   // The clip's own length once the player knows it: a chapter timed from an estimate past its end is left out.
   const [clipMs, setClipMs] = useState<number | null>(null);
-  const chapters = useMemo(() => (clipMs ? all.filter((c, i) => i === 0 || c.startMs < clipMs - 500) : all), [all, clipMs]);
+  const chapters = useMemo(() => (clipMs ? listedChapters(all, clipMs) : all), [all, clipMs]);
 
   useEffect(() => {
     const el = document.getElementById(playerId) as HTMLVideoElement | null;

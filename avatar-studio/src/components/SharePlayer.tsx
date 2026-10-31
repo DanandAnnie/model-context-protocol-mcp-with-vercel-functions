@@ -100,6 +100,10 @@ export function SharePlayer({
     >
       {/* `default` switches the track on without a trip to the CC menu; it stays off when the file already carries captions. */}
       {captions && <track default={trackDefault} kind="subtitles" srcLang="en" label="Captions" src={`/api/videos/${videoId}/captions?format=vtt`} />}
+      {/* The chapters as the player's chapters track, for players and scripts that read one; the page's own list is below.
+          `default` is what loads it (a chapters track is otherwise left disabled and never fetched). Browsers draw
+          nothing for it, and the transcript follows only tracks of words, so it leaves both alone. */}
+      {chapters.length >= 2 && <track default kind="chapters" srcLang="en" label="Chapters" src={`/api/videos/${videoId}/captions?format=chapters`} />}
       {tracks.map((t) => (
         <track key={t.language} id={shareTrackId(t.language)} kind="subtitles" srcLang={t.code ?? "und"} label={t.language} src={`/api/videos/${videoId}/captions?format=vtt&lang=${encodeURIComponent(wellFormed(t.language))}`} />
       ))}

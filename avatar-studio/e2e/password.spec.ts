@@ -146,7 +146,11 @@ test("an offline share link is hidden from the public but not from the owner", a
 
 test("a password-protected share link opens only with the password or for the owner", async ({ request, playwright }) => {
   expect((await request.post("/api/auth/login", { data: { password: "hunter2" } })).status()).toBe(200);
-  const made = await request.post("/api/videos", { data: { title: "Members only", script: "Hi there.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9" } });
+  // Two scenes, so it has chapters, which follow the captions' rules.
+  const bg = { type: "color", value: "#0f172a" };
+  const made = await request.post("/api/videos", {
+    data: { title: "Members only", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9", scenes: [{ script: "Hi there, and welcome to the house.", background: bg }, { script: "Thanks for watching, and call me.", background: bg }] },
+  });
   expect(made.status()).toBe(201);
   const id = ((await made.json()) as { video: { id: string } }).video.id;
   const locked = await request.patch(`/api/videos/${id}`, { data: { sharePassword: "letmein1" } });
@@ -156,13 +160,16 @@ test("a password-protected share link opens only with the password or for the ow
   const anon = await playwright.request.newContext({ baseURL: "http://localhost:3102" });
   expect(await (await anon.get(`/share/${id}`)).text()).toContain('data-testid="share-unlock"');
   expect((await anon.get(`/api/videos/${id}/captions`)).status()).toBe(401);
+  expect((await anon.get(`/api/videos/${id}/captions?format=chapters`)).status()).toBe(401);
   expect((await anon.post(`/api/videos/${id}/unlock`, { data: { password: "wrong" } })).status()).toBe(401);
   expect((await anon.post(`/api/videos/${id}/unlock`, { data: { password: "letmein1" } })).status()).toBe(200);
   // The anonymous context now carries the unlock cookie.
   expect((await anon.get(`/api/videos/${id}/captions`)).status()).toBe(200);
+  expect((await anon.get(`/api/videos/${id}/captions?format=chapters`)).status()).toBe(200);
   expect(await (await anon.get(`/share/${id}`)).text()).not.toContain('data-testid="share-unlock"');
   // The owner never needs it.
   expect((await request.get(`/api/videos/${id}/captions`)).status()).toBe(200);
+  expect((await request.get(`/api/videos/${id}/captions?format=chapters`)).status()).toBe(200);
   // A cover follows the same rule: the unlocked visitor and the owner get it, a stranger does not.
   const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
   expect((await request.patch(`/api/videos/${id}`, { data: { cover: png } })).status()).toBe(200);

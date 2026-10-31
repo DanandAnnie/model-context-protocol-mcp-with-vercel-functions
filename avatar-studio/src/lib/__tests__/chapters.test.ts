@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { captionCuesFor } from "../services";
-import { chaptersText, sceneBoundsMs, videoChapters, youtubeReadsChapters } from "../chapters";
+import { chaptersText, chaptersVtt, sceneBoundsMs, videoChapters, youtubeReadsChapters } from "../chapters";
 import { shareBodyFor } from "../share-body";
 import type { Video } from "../types";
 
@@ -153,5 +153,42 @@ describe("chapters", () => {
     assert.equal(shareBodyFor(tour, null).chapters?.length, 3);
     assert.equal(shareBodyFor({ ...tour, status: "processing", videoUrl: undefined }, null).chapters, undefined, "not before it renders");
     assert.equal(shareBodyFor(video([{ script: "Just one.", background: bg }]), null).chapters, undefined);
+  });
+});
+
+describe("chaptersVtt", () => {
+  it("writes each chapter as a cue to the next one's start, its title escaped on one line", () => {
+    const vtt = chaptersVtt(
+      [
+        { startMs: 0, title: "Welcome" },
+        { startMs: 12_400, title: "Kitchen <and> pantry  &\nmore --> later" },
+        { startMs: 61_000, title: "Book a showing" },
+      ],
+      75_000,
+    );
+    assert.equal(
+      vtt,
+      "WEBVTT\n\n1\n00:00:00.000 --> 00:00:12.400\nWelcome\n\n2\n00:00:12.400 --> 00:01:01.000\nKitchen &lt;and&gt; pantry &amp; more --&gt; later\n\n3\n00:01:01.000 --> 00:01:15.000\nBook a showing\n",
+    );
+  });
+
+  it("leaves out a chapter starting in the last half second or past the end, and gives every cue a length", () => {
+    const vtt = chaptersVtt(
+      [
+        { startMs: 0, title: "A" },
+        { startMs: 9_000, title: "B" },
+        { startMs: 9_600, title: "In the last half second" },
+        { startMs: 10_000, title: "Past the end" },
+      ],
+      10_000,
+    );
+    assert.equal(vtt, "WEBVTT\n\n1\n00:00:00.000 --> 00:00:09.000\nA\n\n2\n00:00:09.000 --> 00:00:10.000\nB\n");
+    assert.match(chaptersVtt([{ startMs: 0, title: "A" }, { startMs: 0, title: "B" }], 0), /00:00:00\.000 --> 00:00:00\.001/);
+  });
+
+  it("writes whole milliseconds when the renderer reports a fractional length", () => {
+    // 9.87654 s from a provider is 9876.54 ms, and 1.001 s is 1000.9999999999999 ms in floating point.
+    assert.equal(chaptersVtt([{ startMs: 0, title: "A" }, { startMs: 5_000, title: "B" }], 9.87654 * 1000).split("\n")[7], "00:00:05.000 --> 00:00:09.877");
+    assert.doesNotMatch(chaptersVtt([{ startMs: 0, title: "A" }, { startMs: 600, title: "B" }], 1.001 * 1000), /\.\d{4}/);
   });
 });

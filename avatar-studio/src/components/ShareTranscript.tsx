@@ -22,9 +22,10 @@ export function ShareTranscript({ playerId, transcripts }: { playerId: string; t
     const el = document.getElementById(playerId) as HTMLVideoElement | null;
     if (!el) return;
     // Translated tracks carry an id made from their language (a label could be anything, even "Captions");
-    // the script's own track, or none, means the script.
+    // the script's own track, or none, means the script. Only a track of words counts: the chapters track is
+    // "showing" too in some browsers, which draw nothing for it.
     const follow = () => {
-      const showing = Array.from(el.textTracks).find((t) => t.mode === "showing");
+      const showing = Array.from(el.textTracks).find((t) => t.mode === "showing" && (t.kind === "subtitles" || t.kind === "captions"));
       const i = showing?.id ? transcripts.findIndex((t) => t.language && shareTrackId(t.language) === showing.id) : -1;
       setWhich(i > 0 ? i : 0);
     };

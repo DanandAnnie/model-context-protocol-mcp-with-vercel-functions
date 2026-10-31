@@ -1,7 +1,7 @@
 // Scene timing and chapters. How long each scene of a video runs (its words at its pace, its pauses, or its clip),
 // shared by the captions, which are timed within each scene's share of the running time, and by the chapters that
 // let a viewer jump to a scene. Pure: no store or provider, so the browser can use it too.
-import { buildCues, spokenWords } from "./captions";
+import { buildCues, formatVttTime, spokenWords } from "./captions";
 import { pauseSeconds, stripPauses } from "./pauses";
 import { formatTimestamp, graphemes } from "./text";
 import type { Scene, Video } from "./types";
@@ -147,6 +147,31 @@ export function sceneChapters(video: Timed & { captionCues?: Cue[] }, { ignoreNa
     }
     return { startMs, title: chapterTitle(sc, i, said), scene: i };
   });
+}
+
+/**
+ * The chapters a player lists for a video `totalMs` long: one starting in its last half second or past its end (timed
+ * from an estimate longer than the clip) is none, the first always kept. The share page's list, its chapter-reach
+ * counting, and the chapters file all use it, with the player's real length where it has one.
+ */
+export function listedChapters<T extends Pick<Chapter, "startMs">>(chapters: readonly T[], totalMs: number): T[] {
+  return chapters.filter((c, i) => i === 0 || c.startMs < totalMs - 500);
+}
+
+/**
+ * Chapters as a WebVTT chapters file, the form a player's `<track kind="chapters">` and other video hosts read: the
+ * chapters `listedChapters` keeps, each a cue running from its start to the next one's and the last to the end
+ * (`totalMs`, rounded to the whole millisecond a timestamp takes), its title on one line, escaped as cue text.
+ */
+export function chaptersVtt(chapters: Array<Pick<Chapter, "startMs" | "title">>, totalMs: number): string {
+  const total = Math.round(totalMs);
+  const cues = listedChapters(chapters, total).map((c, i, kept) => {
+    const startMs = Math.round(c.startMs);
+    const endMs = Math.max(startMs + 1, Math.min(Math.round(kept[i + 1]?.startMs ?? total), total));
+    const title = c.title.replace(/\s+/g, " ").trim().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return `${i + 1}\n${formatVttTime(startMs)} --> ${formatVttTime(endMs)}\n${title}\n`;
+  });
+  return `WEBVTT\n\n${cues.join("\n")}`;
 }
 
 /** Chapters as a video description lists them ("0:00 Welcome"), one a line, the form YouTube reads. */

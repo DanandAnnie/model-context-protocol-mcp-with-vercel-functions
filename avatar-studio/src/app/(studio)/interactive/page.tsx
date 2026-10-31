@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Check, Code2, Copy, Link2, MessagesSquare, Trash2 } from "lucide-react";
+import { Check, Code2, Copy, Link2, MessagesSquare, Pencil, Trash2 } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { ChatPanel, type ChatTurn } from "@/components/ChatPanel";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -8,8 +8,23 @@ import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { useLiveAvatar } from "@/hooks/useLiveAvatar";
+import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { api, formatDate } from "@/lib/client";
 import type { Agent, Avatar, BrandKit, Conversation, ProviderStatus, Voice } from "@/lib/types";
+
+/** The whole setup form, so a new presenter's draft can be put back after an edit, and an edit compared with what it loaded. */
+type FormState = {
+  avatar: Avatar | null;
+  voice: Voice | null;
+  agentName: string;
+  instructions: string;
+  language: string;
+  greeting: string;
+  starters: string;
+  knowledgeUrl: string;
+  collectEmail: boolean;
+  brandStyle: boolean;
+};
 
 const DEFAULT_INSTRUCTIONS = "You represent a real estate team. Help visitors with open houses, listings, and how to book a showing. Be warm and concise.";
 
@@ -39,6 +54,21 @@ export default function InteractivePage() {
   const starterList = starters.split("\n").map((s) => s.trim()).filter(Boolean).slice(0, 3);
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
+  // A saved presenter loaded into the form: Save then changes it in place, so its link and embed keep working.
+  const [editing, setEditing] = useState<Agent | null>(null);
+  const editingRef = useRef<Agent | null>(null);
+  editingRef.current = editing;
+  // The form as the edit loaded it (what Save compares with), and the new presenter's draft to come back to.
+  const loadedForm = useRef<FormState | null>(null);
+  const draft = useRef<FormState | null>(null);
+  // A presenter or voice the edited one was saved with that is gone from the library: Save waits for a new pick.
+  const [missing, setMissing] = useState<{ avatar: string | null; voice: string | null }>({ avatar: null, voice: null });
+  const [rereadPage, setRereadPage] = useState(false);
+  // The presenter whose row switches the form follows: one flipped on the row while it is edited (and not in the form)
+  // shows in the form too, so the form never shows a switch the presenter no longer has.
+  const [switchesFor, setSwitchesFor] = useState<string | null>(null);
+  const setupHeading = useRef<HTMLHeadingElement>(null);
+  const focusAfterRender = useFocusAfterRender();
   const [savedLink, setSavedLink] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [transcriptsFor, setTranscriptsFor] = useState<Agent | null>(null);
@@ -82,6 +112,9 @@ export default function InteractivePage() {
   /** A presenter picked by hand brings its own voice, when it has one. */
   function pickAvatar(a: Avatar) {
     setAvatar(a);
+    setMissing((m) => ({ ...m, avatar: null }));
+    // While a saved presenter is edited, its voice is changed only from the voice list, so a new face keeps it.
+    if (editingRef.current) return;
     const own = a.defaultVoiceId ? voiceData?.voices.find((v) => v.id === a.defaultVoiceId) : undefined;
     if (own) setVoice(own);
   }
@@ -100,6 +133,96 @@ export default function InteractivePage() {
     return reply;
   }
 
+  const formState = (): FormState => ({ avatar, voice, agentName, instructions, language, greeting, starters, knowledgeUrl, collectEmail, brandStyle });
+  function setForm(f: FormState) {
+    setAvatar(f.avatar);
+    setVoice(f.voice);
+    setAgentName(f.agentName);
+    setInstructions(f.instructions);
+    setLanguage(f.language);
+    setGreeting(f.greeting);
+    setStarters(f.starters);
+    setKnowledgeUrl(f.knowledgeUrl);
+    setCollectEmail(f.collectEmail);
+    setBrandStyle(f.brandStyle);
+  }
+  // A switch flipped on the edited presenter's row is kept by Save (it is not sent unless changed in the form) and shown
+  // in the form, unless the form's own value was already changed.
+  useEffect(() => {
+    if (!switchesFor || editingRef.current?.id !== switchesFor) return;
+    const now = agentData?.agents.find((x) => x.id === switchesFor);
+    const was = loadedForm.current;
+    if (!now || !was) return;
+    if (!!now.collectEmail !== was.collectEmail) {
+      if (collectEmail === was.collectEmail) setCollectEmail(!!now.collectEmail);
+      was.collectEmail = !!now.collectEmail;
+    }
+    if (!!now.brandStyle !== was.brandStyle) {
+      if (brandStyle === was.brandStyle) setBrandStyle(!!now.brandStyle);
+      was.brandStyle = !!now.brandStyle;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- follows the presenter's stored switches only
+  }, [agentData, switchesFor]);
+
+  /** Empties the fields one presenter has and the next does not share: its name, opening line, questions, and page. */
+  function clearOwnFields() {
+    setAgentName("");
+    setKnowledgeUrl("");
+    setGreeting("");
+    setStarters("");
+  }
+
+  /** Loads a saved presenter into the form, to change and save in place; a new presenter's draft is kept to come back to. */
+  function startEdit(agent: Agent) {
+    if (!editing) draft.current = formState();
+    setSaveErr(null);
+    setSavedLink(null);
+    const own = avatarData?.avatars.find((a) => a.id === agent.avatarId) ?? null;
+    // A saved voice that is gone is not stood in for by whatever the form showed, and one saved without a voice shows none.
+    const spoken = agent.voiceId ? (voiceData?.voices.find((v) => v.id === agent.voiceId) ?? null) : null;
+    const loaded: FormState = {
+      avatar: own ?? avatar,
+      voice: spoken,
+      agentName: agent.name,
+      instructions: agent.instructions,
+      language: agent.language,
+      greeting: agent.greeting ?? "",
+      starters: (agent.starters ?? []).join("\n"),
+      knowledgeUrl: agent.knowledgeUrl ?? "",
+      collectEmail: !!agent.collectEmail,
+      brandStyle: !!agent.brandStyle,
+    };
+    setForm(loaded);
+    loadedForm.current = loaded;
+    setMissing({ avatar: own ? null : agent.avatarName, voice: agent.voiceId && !spoken ? agent.voiceId : null });
+    setSwitchesFor(agent.id);
+    setRereadPage(false);
+    setEditing(agent);
+    // The form is above the list; its heading names what is being edited, so focus goes there once it says so.
+    focusAfterRender(() => {
+      // At once, not smoothly: a click on the form while it still glided would land on whatever had moved under it.
+      setupHeading.current?.scrollIntoView?.({ block: "start" });
+      return setupHeading.current;
+    });
+  }
+
+  /** Back to the new presenter's draft as it was before the edit. */
+  function leaveEdit() {
+    setEditing(null);
+    setMissing({ avatar: null, voice: null });
+    loadedForm.current = null;
+    // A draft taken before the start presenter and voice were chosen keeps the ones the form has now.
+    if (draft.current) setForm({ ...draft.current, avatar: draft.current.avatar ?? avatar, voice: draft.current.voice ?? voice });
+    else clearOwnFields();
+    draft.current = null;
+    focusAfterRender(() => setupHeading.current);
+  }
+
+  function cancelEdit() {
+    setSaveErr(null);
+    leaveEdit();
+  }
+
   async function saveAgent() {
     if (!avatar) return;
     const tooLong = starterList.find((s) => s.length > 80);
@@ -107,18 +230,56 @@ export default function InteractivePage() {
       setSaveErr(`Each suggested question is at most 80 characters ("${tooLong.slice(0, 30)}…" is ${tooLong.length})`);
       return;
     }
+    if (language.trim().length < 2) {
+      setSaveErr("Name the reply language (at least 2 characters), for example English.");
+      return;
+    }
+    if (editing && (missing.avatar || missing.voice)) {
+      setSaveErr(missing.avatar ? "Pick a presenter from the list before saving." : "Pick a voice before saving.");
+      return;
+    }
+    const name = agentName.trim() || avatar.name.slice(0, 60);
     setSaving(true);
     setSaveErr(null);
     try {
-      const { agent } = await api<{ agent: Agent }>("/api/agents", {
-        method: "POST",
-        body: JSON.stringify({ name: agentName.trim() || avatar.name, avatarId: avatar.id, voiceId: voice?.id, instructions, language, isPublic: true, collectEmail, brandStyle, ...(greeting.trim() ? { greeting: greeting.trim() } : {}), ...(starterList.length ? { starters: starterList } : {}), ...(knowledgeUrl.trim() ? { knowledgeUrl: knowledgeUrl.trim() } : {}) }),
-      });
-      setSavedLink(`${linkOrigin()}/talk/${agent.id}`);
-      setAgentName("");
-      setKnowledgeUrl("");
-      setGreeting("");
-      setStarters("");
+      let agent: Agent;
+      if (editing) {
+        // Only what was changed in the form is sent, so a switch flipped on the presenter's row meanwhile, or a voice
+        // the form never showed, is left as it is; the page is read again only when its address changed or asked for.
+        const was = loadedForm.current!;
+        const page = knowledgeUrl.trim();
+        const patch: Record<string, unknown> = {};
+        // Compared with what is saved, so a presenter picked again after its own was deleted is still sent.
+        if (avatar.id !== editing.avatarId) patch.avatarId = avatar.id;
+        if (voice && voice.id !== editing.voiceId) patch.voiceId = voice.id;
+        if (name !== editing.name) patch.name = name;
+        if (instructions !== was.instructions) patch.instructions = instructions;
+        if (language !== was.language) patch.language = language;
+        if (greeting.trim() !== was.greeting) patch.greeting = greeting.trim();
+        if (starterList.join("\n") !== (editing.starters ?? []).join("\n")) patch.starters = starterList;
+        if (collectEmail !== was.collectEmail) patch.collectEmail = collectEmail;
+        if (brandStyle !== was.brandStyle) patch.brandStyle = brandStyle;
+        if (page !== (editing.knowledgeUrl ?? "")) patch.knowledgeUrl = page || null;
+        else if (page && rereadPage) patch.knowledgeUrl = page;
+        const editedId = editing.id;
+        if (!Object.keys(patch).length) {
+          // Nothing changed: no request, the edit just closes.
+          setSavedLink(`${linkOrigin()}/talk/${editedId}`);
+          leaveEdit();
+          return;
+        }
+        ({ agent } = await api<{ agent: Agent }>(`/api/agents/${editedId}`, { method: "PATCH", body: JSON.stringify(patch) }));
+        setSavedLink(`${linkOrigin()}/talk/${agent.id}`);
+        // A second Edit while this one saved is left alone; only the edit that was saved is closed.
+        if (editingRef.current?.id === editedId) leaveEdit();
+      } else {
+        ({ agent } = await api<{ agent: Agent }>("/api/agents", {
+          method: "POST",
+          body: JSON.stringify({ name, avatarId: avatar.id, voiceId: voice?.id, instructions, language, isPublic: true, collectEmail, brandStyle, ...(greeting.trim() ? { greeting: greeting.trim() } : {}), ...(starterList.length ? { starters: starterList } : {}), ...(knowledgeUrl.trim() ? { knowledgeUrl: knowledgeUrl.trim() } : {}) }),
+        }));
+        setSavedLink(`${linkOrigin()}/talk/${agent.id}`);
+        clearOwnFields();
+      }
       await refetchAgents();
     } catch (e) {
       setSaveErr(e instanceof Error ? e.message : "Could not save the presenter");
@@ -143,6 +304,7 @@ export default function InteractivePage() {
     try {
       await api(`/api/agents/${agent.id}`, { method: "DELETE" });
       if (savedLink?.endsWith(agent.id)) setSavedLink(null);
+      if (editingRef.current?.id === agent.id) cancelEdit();
       // Its transcripts went with it; a panel left open would offer a download that no longer exists.
       if (transcriptsFor?.id === agent.id) setTranscriptsFor(null);
       await refetchAgents();
@@ -175,6 +337,9 @@ export default function InteractivePage() {
       </div>
       {avatar ? (
         <ChatPanel
+          // An edit starts the try-it chat afresh, so one conversation does not run across two presenters' setups; the
+          // panel is not remounted, so a live video stays attached to it.
+          resetKey={editing?.id ?? "new"}
           name={avatar.name}
           imageUrl={avatar.imageUrl}
           voiceLanguage={voice?.language}
@@ -182,7 +347,16 @@ export default function InteractivePage() {
           live={live}
           emptyHint="Say hello, or ask about an open house, pricing, or how to book a showing."
           aside={
-            <select aria-label="Voice" value={voice?.id ?? ""} onChange={(e) => setVoice(voiceData?.voices.find((v) => v.id === e.target.value) ?? null)} className={`${inputClass} py-1 text-xs`}>
+            <select
+              aria-label="Voice"
+              value={voice?.id ?? ""}
+              onChange={(e) => {
+                setVoice(voiceData?.voices.find((v) => v.id === e.target.value) ?? null);
+                setMissing((m) => ({ ...m, voice: null }));
+              }}
+              className={`${inputClass} py-1 text-xs`}
+            >
+              {!voice && <option value="">{editing && !missing.voice ? "No saved voice" : "Pick a voice"}</option>}
               {voiceData?.voices.map((v) => (
                 <option key={v.id} value={v.id}>
                   {v.name}
@@ -198,7 +372,20 @@ export default function InteractivePage() {
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <Card className="p-5">
-          <h3 className="text-sm font-semibold text-slate-900">Presenter setup</h3>
+          <h3 ref={setupHeading} tabIndex={-1} aria-describedby={editing ? `agent-editing${missing.avatar || missing.voice ? " agent-missing" : ""}` : undefined} className="text-sm font-semibold text-slate-900 focus:outline-none">
+            {editing ? `Editing ${editing.name}` : "Presenter setup"}
+          </h3>
+          {editing && (
+            <p id="agent-editing" className="mt-1 text-xs text-slate-600" data-testid="agent-editing">
+              Saving changes {editing.name} in place: its link, embed code, and transcripts stay as they are, and only what you change here is saved. Cancel editing goes back to the presenter you were setting up.
+            </p>
+          )}
+          {editing && (missing.avatar || missing.voice) && (
+            <p id="agent-missing" className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900" data-testid="agent-missing">
+              {missing.avatar && `${missing.avatar}, the presenter this one was saved with, is no longer in your library; pick another before saving. `}
+              {missing.voice && "The voice this one was saved with is no longer available; pick another above the chat before saving."}
+            </p>
+          )}
           <div className="mt-3">
             <Field label="Who answers">
               {avatarsLoading ? (
@@ -227,6 +414,12 @@ export default function InteractivePage() {
             <Field label="Knowledge page (optional)" hint="A public web page read once when the presenter is saved; its text becomes reference material for replies and is never shown to visitors.">
               <input aria-label="Knowledge page URL" value={knowledgeUrl} onChange={(e) => setKnowledgeUrl(e.target.value)} placeholder="https://…/about-us" className={inputClass} maxLength={2000} type="url" />
             </Field>
+            {editing && editing.knowledgeUrl && knowledgeUrl.trim() === editing.knowledgeUrl && (
+              <label className="flex items-center gap-2 text-xs text-slate-700">
+                <input type="checkbox" checked={rereadPage} onChange={(e) => setRereadPage(e.target.checked)} className="h-4 w-4 accent-brand-600" />
+                Read the page again when saving (it is read once; a changed address is read anyway, and a cleared one forgotten)
+              </label>
+            )}
           </div>
           <div className="mt-4 border-t border-slate-100 pt-4">
             {canEdit === false && <ViewOnlyNotice what="save or change agents" />}
@@ -235,9 +428,27 @@ export default function InteractivePage() {
               <Field label="Share as" hint="Name shown to visitors.">
                 <input aria-label="Agent name" value={agentName} onChange={(e) => setAgentName(e.target.value)} placeholder={avatar?.name ?? "Presenter"} maxLength={60} className={`${inputClass} w-56`} />
               </Field>
-              <Button onClick={saveAgent} loading={saving} disabled={!avatar || canEdit === false}>
-                <Link2 className="h-4 w-4" /> Save and get link
+              <Button
+                onClick={saveAgent}
+                loading={saving}
+                disabled={!avatar || canEdit === false || (!!editing && !!(missing.avatar || missing.voice))}
+                aria-describedby={editing && (missing.avatar || missing.voice) ? "agent-missing" : undefined}
+              >
+                {editing ? (
+                  <>
+                    <Check className="h-4 w-4" /> Save changes
+                  </>
+                ) : (
+                  <>
+                    <Link2 className="h-4 w-4" /> Save and get link
+                  </>
+                )}
               </Button>
+              {editing && (
+                <Button variant="secondary" onClick={cancelEdit} disabled={saving}>
+                  Cancel editing
+                </Button>
+              )}
             </div>
             <label className="mt-3 flex items-center gap-2 text-xs text-slate-700">
               <input type="checkbox" checked={collectEmail} onChange={(e) => setCollectEmail(e.target.checked)} className="h-4 w-4 accent-brand-600" />
@@ -258,7 +469,7 @@ export default function InteractivePage() {
                   : "The brand kit has no writing style yet; add one on the Brand page and replies follow it."}
             </p>
             {savedLink && (
-              <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900" data-testid="agent-link">
+              <div role="status" className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900" data-testid="agent-link">
                 <code className="break-all">{savedLink}</code>
                 <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => copy(savedLink, "new")}>
                   {copied === "new" ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />} {copied === "new" ? "Copied" : "Copy"}
@@ -297,26 +508,37 @@ export default function InteractivePage() {
                     >
                       {copied === `embed-${a.id}` ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Code2 className="h-3.5 w-3.5" />} Embed
                     </Button>
+                    <Button
+                      variant="secondary"
+                      className="px-2.5 py-1 text-xs"
+                      onClick={() => startEdit(a)}
+                      // The form needs the presenters and voices to load the saved ones; a save under way finishes first.
+                      disabled={canEdit === false || saving || avatarsLoading || !voiceData}
+                      aria-label={`Edit ${a.name}`}
+                    >
+                      <Pencil className="h-3.5 w-3.5" /> Edit
+                    </Button>
                     <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => openTranscripts(a)} aria-label={`Transcripts for ${a.name}`}>
                       <MessagesSquare className="h-3.5 w-3.5" /> Transcripts
                     </Button>
-                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => patchAgent(a, { isPublic: !a.isPublic })} aria-label={`${a.isPublic ? "Turn off" : "Turn on"} link for ${a.name}`}>
+                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => patchAgent(a, { isPublic: !a.isPublic })} disabled={saving} aria-label={`${a.isPublic ? "Turn off" : "Turn on"} link for ${a.name}`}>
                       {a.isPublic ? "Turn off" : "Turn on"}
                     </Button>
-                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => patchAgent(a, { collectEmail: !a.collectEmail })} aria-label={`${a.collectEmail ? "Stop collecting" : "Collect"} emails for ${a.name}`} title="Ask visitors for an email after the first reply">
+                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => patchAgent(a, { collectEmail: !a.collectEmail })} disabled={saving} aria-label={`${a.collectEmail ? "Stop collecting" : "Collect"} emails for ${a.name}`} title="Ask visitors for an email after the first reply">
                       {a.collectEmail ? "Emails on" : "Emails off"}
                     </Button>
                     <Button
                       variant="secondary"
                       className="px-2.5 py-1 text-xs"
                       onClick={() => patchAgent(a, { brandStyle: !a.brandStyle })}
+                      disabled={saving}
                       aria-label={`Brand style for ${a.name}`}
                       aria-pressed={!!a.brandStyle}
                       title="Word replies in the brand kit's writing style"
                     >
                       {a.brandStyle ? "Brand style on" : "Brand style off"}
                     </Button>
-                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => remove(a)} aria-label={`Delete ${a.name}`}>
+                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => remove(a)} disabled={saving} aria-label={`Delete ${a.name}`}>
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </div>

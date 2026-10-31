@@ -144,20 +144,24 @@ export async function createAgent(input: z.infer<typeof agentSchema>, ownerId: s
 }
 
 export async function updateAgent(id: string, patch: z.infer<typeof agentPatchSchema>, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<Agent> {
-  const existing = await getAgent(id, ownerId);
+  const first = await getAgent(id, ownerId);
   const { knowledgeUrl, greeting, starters, ...rest } = patch;
+  // The slow parts (a page read, the presenter and voice looked up) run before the agent is read for the write: a link
+  // turned off or a delete that landed meanwhile then holds, rather than being written over by an older copy.
+  const knowledge = knowledgeUrl ? await readKnowledge(knowledgeUrl, fetchImpl) : null;
+  const snapshot = patch.avatarId || patch.voiceId ? await presenterSnapshot(patch.avatarId ?? first.avatarId, patch.voiceId ?? first.voiceId, ownerId) : {};
+  const existing = knowledge || patch.avatarId || patch.voiceId ? await getAgent(id, ownerId) : first;
   const next: Agent = { ...existing, ...rest };
   if (greeting === "") delete next.greeting;
   else if (greeting) next.greeting = greeting;
   if (starters && starters.length === 0) delete next.starters;
   else if (starters) next.starters = starters;
-  const snapshot = patch.avatarId || patch.voiceId ? await presenterSnapshot(next.avatarId, next.voiceId, ownerId) : {};
   if (knowledgeUrl === null) {
     delete next.knowledgeUrl;
     delete next.knowledge;
     delete next.knowledgeUpdatedAt;
-  } else if (knowledgeUrl) {
-    Object.assign(next, await readKnowledge(knowledgeUrl, fetchImpl));
+  } else if (knowledge) {
+    Object.assign(next, knowledge);
   }
   return getStore().put("agent", { ...next, ...snapshot, updatedAt: nowIso() });
 }

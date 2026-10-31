@@ -5221,6 +5221,92 @@ test("the microphone button is hidden when the browser cannot transcribe", async
   await expect(page.getByRole("button", { name: "Speak a question" })).toHaveCount(0);
 });
 
+test("a saved presenter is edited in place, keeping its link, and editing can be cancelled", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const make = async (data: Record<string, unknown>) => (await (await page.request.post("/api/agents", { data })).json()).agent as { id: string };
+  const a = await make({ name: `Edit me ${tag}`, avatarId: "stock_2", instructions: "Old instructions.", greeting: "Old hello.", starters: ["Old question?"], language: "English", isPublic: false });
+  const b = await make({ name: `Other ${tag}`, avatarId: "stock_1", instructions: "Other instructions.", language: "French" });
+  const stored = async (id: string) => ((await (await page.request.get("/api/agents")).json()).agents as Record<string, unknown>[]).find((x) => x.id === id)!;
+  const before = await stored(a.id);
+  try {
+    await page.goto("/interactive");
+    // A draft for a new presenter, to come back to.
+    await page.getByLabel("Instructions").fill("My new presenter's draft.");
+    await page.getByRole("button", { name: `Edit Edit me ${tag}` }).click();
+    // The form holds the saved presenter, and says that saving changes it in place.
+    const heading = page.getByRole("heading", { name: `Editing Edit me ${tag}` });
+    await expect(heading).toBeFocused();
+    await expect(page.getByTestId("agent-editing")).toContainText("only what you change here is saved");
+    await expect(page.getByLabel("Agent name")).toHaveValue(`Edit me ${tag}`);
+    await expect(page.getByLabel("Instructions")).toHaveValue("Old instructions.");
+    await expect(page.getByLabel("Opening line")).toHaveValue("Old hello.");
+    await expect(page.getByLabel("Suggested questions")).toHaveValue("Old question?");
+    // Another presenter's Edit replaces every field.
+    await page.getByRole("button", { name: `Edit Other ${tag}` }).click();
+    await expect(page.getByRole("heading", { name: `Editing Other ${tag}` })).toBeFocused();
+    await expect(page.getByLabel("Instructions")).toHaveValue("Other instructions.");
+    await expect(page.getByLabel("Opening line")).toHaveValue("");
+    await expect(page.getByLabel("Reply language")).toHaveValue("French");
+    // Cancelling leaves the presenter as it was and puts the draft back, focus on the form's heading.
+    await page.getByRole("button", { name: "Cancel editing" }).click();
+    await expect(page.getByRole("heading", { name: "Presenter setup" })).toBeFocused();
+    await expect(page.getByLabel("Instructions")).toHaveValue("My new presenter's draft.");
+    await expect(page.getByLabel("Agent name")).toHaveValue("");
+    await expect(page.getByRole("button", { name: "Save and get link" })).toBeVisible();
+
+    await page.getByRole("button", { name: `Edit Edit me ${tag}` }).click();
+    await page.getByLabel("Agent name").fill(`Edited ${tag}`);
+    await page.getByLabel("Instructions").fill("New instructions.");
+    await page.getByLabel("Opening line").fill("");
+    await page.getByLabel("Suggested questions").fill("New question?\nAnother?");
+    await page.getByRole("button", { name: "Save changes" }).click();
+    // The same link, with the changes; a cleared opening line is gone, and what was not touched is kept.
+    await expect(page.getByTestId("agent-link").locator("code")).toHaveText(new RegExp(`/talk/${a.id}$`));
+    const saved = await stored(a.id);
+    expect(saved).toMatchObject({ name: `Edited ${tag}`, instructions: "New instructions.", starters: ["New question?", "Another?"], isPublic: false, avatarId: "stock_2" });
+    expect(saved.greeting).toBeUndefined();
+    expect(saved.voiceId).toBe(before.voiceId);
+    await expect(page.getByRole("heading", { name: "Presenter setup" })).toBeVisible();
+    await expect(page.getByLabel("Instructions")).toHaveValue("My new presenter's draft.");
+    await expect(page.getByTestId("agent-list")).toContainText(`Edited ${tag}`);
+
+    // A switch flipped on the row while the presenter is edited shows in the form and survives the save.
+    await page.getByRole("button", { name: `Edit Edited ${tag}` }).click();
+    const emails = page.getByRole("checkbox", { name: /Ask visitors for an email/ });
+    await expect(emails).not.toBeChecked();
+    await page.getByRole("button", { name: `Collect emails for Edited ${tag}` }).click();
+    await expect(emails).toBeChecked();
+    await page.getByLabel("Instructions").fill("Newer instructions.");
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByRole("heading", { name: "Presenter setup" })).toBeVisible();
+    expect(await stored(a.id)).toMatchObject({ instructions: "Newer instructions.", collectEmail: true });
+
+    // A presenter no longer in the library is named, and Save waits until another is picked.
+    await page.route("**/api/avatars", async (route) => {
+      const res = await route.fetch();
+      const body = (await res.json()) as { avatars: { id: string }[] };
+      await route.fulfill({ response: res, json: { ...body, avatars: body.avatars.filter((x) => x.id !== "stock_2") } });
+    });
+    await page.reload();
+    await page.getByRole("button", { name: `Edit Edited ${tag}` }).click();
+    await expect(page.getByTestId("agent-missing")).toContainText("is no longer in your library; pick another before saving");
+    await expect(page.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    // The pick is saved, even of a presenter the form already showed; the voice stays as it was.
+    await page.getByRole("button", { name: /^Sofia Reyes/ }).click();
+    await expect(page.getByTestId("agent-missing")).toHaveCount(0);
+    await expect(page.getByRole("img", { name: "Sofia Reyes" }).first()).toBeVisible();
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByRole("heading", { name: "Presenter setup" })).toBeVisible();
+    const repicked = await stored(a.id);
+    expect(repicked.avatarId).toBe("stock_3");
+    expect(repicked.voiceId).toBe(before.voiceId);
+  } finally {
+    await page.unroute("**/api/avatars").catch(() => {});
+    await page.request.delete(`/api/agents/${a.id}`);
+    await page.request.delete(`/api/agents/${b.id}`);
+  }
+});
+
 test("a presenter can word its replies in the brand kit's writing style, switched on when saved or from its row", async ({ page }) => {
   const before = (await (await page.request.get("/api/brand")).json()).brand as Record<string, unknown> | null;
   const tag = Date.now().toString(36);

@@ -54,6 +54,7 @@ export function ChatPanel({
   compact = false,
   aside,
   onReset,
+  resetKey,
   live,
 }: {
   name: string;
@@ -72,6 +73,11 @@ export function ChatPanel({
   aside?: React.ReactNode;
   /** Called when the visitor starts over, so the host can drop its transcript id. */
   onReset?: () => void;
+  /**
+   * The conversation starts afresh whenever this changes (the host loaded another setup), without remounting, so a live
+   * video already attached to the panel stays attached; a reply still on its way to the old conversation is dropped.
+   */
+  resetKey?: string;
   /** Live video session; when connected, replies are spoken by the stream instead of the browser. */
   live?: { status: LiveStatus; videoRef: React.RefObject<HTMLVideoElement | null>; speak: (text: string) => Promise<boolean> };
 }) {
@@ -87,6 +93,8 @@ export function ChatPanel({
   const logRef = useRef<HTMLDivElement>(null);
   const recognizer = useRef<Recognizer | null>(null);
   const heard = useRef("");
+  // Bumped by each fresh start, so a reply that arrives for the conversation before it is not shown or spoken.
+  const round = useRef(0);
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: "smooth" });
@@ -185,15 +193,18 @@ export function ChatPanel({
     setDraft((d) => (d.trim() === content ? "" : d));
     setBusy(true);
     setErr(null);
+    const asked0 = round.current;
     try {
       // The last 20 turns; once the transcript outgrows that, the window starts at a visitor turn so the
       // model never sees a mid-conversation reply as the presenter's opening.
       const recent = next.slice(-20);
       const firstUser = recent.findIndex((m) => m.role === "user");
       const reply = await ask(next.length > 20 && firstUser > 0 ? recent.slice(firstUser) : recent);
+      if (asked0 !== round.current) return;
       setMessages([...next, { role: "assistant", content: reply }]);
       if (!(live && (await live.speak(reply)))) speak(reply);
     } catch (e) {
+      if (asked0 !== round.current) return;
       setErr(e instanceof Error ? e.message : "The presenter could not answer");
       setMessages(messages);
       // Put the failed text back unless the visitor has something of their own in the box.
@@ -203,15 +214,30 @@ export function ChatPanel({
     }
   }
 
-  function reset() {
+  /** Clears the conversation, the recogniser, and speech; a reply on its way is dropped. */
+  function startAfresh() {
+    round.current += 1;
     window.speechSynthesis?.cancel();
     dropRecognizer();
     setListening(false);
     setSpeaking(false);
     setMessages(openingTurns);
     setErr(null);
+  }
+
+  function reset() {
+    startAfresh();
     onReset?.();
   }
+
+  const firstKey = useRef(resetKey);
+  useEffect(() => {
+    if (resetKey === firstKey.current) return;
+    firstKey.current = resetKey;
+    startAfresh();
+    setDraft("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only a change of setup starts afresh
+  }, [resetKey]);
 
   // Not the shared Card: its bg-white would compete with the dark surface in the stylesheet order.
   const card = `rounded-xl border shadow-sm ${dark ? "border-slate-800 bg-slate-900 text-slate-100" : "border-slate-200 bg-white"}`;

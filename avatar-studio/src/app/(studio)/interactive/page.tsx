@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Check, Code2, Copy, CopyPlus, Link2, MessagesSquare, Pencil, Trash2 } from "lucide-react";
+import { Check, Code2, Copy, CopyPlus, Link2, MessagesSquare, Pencil, Sparkles, Trash2 } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { ChatPanel, type ChatTurn } from "@/components/ChatPanel";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -53,6 +53,10 @@ export default function InteractivePage() {
   const [brandStyle, setBrandStyle] = useState(false);
   const [knowledgeUrl, setKnowledgeUrl] = useState("");
   const [notes, setNotes] = useState("");
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestErr, setSuggestErr] = useState<string | null>(null);
+  /** Which press of Suggest questions an answer is for, so one for another presenter, or a superseded one, is dropped. */
+  const suggestRun = useRef(0);
   const [greeting, setGreeting] = useState("");
   const [starters, setStarters] = useState("");
   const starterList = starters.split("\n").map((s) => s.trim()).filter(Boolean).slice(0, 3);
@@ -203,6 +207,9 @@ export default function InteractivePage() {
   /** Loads a saved presenter into the form, to change and save in place; a new presenter's draft is kept to come back to. */
   function startEdit(agent: Agent) {
     setListNote(null);
+    suggestRun.current++;
+    setSuggesting(false);
+    setSuggestErr(null);
     if (!editing) draft.current = formState();
     setSaveErr(null);
     setSavedLink(null);
@@ -238,6 +245,9 @@ export default function InteractivePage() {
 
   /** Back to the new presenter's draft as it was before the edit. */
   function leaveEdit() {
+    suggestRun.current++;
+    setSuggesting(false);
+    setSuggestErr(null);
     setEditing(null);
     setMissing({ avatar: null, voice: null });
     loadedForm.current = null;
@@ -359,6 +369,30 @@ export default function InteractivePage() {
     }
   }
 
+  /** Fills the suggested questions with ones the script writer drafts from the instructions and notes; asks before replacing any. */
+  async function suggestQuestions() {
+    if (starters.trim() && !window.confirm("Replace the suggested questions with new ones?")) return;
+    const run = ++suggestRun.current;
+    const before = starters;
+    setSuggesting(true);
+    setSuggestErr(null);
+    try {
+      // A saved presenter's page is drawn on only while the form still names it; one cleared or changed is not.
+      const page = editing && editing.knowledgeUrl && knowledgeUrl.trim() === editing.knowledgeUrl ? editing.id : undefined;
+      const { starters: drafted } = await api<{ starters: string[] }>("/api/agents/starters", {
+        method: "POST",
+        body: JSON.stringify({ name: agentName.trim(), avatarId: avatar?.id, instructions, notes: notes.trim() || undefined, language, agentId: page }),
+      });
+      if (run !== suggestRun.current) return;
+      // Questions typed while the writer worked are kept rather than replaced unasked.
+      setStarters((now) => (now === before ? drafted.join("\n") : now));
+    } catch (e) {
+      if (run === suggestRun.current) setSuggestErr(e instanceof Error ? e.message : "Could not suggest questions");
+    } finally {
+      if (run === suggestRun.current) setSuggesting(false);
+    }
+  }
+
   async function patchAgent(agent: Agent, patch: Partial<Pick<Agent, "isPublic" | "collectEmail" | "brandStyle">>) {
     setSaveErr(null);
     setListNote(null);
@@ -455,6 +489,24 @@ export default function InteractivePage() {
             <Field label="Suggested questions (optional)" hint="Up to three, one per line and 80 characters each, offered as chips until the visitor's first message.">
               <textarea aria-label="Suggested questions" value={starters} onChange={(e) => setStarters(e.target.value)} rows={3} placeholder={"What are your hours?\nHow do I book a showing?"} className={inputClass} maxLength={300} />
             </Field>
+            <div className="-mt-1 flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                className="px-2.5 py-1 text-xs"
+                onClick={suggestQuestions}
+                loading={suggesting}
+                disabled={canEdit === false || (!instructions.trim() && !notes.trim())}
+                title="Up to three questions drafted from the instructions and reference notes (and a saved presenter's knowledge page), to edit before saving"
+              >
+                <Sparkles className="h-3.5 w-3.5" /> Suggest questions
+              </Button>
+              {suggestErr && (
+                <span role="alert" className="text-xs text-rose-700">
+                  {suggestErr}
+                </span>
+              )}
+            </div>
             <Field label="Reply language">
               <input value={language} onChange={(e) => setLanguage(e.target.value)} className={inputClass} maxLength={40} />
             </Field>

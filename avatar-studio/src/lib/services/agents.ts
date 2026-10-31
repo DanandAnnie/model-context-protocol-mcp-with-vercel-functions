@@ -14,6 +14,7 @@ import { getAvatar } from "./avatars";
 import { listVoices } from "./voices";
 import { getBrandKit } from "./brand";
 import { copyTitle } from "./templates";
+import { cutToFit, tidyTitle } from "./videos";
 import { MAX_CONVERSATIONS_PER_AGENT } from "../transcripts";
 import { chatSchema } from "./scripts";
 import { fetchPageText } from "../webpage";
@@ -180,6 +181,47 @@ export async function duplicateAgent(id: string, ownerId: string = LOCAL_OWNER):
     if (source[key] !== undefined) Object.assign(copy, { [key]: source[key] });
   }
   return getStore().put("agent", copy);
+}
+
+/** What a presenter is drafted from when questions are suggested for it: what the form holds, and a saved one's page. */
+export const startersSchema = z.object({
+  name: z.string().trim().max(60).default(""),
+  avatarId: z.string().min(1).optional(),
+  instructions: agentFields.instructions.default(""),
+  notes: agentFields.notes.optional(),
+  language: agentFields.language.default("English"),
+  /** A saved presenter being edited, whose knowledge page text is read too. */
+  agentId: z.string().min(1).optional(),
+});
+
+/**
+ * Up to three opening questions for a presenter, suggested by the script provider from its instructions, notes, and (for
+ * a saved one) its knowledge page; nothing is saved. Each is tidied like a suggested title and kept to a chip's 80
+ * characters, and repeats are left out.
+ */
+export async function suggestStarters(input: z.infer<typeof startersSchema>, ownerId: string = LOCAL_OWNER): Promise<string[]> {
+  if (!input.instructions && !input.notes) throw new ValidationError("Write the instructions or notes first, so there is something to suggest questions from");
+  const provider = getScriptProvider();
+  if (!provider.starters) throw new ValidationError("The script writer cannot suggest questions");
+  const saved = input.agentId ? await getAgent(input.agentId, ownerId) : null;
+  const name = input.name || saved?.name || (input.avatarId ? (await getAvatar(input.avatarId, ownerId).catch(() => null))?.name : undefined) || "the presenter";
+  const lines = await provider.starters({ name, instructions: input.instructions, ...(input.notes ? { notes: input.notes } : {}), ...(saved?.knowledge ? { reference: saved.knowledge } : {}), language: input.language });
+  // Lines that read as questions come first, then any others; a lead-in ("Here are three questions") or a line with no
+  // letter in it never takes a place.
+  const tidied = lines.map(tidyTitle).filter((t) => t && !t.endsWith(":") && /\p{L}/u.test(t) && !/^here (?:are|is)\b/i.test(t));
+  const asks = (t: string) => /[?？؟]$/.test(t);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const text of [...tidied.filter(asks), ...tidied.filter((t) => !asks(t))]) {
+    const question = cutToFit(text, 80);
+    const key = question.toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(question);
+    if (out.length === 3) break;
+  }
+  if (!out.length) throw new Error("The script writer returned no questions. Try again.");
+  return out;
 }
 
 export async function updateAgent(id: string, patch: z.infer<typeof agentPatchSchema>, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<Agent> {

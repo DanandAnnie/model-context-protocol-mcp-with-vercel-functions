@@ -5447,6 +5447,32 @@ test("a presenter answers from reference notes, in the try-it chat and once shar
     if (id) await page.request.delete(`/api/agents/${id}`);
   }
 });
+
+test("opening questions are suggested from the instructions and notes, and replacing typed ones asks first", async ({ page }) => {
+  await page.goto("/interactive");
+  const questions = page.getByLabel("Suggested questions");
+  const suggest = page.getByRole("button", { name: "Suggest questions" });
+  // Nothing to draft from: the button waits for instructions or notes.
+  await page.getByLabel("Instructions").fill("");
+  await expect(suggest).toBeDisabled();
+  await page.getByLabel("Instructions").fill("You represent Maple Realty. Be warm and brief.");
+  await page.getByLabel("Reference notes").fill("Showings: Saturdays, 10am to 2pm");
+  await suggest.click();
+  await expect(questions).toHaveValue("What does Maple Realty do?\nWhat about showings?\nWhat can you help me with?");
+  // Replacing questions already there asks first; declining keeps them.
+  await questions.fill("My own question?");
+  // The confirm holds the click until it is answered, so it is answered from a handler set before the click.
+  const asked: string[] = [];
+  page.once("dialog", (d) => (asked.push(d.message()), d.dismiss()));
+  await suggest.click();
+  expect(asked).toEqual(["Replace the suggested questions with new ones?"]);
+  await expect(questions).toHaveValue("My own question?");
+  page.once("dialog", (d) => (asked.push(d.message()), d.accept()));
+  await suggest.click();
+  expect(asked).toHaveLength(2);
+  await expect(questions).toHaveValue(/^What does Maple Realty do\?/);
+  expect((await page.request.post("/api/agents/starters", { data: {} })).status()).toBe(400);
+});
 test("a presenter can word its replies in the brand kit's writing style, switched on when saved or from its row", async ({ page }) => {
   const before = (await (await page.request.get("/api/brand")).json()).brand as Record<string, unknown> | null;
   const tag = Date.now().toString(36);

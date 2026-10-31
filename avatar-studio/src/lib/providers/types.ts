@@ -278,6 +278,11 @@ export interface ScriptProvider {
    * language and from its facts only; the caller tidies and limits them.
    */
   titles(input: { title: string; script: string; style?: string }): Promise<string[]>;
+  /**
+   * Up to three questions a visitor might open a conversation with, from what a presenter was told and knows, one per
+   * entry, in its reply language; the caller tidies and limits them.
+   */
+  starters?(input: { name: string; instructions: string; notes?: string; reference?: string; language: string }): Promise<string[]>;
   /** A whole video from one prompt (the Video Agent): a title, a frame orientation, and the scenes in order. */
   plan(input: { prompt: string; lengthSec: number; language: string; source?: string; style?: string }): Promise<VideoPlan>;
 }

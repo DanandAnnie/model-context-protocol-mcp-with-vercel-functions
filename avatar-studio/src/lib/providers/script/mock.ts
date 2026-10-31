@@ -51,6 +51,18 @@ export class MockScriptProvider implements ScriptProvider {
     });
   }
 
+  async starters({ instructions, notes }: { name: string; instructions: string; notes?: string; reference?: string; language: string }) {
+    // Demo: a question about who the presenter represents ("You represent X." in the first line, X ending at a full
+    // stop after a lower-case letter or digit, so "U.S." stays whole), one about each "Label: value" note, then two
+    // that suit any presenter.
+    const first = instructions.split("\n")[0] ?? "";
+    const represents = /^[Yy]ou (?:represent|work for|are part of|are with)\s+(.+?[\p{Ll}\d)])(?:\.(?:\s|$)|$)/u.exec(first.trim());
+    const topic = represents?.[1].replace(/^The\s/, "the ");
+    const labels = (notes ?? "").split(/\n+/).map((l) => /^([^:]{2,30}):\s*\S/.exec(l.trim())?.[1].trim()).filter((l): l is string => !!l);
+    const about = labels.map((l) => `What about ${/^\p{Lu}\p{Ll}/u.test(l) ? l[0].toLowerCase() + l.slice(1) : l}?`);
+    return [...(topic ? [`What does ${topic} do?`] : []), ...about, "What can you help me with?", "How do I get in touch?"].slice(0, 3);
+  }
+
   async revise({ script, action, tone, language }: { script: string; action: ScriptAction; tone?: string; language?: string }) {
     const sentences = script.replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s+/).filter(Boolean);
     switch (action) {

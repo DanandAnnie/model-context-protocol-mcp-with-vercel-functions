@@ -2129,7 +2129,7 @@ export function titleSuggestions(lines: string[], current = ""): string[] {
 }
 
 /** One line as a title: list marks, wrapping quotes or bold, and a closing full stop taken off, in any nesting. */
-function tidyTitle(line: string): string {
+export function tidyTitle(line: string): string {
   let text = wellFormed(line).replace(/\s+/g, " ").trim();
   for (let before = ""; before !== text; ) {
     before = text;
@@ -2153,7 +2153,7 @@ function unquoted(text: string): string {
 }
 
 /** The text cut at a word with an ellipsis past `max`, counted as a field counts it (UTF-16 units), never splitting a character. */
-function cutToFit(text: string, max: number): string {
+export function cutToFit(text: string, max: number): string {
   if (text.length <= max) return text;
   let cut = "";
   for (const ch of graphemes(text)) {

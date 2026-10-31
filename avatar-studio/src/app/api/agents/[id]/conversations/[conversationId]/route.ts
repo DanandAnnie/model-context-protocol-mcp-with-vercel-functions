@@ -1,9 +1,10 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { requireEditor, requireOwner } from "@/lib/owner";
-import { deleteConversation, getConversation, setFollowedUp } from "@/lib/services";
+import { deleteConversation, getConversation, updateVisit } from "@/lib/services";
 import { z } from "zod";
 import { transcriptText } from "@/lib/transcripts";
 import { graphemes, wellFormed } from "@/lib/text";
+import { MAX_VISIT_NOTE } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -47,15 +48,20 @@ export async function GET(req: Request, ctx: Ctx) {
   }
 }
 
-const patchSchema = z.object({ followedUp: z.boolean() });
+const patchSchema = z
+  .object({ followedUp: z.boolean().optional(), note: z.string().trim().max(MAX_VISIT_NOTE).optional() })
+  .refine((b) => b.followedUp !== undefined || b.note !== undefined, { message: "Send followedUp or note" });
 
-/** Marks one visit followed up (`{ followedUp: true }`) or clears the mark (editors) → `{ conversation }`. */
+/**
+ * The owner's own fields on one visit (editors) → `{ conversation }`: `followedUp` marks it followed up or clears the
+ * mark, and `note` sets its private note (an empty one removes it).
+ */
 export async function PATCH(req: Request, ctx: Ctx) {
   try {
     const { id, conversationId } = await ctx.params;
     const owner = await requireEditor();
-    const { followedUp } = patchSchema.parse(await readJson(req));
-    return json({ conversation: await setFollowedUp(id, conversationId, followedUp, owner) });
+    const change = patchSchema.parse(await readJson(req));
+    return json({ conversation: await updateVisit(id, conversationId, change, owner) });
   } catch (err) {
     return errorResponse(err);
   }

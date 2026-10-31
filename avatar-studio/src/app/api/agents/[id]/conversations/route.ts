@@ -7,14 +7,14 @@ import { ValidationError } from "@/lib/errors";
 
 /** Conversations in one CSV download; up to this many, newest first. */
 const CSV_LIMIT = 1000;
-const CSV_COLUMNS = ["started", "last_message", "email", "name", "messages", "first_question", "last_reply", "followed_up"];
+const CSV_COLUMNS = ["started", "last_message", "email", "name", "messages", "first_question", "last_reply", "followed_up", "note"];
 
 export const dynamic = "force-dynamic";
 type Ctx = { params: Promise<{ id: string }> };
 
 /**
  * Transcripts of visitor conversations with one shared presenter (newest first, every visit kept); `?format=csv` downloads up to
- * 1000 as a lead list, narrowed as the transcripts panel narrows its list by `q` (words, email, or name), `leads=1`,
+ * 1000 as a lead list, narrowed as the transcripts panel narrows its list by `q` (words, email, name, or the owner's note), `leads=1`,
  * `pending=1` (not followed up), and `first` (a "Most asked" question's `openingKey`).
  */
 export async function GET(req: Request, ctx: Ctx) {
@@ -42,6 +42,7 @@ export async function GET(req: Request, ctx: Ctx) {
         first_question: asked[0]?.content,
         last_reply: replies[replies.length - 1]?.content,
         followed_up: c.followedUpAt,
+        note: c.note,
       };
     });
     return new Response(toCsv(CSV_COLUMNS, rows), {

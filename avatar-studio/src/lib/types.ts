@@ -1365,6 +1365,9 @@ export interface Workspace {
 /** Longest reference notes a presenter keeps, in characters (as long as the text kept from a knowledge page). */
 export const MAX_AGENT_NOTES = 6000;
 
+/** Longest private note an owner keeps on one visit, in characters. */
+export const MAX_VISIT_NOTE = 1000;
+
 /** A saved interactive presenter that visitors can talk to on a public page. */
 export interface Agent {
   id: string;
@@ -1414,6 +1417,8 @@ export interface Conversation {
   visitor?: { email: string; name?: string };
   /** When the owner marked the visit followed up; absent until then. */
   followedUpAt?: string;
+  /** The owner's private note on the visit (what was agreed, who called back); never shown to the visitor. */
+  note?: string;
   startedAt: string;
   updatedAt: string;
 }

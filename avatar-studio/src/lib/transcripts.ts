@@ -20,9 +20,9 @@ export const MAX_TRANSCRIPT_MESSAGES = 40;
 /** Longest transcript search a request may carry, in UTF-16 units as a text field counts them. */
 export const MAX_TRANSCRIPT_QUERY = 200;
 
-/** What a transcript search looks in: the visitor's email and name, then every message of the visit. */
+/** What a transcript search looks in: the visitor's email and name, the owner's note, then every message of the visit. */
 export function conversationTexts(c: Conversation): Array<string | undefined> {
-  return [c.visitor?.email, c.visitor?.name, ...c.messages.map((m) => m.content)];
+  return [c.visitor?.email, c.visitor?.name, c.note, ...c.messages.map((m) => m.content)];
 }
 
 /** Characters (code points) of a visit's first question that the "Most asked" chips compare; longer ones are grouped by these. */
@@ -226,7 +226,8 @@ function block(lead: string, text: string): string[] {
 
 /**
  * One visit as a plain-text file: who it was with, when it started and when its last message was, the visitor's name and
- * email when left, then each message with its time and speaker (`Visitor` or `Presenter`). Every value is cut into lines
+ * email when left, when it was marked followed up and the owner's note when there are, then each message with its time
+ * and speaker (`Visitor` or `Presenter`). Every value is cut into lines
  * of at most 76 columns, every line after its first indented, and kept to plain characters, so in a viewer at least that
  * wide nothing a visitor typed can start a line of the file or pass for a heading or another speaker. Times are UTC, as
  * the server has no reader's zone.
@@ -240,6 +241,12 @@ export function transcriptText(agentName: string, c: Conversation): string {
   if (last) field("Last message:", utc(last.at));
   if (c.visitor?.name && oneLine(c.visitor.name)) field("Visitor name:", oneLine(c.visitor.name));
   if (c.visitor?.email) field("Visitor email:", oneLine(c.visitor.email));
+  if (c.followedUpAt) field("Followed up:", utc(c.followedUpAt));
+  if (c.note) {
+    // The owner's note keeps its lines, each run on with the indent, as a message's do.
+    const lines = c.note.split(LINE_BREAK).map((line) => clean(line).trim()).filter(Boolean);
+    lines.forEach((line, i) => head.push(...block(i === 0 ? "Note: " : INDENT, line)));
+  }
   // A new visit's first turn is stamped with its start; once the oldest messages roll off, the first left is later.
   if (c.messages.length >= MAX_TRANSCRIPT_MESSAGES && c.messages[0].at !== c.startedAt) {
     head.push(`Only the ${MAX_TRANSCRIPT_MESSAGES} newest messages were kept; earlier ones are not shown.`);

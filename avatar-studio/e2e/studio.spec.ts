@@ -5042,7 +5042,7 @@ test("shared presenter: save from the interactive page, talk publicly, turn off"
   const csvRes = await page.request.get(`/api/agents/${id}/conversations?format=csv`);
   expect(csvRes.headers()["content-type"]).toContain("text/csv");
   const csv = await csvRes.text();
-  expect(csv.replace(/^\uFEFF/, "").split("\r\n")[0]).toBe('"started","last_message","email","name","messages","first_question","last_reply","followed_up"');
+  expect(csv.replace(/^\uFEFF/, "").split("\r\n")[0]).toBe('"started","last_message","email","name","messages","first_question","last_reply","followed_up","note"');
   expect(csv).toContain(`sam-${tag}@example.com`);
   expect(csv).toContain('"Hi there"');
   await page.getByRole("button", { name: `Turn off link for Dana ${tag}` }).click();
@@ -5643,6 +5643,74 @@ test("a visit can be marked followed up, listed apart, and carried in the downlo
     expect(after.rows.find((r) => r.first_question === `Call me ${tag}`)!.followed_up).toBe("");
     expect((await page.request.patch(`/api/agents/${id}/conversations/conv_nope`, { data: { followedUp: true } })).status()).toBe(404);
     expect((await page.request.patch(`/api/agents/${id}/conversations/conv_nope`, { data: { followedUp: "yes" } })).status()).toBe(400);
+  } finally {
+    await page.request.delete(`/api/agents/${id}`);
+  }
+});
+
+test("a visit keeps a private note, found by the search and carried in both downloads", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const res = await page.request.post("/api/agents", { data: { name: `Noted ${tag}`, avatarId: "stock_1" } });
+  const { id } = (await res.json()).agent as { id: string };
+  try {
+    const headers = { "x-forwarded-for": `198.51.100.${Math.floor(Math.random() * 200) + 1}` };
+    for (const content of [`Price please ${tag}`, `Hours please ${tag}`]) {
+      expect((await page.request.post(`/api/talk/${id}`, { data: { messages: [{ role: "user", content }] }, headers })).status()).toBe(200);
+    }
+    await page.goto("/interactive");
+    await page.getByRole("button", { name: `Transcripts for Noted ${tag}` }).click();
+    const list = page.getByTestId("transcript-list").locator("> li");
+    await expect(list).toHaveCount(2);
+    const price = list.filter({ hasText: `Price please ${tag}` });
+    await price.locator("summary").click();
+    const note = price.getByRole("textbox", { name: /^Note on the conversation from / });
+    const save = price.getByRole("button", { name: "Save note" });
+    await expect(save).toBeDisabled();
+    await note.fill(`  Called back ${tag}; wants a viewing  `);
+    await expect(price).toContainText(`${`  Called back ${tag}; wants a viewing  `.length} / 1000`);
+    await save.click();
+    await expect(price.locator("summary")).toContainText("note");
+    await expect(note).toHaveValue(`Called back ${tag}; wants a viewing`);
+    await expect(save).toBeDisabled();
+    await expect(note).toBeFocused();
+    await expect(price.getByRole("status")).toHaveText("Note saved");
+    // The search finds a visit by its note, and the CSV and the text file carry it.
+    await page.getByLabel(`Search conversations with Noted ${tag}`).fill("wants a viewing");
+    await expect(list).toHaveCount(1);
+    await expect(list.first()).toContainText(`Price please ${tag}`);
+    const csv = parseCsv(await (await page.request.get(`/api/agents/${id}/conversations?format=csv&q=${encodeURIComponent("wants a viewing")}`)).text());
+    expect(csv.rows.map((r) => r.note)).toEqual([`Called back ${tag}; wants a viewing`]);
+    const conversations = (await (await page.request.get(`/api/agents/${id}/conversations`)).json()).conversations as Array<{ id: string; note?: string }>;
+    const noted = conversations.find((c) => c.note)!;
+    expect(await (await page.request.get(`/api/agents/${id}/conversations/${noted.id}?format=txt`)).text()).toContain(`\nNote: Called back ${tag}; wants a viewing\n`);
+    // The visitor's own view never shows it.
+    expect(JSON.stringify(await (await page.request.get(`/api/talk/${id}`)).json())).not.toContain("Called back");
+    // Saved so the search no longer finds it, the visit stays in view, open and focused, until the search changes.
+    await note.fill(`Called back ${tag}`);
+    await expect(price.getByRole("status")).toHaveText("");
+    await save.click();
+    await expect(price.getByRole("status")).toHaveText("Note saved");
+    await expect(list).toHaveCount(1);
+    await expect(note).toBeFocused();
+    await page.getByLabel(`Search conversations with Noted ${tag}`).fill("");
+    await expect(list).toHaveCount(2);
+    // A note that looks like a spreadsheet formula is neutralised in the CSV.
+    await note.fill("=HYPERLINK(1)");
+    await save.click();
+    await expect(price.getByRole("status")).toHaveText("Note saved");
+    const formula = parseCsv(await (await page.request.get(`/api/agents/${id}/conversations?format=csv`)).text());
+    expect(formula.rows.find((r) => r.first_question === `Price please ${tag}`)!.note).toBe("'=HYPERLINK(1)");
+    // Emptied and saved, the note goes; too long or the wrong shape is a 400, and spaces around it do not count.
+    await note.fill("");
+    await save.click();
+    await expect(price.locator("summary")).not.toContainText("note");
+    await expect.poll(async () => ((await (await page.request.get(`/api/agents/${id}/conversations/${noted.id}`)).json()).conversation as { note?: string }).note).toBeUndefined();
+    expect((await page.request.patch(`/api/agents/${id}/conversations/${noted.id}`, { data: { note: "x".repeat(1001) } })).status()).toBe(400);
+    expect((await page.request.patch(`/api/agents/${id}/conversations/${noted.id}`, { data: {} })).status()).toBe(400);
+    expect((await page.request.patch(`/api/agents/${id}/conversations/${noted.id}`, { data: { note: null } })).status()).toBe(400);
+    const padded = await page.request.patch(`/api/agents/${id}/conversations/${noted.id}`, { data: { note: `  ${"y".repeat(1000)}  ` } });
+    expect(padded.status()).toBe(200);
+    expect(((await padded.json()).conversation as { note: string }).note).toHaveLength(1000);
   } finally {
     await page.request.delete(`/api/agents/${id}`);
   }

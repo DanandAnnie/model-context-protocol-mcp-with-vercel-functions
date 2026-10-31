@@ -13,7 +13,7 @@ import { MAX_CONVERSATIONS_PER_AGENT, MAX_TRANSCRIPT_MESSAGES, MAX_TRANSCRIPT_QU
 import { useLiveAvatar } from "@/hooks/useLiveAvatar";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ApiError, api, formatDate } from "@/lib/client";
-import { MAX_AGENT_NOTES, type Agent, type Avatar, type BrandKit, type Conversation, type ProviderStatus, type Voice } from "@/lib/types";
+import { MAX_AGENT_NOTES, MAX_VISIT_NOTE, type Agent, type Avatar, type BrandKit, type Conversation, type ProviderStatus, type Voice } from "@/lib/types";
 
 /** The whole setup form, so a new presenter's draft can be put back after an edit, and an edit compared with what it loaded. */
 type FormState = {
@@ -101,6 +101,11 @@ export default function InteractivePage() {
   /** Visits with a save under way, and the mark last asked for on each (sent once the save under way lands). */
   const savingMarks = useRef(new Set<string>());
   const wantedMarks = useRef(new Map<string, boolean>());
+  /** Each opened visit's note as typed and not yet saved, and the visits whose note is being saved. */
+  const [noteDrafts, setNoteDrafts] = useState<Readonly<Record<string, string>>>({});
+  const [savingNotes, setSavingNotes] = useState<ReadonlySet<string>>(new Set());
+  /** The visit whose note was saved last, so "Note saved" is said beside it until it is typed in again. */
+  const [noteSaved, setNoteSaved] = useState<string | null>(null);
   /** Visits marked while "not followed up" is on, kept in view until the box changes so the focus and the list stay put. */
   const [keptInView, setKeptInView] = useState<ReadonlySet<string>>(new Set());
   /** The "Most asked" question picked, which narrows the list to exactly the visits that opened with it. */
@@ -132,6 +137,8 @@ export default function InteractivePage() {
     setLeadsOnly(false);
     setPendingOnly(false);
     setKeptInView(new Set());
+    setNoteDrafts({});
+    setNoteSaved(null);
     setOpening(null);
     setTranscriptErr(null);
     setSaveErr(null);
@@ -157,13 +164,21 @@ export default function InteractivePage() {
    */
   async function markFollowedUp(agent: Agent, c: Conversation, followedUp: boolean) {
     const load = transcriptsLoad.current;
-    const put = (next: Conversation) => setTranscripts((now) => now?.map((x) => (x.id === c.id ? next : x)) ?? now);
+    // Only the mark is written to the page, so a note saved while the mark is saving keeps what it shows.
+    const put = (from: Pick<Conversation, "followedUpAt">) =>
+      setTranscripts(
+        (now) =>
+          now?.map((x) => {
+            if (x.id !== c.id) return x;
+            const next = { ...x };
+            if (from.followedUpAt) next.followedUpAt = from.followedUpAt;
+            else delete next.followedUpAt;
+            return next;
+          }) ?? now,
+      );
     setTranscriptErr(null);
     if (pendingOnly && followedUp) setKeptInView((now) => new Set(now).add(c.id));
-    const shown: Conversation = { ...c };
-    if (followedUp) shown.followedUpAt = c.followedUpAt ?? new Date().toISOString();
-    else delete shown.followedUpAt;
-    put(shown);
+    put({ followedUpAt: followedUp ? (c.followedUpAt ?? new Date().toISOString()) : undefined });
     wantedMarks.current.set(c.id, followedUp);
     if (savingMarks.current.has(c.id)) return;
     savingMarks.current.add(c.id);
@@ -199,6 +214,58 @@ export default function InteractivePage() {
       savingMarks.current.delete(c.id);
       wantedMarks.current.delete(c.id);
       setMarkingVisits((now) => {
+        const next = new Set(now);
+        next.delete(c.id);
+        return next;
+      });
+    }
+  }
+
+  /** Saves the note typed on one visit (an empty one removes it); a draft changed while it saves is kept to save next. */
+  async function saveNote(agent: Agent, c: Conversation) {
+    const typed = noteDrafts[c.id];
+    if (typed === undefined || savingNotes.has(c.id)) return;
+    const load = transcriptsLoad.current;
+    setTranscriptErr(null);
+    setSavingNotes((now) => new Set(now).add(c.id));
+    try {
+      const { conversation } = await api<{ conversation: Conversation }>(`/api/agents/${encodeURIComponent(agent.id)}/conversations/${encodeURIComponent(c.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: typed }),
+      });
+      if (load !== transcriptsLoad.current) return;
+      // Only the note is taken from the answer, so a follow-up mark still saving keeps what it shows.
+      setTranscripts(
+        (now) =>
+          now?.map((x) => {
+            if (x.id !== c.id) return x;
+            const next = { ...x };
+            if (conversation.note) next.note = conversation.note;
+            else delete next.note;
+            return next;
+          }) ?? now,
+      );
+      setNoteDrafts((now) => {
+        if (now[c.id] !== typed) return now;
+        const next = { ...now };
+        delete next[c.id];
+        return next;
+      });
+      // A visit whose new note the search no longer finds stays in view, as an item renamed during a search does.
+      transcriptSearch.pin(c.id);
+      setNoteSaved(c.id);
+      // Saved, the button is disabled and lets the focus go: it goes back to the note.
+      focusAfterRender(() => (document.activeElement && document.activeElement !== document.body ? null : document.getElementById(`visit-note-${c.id}`)));
+    } catch (e) {
+      if (load !== transcriptsLoad.current) return;
+      if (e instanceof ApiError && e.status === 404) {
+        setTranscripts((now) => now?.filter((x) => x.id !== c.id) ?? now);
+        focusAfterRender(() => (document.activeElement && document.activeElement !== document.body ? null : transcriptsHeading.current));
+      }
+      setTranscriptErr(e instanceof Error ? e.message : "Could not save the note");
+    } finally {
+      setSavingNotes((now) => {
         const next = new Set(now);
         next.delete(c.id);
         return next;
@@ -924,7 +991,8 @@ export default function InteractivePage() {
                         <summary className="cursor-pointer select-none px-3 py-2 text-xs text-slate-700">
                           {formatDate(c.startedAt)} · {c.messages.length} {c.messages.length === 1 ? "message" : "messages"}
                           {c.visitor?.email && <span className="ml-1 rounded bg-emerald-100 px-1.5 py-0.5 font-medium text-emerald-800">{c.visitor.name ? `${c.visitor.name} · ` : ""}{c.visitor.email}</span>}
-                          {c.followedUpAt && <span className="ml-1 rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-700">followed up</span>} · <span className="text-slate-500">{c.messages[0]?.content.slice(0, 80)}</span>
+                          {c.followedUpAt && <span className="ml-1 rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-700">followed up</span>}
+                          {c.note && <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-900">note</span>} · <span className="text-slate-500">{c.messages[0]?.content.slice(0, 80)}</span>
                         </summary>
                         <ol className="space-y-1.5 border-t border-slate-100 px-3 py-2 text-xs">
                           {c.messages.map((m, i) => (
@@ -934,6 +1002,60 @@ export default function InteractivePage() {
                             </li>
                           ))}
                         </ol>
+                        {canEdit !== false ? (
+                          <form
+                            className="border-t border-slate-100 px-3 py-2"
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              saveNote(transcriptsFor, c);
+                            }}
+                          >
+                            {(() => {
+                              const draft = noteDrafts[c.id] ?? c.note ?? "";
+                              const changed = noteDrafts[c.id] !== undefined && noteDrafts[c.id].trim() !== (c.note ?? "");
+                              return (
+                                <>
+                                  <label htmlFor={`visit-note-${c.id}`} className="text-xs font-medium text-slate-700">
+                                    Note<span className="sr-only"> on the conversation from {formatDate(c.startedAt)}</span>
+                                    <span className="font-normal text-slate-500"> (only you and your team see it)</span>
+                                  </label>
+                                  <textarea
+                                    id={`visit-note-${c.id}`}
+                                    aria-describedby={`visit-note-count-${c.id}`}
+                                    value={draft}
+                                    onChange={(e) => {
+                                      setNoteDrafts((now) => ({ ...now, [c.id]: e.target.value }));
+                                      if (noteSaved === c.id) setNoteSaved(null);
+                                    }}
+                                    rows={2}
+                                    maxLength={MAX_VISIT_NOTE}
+                                    placeholder="Called back on Tuesday; wants a showing after work."
+                                    className={`${inputClass} mt-1 text-xs`}
+                                  />
+                                  <div className="mt-1 flex items-center justify-between gap-2">
+                                    <span id={`visit-note-count-${c.id}`} className={`text-xs ${draft.length >= MAX_VISIT_NOTE ? "font-medium text-rose-700" : "text-slate-500"}`}>
+                                      {draft.length} / {MAX_VISIT_NOTE}
+                                      {draft.length >= MAX_VISIT_NOTE && <span className="sr-only"> (the limit)</span>}
+                                    </span>
+                                    <span role="status" className="ml-auto text-xs text-emerald-700">
+                                      {noteSaved === c.id ? "Note saved" : ""}
+                                    </span>
+                                    <Button type="submit" variant="secondary" className="px-2 py-1 text-xs" disabled={!changed} loading={savingNotes.has(c.id)}>
+                                      Save note
+                                    </Button>
+                                  </div>
+                                </>
+                              );
+                            })()}
+                          </form>
+                        ) : (
+                          c.note && (
+                            <p className="whitespace-pre-wrap border-t border-slate-100 px-3 py-2 text-xs text-slate-700">
+                              <span className="mr-1 font-medium">Note:</span>
+                              {c.note}
+                            </p>
+                          )
+                        )}
                         <div className="flex flex-wrap justify-end gap-3 border-t border-slate-100 px-3 py-2">
                           <a
                             href={`/api/agents/${encodeURIComponent(transcriptsFor.id)}/conversations/${encodeURIComponent(c.id)}?format=txt`}

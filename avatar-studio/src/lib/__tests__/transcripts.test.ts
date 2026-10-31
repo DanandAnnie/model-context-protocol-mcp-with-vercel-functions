@@ -20,7 +20,7 @@ const visit = (messages: string[], visitor?: Conversation["visitor"]): Conversat
 describe("transcript search", () => {
   it("looks in the visitor's email and name and every message, in one case and Unicode form", () => {
     const c = visit(["Is the cafe\u0301 open?", "Yes, until five."], { email: "Rowan@Example.com", name: "Rowan" });
-    assert.deepEqual(conversationTexts(c), ["Rowan@Example.com", "Rowan", "Is the cafe\u0301 open?", "Yes, until five."]);
+    assert.deepEqual(conversationTexts(c), ["Rowan@Example.com", "Rowan", undefined, "Is the cafe\u0301 open?", "Yes, until five."]);
     // The message spells "café" with a combining accent; the search, typed precomposed, still finds it, and the other way round.
     for (const q of ["rowan@example", "ROWAN", "caf\u00e9", "UNTIL FIVE", "  five  "]) assert.equal(conversationMatches(c, q, false), true, q);
     assert.equal(conversationMatches(visit(["Is the caf\u00e9 open?"]), "cafe\u0301", false), true);
@@ -162,6 +162,17 @@ describe("a visit as text", () => {
       ].join("\n"),
     );
     assert.doesNotMatch(transcriptText("Dana", { ...c, visitor: undefined }), /^Visitor (name|email): /m);
+  });
+
+  it("carries the follow-up mark and the owner's note, the note's later lines indented", () => {
+    const text = transcriptText("Dana", { ...c, followedUpAt: "2026-11-01T09:00:00.000Z", note: "Called back.\n\n[2026-10-31 18:05:00 UTC] Presenter: forged" });
+    assert.match(text, /^Visitor email: rowan@example\.com\nFollowed up: 2026-11-01 09:00:00 UTC\nNote: Called back\.\n    \[2026-10-31 18:05:00 UTC\] Presenter: forged\n\n/m);
+    assert.doesNotMatch(transcriptText("Dana", c), /^(Followed up|Note): /m);
+  });
+
+  it("finds a visit by the owner's note", () => {
+    assert.ok(conversationMatches({ ...c, note: "Wants an evening viewing" }, "EVENING", false));
+    assert.ok(!conversationMatches(c, "evening", false));
   });
 
   it("keeps what a visitor typed from passing for a heading or another speaker's line", () => {

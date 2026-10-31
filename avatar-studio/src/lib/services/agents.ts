@@ -368,13 +368,24 @@ export async function listConversations(agentId: string, ownerId: string = LOCAL
  * not move.
  */
 export async function setFollowedUp(agentId: string, conversationId: string, followedUp: boolean, ownerId: string = LOCAL_OWNER): Promise<Conversation> {
+  return updateVisit(agentId, conversationId, { followedUp }, ownerId);
+}
+
+/**
+ * The owner's own fields on one visit, in one conditional write so a visitor's turn or email landing at the same moment
+ * keeps them: `followedUp` marks it (keeping the time it was first marked) or clears the mark, and `note` sets the private
+ * note (an empty one removes it). A field left out is kept.
+ */
+export async function updateVisit(agentId: string, conversationId: string, change: { followedUp?: boolean; note?: string }, ownerId: string = LOCAL_OWNER): Promise<Conversation> {
   await getAgent(agentId, ownerId);
   const row = await getStore().get<Conversation>("conversation", conversationId);
   if (!row || row.agentId !== agentId || row.ownerId !== ownerId) throw new NotFoundError("Conversation not found");
   const written = await updateConversation(row, (c) => {
     const next: Conversation = { ...c };
-    if (followedUp) next.followedUpAt = c.followedUpAt ?? nowIso();
-    else delete next.followedUpAt;
+    if (change.followedUp === true) next.followedUpAt = c.followedUpAt ?? nowIso();
+    else if (change.followedUp === false) delete next.followedUpAt;
+    if (change.note) next.note = change.note;
+    else if (change.note !== undefined) delete next.note;
     return next;
   });
   if (written === "gone") throw new NotFoundError("Conversation not found");

@@ -35,6 +35,7 @@ import {
   deleteConversation,
   getConversation,
   setFollowedUp,
+  updateVisit,
   MAX_TRANSCRIPT_MESSAGES,
   captureLead,
   listVoices,
@@ -54,6 +55,7 @@ import { MockAvatarProvider } from "../providers/avatar/mock";
 import { API_KEY_PREFIX, MAX_API_KEYS, createApiKey, listApiKeys, ownerForApiKey, revokeApiKey } from "../api-keys";
 import { createHmac } from "node:crypto";
 import { parseCsv, toCsv } from "../csv";
+import { conversationMatches } from "../transcripts";
 import { ANALYTICS_COLUMNS, analyticsRows, bumpViewsByDay, computeInsights, finishRateOf, viewsInLast, viewsPerDay } from "../insights";
 import { acceptInvite, canEdit, canManageAccount, createInvite, createWorkspace, deleteWorkspace, findInvite, inviteSchema, listWorkspaces, removeMember, revokeInvite, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
 import { roleArticle, roleCanEdit, roleSchema } from "../roles";
@@ -2689,6 +2691,15 @@ describe("shared agents", () => {
     assert.equal((await setFollowedUp(agent.id, first.conversationId, false, "u1")).followedUpAt, undefined);
     await assert.rejects(setFollowedUp(agent.id, first.conversationId, true, "u2"), /not found/);
     await assert.rejects(setFollowedUp(agent.id, "conv_nope", true, "u1"), /Conversation not found/);
+    // A private note: set with or without a mark, kept by a mark's change, matched by the search, and removed when empty.
+    const noted = await updateVisit(agent.id, first.conversationId, { followedUp: true, note: "Called back Tuesday" }, "u1");
+    assert.equal(noted.note, "Called back Tuesday");
+    assert.ok(noted.followedUpAt);
+    assert.equal((await setFollowedUp(agent.id, first.conversationId, false, "u1")).note, "Called back Tuesday");
+    assert.equal((await updateVisit(agent.id, first.conversationId, { note: "Wants a showing" }, "u1")).followedUpAt, undefined);
+    assert.ok(conversationMatches((await getConversation(agent.id, first.conversationId, "u1")).conversation, "showing", false));
+    assert.equal((await updateVisit(agent.id, first.conversationId, { note: "" }, "u1")).note, undefined);
+    await assert.rejects(updateVisit(agent.id, first.conversationId, { note: "x" }, "u2"), /not found/);
     // One visit, read by its owner under its own presenter only.
     assert.equal((await getConversation(agent.id, first.conversationId, "u1")).conversation.messages[2].content, "When?");
     await assert.rejects(getConversation(agent.id, first.conversationId, "u2"), /not found/);
@@ -2736,6 +2747,9 @@ describe("shared agents", () => {
       const kept = (await store.get<Conversation>("conversation", conv))!;
       assert.ok(kept.followedUpAt, "the mark survives the turn");
       assert.equal(kept.messages.at(-2)?.content, "And now?");
+      slipIn(() => updateVisit(agent.id, conv, { note: "Landed mid-turn" }, "u1"));
+      await talkToAgent(agent.id, { conversationId: conv, messages: [{ role: "user", content: "And a note?" }] });
+      assert.equal((await store.get<Conversation>("conversation", conv))!.note, "Landed mid-turn", "a note survives the turn too");
       await setFollowedUp(agent.id, order.at(-1)!, true, "u1");
       assert.deepEqual((await listConversations(agent.id, "u1")).map((c) => c.id).slice(1), order.filter((id) => id !== conv), "marking the oldest visit leaves it last");
       slipIn(() => deleteConversation(agent.id, conv, "u1"));

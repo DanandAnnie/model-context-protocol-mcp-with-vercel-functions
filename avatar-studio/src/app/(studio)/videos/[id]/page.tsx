@@ -4,6 +4,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ArchiveRestore, ArrowLeft, Captions, Check, Clock, Code2, Copy, Download, Eye, Film, FolderOpen, Languages, LayoutTemplate, Link2, Lock, Mail, Pencil, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge, inputClass } from "@/components/ui";
+import { LANGUAGES } from "@/lib/stock";
 import { ViewSparkline } from "@/components/ViewSparkline";
 import { VideoComments } from "@/components/VideoComments";
 import { ReviewPanel } from "@/components/ReviewPanel";
@@ -70,6 +71,8 @@ export default function VideoDetailPage() {
     titleButton.current?.focus();
   }, [editing]);
   const [draftTitle, setDraftTitle] = useState("");
+  // The language a copy is made in; the copy opens in the editor with its scenes translated.
+  const [copyLanguage, setCopyLanguage] = useState("");
   // Titles the script writer suggests, offered under the header until one is saved; picking one opens the title field
   // with it, which saves as a typed title does (Enter or leaving the field) and Escape leaves the title as it was.
   const [titleIdeas, setTitleIdeas] = useState<string[] | null>(null);
@@ -835,6 +838,54 @@ export default function VideoDetailPage() {
                     <Copy className="h-4 w-4" /> Edit a copy
                   </Link>
                 )}
+                {!video.studioTemplate && !described && !video.deletedAt && canEdit === true && hasSpokenWords(video) && (
+                  <details
+                    className="relative"
+                    data-testid="language-copy"
+                    onKeyDown={(e) => {
+                      // Escape closes the form and leaves the focus on its button, as a menu would.
+                      if (e.key !== "Escape" || !e.currentTarget.open) return;
+                      e.currentTarget.open = false;
+                      e.currentTarget.querySelector("summary")?.focus();
+                    }}
+                  >
+                    <summary className="inline-flex cursor-pointer list-none items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
+                      <Languages className="h-4 w-4" /> In another language
+                    </summary>
+                    <form
+                      className="absolute right-0 z-20 mt-2 w-72 max-w-[calc(100vw-2rem)] space-y-2 rounded-lg border border-slate-200 bg-white p-3 text-left shadow-lg"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        const language = copyLanguage.trim();
+                        if (language) router.push(`/create?from=${video.id}&language=${encodeURIComponent(language)}`);
+                      }}
+                    >
+                      <label className="block text-xs font-medium text-slate-700">
+                        Language
+                        <input
+                          className={`${inputClass} mt-1`}
+                          aria-describedby="language-copy-hint"
+                          list="language-copy-options"
+                          maxLength={40}
+                          placeholder="Spanish"
+                          value={copyLanguage}
+                          onChange={(e) => setCopyLanguage(e.target.value)}
+                        />
+                      </label>
+                      <datalist id="language-copy-options">
+                        {LANGUAGES.map((l) => (
+                          <option key={l.code} value={l.code} />
+                        ))}
+                      </datalist>
+                      <p id="language-copy-hint" className="text-xs text-slate-500">
+                        A copy opens in the editor with every scene&apos;s script translated and a voice that speaks the language, to read before you make it. Clips, silent scenes, on-screen text, and scene names stay as they are.
+                      </p>
+                      <Button type="submit" className="w-full px-3 py-1.5 text-xs" disabled={!copyLanguage.trim()}>
+                        Open the copy
+                      </Button>
+                    </form>
+                  </details>
+                )}
                 {video.directed ? (
                   <Link href={`/agent?from=${video.id}`} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50">
                     <Sparkles className="h-4 w-4" /> Ask the agent again
@@ -1489,6 +1540,12 @@ function copyRendered(html: string, text: string): boolean {
   selection?.removeAllRanges();
   holder.remove();
   return done;
+}
+
+/** Words a voice speaks, which a copy in another language translates: those of scenes lip-synced to a clip do not count. */
+function hasSpokenWords(video: Video): boolean {
+  const scenes = video.scenes?.length ? video.scenes : [{ script: video.script, audioId: undefined }];
+  return scenes.some((sc) => !sc.audioId && !!stripPauses(sc.script).trim());
 }
 
 /** Whether a video's script holds any words to write from, its pause markers aside. */

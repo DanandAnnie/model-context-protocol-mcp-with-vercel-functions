@@ -5876,6 +5876,59 @@ test("a share-page description is drafted from the script, edited, and saved", a
   expect((await page.request.post(`/api/videos/vid_missing/describe`)).status()).toBe(404);
 });
 
+test("a video is copied into another language: every scene translated, a voice that speaks it, for the editor to review", async ({ page }) => {
+  const bg = { type: "color", value: "#0f172a" };
+  const original = `Languages ${Date.now().toString(36)}`;
+  const v = await createVideoViaApi(page, original, {
+    script: undefined,
+    voiceId: "stock_voice_2",
+    scenes: [
+      { script: "Welcome to twelve Maple Street. [pause 2s] It's a bright home.", background: bg },
+      { script: "Call Dana to book a showing.", background: bg },
+    ],
+  });
+  await page.goto(`/videos/${v.id}`);
+  await page.getByText("In another language").click();
+  const form = page.getByTestId("language-copy");
+  await expect(form.getByRole("button", { name: "Open the copy" })).toBeDisabled();
+  await form.getByLabel("Language").fill("Spanish");
+  await form.getByRole("button", { name: "Open the copy" }).click();
+  await expect(page).toHaveURL(new RegExp(`/create\\?from=${v.id}&language=Spanish$`));
+  // The copy waits for its translation, then says what to do with it.
+  await expect(page.getByTestId("language-copy-note")).toHaveText("Translated into Spanish: read each scene's script before you make it; on-screen text and scene names stay as they were.");
+  await expect(page.locator("input[placeholder='Video title']")).toHaveValue(`${original} (Spanish)`);
+  // What is made is the translated copy, spoken by the Spanish voice of the same gender; the original is unchanged.
+  const made = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
+  await page.getByRole("button", { name: "Generate video" }).click();
+  const body = (await made).postDataJSON() as { title: string; voiceId: string; scenes: Array<{ script: string }> };
+  expect(body.title).toBe(`${original} (Spanish)`);
+  expect(body.voiceId).toBe("stock_voice_4");
+  expect(body.scenes.map((sc) => sc.script)).toEqual(["[Spanish] Welcome to twelve Maple Street. [pause 2s] It's a bright home.", "[Spanish] Call Dana to book a showing."]);
+  const kept = (await (await page.request.get(`/api/videos/${v.id}`)).json()).video;
+  expect(kept.scenes[0].script).toBe("Welcome to twelve Maple Street. [pause 2s] It's a bright home.");
+  // A language no voice speaks keeps the original voice and says so; one the studio does not know is refused.
+  await page.goto(`/create?from=${v.id}&language=Hindi`);
+  await expect(page.getByTestId("language-copy-note")).toHaveText(
+    "Translated into Hindi: read each scene's script before you make it; on-screen text and scene names stay as they were. None of your voices speaks Hindi, so the voice is the original's; choose one that does.",
+  );
+  // A copy that cannot be translated is held, with nothing saved for it, and offers the translation again or a plain copy.
+  await page.goto(`/create?from=${v.id}&language=Klingonese`);
+  const note = page.getByTestId("language-copy-note");
+  await expect(note).toContainText('Could not translate the copy into Klingonese: "Klingonese" is not a language the studio knows');
+  await expect(page.getByRole("button", { name: "Generate video" })).toBeDisabled();
+  // The editor itself is inert, so nothing can be typed into a copy that has not been made.
+  await expect(page.locator("div[inert]").locator("input[placeholder='Video title']")).toHaveCount(1);
+  await page.reload();
+  await expect(note).toContainText("Could not translate the copy into Klingonese", { timeout: 10_000 });
+  await note.getByRole("link", { name: "Open a plain copy" }).click();
+  await expect(page).toHaveURL(new RegExp(`/create\\?from=${v.id}$`));
+  await expect(page.locator("input[placeholder='Video title']")).toHaveValue(`${original} (copy)`);
+  await expect(page.getByTestId("language-copy-note")).toHaveCount(0);
+  await expect(page.locator("div[inert]")).toHaveCount(0);
+  expect((await page.request.post(`/api/videos/${v.id}/language-copy`, { data: { language: "Spanish", extra: 1 } })).status()).toBe(400);
+  expect((await page.request.post(`/api/videos/vid_missing/language-copy`, { data: { language: "Spanish" } })).status()).toBe(404);
+});
+
 test("share views count where they play: on the share page or in an embed on another site", async ({ page }) => {
   const v = await createVideoViaApi(page, `Places ${Date.now().toString(36)}`);
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");

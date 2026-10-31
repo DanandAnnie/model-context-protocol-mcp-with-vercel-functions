@@ -35,7 +35,7 @@ import { findTemplate } from "@/lib/templates";
 import { capSceneName, capSceneText, fitSceneTextEdit, sceneName, sceneTextLength, textHidden, textStyleTargets, textSwatches, withTextStyle, type TextSwatch } from "@/lib/scene-text";
 import { mergeScenes, moveItem, splitParagraphs, splitScene } from "@/lib/scene-split";
 import { amendLast, emptyHistory, record, redo, undo, type History, type HistoryEntry } from "@/lib/scene-history";
-import { graphemes } from "@/lib/text";
+import { graphemes, withSuffix } from "@/lib/text";
 import { takeAgentDraft, type AgentDraft } from "@/lib/agent-draft";
 import { DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, footageIdOf, footageLength, footagePath, type FootageJob, framingFor, isDefaultLayout, isPhotoAvatar, rendersOnAvatarV, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, type PhotoExpressiveness, VOICE_ACCENTS, type VoiceAccent, AVATAR_ENGINES, type AvatarEngine } from "@/lib/types";
 
@@ -110,6 +110,10 @@ class ImportCancelled extends Error {}
 /** The paces a scene can take instead of the video's (the video's own speed is the default choice). */
 const SCENE_SPEEDS = [0.75, 0.85, 0.9, 1, 1.1, 1.15, 1.25];
 
+/** The title's limit in the video request schema. */
+const MAX_TITLE_CHARS = 120;
+/** What `POST /api/videos/:id/language-copy` answers: one script per scene, and a voice in the language for each voice. */
+type LanguageCopyAnswer = { language: string; scripts: string[]; voices: Record<string, string> };
 /** A deck larger than this is refused before pdf.js reads it. */
 const MAX_PDF_BYTES = 50_000_000;
 /** A PowerPoint file larger than this is refused before it is unpacked (its pictures and video count, though only its text is read). */
@@ -1125,13 +1129,15 @@ function CreateInner() {
   const spacesKnown = !!spaces || !!spacesError;
   const templateId = params.get("template");
   const fromId = params.get("from");
+  // A copy in another language (?from=…&language=Spanish): the scenes come translated, with voices that speak it.
+  const copyLanguage = (fromId && params.get("language")?.trim().slice(0, 40)) || null;
   // A video spoken by one of the account's audio clips (?clip=, from a recording kept in the voice changer).
   const clipStart = !fromId && !templateId ? params.get("clip") : null;
   // A video set against one of the account's pictures (?picture=, from the Assets page).
   const pictureStart = !fromId && !templateId && !clipStart ? params.get("picture") : null;
   // A copy of a video, a template, or a clip keeps its own draft, so editing one never overwrites the unsent draft of a
   // plain visit, and a reload brings back the edits rather than the original.
-  const draftSource = fromId ? `from:${fromId}` : templateId ? `template:${templateId}` : clipStart ? `clip:${clipStart}` : pictureStart ? `picture:${pictureStart}` : "";
+  const draftSource = fromId ? `from:${fromId}${copyLanguage ? `:${copyLanguage}` : ""}` : templateId ? `template:${templateId}` : clipStart ? `clip:${clipStart}` : pictureStart ? `picture:${pictureStart}` : "";
   const editKey = draftKey && (draftSource ? `${draftKey}:${draftSource}` : draftKey);
   // A scene copied here or in another tab, kept by the browser; it is pasted only in the space it was copied in, whose
   // pictures, clips, and recordings it may use.
@@ -1252,6 +1258,16 @@ function CreateInner() {
     setDraftRestored(d.savedAt);
   }, [draftSource, params, editKey, spacesKnown]);
 
+  // A copy in another language (?language=) is held, with nothing saved for it, until it is translated: the editor
+  // waits rather than taking typing the translation would replace, and a failure leaves no untranslated draft where the
+  // translated copy is kept, so asking again translates it.
+  const [copySource, setCopySource] = useState<Video | null>(null);
+  const [copyAttempt, setCopyAttempt] = useState(0);
+  const [copyFailed, setCopyFailed] = useState<string | null>(null);
+  const [copyDone, setCopyDone] = useState(false);
+  const [translatedNote, setTranslatedNote] = useState<string | null>(null);
+  const copyHeld = !!copyLanguage && !copyDone;
+  const translating = copyHeld && !copyFailed;
   // Set once a render has started from this draft: the draft is cleared then, and no autosave may write it back while
   // the page is on its way to the video (a timer still pending, or one re-armed by data arriving meanwhile).
   const sent = useRef(false);
@@ -1259,7 +1275,7 @@ function CreateInner() {
   const startTitle = useRef<string | null>(null);
   // Autosave the editor state (debounced) so a refresh never loses work.
   useEffect(() => {
-    if (!hydrated.current || !editKey || sent.current) return;
+    if (!hydrated.current || !editKey || sent.current || copyHeld) return;
     // A clip or picture start names the video after it; that alone is not an edit worth a draft.
     const empty = !scenes.some(hasContent) && (title === "Untitled video" || title === startTitle.current);
     const t = setTimeout(() => {
@@ -1267,7 +1283,7 @@ function CreateInner() {
       writeDraft(editKey, empty ? null : { title, scenes, aspect, resolution, captions, ...(isDefaultCaptionStyle ? {} : { captionStyle }), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...(expressiveness !== "low" ? { expressiveness } : {}), ...(motionPrompt ? { motionPrompt } : {}), ...(accent ? { accent } : {}), ...(avatarEngine !== "avatar_iv" ? { avatarEngine } : {}), ...(moreBlinking ? { moreBlinking } : {}), ...(transparent ? { transparent } : {}), avatarId: avatar?.id, voiceId: voice?.id, savedAt: new Date().toISOString() });
     }, 400);
     return () => clearTimeout(t);
-  }, [title, scenes, aspect, resolution, captions, captionStyle, isDefaultCaptionStyle, speed, pitch, emotion, expressiveness, motionPrompt, accent, avatarEngine, moreBlinking, transparent, avatar, voice, editKey]);
+  }, [title, scenes, aspect, resolution, captions, captionStyle, isDefaultCaptionStyle, speed, pitch, emotion, expressiveness, motionPrompt, accent, avatarEngine, moreBlinking, transparent, avatar, voice, editKey, copyHeld]);
 
   function discardDraft() {
     if (editKey) writeDraft(editKey, null);
@@ -1368,45 +1384,111 @@ function CreateInner() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once the space (and so the draft key) is known
   }, [templateId, spacesKnown]);
+  /** The copied video in the editor: its scenes, presenter, voice, and settings, translated when `copy` is given. */
+  function applyCopy(video: Video, copy?: LanguageCopyAnswer) {
+    let copied: Scene[] = video.scenes?.length ? video.scenes.map((sc) => newScene(sc.script, sc.background, sc)) : [newScene(video.script, video.background)];
+    if (copy) {
+      copied = copied.map((sc, i) => ({ ...sc, script: copy.scripts[i] ?? sc.script, ...(sc.voiceId ? { voiceId: copy.voices[sc.voiceId] ?? sc.voiceId } : {}) }));
+    }
+    // Within the title's limit, the original's words cut to leave room for what marks the copy.
+    setTitle(withSuffix(video.title, copy ? ` (${copy.language})` : " (copy)", MAX_TITLE_CHARS));
+    setScenes(copied);
+    setSceneHistory(emptyHistory());
+    setActiveIdx(0);
+    setAspect(video.aspect);
+    setResolution(video.resolution ?? "1080p");
+    setCaptions(video.captions);
+    setCaptionStyle(video.captionStyle ?? DEFAULT_CAPTION_STYLE);
+    setSpeed(video.speed);
+    setPitch(video.pitch ?? 0);
+    setEmotion(video.emotion ?? "");
+    setExpressiveness(asExpressiveness(video.expressiveness));
+    setMotionPrompt(asMotionPrompt(video.motionPrompt));
+    setAccent(asAccent(video.accent));
+    setAvatarEngine(asAvatarEngine(video.avatarEngine));
+    setMoreBlinking(video.moreBlinking === true);
+    setTransparent(video.transparent === true);
+    setPrefill({ avatarId: video.avatarId, voiceId: (copy && copy.voices[video.voiceId]) || video.voiceId });
+  }
   useEffect(() => {
-    if (!fromId || !spacesKnown || keptEdits()) return;
+    if (!fromId || !spacesKnown || copyDone) return;
+    if (keptEdits()) {
+      // A reload of a translated copy brings its edits back; there is nothing to translate again.
+      setCopyDone(true);
+      return;
+    }
+    let cancelled = false;
+    // A copy in another language that cannot be loaded stays held with the reason and Try again, so nothing typed into
+    // an empty editor is kept where the translated copy belongs; a plain copy says why and opens empty.
+    const fail = (reason: string) => {
+      if (copyLanguage) setCopyFailed(reason);
+      else {
+        setErr(reason);
+        setCopyDone(true);
+      }
+    };
     api<{ video: Video }>(`/api/videos/${fromId}`)
       .then(({ video }) => {
+        if (cancelled) return;
         // A cinematic shot has no scenes to copy, and a HeyGen template's are not here; each has its own form to make another.
-        if (video.cinematic) {
-          setErr(`"${video.title}" is a cinematic shot made from a description; make it again from the Cinematic page.`);
+        const refused = video.cinematic
+          ? `"${video.title}" is a cinematic shot made from a description; make it again from the Cinematic page.`
+          : video.directed
+            ? `"${video.title}" was directed by HeyGen's Video Agent from a brief; ask the agent again from the Video Agent page.`
+            : video.studioTemplate
+              ? `"${video.title}" was made from the HeyGen template "${video.studioTemplate.name}"; use the template again from the Templates page to make another.`
+              : null;
+        if (refused) {
+          fail(refused);
           return;
         }
-        if (video.directed) {
-          setErr(`"${video.title}" was directed by HeyGen's Video Agent from a brief; ask the agent again from the Video Agent page.`);
-          return;
-        }
-        if (video.studioTemplate) {
-          setErr(`"${video.title}" was made from the HeyGen template "${video.studioTemplate.name}"; use the template again from the Templates page to make another.`);
-          return;
-        }
-        setTitle(`${video.title} (copy)`);
-        setScenes(video.scenes?.length ? video.scenes.map((sc) => newScene(sc.script, sc.background, sc)) : [newScene(video.script, video.background)]);
-        setSceneHistory(emptyHistory());
-        setActiveIdx(0);
-        setAspect(video.aspect);
-        setResolution(video.resolution ?? "1080p");
-        setCaptions(video.captions);
-        setCaptionStyle(video.captionStyle ?? DEFAULT_CAPTION_STYLE);
-        setSpeed(video.speed);
-        setPitch(video.pitch ?? 0);
-        setEmotion(video.emotion ?? "");
-        setExpressiveness(asExpressiveness(video.expressiveness));
-        setMotionPrompt(asMotionPrompt(video.motionPrompt));
-        setAccent(asAccent(video.accent));
-        setAvatarEngine(asAvatarEngine(video.avatarEngine));
-        setMoreBlinking(video.moreBlinking === true);
-        setTransparent(video.transparent === true);
-        setPrefill({ avatarId: video.avatarId, voiceId: video.voiceId });
+        // A copy in another language is applied once translated (below); a plain copy at once.
+        if (copyLanguage) setCopySource(video);
+        else applyCopy(video);
       })
-      .catch((e) => setErr(e instanceof Error ? e.message : "Could not load the original video"));
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once the space (and so the draft key) is known
-  }, [fromId, spacesKnown]);
+      .catch((e) => {
+        if (cancelled) return;
+        fail(e instanceof Error ? e.message : "Could not load the original video");
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once the space (and so the draft key) is known, and again on Try again
+  }, [fromId, spacesKnown, copyAttempt]);
+  // The translation of a copy in another language, asked again by Try again.
+  useEffect(() => {
+    if (!copySource || !copyLanguage) return;
+    let cancelled = false;
+    api<LanguageCopyAnswer>(`/api/videos/${copySource.id}/language-copy`, { method: "POST", body: JSON.stringify({ language: copyLanguage }) })
+      .then((copy) => {
+        if (cancelled) return;
+        const sceneCount = copySource.scenes?.length || 1;
+        // The scripts are matched to the scenes by place; a video edited in between is translated again.
+        if (copy.scripts.length !== sceneCount) throw new Error("The video changed while it was being translated");
+        applyCopy(copySource, copy);
+        const unvoiced = !copy.voices[copySource.voiceId];
+        setTranslatedNote(
+          `Translated into ${copy.language}: read each scene's script before you make it; on-screen text and scene names stay as they were.${unvoiced ? ` None of your voices speaks ${copy.language}, so the voice is the original's; choose one that does.` : ""}`,
+        );
+        setCopySource(null);
+        setCopyDone(true);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setCopyFailed(e instanceof Error ? e.message : "The script writer did not answer");
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the copy is translated once per video loaded
+  }, [copySource]);
+  // Leaving the copy for a plain editor (the sidebar's Create) ends its translation and its notes.
+  useEffect(() => {
+    if (copyLanguage) return;
+    setCopySource(null);
+    setCopyFailed(null);
+    setTranslatedNote(null);
+  }, [copyLanguage]);
 
   // Start from a clip (?clip=): one scene lip-syncing to it, its words as the script when they are known. Once the
   // clips are loaded; one that is gone says so and leaves an empty video.
@@ -1530,7 +1612,7 @@ function CreateInner() {
   // On-screen text is drawn as it is, so a placeholder there is checked too.
   const unfilled = [...new Set(scenes.flatMap((sc) => [sc.script, sc.overlay?.text ?? ""].flatMap((t) => t.match(/\{[\p{L}_][\p{L}\p{N}_ -]{0,39}\}/gu) ?? [])))];
   const canEdit = useCanEdit();
-  const canGenerate = canEdit !== false && !!avatar && !!voice && allScenesFilled && !silentIssue && !scriptTooLong && title.trim().length > 0 && !submitting;
+  const canGenerate = canEdit !== false && !!avatar && !!voice && allScenesFilled && !silentIssue && !scriptTooLong && title.trim().length > 0 && !submitting && !copyHeld;
 
   async function generate() {
     if (!avatar || !voice) return;
@@ -1595,6 +1677,45 @@ function CreateInner() {
           {unfilled.length > 4 ? ` and ${unfilled.length - 4} more` : ""} with your own words: if the video is generated as it is, the presenter reads {unfilled.length === 1 ? "it" : "them"} out as written.
         </div>
       )}
+      {/* Kept in place while the copy is made, so each change of its words is announced. */}
+      {copyLanguage && (
+        <div
+          role="status"
+          data-testid="language-copy-note"
+          className={translating || copyFailed || translatedNote ? `mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-4 py-2.5 text-sm ${copyFailed ? "border-rose-200 bg-rose-50 text-rose-900" : "border-brand-200 bg-brand-50 text-brand-900"}` : "sr-only"}
+        >
+          {copyFailed ? (
+            <>
+              <span>
+                Could not translate the copy into {copyLanguage}: {copyFailed.replace(/[.!]+$/, "")}. Nothing was saved.
+              </span>
+              <span className="flex gap-2">
+                {/* The video is loaded again too, so a copy is translated from the video as it is now. */}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="px-3 py-1.5 text-xs"
+                  onClick={() => {
+                    setCopyFailed(null);
+                    setCopySource(null);
+                    setCopyAttempt((n) => n + 1);
+                  }}
+                >
+                  Try again
+                </Button>
+                {/* A page load, so the editor opens the plain copy from the start, with its own kept draft if it has one. */}
+                <a href={`/create?from=${fromId}`} className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50">
+                  Open a plain copy
+                </a>
+              </span>
+            </>
+          ) : translating ? (
+            `Translating the copy into ${copyLanguage}…`
+          ) : (
+            (translatedNote ?? "")
+          )}
+        </div>
+      )}
       {fromAgent && (
         <div role="status" data-testid="agent-plan" className="mb-4 rounded-lg border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm text-brand-900">
           The Video Agent planned {scenes.length === 1 ? "this scene" : `these ${scenes.length} scenes`}. Review and edit them, then generate.
@@ -1609,7 +1730,7 @@ function CreateInner() {
         </div>
       )}
 
-      <div className="grid gap-6 xl:grid-cols-[1.1fr_1fr]">
+      <div className="grid gap-6 xl:grid-cols-[1.1fr_1fr]" inert={copyHeld || undefined} aria-busy={translating || undefined}>
         {/* Left column: stage + script. min-w-0 lets the columns shrink below their content width on phones. */}
         <div className="min-w-0 space-y-5">
           <input aria-label="Video title" className={`${inputClass} text-base font-medium`} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Video title" />

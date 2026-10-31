@@ -8,7 +8,7 @@ import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { ListSearch, useListSearch } from "@/components/ListSearch";
-import { MAX_CONVERSATIONS_PER_AGENT, MAX_TRANSCRIPT_QUERY, conversationTexts } from "@/lib/transcripts";
+import { MAX_CONVERSATIONS_PER_AGENT, MAX_TRANSCRIPT_QUERY, conversationMatches, conversationTexts, mostAsked } from "@/lib/transcripts";
 import { useLiveAvatar } from "@/hooks/useLiveAvatar";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { api, formatDate } from "@/lib/client";
@@ -76,6 +76,8 @@ export default function InteractivePage() {
   // shows in the form too, so the form never shows a switch the presenter no longer has.
   const [switchesFor, setSwitchesFor] = useState<string | null>(null);
   const setupHeading = useRef<HTMLHeadingElement>(null);
+  const mostAskedHeading = useRef<HTMLHeadingElement>(null);
+  const leadsBox = useRef<HTMLInputElement>(null);
   const focusAfterRender = useFocusAfterRender();
   const [savedLink, setSavedLink] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
@@ -88,10 +90,22 @@ export default function InteractivePage() {
   const transcriptsLoad = useRef(0);
   const transcriptSearch = useListSearch();
   const [leadsOnly, setLeadsOnly] = useState(false);
-  const shownTranscripts = (transcripts ?? []).filter(
-    (c) => (!leadsOnly || !!c.visitor?.email) && transcriptSearch.matches(c.id, ...conversationTexts(c)),
-  );
+  /** The "Most asked" question picked, which narrows the list to exactly the visits that opened with it. */
+  const [opening, setOpening] = useState<{ key: string; question: string } | null>(null);
+  // The box and the picked question narrow by the rule the CSV download uses; the search box narrows what is left.
+  const transcriptPool = (transcripts ?? []).filter((c) => conversationMatches(c, "", leadsOnly, opening?.key));
+  const shownTranscripts = transcriptPool.filter((c) => transcriptSearch.matches(c.id, ...conversationTexts(c)));
   const leadCount = (transcripts ?? []).filter((c) => c.visitor?.email).length;
+  // Counted over what the "left an email" box leaves, so a chip's number is what picking it shows.
+  const boxed = (transcripts ?? []).filter((c) => conversationMatches(c, "", leadsOnly));
+  const topQuestions = mostAsked(boxed);
+  // A picked question the box has pushed out of the top five stays on show, with its count there, so it can be unpicked.
+  if (opening && !topQuestions.some((t) => t.key === opening.key)) {
+    topQuestions.push({ ...opening, count: boxed.filter((c) => conversationMatches(c, "", false, opening.key)).length });
+  }
+  const narrowed = !!transcriptSearch.needle || leadsOnly || !!opening;
+  /** Where the focus goes once a question is unpicked: the list's heading, or the email box when no question is left. */
+  const unpickFocus = () => mostAskedHeading.current ?? leadsBox.current;
 
   async function openTranscripts(agent: Agent) {
     const load = ++transcriptsLoad.current;
@@ -99,6 +113,7 @@ export default function InteractivePage() {
     setTranscripts(null);
     transcriptSearch.search("");
     setLeadsOnly(false);
+    setOpening(null);
     setSaveErr(null);
     try {
       const { conversations } = await api<{ conversations: Conversation[] }>(`/api/agents/${agent.id}/conversations`);
@@ -687,16 +702,16 @@ export default function InteractivePage() {
                 <div className="flex gap-2">
                   {transcripts && transcripts.length > 0 && (
                     <a
-                      href={`/api/agents/${transcriptsFor.id}/conversations?${new URLSearchParams({ format: "csv", ...(transcriptSearch.needle ? { q: transcriptSearch.q.trim() } : {}), ...(leadsOnly ? { leads: "1" } : {}) })}`}
+                      href={`/api/agents/${transcriptsFor.id}/conversations?${new URLSearchParams({ format: "csv", ...(transcriptSearch.needle ? { q: transcriptSearch.q.trim() } : {}), ...(leadsOnly ? { leads: "1" } : {}), ...(opening ? { first: opening.key } : {}) })}`}
                       download
                       className="text-xs text-brand-700 hover:underline"
                       title={
-                        transcriptSearch.needle || leadsOnly
-                          ? "The conversations listed below, as the search and box narrow them, with each visitor's email, first question, and last reply"
+                        narrowed
+                          ? "The conversations listed below, as the search, the email box, and the picked question narrow them, with each visitor's email, first question, and last reply"
                           : "Every conversation with its visitor's email, first question, and last reply"
                       }
                     >
-                      {transcriptSearch.needle || leadsOnly ? "Download matches (CSV)" : "Download CSV"}
+                      {narrowed ? "Download matches (CSV)" : "Download CSV"}
                     </a>
                   )}
                   {transcripts && transcripts.length > 0 && (
@@ -723,14 +738,70 @@ export default function InteractivePage() {
                     label={`Search conversations with ${transcriptsFor.name}`}
                     placeholder="Search words, emails, or names"
                     shown={shownTranscripts.length}
-                    total={leadsOnly ? leadCount : transcripts.length}
-                    noun={leadsOnly ? "visits that left an email" : "conversations"}
+                    total={transcriptPool.length}
+                    noun={
+                      opening
+                        ? `visits that opened with the picked question${leadsOnly ? " and left an email" : ""}`
+                        : leadsOnly
+                          ? "visits that left an email"
+                          : "conversations"
+                    }
                     maxLength={MAX_TRANSCRIPT_QUERY}
                   />
                   <label className="mb-3 flex items-center gap-1.5 text-xs text-slate-700">
-                    <input type="checkbox" checked={leadsOnly} onChange={(e) => setLeadsOnly(e.target.checked)} disabled={leadCount === 0 && !leadsOnly} />
+                    <input ref={leadsBox} type="checkbox" checked={leadsOnly} onChange={(e) => setLeadsOnly(e.target.checked)} disabled={leadCount === 0 && !leadsOnly} />
                     Only visits that left an email ({leadCount})
                   </label>
+                  {topQuestions.length > 0 && (
+                    <div className="mb-3" data-testid="most-asked">
+                      <h5 id="most-asked-heading" ref={mostAskedHeading} tabIndex={-1} className="text-xs font-medium text-slate-700 focus:outline-none">Most asked first questions</h5>
+                      <p className="text-xs text-slate-500">Asked first in two visits or more; pick one to list just those visits (a picked one stays here, counted among what the box leaves).</p>
+                      <ul aria-labelledby="most-asked-heading" className="mt-1 flex flex-wrap gap-1.5">
+                        {topQuestions.map((t) => {
+                          const picked = opening?.key === t.key;
+                          const shown = Array.from(t.question).length > 80 ? `${Array.from(t.question).slice(0, 79).join("")}…` : t.question;
+                          return (
+                            <li key={t.key} className="min-w-0 max-w-full">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOpening(picked ? null : { key: t.key, question: t.question });
+                                  // A chip on show only because it was picked goes with it, so the focus moves on rather than to the page.
+                                  if (picked) focusAfterRender(() => (document.activeElement && document.activeElement !== document.body ? null : unpickFocus()));
+                                }}
+                                aria-pressed={picked}
+                                title={t.question}
+                                className={`max-w-full rounded-full border px-2.5 py-1 text-left text-xs [overflow-wrap:anywhere] ${picked ? "border-brand-500 bg-brand-50 text-brand-800" : "border-slate-200 bg-white text-slate-700 hover:border-brand-300 hover:text-brand-700"}`}
+                              >
+                                {shown} <span className="text-slate-500">· {t.count}</span>
+                                <span className="sr-only">{t.count === 1 ? " visit" : " visits"}</span>
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                      {/* Mounted while the list is, so a screen reader hears the change when a question is picked. */}
+                      <div className="mt-1.5 flex flex-wrap items-baseline gap-x-1.5 text-xs text-slate-700">
+                        <p role="status" className="min-w-0 [overflow-wrap:anywhere]">
+                          {opening
+                            ? `Listing the ${transcriptPool.length === 1 ? "visit" : "visits"} that opened with “${Array.from(opening.question).length > 80 ? `${Array.from(opening.question).slice(0, 79).join("")}…` : opening.question}”${transcriptPool.length === 0 ? ": none here." : "."}`
+                            : ""}
+                        </p>
+                        {opening && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpening(null);
+                              focusAfterRender(unpickFocus);
+                            }}
+                            className="font-medium text-brand-700 hover:underline"
+                          >
+                            Show all
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <ul className="space-y-2" data-testid="transcript-list">
                   {shownTranscripts.map((c) => (

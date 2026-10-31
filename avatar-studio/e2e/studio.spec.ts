@@ -5410,6 +5410,60 @@ test("a presenter's transcripts can be searched by words or visitor, and narrowe
   }
 });
 
+test("the questions visitors most often open with are listed with their counts, and picking one lists just those visits", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const res = await page.request.post("/api/agents", { data: { name: `Most asked ${tag}`, avatarId: "stock_1" } });
+  const { id } = (await res.json()).agent as { id: string };
+  try {
+    const headers = { "x-forwarded-for": `198.51.100.${Math.floor(Math.random() * 200) + 1}` };
+    const ids: string[] = [];
+    for (const first of [`Hours for ${tag}?`, `hours for ${tag}`, "Do you take walk-ins?", `HOURS FOR ${tag}?!`, "Only once?"]) {
+      const turn = await page.request.post(`/api/talk/${id}`, { data: { messages: [{ role: "user", content: first }] }, headers });
+      expect(turn.status()).toBe(200);
+      ids.push((await turn.json()).conversationId);
+    }
+    // Only the walk-ins visit leaves an email.
+    expect((await page.request.post(`/api/talk/${id}/lead`, { data: { conversationId: ids[2], email: `walkin-${tag}@example.com` }, headers })).status()).toBe(200);
+    await page.goto("/interactive");
+    await page.getByRole("button", { name: `Transcripts for Most asked ${tag}` }).click();
+    const top = page.getByTestId("most-asked").getByRole("button");
+    // Asked once is left out; the newest wording stands for each.
+    await expect(top).toHaveCount(1);
+    await expect(top.first()).toHaveText(`HOURS FOR ${tag}?! · 3 visits`);
+    // Picking it lists exactly the visits it counts, and the download holds the same ones.
+    await top.first().click();
+    await expect(top.first()).toHaveAttribute("aria-pressed", "true");
+    const list = page.getByTestId("transcript-list").locator("> li");
+    await expect(list).toHaveCount(3);
+    await expect(page.getByTestId("most-asked").getByRole("status")).toContainText(`Listing the visits that opened with “HOURS FOR ${tag}?!”`);
+    const download = page.getByTestId("transcripts").getByRole("link", { name: "Download matches (CSV)" });
+    await expect(download).toHaveAttribute("href", /first=/);
+    expect(parseCsv(await (await page.request.get((await download.getAttribute("href"))!)).text()).rows).toHaveLength(3);
+    // The email box leaves none of them: the picked question stays on show, at its count there, so it can be unpicked.
+    await page.getByLabel("Only visits that left an email (1)").check();
+    await expect(list).toHaveCount(0);
+    await expect(top.first()).toHaveText(`HOURS FOR ${tag}?! · 0 visits`);
+    await expect(page.getByTestId("most-asked").getByRole("status")).toContainText(": none here.");
+    await expect(download).toHaveAttribute("href", /leads=1.*first=|first=.*leads=1/);
+    expect(parseCsv(await (await page.request.get((await download.getAttribute("href"))!)).text()).rows).toHaveLength(0);
+    // Showing all with the box still ticked leaves no question to list, so the focus goes to the box, not the page.
+    await page.getByTestId("most-asked").getByRole("button", { name: "Show all" }).click();
+    await expect(page.getByTestId("most-asked")).toHaveCount(0);
+    await expect(page.getByLabel("Only visits that left an email (1)")).toBeFocused();
+    await page.getByLabel("Only visits that left an email (1)").uncheck();
+    await expect(list).toHaveCount(5);
+    await expect(top.first()).toHaveAttribute("aria-pressed", "false");
+    // Picked again and shown all, the focus goes back to the list of questions.
+    await top.first().click();
+    await expect(list).toHaveCount(3);
+    await page.getByTestId("most-asked").getByRole("button", { name: "Show all" }).click();
+    await expect(list).toHaveCount(5);
+    await expect(page.getByRole("heading", { name: "Most asked first questions" })).toBeFocused();
+  } finally {
+    await page.request.delete(`/api/agents/${id}`);
+  }
+});
+
 test("a presenter answers from reference notes, in the try-it chat and once shared, and they can be cleared", async ({ page }) => {
   const tag = Date.now().toString(36);
   const notes = `Showings for ${tag} run Saturdays, 10am to 2pm.\nThe lakeside cabin is listed at $450,000.`;

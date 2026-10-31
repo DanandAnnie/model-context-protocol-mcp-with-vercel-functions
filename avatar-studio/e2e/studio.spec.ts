@@ -966,6 +966,47 @@ test("the brand kit's closing scene is set on the brand page and added at the en
   }
 });
 
+test("the brand kit's writing style is set on the brand page, counted as it is typed, and cleared with the kit", async ({ page }) => {
+  const before = (await (await page.request.get("/api/brand")).json()).brand as Record<string, unknown> | null;
+  const style = "Warm and plain-spoken, like a neighbour. Say home, not property.";
+  try {
+    await page.goto("/brand");
+    await page.getByLabel("Primary color", { exact: true }).fill("#0f766e");
+    const field = page.getByRole("textbox", { name: "Writing style" });
+    await expect(field).toHaveAttribute("maxlength", "600");
+    await field.fill(`  ${style}  `);
+    await expect(page.locator("#writing-style-count")).toHaveText(`${style.length + 4} of 600 characters`);
+    await expect(page.locator("#writing-style-hint")).toContainText("not one HeyGen's agent directs");
+    // At the limit the count says so, and a screen reader hears it once.
+    await field.fill("a".repeat(600));
+    await expect(page.locator("#writing-style-count")).toContainText("Limit reached");
+    await expect(page.getByText("Writing style: character limit reached.")).toBeAttached();
+    await field.fill(`  ${style}  `);
+    await page.getByRole("button", { name: "Save brand kit" }).click();
+    // Saved without the spaces around it, and read back into the form.
+    await expect.poll(async () => ((await (await page.request.get("/api/brand")).json()).brand as { writingStyle?: string } | null)?.writingStyle).toBe(style);
+    await page.reload();
+    await expect(field).toHaveValue(style);
+    // A blank style is none.
+    await field.fill("   ");
+    await page.getByRole("button", { name: "Save brand kit" }).click();
+    await expect.poll(async () => "writingStyle" in (((await (await page.request.get("/api/brand")).json()).brand as object | null) ?? {})).toBe(false);
+    // Removing the kit clears it from the form, so the next save does not bring it back.
+    await page.request.put("/api/brand", { data: { name: "Acme", primaryColor: "#0f766e", writingStyle: style } });
+    await page.reload();
+    await expect(field).toHaveValue(style);
+    page.once("dialog", (d) => void d.accept());
+    await page.getByRole("button", { name: "Remove brand kit" }).click();
+    await expect(field).toHaveValue("");
+    // A style longer than the field allows is refused by the server too.
+    const long = await page.request.put("/api/brand", { data: { name: "Acme", primaryColor: "#0f766e", writingStyle: "a".repeat(601) } });
+    expect(long.status()).toBe(400);
+  } finally {
+    const restored = before ? await page.request.put("/api/brand", { data: before }) : await page.request.delete("/api/brand");
+    expect(restored.ok()).toBe(true);
+  }
+});
+
 test("a scene tab dragged onto another moves the scene there, a change Undo takes back", async ({ page }) => {
   await page.getByRole("textbox", { name: "Script", exact: true }).fill("First.");
   // One scene has nowhere to go.

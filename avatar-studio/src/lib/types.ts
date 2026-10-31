@@ -1248,6 +1248,8 @@ export interface BrandKit {
   glossary?: string[];
   /** Terms the AI translation always renders one way: in every language, or only in `language`. */
   forcedTranslations?: ForcedTranslation[];
+  /** How the brand writes, in the owner's words, which the script writer follows when it writes, plans, or rewrites a script. */
+  writingStyle?: string;
   defaultAvatarId?: string;
   defaultVoiceId?: string;
   defaultAspect?: AspectRatio;
@@ -1266,6 +1268,9 @@ export interface BrandKit {
 
 /** The most a brand kit's opening or closing scene says; a scene of a video holds more, but a greeting or a closing line is short. */
 export const MAX_CLOSING_SCRIPT = 1000;
+
+/** The most a brand kit's writing style says: a few sentences of guidance, not a script. */
+export const MAX_WRITING_STYLE = 600;
 
 /** A brand kit's opening or closing scene: what the presenter says, and text on screen (a title across the middle of an opening scene, a website or phone number at the bottom of a closing one); none when absent. */
 export interface BrandClosingScene {

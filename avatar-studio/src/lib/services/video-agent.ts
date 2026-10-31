@@ -169,7 +169,7 @@ export async function planVideo(input: VideoAgentInput, ownerId: string = LOCAL_
   const voice = candidates.map((id) => id && voices.find((v) => v.id === id)).find(Boolean) || voices[0];
   if (!voice) throw new ValidationError("No voice is available to narrate the video");
 
-  const plan = await getScriptProvider().plan({ prompt: input.prompt, lengthSec: input.lengthSec, language: input.language, ...(source ? { source } : {}) });
+  const plan = await getScriptProvider().plan({ prompt: input.prompt, lengthSec: input.lengthSec, language: input.language, ...(source ? { source } : {}), ...(kit?.writingStyle ? { style: kit.writingStyle } : {}) });
   const scenes = fitPlan(plan);
   if (!scenes.length) throw new ValidationError("The video agent could not plan a video from that prompt. Try describing it in more detail.");
   const background: Background = kit?.defaultBackground ?? (kit ? { type: "color", value: kit.primaryColor } : { type: "color", value: "#f1f5f9" });

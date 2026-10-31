@@ -253,13 +253,14 @@ export type ScriptAction = "shorten" | "expand" | "tone" | "translate" | "polish
 
 export interface ScriptProvider {
   readonly name: string;
-  generate(input: { topic: string; tone: string; lengthSec: number; language: string; audience?: string; source?: string }): Promise<string>;
+  /** A new script; `style` is the brand kit's writing style, which it follows, as `revise` (but not a translation) and `plan` do. */
+  generate(input: { topic: string; tone: string; lengthSec: number; language: string; audience?: string; source?: string; style?: string }): Promise<string>;
   /**
    * Transform an existing script: shorten, expand, change tone, translate, or polish. `terms[i]` is what
    * the token `[[T{i+1}]]` in the script stands for (a brand term kept untranslated), so the words around
    * it can agree with it; the caller puts the term back itself.
    */
-  revise(input: { script: string; action: ScriptAction; tone?: string; language?: string; terms?: string[]; label?: boolean }): Promise<string>;
+  revise(input: { script: string; action: ScriptAction; tone?: string; language?: string; terms?: string[]; label?: boolean; style?: string }): Promise<string>;
   /** One conversational turn for the interactive avatar: the presenter answers in character, briefly, for speech. */
   chat(input: { persona: ChatPersona; messages: ChatMessage[] }): Promise<string>;
   /**
@@ -273,7 +274,7 @@ export interface ScriptProvider {
    */
   titles(input: { title: string; script: string }): Promise<string[]>;
   /** A whole video from one prompt (the Video Agent): a title, a frame orientation, and the scenes in order. */
-  plan(input: { prompt: string; lengthSec: number; language: string; source?: string }): Promise<VideoPlan>;
+  plan(input: { prompt: string; lengthSec: number; language: string; source?: string; style?: string }): Promise<VideoPlan>;
 }
 
 /** What the Video Agent's planner hands back; the caller trims it to what a video holds. */

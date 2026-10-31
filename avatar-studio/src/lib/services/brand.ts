@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { nowIso } from "../ids";
 import { getStore } from "../store";
-import { MAX_CLOSING_SCRIPT, MAX_SCENE_TEXT, WATERMARK_CORNERS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, type BrandKit } from "../types";
+import { MAX_CLOSING_SCRIPT, MAX_SCENE_TEXT, MAX_WRITING_STYLE, WATERMARK_CORNERS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, type BrandKit } from "../types";
 import { silentProblem } from "../pauses";
 import { graphemes } from "../text";
 import { LOCAL_OWNER } from "../owner-id";
@@ -102,6 +102,8 @@ export const brandKitSchema = z.object({
     .max(MAX_FORCED_TRANSLATIONS)
     .transform((rules) => rules.filter((r, i) => rules.findIndex((u) => u.term.toLowerCase() === r.term.toLowerCase() && (u.language ?? "").toLowerCase() === (r.language ?? "").toLowerCase()) === i))
     .optional(),
+  /** Up to 600 characters on how the brand writes, which the script writer follows; blank is none. */
+  writingStyle: z.string().trim().max(MAX_WRITING_STYLE, `The writing style must be ${MAX_WRITING_STYLE} characters or fewer`).optional(),
   defaultAvatarId: z.string().trim().max(200).optional(),
   defaultVoiceId: z.string().trim().max(200).optional(),
   defaultAspect: z.enum(["16:9", "9:16", "1:1"]).optional(),
@@ -143,6 +145,7 @@ export async function saveBrandKit(input: z.infer<typeof brandKitSchema>, ownerI
     ...(input.pronunciations?.length ? { pronunciations: input.pronunciations.map(({ word, sayAs, language }) => ({ word, sayAs, ...(language ? { language } : {}) })) } : {}),
     ...(input.glossary?.length ? { glossary: input.glossary } : {}),
     ...(input.forcedTranslations?.length ? { forcedTranslations: input.forcedTranslations.map(({ term, translation, language }) => ({ term, translation, ...(language ? { language } : {}) })) } : {}),
+    ...(input.writingStyle ? { writingStyle: input.writingStyle } : {}),
     defaultAvatarId: input.defaultAvatarId || undefined,
     defaultVoiceId: input.defaultVoiceId || undefined,
     defaultAspect: input.defaultAspect,

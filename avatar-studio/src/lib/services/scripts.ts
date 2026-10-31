@@ -22,7 +22,14 @@ export const scriptSchema = z
   })
   .refine((v) => v.topic.length >= 3 || !!v.url, { path: ["topic"], message: "Give a topic or a page URL" });
 
-export async function generateScript(input: z.infer<typeof scriptSchema>, fetchImpl?: FetchLike): Promise<string> {
+/** The brand kit's writing style, for the script writer to follow; none without a kit or a style. */
+export async function writingStyleOf(ownerId: string): Promise<{ style?: string }> {
+  const style = (await getBrandKit(ownerId))?.writingStyle;
+  return style ? { style } : {};
+}
+
+export async function generateScript(input: z.infer<typeof scriptSchema>, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<string> {
+  const style = await writingStyleOf(ownerId);
   if (input.url) {
     let page: { title: string; text: string };
     try {
@@ -31,9 +38,9 @@ export async function generateScript(input: z.infer<typeof scriptSchema>, fetchI
       throw new ValidationError(err instanceof Error ? err.message : "The page could not be read");
     }
     const topic = input.topic.length >= 3 ? input.topic : page.title || "this page";
-    return getScriptProvider().generate({ ...input, topic, source: page.text });
+    return getScriptProvider().generate({ ...input, topic, source: page.text, ...style });
   }
-  return getScriptProvider().generate(input);
+  return getScriptProvider().generate({ ...input, ...style });
 }
 
 export const reviseSchema = z.object({
@@ -49,19 +56,21 @@ export const reviseSchema = z.object({
  * Pause markers ride through the model as tokens it leaves alone, then come back as written. A
  * translation does the same with the owner's brand glossary, so its terms come back untranslated, and
  * with the kit's forced translations for the language, which come back as their fixed translation.
+ * Every other revision follows the kit's writing style; a translation keeps the voice of the script it is given.
  */
 export async function reviseScript(input: z.infer<typeof reviseSchema>, ownerId: string = LOCAL_OWNER): Promise<string> {
   const pauses = protectPauses(input.script);
   let terms: ReturnType<typeof protectTerms> | null = null;
+  const kit = await getBrandKit(ownerId);
   if (input.action === "translate") {
-    const kit = await getBrandKit(ownerId);
     // A translation with no language named goes into English, as the script writer does.
     const forced = forcedFor(kit?.forcedTranslations, input.language ?? "English");
     terms = protectTerms(pauses.text, [...(kit?.glossary ?? []), ...forced.map((r) => r.term)], forced);
   }
+  const style = input.action !== "translate" && kit?.writingStyle ? { style: kit.writingStyle } : {};
   const sent = terms ? terms.text : pauses.text;
   // The model is told what each token stands for in the translation: the term itself, or its fixed translation.
-  const out = await getScriptProvider().revise({ ...input, script: sent, ...(terms?.meanings.length ? { terms: terms.meanings } : {}) });
+  const out = await getScriptProvider().revise({ ...input, script: sent, ...(terms?.meanings.length ? { terms: terms.meanings } : {}), ...style });
   return pauses.restore(terms ? terms.restore(out) : out);
 }
 

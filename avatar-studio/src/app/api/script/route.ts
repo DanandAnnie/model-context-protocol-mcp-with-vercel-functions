@@ -15,7 +15,7 @@ export async function POST(req: Request) {
       return json({ script: await reviseScript(input, owner) });
     }
     const input = scriptSchema.parse(body);
-    return json({ script: await generateScript(input) });
+    return json({ script: await generateScript(input, owner) });
   } catch (err) {
     return errorResponse(err);
   }

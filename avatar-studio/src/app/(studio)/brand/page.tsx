@@ -13,7 +13,7 @@ import { MAX_PRONUNCIATIONS, formatPronunciations, parsePronunciations } from "@
 import { MAX_FORCED_TRANSLATIONS, MAX_FORCED_TRANSLATION_LENGTH, MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH, MIN_GLOSSARY_TERM_LENGTH, formatForcedTranslations, parseForcedTranslations, parseGlossary } from "@/lib/glossary";
 import { LOGO_TYPES, logoDataUrlValid, logoFileType } from "@/lib/logo-types";
 import type { BrandSuggestion } from "@/lib/brand-import";
-import { DEFAULT_CAPTION_STYLE, MAX_CLOSING_SCRIPT, MAX_SCENE_TEXT, backdropIdOf, isDefaultCaptionStyle, type CaptionStyle, footageIdOf, footageLength, footagePath, type FootageJob, type AspectRatio, type Avatar, type Backdrop, type BrandKit, type Resolution, type Voice, type WatermarkCorner } from "@/lib/types";
+import { DEFAULT_CAPTION_STYLE, MAX_CLOSING_SCRIPT, MAX_SCENE_TEXT, MAX_WRITING_STYLE, backdropIdOf, isDefaultCaptionStyle, type CaptionStyle, footageIdOf, footageLength, footagePath, type FootageJob, type AspectRatio, type Avatar, type Backdrop, type BrandKit, type Resolution, type Voice, type WatermarkCorner } from "@/lib/types";
 
 const DEFAULT_PRIMARY = "#4f46e5";
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -58,6 +58,7 @@ export default function BrandPage() {
   const [pronunciations, setPronunciations] = useState("");
   const [glossary, setGlossary] = useState("");
   const [forced, setForced] = useState("");
+  const [writingStyle, setWritingStyle] = useState("");
   const [logoNotice, setLogoNotice] = useState<string | null>(null);
   const [avatarId, setAvatarId] = useState("");
   const [voiceId, setVoiceId] = useState("");
@@ -104,6 +105,7 @@ export default function BrandPage() {
     setPronunciations(formatPronunciations(b.pronunciations ?? []));
     setGlossary((b.glossary ?? []).join("\n"));
     setForced(formatForcedTranslations(b.forcedTranslations));
+    setWritingStyle(b.writingStyle ?? "");
     setAvatarId(b.defaultAvatarId ?? "");
     setVoiceId(b.defaultVoiceId ?? "");
     setAspect(b.defaultAspect ?? "");
@@ -242,6 +244,7 @@ export default function BrandPage() {
           pronunciations: rules,
           glossary: terms,
           forcedTranslations: parsed.rules,
+          writingStyle: writingStyle.trim() || undefined,
           defaultAvatarId: avatarId || undefined,
           defaultVoiceId: voiceId || undefined,
           defaultAspect: aspect || undefined,
@@ -281,6 +284,7 @@ export default function BrandPage() {
       setPronunciations("");
       setGlossary("");
       setForced("");
+      setWritingStyle("");
       setCaptions(false);
       setCaptionStyle(DEFAULT_CAPTION_STYLE);
       setWatermark("");
@@ -522,6 +526,29 @@ export default function BrandPage() {
             </div>
             <CaptionStyleFields value={captionStyle} onChange={setCaptionStyle} />
           </div>
+          <Field
+            label="Writing style"
+            hintId="writing-style-hint"
+            hint="How your brand sounds, in a few sentences: words to use or avoid, how formal, who you speak to. Claude follows it when it writes a script, plans a video in the Video Agent (not one HeyGen's agent directs), or shortens, expands, polishes, or changes the tone of one (a tone you pick when changing the tone wins); translations keep the voice of the script."
+          >
+            <textarea
+              aria-label="Writing style"
+              aria-describedby="writing-style-hint writing-style-count"
+              value={writingStyle}
+              onChange={(e) => setWritingStyle(e.target.value)}
+              rows={3}
+              maxLength={MAX_WRITING_STYLE}
+              placeholder="Warm and plain-spoken, like a neighbour who knows the market. Say “home”, not “property”. No exclamation marks."
+              className={inputClass}
+            />
+            <span id="writing-style-count" className={`mt-1 block text-xs ${writingStyle.length >= MAX_WRITING_STYLE ? "font-medium text-rose-700" : "text-slate-500"}`}>
+              {writingStyle.length >= MAX_WRITING_STYLE ? `Limit reached: ${MAX_WRITING_STYLE} of ${MAX_WRITING_STYLE} characters; anything more is left out.` : `${writingStyle.length} of ${MAX_WRITING_STYLE} characters`}
+            </span>
+            {/* Announced only near the limit, so typing is not read out character by character. */}
+            <span className="sr-only" aria-live="polite">
+              {writingStyle.length >= MAX_WRITING_STYLE ? "Writing style: character limit reached." : writingStyle.length >= MAX_WRITING_STYLE - 50 ? `Writing style: ${MAX_WRITING_STYLE - writingStyle.length} characters left.` : ""}
+            </span>
+          </Field>
           <Field label="Pronunciation" hint="One per line, word = how to say it (for example Nair = Nye-er), with [Language] at the end for one language only (Nair = Naïr [French]); it then applies where the voice speaks that language and beats a rule for every language. Renders say it that way; scripts and captions keep the spelling. Up to 50.">
             <textarea aria-label="Pronunciation" value={pronunciations} onChange={(e) => setPronunciations(e.target.value)} rows={3} placeholder={"Nair = Nye-er\nNair = Naïr [French]\nSaaS = sass"} className={`${inputClass} font-mono text-xs`} />
           </Field>

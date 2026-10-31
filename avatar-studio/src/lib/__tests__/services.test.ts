@@ -2769,7 +2769,7 @@ describe("script from a web page", () => {
     // Without an injected client the writer takes the pinned path, which starts with the same host check.
     await assert.rejects(generateScript(scriptSchema.parse({ url: "http://127.0.0.1/listing", lengthSec: 45 })), /public host/);
 
-    const script = await generateScript(scriptSchema.parse({ url: "https://203.0.113.5/listing", lengthSec: 45 }), fake);
+    const script = await generateScript(scriptSchema.parse({ url: "https://203.0.113.5/listing", lengthSec: 45 }), LOCAL_OWNER, fake);
     assert.match(script, /12 Maple St & more/, "topic defaults to the page title");
     assert.match(script, /quiet street near the park/, "demo writer reads from the page");
     assert.throws(() => scriptSchema.parse({ topic: "" }), /topic or a page URL/);

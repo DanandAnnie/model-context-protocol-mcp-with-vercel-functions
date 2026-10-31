@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { HTML_LIMITED_BOT_UA_RE } from "next/dist/shared/lib/router/utils/html-bots";
 
 const nextConfig: NextConfig = {
   // The repo root carries its own lockfile; this app is its own workspace.
@@ -9,6 +10,9 @@ const nextConfig: NextConfig = {
     remotePatterns: [{ protocol: "https", hostname: "**" }],
   },
   serverExternalPackages: ["@anthropic-ai/sdk", "undici"],
+  // Next's own list of readers that need the metadata in the head, plus the oEmbed consumers that stop reading at
+  // </head> to find a share page's oEmbed link (WordPress among them), so it never streams in later for them.
+  htmlLimitedBots: new RegExp(`${HTML_LIMITED_BOT_UA_RE.source}|WordPress|Iframely|Embedly|Notion|Discourse|Ghost|Mastodon|TelegramBot`, "i"),
   async headers() {
     const common = [
       { key: "X-Content-Type-Options", value: "nosniff" },

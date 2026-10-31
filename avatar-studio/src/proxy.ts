@@ -7,8 +7,9 @@ import { refreshSupabaseSession } from "@/lib/supabase/proxy";
 const PUBLIC_PREFIXES = ["/login", "/demo-consent", "/auth/", "/api/auth/", "/share/", "/talk/", "/api/talk/", "/embed/", "/api/webhooks/", "/api/health", "/_next/", "/favicon"];
 // Caption files back the public share player's subtitle track; the view, watch, and click
 // beacons, the share-password check, and the email gate come from it too. The dubbing provider
-// reads a proofread's corrected lines (behind the job's own secret) without a session.
-const PUBLIC_PATTERNS = [/^\/api\/videos\/[^/]+\/(captions|cover|logo)$/, /^\/api\/videos\/[^/]+\/(view|cta|watch|unlock|lead)$/, /^\/api\/translate\/[^/]+\/srt$/];
+// reads a proofread's corrected lines (behind the job's own secret) without a session, and oEmbed
+// consumers read a share link's embed (exactly that path, nothing under it).
+const PUBLIC_PATTERNS = [/^\/api\/oembed$/, /^\/api\/videos\/[^/]+\/(captions|cover|logo)$/, /^\/api\/videos\/[^/]+\/(view|cta|watch|unlock|lead)$/, /^\/api\/translate\/[^/]+\/srt$/];
 // Only bundled non-private sample assets; public share pages need these without a session.
 const DEMO_ASSETS = new Set(["/demo/render.mp4", "/demo/render.webm", "/demo/poster.svg", "/demo/preview.gif"]);
 

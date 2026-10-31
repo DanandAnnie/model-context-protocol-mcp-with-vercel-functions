@@ -28,10 +28,13 @@ export const dynamic = "force-dynamic";
 /** Link previews (Slack, LinkedIn, iMessage): title, script excerpt, thumbnail, and the video itself once rendered. */
 export async function generateMetadata({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ t?: string | string[] }>;
 }): Promise<Metadata> {
   const { id } = await params;
+  const start = parseStartTime((await searchParams).t);
   let video;
   try {
     video = await getVideo(id, PUBLIC_ACCESS, false);
@@ -46,6 +49,9 @@ export async function generateMetadata({
   const brand = await getBrandKit(video.ownerId ?? LOCAL_OWNER);
   const siteName = brand?.name || "Avatar Studio";
   const base = config.appUrl.replace(/\/$/, "");
+  // Editors and chat apps that read oEmbed find the embed player from the link alone, starting where the link does.
+  const shared = `${base}/share/${video.id}${start !== undefined ? `?t=${start}` : ""}`;
+  const alternates = { types: { "application/json+oembed": `${base}/api/oembed?url=${encodeURIComponent(shared)}&format=json` } };
   // A protected link previews with its title only: no excerpt, thumbnail, or video for the unfurler.
   if (video.shareLocked) {
     const description = "This video is password protected.";
@@ -53,6 +59,7 @@ export async function generateMetadata({
       title: `${video.title} · ${siteName}`,
       description,
       robots: { index: false, follow: false },
+      alternates,
       openGraph: {
         title: video.title,
         description,
@@ -75,6 +82,7 @@ export async function generateMetadata({
   return {
     title: `${video.title} · ${siteName}`,
     description,
+    alternates,
     openGraph: {
       title: video.title,
       description,

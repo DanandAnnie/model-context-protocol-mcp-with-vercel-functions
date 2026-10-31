@@ -144,6 +144,65 @@ test("an offline share link is hidden from the public but not from the owner", a
   await anon.dispose();
 });
 
+test("share links answer oEmbed without a session, and only while the link is up", async ({ request, playwright }) => {
+  expect((await request.post("/api/auth/login", { data: { password: "hunter2" } })).status()).toBe(200);
+  const made = await request.post("/api/videos", { data: { title: 'Tour "Maple" & more', avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "9:16", script: "Hi there, and welcome to the house." } });
+  expect(made.status()).toBe(201);
+  const id = ((await made.json()) as { video: { id: string } }).video.id;
+  const link = `http://localhost:3102/share/${id}`;
+  const anon = await playwright.request.newContext({ baseURL: "http://localhost:3102" });
+  const oembed = (url: string, extra = "") => anon.get(`/api/oembed?url=${encodeURIComponent(url)}${extra}`);
+
+  // The share page names its oEmbed answer in its head, where WordPress, which reads no further, looks for it.
+  const tag = (shared: string) => `<link rel="alternate" type="application/json+oembed" href="http://localhost:3102/api/oembed?url=${encodeURIComponent(shared)}&amp;format=json"/>`;
+  const head = (await (await anon.get(`/share/${id}`, { headers: { "user-agent": "WordPress/6.6; https://blog.example.com" } })).text()).split("</head>")[0];
+  expect(head).toContain(tag(link));
+  // A link that starts at a time names an answer that starts there too.
+  expect(await (await anon.get(`/share/${id}?t=1m5s`)).text()).toContain(tag(`${link}?t=65`));
+  const res = await oembed(`${link}?t=1m5s`, "&maxwidth=180&format=json");
+  expect(res.status()).toBe(200);
+  expect(res.headers()["access-control-allow-origin"]).toBe("*");
+  expect(res.headers()["cache-control"]).toBe("public, max-age=300");
+  const answer = (await res.json()) as Record<string, unknown>;
+  expect(answer).toMatchObject({ version: "1.0", type: "video", title: 'Tour "Maple" & more', provider_url: "http://localhost:3102", width: 180, height: 320 });
+  expect(answer.html).toBe(
+    `<iframe src="http://localhost:3102/share/${id}?embed=1&amp;t=65" width="180" height="320" style="border:0;max-width:100%" allow="fullscreen; picture-in-picture" allowfullscreen title="Tour &quot;Maple&quot; &amp; more"></iframe>`,
+  );
+  // The iframe's page is the embed player, open to anyone and allowed in a frame.
+  const embed = await anon.get(`/share/${id}?embed=1&t=65`);
+  expect(embed.status()).toBe(200);
+  expect(embed.headers()["x-frame-options"]).toBeUndefined();
+
+  const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+  expect((await request.patch(`/api/videos/${id}`, { data: { cover: png } })).status()).toBe(200);
+  const covered = (await (await oembed(link)).json()) as Record<string, unknown>;
+  expect(String(covered.thumbnail_url)).toMatch(new RegExp(`^http://localhost:3102/api/videos/${id}/cover\\?v=\\d+$`));
+  // The cover's own size, read from the picture: the one-pixel PNG uploaded here.
+  expect(covered).toMatchObject({ thumbnail_width: 1, thumbnail_height: 1 });
+  // Behind a password the answer keeps the player, which asks for it, and leaves the cover out.
+  expect((await request.patch(`/api/videos/${id}`, { data: { sharePassword: "letmein1" } })).status()).toBe(200);
+  const locked = (await (await oembed(link)).json()) as Record<string, unknown>;
+  expect(locked.thumbnail_url).toBeUndefined();
+  expect(String(locked.html)).toContain(`/share/${id}?embed=1`);
+  expect((await request.patch(`/api/videos/${id}`, { data: { sharePassword: null } })).status()).toBe(200);
+
+  // A link that is off, another site's, another page, or missing is not answered; XML is not offered.
+  expect((await request.patch(`/api/videos/${id}`, { data: { shareDisabled: true } })).status()).toBe(200);
+  expect((await oembed(link)).status()).toBe(404);
+  expect((await request.patch(`/api/videos/${id}`, { data: { shareDisabled: false } })).status()).toBe(200);
+  expect((await oembed(link)).status()).toBe(200);
+  expect((await oembed(`https://elsewhere.example.com/share/${id}`)).status()).toBe(404);
+  expect((await oembed(`http://localhost:3102/videos/${id}`)).status()).toBe(404);
+  expect((await oembed("http://localhost:3102/share/vid_missing")).status()).toBe(404);
+  expect((await anon.get("/api/oembed")).status()).toBe(400);
+  expect((await oembed(link, "&format=xml")).status()).toBe(501);
+  // A link about to expire is cached no longer than it lasts.
+  expect((await request.patch(`/api/videos/${id}`, { data: { shareExpiresAt: new Date(Date.now() + 60_000).toISOString() } })).status()).toBe(200);
+  expect(Number(/max-age=(\d+)/.exec((await oembed(link)).headers()["cache-control"] ?? "")?.[1])).toBeLessThanOrEqual(60);
+  expect((await oembed(link)).headers()["cache-control"]).toContain("public");
+  await anon.dispose();
+});
+
 test("a password-protected share link opens only with the password or for the owner", async ({ request, playwright }) => {
   expect((await request.post("/api/auth/login", { data: { password: "hunter2" } })).status()).toBe(200);
   // Two scenes, so it has chapters, which follow the captions' rules.

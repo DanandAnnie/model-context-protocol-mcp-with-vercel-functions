@@ -1,0 +1,151 @@
+// Scenes without the presenter: the scene's picture or video fills the frame, narrated by the voice or a clip, or
+// silent (HeyGen v3's whole-frame image and video scenes). What is accepted, stored, kept, and sent.
+// Run with: npm test
+import assert from "node:assert/strict";
+import { beforeEach, describe, it } from "node:test";
+import { MemoryStore } from "../store/memory";
+import { createTemplate, createVideo, templateInputSchema, videoRequestSchema } from "../services";
+import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
+import type { AudioClip, Avatar, Backdrop } from "../types";
+
+beforeEach(() => {
+  globalThis.__avatarStudioStore = new MemoryStore();
+});
+
+const issues = (r: { success: boolean; error?: { issues: unknown } }) => JSON.stringify(r.error?.issues ?? []);
+const image = { type: "image" as const, value: "https://cdn.example.com/kitchen.jpg" };
+const loop = { type: "video" as const, value: "https://cdn.example.com/street.mp4" };
+const request = (scenes: unknown[]) => ({ title: "Tour", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, scenes });
+
+describe("scenes without the presenter", () => {
+  it("need a picture or video to show, on a video and on a template", () => {
+    assert.ok(videoRequestSchema.safeParse(request([{ script: "Hi.", background: image, hidePresenter: true }])).success);
+    assert.ok(videoRequestSchema.safeParse(request([{ script: "Hi.", background: loop, hidePresenter: true }])).success);
+    assert.match(issues(videoRequestSchema.safeParse(request([{ script: "Hi.", background: { type: "color", value: "#000000" }, hidePresenter: true }]))), /give it an image or video background/);
+    assert.equal(videoRequestSchema.safeParse(request([{ script: "Hi.", background: image, hidePresenter: false }])).success, false, "only true is a choice; showing the presenter is the default");
+    assert.match(issues(templateInputSchema.safeParse({ title: "T", scenes: [{ script: "Hi.", background: { type: "color", value: "#fff" }, hidePresenter: true }] })), /image or video background/);
+  });
+
+  it("are stored without a presenter or layout of their own, and kept by a template", async () => {
+    const req = videoRequestSchema.parse(
+      request([
+        { script: "Welcome in.", background: { type: "color", value: "#0f172a" } },
+        { script: "The kitchen was redone last spring.", background: image, hidePresenter: true, avatarId: STOCK_AVATARS[1].id, layout: { scale: 1.2, x: 0.2, y: 0 } },
+      ]),
+    );
+    const video = await createVideo(req, "tourer");
+    assert.equal(video.scenes![1].hidePresenter, true);
+    assert.equal("avatarId" in video.scenes![1] || "avatarName" in video.scenes![1] || "layout" in video.scenes![1], false, "nothing about a presenter is kept for a scene that shows none");
+    assert.equal("hidePresenter" in video.scenes![0], false);
+    const template = await createTemplate({ fromVideoId: video.id }, "tourer");
+    assert.equal(template.scenes[1].hidePresenter, true, "a template keeps it");
+  });
+
+  it("render on HeyGen as whole-frame image and video scenes, narrated, from a clip, or silent", async () => {
+    const { HeyGenAvatarProvider } = await import("../providers/avatar/heygen");
+    const heygen = new HeyGenAvatarProvider("key");
+    const client = (heygen as unknown as { client: Record<string, (...a: unknown[]) => Promise<unknown>> }).client;
+    let sent: { scenes: Array<Record<string, unknown>> } | null = null;
+    client.generateVideo = async (b) => {
+      sent = b as typeof sent;
+      return { video_id: "hg_1" };
+    };
+    const uploads: string[] = [];
+    client.uploadAsset = async (_bytes, _mime, name) => {
+      uploads.push(name as string);
+      return `asset_${uploads.length}`;
+    };
+    const ava = { ...STOCK_AVATARS[0], id: "ava_hg", provider: "heygen", source: "provider" as const };
+    const emma = { ...STOCK_VOICES[0], id: "emma_hg", provider: "heygen" };
+    const office: Backdrop = { id: "bd_office", name: "Office", mimeType: "image/png", bytes: 12, createdAt: "", providerAssetIds: { "heygen:asset": "img_1" } };
+    const clip: AudioClip = { id: "clip_1", name: "Take", mimeType: "audio/wav", bytes: 10, durationSec: 3, createdAt: "", providerAssetIds: { "heygen:asset": "clip_asset" } };
+    const req = videoRequestSchema.parse({
+      ...request([
+        { script: "Welcome in.", background: { type: "color", value: "#0f172a" } },
+        { script: "The kitchen [pause 1s] was redone.", background: image, hidePresenter: true, speed: 0.9 },
+        { script: "[pause 3s]", background: image, hidePresenter: true },
+        { script: "Around the corner.", background: loop, hidePresenter: true },
+        { script: "[pause 2s]", background: loop, hidePresenter: true },
+        { script: "As recorded.", background: { type: "image", value: "/api/backdrops/bd_office" }, hidePresenter: true, audioId: clip.id },
+      ]),
+      avatarId: ava.id,
+      voiceId: emma.id,
+      pitch: 10,
+    });
+    await heygen.createVideo(req, ava, emma, { avatars: { [ava.id]: ava }, voices: { [emma.id]: emma }, clips: { [clip.id]: clip }, backdrops: { [office.id]: office } });
+    const scenes = sent!.scenes;
+    assert.equal(scenes[0].type, "avatar_video", "a scene with the presenter is as before");
+    assert.deepEqual(scenes[1], {
+      type: "image",
+      source: { type: "url", url: image.value },
+      script: 'The kitchen <break time="1s"/> was redone.',
+      voice_id: emma.id,
+      voice_settings: { speed: 0.9, pitch: 10 },
+    });
+    assert.deepEqual(scenes[2], { type: "image", source: { type: "url", url: image.value }, duration: 3 }, "a silent picture is held, with nothing uploaded");
+    assert.deepEqual(scenes[3], { type: "video", source: { type: "url", url: loop.value }, playback: { mode: "loop", mute: true }, script: "Around the corner.", voice_id: emma.id, voice_settings: { speed: 1, pitch: 10 } });
+    assert.deepEqual(scenes[4], { type: "video", source: { type: "url", url: loop.value }, playback: { mode: "loop", mute: true }, audio_asset_id: "asset_1" }, "a silent video runs as long as its silence");
+    assert.deepEqual(scenes[5], { type: "image", source: { type: "asset_id", asset_id: "img_1" }, audio_asset_id: "clip_asset" });
+    assert.deepEqual(uploads, ["silence-2s.wav"], "only the video's silence is uploaded");
+    // A presenter that could not render (a portrait HeyGen is still preparing) does not hold up a video whose scenes
+    // that would show it are all hidden.
+    const pending: Avatar = { id: "ava_custom", name: "Dana", imageUrl: "data:image/png;base64,AA==", source: "custom", provider: "heygen", providerAssetIds: { "heygen:look": "look_1", "heygen:pending": "1" } };
+    const onlyPictures = videoRequestSchema.parse(request([{ script: "Just the view.", background: image, hidePresenter: true }]));
+    await heygen.createVideo(onlyPictures, pending, emma);
+    assert.equal(sent!.scenes[0].type, "image");
+  });
+
+  it("are refused by D-ID, which shows its presenter in every scene", async () => {
+    const { DidAvatarProvider } = await import("../providers/avatar/did");
+    const req = videoRequestSchema.parse(request([{ script: "Just the view.", background: image, hidePresenter: true }]));
+    await assert.rejects(new DidAvatarProvider("key").createVideo(req, STOCK_AVATARS[0], STOCK_VOICES[0]), /D-ID shows its presenter in every scene/);
+  });
+});
+
+describe("scenes without the presenter, and the presenters they leave out", () => {
+  it("do not prepare a presenter no scene shows", async () => {
+    const { MockAvatarProvider } = await import("../providers/avatar/mock");
+    const { createAvatar } = await import("../services");
+    const proto = MockAvatarProvider.prototype as unknown as { prepareAvatar?: (a: Avatar) => Promise<Avatar> };
+    const prepared: string[] = [];
+    proto.prepareAvatar = async (a) => {
+      prepared.push(a.name);
+      return a;
+    };
+    try {
+      const main = await createAvatar({ name: "Main", imageUrl: "https://example.com/main.jpg" }, "shown");
+      const guest = await createAvatar({ name: "Guest", imageUrl: "https://example.com/guest.jpg" }, "shown");
+      const base = { title: "Tour", avatarId: main.id, voiceId: STOCK_VOICES[0].id };
+      await createVideo(videoRequestSchema.parse({ ...base, scenes: [{ script: "Just the view.", background: image, hidePresenter: true }] }), "shown");
+      assert.deepEqual(prepared, [], "every scene leaves the presenter out");
+      await createVideo(videoRequestSchema.parse({ ...base, scenes: [{ script: "The view.", background: image, hidePresenter: true }, { script: "Hi.", background: image, avatarId: guest.id }] }), "shown");
+      assert.deepEqual(prepared, ["Guest"], "only the presenter a scene shows, not the video's own one");
+      await createVideo(videoRequestSchema.parse({ ...base, script: "Hello." }), "shown");
+      assert.deepEqual(prepared, ["Guest", "Main"], "a one-scene video shows its presenter");
+    } finally {
+      delete proto.prepareAvatar;
+    }
+  });
+});
+
+describe("scenes without the presenter, when their picture goes", () => {
+  it("name no presenter of their own once accepted, so none is looked up or prepared", () => {
+    const req = videoRequestSchema.parse(request([{ script: "Just the view.", background: image, hidePresenter: true, avatarId: "av_portrait", layout: { scale: 1.2, x: 0, y: 0 } }, { script: "Hi.", background: image, avatarId: "stock_2" }]));
+    assert.equal("avatarId" in req.scenes![0] || "layout" in req.scenes![0], false);
+    assert.equal(req.scenes![1].avatarId, "stock_2");
+  });
+
+  it("show the presenter again in templates whose image was deleted", async () => {
+    const { plainScene } = await import("../services/backdrops");
+    assert.deepEqual(plainScene({ script: "Hi.", background: image, hidePresenter: true as const }), { script: "Hi.", background: { type: "color", value: "#f1f5f9" } });
+    const { createBackdrop, deleteBackdrop, getTemplate } = await import("../services");
+    const png = `data:image/png;base64,${Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8cfc0f01f0005000201ffa2d1c2d40000000049454e44ae426082", "hex").toString("base64")}`;
+    const b = await createBackdrop({ name: "Deck", image: png }, "owner_t");
+    const t = await createTemplate(templateInputSchema.parse({ title: "Tour", scenes: [{ script: "Just the view.", background: { type: "image", value: `/api/backdrops/${b.id}` }, hidePresenter: true }] }), "owner_t");
+    await deleteBackdrop(b.id, "owner_t");
+    const after = await getTemplate(t.id, "owner_t");
+    assert.deepEqual(after.scenes[0].background, { type: "color", value: "#f1f5f9" });
+    assert.equal("hidePresenter" in after.scenes[0], false, "a colour cannot stand in for the presenter");
+    assert.ok(templateInputSchema.safeParse({ title: "Again", scenes: after.scenes }).success, "the template is still valid");
+  });
+});

@@ -1,0 +1,151 @@
+"use client";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { useMobileNav } from "@/components/MobileNav";
+import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
+import { Clapperboard, Keyboard, LogOut, Search, Sparkles, X } from "lucide-react";
+import { NAV } from "@/components/nav";
+import { isApple, openQuickFind } from "@/components/QuickFind";
+import { openShortcuts } from "@/components/ShortcutsHelp";
+import { useApi } from "@/hooks/useApi";
+import { useCanEdit } from "@/hooks/useCanEdit";
+import type { ProviderStatus } from "@/lib/types";
+
+
+export function Sidebar() {
+  const pathname = usePathname();
+  const router = useRouter();
+  const { data: status } = useApi<ProviderStatus>("/api/status");
+  const canEdit = useCanEdit();
+
+  async function signOut() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.replace("/login");
+    router.refresh();
+  }
+  const { open, setOpen } = useMobileNav();
+  // The shortcut as this browser's keyboard has it (worked out after the first render, which the server also makes).
+  const [shortcut, setShortcut] = useState("Ctrl K");
+  useEffect(() => {
+    if (isApple()) setShortcut("⌘K");
+  }, []);
+
+  // Close the drawer on navigation.
+  useEffect(() => setOpen(false), [pathname, setOpen]);
+
+  // While the drawer is open on a small screen it takes the focus, Escape closes it, and the focus
+  // goes back to whatever opened it (the menu button).
+  const closeButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeButton.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      // A dialog over the drawer (quick find) takes its own Escape; the drawer stays open beneath it.
+      if (e.key === "Escape" && !document.querySelector("dialog[open]")) setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      if (opener?.isConnected) opener.focus();
+    };
+  }, [open, setOpen]);
+
+  return (
+    <>
+      {open && <div className="fixed inset-0 z-40 bg-slate-900/40 lg:hidden" onClick={() => setOpen(false)} />}
+    <aside
+      // Closed, the drawer is off screen and also invisible, so Tab cannot reach its links below lg. Visibility
+      // animates only on the way out (it stays visible while sliding away); opening shows it at once, so it can take the focus.
+      className={`fixed inset-y-0 left-0 z-50 flex h-full w-64 shrink-0 flex-col border-r border-slate-200 bg-white lg:static lg:visible lg:translate-x-0 ${
+        open ? "visible translate-x-0 transition-transform" : "invisible -translate-x-full transition-[transform,visibility]"
+      }`}
+      data-testid="sidebar"
+    >
+      <button ref={closeButton} type="button" aria-label="Close menu" onClick={() => setOpen(false)} className="absolute right-3 top-4 rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 lg:hidden">
+        <X className="h-5 w-5" />
+      </button>
+      <Link href="/home" className="flex items-center gap-2 px-5 py-5">
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white">
+          <Sparkles className="h-4 w-4" />
+        </span>
+        <span className="text-base font-semibold tracking-tight">Avatar Studio</span>
+      </Link>
+
+      <WorkspaceSwitcher />
+      <div className={`px-3 ${canEdit === false ? "hidden" : ""}`}>
+        <Link
+          href="/create"
+          className="mb-4 flex w-full items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700"
+        >
+          <Clapperboard className="h-4 w-4" /> Create video
+        </Link>
+      </div>
+
+      <div className="px-3 pb-2">
+        <button
+          type="button"
+          onClick={openQuickFind}
+          aria-keyshortcuts="Control+K Meta+K"
+          className="flex w-full items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+        >
+          <Search className="h-4 w-4" aria-hidden />
+          <span className="flex-1 text-left">Search</span>
+          <kbd className="rounded border border-slate-200 px-1.5 text-[11px] font-sans text-slate-500" aria-hidden>
+            {shortcut}
+          </kbd>
+        </button>
+      </div>
+
+      <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3">
+        {NAV.map(({ href, label, icon: Icon }) => {
+          const active = pathname === href || pathname.startsWith(`${href}/`);
+          return (
+            <Link
+              key={href}
+              href={href}
+              className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
+                active ? "bg-brand-50 text-brand-700" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+              }`}
+            >
+              <Icon className="h-4 w-4" />
+              {label}
+            </Link>
+          );
+        })}
+      </nav>
+
+      <div className="border-t border-slate-200 p-4">
+        <div className="rounded-lg bg-slate-50 p-3 text-xs">
+          <div className="flex items-center gap-2 font-medium text-slate-700">
+            <span className={`h-2 w-2 rounded-full ${status?.mode === "live" ? "bg-emerald-500" : "bg-amber-400"}`} />
+            {status ? (status.mode === "live" ? "Live providers" : "Demo mode") : "Checking…"}
+          </div>
+          <p className="mt-1 text-slate-500">
+            {status?.mode === "live"
+              ? `Rendering with ${status.avatar}; voices via ${status.tts}.`
+              : "No API keys set. Renders are simulated."}
+          </p>
+          <Link href="/settings" className="mt-2 inline-block font-medium text-brand-600 hover:underline">
+            Configure providers
+          </Link>
+        </div>
+        <button
+          type="button"
+          onClick={openShortcuts}
+          aria-keyshortcuts="Control+/ Meta+/"
+          className="mt-2 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100"
+        >
+          <Keyboard className="h-3.5 w-3.5" aria-hidden /> Keyboard shortcuts
+        </button>
+        {status?.authEnabled && (
+          <button onClick={signOut} className="mt-2 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100">
+            <LogOut className="h-3.5 w-3.5" /> Sign out
+          </button>
+        )}
+      </div>
+    </aside>
+    </>
+  );
+}

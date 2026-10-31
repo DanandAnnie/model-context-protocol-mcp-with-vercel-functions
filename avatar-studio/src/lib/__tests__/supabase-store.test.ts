@@ -1,0 +1,144 @@
+// The Supabase store is exercised against a recording fetch, so the PostgREST requests it
+// builds (filters on the JSON document, ordering, upsert semantics) are checked without a database.
+import assert from "node:assert/strict";
+import { beforeEach, describe, it } from "node:test";
+import { SupabaseStore } from "../store/supabase";
+
+type Call = { method: string; path: string; query: Record<string, string>; headers: Record<string, string>; body: unknown };
+
+let calls: Call[] = [];
+let respond: (call: Call) => unknown = () => [];
+
+const fakeFetch: typeof fetch = async (input, init) => {
+  const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+  const headers: Record<string, string> = {};
+  new Headers(init?.headers).forEach((v, k) => (headers[k.toLowerCase()] = v));
+  const call: Call = {
+    method: init?.method ?? "GET",
+    path: url.pathname,
+    query: Object.fromEntries(url.searchParams),
+    headers,
+    body: init?.body ? JSON.parse(String(init.body)) : undefined,
+  };
+  calls.push(call);
+  return new Response(JSON.stringify(respond(call)), { status: 200, headers: { "content-type": "application/json" } });
+};
+
+const store = new SupabaseStore("https://example.supabase.co", "service-role-key", fakeFetch);
+
+beforeEach(() => {
+  calls = [];
+  respond = () => [];
+});
+
+describe("SupabaseStore", () => {
+  it("says it is shared by every instance, which billing relies on before cancelling a deleted workspace's subscription", () => {
+    assert.equal(store.durable, true);
+  });
+
+  it("lists a kind newest first, filtered by the document's ownerId when given", async () => {
+    respond = () => [{ data: { id: "v1", ownerId: "u1" } }, { data: { id: "v2", ownerId: "u1" } }];
+    const items = await store.list<{ id: string }>("video", "u1");
+    assert.deepEqual(items.map((v) => v.id), ["v1", "v2"]);
+    const [call] = calls;
+    assert.equal(call.method, "GET");
+    assert.equal(call.path, "/rest/v1/studio_items");
+    assert.equal(call.query.select, "data");
+    assert.equal(call.query.kind, "eq.video");
+    assert.equal(call.query["data->>ownerId"], "eq.u1");
+    assert.equal(call.query.order, "created_at.desc,id.asc");
+    assert.deepEqual([call.query.offset, call.query.limit], ["0", "1000"]);
+    assert.equal(call.headers.apikey, "service-role-key");
+
+    await store.list("avatar");
+    assert.equal("data->>ownerId" in calls[1].query, false, "no owner filter without an owner");
+  });
+
+  it("reads a long list page by page, as PostgREST answers at most a page of rows", async () => {
+    const all = Array.from({ length: 2345 }, (_, i) => ({ data: { id: `ml_${i}` } }));
+    respond = (call) => all.slice(Number(call.query.offset), Number(call.query.offset) + Number(call.query.limit));
+    const items = await store.list<{ id: string }>("madelook");
+    assert.equal(items.length, 2345);
+    assert.deepEqual(calls.map((c) => [c.query.offset, c.query.limit]), [["0", "1000"], ["1000", "1000"], ["2000", "1000"]]);
+    assert.equal(new Set(items.map((i) => i.id)).size, 2345, "no row read twice");
+    calls = [];
+    respond = (call) => all.slice(0, 1000).slice(Number(call.query.offset));
+    assert.equal((await store.list("madelook")).length, 1000, "a full last page is followed by one empty read");
+    assert.equal(calls.length, 2);
+  });
+
+  it("writes conditionally with one filtered UPDATE, reporting whether the row still matched", async () => {
+    respond = () => [{ id: "tr_1" }];
+    assert.equal(await store.putIf("translation", { id: "tr_1", updatedAt: "b" }, "updatedAt", "a"), true);
+    const [call] = calls;
+    assert.equal(call.method, "PATCH");
+    assert.equal(call.query.kind, "eq.translation");
+    assert.equal(call.query.id, "eq.tr_1");
+    assert.equal(call.query["data->>updatedAt"], "eq.a");
+    // Without asking for the row back PostgREST answers 204 whether or not it matched, and every write would read as lost.
+    assert.equal(call.query.select, "id");
+    assert.match(call.headers.prefer ?? "", /return=representation/);
+    assert.deepEqual((call.body as { data: unknown }).data, { id: "tr_1", updatedAt: "b" });
+    respond = () => [];
+    assert.equal(await store.putIf("translation", { id: "tr_1", updatedAt: "c" }, "updatedAt", "a"), false, "no row matched: someone wrote first");
+    await assert.rejects(store.putIf("translation", { id: "tr_1" }, "data); drop", "a"), /invalid field name/);
+  });
+
+  it("inserts only when the id is free, with ON CONFLICT DO NOTHING, reporting whether the row went in", async () => {
+    respond = () => [{ id: "usage_u1_2026-10" }];
+    assert.equal(await store.insert("usage", { id: "usage_u1_2026-10", count: 1 }), true);
+    const [call] = calls;
+    assert.equal(call.method, "POST");
+    assert.equal(call.query.on_conflict, "id");
+    assert.match(call.headers.prefer, /resolution=ignore-duplicates/);
+    assert.match(call.headers.prefer, /return=representation/);
+    const row = call.body as { id: string; kind: string; data: unknown };
+    assert.deepEqual([row.id, row.kind, row.data], ["usage_u1_2026-10", "usage", { id: "usage_u1_2026-10", count: 1 }]);
+    respond = () => [];
+    assert.equal(await store.insert("usage", { id: "usage_u1_2026-10", count: 1 }), false, "the id was taken: nothing written");
+  });
+
+  it("gets one document by kind and id, and null when absent", async () => {
+    respond = () => [{ data: { id: "v1", title: "Hi" } }];
+    assert.deepEqual(await store.get("video", "v1"), { id: "v1", title: "Hi" });
+    assert.equal(calls[0].query.id, "eq.v1");
+    assert.equal(calls[0].query.kind, "eq.video");
+    respond = () => [];
+    assert.equal(await store.get("video", "missing"), null);
+  });
+
+  it("upserts the whole document under its id and bumps updated_at", async () => {
+    const item = { id: "v1", ownerId: "u1", title: "Hi" };
+    assert.equal(await store.put("video", item), item);
+    const [call] = calls;
+    assert.equal(call.method, "POST");
+    assert.match(call.headers.prefer ?? "", /resolution=merge-duplicates/);
+    const body = call.body as { id: string; kind: string; data: unknown; updated_at: string };
+    assert.equal(body.id, "v1");
+    assert.equal(body.kind, "video");
+    assert.deepEqual(body.data, item);
+    assert.ok(!Number.isNaN(Date.parse(body.updated_at)));
+  });
+
+  it("removes by kind and id", async () => {
+    await store.remove("video", "v1");
+    assert.equal(calls[0].method, "DELETE");
+    assert.equal(calls[0].query.kind, "eq.video");
+    assert.equal(calls[0].query.id, "eq.v1");
+  });
+
+  it("finds by a top-level document field and rejects unsafe field names", async () => {
+    respond = () => [{ data: { id: "v9", providerJobId: "job_1" } }];
+    const found = await store.findBy<{ id: string }>("video", "providerJobId", "job_1");
+    assert.equal(found?.id, "v9");
+    assert.equal(calls[0].query["data->>providerJobId"], "eq.job_1");
+    assert.equal(calls[0].query.limit, "1");
+    await assert.rejects(store.findBy("video", "hash)=eq.x--", "v"), /invalid field name/);
+  });
+
+  it("surfaces PostgREST errors with the operation name", async () => {
+    const failing = new SupabaseStore("https://example.supabase.co", "k", async () => new Response(JSON.stringify({ message: "permission denied", code: "42501" }), { status: 403, headers: { "content-type": "application/json" } }));
+    await assert.rejects(failing.list("video", "u1"), /supabase list failed: permission denied/);
+    await assert.rejects(failing.put("video", { id: "v1" }), /supabase put failed/);
+  });
+});

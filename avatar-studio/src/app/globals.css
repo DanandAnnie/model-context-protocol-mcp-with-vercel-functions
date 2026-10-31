@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-50: #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-200: #c7d2fe;
+  --color-brand-300: #a5b4fc;
+  --color-brand-400: #818cf8;
+  --color-brand-500: #6366f1;
+  --color-brand-600: #4f46e5;
+  --color-brand-700: #4338ca;
+  --color-brand-800: #3730a3;
+  --color-brand-900: #312e81;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  height: 100%;
+  background: #f8fafc;
+  color: #0f172a;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+@keyframes shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s infinite linear;
+}
+
+/* Subtitle size on the share player, chosen per video (see CaptionStyle). */
+video.cue-small::cue { font-size: 0.8em; }
+video.cue-medium::cue { font-size: 1em; }
+video.cue-large::cue { font-size: 1.4em; }
+/* Subtitle look (CaptionStyle.look); "classic" keeps the browser's white on a translucent box. */
+video.cue-look-bold::cue { font-weight: 700; background-color: rgba(0, 0, 0, 0.92); }
+video.cue-look-yellow::cue { color: #facc15; font-weight: 600; background-color: rgba(0, 0, 0, 0.75); }
+video.cue-look-minimal::cue { background-color: transparent; text-shadow: 0 0 4px #000, 0 1px 2px #000; }
+/* Caption typefaces: system stacks only, so a viewer's player never waits on a font download. */
+video.cue-font-serif::cue { font-family: Georgia, "Times New Roman", serif; }
+video.cue-font-rounded::cue { font-family: ui-rounded, "SF Pro Rounded", "Arial Rounded MT Bold", "Nunito", system-ui, sans-serif; }
+video.cue-font-mono::cue { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }

@@ -30,13 +30,13 @@ export function useListSearch() {
  * The search box over a list, with how many of it match read out as the search changes. It stays on the page once the
  * list has anything in it, so clearing it never takes it (and the focus in it) away.
  */
-export function ListSearch(props: { search: ListSearchState; label: string; placeholder: string; shown: number; total: number; noun: string }) {
+export function ListSearch(props: { search: ListSearchState; label: string; placeholder: string; shown: number; total: number; noun: string; maxLength?: number }) {
   const id = useId();
   const { search, shown, total, noun } = props;
   return (
     <div className="mb-3">
       <div className="flex flex-wrap items-center gap-3">
-        <input type="search" aria-label={props.label} aria-describedby={id} className={`${inputClass} max-w-xs`} placeholder={props.placeholder} value={search.q} onChange={(e) => search.search(e.target.value)} />
+        <input type="search" aria-label={props.label} aria-describedby={id} className={`${inputClass} max-w-xs`} placeholder={props.placeholder} maxLength={props.maxLength} value={search.q} onChange={(e) => search.search(e.target.value)} />
         <span id={id} role="status" className="text-xs text-slate-500" data-testid="list-matches">
           {search.needle && total > 0 ? `${shown} of ${total} ${noun}` : ""}
         </span>

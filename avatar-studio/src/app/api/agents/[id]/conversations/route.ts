@@ -2,6 +2,8 @@ import { errorResponse, json } from "@/lib/api-utils";
 import { toCsv } from "@/lib/csv";
 import { requireEditor, requireOwner } from "@/lib/owner";
 import { clearConversations, listConversations } from "@/lib/services";
+import { MAX_CONVERSATIONS_PER_AGENT, MAX_TRANSCRIPT_QUERY, conversationMatches } from "@/lib/transcripts";
+import { ValidationError } from "@/lib/errors";
 
 /** Conversations in one CSV download; up to this many, newest first. */
 const CSV_LIMIT = 1000;
@@ -10,13 +12,20 @@ const CSV_COLUMNS = ["started", "last_message", "email", "name", "messages", "fi
 export const dynamic = "force-dynamic";
 type Ctx = { params: Promise<{ id: string }> };
 
-/** Transcripts of visitor conversations with one shared presenter (newest first, up to 50); `?format=csv` downloads up to 1000 as a lead list. */
+/**
+ * Transcripts of visitor conversations with one shared presenter (newest first, every visit kept); `?format=csv` downloads up to
+ * 1000 as a lead list, narrowed as the transcripts panel narrows its list by `q` (words, email, or name) and `leads=1`.
+ */
 export async function GET(req: Request, ctx: Ctx) {
   try {
     const { id } = await ctx.params;
     const owner = await requireOwner();
-    if (new URL(req.url).searchParams.get("format") !== "csv") return json({ conversations: await listConversations(id, owner) });
-    const rows = (await listConversations(id, owner, CSV_LIMIT)).map((c) => {
+    const params = new URL(req.url).searchParams;
+    if (params.get("format") !== "csv") return json({ conversations: await listConversations(id, owner, MAX_CONVERSATIONS_PER_AGENT) });
+    const q = params.get("q") ?? "";
+    if (q.length > MAX_TRANSCRIPT_QUERY) throw new ValidationError(`A search is at most ${MAX_TRANSCRIPT_QUERY} characters`);
+    const leadsOnly = params.get("leads") === "1";
+    const rows = (await listConversations(id, owner, CSV_LIMIT)).filter((c) => conversationMatches(c, q, leadsOnly)).map((c) => {
       const asked = c.messages.filter((m) => m.role === "user");
       const replies = c.messages.filter((m) => m.role === "assistant");
       return {

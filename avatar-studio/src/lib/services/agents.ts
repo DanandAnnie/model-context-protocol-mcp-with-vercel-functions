@@ -14,6 +14,7 @@ import { getAvatar } from "./avatars";
 import { listVoices } from "./voices";
 import { getBrandKit } from "./brand";
 import { copyTitle } from "./templates";
+import { MAX_CONVERSATIONS_PER_AGENT } from "../transcripts";
 import { chatSchema } from "./scripts";
 import { fetchPageText } from "../webpage";
 import type { FetchLike } from "../safe-fetch";
@@ -240,7 +241,7 @@ export const talkSchema = z.object({
 
 /** Transcript limits: per visit and per presenter (oldest visits are dropped). */
 export const MAX_TRANSCRIPT_MESSAGES = 40;
-export const MAX_CONVERSATIONS_PER_AGENT = 100;
+export { MAX_CONVERSATIONS_PER_AGENT };
 
 /** A visitor's turn with a public agent. Records the transcript and counts conversations and messages. */
 export async function talkToAgent(id: string, input: z.infer<typeof talkSchema>): Promise<{ reply: string; conversationId: string }> {

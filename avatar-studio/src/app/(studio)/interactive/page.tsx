@@ -8,6 +8,7 @@ import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { ListSearch, useListSearch } from "@/components/ListSearch";
+import { MAX_CONVERSATIONS_PER_AGENT, MAX_TRANSCRIPT_QUERY, conversationTexts } from "@/lib/transcripts";
 import { useLiveAvatar } from "@/hooks/useLiveAvatar";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { api, formatDate } from "@/lib/client";
@@ -84,7 +85,7 @@ export default function InteractivePage() {
   const transcriptSearch = useListSearch();
   const [leadsOnly, setLeadsOnly] = useState(false);
   const shownTranscripts = (transcripts ?? []).filter(
-    (c) => (!leadsOnly || !!c.visitor?.email) && transcriptSearch.matches(c.id, c.visitor?.email, c.visitor?.name, ...c.messages.map((m) => m.content)),
+    (c) => (!leadsOnly || !!c.visitor?.email) && transcriptSearch.matches(c.id, ...conversationTexts(c)),
   );
   const leadCount = (transcripts ?? []).filter((c) => c.visitor?.email).length;
 
@@ -633,8 +634,17 @@ export default function InteractivePage() {
                 <h4 className="text-sm font-semibold text-slate-900">Conversations with {transcriptsFor.name}</h4>
                 <div className="flex gap-2">
                   {transcripts && transcripts.length > 0 && (
-                    <a href={`/api/agents/${transcriptsFor.id}/conversations?format=csv`} download className="text-xs text-brand-700 hover:underline" title="Every conversation with its visitor's email, first question, and last reply">
-                      Download CSV
+                    <a
+                      href={`/api/agents/${transcriptsFor.id}/conversations?${new URLSearchParams({ format: "csv", ...(transcriptSearch.needle ? { q: transcriptSearch.q.trim() } : {}), ...(leadsOnly ? { leads: "1" } : {}) })}`}
+                      download
+                      className="text-xs text-brand-700 hover:underline"
+                      title={
+                        transcriptSearch.needle || leadsOnly
+                          ? "The conversations listed below, as the search and box narrow them, with each visitor's email, first question, and last reply"
+                          : "Every conversation with its visitor's email, first question, and last reply"
+                      }
+                    >
+                      {transcriptSearch.needle || leadsOnly ? "Download matches (CSV)" : "Download CSV"}
                     </a>
                   )}
                   {transcripts && transcripts.length > 0 && (
@@ -647,7 +657,7 @@ export default function InteractivePage() {
                   </button>
                 </div>
               </div>
-              <p className="mt-1 text-xs text-slate-500">Newest first, up to 50 visits; each visit keeps its last 40 messages. Visitors are told conversations may be kept.</p>
+              <p className="mt-1 text-xs text-slate-500">Newest first, up to {MAX_CONVERSATIONS_PER_AGENT} visits; each visit keeps its last 40 messages. Visitors are told conversations may be kept.</p>
               {transcripts === null ? (
                 <p className="mt-3 text-xs text-slate-500">Loading…</p>
               ) : transcripts.length === 0 ? (
@@ -663,6 +673,7 @@ export default function InteractivePage() {
                     shown={shownTranscripts.length}
                     total={leadsOnly ? leadCount : transcripts.length}
                     noun={leadsOnly ? "visits that left an email" : "conversations"}
+                    maxLength={MAX_TRANSCRIPT_QUERY}
                   />
                   <label className="mb-3 flex items-center gap-1.5 text-xs text-slate-700">
                     <input type="checkbox" checked={leadsOnly} onChange={(e) => setLeadsOnly(e.target.checked)} disabled={leadCount === 0 && !leadsOnly} />

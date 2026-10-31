@@ -5371,8 +5371,23 @@ test("a presenter's transcripts can be searched by words or visitor, and narrowe
     await box.fill("no such words");
     await expect(list).toHaveCount(0);
     await expect(page.getByText("Nothing here matches “no such words”.")).toBeVisible();
+    // The download holds what the panel shows: every visit with no search, the matches with one.
+    const download = page.getByTestId("transcripts").getByRole("link", { name: /^Download/ });
+    const csvOf = async () => parseCsv(await (await page.request.get((await download.getAttribute("href"))!)).text()).rows;
+    await box.fill("LAKESIDE");
+    await expect(download).toHaveText("Download matches (CSV)");
+    await expect(download).toHaveAttribute("href", /q=LAKESIDE/);
+    const matched = await csvOf();
+    expect(matched.map((r) => r.email)).toEqual([`buyer-${tag}@example.com`]);
     await box.fill("");
     await expect(list).toHaveCount(2);
+    await expect(download).toHaveText("Download CSV");
+    await expect(download).not.toHaveAttribute("href", /q=/);
+    expect(await csvOf()).toHaveLength(2);
+    // 200 UTF-16 units is the most a search may be.
+    const csv = (q: string) => page.request.get(`/api/agents/${id}/conversations?${new URLSearchParams({ format: "csv", q })}`);
+    expect((await csv("x".repeat(200))).status()).toBe(200);
+    expect((await csv("x".repeat(201))).status()).toBe(400);
     // Only the visit that left an email.
     const leads = page.getByRole("checkbox", { name: "Only visits that left an email (1)" });
     await leads.check();
@@ -5382,6 +5397,8 @@ test("a presenter's transcripts can be searched by words or visitor, and narrowe
     await box.fill("rentals");
     await expect(list).toHaveCount(0);
     await expect(page.getByTestId("list-matches")).toHaveText("0 of 1 visits that left an email");
+    await expect(download).toHaveAttribute("href", /leads=1/);
+    expect(await csvOf()).toHaveLength(0);
     // Opening the panel again starts with the whole list, the search and the box cleared.
     await page.getByTestId("transcripts").getByRole("button", { name: "Close", exact: true }).click();
     await page.getByRole("button", { name: `Transcripts for Transcripts ${tag}` }).click();

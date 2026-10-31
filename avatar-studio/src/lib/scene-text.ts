@@ -1,7 +1,8 @@
 // On-screen text as the editor keeps it: its length limit, counted as stored (the characters a reader sees once the
-// spaces are collapsed) and enforced on an edit by cutting only what was typed or pasted; and the colours offered for it.
+// spaces are collapsed) and enforced on an edit by cutting only what was typed or pasted; the colours offered for it;
+// and its style (position, size, and colour) given to other scenes.
 import { graphemes } from "./text";
-import { MAX_SCENE_TEXT } from "./types";
+import { MAX_SCENE_TEXT, type SceneText } from "./types";
 
 /** On-screen text's length as stored: the characters a reader sees once the spaces are collapsed. */
 export const sceneTextLength = (raw: string) => graphemes(raw.replace(/\s+/g, " ").trim()).length;
@@ -68,3 +69,25 @@ export function contrastRatio(a: string, b: string): number {
 /** Whether text in `color` would hardly show on a scene's plain colour `background` (contrast under 1.5:1). */
 export const textHidden = (color: string, background: string) =>
   /^#[0-9a-f]{6}$/i.test(color) && /^#[0-9a-f]{6}$/i.test(background) && contrastRatio(color, background) < 1.5;
+
+/** Whether two scenes' on-screen text shows the same way: position, size, and colour, an absent one being the default. */
+export const sameTextStyle = (a: SceneText, b: SceneText) =>
+  (a.position ?? "top") === (b.position ?? "top") &&
+  (a.size ?? "medium") === (b.size ?? "medium") &&
+  (a.color ?? "#ffffff").toLowerCase() === (b.color ?? "#ffffff").toLowerCase();
+/** On-screen text with `style`'s position, size, and colour and its own words; a default is stored as absent. */
+export function withTextStyle(overlay: SceneText, style: SceneText): SceneText {
+  const color = style.color?.toLowerCase();
+  return {
+    text: overlay.text,
+    ...(style.position && style.position !== "top" ? { position: style.position } : {}),
+    ...(style.size && style.size !== "medium" ? { size: style.size } : {}),
+    ...(color && color !== "#ffffff" ? { color } : {}),
+  };
+}
+/** The other scenes whose on-screen text would take scene `from`'s style: those with words on screen shown another way. */
+export function textStyleTargets(overlays: readonly (SceneText | undefined)[], from: number): number[] {
+  const style = overlays[from];
+  if (!style?.text.trim()) return [];
+  return overlays.flatMap((o, i) => (i !== from && o?.text.trim() && !sameTextStyle(o, style) ? [i] : []));
+}

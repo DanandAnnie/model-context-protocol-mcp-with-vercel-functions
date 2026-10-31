@@ -788,6 +788,59 @@ test("the brand kit's colours are one-click swatches for a scene's on-screen tex
   }
 });
 
+test("one scene's on-screen text style is given to every scene's text in one undoable change", async ({ page }) => {
+  await page.goto("/create");
+  await page.evaluate(() => localStorage.removeItem("avatar-studio:draft"));
+  await page.reload();
+  const text = page.getByPlaceholder("Shown over the scene for its whole length");
+  const button = page.getByRole("button", { name: "Use this text style on every scene" });
+  await page.getByRole("textbox", { name: "Script", exact: true }).fill("Welcome to 12 Elm Street.");
+  await text.fill("12 Elm Street");
+  await page.getByLabel("Text position").selectOption("bottom");
+  await page.getByLabel("Text size").selectOption("large");
+  await page.getByLabel("Text colour").fill("#000000");
+  // Alone, there is no other scene to give it to.
+  await expect(button).toHaveCount(0);
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
+  await page.getByRole("textbox", { name: "Scene 2 script" }).fill("The kitchen.");
+  // 36 characters fit on one line across a 16:9 frame at the medium size, not the large one.
+  await text.fill("Kitchen redone with new oak cabinets");
+  await page.getByRole("button", { name: "Add scene", exact: true }).click();
+  await page.getByRole("textbox", { name: "Scene 3 script" }).fill("The garden.");
+  await page.getByRole("button", { name: /^Scene 1,/ }).click();
+  await button.click();
+  await expect(page.getByTestId("import-note")).toHaveText(
+    "Scene 2 now shows its on-screen text as scene 1 does. It is too long for one line across a 16:9 frame at this size in scene 2.",
+  );
+  const undo = page.getByRole("button", { name: "Undo use scene 1's text style on every scene" });
+  await expect(undo).toBeFocused();
+  await expect(button).toHaveCount(0);
+  // Scene 2 keeps its words in scene 1's style; scene 3, with no words on screen, is left alone.
+  await page.getByRole("button", { name: /^Scene 2,/ }).click();
+  await expect(text).toHaveValue("Kitchen redone with new oak cabinets");
+  await expect(page.getByLabel("Text position")).toHaveValue("bottom");
+  await expect(page.getByLabel("Text size")).toHaveValue("large");
+  await expect(page.getByLabel("Text colour")).toHaveValue("#000000");
+  await expect(page.getByRole("alert").filter({ hasText: "Too long for one line" })).toBeVisible();
+  await page.getByRole("button", { name: /^Scene 3,/ }).click();
+  await expect(text).toHaveValue("");
+  await undo.click();
+  await page.getByRole("button", { name: /^Scene 2,/ }).click();
+  await expect(page.getByLabel("Text position")).toHaveValue("top");
+  await expect(page.getByLabel("Text size")).toHaveValue("medium");
+  await expect(page.getByLabel("Text colour")).toHaveValue("#ffffff");
+  await page.getByRole("button", { name: "Redo use scene 1's text style on every scene" }).click();
+  await page.getByRole("button", { name: /^Scene 2,/ }).click();
+  await expect(page.getByLabel("Text position")).toHaveValue("bottom");
+  await expect(page.getByLabel("Text size")).toHaveValue("large");
+  await page.getByRole("button", { name: "Undo use scene 1's text style on every scene" }).click();
+  await page.getByRole("button", { name: /^Scene 2,/ }).click();
+  await expect(page.getByLabel("Text position")).toHaveValue("top");
+  // From scene 2, the button offers scene 2's style to scene 1.
+  await expect(button).toBeVisible();
+  await page.evaluate(() => localStorage.removeItem("avatar-studio:draft"));
+});
+
 test("the brand kit's opening scene is set on the brand page and added at the start of a video in one click", async ({ page }) => {
   const before = (await (await page.request.get("/api/brand")).json()).brand as Record<string, unknown> | null;
   try {

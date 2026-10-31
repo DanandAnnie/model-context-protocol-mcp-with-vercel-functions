@@ -31,7 +31,7 @@ import { readPptx, type PptxSlide } from "@/lib/pptx-notes";
 import { readDocx } from "@/lib/docx-text";
 import { portraitSvg } from "@/lib/stock";
 import { findTemplate } from "@/lib/templates";
-import { capSceneText, fitSceneTextEdit, sceneTextLength, textHidden, textSwatches, type TextSwatch } from "@/lib/scene-text";
+import { capSceneText, fitSceneTextEdit, sceneTextLength, textHidden, textStyleTargets, textSwatches, withTextStyle, type TextSwatch } from "@/lib/scene-text";
 import { mergeScenes, moveItem, splitParagraphs, splitScene } from "@/lib/scene-split";
 import { amendLast, emptyHistory, record, redo, undo, type History, type HistoryEntry } from "@/lib/scene-history";
 import { graphemes } from "@/lib/text";
@@ -308,7 +308,7 @@ function CreateInner() {
       return prev.map((s, i) => (i === idx ? withBackground({ ...s, ...patch }, patch.background ?? s.background) : s));
     });
   }
-  // Scene changes (added, removed, moved, duplicated, split, merged, imported, one background given to all) can be undone and redone, with what they
+  // Scene changes (added, removed, moved, duplicated, split, merged, imported, one background or text style given to all) can be undone and redone, with what they
   // changed of the video's own settings; typing is left to the text box's own undo.
   const [sceneHistory, setSceneHistory] = useState<History<EditorState>>(emptyHistory);
   // The video's settings a scene change can touch, as they are now (set where they are declared, below).
@@ -477,9 +477,33 @@ function CreateInner() {
     // The button gives way to a line saying every scene has the background, so the focus goes to Undo, which names it.
     requestAnimationFrame(() => undoButton.current?.focus());
   }
+  /**
+   * Gives the other scenes' on-screen text the selected scene's position, size, and colour, each keeping its own words,
+   * as one change Undo takes back. Scenes without words on screen are left alone.
+   */
+  function applyTextStyleEverywhere() {
+    const from = scenes.indexOf(active);
+    const style = active.overlay;
+    const targets = textStyleTargets(scenes.map((sc) => sc.overlay), from);
+    if (!style || !targets.length) return;
+    const next = scenes.map((sc, i) => (sc.overlay && targets.includes(i) ? { ...sc, overlay: withTextStyle(sc.overlay, style) } : sc));
+    changeScenes(`use scene ${from + 1}'s text style on every scene`, next);
+    // Where the new style no longer works: text too long for one line at its size, or hardly showing on a plain colour.
+    const inScenes = (n: number[]) => scenesPhrase(n).replace(/^S/, "s");
+    const long = targets.filter((i) => !sceneTextFits(next[i].overlay!, aspect));
+    const hidden = targets.filter((i) => next[i].background.type === "color" && textHidden(next[i].overlay!.color ?? "#ffffff", next[i].background.value));
+    setImportNote(
+      `${scenesPhrase(targets)} now ${targets.length > 1 ? "show their" : "shows its"} on-screen text as scene ${from + 1} does.` +
+        (long.length ? ` It is too long for one line across a ${aspect} frame at this size in ${inScenes(long)}.` : "") +
+        (hidden.length ? ` It hardly shows on the background colour of ${inScenes(hidden)}.` : ""),
+    );
+    // The button goes once every scene's text matches, so the focus goes to Undo, which names the change.
+    requestAnimationFrame(() => undoButton.current?.focus());
+  }
   // What the selected scene's presenter, voice, and pace would change on the others, and how the button names it:
   // "this scene's" when it has any of its own, "the video's" when giving it means clearing the others' choices.
   const castFrom = Math.min(activeIdx, scenes.length - 1);
+  const textStyleCount = textStyleTargets(scenes.map((sc) => sc.overlay), castFrom).length;
   const cast = scenes.length > 1 ? castEverywhere(scenes, castFrom) : null;
   const castLabel = cast?.changed.length ? `Use ${cast.own ? "this scene's" : "the video's"} ${partsPhrase(cast.parts)} on every scene` : "";
   /** Gives the other scenes the selected scene's presenter, voice, and pace, where each applies, as one change Undo takes back. */
@@ -2370,6 +2394,8 @@ function CreateInner() {
               scene={scenes.length > 1 ? activeIdx + 1 : undefined}
               swatches={textSwatches(brandData?.brand)}
               backdrop={active.background.type === "color" ? active.background.value : undefined}
+              onStyleEverywhere={textStyleCount ? applyTextStyleEverywhere : undefined}
+              styleBusy={!!slidesProgress}
               disabled={canEdit === false}
               onChange={(overlay) => updateScene(activeIdx, { overlay })}
             />
@@ -2958,9 +2984,10 @@ function FindReplace({
 /**
  * A scene's on-screen text: what it says, and where, how large, and in what colour it shows. Cleared text removes it.
  * With a brand kit, its colours sit beside the colour picker as one-click swatches. On a plain colour background
- * (`backdrop`), text that would hardly show on it is pointed out.
+ * (`backdrop`), text that would hardly show on it is pointed out; while other scenes show their text another way,
+ * `onStyleEverywhere` gives them this one (held while `styleBusy`, as during a slide import).
  */
-function SceneTextFields({ overlay, aspect, captionsAt, scene, swatches = [], backdrop, disabled, onChange }: { overlay?: SceneText; aspect: AspectRatio; captionsAt?: CaptionStyle["position"]; scene?: number; swatches?: TextSwatch[]; backdrop?: string; disabled: boolean; onChange: (overlay: SceneText | undefined) => void }) {
+function SceneTextFields({ overlay, aspect, captionsAt, scene, swatches = [], backdrop, disabled, onChange, onStyleEverywhere, styleBusy }: { overlay?: SceneText; aspect: AspectRatio; captionsAt?: CaptionStyle["position"]; scene?: number; swatches?: TextSwatch[]; backdrop?: string; disabled: boolean; onChange: (overlay: SceneText | undefined) => void; onStyleEverywhere?: () => void; styleBusy?: boolean }) {
   const id = useId();
   const text = overlay?.text ?? "";
   const shown = text.replace(/\s+/g, " ").trim();
@@ -3030,6 +3057,17 @@ function SceneTextFields({ overlay, aspect, captionsAt, scene, swatches = [], ba
                 );
               })}
             </span>
+          )}
+          {onStyleEverywhere && (
+            <Button
+              variant="secondary"
+              className="px-2.5 py-1 text-xs"
+              onClick={onStyleEverywhere}
+              disabled={disabled || styleBusy}
+              title={disabled ? undefined : styleBusy ? "Wait for the import to finish" : "Give the other scenes' on-screen text this position, size, and colour, each keeping its own words; Undo takes it back"}
+            >
+              Use this text style on every scene
+            </Button>
           )}
         </div>
       )}

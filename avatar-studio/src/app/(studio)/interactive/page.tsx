@@ -12,7 +12,7 @@ import { ListSearch, useListSearch } from "@/components/ListSearch";
 import { MAX_CONVERSATIONS_PER_AGENT, MAX_TRANSCRIPT_MESSAGES, MAX_TRANSCRIPT_QUERY, conversationMatches, conversationTexts, mostAsked } from "@/lib/transcripts";
 import { useLiveAvatar } from "@/hooks/useLiveAvatar";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
-import { api, formatDate } from "@/lib/client";
+import { ApiError, api, formatDate } from "@/lib/client";
 import { MAX_AGENT_NOTES, type Agent, type Avatar, type BrandKit, type Conversation, type ProviderStatus, type Voice } from "@/lib/types";
 
 /** The whole setup form, so a new presenter's draft can be put back after an edit, and an edit compared with what it loaded. */
@@ -95,20 +95,32 @@ export default function InteractivePage() {
   const transcriptsLoad = useRef(0);
   const transcriptSearch = useListSearch();
   const [leadsOnly, setLeadsOnly] = useState(false);
+  const [pendingOnly, setPendingOnly] = useState(false);
+  /** Visits whose follow-up mark is on its way; a change to one of them waits until it lands. */
+  const [markingVisits, setMarkingVisits] = useState<ReadonlySet<string>>(new Set());
+  /** Visits with a save under way, and the mark last asked for on each (sent once the save under way lands). */
+  const savingMarks = useRef(new Set<string>());
+  const wantedMarks = useRef(new Map<string, boolean>());
+  /** Visits marked while "not followed up" is on, kept in view until the box changes so the focus and the list stay put. */
+  const [keptInView, setKeptInView] = useState<ReadonlySet<string>>(new Set());
   /** The "Most asked" question picked, which narrows the list to exactly the visits that opened with it. */
   const [opening, setOpening] = useState<{ key: string; question: string } | null>(null);
   // The box and the picked question narrow by the rule the CSV download uses; the search box narrows what is left.
-  const transcriptPool = (transcripts ?? []).filter((c) => conversationMatches(c, "", leadsOnly, opening?.key));
+  // A visit marked while "not followed up" is on is still counted as one the box leaves, until the box changes.
+  const boxLeaves = (c: Conversation, key?: string) =>
+    conversationMatches(c, "", leadsOnly, key, pendingOnly) || (keptInView.has(c.id) && conversationMatches(c, "", leadsOnly, key));
+  const transcriptPool = (transcripts ?? []).filter((c) => boxLeaves(c, opening?.key));
   const shownTranscripts = transcriptPool.filter((c) => transcriptSearch.matches(c.id, ...conversationTexts(c)));
   const leadCount = (transcripts ?? []).filter((c) => c.visitor?.email).length;
-  // Counted over what the "left an email" box leaves, so a chip's number is what picking it shows.
-  const boxed = (transcripts ?? []).filter((c) => conversationMatches(c, "", leadsOnly));
+  // Counted over what the "left an email" and "not followed up" boxes leave, so a chip's number is what picking it shows.
+  const boxed = (transcripts ?? []).filter((c) => boxLeaves(c));
+  const pendingCount = (transcripts ?? []).filter((c) => !c.followedUpAt).length;
   const topQuestions = mostAsked(boxed);
   // A picked question the box has pushed out of the top five stays on show, with its count there, so it can be unpicked.
   if (opening && !topQuestions.some((t) => t.key === opening.key)) {
     topQuestions.push({ ...opening, count: boxed.filter((c) => conversationMatches(c, "", false, opening.key)).length });
   }
-  const narrowed = !!transcriptSearch.needle || leadsOnly || !!opening;
+  const narrowed = !!transcriptSearch.needle || leadsOnly || pendingOnly || !!opening;
   /** Where the focus goes once a question is unpicked: the list's heading, or the email box when no question is left. */
   const unpickFocus = () => mostAskedHeading.current ?? leadsBox.current;
 
@@ -118,6 +130,8 @@ export default function InteractivePage() {
     setTranscripts(null);
     transcriptSearch.search("");
     setLeadsOnly(false);
+    setPendingOnly(false);
+    setKeptInView(new Set());
     setOpening(null);
     setTranscriptErr(null);
     setSaveErr(null);
@@ -135,6 +149,61 @@ export default function InteractivePage() {
   function closeTranscripts() {
     transcriptsLoad.current++;
     setTranscriptsFor(null);
+  }
+
+  /**
+   * Marks one visit followed up, or clears the mark, at once on the page and then on the server; the list keeps its order.
+   * A change made while a save is under way is shown at once and sent when that save lands, so the last click wins.
+   */
+  async function markFollowedUp(agent: Agent, c: Conversation, followedUp: boolean) {
+    const load = transcriptsLoad.current;
+    const put = (next: Conversation) => setTranscripts((now) => now?.map((x) => (x.id === c.id ? next : x)) ?? now);
+    setTranscriptErr(null);
+    if (pendingOnly && followedUp) setKeptInView((now) => new Set(now).add(c.id));
+    const shown: Conversation = { ...c };
+    if (followedUp) shown.followedUpAt = c.followedUpAt ?? new Date().toISOString();
+    else delete shown.followedUpAt;
+    put(shown);
+    wantedMarks.current.set(c.id, followedUp);
+    if (savingMarks.current.has(c.id)) return;
+    savingMarks.current.add(c.id);
+    setMarkingVisits((now) => new Set(now).add(c.id));
+    // What the server holds: the visit as it was shown before the first click, then each save's answer.
+    let held = c;
+    try {
+      for (;;) {
+        const want = wantedMarks.current.get(c.id) ?? followedUp;
+        const { conversation } = await api<{ conversation: Conversation }>(`/api/agents/${encodeURIComponent(agent.id)}/conversations/${encodeURIComponent(c.id)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ followedUp: want }),
+        });
+        held = conversation;
+        if (load !== transcriptsLoad.current || wantedMarks.current.get(c.id) === want) break;
+      }
+      if (load === transcriptsLoad.current) put(held);
+    } catch (e) {
+      if (load === transcriptsLoad.current) {
+        if (e instanceof ApiError && e.status === 404) {
+          // Gone (deleted elsewhere, or rolled over): it leaves the list, as a delete would, and the focus its box had goes
+          // to the panel's heading.
+          setTranscripts((now) => now?.filter((x) => x.id !== c.id) ?? now);
+          focusAfterRender(() => (document.activeElement && document.activeElement !== document.body ? null : transcriptsHeading.current));
+        } else {
+          // Not saved: the box goes back to what the server holds.
+          put(held);
+        }
+        setTranscriptErr(e instanceof Error ? e.message : "Could not save the follow-up");
+      }
+    } finally {
+      savingMarks.current.delete(c.id);
+      wantedMarks.current.delete(c.id);
+      setMarkingVisits((now) => {
+        const next = new Set(now);
+        next.delete(c.id);
+        return next;
+      });
+    }
   }
 
   /**
@@ -738,12 +807,12 @@ export default function InteractivePage() {
                 <div className="flex gap-2">
                   {transcripts && transcripts.length > 0 && (
                     <a
-                      href={`/api/agents/${transcriptsFor.id}/conversations?${new URLSearchParams({ format: "csv", ...(transcriptSearch.needle ? { q: transcriptSearch.q.trim() } : {}), ...(leadsOnly ? { leads: "1" } : {}), ...(opening ? { first: opening.key } : {}) })}`}
+                      href={`/api/agents/${transcriptsFor.id}/conversations?${new URLSearchParams({ format: "csv", ...(transcriptSearch.needle ? { q: transcriptSearch.q.trim() } : {}), ...(leadsOnly ? { leads: "1" } : {}), ...(pendingOnly ? { pending: "1" } : {}), ...(opening ? { first: opening.key } : {}) })}`}
                       download
                       className="text-xs text-brand-700 hover:underline"
                       title={
                         narrowed
-                          ? "The conversations listed below, as the search, the email box, and the picked question narrow them, with each visitor's email, first question, and last reply"
+                          ? "The conversations listed below, as the search, the two boxes, and the picked question narrow them, with each visitor's email, first question, last reply, and follow-up"
                           : "Every conversation with its visitor's email, first question, and last reply"
                       }
                     >
@@ -776,18 +845,26 @@ export default function InteractivePage() {
                     placeholder="Search words, emails, or names"
                     shown={shownTranscripts.length}
                     total={transcriptPool.length}
-                    noun={
-                      opening
-                        ? `visits that opened with the picked question${leadsOnly ? " and left an email" : ""}`
-                        : leadsOnly
-                          ? "visits that left an email"
-                          : "conversations"
-                    }
+                    noun={(() => {
+                      const kinds = [opening && "opened with the picked question", leadsOnly && "left an email", pendingOnly && (transcriptPool.some((c) => c.followedUpAt) ? "were not followed up when the box was ticked" : "are not followed up")].filter(Boolean);
+                      return kinds.length ? `visits that ${kinds.join(" and ")}` : "conversations";
+                    })()}
                     maxLength={MAX_TRANSCRIPT_QUERY}
                   />
                   <label className="mb-3 flex items-center gap-1.5 text-xs text-slate-700">
                     <input ref={leadsBox} type="checkbox" checked={leadsOnly} onChange={(e) => setLeadsOnly(e.target.checked)} disabled={leadCount === 0 && !leadsOnly} />
                     Only visits that left an email ({leadCount})
+                  </label>
+                  <label className="-mt-2 mb-3 flex items-center gap-1.5 text-xs text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={pendingOnly}
+                      onChange={(e) => {
+                        setPendingOnly(e.target.checked);
+                        setKeptInView(new Set());
+                      }}
+                    />
+                    Only visits not followed up ({pendingCount})
                   </label>
                   {topQuestions.length > 0 && (
                     <div className="mb-3" data-testid="most-asked">
@@ -846,7 +923,8 @@ export default function InteractivePage() {
                       <details className="rounded-lg border border-slate-200 bg-white">
                         <summary className="cursor-pointer select-none px-3 py-2 text-xs text-slate-700">
                           {formatDate(c.startedAt)} · {c.messages.length} {c.messages.length === 1 ? "message" : "messages"}
-                          {c.visitor?.email && <span className="ml-1 rounded bg-emerald-100 px-1.5 py-0.5 font-medium text-emerald-800">{c.visitor.name ? `${c.visitor.name} · ` : ""}{c.visitor.email}</span>} · <span className="text-slate-500">{c.messages[0]?.content.slice(0, 80)}</span>
+                          {c.visitor?.email && <span className="ml-1 rounded bg-emerald-100 px-1.5 py-0.5 font-medium text-emerald-800">{c.visitor.name ? `${c.visitor.name} · ` : ""}{c.visitor.email}</span>}
+                          {c.followedUpAt && <span className="ml-1 rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-700">followed up</span>} · <span className="text-slate-500">{c.messages[0]?.content.slice(0, 80)}</span>
                         </summary>
                         <ol className="space-y-1.5 border-t border-slate-100 px-3 py-2 text-xs">
                           {c.messages.map((m, i) => (
@@ -865,6 +943,19 @@ export default function InteractivePage() {
                           >
                             Download (.txt)
                           </a>
+                          {canEdit !== false && (
+                            <label className="mr-auto flex items-center gap-1.5 text-xs text-slate-700">
+                              {/* Left enabled while it saves, so it keeps the keyboard focus; a change made then shows at once and is sent when the save lands. */}
+                              <input
+                                type="checkbox"
+                                checked={!!c.followedUpAt}
+                                aria-busy={markingVisits.has(c.id)}
+                                onChange={(e) => markFollowedUp(transcriptsFor, c, e.target.checked)}
+                              />
+                              Followed up{c.followedUpAt ? ` ${formatDate(c.followedUpAt)}` : ""}
+                              <span className="sr-only">, conversation from {formatDate(c.startedAt)}</span>
+                            </label>
+                          )}
                           {canEdit !== false && (
                             <button
                               type="button"

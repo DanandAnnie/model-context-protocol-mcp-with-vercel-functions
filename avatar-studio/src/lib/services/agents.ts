@@ -15,7 +15,7 @@ import { listVoices } from "./voices";
 import { getBrandKit } from "./brand";
 import { copyTitle } from "./templates";
 import { cutToFit, tidyTitle } from "./videos";
-import { MAX_CONVERSATIONS_PER_AGENT, MAX_TRANSCRIPT_MESSAGES } from "../transcripts";
+import { MAX_CONVERSATIONS_PER_AGENT, MAX_TRANSCRIPT_MESSAGES, lastActivity } from "../transcripts";
 import { bumpViewsByDay } from "../insights";
 import { chatSchema } from "./scripts";
 import { fetchPageText } from "../webpage";
@@ -350,7 +350,7 @@ async function updateConversation(first: Conversation, change: (c: Conversation)
 async function pruneConversations(agent: Agent) {
   const all = (await getStore().list<Conversation>("conversation", agent.ownerId)).filter((c) => c.agentId === agent.id);
   if (all.length <= MAX_CONVERSATIONS_PER_AGENT) return;
-  all.sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+  all.sort((a, b) => lastActivity(a).localeCompare(lastActivity(b)) || a.updatedAt.localeCompare(b.updatedAt));
   for (const c of all.slice(0, all.length - MAX_CONVERSATIONS_PER_AGENT)) await getStore().remove("conversation", c.id);
 }
 
@@ -358,7 +358,28 @@ async function pruneConversations(agent: Agent) {
 export async function listConversations(agentId: string, ownerId: string = LOCAL_OWNER, limit = 50): Promise<Conversation[]> {
   await getAgent(agentId, ownerId);
   const all = (await getStore().list<Conversation>("conversation", ownerId)).filter((c) => c.agentId === agentId);
-  return all.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, limit);
+  return all.sort((a, b) => lastActivity(b).localeCompare(lastActivity(a)) || b.updatedAt.localeCompare(a.updatedAt)).slice(0, limit);
+}
+
+/**
+ * Marks one visit followed up (marking again keeps the first time; clearing then marking stamps a new one), or clears the
+ * mark. Written as every visit write is, through `updateConversation`, so a turn or an email landing at the same time is
+ * re-read rather than written over, and neither can drop the mark; the list orders by `lastActivity`, so the visit does
+ * not move.
+ */
+export async function setFollowedUp(agentId: string, conversationId: string, followedUp: boolean, ownerId: string = LOCAL_OWNER): Promise<Conversation> {
+  await getAgent(agentId, ownerId);
+  const row = await getStore().get<Conversation>("conversation", conversationId);
+  if (!row || row.agentId !== agentId || row.ownerId !== ownerId) throw new NotFoundError("Conversation not found");
+  const written = await updateConversation(row, (c) => {
+    const next: Conversation = { ...c };
+    if (followedUp) next.followedUpAt = c.followedUpAt ?? nowIso();
+    else delete next.followedUpAt;
+    return next;
+  });
+  if (written === "gone") throw new NotFoundError("Conversation not found");
+  if (written === "busy") throw new ConflictError("The conversation is busy; try again");
+  return written;
 }
 
 /** One visit's transcript with its presenter, for the owner; `NotFoundError` for a visit the presenter does not have. */

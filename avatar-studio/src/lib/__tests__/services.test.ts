@@ -34,6 +34,7 @@ import {
   clearConversations,
   deleteConversation,
   getConversation,
+  setFollowedUp,
   MAX_TRANSCRIPT_MESSAGES,
   captureLead,
   listVoices,
@@ -2679,6 +2680,15 @@ describe("shared agents", () => {
     assert.equal(capped.messages.length, MAX_TRANSCRIPT_MESSAGES, "transcript is capped per visit");
     // One visit at a time: only its owner's, only under its own presenter, and gone for good.
     await assert.rejects(deleteConversation(agent.id, first.conversationId, "u2"), /not found/);
+    // A follow-up mark: set once (marking again keeps its time), cleared on demand, and the visit keeps its place.
+    const before = (await getConversation(agent.id, first.conversationId, "u1")).conversation;
+    const marked = await setFollowedUp(agent.id, first.conversationId, true, "u1");
+    assert.ok(marked.followedUpAt);
+    assert.ok(marked.updatedAt > before.updatedAt, "marking moves the version, as every write does");
+    assert.equal((await setFollowedUp(agent.id, first.conversationId, true, "u1")).followedUpAt, marked.followedUpAt);
+    assert.equal((await setFollowedUp(agent.id, first.conversationId, false, "u1")).followedUpAt, undefined);
+    await assert.rejects(setFollowedUp(agent.id, first.conversationId, true, "u2"), /not found/);
+    await assert.rejects(setFollowedUp(agent.id, "conv_nope", true, "u1"), /Conversation not found/);
     // One visit, read by its owner under its own presenter only.
     assert.equal((await getConversation(agent.id, first.conversationId, "u1")).conversation.messages[2].content, "When?");
     await assert.rejects(getConversation(agent.id, first.conversationId, "u2"), /not found/);
@@ -2719,6 +2729,15 @@ describe("shared agents", () => {
       assert.equal(both.visitor?.email, "both@example.com", "the email that landed meanwhile is kept");
       assert.equal(both.messages.at(-2)?.content, "One more", "and so is the turn");
       assert.ok(both.updatedAt > before.updatedAt, "each write moves the version on");
+      // A follow-up mark landing between a turn's read and its write is kept, and a mark does not move the visit.
+      const order = (await listConversations(agent.id, "u1")).map((c) => c.id);
+      slipIn(() => setFollowedUp(agent.id, conv, true, "u1"));
+      await talkToAgent(agent.id, { conversationId: conv, messages: [{ role: "user", content: "And now?" }] });
+      const kept = (await store.get<Conversation>("conversation", conv))!;
+      assert.ok(kept.followedUpAt, "the mark survives the turn");
+      assert.equal(kept.messages.at(-2)?.content, "And now?");
+      await setFollowedUp(agent.id, order.at(-1)!, true, "u1");
+      assert.deepEqual((await listConversations(agent.id, "u1")).map((c) => c.id).slice(1), order.filter((id) => id !== conv), "marking the oldest visit leaves it last");
       slipIn(() => deleteConversation(agent.id, conv, "u1"));
       await talkToAgent(agent.id, { conversationId: conv, messages: [{ role: "user", content: "Still there?" }] });
       assert.equal(await store.get("conversation", conv), null, "a visit deleted meanwhile is not written back");

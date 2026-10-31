@@ -2,7 +2,7 @@
 // Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { MAX_OPENING_KEY, MAX_TRANSCRIPT_MESSAGES, OPENING_KEY_CHARS, columns, conversationMatches, conversationTexts, mostAsked, openingKey, transcriptText } from "../transcripts";
+import { MAX_OPENING_KEY, MAX_TRANSCRIPT_MESSAGES, OPENING_KEY_CHARS, columns, conversationMatches, conversationTexts, lastActivity, mostAsked, openingKey, transcriptText } from "../transcripts";
 import { graphemes } from "../text";
 import type { Conversation } from "../types";
 
@@ -89,6 +89,13 @@ describe("picking a most asked question", () => {
     assert.ok(performance.now() - started < 100, "openingKey stays linear in a run of marks");
     assert.equal(openingKey(visit(["?!…"])), null);
     assert.equal(openingKey(visit([])), null);
+  });
+
+  it("leaves out visits followed up when only those not followed up are asked for", () => {
+    const done = { ...visit(["Hours?"], { email: "a@example.com" }), followedUpAt: at };
+    const open = visit(["Hours?"], { email: "b@example.com" });
+    assert.deepEqual([done, open].filter((c) => conversationMatches(c, "", true, undefined, true)), [open]);
+    assert.equal([done, open].filter((c) => conversationMatches(c, "", false)).length, 2);
   });
 
   it("is combined with the search and the email box", () => {
@@ -314,5 +321,16 @@ describe("a visit as text", () => {
     const persian = "\u0645\u0646 \u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645 \u0628\u062F\u0627\u0646\u0645 \u0644\u0637\u0641\u0627\u064B \u067E\u0627\u0633\u062E \u062F\u0647\u06CC\u062F ".repeat(6).trim();
     const text = transcriptText("Dana", { ...c, messages: [{ role: "user", content: persian, at: c.startedAt }] });
     assert.equal(text.split("\n").slice(6, -1).join(" ").replace("[2026-10-31 18:04:05 UTC] Visitor: ", "").replace(/\s+/g, " "), persian);
+  });
+});
+
+describe("lastActivity", () => {
+  const base = { id: "c1", agentId: "a1", ownerId: "u1", startedAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-03T00:00:00.000Z" } as Conversation;
+  it("is the last message's own time, not when the visit was last written", () => {
+    const c = { ...base, messages: [{ role: "user", content: "hi", at: "2026-01-01T00:00:05.000Z" }, { role: "assistant", content: "hello", at: "2026-01-01T00:00:09.000Z" }] } as Conversation;
+    assert.equal(lastActivity(c), "2026-01-01T00:00:09.000Z");
+  });
+  it("falls back to the start for a visit with no messages", () => {
+    assert.equal(lastActivity({ ...base, messages: [] }), base.startedAt);
   });
 });

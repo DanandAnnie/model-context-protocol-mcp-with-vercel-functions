@@ -1412,6 +1412,8 @@ export interface Conversation {
   messages: Array<{ role: "user" | "assistant"; content: string; at: string }>;
   /** Contact details the visitor chose to leave. */
   visitor?: { email: string; name?: string };
+  /** When the owner marked the visit followed up; absent until then. */
+  followedUpAt?: string;
   startedAt: string;
   updatedAt: string;
 }

@@ -1,6 +1,7 @@
-import { errorResponse, json } from "@/lib/api-utils";
+import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { requireEditor, requireOwner } from "@/lib/owner";
-import { deleteConversation, getConversation } from "@/lib/services";
+import { deleteConversation, getConversation, setFollowedUp } from "@/lib/services";
+import { z } from "zod";
 import { transcriptText } from "@/lib/transcripts";
 import { graphemes, wellFormed } from "@/lib/text";
 
@@ -41,6 +42,20 @@ export async function GET(req: Request, ctx: Ctx) {
         "Cache-Control": "no-store",
       },
     });
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+const patchSchema = z.object({ followedUp: z.boolean() });
+
+/** Marks one visit followed up (`{ followedUp: true }`) or clears the mark (editors) → `{ conversation }`. */
+export async function PATCH(req: Request, ctx: Ctx) {
+  try {
+    const { id, conversationId } = await ctx.params;
+    const owner = await requireEditor();
+    const { followedUp } = patchSchema.parse(await readJson(req));
+    return json({ conversation: await setFollowedUp(id, conversationId, followedUp, owner) });
   } catch (err) {
     return errorResponse(err);
   }

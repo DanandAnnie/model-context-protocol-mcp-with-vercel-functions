@@ -2,6 +2,15 @@ import { foldTerm } from "./glossary";
 import { graphemes, wellFormed } from "./text";
 import type { Conversation } from "./types";
 
+/**
+ * When a visit last had a message: what the transcripts list orders by (newest first) and the oldest are pruned by. It is
+ * not `updatedAt`, which every write moves (it is the row's version), so leaving an email or a follow-up mark does not
+ * move a visit.
+ */
+export function lastActivity(c: Conversation): string {
+  return c.messages.at(-1)?.at ?? c.startedAt;
+}
+
 /** Visits kept per presenter (the oldest are dropped past it); the transcripts panel lists them all. */
 export const MAX_CONVERSATIONS_PER_AGENT = 100;
 
@@ -43,11 +52,12 @@ export function openingKey(c: Conversation): string | null {
 export const MAX_OPENING_KEY = OPENING_KEY_CHARS * 2;
 
 /**
- * Whether a visit passes the transcripts panel's search, its "left an email" box, and the "Most asked" question picked
- * (`opening`, an `openingKey`), compared as the panel compares them, so a download holds the same visits the panel shows.
+ * Whether a visit passes the transcripts panel's search, its "left an email" and "not followed up" boxes, and the "Most
+ * asked" question picked (`opening`, an `openingKey`), compared as the panel compares them, so a download holds the same visits the panel shows.
  */
-export function conversationMatches(c: Conversation, query: string, leadsOnly: boolean, opening?: string): boolean {
+export function conversationMatches(c: Conversation, query: string, leadsOnly: boolean, opening?: string, pendingOnly = false): boolean {
   if (leadsOnly && !c.visitor?.email) return false;
+  if (pendingOnly && c.followedUpAt) return false;
   if (opening && openingKey(c) !== opening) return false;
   const needle = foldTerm(query.trim());
   return !needle || conversationTexts(c).some((t) => !!t && foldTerm(t).includes(needle));

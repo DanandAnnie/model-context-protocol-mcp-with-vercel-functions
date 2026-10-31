@@ -5042,7 +5042,7 @@ test("shared presenter: save from the interactive page, talk publicly, turn off"
   const csvRes = await page.request.get(`/api/agents/${id}/conversations?format=csv`);
   expect(csvRes.headers()["content-type"]).toContain("text/csv");
   const csv = await csvRes.text();
-  expect(csv.replace(/^\uFEFF/, "").split("\r\n")[0]).toBe('"started","last_message","email","name","messages","first_question","last_reply"');
+  expect(csv.replace(/^\uFEFF/, "").split("\r\n")[0]).toBe('"started","last_message","email","name","messages","first_question","last_reply","followed_up"');
   expect(csv).toContain(`sam-${tag}@example.com`);
   expect(csv).toContain('"Hi there"');
   await page.getByRole("button", { name: `Turn off link for Dana ${tag}` }).click();
@@ -5565,6 +5565,84 @@ test("a shared presenter's row shows its visits per day for the last two weeks",
     await expect(visits).toHaveAttribute("data-total", "2");
     await expect(visits).toContainText("2 in 14 days");
     await expect(visits.getByRole("img", { name: "Visits per day for the last 14 days, 2 in total" })).toBeVisible();
+  } finally {
+    await page.request.delete(`/api/agents/${id}`);
+  }
+});
+
+test("a visit can be marked followed up, listed apart, and carried in the download", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const res = await page.request.post("/api/agents", { data: { name: `Follow up ${tag}`, avatarId: "stock_1" } });
+  const { id } = (await res.json()).agent as { id: string };
+  try {
+    const headers = { "x-forwarded-for": `198.51.100.${Math.floor(Math.random() * 200) + 1}` };
+    for (const content of [`Call me ${tag}`, `Just looking ${tag}`]) {
+      expect((await page.request.post(`/api/talk/${id}`, { data: { messages: [{ role: "user", content }] }, headers })).status()).toBe(200);
+    }
+    await page.goto("/interactive");
+    await page.getByRole("button", { name: `Transcripts for Follow up ${tag}` }).click();
+    const list = page.getByTestId("transcript-list").locator("> li");
+    await expect(list).toHaveCount(2);
+    const call = list.filter({ hasText: `Call me ${tag}` });
+    await call.locator("summary").click();
+    await call.getByRole("checkbox", { name: /^Followed up/ }).check();
+    await expect(call.locator("summary")).toContainText("followed up");
+    // The mark does not move the visit, and the box lists the rest.
+    await expect(list.nth(1)).toContainText(`Call me ${tag}`);
+    await page.getByLabel("Only visits not followed up (1)").check();
+    await expect(list).toHaveCount(1);
+    await expect(list.first()).toContainText(`Just looking ${tag}`);
+    const download = page.getByTestId("transcripts").getByRole("link", { name: "Download matches (CSV)" });
+    await expect(download).toHaveAttribute("href", /pending=1/);
+    const pending = parseCsv(await (await page.request.get((await download.getAttribute("href"))!)).text());
+    expect(pending.rows).toHaveLength(1);
+    const all = parseCsv(await (await page.request.get(`/api/agents/${id}/conversations?format=csv`)).text());
+    expect(all.columns).toContain("followed_up");
+    expect(all.rows.find((r) => r.first_question === `Call me ${tag}`)!.followed_up).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(all.rows.find((r) => r.first_question === `Just looking ${tag}`)!.followed_up).toBe("");
+    // Marked with the box on, a visit stays in view, its box keeping the focus, until the box changes.
+    const looking = list.filter({ hasText: `Just looking ${tag}` });
+    await looking.locator("summary").click();
+    const lookingBox = looking.getByRole("checkbox", { name: /^Followed up/ });
+    await lookingBox.focus();
+    await page.keyboard.press("Space");
+    await expect(lookingBox).toBeChecked();
+    await expect(list).toHaveCount(1);
+    await expect(lookingBox).toBeFocused();
+    await expect(lookingBox).toHaveAccessibleName(/, conversation from /);
+    // A search's count names a visit kept in view for what it is.
+    const search = page.getByLabel(`Search conversations with Follow up ${tag}`);
+    await search.fill(tag);
+    await expect(page.getByTestId("transcripts")).toContainText("1 of 1 visits that were not followed up when the box was ticked");
+    await search.fill("");
+    await expect(lookingBox).toBeChecked();
+    await expect.poll(async () => parseCsv(await (await page.request.get(`/api/agents/${id}/conversations?format=csv&pending=1`)).text()).rows.length).toBe(0);
+    // Cleared again; the box stays usable (and focused) with nothing left to follow up.
+    const pendingBox = page.getByLabel("Only visits not followed up (0)");
+    await pendingBox.focus();
+    await page.keyboard.press("Space");
+    await expect(pendingBox).not.toBeChecked();
+    await expect(pendingBox).toBeFocused();
+    // Hidden by the box and shown again, the visit opens closed.
+    await expect(call.locator("details")).not.toHaveAttribute("open", /.*/);
+    await call.locator("summary").click();
+    await call.getByRole("checkbox", { name: /^Followed up/ }).uncheck();
+    await expect(call.locator("summary")).not.toContainText("followed up");
+    // A second click while the first is saving is shown at once and sent after it, so the last click wins.
+    await page.route(`**/api/agents/${id}/conversations/*`, async (route) => {
+      if (route.request().method() === "PATCH") await new Promise((r) => setTimeout(r, 400));
+      await route.continue();
+    });
+    const callBox = call.getByRole("checkbox", { name: /^Followed up/ });
+    await callBox.check();
+    await expect(callBox).toHaveAttribute("aria-busy", "true");
+    await callBox.uncheck();
+    await expect(callBox).toHaveAttribute("aria-busy", "false");
+    await expect(callBox).not.toBeChecked();
+    const after = parseCsv(await (await page.request.get(`/api/agents/${id}/conversations?format=csv`)).text());
+    expect(after.rows.find((r) => r.first_question === `Call me ${tag}`)!.followed_up).toBe("");
+    expect((await page.request.patch(`/api/agents/${id}/conversations/conv_nope`, { data: { followedUp: true } })).status()).toBe(404);
+    expect((await page.request.patch(`/api/agents/${id}/conversations/conv_nope`, { data: { followedUp: "yes" } })).status()).toBe(400);
   } finally {
     await page.request.delete(`/api/agents/${id}`);
   }

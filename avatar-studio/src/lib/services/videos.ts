@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName, getScriptProvider } from "../providers";
 import { getStore } from "../store";
-import { EMPTY_TRASH_MAX, EMPTY_WATCH, MAX_AGENT_MESSAGE, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
+import { EMPTY_TRASH_MAX, EMPTY_WATCH, RESTORE_ALL_MAX, MAX_AGENT_MESSAGE, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
 import type { AgentMessage, AudioClip, Avatar, Backdrop, Background, CaptionCue, DirectedMedia, DirectedScene, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
 import { buildCues } from "../captions";
 import { captionDurationSec, sceneBoundsMs, videoChapters, type Timed } from "../chapters";
@@ -828,7 +828,7 @@ export const emptyTrashSchema = z.object({
   expected: z.number().int().min(0),
 });
 
-/** Past this, "Empty trash" starts no more deletes and reports the rest as remaining, so the request ends in time. */
+/** Past this, "Empty trash" (and "Restore all") starts no more videos and reports the rest as remaining, so the request ends in time. */
 const EMPTY_TRASH_DEADLINE_MS = 60_000;
 
 /**
@@ -871,6 +871,43 @@ export async function emptyTrash(input: z.infer<typeof emptyTrashSchema>, ownerI
     remaining = after.filter((v) => !!v.deletedAt && !purgeDue(v, end)).length;
   } catch (err) {
     console.error(`counting the trash of ${ownerId} after emptying it failed:`, err);
+  }
+  return { done, remaining };
+}
+
+/**
+ * Brings the owner's whole trash back to the library, up to `RESTORE_ALL_MAX` videos a call (the longest-trashed
+ * first, the ones nearest their purge), each as a single restore would, from the record as stored under its lock. A video past retention is
+ * gone and stays so; one deleted for good meanwhile is skipped; a restore that fails is logged and left in the trash.
+ * `done` counts the videos this call brought back, `remaining` what the trash still shows.
+ */
+export async function restoreAll(ownerId: string = LOCAL_OWNER, now: () => number = Date.now): Promise<{ done: number; remaining: number }> {
+  const started = now();
+  const trashed = (await getStore().list<Video>("video", ownerId))
+    .filter((v) => !!v.deletedAt && !purgeDue(v, started))
+    .sort((a, b) => a.deletedAt!.localeCompare(b.deletedAt!) || a.createdAt.localeCompare(b.createdAt));
+  let done = 0;
+  for (const video of trashed.slice(0, RESTORE_ALL_MAX)) {
+    if (now() - started > EMPTY_TRASH_DEADLINE_MS) break;
+    try {
+      let changed = false;
+      await updateKeepingCounters(video.id, ownerId, (stored) => {
+        changed = !!stored.deletedAt;
+        return restoredFrom(stored);
+      });
+      if (changed) done += 1;
+    } catch (err) {
+      // Deleted for good (or past retention) since the trash was read: nothing to bring back.
+      if (!(err instanceof NotFoundError)) console.error(`restoring the trash of ${ownerId} failed for one video:`, err);
+    }
+  }
+  let remaining = Math.max(0, trashed.length - done);
+  try {
+    const after = await getStore().list<Video>("video", ownerId);
+    const end = now();
+    remaining = after.filter((v) => !!v.deletedAt && !purgeDue(v, end)).length;
+  } catch (err) {
+    console.error(`counting the trash of ${ownerId} after restoring it failed:`, err);
   }
   return { done, remaining };
 }
@@ -1901,15 +1938,18 @@ export async function deleteVideo(id: string, ownerId: string = LOCAL_OWNER, per
   return { title: next.title, changed };
 }
 
+/** The record a restore writes: the stored one out of the trash, or the stored one itself when it is not in the trash. */
+function restoredFrom(stored: Video): Video {
+  if (!stored.deletedAt) return stored;
+  const { deletedAt: _gone, ...rest } = stored;
+  void _gone;
+  return { ...rest, updatedAt: nowIso() };
+}
+
 /** Brings a trashed video back to the library; a video that is not in the trash is returned as is. */
 export function restoreVideo(id: string, ownerId: string = LOCAL_OWNER): Promise<Video> {
   // Past its retention it is as good as gone (the helper says not found), whether or not a listing has purged it yet.
-  return updateKeepingCounters(id, ownerId, (stored) => {
-    if (!stored.deletedAt) return stored;
-    const { deletedAt: _gone, ...rest } = stored;
-    void _gone;
-    return { ...rest, updatedAt: nowIso() };
-  });
+  return updateKeepingCounters(id, ownerId, restoredFrom);
 }
 
 /**

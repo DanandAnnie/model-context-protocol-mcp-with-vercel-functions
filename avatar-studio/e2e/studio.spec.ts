@@ -8877,3 +8877,50 @@ test("Empty trash deletes every trashed video for good and keeps the library", a
   // Once empty, the endpoint has nothing to do.
   expect(await (await page.request.post("/api/videos/empty-trash", { data: { expected: 0 } })).json()).toEqual({ done: 0, remaining: 0 });
 });
+
+test("Restore all brings every trashed video back to the library", async ({ page }) => {
+  const trashCount = async () => (await (await page.request.get("/api/videos?trash=true&limit=1")).json()).trashed as number;
+  // Start from an empty trash, so the count below is this test's own.
+  for (let left = await trashCount(), i = 0; left > 0 && i < 20; left = await trashCount(), i++) {
+    expect((await page.request.post("/api/videos/empty-trash", { data: { expected: left } })).ok()).toBe(true);
+  }
+  const tag = Date.now().toString(36);
+  const folder = `Back ${tag}`;
+  const [a, b] = [await createVideoViaApi(page, `Restored A ${tag}`), await createVideoViaApi(page, `Restored B ${tag}`)];
+  expect((await page.request.patch(`/api/videos/${a.id}`, { data: { folder, starred: true } })).ok()).toBe(true);
+  for (const v of [a, b]) expect((await page.request.delete(`/api/videos/${v.id}`)).ok()).toBe(true);
+  expect(await trashCount()).toBe(2);
+  await page.goto("/videos");
+  await expect(page.getByRole("button", { name: "Restore all" })).toHaveCount(0);
+  await page.getByTestId("trash-toggle").click();
+  // A search narrows the view, not what comes back.
+  await page.getByLabel("Search videos").fill(`Restored A ${tag}`);
+  await expect(page.locator(`a[href="/videos/${b.id}"]`)).toHaveCount(0);
+  const dialogs: string[] = [];
+  page.once("dialog", (d) => {
+    dialogs.push(d.message());
+    void d.dismiss();
+  });
+  await page.getByRole("button", { name: "Restore all" }).click();
+  await expect.poll(() => dialogs.length).toBe(1);
+  expect(dialogs[0]).toBe("Bring all 2 videos in the trash back to the library? Their share links and embeds work again as they were set.");
+  // Dismissed: nothing came back.
+  await expect(page.getByTestId("trash-toggle")).toBeEnabled();
+  expect(await trashCount()).toBe(2);
+  page.once("dialog", (d) => void d.accept());
+  await page.getByRole("button", { name: "Restore all" }).click();
+  await expect(page.getByText("The trash is empty")).toBeVisible();
+  await expect(page.getByTestId("trash-toggle")).toHaveText("Trash");
+  await expect(page.getByTestId("trash-toggle")).toBeFocused();
+  // Both are back, the first in its folder with its star.
+  const back = (await (await page.request.get(`/api/videos/${a.id}`)).json()).video as { deletedAt?: string; folder?: string; starred?: boolean };
+  expect([back.deletedAt, back.folder, back.starred]).toEqual([undefined, folder, true]);
+  expect((await (await page.request.get(`/api/videos/${b.id}`)).json()).video.deletedAt).toBeUndefined();
+  await page.getByTestId("trash-toggle").click();
+  await page.getByLabel("Search videos").fill(`Restored B ${tag}`);
+  await expect(page.locator(`a[href="/videos/${b.id}"]`)).toBeVisible();
+  // The activity feed counts them in one line, and a second call has nothing to do.
+  const events = (await (await page.request.get("/api/activity")).json()).events as Array<{ kind: string; count?: number }>;
+  expect(events[0]).toMatchObject({ kind: "video.restored", count: 2 });
+  expect(await (await page.request.post("/api/videos/restore-all")).json()).toEqual({ done: 0, remaining: 0 });
+});

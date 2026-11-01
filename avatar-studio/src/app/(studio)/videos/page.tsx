@@ -9,7 +9,7 @@ import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } f
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit, useWorkspaceRole } from "@/hooks/useCanEdit";
 import type { VideoPage, VideoQuery } from "@/lib/services/videos";
-import { EMPTY_TRASH_MAX, MAX_RETRY_AT_ONCE, SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, TRASH_RETENTION_DAYS, type VideoStatus } from "@/lib/types";
+import { EMPTY_TRASH_MAX, MAX_RETRY_AT_ONCE, RESTORE_ALL_MAX, SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, TRASH_RETENTION_DAYS, type VideoStatus } from "@/lib/types";
 
 const STATUSES: Array<"all" | VideoStatus> = ["all", "processing", "completed", "failed"];
 type SortKey = VideoQuery["sort"];
@@ -29,7 +29,7 @@ function localMinute(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links" | "password" | "nopassword" | "settings" | "retry" | "star" | "unstar" | "empty";
+type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links" | "password" | "nopassword" | "settings" | "retry" | "star" | "unstar" | "empty" | "restoreall";
 
 export default function VideosPage() {
   return (
@@ -317,6 +317,36 @@ function VideosInner() {
     focusTrashToggle.current = false;
     trashToggleRef.current?.focus();
   }, [busy]);
+
+  // Everything in the trash back to the library, whatever the filters show. Nothing is lost, but their share links come
+  // back online with them, so the count (read fresh) is confirmed first.
+  async function restoreTheTrash() {
+    setBusy("restoreall");
+    setBulkErr(null);
+    try {
+      const { trashed: count } = await api<VideoPage>("/api/videos?trash=true&limit=1");
+      if (!count) {
+        focusTrashToggle.current = true;
+        return void (await refetch());
+      }
+      const one = count === 1;
+      const over = count > RESTORE_ALL_MAX ? ` Only ${RESTORE_ALL_MAX} come back at a time; restore all again for the rest.` : "";
+      if (!window.confirm(`Bring ${one ? "the 1 video" : `all ${count} videos`} in the trash back to the library? ${one ? "Its share link and embeds work" : "Their share links and embeds work"} again as they were set.${over}`)) {
+        if (count !== trashed) await refetch();
+        return;
+      }
+      const { remaining } = await api<{ done: number; remaining: number }>("/api/videos/restore-all", { method: "POST" });
+      await refetch();
+      if (remaining) setBulkErr(`${remaining === 1 ? "1 video is" : `${remaining} videos are`} still in the trash; restore all again to bring ${remaining === 1 ? "it" : "them"} back.`);
+      else focusTrashToggle.current = true;
+    } catch (e) {
+      // Some may have come back before the request failed; show where things stand.
+      await refetch();
+      setBulkErr(e instanceof Error ? e.message : "Could not restore the trash");
+    } finally {
+      setBusy(null);
+    }
+  }
 
   // Everything in the trash, whatever the filters show. The count is read fresh (a teammate may have trashed more since
   // the page loaded) and sent along, so the server refuses rather than delete videos the confirm never counted.
@@ -687,14 +717,19 @@ function VideosInner() {
               </button>
             </div>
           ) : (
-            <Button variant="secondary" className="px-3 py-1.5 text-xs" onClick={() => setSelecting(true)} disabled={busy === "empty"}>
+            <Button variant="secondary" className="px-3 py-1.5 text-xs" onClick={() => setSelecting(true)} disabled={busy === "empty" || busy === "restoreall"}>
               <CheckSquare className="h-3.5 w-3.5" /> Select
             </Button>
           )}
           {trash && !selecting && trashed > 0 && canEdit && (
-            <Button variant="danger" className="px-3 py-1.5 text-xs" onClick={() => void emptyTheTrash()} disabled={busy !== null && busy !== "empty"} loading={busy === "empty"} title="Deletes every video in the trash for good, whatever the filters show">
-              <Trash2 className="h-3.5 w-3.5" /> Empty trash
-            </Button>
+            <>
+              <Button variant="secondary" className="px-3 py-1.5 text-xs" onClick={() => void restoreTheTrash()} disabled={busy !== null && busy !== "restoreall"} loading={busy === "restoreall"} title="Brings every video in the trash back to the library, whatever the filters show; their share links work again">
+                <ArchiveRestore className="h-3.5 w-3.5" /> Restore all
+              </Button>
+              <Button variant="danger" className="px-3 py-1.5 text-xs" onClick={() => void emptyTheTrash()} disabled={busy !== null && busy !== "empty"} loading={busy === "empty"} title="Deletes every video in the trash for good, whatever the filters show">
+                <Trash2 className="h-3.5 w-3.5" /> Empty trash
+              </Button>
+            </>
           )}
           {STATUSES.map((s) => (
             <button
@@ -709,7 +744,7 @@ function VideosInner() {
           <button
             type="button"
             ref={trashToggleRef}
-            disabled={busy === "empty"}
+            disabled={busy === "empty" || busy === "restoreall"}
             onClick={() => {
               setTrash((t) => !t);
               // Trashed links answer "not found" whatever they were set to, so the share filter has no place there.

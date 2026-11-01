@@ -5042,7 +5042,7 @@ test("shared presenter: save from the interactive page, talk publicly, turn off"
   const csvRes = await page.request.get(`/api/agents/${id}/conversations?format=csv`);
   expect(csvRes.headers()["content-type"]).toContain("text/csv");
   const csv = await csvRes.text();
-  expect(csv.replace(/^\uFEFF/, "").split("\r\n")[0]).toBe('"started","last_message","email","name","messages","first_question","last_reply","followed_up","note"');
+  expect(csv.replace(/^\uFEFF/, "").split("\r\n")[0]).toBe('"started","last_message","email","name","messages","first_question","last_reply","followed_up","note","helpful","not_helpful"');
   expect(csv).toContain(`sam-${tag}@example.com`);
   expect(csv).toContain('"Hi there"');
   await page.getByRole("button", { name: `Turn off link for Dana ${tag}` }).click();
@@ -5643,6 +5643,74 @@ test("a visit can be marked followed up, listed apart, and carried in the downlo
     expect(after.rows.find((r) => r.first_question === `Call me ${tag}`)!.followed_up).toBe("");
     expect((await page.request.patch(`/api/agents/${id}/conversations/conv_nope`, { data: { followedUp: true } })).status()).toBe(404);
     expect((await page.request.patch(`/api/agents/${id}/conversations/conv_nope`, { data: { followedUp: "yes" } })).status()).toBe(400);
+  } finally {
+    await page.request.delete(`/api/agents/${id}`);
+  }
+});
+
+test("a visitor rates the presenter's replies, and the owner sees the ratings in the transcripts and downloads", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const res = await page.request.post("/api/agents", { data: { name: `Rated ${tag}`, avatarId: "stock_1" } });
+  const { id } = (await res.json()).agent as { id: string };
+  try {
+    // The studio's try-it chat has nothing to rate.
+    await page.goto("/interactive");
+    await page.getByLabel("Your message").fill("Hi there");
+    await page.getByRole("button", { name: "Send" }).click();
+    await expect(page.locator("[data-testid=chat-log] [data-role=assistant]")).toHaveCount(1);
+    await expect(page.getByRole("group", { name: "Rate this reply" })).toHaveCount(0);
+    // On the talk page, each reply after the greeting can be rated, changed, and taken back.
+    await page.setExtraHTTPHeaders({ "x-forwarded-for": `198.51.100.${Math.floor(Math.random() * 200) + 1}` });
+    await page.goto(`/talk/${id}`);
+    await page.getByLabel("Your message").fill(`Hours ${tag}`);
+    await page.getByRole("button", { name: "Send" }).click();
+    const ratings = page.getByRole("group", { name: "Rate this reply" });
+    await expect(ratings).toHaveCount(1);
+    // The first reply's thumbs; a second reply below brings its own.
+    const helpful = ratings.first().getByRole("button", { name: "Helpful", exact: true });
+    const unhelpful = ratings.first().getByRole("button", { name: "Not helpful" });
+    await unhelpful.click();
+    await expect(unhelpful).toHaveAttribute("aria-pressed", "true");
+    await helpful.click();
+    await expect(helpful).toHaveAttribute("aria-pressed", "true");
+    await expect(unhelpful).toHaveAttribute("aria-pressed", "false");
+    // A rating made while the next reply is on its way stays on the page when that reply lands.
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    await page.route(`**/api/talk/${id}`, async (route) => {
+      if (route.request().method() === "POST") await held;
+      await route.continue();
+    });
+    await page.getByLabel("Your message").fill(`Sundays ${tag}`);
+    await page.getByRole("button", { name: "Send" }).click();
+    await unhelpful.click();
+    await expect(unhelpful).toHaveAttribute("aria-pressed", "true");
+    release();
+    await expect(ratings).toHaveCount(2);
+    await expect(unhelpful).toHaveAttribute("aria-pressed", "true");
+    await page.unroute(`**/api/talk/${id}`);
+    await helpful.click();
+    await expect(helpful).toHaveAttribute("aria-pressed", "true");
+    const csv = async () => parseCsv(await (await page.request.get(`/api/agents/${id}/conversations?format=csv`)).text()).rows[0];
+    await expect.poll(async () => (await csv()).helpful).toBe("1");
+    expect((await csv()).not_helpful).toBe("0");
+    const [visit] = (await (await page.request.get(`/api/agents/${id}/conversations`)).json()).conversations as Array<{ id: string; messages: Array<{ at: string }> }>;
+    expect(await (await page.request.get(`/api/agents/${id}/conversations/${visit.id}?format=txt`)).text()).toMatch(/\] Presenter \(rated helpful\): /);
+    // The owner sees it on the reply and in the panel's count.
+    await page.goto("/interactive");
+    await page.getByRole("button", { name: `Transcripts for Rated ${tag}` }).click();
+    await expect(page.getByTestId("reply-ratings")).toHaveText("Visitors rated 1 reply helpful and 0 not helpful.");
+    const row = page.getByTestId("transcript-list").locator("> li").first();
+    await row.locator("summary").click();
+    await expect(row.getByText("helpful", { exact: true })).toBeVisible();
+    await expect(row.getByText("not helpful", { exact: true })).toHaveCount(0);
+    // Taken back on the talk page; a reply not in the visit, or a visit of another presenter, is a 404.
+    await page.goto(`/talk/${id}`);
+    const headers = { "x-forwarded-for": `198.51.100.${Math.floor(Math.random() * 200) + 1}` };
+    expect((await page.request.post(`/api/talk/${id}/rate`, { data: { conversationId: visit.id, at: visit.messages[1].at, rating: null }, headers })).status()).toBe(200);
+    await expect.poll(async () => (await csv()).helpful).toBe("0");
+    expect((await page.request.post(`/api/talk/${id}/rate`, { data: { conversationId: visit.id, at: "2020-01-01T00:00:00.000Z", rating: "up" }, headers })).status()).toBe(404);
+    expect((await page.request.post(`/api/talk/${id}/rate`, { data: { conversationId: visit.id, at: visit.messages[1].at, rating: "meh" }, headers })).status()).toBe(400);
   } finally {
     await page.request.delete(`/api/agents/${id}`);
   }

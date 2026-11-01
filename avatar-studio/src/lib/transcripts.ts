@@ -227,7 +227,7 @@ function block(lead: string, text: string): string[] {
 /**
  * One visit as a plain-text file: who it was with, when it started and when its last message was, the visitor's name and
  * email when left, when it was marked followed up and the owner's note when there are, then each message with its time
- * and speaker (`Visitor` or `Presenter`). Every value is cut into lines
+ * and speaker (`Visitor` or `Presenter`, with the visitor's rating of a reply when they gave one). Every value is cut into lines
  * of at most 76 columns, every line after its first indented, and kept to plain characters, so in a viewer at least that
  * wide nothing a visitor typed can start a line of the file or pass for a heading or another speaker. Times are UTC, as
  * the server has no reader's zone.
@@ -252,7 +252,8 @@ export function transcriptText(agentName: string, c: Conversation): string {
     head.push(`Only the ${MAX_TRANSCRIPT_MESSAGES} newest messages were kept; earlier ones are not shown.`);
   }
   const body = c.messages.map((m) => {
-    const prefix = `[${utc(m.at)}] ${m.role === "user" ? "Visitor" : "Presenter"}: `;
+    const rated = m.rating === "up" ? " (rated helpful)" : m.rating === "down" ? " (rated not helpful)" : "";
+    const prefix = `[${utc(m.at)}] ${m.role === "user" ? "Visitor" : `Presenter${rated}`}: `;
     // Blank lines are left out, so a message's text runs on in indented lines with no gap that could set part of it apart.
     const lines = m.content.split(LINE_BREAK).map((line) => clean(line).trim()).filter((line, i) => i === 0 || line);
     return lines.flatMap((line, i) => block(i === 0 ? prefix : INDENT, line)).join("\n");

@@ -1414,7 +1414,8 @@ export interface Conversation {
   /** The agent's owner, so transcripts list with the owner index. */
   ownerId: string;
   agentId: string;
-  messages: Array<{ role: "user" | "assistant"; content: string; at: string }>;
+  /** `rating` on a presenter reply is the visitor's thumbs up or down on it, when they gave one. */
+  messages: Array<{ role: "user" | "assistant"; content: string; at: string; rating?: "up" | "down" }>;
   /** Contact details the visitor chose to leave. */
   visitor?: { email: string; name?: string };
   /** When the owner marked the visit followed up; absent until then. */

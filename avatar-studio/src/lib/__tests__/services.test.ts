@@ -36,6 +36,7 @@ import {
   getConversation,
   setFollowedUp,
   updateVisit,
+  rateReply,
   MAX_TRANSCRIPT_MESSAGES,
   captureLead,
   listVoices,
@@ -52,6 +53,8 @@ import {
   videoRequestSchema,
 } from "../services";
 import { MockAvatarProvider } from "../providers/avatar/mock";
+import { MockScriptProvider } from "../providers/script/mock";
+import { setScriptProvider } from "../providers";
 import { API_KEY_PREFIX, MAX_API_KEYS, createApiKey, listApiKeys, ownerForApiKey, revokeApiKey } from "../api-keys";
 import { createHmac } from "node:crypto";
 import { parseCsv, toCsv } from "../csv";
@@ -2775,6 +2778,56 @@ describe("shared agents", () => {
     await assert.rejects(createAgent(agentSchema.parse({ name: "X", avatarId: "stock_1", voiceId: "nope" }), "u1"), /not available/);
     await deleteAgent(agent.id, "u1");
     await assert.rejects(publicAgent(agent.id), /not available/);
+  });
+});
+
+describe("reply ratings", () => {
+  it("lets a visitor rate a reply in their own visit, change or take it back, and keeps it through later turns", async () => {
+    const agent = await createAgent(agentSchema.parse({ name: "Rated", avatarId: "stock_1" }), "u1");
+    const first = await talkToAgent(agent.id, { messages: [{ role: "user", content: "Hours?" }] });
+    const at = first.at;
+    assert.ok(at, "a recorded reply is named by its time");
+    const stored = (await getConversation(agent.id, first.conversationId, "u1")).conversation;
+    assert.equal(stored.messages.at(-1)?.at, at);
+    await rateReply(agent.id, { conversationId: first.conversationId, at, rating: "up" });
+    const reply = () => getConversation(agent.id, first.conversationId, "u1").then((r) => r.conversation.messages.at(1));
+    assert.equal((await reply())?.rating, "up");
+    assert.equal((await getConversation(agent.id, first.conversationId, "u1")).conversation.messages[0].rating, undefined, "only the reply");
+    await rateReply(agent.id, { conversationId: first.conversationId, at, rating: "down" });
+    assert.equal((await reply())?.rating, "down");
+    // A later turn keeps the rating; null takes it back.
+    await talkToAgent(agent.id, { conversationId: first.conversationId, messages: [{ role: "user", content: "And Sundays?" }] });
+    assert.equal((await reply())?.rating, "down");
+    await rateReply(agent.id, { conversationId: first.conversationId, at, rating: null });
+    assert.equal("rating" in (await reply())!, false);
+    // Only a reply that is in the visit, of a presenter still shared, under that presenter.
+    await assert.rejects(rateReply(agent.id, { conversationId: first.conversationId, at: "2020-01-01T00:00:00.000Z", rating: "up" }), /not in this conversation/);
+    await assert.rejects(rateReply(agent.id, { conversationId: "conv_nope", at, rating: "up" }), /Conversation not found/);
+    const other = await createAgent(agentSchema.parse({ name: "Other", avatarId: "stock_1" }), "u1");
+    await assert.rejects(rateReply(other.id, { conversationId: first.conversationId, at, rating: "up" }), /Conversation not found/);
+    await updateAgent(agent.id, { isPublic: false }, "u1");
+    await assert.rejects(rateReply(agent.id, { conversationId: first.conversationId, at, rating: "up" }), /not available/);
+    await deleteAgent(other.id, "u1");
+    await deleteAgent(agent.id, "u1");
+  });
+
+  it("names no reply to rate when the turn was not recorded", async () => {
+    const agent = await createAgent(agentSchema.parse({ name: "Gone", avatarId: "stock_1" }), "u1");
+    const mock = new MockScriptProvider();
+    // The presenter is deleted while the reply is being written, so the turn is answered but not kept.
+    setScriptProvider(Object.assign(Object.create(Object.getPrototypeOf(mock)), mock, {
+      chat: async (input: Parameters<MockScriptProvider["chat"]>[0]) => {
+        await deleteAgent(agent.id, "u1");
+        return mock.chat(input);
+      },
+    }));
+    try {
+      const turn = await talkToAgent(agent.id, { messages: [{ role: "user", content: "Hello?" }] });
+      assert.ok(turn.reply);
+      assert.equal(turn.at, undefined);
+    } finally {
+      setScriptProvider(undefined);
+    }
   });
 });
 

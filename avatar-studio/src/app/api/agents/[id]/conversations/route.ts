@@ -7,7 +7,7 @@ import { ValidationError } from "@/lib/errors";
 
 /** Conversations in one CSV download; up to this many, newest first. */
 const CSV_LIMIT = 1000;
-const CSV_COLUMNS = ["started", "last_message", "email", "name", "messages", "first_question", "last_reply", "followed_up", "note"];
+const CSV_COLUMNS = ["started", "last_message", "email", "name", "messages", "first_question", "last_reply", "followed_up", "note", "helpful", "not_helpful"];
 
 export const dynamic = "force-dynamic";
 type Ctx = { params: Promise<{ id: string }> };
@@ -43,6 +43,9 @@ export async function GET(req: Request, ctx: Ctx) {
         last_reply: replies[replies.length - 1]?.content,
         followed_up: c.followedUpAt,
         note: c.note,
+        // Replies the visitor rated, each way.
+        helpful: replies.filter((m) => m.rating === "up").length,
+        not_helpful: replies.filter((m) => m.rating === "down").length,
       };
     });
     return new Response(toCsv(CSV_COLUMNS, rows), {

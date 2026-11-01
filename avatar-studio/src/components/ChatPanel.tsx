@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { MessageSquare, Mic, Send, Square, Volume2, VolumeX } from "lucide-react";
+import { MessageSquare, Mic, Send, Square, ThumbsDown, ThumbsUp, Volume2, VolumeX } from "lucide-react";
 import { Button, ErrorBanner, inputClass } from "@/components/ui";
 import { languageCode, languageTag } from "@/lib/language";
 import { portraitSvg } from "@/lib/stock";
@@ -10,6 +10,12 @@ export interface ChatTurn {
   role: "user" | "assistant";
   content: string;
 }
+
+/** A reply as the host's `ask` answers it: the text, and, when the host lets visitors rate replies, what names it. */
+export type ChatReply = string | { reply: string; ref?: string };
+
+/** A turn as the panel keeps it: a rateable reply carries its `ref` and the visitor's rating. */
+type ShownTurn = ChatTurn & { ref?: string; rating?: "up" | "down" };
 
 // Minimal typing for the Web Speech API recogniser (Chrome, Edge, Safari); absent elsewhere.
 interface Recognizer {
@@ -56,11 +62,12 @@ export function ChatPanel({
   onReset,
   resetKey,
   live,
+  rate,
 }: {
   name: string;
   imageUrl: string;
   voiceLanguage?: string;
-  ask: (messages: ChatTurn[]) => Promise<string>;
+  ask: (messages: ChatTurn[]) => Promise<ChatReply>;
   emptyHint?: string;
   /** The presenter's first message, shown before the visitor says anything and kept in the transcript. */
   opening?: string;
@@ -80,9 +87,16 @@ export function ChatPanel({
   resetKey?: string;
   /** Live video session; when connected, replies are spoken by the stream instead of the browser. */
   live?: { status: LiveStatus; videoRef: React.RefObject<HTMLVideoElement | null>; speak: (text: string) => Promise<boolean> };
+  /** Saves a visitor's rating of a reply `ask` gave a `ref` (`null` takes it back); replies then show thumbs up and down. */
+  rate?: (ref: string, rating: "up" | "down" | null) => Promise<void>;
 }) {
   const openingTurns: ChatTurn[] = opening ? [{ role: "assistant", content: opening }] : [];
-  const [messages, setMessages] = useState<ChatTurn[]>(openingTurns);
+  const [messages, setMessages] = useState<ShownTurn[]>(openingTurns);
+  // Each reply's ratings are sent one after another, so quick clicks reach the server in the order they were made.
+  const ratingQueue = useRef(new Map<string, Promise<unknown>>());
+  /** Per reply, the rating the server last confirmed and the newest click, so a failed save rolls back only when it is the last. */
+  const ratingSaved = useRef(new Map<string, "up" | "down" | null>());
+  const ratingClicks = useRef(new Map<string, number>());
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [speaking, setSpeaking] = useState(false);
@@ -171,7 +185,8 @@ export function ChatPanel({
       recognizer.current = null;
       const text = heard.current.trim();
       heard.current = "";
-      if (text) void send(text);
+      // The newest `send`, not the one from when listening started, so what changed meanwhile (a rating) is kept.
+      if (text) void sendRef.current(text);
     };
     recognizer.current = rec;
     setListening(true);
@@ -187,8 +202,9 @@ export function ChatPanel({
   async function send(text = draft) {
     const content = text.trim();
     if (!content || busy) return;
-    const next: ChatTurn[] = [...messages, { role: "user", content }];
-    setMessages(next);
+    const asked: ShownTurn = { role: "user", content };
+    const next: ShownTurn[] = [...messages, asked];
+    setMessages((now) => [...now, asked]);
     // A chip sends its own text; whatever the visitor had typed stays in the box.
     setDraft((d) => (d.trim() === content ? "" : d));
     setBusy(true);
@@ -199,19 +215,56 @@ export function ChatPanel({
       // model never sees a mid-conversation reply as the presenter's opening.
       const recent = next.slice(-20);
       const firstUser = recent.findIndex((m) => m.role === "user");
-      const reply = await ask(next.length > 20 && firstUser > 0 ? recent.slice(firstUser) : recent);
+      const answer = await ask((next.length > 20 && firstUser > 0 ? recent.slice(firstUser) : recent).map(({ role, content }) => ({ role, content })));
       if (asked0 !== round.current) return;
-      setMessages([...next, { role: "assistant", content: reply }]);
+      const { reply, ref } = typeof answer === "string" ? { reply: answer, ref: undefined } : answer;
+      // Added to the transcript as it is now, so a reply rated while this one was on its way keeps its rating.
+      setMessages((now) => [...now, { role: "assistant", content: reply, ...(ref ? { ref } : {}) }]);
       if (!(live && (await live.speak(reply)))) speak(reply);
     } catch (e) {
       if (asked0 !== round.current) return;
       setErr(e instanceof Error ? e.message : "The presenter could not answer");
-      setMessages(messages);
+      setMessages((now) => now.filter((x) => x !== asked));
       // Put the failed text back unless the visitor has something of their own in the box.
       setDraft((d) => (d.trim() ? d : content));
     } finally {
       setBusy(false);
     }
+  }
+
+  const sendRef = useRef(send);
+  sendRef.current = send;
+
+  /** Rates reply `i` (the same thumb again takes the rating back), at once on the page and then through `rate`. */
+  function rateReply(i: number, value: "up" | "down") {
+    const m = messages[i];
+    if (!rate || !m?.ref) return;
+    const ref = m.ref;
+    const rating = m.rating === value ? null : value;
+    const asked0 = round.current;
+    const show = (r: "up" | "down" | null | undefined) =>
+      setMessages((now) =>
+        now.map((x) => {
+          if (x.ref !== ref) return x;
+          const { rating: _was, ...rest } = x;
+          return r ? { ...rest, rating: r } : rest;
+        }),
+      );
+    show(rating);
+    const click = (ratingClicks.current.get(ref) ?? 0) + 1;
+    ratingClicks.current.set(ref, click);
+    const sent = (ratingQueue.current.get(ref) ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => rate(ref, rating))
+      .then(
+        () => void ratingSaved.current.set(ref, rating),
+        (e: unknown) => {
+          if (asked0 !== round.current || ratingClicks.current.get(ref) !== click) return;
+          show(ratingSaved.current.get(ref) ?? null);
+          setErr(e instanceof Error ? e.message : "Your rating could not be saved");
+        },
+      );
+    ratingQueue.current.set(ref, sent);
   }
 
   /** Clears the conversation, the recogniser, and speech; a reply on its way is dropped. */
@@ -313,8 +366,31 @@ export function ChatPanel({
           {messages.length === 0 && <p className={`text-sm ${muted500}`}>{emptyHint}</p>}
           {messages.map((m, i) => (
             <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-              <div className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm ${m.role === "user" ? "bg-brand-600 text-white" : bubbleBot}`} data-role={m.role} data-opening={opening && i === 0 ? "true" : undefined}>
-                {m.content}
+              <div className="max-w-[80%]">
+                <div className={`rounded-2xl px-3.5 py-2 text-sm ${m.role === "user" ? "bg-brand-600 text-white" : bubbleBot}`} data-role={m.role} data-opening={opening && i === 0 ? "true" : undefined}>
+                  {m.content}
+                </div>
+                {rate && m.ref && (
+                  <div className="mt-1 flex gap-1" role="group" aria-label="Rate this reply">
+                    {(["up", "down"] as const).map((value) => {
+                      const Icon = value === "up" ? ThumbsUp : ThumbsDown;
+                      const on = m.rating === value;
+                      return (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => rateReply(i, value)}
+                          aria-pressed={on}
+                          aria-label={value === "up" ? "Helpful" : "Not helpful"}
+                          title={value === "up" ? "Helpful" : "Not helpful"}
+                          className={`rounded p-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${on ? (dark ? "bg-slate-700 text-white" : "bg-slate-200 text-slate-900") : dark ? "text-slate-400 hover:bg-slate-800" : "text-slate-500 hover:bg-slate-100"}`}
+                        >
+                          <Icon className="h-3.5 w-3.5" fill={on ? "currentColor" : "none"} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           ))}

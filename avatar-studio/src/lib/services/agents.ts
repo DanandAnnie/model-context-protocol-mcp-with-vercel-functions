@@ -128,6 +128,38 @@ export async function captureLead(agentId: string, input: z.infer<typeof leadSch
   }
 }
 
+export const rateSchema = z.object({
+  conversationId: z.string().regex(/^conv_[a-z0-9]+$/),
+  /** The reply's time, as the turn that brought it answered. */
+  at: z.string().max(40),
+  /** Helpful, not helpful, or `null` to take a rating back. */
+  rating: z.enum(["up", "down"]).nullable(),
+});
+
+/**
+ * A visitor's thumbs up or down on one of the presenter's replies in their visit (the visit's id is their token, as for
+ * leaving an email). Written in the same conditional write as turns, so neither is lost; a reply no longer kept (a long
+ * visit keeps its 40 newest messages) or never recorded is a `NotFoundError`.
+ */
+export async function rateReply(agentId: string, input: z.infer<typeof rateSchema>): Promise<void> {
+  const agent = await getStore().get<Agent>("agent", agentId);
+  if (!agent || !agent.isPublic) throw new NotFoundError("This presenter is not available");
+  const conversation = await getStore().get<Conversation>("conversation", input.conversationId);
+  if (!conversation || conversation.agentId !== agentId) throw new NotFoundError("Conversation not found");
+  const isReply = (m: Conversation["messages"][number]) => m.role === "assistant" && m.at === input.at;
+  if (!conversation.messages.some(isReply)) throw new NotFoundError("That reply is not in this conversation");
+  const written = await updateConversation(conversation, (c) => ({
+    ...c,
+    messages: c.messages.map((m) => {
+      if (!isReply(m)) return m;
+      const { rating: _old, ...rest } = m;
+      return input.rating ? { ...rest, rating: input.rating } : rest;
+    }),
+  }));
+  if (written === "gone") throw new NotFoundError("Conversation not found");
+  if (written === "busy") throw new ConflictError("The conversation is busy; try again");
+}
+
 export async function listAgents(ownerId: string = LOCAL_OWNER): Promise<Agent[]> {
   const agents = await getStore().list<Agent>("agent", ownerId);
   return agents.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -292,7 +324,7 @@ export const talkSchema = z.object({
 export { MAX_CONVERSATIONS_PER_AGENT, MAX_TRANSCRIPT_MESSAGES };
 
 /** A visitor's turn with a public agent. Records the transcript and counts conversations and messages. */
-export async function talkToAgent(id: string, input: z.infer<typeof talkSchema>): Promise<{ reply: string; conversationId: string }> {
+export async function talkToAgent(id: string, input: z.infer<typeof talkSchema>): Promise<{ reply: string; conversationId: string; at?: string }> {
   const agent = await getStore().get<Agent>("agent", id);
   if (!agent || !agent.isPublic) throw new NotFoundError("This presenter is not available");
   const last = input.messages[input.messages.length - 1];
@@ -309,14 +341,22 @@ export async function talkToAgent(id: string, input: z.infer<typeof talkSchema>)
   if (!conversation) conversation = { id: newId("conv"), ownerId: agent.ownerId, agentId: agent.id, messages: [], startedAt: now, updatedAt: now };
   const turn = [{ role: "user" as const, content: last.content, at: now }, { role: "assistant" as const, content: reply, at: now }];
   // Transcripts and counters are best effort; a lost write never fails the visitor's turn.
-  const record = async () => {
+  // Whether the turn made it into the transcript, kept apart from the counter writes after it, which may fail on their own.
+  let recorded = false;
+  const record = async (): Promise<void> => {
     // The chat took seconds: count on the stored row so an edit or rename that landed meanwhile is kept,
     // and write nothing for a presenter deleted meanwhile rather than bringing it back.
     const current = await getStore().get<Agent>("agent", agent.id);
     if (!current) return;
     const addTurn = (c: Conversation) => ({ ...c, messages: [...c.messages, ...turn].slice(-MAX_TRANSCRIPT_MESSAGES), updatedAt: now });
-    if (isNew) await getStore().put("conversation", addTurn(conversation));
-    else if ((await updateConversation(conversation, addTurn)) === "busy") console.error(`transcript turn for ${conversation.id} not recorded: the visit kept changing`);
+    if (isNew) {
+      await getStore().put("conversation", addTurn(conversation));
+      recorded = true;
+    } else {
+      const written = await updateConversation(conversation, addTurn);
+      recorded = typeof written !== "string";
+      if (written === "busy") console.error(`transcript turn for ${conversation.id} not recorded: the visit kept changing`);
+    }
     await getStore().put("agent", {
       ...current,
       conversations: current.conversations + (isNew ? 1 : 0),
@@ -328,7 +368,8 @@ export async function talkToAgent(id: string, input: z.infer<typeof talkSchema>)
     if (isNew) await pruneConversations(agent);
   };
   await record().catch((err) => console.error("transcript write failed:", err));
-  return { reply, conversationId: conversation.id };
+  // `at` names the reply in the visit, so the visitor can rate it; a reply that was not recorded has nothing to rate.
+  return { reply, conversationId: conversation.id, ...(recorded ? { at: now } : {}) };
 }
 
 /**

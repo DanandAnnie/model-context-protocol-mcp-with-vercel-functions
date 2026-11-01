@@ -44,11 +44,21 @@ function TalkInner() {
   const [lead, setLead] = useState<{ email: string; name: string }>({ email: "", name: "" });
   const [leadState, setLeadState] = useState<"idle" | "sending" | "done" | "dismissed">("idle");
   const [leadErr, setLeadErr] = useState<string | null>(null);
+  // Bumped by "Start over", so a reply that lands afterwards does not bring the old visit back.
+  const visit = useRef(0);
   async function ask(messages: ChatTurn[]) {
-    const res = await api<{ reply: string; conversationId: string }>(`/api/talk/${id}`, { method: "POST", body: JSON.stringify({ messages, conversationId: conversationId.current }) });
+    const asked = visit.current;
+    const res = await api<{ reply: string; conversationId: string; at?: string }>(`/api/talk/${id}`, { method: "POST", body: JSON.stringify({ messages, conversationId: conversationId.current }) });
+    if (asked !== visit.current) return res.reply;
     conversationId.current = res.conversationId;
     setTurns((n) => n + 1);
-    return res.reply;
+    // The reply's time names it in this visit, so the visitor can rate it.
+    return { reply: res.reply, ref: res.at ? `${res.conversationId} ${res.at}` : undefined };
+  }
+  /** Saves a rating on a reply; `ref` is the visit and the reply's time, so a reply from before "Start over" still rates its own visit. */
+  async function rate(ref: string, rating: "up" | "down" | null) {
+    const [visit, at] = ref.split(" ");
+    await api(`/api/talk/${id}/rate`, { method: "POST", body: JSON.stringify({ conversationId: visit, at, rating }) });
   }
   async function sendLead() {
     if (!conversationId.current) return;
@@ -112,6 +122,7 @@ function TalkInner() {
               imageUrl={agent.avatar.imageUrl}
               voiceLanguage={agent.voiceLanguage}
               ask={ask}
+              rate={rate}
               live={live}
               dark
               compact={embed}
@@ -119,6 +130,7 @@ function TalkInner() {
               opening={agent.greeting}
               starters={agent.starters}
               onReset={() => {
+                visit.current += 1;
                 conversationId.current = undefined;
                 setTurns(0);
                 setLeadState("idle");

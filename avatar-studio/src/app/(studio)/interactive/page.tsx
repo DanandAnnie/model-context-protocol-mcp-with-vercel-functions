@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Check, Code2, Copy, CopyPlus, Link2, MessagesSquare, Pencil, Sparkles, Trash2 } from "lucide-react";
+import { Check, Code2, Copy, CopyPlus, Link2, MessagesSquare, Pencil, Sparkles, ThumbsDown, ThumbsUp, Trash2 } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { ChatPanel, type ChatTurn } from "@/components/ChatPanel";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -956,6 +956,16 @@ export default function InteractivePage() {
               </div>
               <ErrorBanner message={transcriptErr} />
               <p className="mt-1 text-xs text-slate-500">Newest first, up to {MAX_CONVERSATIONS_PER_AGENT} visits; each visit keeps its last {MAX_TRANSCRIPT_MESSAGES} messages. Visitors are told conversations may be kept.</p>
+              {(() => {
+                const rated = (transcripts ?? []).flatMap((c) => c.messages.filter((m) => m.rating));
+                if (!rated.length) return null;
+                const up = rated.filter((m) => m.rating === "up").length;
+                return (
+                  <p className="mt-1 text-xs text-slate-600" data-testid="reply-ratings">
+                    Visitors rated {up} {up === 1 ? "reply" : "replies"} helpful and {rated.length - up} not helpful.
+                  </p>
+                );
+              })()}
               {transcripts === null ? (
                 <p className="mt-3 text-xs text-slate-500">Loading…</p>
               ) : transcripts.length === 0 ? (
@@ -1057,6 +1067,12 @@ export default function InteractivePage() {
                             <li key={i} className={m.role === "user" ? "text-slate-900" : "text-slate-600"}>
                               <span className="mr-1 font-medium">{m.role === "user" ? "Visitor" : transcriptsFor.name}:</span>
                               {m.content}
+                              {m.rating && (
+                                <span className={`ml-1.5 inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[11px] font-medium ${m.rating === "up" ? "bg-emerald-50 text-emerald-800" : "bg-rose-50 text-rose-800"}`}>
+                                  {m.rating === "up" ? <ThumbsUp className="h-3 w-3" aria-hidden="true" /> : <ThumbsDown className="h-3 w-3" aria-hidden="true" />}
+                                  {m.rating === "up" ? "helpful" : "not helpful"}
+                                </span>
+                              )}
                             </li>
                           ))}
                         </ol>

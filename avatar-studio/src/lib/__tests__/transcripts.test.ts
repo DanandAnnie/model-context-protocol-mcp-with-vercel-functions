@@ -170,6 +170,12 @@ describe("a visit as text", () => {
     assert.doesNotMatch(transcriptText("Dana", c), /^(Followed up|Note): /m);
   });
 
+  it("says how the visitor rated a reply", () => {
+    const rated = { ...c, messages: [c.messages[0], { ...c.messages[1], rating: "up" as const }] };
+    assert.match(transcriptText("Dana", rated), /^\[2026-10-31 18:06:00 UTC\] Presenter \(rated helpful\): It is\.$/m);
+    assert.match(transcriptText("Dana", { ...rated, messages: [c.messages[0], { ...c.messages[1], rating: "down" as const }] }), /Presenter \(rated not helpful\): /);
+  });
+
   it("finds a visit by the owner's note", () => {
     assert.ok(conversationMatches({ ...c, note: "Wants an evening viewing" }, "EVENING", false));
     assert.ok(!conversationMatches(c, "evening", false));

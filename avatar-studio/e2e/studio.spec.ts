@@ -9214,6 +9214,65 @@ test("Call to action puts one button on the share pages of the selected videos, 
   await expect(page.getByTestId("share-cta")).toHaveCount(0);
 });
 
+test("Copy links puts the selected videos' sendable share links on the clipboard, one a line", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const tag = Date.now().toString(36);
+  const made = await page.request.post("/api/videos/batch", {
+    data: { title: `Copy ${tag}`, scriptTemplate: "Hello {name}.", csv: "name\nAda\nBo\nCy", avatarId: "stock_1", voiceId: "stock_voice_1" },
+  });
+  expect(made.status()).toBe(201);
+  const { batchId } = (await made.json()) as { batchId: string };
+  const listed = async () => ((await (await page.request.get(`/api/videos?batch=${batchId}`)).json()) as { videos: Array<{ id: string; title: string }> }).videos;
+  await expect.poll(async () => (await Promise.all((await listed()).map(async (v) => ((await (await page.request.get(`/api/videos/${v.id}`)).json()) as { video: { status: string } }).video.status))).join(","), { timeout: 30_000 }).toBe("completed,completed,completed");
+  const shown = await listed();
+  // One link is switched off, so it cannot be sent.
+  const off = shown[1];
+  expect((await page.request.patch(`/api/videos/${off.id}`, { data: { shareDisabled: true } })).status()).toBe(200);
+
+  await page.goto(`/videos?batch=${batchId}`);
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  const bar = page.getByTestId("bulk-bar");
+  await expect(page.locator("button[aria-pressed][aria-label^='Select ']")).toHaveCount(3);
+  await page.keyboard.press("Control+a");
+  await bar.getByRole("button", { name: "Copy links" }).click();
+  await expect(page.getByTestId("copy-note")).toHaveText("Copied 2 links; left out: 1 has no link that can be sent yet");
+  const origin = new URL(page.url()).origin;
+  const copied = (await page.evaluate(() => navigator.clipboard.readText())).split("\n");
+  expect(copied).toHaveLength(2);
+  expect(copied.every((l) => l.startsWith(`${origin}/share/`))).toBe(true);
+  expect(copied.some((l) => l.endsWith(off.id))).toBe(false);
+  expect(new Set(copied)).toEqual(new Set(shown.filter((v) => v.id !== off.id).map((v) => `${origin}/share/${v.id}`)));
+  // A change of selection clears the note.
+  await page.locator("button[aria-pressed='true'][aria-label^='Select ']").first().click();
+  await expect(page.getByTestId("copy-note")).toHaveText("");
+
+  // With only the switched-off video chosen, nothing is copied and the bar says why.
+  await page.evaluate(() => navigator.clipboard.writeText("unchanged"));
+  await bar.getByRole("button", { name: "Done selecting" }).click();
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await page.getByRole("button", { name: `Select ${off.title}`, exact: true }).click();
+  await expect(bar.getByText(/selected$/)).toHaveText("1 selected");
+  await bar.getByRole("button", { name: "Copy links" }).click();
+  const nothing = page.getByText(/^None of the selected videos has a link that can be sent yet/);
+  await expect(nothing).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("unchanged");
+  // Adding a video that can be sent clears that, and the copy that follows says only what it did.
+  const other = shown.find((v) => v.id !== off.id)!;
+  await page.getByRole("button", { name: `Select ${other.title}`, exact: true }).click();
+  await expect(nothing).toHaveCount(0);
+  await bar.getByRole("button", { name: "Copy links" }).click();
+  await expect(page.getByTestId("copy-note")).toHaveText("Copied 1 link; left out: 1 has no link that can be sent yet");
+  await expect(nothing).toHaveCount(0);
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(`${origin}/share/${other.id}`);
+  // A refusal from the browser says so and points at the file instead.
+  await page.evaluate(() => {
+    navigator.clipboard.write = () => Promise.reject(new DOMException("Denied", "NotAllowedError"));
+  });
+  await bar.getByRole("button", { name: "Copy links" }).click();
+  await expect(page.getByText("The browser did not let the page copy to the clipboard; Download links gives the same links as a file.")).toBeVisible();
+  await expect(page.getByTestId("copy-note")).toHaveText("");
+});
+
 test("the bulk bar never sends more than the 200 videos one action takes", async ({ page }) => {
   test.slow();
   const tag = `Over ${Date.now().toString(36)}`;
@@ -9247,7 +9306,7 @@ test("the bulk bar never sends more than the 200 videos one action takes", async
   await expect(page.locator(`a[href^="/videos/vid_"]`).filter({ hasText: tag })).toHaveCount(205);
   await page.getByRole("button", { name: "Select", exact: true }).click();
   const bar = page.getByTestId("bulk-bar");
-  const count = bar.getByRole("status");
+  const count = bar.getByRole("status").filter({ hasText: "selected" });
   // Select all shown stops at what one action takes, and says so.
   await bar.getByRole("button", { name: "Select all shown" }).click();
   await expect(count).toHaveText("200 selected");

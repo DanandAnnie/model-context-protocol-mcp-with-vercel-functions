@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArchiveRestore, CheckSquare, Clapperboard, Clock, LayoutGrid, List, Download, FolderInput, KeyRound, MousePointerClick, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
+import { ArchiveRestore, CheckSquare, Clapperboard, Clock, Copy, LayoutGrid, List, Download, FolderInput, KeyRound, MousePointerClick, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
 import { api, clickSelect, folderFor, overSelection } from "@/lib/client";
 import { libraryKey } from "@/lib/shortcuts";
 import { isApple } from "@/components/QuickFind";
@@ -31,7 +31,7 @@ function localMinute(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links" | "password" | "nopassword" | "settings" | "retry" | "star" | "unstar" | "empty" | "restoreall" | "unfile" | "cta" | "nocta";
+type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links" | "password" | "nopassword" | "settings" | "retry" | "star" | "unstar" | "empty" | "restoreall" | "unfile" | "cta" | "nocta" | "copylinks";
 
 export default function VideosPage() {
   return (
@@ -295,6 +295,7 @@ function VideosInner() {
   async function bulk(action: BulkAction) {
     const ids = Array.from(selected);
     if (!ids.length) return;
+    setCopyNote(null);
     const over = overSelection(ids.length, BULK_MAX);
     if (over) return setBulkErr(over);
     let targetFolder: string | undefined;
@@ -440,6 +441,70 @@ function VideosInner() {
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) {
       setBulkErr(e instanceof Error ? e.message : "Could not download the links");
+    } finally {
+      setBusy(null);
+    }
+  }
+  // The selected videos' links that can be sent now, one a line, put on the clipboard for an email or a chat. The note
+  // and any refusal belong to the selection they were made for, so a change of selection (or a later copy) clears them.
+  const [copyNote, setCopyNote] = useState<string | null>(null);
+  const copyErr = useRef<string | null>(null);
+  const selectedNow = useRef(selected);
+  useLayoutEffect(() => {
+    selectedNow.current = selected;
+  });
+  useEffect(() => {
+    setCopyNote(null);
+    setBulkErr((note) => (note !== null && note === copyErr.current ? null : note));
+  }, [selected]);
+  async function copyLinks() {
+    const ids = Array.from(selected);
+    if (!ids.length) return;
+    const over = overSelection(ids.length, BULK_MAX);
+    if (over) return setBulkErr(over);
+    const madeFor = selected;
+    setBusy("copylinks");
+    setCopyNote(null);
+    setBulkErr((note) => (note !== null && note === copyErr.current ? null : note));
+    const counts = { links: 0, omitted: 0, unsendable: 0 };
+    // Fetched inside the clipboard write rather than before it, so a browser that only lets a click copy at once (Safari)
+    // still counts the copy as the click's.
+    const text = fetch("/api/videos/links?format=text", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) })
+      .catch(() => {
+        throw new Error("Could not reach the server to copy the links");
+      })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? "Could not copy the links");
+        counts.links = Number(res.headers.get("X-Links") ?? 0);
+        counts.omitted = Number(res.headers.get("X-Omitted") ?? 0);
+        counts.unsendable = Number(res.headers.get("X-Unsendable") ?? 0);
+        if (!counts.links) throw new Error(`None of the selected videos has a link that can be sent yet (still rendering, failed, switched off, expired, or not live until later); Download links says why for each.`);
+        return res.text();
+      });
+    try {
+      if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+        const blob = text.then((t) => new Blob([t], { type: "text/plain" }));
+        // The item may be refused before it reads the text; the failure is reported from `text` below.
+        blob.catch(() => {});
+        await navigator.clipboard.write([new ClipboardItem({ "text/plain": blob })]);
+      } else {
+        await navigator.clipboard.writeText(await text);
+      }
+      if (selectedNow.current !== madeFor) return;
+      const left = [
+        counts.unsendable ? `${counts.unsendable} ${counts.unsendable === 1 ? "has" : "have"} no link that can be sent yet` : "",
+        counts.omitted ? `${counts.omitted} ${counts.omitted === 1 ? "is" : "are"} no longer in the library` : "",
+      ].filter(Boolean);
+      setCopyNote(`Copied ${counts.links} ${counts.links === 1 ? "link" : "links"}${left.length ? `; left out: ${left.join(", ")}` : ""}`);
+    } catch {
+      // The server's answer says what went wrong if it was the problem; otherwise the browser refused the copy.
+      const failed = await text.then(
+        () => null,
+        (err: unknown) => (err instanceof Error ? err.message : "Could not copy the links"),
+      );
+      const message = failed ?? "The browser did not let the page copy to the clipboard; Download links gives the same links as a file.";
+      copyErr.current = message;
+      setBulkErr(message);
     } finally {
       setBusy(null);
     }
@@ -917,6 +982,9 @@ function VideosInner() {
               <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void downloadLinks()} disabled={!selected.size || busy !== null} loading={busy === "links"} title="A CSV of the selected videos' share links, each left blank until it can be sent (a render still under way included), with the reason">
                 <Download className="h-3.5 w-3.5" /> Download links
               </Button>
+              <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void copyLinks()} disabled={!selected.size || busy !== null} loading={busy === "copylinks"} title="Copies the share links of the selected videos that can be sent now, one a line, to paste into an email or a chat">
+                <Copy className="h-3.5 w-3.5" /> Copy links
+              </Button>
               {failedSelected.length > 0 && (
                 <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void retryFailed()} disabled={busy !== null} loading={busy === "retry"} title={`Start the selected failed renders again with the same settings, up to ${MAX_RETRY_AT_ONCE} at a time; each counts toward this month's renders`}>
                   <RotateCcw className="h-3.5 w-3.5" /> Retry failed ({failedSelected.length})
@@ -981,6 +1049,9 @@ function VideosInner() {
               </Button>
                 </>
               )}
+              <span role="status" className="text-xs text-emerald-800" data-testid="copy-note">
+                {copyNote}
+              </span>
               <button type="button" onClick={stopSelecting} disabled={busy !== null} aria-label="Done selecting" aria-keyshortcuts="Escape" className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-50">
                 <X className="h-4 w-4" />
               </button>

@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import { getStore } from "../store";
-import { SELECTION_LINK_COLUMNS, createVideo, selectionLinkRows, selectionLinksSchema, selectionVideos, videoRequestSchema } from "../services";
+import { SELECTION_LINK_COLUMNS, createVideo, selectionLinkRows, selectionLinkText, selectionLinksSchema, selectionVideos, videoRequestSchema } from "../services";
 import { NotFoundError } from "../errors";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import { parseCsv, toCsv } from "../csv";
@@ -67,5 +67,21 @@ describe("selection links", () => {
     assert.equal(selectionLinksSchema.safeParse({ ids: Array.from({ length: 201 }, (_, i) => `vid_${i}`) }).success, false);
     assert.equal(selectionLinksSchema.safeParse({ ids: Array.from({ length: 200 }, (_, i) => `vid_${i}`) }).success, true);
     assert.equal(selectionLinksSchema.safeParse({ ids: ["x".repeat(81)] }).success, false);
+  });
+
+  it("copies only the links that can be sent, one a line in the order chosen, and counts the rest", async () => {
+    const first = await video("First");
+    const off = await video("Off", { shareDisabled: true });
+    const rendering = await video("Rendering", { status: "processing" });
+    const second = await video("Second", { shareExpiresAt: at(day) });
+    const expired = await video("Expired", { shareExpiresAt: at(-day) });
+    const rows = selectionLinkRows([second, off, rendering, expired, first], "https://studio.example.com/");
+    assert.deepEqual(selectionLinkText(rows), {
+      text: `https://studio.example.com/share/${second.id}\nhttps://studio.example.com/share/${first.id}`,
+      links: 2,
+      unsendable: 3,
+    });
+    assert.deepEqual(selectionLinkText(selectionLinkRows([off], "https://x")), { text: "", links: 0, unsendable: 1 });
+    assert.deepEqual(selectionLinkText([]), { text: "", links: 0, unsendable: 0 });
   });
 });

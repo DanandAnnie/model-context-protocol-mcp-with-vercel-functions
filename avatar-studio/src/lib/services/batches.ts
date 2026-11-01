@@ -248,6 +248,15 @@ export function selectionLinkRows(videos: Video[], base: string, now = Date.now(
 }
 
 /**
+ * The links of those rows a viewer can open now, one a line in the order given, for pasting into an email or a chat, and
+ * how many rows had none (not ready, failed, off, expired, or scheduled), so the page can say they were left out.
+ */
+export function selectionLinkText(rows: ReturnType<typeof selectionLinkRows>): { text: string; links: number; unsendable: number } {
+  const links = rows.flatMap((r) => (r.share_link ? [r.share_link] : []));
+  return { text: links.join("\n"), links: links.length, unsendable: rows.length - links.length };
+}
+
+/**
  * The owner's videos among `ids` (not those in the trash), in the order asked, renders in flight refreshed first (up to
  * 10 at a time, as the library's list); others are left out, which the route reports in a header.
  */

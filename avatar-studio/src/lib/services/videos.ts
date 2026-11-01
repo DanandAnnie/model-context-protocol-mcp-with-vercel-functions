@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName, getScriptProvider } from "../providers";
 import { getStore } from "../store";
-import { BULK_MAX, EMPTY_TRASH_MAX, EMPTY_WATCH, LIBRARY_PAGE_MAX, MAX_FOLDER_NAME, RESTORE_ALL_MAX, MAX_AGENT_MESSAGE, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
+import { BULK_MAX, SHARE_CTA_LABEL_MAX, SHARE_CTA_URL_MAX, EMPTY_TRASH_MAX, EMPTY_WATCH, LIBRARY_PAGE_MAX, MAX_FOLDER_NAME, RESTORE_ALL_MAX, MAX_AGENT_MESSAGE, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
 import type { AgentMessage, AudioClip, Avatar, Backdrop, Background, CaptionCue, DirectedMedia, DirectedScene, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
 import { buildCues } from "../captions";
 import { captionDurationSec, sceneBoundsMs, videoChapters, type Timed } from "../chapters";
@@ -1002,6 +1002,18 @@ export const sharePasswordSchema = z
   .max(SHARE_PASSWORD_MAX, `The share password can have at most ${SHARE_PASSWORD_MAX} characters`)
   .nullable();
 
+/** A call-to-action button on the share page (its text and where it goes), or null for none. */
+export const shareCtaSchema = z
+  .object({
+    label: z.string().trim().min(1).max(SHARE_CTA_LABEL_MAX),
+    url: z
+      .string()
+      .trim()
+      .max(SHARE_CTA_URL_MAX)
+      .refine((v) => /^https?:\/\/[^\s]+$/i.test(v), "The link must start with http:// or https://"),
+  })
+  .nullable();
+
 export const videoPatchSchema = z
   .object({
     title: z.string().trim().min(1).max(120).optional(),
@@ -1029,17 +1041,7 @@ export const videoPatchSchema = z
       .optional(),
     sharePassword: sharePasswordSchema.optional(),
     /** A call-to-action button on the share page; null removes it. */
-    shareCta: z
-      .object({
-        label: z.string().trim().min(1).max(40),
-        url: z
-          .string()
-          .trim()
-          .max(2000)
-          .refine((v) => /^https?:\/\/[^\s]+$/i.test(v), "The link must start with http:// or https://"),
-      })
-      .nullable()
-      .optional(),
+    shareCta: shareCtaSchema.optional(),
     /**
      * New names for some of the scenes, for their chapters' titles, keyed by scene number from 1 (null or blank clears
      * one); the scenes left out keep theirs, so two editors retitling different chapters do not undo each other.
@@ -1383,11 +1385,14 @@ export const bulkVideoSchema = z.discriminatedUnion("action", [
   z
     .object({ action: z.literal("settings"), ids: z.array(z.string().min(1)).min(1).max(BULK_MAX), shareDownload: z.boolean().optional(), shareGate: z.boolean().optional() })
     .refine((v) => v.shareDownload !== undefined || v.shareGate !== undefined, { message: "Choose a setting to change" }),
+  /** Put one call-to-action button on the share pages of many videos, in place of any they had, or remove theirs with `null`. */
+  z.object({ action: z.literal("cta"), ids: z.array(z.string().min(1)).min(1).max(BULK_MAX), shareCta: shareCtaSchema }),
 ]);
 
 /**
- * Trash, restore, purge, move, star, or switch, schedule, set the expiry of, put a password on, or change the download
- * button and email gate of the share links of many videos at once.
+ * Trash, restore, purge, move, star, or switch, schedule, set the expiry of, put a password on, change the download
+ * button and email gate of, or set the call-to-action button of the share links of many videos at once. A new button
+ * is a change to what the share page shows, so it sends an approved video back to not reviewed, as on one video.
  * Ids that are missing or belong to someone else are reported, not failed; so is a purge of a video that is
  * not in the trash, since deleting for good is only offered from there. A go-live time at or after a video's
  * own expiry, or an expiry at or before its own go-live time, is reported in `refused` for that video, and
@@ -1409,9 +1414,19 @@ export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId
     else if (input.action === "purge") await purgeVideo(id, ownerId);
     else if (input.action === "move") await updateVideo(id, { folder: input.folder }, ownerId);
     else if (input.action === "share") await updateVideo(id, { shareDisabled: input.shareDisabled }, ownerId);
-    else if (input.action === "password" || input.action === "settings" || input.action === "star") {
+    else if (input.action === "password" || input.action === "settings" || input.action === "star" || input.action === "cta") {
       try {
-        await updateVideo(id, input.action === "password" ? { sharePassword: input.sharePassword } : input.action === "star" ? { starred: input.starred } : { shareDownload: input.shareDownload, shareGate: input.shareGate }, ownerId);
+        await updateVideo(
+          id,
+          input.action === "password"
+            ? { sharePassword: input.sharePassword }
+            : input.action === "star"
+              ? { starred: input.starred }
+              : input.action === "cta"
+                ? { shareCta: input.shareCta }
+                : { shareDownload: input.shareDownload, shareGate: input.shareGate },
+          ownerId,
+        );
       } catch (err) {
         // Deleted for good between the check above and the write: reported like the others not there.
         if (!(err instanceof NotFoundError)) throw err;

@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArchiveRestore, CheckSquare, Clapperboard, Clock, LayoutGrid, List, Download, FolderInput, KeyRound, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
+import { ArchiveRestore, CheckSquare, Clapperboard, Clock, LayoutGrid, List, Download, FolderInput, KeyRound, MousePointerClick, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
 import { api, clickSelect, folderFor, overSelection } from "@/lib/client";
 import { libraryKey } from "@/lib/shortcuts";
 import { isApple } from "@/components/QuickFind";
@@ -11,7 +11,7 @@ import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } f
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit, useWorkspaceRole } from "@/hooks/useCanEdit";
 import type { VideoPage, VideoQuery } from "@/lib/services/videos";
-import { BULK_MAX, EMPTY_TRASH_MAX, LIBRARY_PAGE_MAX, MAX_FOLDER_NAME, MAX_RETRY_AT_ONCE, RESTORE_ALL_MAX, SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, TRASH_RETENTION_DAYS, type VideoStatus } from "@/lib/types";
+import { BULK_MAX, EMPTY_TRASH_MAX, LIBRARY_PAGE_MAX, MAX_FOLDER_NAME, MAX_RETRY_AT_ONCE, RESTORE_ALL_MAX, SHARE_CTA_LABEL_MAX, SHARE_CTA_URL_MAX, SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, TRASH_RETENTION_DAYS, type VideoStatus } from "@/lib/types";
 
 const STATUSES: Array<"all" | VideoStatus> = ["all", "processing", "completed", "failed"];
 type SortKey = VideoQuery["sort"];
@@ -31,7 +31,7 @@ function localMinute(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links" | "password" | "nopassword" | "settings" | "retry" | "star" | "unstar" | "empty" | "restoreall" | "unfile";
+type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links" | "password" | "nopassword" | "settings" | "retry" | "star" | "unstar" | "empty" | "restoreall" | "unfile" | "cta" | "nocta";
 
 export default function VideosPage() {
   return (
@@ -135,7 +135,9 @@ function VideosInner() {
   const [bulkErr, setBulkErr] = useState<string | null>(null);
   // "Schedule go-live" and "Set expiry" open a date and time field in the bar, one at a time; it is a local time, sent as an instant.
   // The share password, link settings, and folder fields take the same place in the bar, so only one of them is open at a time.
-  const [timeField, setTimeField] = useState<"golive" | "expiry" | "password" | "settings" | "folder" | null>(null);
+  const [timeField, setTimeField] = useState<"golive" | "expiry" | "password" | "settings" | "folder" | "cta" | null>(null);
+  // The call-to-action button's text and link, for every selected video's share page.
+  const [ctaDraft, setCtaDraft] = useState({ label: "", url: "" });
   const [timeDraft, setTimeDraft] = useState("");
   // The download button and email gate, each left as it is ("") or turned on or off on every selected video.
   const [linkSettings, setLinkSettings] = useState<{ download: "" | "on" | "off"; gate: "" | "on" | "off" }>({ download: "", gate: "" });
@@ -163,6 +165,7 @@ function VideosInner() {
     setTimeField(null);
     setTimeDraft("");
     setLinkSettings({ download: "", gate: "" });
+    setCtaDraft({ label: "", url: "" });
     requestAnimationFrame(() => {
       if (document.activeElement && document.activeElement !== document.body) return;
       const opener = barRef.current?.querySelector<HTMLButtonElement>(`[data-opens='${kind}']`);
@@ -205,6 +208,7 @@ function VideosInner() {
     setTimeField(null);
     setTimeDraft("");
     setLinkSettings({ download: "", gate: "" });
+    setCtaDraft({ label: "", url: "" });
   }
   // Folder management: rename the chosen folder (merging into an existing name) or remove it, leaving its videos unfiled.
   const [folderBusy, setFolderBusy] = useState(false);
@@ -282,6 +286,7 @@ function VideosInner() {
     setTimeField(null);
     setTimeDraft("");
     setLinkSettings({ download: "", gate: "" });
+    setCtaDraft({ label: "", url: "" });
   }, [q, status, folder, batch, sort, trash, review, share, starred, created]);
   // The last purge empties both views; leave the trash so the "No videos yet" state (and the filter bar) comes back.
   useEffect(() => {
@@ -315,6 +320,28 @@ function VideosInner() {
       if (locked && !window.confirm(`${locked === 1 ? "1 selected video already has" : `${locked} selected videos already have`} a share password. Replace ${locked === 1 ? "it" : "them"} with this one? Visitors who unlocked ${locked === 1 ? "it" : "them"} must enter the new one.`)) return;
     } else if (action === "settings" && linkSettings.gate === "on" && !window.confirm(`Ask for an email before ${ids.length === 1 ? "the selected video plays" : `the ${ids.length} selected videos play`}? Everyone opening ${ids.length === 1 ? "its link or embed" : "their links or embeds"}, including people you have already sent ${ids.length === 1 ? "it" : "them"} to, sees the form first.`)) {
       return;
+    } else if (action === "cta" || action === "nocta") {
+      if (action === "cta") {
+        const label = ctaDraft.label.trim();
+        const url = ctaDraft.url.trim();
+        if (!label || label.length > SHARE_CTA_LABEL_MAX) return setBulkErr(`Give the button 1 to ${SHARE_CTA_LABEL_MAX} characters of text`);
+        if (!/^https?:\/\/[^\s]+$/i.test(url)) return setBulkErr("The button's link must start with http:// or https://");
+        if (url.length > SHARE_CTA_URL_MAX) return setBulkErr(`Keep the button's link to ${SHARE_CTA_URL_MAX} characters`);
+      }
+      // The button is part of what a share page shows, so changing it sends an approved video back to not reviewed.
+      const chosen = videos.filter((v) => selected.has(v.id));
+      const same = (v: (typeof chosen)[number]) => (action === "nocta" ? !v.shareCta : v.shareCta?.label === ctaDraft.label.trim() && v.shareCta?.url === ctaDraft.url.trim());
+      const replaced = action === "cta" ? chosen.filter((v) => v.shareCta && !same(v)).length : chosen.filter((v) => v.shareCta).length;
+      const approved = chosen.filter((v) => v.review?.status === "approved" && !same(v)).length;
+      const notes = [
+        !replaced
+          ? ""
+          : action === "cta"
+            ? `${replaced === 1 ? "1 selected video has a button already, which this replaces" : `${replaced} selected videos have a button already, which this replaces`}.`
+            : `${replaced === 1 ? "1 selected video has a button on its share page" : `${replaced} selected videos have a button on their share pages`}.`,
+        approved ? `${approved === 1 ? "1 approved video goes" : `${approved} approved videos go`} back to not reviewed, as ${approved === 1 ? "its" : "their"} share page changes.` : "",
+      ].filter(Boolean);
+      if (notes.length && !window.confirm(`${notes.join(" ")} ${action === "cta" ? "Set this button" : replaced === 1 ? "Remove it" : "Remove them"}?`)) return;
     } else if (action === "nopassword" && !window.confirm(`Remove the share password from ${ids.length} ${ids.length === 1 ? "video" : "videos"}? Anyone with ${ids.length === 1 ? "the link" : "their links"} can then watch.`)) {
       return;
     } else if (action === "schedule" || action === "expire") {
@@ -343,6 +370,8 @@ function VideosInner() {
                 ? { action: "expire", ids, shareExpiresAt: action === "noexpiry" ? null : new Date(timeDraft).toISOString() }
                 : action === "password" || action === "nopassword"
                   ? { action: "password", ids, sharePassword: action === "nopassword" ? null : timeDraft }
+                  : action === "cta" || action === "nocta"
+                    ? { action: "cta", ids, shareCta: action === "nocta" ? null : { label: ctaDraft.label.trim(), url: ctaDraft.url.trim() } }
                   : action === "settings"
                     ? {
                         action,
@@ -535,7 +564,8 @@ function VideosInner() {
   }
 
   // The banner stays: after a refusal it says which of the two times to move, which may be the field being opened.
-  function openTimeField(kind: "golive" | "expiry" | "password" | "settings" | "folder") {
+  function openTimeField(kind: "golive" | "expiry" | "password" | "settings" | "folder" | "cta") {
+    setCtaDraft({ label: "", url: "" });
     setTimeField(kind);
     setTimeDraft("");
     setLinkSettings({ download: "", gate: "" });
@@ -629,6 +659,59 @@ function VideosInner() {
           onClick={closeTimeField}
           disabled={busy !== null}
           aria-label="Close share password"
+          className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </form>
+    );
+  }
+  // One call-to-action button (its text and link) for every selected video's share page, or none.
+  function ctaForm() {
+    return (
+      <form
+        className="inline-flex flex-wrap items-center gap-1.5"
+        data-testid="bulk-cta"
+        noValidate
+        onSubmit={(e) => {
+          e.preventDefault();
+          void bulk("cta");
+        }}
+      >
+        <input
+          autoFocus
+          aria-label="Button text for the selected videos"
+          placeholder="Button text"
+          className={`${inputClass} w-36 py-1 text-xs`}
+          value={ctaDraft.label}
+          onChange={(e) => {
+            setCtaDraft((prev) => ({ ...prev, label: e.target.value }));
+            setBulkErr(null);
+          }}
+        />
+        <input
+          type="url"
+          inputMode="url"
+          aria-label="Button link for the selected videos"
+          placeholder="https://…"
+          className={`${inputClass} w-48 py-1 text-xs`}
+          value={ctaDraft.url}
+          onChange={(e) => {
+            setCtaDraft((prev) => ({ ...prev, url: e.target.value }));
+            setBulkErr(null);
+          }}
+        />
+        <Button type="submit" variant="secondary" className="px-2.5 py-1 text-xs" disabled={!selected.size || !ctaDraft.label.trim() || !ctaDraft.url.trim() || busy !== null} loading={busy === "cta"} title="Shows this button under the player on the selected videos' share pages">
+          Set button
+        </Button>
+        <Button type="button" variant="ghost" className="px-2.5 py-1 text-xs" onClick={() => bulk("nocta")} disabled={!selected.size || busy !== null} loading={busy === "nocta"} title="Remove the call-to-action button from the selected videos' share pages">
+          No button
+        </Button>
+        <button
+          type="button"
+          onClick={closeTimeField}
+          disabled={busy !== null}
+          aria-label="Close call to action"
           className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
         >
           <X className="h-3.5 w-3.5" />
@@ -884,6 +967,13 @@ function VideosInner() {
               ) : (
                 <Button variant="secondary" className="px-2.5 py-1 text-xs" data-opens="settings" onClick={() => openTimeField("settings")} disabled={!selected.size || busy !== null} title="Let viewers of the selected videos download them, or ask them for an email before playing, or stop either">
                   <SlidersHorizontal className="h-3.5 w-3.5" /> Download &amp; email
+                </Button>
+              )}
+              {timeField === "cta" ? (
+                ctaForm()
+              ) : (
+                <Button variant="secondary" className="px-2.5 py-1 text-xs" data-opens="cta" onClick={() => openTimeField("cta")} disabled={!selected.size || busy !== null} title="Put one call-to-action button on the selected videos' share pages, or take theirs off">
+                  <MousePointerClick className="h-3.5 w-3.5" /> Call to action
                 </Button>
               )}
               <Button variant="danger" className="px-2.5 py-1 text-xs" onClick={() => bulk("delete")} disabled={!selected.size || busy !== null} loading={busy === "delete"} title={`Moves the selected videos to the trash, where they can be restored for ${TRASH_RETENTION_DAYS} days`}>

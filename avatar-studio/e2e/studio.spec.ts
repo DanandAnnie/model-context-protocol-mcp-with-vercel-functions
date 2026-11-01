@@ -9145,6 +9145,75 @@ test("while selecting, Ctrl+A selects all shown and Escape closes the bar's fiel
   await expect(bar.getByRole("button", { name: "Select all shown" })).toBeFocused();
 });
 
+test("Call to action puts one button on the share pages of the selected videos, or takes theirs off", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const made = await page.request.post("/api/videos/batch", {
+    data: { title: `Buttons ${tag}`, scriptTemplate: "Hello {name}.", csv: "name\nAda\nBo", avatarId: "stock_1", voiceId: "stock_voice_1" },
+  });
+  expect(made.status()).toBe(201);
+  const { batchId } = (await made.json()) as { batchId: string };
+  const listed = async () => ((await (await page.request.get(`/api/videos?batch=${batchId}`)).json()) as { videos: Array<{ id: string; status: string; shareCta?: { label: string; url: string } }> }).videos;
+  // Rendered, so their share pages show.
+  await expect.poll(async () => (await Promise.all((await listed()).map(async (v) => ((await (await page.request.get(`/api/videos/${v.id}`)).json()) as { video: { status: string } }).video.status))).join(","), { timeout: 30_000 }).toBe("completed,completed");
+  const [first, second] = await listed();
+  expect((await page.request.patch(`/api/videos/${second.id}`, { data: { shareCta: { label: "Old offer", url: "https://example.com/old" } } })).status()).toBe(200);
+  const dialogs: string[] = [];
+  page.on("dialog", (d) => {
+    dialogs.push(d.message());
+    void d.accept();
+  });
+  const sent: string[] = [];
+  page.on("request", (r) => r.url().endsWith("/api/videos/bulk") && sent.push(r.postData() ?? ""));
+
+  await page.goto(`/videos?batch=${batchId}`);
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  const bar = page.getByTestId("bulk-bar");
+  await expect(page.locator("button[aria-pressed][aria-label^='Select ']")).toHaveCount(2);
+  await page.keyboard.press("Control+a");
+  await expect(bar.getByText(/selected$/)).toHaveText("2 selected");
+  await bar.getByRole("button", { name: "Call to action" }).click();
+  const label = page.getByLabel("Button text for the selected videos");
+  await expect(label).toBeFocused();
+  // Pasted text with spaces around it is trimmed rather than cut short.
+  await label.fill(`   Book a viewing${" ".repeat(40)}`);
+  // A link that is not a web address is refused before anything is sent.
+  await page.getByLabel("Button link for the selected videos").fill("example.com/book");
+  await page.getByTestId("bulk-cta").getByRole("button", { name: "Set button" }).click();
+  await expect(page.getByText("The button's link must start with http:// or https://")).toBeVisible();
+  expect(sent).toEqual([]);
+  await page.getByLabel("Button link for the selected videos").fill("https://example.com/book");
+  await page.getByLabel("Button link for the selected videos").press("Enter");
+  await expect(bar).toHaveCount(0);
+  expect(dialogs).toEqual(["1 selected video has a button already, which this replaces. Set this button?"]);
+  expect((await listed()).map((v) => v.shareCta)).toEqual([
+    { label: "Book a viewing", url: "https://example.com/book" },
+    { label: "Book a viewing", url: "https://example.com/book" },
+  ]);
+  for (const v of [first, second]) {
+    await page.goto(`/share/${v.id}`);
+    await expect(page.getByTestId("share-cta")).toHaveText(/^Book a viewing/);
+    await expect(page.getByTestId("share-cta")).toHaveAttribute("href", "https://example.com/book");
+  }
+
+  // No button takes them off, after saying what goes; Escape closes the field without a change.
+  await page.goto(`/videos?batch=${batchId}`);
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await expect(page.locator("button[aria-pressed][aria-label^='Select ']")).toHaveCount(2);
+  await page.keyboard.press("Control+a");
+  await bar.getByRole("button", { name: "Call to action" }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("bulk-cta")).toHaveCount(0);
+  await expect(bar.getByRole("button", { name: "Call to action" })).toBeFocused();
+  await bar.getByRole("button", { name: "Call to action" }).click();
+  await page.getByTestId("bulk-cta").getByRole("button", { name: "No button" }).click();
+  await expect(bar).toHaveCount(0);
+  expect(dialogs[1]).toBe("2 selected videos have a button on their share pages. Remove them?");
+  expect((await listed()).map((v) => v.shareCta)).toEqual([undefined, undefined]);
+  await page.goto(`/share/${first.id}`);
+  await expect(page.getByTestId("share-player")).toBeVisible();
+  await expect(page.getByTestId("share-cta")).toHaveCount(0);
+});
+
 test("the bulk bar never sends more than the 200 videos one action takes", async ({ page }) => {
   test.slow();
   const tag = `Over ${Date.now().toString(36)}`;

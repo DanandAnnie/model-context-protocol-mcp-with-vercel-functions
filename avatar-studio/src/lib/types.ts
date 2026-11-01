@@ -1079,6 +1079,10 @@ export const EMPTY_TRASH_MAX = 50;
 export const LIBRARY_PAGE_MAX = 480;
 /** Videos one library bulk action takes (`POST /api/videos/bulk`, `/links`), and so the most "Select all matching" selects. */
 export const BULK_MAX = 200;
+/** The longest text a share page's call-to-action button takes. */
+export const SHARE_CTA_LABEL_MAX = 40;
+/** The longest link a share page's call-to-action button takes. */
+export const SHARE_CTA_URL_MAX = 2000;
 /** Trashed videos one "Restore all" brings back (`POST /api/videos/restore-all`), one write each; a bigger trash takes another. */
 export const RESTORE_ALL_MAX = 200;
 

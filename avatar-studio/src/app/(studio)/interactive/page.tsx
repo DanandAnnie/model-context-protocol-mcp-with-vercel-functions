@@ -1,8 +1,9 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Check, Code2, Copy, CopyPlus, Link2, MessagesSquare, Pencil, Sparkles, ThumbsDown, ThumbsUp, Trash2 } from "lucide-react";
+import { Check, Code2, Copy, CopyPlus, Link2, MessagesSquare, Pencil, QrCode, Sparkles, ThumbsDown, ThumbsUp, Trash2 } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { ChatPanel, type ChatTurn } from "@/components/ChatPanel";
+import { ShareQrCode } from "@/components/ShareQrCode";
 import { Button, Card, ErrorBanner, Field, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
@@ -170,6 +171,8 @@ export default function InteractivePage() {
   const [copied, setCopied] = useState<string | null>(null);
   /** The presenter whose website launcher is being set up on its row, and the choices made for it. */
   const [embedFor, setEmbedFor] = useState<string | null>(null);
+  // The presenter whose talk-link QR code is open, for a sign or a flyer.
+  const [qrFor, setQrFor] = useState<string | null>(null);
   const [embedOptions, setEmbedOptions] = useState<EmbedOptions>(EMBED_DEFAULTS);
   /** The presenter being copied, and what the last copy left to say beside the list. */
   const [duplicating, setDuplicating] = useState<string | null>(null);
@@ -984,6 +987,17 @@ export default function InteractivePage() {
                     <Button
                       variant="secondary"
                       className="px-2.5 py-1 text-xs"
+                      onClick={() => setQrFor(qrFor === a.id ? null : a.id)}
+                      aria-label={`QR code for ${a.name}`}
+                      aria-expanded={qrFor === a.id}
+                      aria-controls={qrFor === a.id ? `qr-${a.id}` : undefined}
+                      title="A QR code of the link, for a sign or a flyer"
+                    >
+                      <QrCode className="h-3.5 w-3.5" /> QR
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="px-2.5 py-1 text-xs"
                       onClick={() => startEdit(a)}
                       // The form needs the presenters and voices to load the saved ones; a save under way finishes first.
                       disabled={canEdit === false || saving || avatarsLoading || !voiceData}
@@ -1026,6 +1040,20 @@ export default function InteractivePage() {
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </div>
+                  {qrFor === a.id && (
+                    <div id={`qr-${a.id}`} role="region" aria-label={`QR code for ${a.name}`} className="basis-full rounded-lg border border-slate-200 bg-slate-50 p-3" data-testid="agent-qr">
+                      {a.isPublic ? (
+                        <>
+                          <p className="text-xs text-slate-600">Scanning it opens the talk page, where visitors chat with {a.name}. For a sign at an open house, a flyer, or a slide.</p>
+                          <ShareQrCode url={url} title={a.name} subject="talk" />
+                        </>
+                      ) : (
+                        <p role="status" className="text-xs text-slate-600">
+                          {canEdit === false ? "An editor has to turn the link on first" : "Turn the link on first"}: while it is off, scanning it shows “This presenter is not available”.
+                        </p>
+                      )}
+                    </div>
+                  )}
                   {embedFor === a.id && (
                     <div id={`embed-builder-${a.id}`} className="basis-full rounded-lg border border-slate-200 bg-slate-50 p-3" data-testid="embed-builder">
                       <p className="text-xs text-slate-600">Paste this before &lt;/body&gt; on your site to add a floating chat launcher.</p>

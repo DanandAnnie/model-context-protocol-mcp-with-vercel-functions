@@ -9371,6 +9371,63 @@ test("a video's share link has a QR code to print, saved as an SVG or a PNG, or 
   await expect(page.getByTestId("share-qr")).toHaveCount(0);
 });
 
+test("a shared presenter's row has a QR code of its talk link, for a sign at an open house, that scans back to the link", async ({ page }) => {
+  const name = `Open house host ${Date.now().toString(36)}`;
+  const agent = (await (await page.request.post("/api/agents", { data: { name, avatarId: "stock_1", isPublic: true } })).json()).agent as { id: string };
+  try {
+    await page.goto("/interactive");
+    const open = page.getByRole("button", { name: `QR code for ${name}`, exact: true });
+    await expect(open).toHaveAttribute("aria-expanded", "false");
+    await open.click();
+    await expect(open).toHaveAttribute("aria-expanded", "true");
+    const panel = page.getByRole("region", { name: `QR code for ${name}` });
+    await expect(panel).toContainText(`visitors chat with ${name}`);
+    await expect(panel.getByRole("img", { name: "QR code for the talk link" })).toBeVisible();
+    const talkUrl = `${new URL(page.url()).origin}/talk/${agent.id}`;
+
+    // The SVG is named after the presenter and says what scanning does.
+    const svgDownload = page.waitForEvent("download");
+    await panel.getByRole("button", { name: "Download SVG" }).click();
+    const svgFile = await svgDownload;
+    expect(svgFile.suggestedFilename()).toBe(`qr-${name}.svg`);
+    const svg = await readFile((await svgFile.path())!, "utf8");
+    expect(svg).toContain(`<title>Scan to talk to “${name}”</title>`);
+    // It draws what the page shows.
+    expect(svg).toContain(`d="${await panel.getByRole("img", { name: "QR code for the talk link" }).locator("path").getAttribute("d")}"`);
+
+    // The PNG scans to the talk page.
+    const pngDownload = page.waitForEvent("download");
+    await panel.getByRole("button", { name: "Download PNG" }).click();
+    const png = (await readFile((await (await pngDownload).path())!)).toString("base64");
+    const read = await page.evaluate(async (data) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${data}`;
+      await img.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 256;
+      const ctx = canvas.getContext("2d")!;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, 0, 0, 256, 256);
+      return Array.from(ctx.getImageData(0, 0, 256, 256).data);
+    }, png);
+    expect(jsQR(new Uint8ClampedArray(read), 256, 256)?.data).toBe(talkUrl);
+    // The presenter it opens is there to talk to.
+    expect((await page.request.get(`/api/talk/${agent.id}`)).status()).toBe(200);
+
+    // With the link off there is nothing to scan to, and the panel says so.
+    await page.getByRole("button", { name: `Turn off link for ${name}`, exact: true }).click();
+    await expect(page.getByRole("button", { name: `Turn on link for ${name}`, exact: true })).toBeVisible();
+    await expect(panel.getByRole("status")).toHaveText("Turn the link on first: while it is off, scanning it shows “This presenter is not available”.");
+    await expect(panel.getByRole("img")).toHaveCount(0);
+    expect((await page.request.get(`/api/talk/${agent.id}`)).status()).toBe(404);
+    // The button closes it again.
+    await open.click();
+    await expect(page.getByTestId("agent-qr")).toHaveCount(0);
+  } finally {
+    await page.request.delete(`/api/agents/${agent.id}`);
+  }
+});
+
 test("the bulk bar never sends more than the 200 videos one action takes", async ({ page }) => {
   test.slow();
   const tag = `Over ${Date.now().toString(36)}`;

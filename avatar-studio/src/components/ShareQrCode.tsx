@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import { Copy, Download } from "lucide-react";
 import { safeFileStem } from "@/lib/attachment";
-import { qrDraw, qrMatrix, qrPath, qrSide, qrSvg } from "@/lib/qr";
+import { type QrSubject, qrDraw, qrMatrix, qrPath, qrSide, qrSvg, qrWording } from "@/lib/qr";
 
 /** The PNG's width and height in pixels: sharp on a printed flyer or a slide. */
 const PNG_SIZE = 1024;
@@ -21,14 +21,16 @@ function save(blob: Blob, name: string) {
 }
 
 /**
- * A QR code of a share link, for a flyer, a slide, or a sign at an open house: shown on the page, saved as an SVG
- * (sharp at any size) or a 1024-pixel PNG named after the video, or copied as that PNG to paste straight into a slide.
+ * A QR code of a share link (or, with `subject` "talk", a presenter's talk link), for a flyer, a slide, or a sign at an
+ * open house: shown on the page, saved as an SVG (sharp at any size) or a 1024-pixel PNG named after the video or
+ * presenter, or copied as that PNG to paste straight into a slide.
  */
-export function ShareQrCode({ url, title }: { url: string; title: string }) {
+export function ShareQrCode({ url, title, subject = "share" }: { url: string; title: string; subject?: QrSubject }) {
+  const wording = qrWording(subject, title);
   const matrix = useMemo(() => qrMatrix(url), [url]);
   const path = useMemo(() => qrPath(matrix), [matrix]);
   const side = qrSide(matrix);
-  const stem = `qr-${safeFileStem(title) || "video"}`;
+  const stem = `qr-${safeFileStem(title) || (subject === "talk" ? "presenter" : "video")}`;
   const [err, setErr] = useState<string | null>(null);
   // The link the last copy was of, so the note does not outlive a change to the link.
   const [copied, setCopied] = useState<string | null>(null);
@@ -48,7 +50,7 @@ export function ShareQrCode({ url, title }: { url: string; title: string }) {
   function downloadSvg() {
     setErr(null);
     setCopied(null);
-    save(new Blob([qrSvg(url, `Scan to watch “${title}”`, matrix)], { type: "image/svg+xml" }), `${stem}.svg`);
+    save(new Blob([qrSvg(url, wording.title, matrix)], { type: "image/svg+xml" }), `${stem}.svg`);
   }
   function downloadPng() {
     setErr(null);
@@ -80,7 +82,7 @@ export function ShareQrCode({ url, title }: { url: string; title: string }) {
 
   return (
     <div className="mt-3 flex flex-wrap items-center gap-4">
-      <svg role="img" aria-label="QR code for the share link" viewBox={`0 0 ${side} ${side}`} className="h-36 w-36 rounded border border-slate-200" shapeRendering="crispEdges" data-testid="share-qr">
+      <svg role="img" aria-label={wording.label} viewBox={`0 0 ${side} ${side}`} className="h-36 w-36 rounded border border-slate-200" shapeRendering="crispEdges" data-testid="share-qr">
         <rect width={side} height={side} fill="#fff" />
         <path d={path} fill="#000" />
       </svg>

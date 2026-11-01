@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import jsQR from "jsqr";
-import { QR_MARGIN, qrDraw, qrMatrix, qrPath, qrSide, qrSvg } from "../qr";
+import { QR_MARGIN, qrDraw, qrMatrix, qrPath, qrSide, qrSvg, qrWording } from "../qr";
 
 const url = "https://studio.example.com/share/vid_mf3k2abcd1234efgh";
 
@@ -147,5 +147,17 @@ describe("qrDraw", () => {
     const m = qrMatrix(long);
     assert.ok(256 % qrSide(m) !== 0 && Math.floor(256 / qrSide(m)) >= 2);
     check(m, 256, long);
+  });
+});
+
+describe("qrWording", () => {
+  it("names a video's code by its share link and a presenter's by its talk link", () => {
+    assert.deepEqual(qrWording("share", "Open house"), { label: "QR code for the share link", title: "Scan to watch “Open house”" });
+    assert.deepEqual(qrWording("talk", "Ask Dana"), { label: "QR code for the talk link", title: "Scan to talk to “Ask Dana”" });
+  });
+
+  it("gives a title qrSvg keeps to what an SVG file may hold", () => {
+    const { title } = qrWording("talk", `Ask <Dana> & "Sam"\u0007`);
+    assert.match(qrSvg(url, title), /<title>Scan to talk to “Ask &lt;Dana&gt; &amp; &quot;Sam&quot;”<\/title>/);
   });
 });

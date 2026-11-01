@@ -12,6 +12,32 @@ export function isShortcutsKey(e: Pick<KeyboardEvent, "key" | "code" | "ctrlKey"
 
 export type Shortcut = { keys: string[][]; does: string };
 
+/**
+ * What a key press does in the library while selecting: Escape closes the field open in the bar (a folder, a time, the
+ * password, or the link settings), or else ends selecting; Ctrl+A (⌘A on a Mac) selects every video shown. Neither
+ * takes a key from a text box (outside the bar's own field, Escape is the box's), and nothing is done while not
+ * selecting or while an action is running. An Escape that ends an input method's composition, closes a select's list,
+ * or repeats from a held key is not for the bar, so a held key cannot run on from closing the field to clearing the
+ * selection. Ctrl+A is the A key by character, or by its place on a layout whose key types no Latin letter (Cyrillic,
+ * Greek), as Ctrl+/ is.
+ */
+export function libraryKey(
+  e: Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "repeat" | "isComposing" | "keyCode">,
+  state: { apple: boolean; selecting: boolean; busy: boolean; fieldOpen: boolean; inField: boolean; editable: boolean; inSelect: boolean },
+): "close-field" | "stop" | "select-all" | null {
+  if (!state.selecting || state.busy || e.isComposing || e.keyCode === 229) return null;
+  const plain = !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+  if (e.key === "Escape" && plain) {
+    if (e.repeat || state.inSelect) return null;
+    if (state.fieldOpen && (state.inField || !state.editable)) return "close-field";
+    return state.editable ? null : "stop";
+  }
+  const modifier = state.apple ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+  const a = e.key.toLowerCase() === "a" || (e.code === "KeyA" && !/^[\x20-\x7e]$/.test(e.key));
+  if (modifier && !e.altKey && !e.shiftKey && a && !state.editable) return "select-all";
+  return null;
+}
+
 /** The studio's shortcuts, with the keys as this computer has them: each entry is one or more ways to press it. */
 export function shortcutGroups(apple: boolean): Array<{ title: string; shortcuts: Shortcut[] }> {
   const mod = apple ? "⌘" : "Ctrl";
@@ -39,7 +65,11 @@ export function shortcutGroups(apple: boolean): Array<{ title: string; shortcuts
     {
       title: "In My videos, while selecting",
       // A focused card's Space or Enter clicks it with the Shift key as held, so the keyboard picks a run the same way.
-      shortcuts: [{ keys: [[shift, "Click"], [shift, "Space"]], does: "Select, or unselect, a run of videos: every one from the video clicked last to the one Shift+clicked" }],
+      shortcuts: [
+        { keys: [[shift, "Click"], [shift, "Space"]], does: "Select, or unselect, a run of videos: every one from the video clicked last to the one Shift+clicked" },
+        { keys: [[mod, "A"]], does: "Select every video shown (up to the 200 one action takes)" },
+        { keys: [["Esc"]], does: "Close the field open in the bar, such as the folder or a time; with none open, stop selecting" },
+      ],
     },
     {
       title: "In quick find",

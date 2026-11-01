@@ -1,9 +1,11 @@
 "use client";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArchiveRestore, CheckSquare, Clapperboard, Clock, LayoutGrid, List, Download, FolderInput, KeyRound, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
 import { api, clickSelect, folderFor, overSelection } from "@/lib/client";
+import { libraryKey } from "@/lib/shortcuts";
+import { isApple } from "@/components/QuickFind";
 import { VideoCard, VideoRow } from "@/components/VideoCard";
 import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
@@ -146,6 +148,55 @@ function VideosInner() {
     anchor.current = done.anchor;
     setSelected(done.selected);
   }
+  // Never more than one action takes, so every button in the bar can act on what is chosen.
+  function selectShown() {
+    setSelected(new Set(videos.slice(0, BULK_MAX).map((v) => v.id)));
+    anchor.current = null;
+    if (videos.length > BULK_MAX) setBulkErr(`Selected the first ${BULK_MAX} of the ${videos.length} shown, as one action takes up to ${BULK_MAX}.`);
+  }
+  // The bar's field (a folder, a time, the password, or the link settings) takes its button's place, and closes back
+  // onto that button (`data-opens`), so the keyboard stays where it was; with that button disabled (nothing is
+  // selected any more), onto "Select all shown".
+  const barRef = useRef<HTMLDivElement>(null);
+  function closeTimeField() {
+    const kind = timeField;
+    setTimeField(null);
+    setTimeDraft("");
+    setLinkSettings({ download: "", gate: "" });
+    requestAnimationFrame(() => {
+      if (document.activeElement && document.activeElement !== document.body) return;
+      const opener = barRef.current?.querySelector<HTMLButtonElement>(`[data-opens='${kind}']`);
+      if (opener && !opener.disabled) opener.focus();
+      else selectShownRef.current?.focus();
+    });
+  }
+  const selectButtonRef = useRef<HTMLButtonElement>(null);
+  // Escape and Ctrl/⌘+A while selecting (see libraryKey), read through a ref, set once each render commits, so the
+  // listener sees the state on screen. In Firefox an Escape that closes the folder field's list of suggestions also
+  // reaches here and closes the field; Chromium keeps that Escape to the list.
+  const onLibraryKey = useRef<(e: KeyboardEvent) => void>(() => {});
+  useLayoutEffect(() => {
+    onLibraryKey.current = (e) => {
+      if (e.defaultPrevented || document.querySelector("dialog[open]")) return;
+      const el = e.target instanceof HTMLElement ? e.target : null;
+      const editable = !!el && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName));
+      const inField = !!el && !!barRef.current?.contains(el) && !!el.closest("form");
+      const does = libraryKey(e, { apple: isApple(), selecting, busy: busy !== null, fieldOpen: timeField !== null, inField, editable, inSelect: el?.tagName === "SELECT" });
+      if (!does) return;
+      e.preventDefault();
+      if (does === "close-field") closeTimeField();
+      else if (does === "select-all") selectShown();
+      else {
+        stopSelecting();
+        requestAnimationFrame(() => selectButtonRef.current?.focus());
+      }
+    };
+  });
+  useEffect(() => {
+    const listen = (e: KeyboardEvent) => onLibraryKey.current(e);
+    document.addEventListener("keydown", listen);
+    return () => document.removeEventListener("keydown", listen);
+  }, []);
   function stopSelecting() {
     setSelecting(false);
     setSelected(new Set());
@@ -532,10 +583,7 @@ function VideosInner() {
         </Button>
         <button
           type="button"
-          onClick={() => {
-            setTimeField(null);
-            setTimeDraft("");
-          }}
+          onClick={closeTimeField}
           disabled={busy !== null}
           aria-label="Close folder"
           className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
@@ -578,10 +626,7 @@ function VideosInner() {
         </Button>
         <button
           type="button"
-          onClick={() => {
-            setTimeField(null);
-            setTimeDraft("");
-          }}
+          onClick={closeTimeField}
           disabled={busy !== null}
           aria-label="Close share password"
           className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
@@ -621,10 +666,7 @@ function VideosInner() {
         </Button>
         <button
           type="button"
-          onClick={() => {
-            setTimeField(null);
-            setLinkSettings({ download: "", gate: "" });
-          }}
+          onClick={closeTimeField}
           disabled={busy !== null}
           aria-label="Close link settings"
           className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
@@ -682,10 +724,7 @@ function VideosInner() {
         </Button>
         <button
           type="button"
-          onClick={() => {
-            setTimeField(null);
-            setTimeDraft("");
-          }}
+          onClick={closeTimeField}
           disabled={busy !== null}
           aria-label={golive ? "Close go-live time" : "Close expiry"}
           className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
@@ -755,19 +794,15 @@ function VideosInner() {
           )}
           <span className="flex-1" />
           {selecting ? (
-            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1" data-testid="bulk-bar">
+            <div ref={barRef} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1" data-testid="bulk-bar">
               <span role="status" className={`px-1 text-xs font-medium ${selected.size > BULK_MAX ? "text-amber-800" : "text-slate-700"}`}>
                 {selected.size} selected{selected.size > BULK_MAX ? `, over the ${BULK_MAX} one action takes` : ""}
               </span>
               <button
                 ref={selectShownRef}
                 type="button"
-                onClick={() => {
-                  // Never more than one action takes, so every button in the bar can act on what is chosen.
-                  setSelected(new Set(videos.slice(0, BULK_MAX).map((v) => v.id)));
-                  anchor.current = null;
-                  if (videos.length > BULK_MAX) setBulkErr(`Selected the first ${BULK_MAX} of the ${videos.length} shown, as one action takes up to ${BULK_MAX}.`);
-                }}
+                onClick={selectShown}
+                aria-keyshortcuts="Control+A Meta+A"
                 disabled={busy !== null} className="text-xs text-brand-700 hover:underline disabled:opacity-50">
                 Select all shown
               </button>
@@ -813,7 +848,7 @@ function VideosInner() {
               {timeField === "folder" ? (
                 folderForm()
               ) : (
-                <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => openTimeField("folder")} disabled={!selected.size || busy !== null}>
+                <Button variant="secondary" className="px-2.5 py-1 text-xs" data-opens="folder" onClick={() => openTimeField("folder")} disabled={!selected.size || busy !== null}>
                   <FolderInput className="h-3.5 w-3.5" /> Move to folder
                 </Button>
               )}
@@ -826,28 +861,28 @@ function VideosInner() {
               {timeField === "golive" ? (
                 timeForm("golive")
               ) : (
-                <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => openTimeField("golive")} disabled={!selected.size || busy !== null}>
+                <Button variant="secondary" className="px-2.5 py-1 text-xs" data-opens="golive" onClick={() => openTimeField("golive")} disabled={!selected.size || busy !== null}>
                   <Clock className="h-3.5 w-3.5" /> Schedule go-live
                 </Button>
               )}
               {timeField === "expiry" ? (
                 timeForm("expiry")
               ) : (
-                <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => openTimeField("expiry")} disabled={!selected.size || busy !== null}>
+                <Button variant="secondary" className="px-2.5 py-1 text-xs" data-opens="expiry" onClick={() => openTimeField("expiry")} disabled={!selected.size || busy !== null}>
                   <TimerOff className="h-3.5 w-3.5" /> Set expiry
                 </Button>
               )}
               {timeField === "password" ? (
                 passwordForm()
               ) : (
-                <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => openTimeField("password")} disabled={!selected.size || busy !== null}>
+                <Button variant="secondary" className="px-2.5 py-1 text-xs" data-opens="password" onClick={() => openTimeField("password")} disabled={!selected.size || busy !== null}>
                   <KeyRound className="h-3.5 w-3.5" /> Password
                 </Button>
               )}
               {timeField === "settings" ? (
                 settingsForm()
               ) : (
-                <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => openTimeField("settings")} disabled={!selected.size || busy !== null} title="Let viewers of the selected videos download them, or ask them for an email before playing, or stop either">
+                <Button variant="secondary" className="px-2.5 py-1 text-xs" data-opens="settings" onClick={() => openTimeField("settings")} disabled={!selected.size || busy !== null} title="Let viewers of the selected videos download them, or ask them for an email before playing, or stop either">
                   <SlidersHorizontal className="h-3.5 w-3.5" /> Download &amp; email
                 </Button>
               )}
@@ -856,12 +891,12 @@ function VideosInner() {
               </Button>
                 </>
               )}
-              <button type="button" onClick={stopSelecting} disabled={busy !== null} aria-label="Done selecting" className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-50">
+              <button type="button" onClick={stopSelecting} disabled={busy !== null} aria-label="Done selecting" aria-keyshortcuts="Escape" className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-50">
                 <X className="h-4 w-4" />
               </button>
             </div>
           ) : (
-            <Button variant="secondary" className="px-3 py-1.5 text-xs" onClick={() => setSelecting(true)} disabled={busy === "empty" || busy === "restoreall"} title="Choose videos for one action; Shift+click a video to select, or unselect, every one from the video clicked last to it">
+            <Button ref={selectButtonRef} variant="secondary" className="px-3 py-1.5 text-xs" onClick={() => setSelecting(true)} disabled={busy === "empty" || busy === "restoreall"} title="Choose videos for one action; Shift+click a video to select, or unselect, every one from the video clicked last to it">
               <CheckSquare className="h-3.5 w-3.5" /> Select
             </Button>
           )}

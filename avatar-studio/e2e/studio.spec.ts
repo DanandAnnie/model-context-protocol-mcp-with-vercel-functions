@@ -9070,6 +9070,81 @@ test("Shift+click selects, or unselects, a run of videos from the one clicked la
   await expect(dialog).toContainText("Select, or unselect, a run of videos: every one from the video clicked last to the one Shift+clicked");
 });
 
+test("while selecting, Ctrl+A selects all shown and Escape closes the bar's field, then stops selecting", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const made = await page.request.post("/api/videos/batch", {
+    data: { title: `Keys ${tag}`, scriptTemplate: "Hello {name}.", csv: "name\nAda\nBo\nCy\nDee", avatarId: "stock_1", voiceId: "stock_voice_1" },
+  });
+  expect(made.status()).toBe(201);
+  const { batchId } = (await made.json()) as { batchId: string };
+  await page.goto(`/videos?batch=${batchId}`);
+  const select = page.getByRole("button", { name: "Select", exact: true });
+  await select.click();
+  const bar = page.getByTestId("bulk-bar");
+  const count = bar.getByText(/selected$/);
+  await expect(page.locator("button[aria-pressed][aria-label^='Select ']")).toHaveCount(4);
+  await page.keyboard.press("Control+a");
+  await expect(count).toHaveText("4 selected");
+
+  // In the search box the keys are the box's own: Ctrl+A selects its text, Escape leaves the bar as it is.
+  const search = page.getByLabel("Search videos");
+  await bar.getByRole("button", { name: "Done selecting" }).click();
+  await select.click();
+  await search.focus();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Escape");
+  await expect(count).toHaveText("0 selected");
+
+  // Escape in the folder field closes it, back on Move to folder, with the selection kept.
+  await page.locator("button[aria-pressed][aria-label^='Select ']").first().click();
+  await page.keyboard.press("Control+a");
+  await expect(count).toHaveText("4 selected");
+  await bar.getByRole("button", { name: "Move to folder" }).click();
+  const folderField = page.getByLabel("Folder for the selected videos");
+  await expect(folderField).toBeFocused();
+  await folderField.fill(`Kept out ${tag}`);
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("bulk-folder")).toHaveCount(0);
+  await expect(bar.getByRole("button", { name: "Move to folder" })).toBeFocused();
+  await expect(count).toHaveText("4 selected");
+  // Its close button goes back to the button that opened the field too.
+  await bar.getByRole("button", { name: "Set expiry" }).click();
+  await bar.getByRole("button", { name: "Close expiry" }).click();
+  await expect(bar.getByRole("button", { name: "Set expiry" })).toBeFocused();
+
+  // With no field open, Escape stops selecting, the keyboard landing on Select; nothing was moved.
+  await page.keyboard.press("Escape");
+  await expect(bar).toHaveCount(0);
+  await expect(select).toBeFocused();
+  const videos = (await (await page.request.get(`/api/videos?batch=${batchId}`)).json()) as { videos: Array<{ folder?: string }> };
+  expect(videos.videos.map((v) => v.folder ?? "")).toEqual(["", "", "", ""]);
+  // Out of select mode, Ctrl+A is the browser's again: it selects the page's text.
+  await page.keyboard.press("Control+a");
+  expect(await page.evaluate(() => window.getSelection()?.toString().length ?? 0)).toBeGreaterThan(0);
+  await expect(bar).toHaveCount(0);
+
+  // Over the keyboard shortcuts dialog the keys are the dialog's: Escape closes it and leaves the bar's field open.
+  await page.evaluate(() => window.getSelection()?.removeAllRanges());
+  await select.click();
+  await page.locator("button[aria-pressed][aria-label^='Select ']").first().click();
+  await bar.getByRole("button", { name: "Move to folder" }).click();
+  await expect(page.getByLabel("Folder for the selected videos")).toBeFocused();
+  await page.keyboard.press("Control+/");
+  const dialog = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+  await expect(dialog).toContainText("Select every video shown (up to the 200 one action takes)");
+  await expect(dialog).toContainText("Close the field open in the bar, such as the folder or a time; with none open, stop selecting");
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(page.getByTestId("bulk-folder")).toHaveCount(1);
+  await expect(count).toHaveText("1 selected");
+  // Unselecting everything disables Move to folder, so closing the field lands on Select all shown instead.
+  await page.locator("button[aria-pressed='true'][aria-label^='Select ']").click();
+  await expect(count).toHaveText("0 selected");
+  await bar.getByRole("button", { name: "Close folder" }).click();
+  await expect(bar.getByRole("button", { name: "Select all shown" })).toBeFocused();
+});
+
 test("the bulk bar never sends more than the 200 videos one action takes", async ({ page }) => {
   test.slow();
   const tag = `Over ${Date.now().toString(36)}`;

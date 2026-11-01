@@ -51,3 +51,17 @@ export function qrSvg(text: string, title = "QR code", matrix = qrMatrix(text)):
   const escaped = title.replace(NOT_XML, "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${side} ${side}" width="${side * 8}" height="${side * 8}" shape-rendering="crispEdges"><title>${escaped}</title><rect width="${side}" height="${side}" fill="#fff"/><path d="${qrPath(matrix)}" fill="#000"/></svg>\n`;
 }
+
+/**
+ * Draws the code with its quiet zone, black on white, filling a `size`-pixel square (at least `qrSide(matrix)`
+ * pixels): whole pixels a module, centred, so no module is blurred across two pixels when the picture is printed.
+ */
+export function qrDraw(ctx: Pick<CanvasRenderingContext2D, "fillStyle" | "fillRect">, matrix: boolean[][], size: number): void {
+  const side = qrSide(matrix);
+  const cell = Math.floor(size / side);
+  const offset = Math.floor((size - cell * side) / 2) + QR_MARGIN * cell;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, size, size);
+  ctx.fillStyle = "#000";
+  matrix.forEach((row, y) => row.forEach((dark, x) => dark && ctx.fillRect(offset + x * cell, offset + y * cell, cell, cell)));
+}

@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import jsQR from "jsqr";
-import { QR_MARGIN, qrMatrix, qrPath, qrSide, qrSvg } from "../qr";
+import { QR_MARGIN, qrDraw, qrMatrix, qrPath, qrSide, qrSvg } from "../qr";
 
 const url = "https://studio.example.com/share/vid_mf3k2abcd1234efgh";
 
@@ -96,5 +96,56 @@ describe("qrSvg", () => {
     assert.match(qrSvg(url, "Bell\u0007 \u001b[1mTour\uFFFF \uD800end"), /<title>Bell \[1mTour end<\/title>/);
     assert.equal(qrSvg(url, "t", qrMatrix(url)), qrSvg(url, "t"));
     assert.ok(svg.endsWith("</svg>\n"));
+  });
+});
+
+describe("qrDraw", () => {
+  /** Paints what `qrDraw` asks for into a `size`-pixel grey bitmap (0 black, 255 white, 128 never painted). */
+  function paint(matrix: boolean[][], size: number) {
+    const px = new Uint8ClampedArray(size * size).fill(128);
+    const ctx = {
+      fillStyle: "" as string | CanvasGradient | CanvasPattern,
+      fillRect(x: number, y: number, w: number, h: number) {
+        assert.ok(Number.isInteger(x) && Number.isInteger(y) && Number.isInteger(w) && Number.isInteger(h), "whole pixels only");
+        assert.ok(x >= 0 && y >= 0 && x + w <= size && y + h <= size, "inside the picture");
+        for (let j = y; j < y + h; j++) for (let i = x; i < x + w; i++) px[j * size + i] = this.fillStyle === "#000" ? 0 : 255;
+      },
+    };
+    qrDraw(ctx, matrix, size);
+    return px;
+  }
+
+  /** Checks each module (and the quiet zone) is one solid square of whole pixels in its place, then scans the picture. */
+  function check(matrix: boolean[][], size: number, text: string) {
+    const px = paint(matrix, size);
+    const side = qrSide(matrix);
+    const cell = Math.floor(size / side);
+    const offset = Math.floor((size - cell * side) / 2);
+    assert.ok(cell >= 1);
+    for (let y = -QR_MARGIN; y < matrix.length + QR_MARGIN; y++)
+      for (let x = -QR_MARGIN; x < matrix.length + QR_MARGIN; x++) {
+        const dark = matrix[y]?.[x] === true;
+        const top = offset + (y + QR_MARGIN) * cell;
+        const left = offset + (x + QR_MARGIN) * cell;
+        for (let dy = 0; dy < cell; dy++) for (let dx = 0; dx < cell; dx++) assert.equal(px[(top + dy) * size + left + dx], dark ? 0 : 255, `module ${x},${y}`);
+      }
+    // Outside the code, the border left by whole-pixel cells is white too.
+    assert.equal(px[0], 255);
+    assert.equal(px[size * size - 1], 255);
+    assert.ok(!px.includes(128));
+    const rgba = new Uint8ClampedArray(size * size * 4);
+    px.forEach((v, i) => rgba.set([v, v, v, 255], i * 4));
+    assert.equal(jsQR(rgba, size, size)?.data, text);
+  }
+
+  it("fills the picture with whole-pixel modules, centred in a white ground, that scan back to the link", () => {
+    check(qrMatrix(url), 1024, url);
+  });
+
+  it("fits a long link's larger code at a size that leaves a border, still at whole pixels", () => {
+    const long = `${url}?t=${"9".repeat(600)}`;
+    const m = qrMatrix(long);
+    assert.ok(256 % qrSide(m) !== 0 && Math.floor(256 / qrSide(m)) >= 2);
+    check(m, 256, long);
   });
 });

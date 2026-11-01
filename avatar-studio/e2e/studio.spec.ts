@@ -9274,7 +9274,8 @@ test("Copy links puts the selected videos' sendable share links on the clipboard
   await expect(page.getByTestId("copy-note")).toHaveText("");
 });
 
-test("a video's share link has a QR code to print, saved as an SVG or a PNG that scans back to the link", async ({ page }) => {
+test("a video's share link has a QR code to print, saved as an SVG or a PNG, or copied as a picture, that scans back to the link", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const v = await createVideoViaApi(page, "Open house QR");
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
   await page.goto(`/videos/${v.id}`);
@@ -9300,19 +9301,51 @@ test("a video's share link has a QR code to print, saved as an SVG or a PNG that
   const pngFile = await pngDownload;
   expect(pngFile.suggestedFilename()).toBe("qr-Open house QR.png");
   const png = (await readFile((await pngFile.path())!)).toString("base64");
-  const read = await page.evaluate(async (data) => {
-    const img = new Image();
-    img.src = `data:image/png;base64,${data}`;
-    await img.decode();
-    const canvas = document.createElement("canvas");
-    canvas.width = canvas.height = 256;
-    const ctx = canvas.getContext("2d")!;
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(img, 0, 0, 256, 256);
-    return { width: img.naturalWidth, pixels: Array.from(ctx.getImageData(0, 0, 256, 256).data) };
-  }, png);
-  expect(read.width).toBe(1024);
-  expect(jsQR(new Uint8ClampedArray(read.pixels), 256, 256)?.data).toBe(shareUrl);
+  /** The picture's width, and what a camera reads from it drawn at 256 pixels. */
+  const scan = async (data: string) => {
+    const read = await page.evaluate(async (data) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${data}`;
+      await img.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 256;
+      const ctx = canvas.getContext("2d")!;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, 0, 0, 256, 256);
+      return { width: img.naturalWidth, pixels: Array.from(ctx.getImageData(0, 0, 256, 256).data) };
+    }, data);
+    return { width: read.width, text: jsQR(new Uint8ClampedArray(read.pixels), 256, 256)?.data };
+  };
+  expect(await scan(png)).toEqual({ width: 1024, text: shareUrl });
+
+  // Copy image puts the same PNG on the clipboard, to paste straight into a slide.
+  await card.getByRole("button", { name: "Copy image" }).click();
+  await expect(card.getByTestId("qr-copy-note")).toHaveText("Copied: paste it into a slide, a flyer, or a document.");
+  const pasted = await page.evaluate(async () => {
+    const [item] = await navigator.clipboard.read();
+    const bytes = new Uint8Array(await (await item.getType("image/png")).arrayBuffer());
+    return { types: item.types, data: btoa(Array.from(bytes, (b) => String.fromCharCode(b)).join("")) };
+  });
+  expect(pasted.types).toEqual(["image/png"]);
+  expect(await scan(pasted.data)).toEqual({ width: 1024, text: shareUrl });
+  // A browser that cannot copy pictures says so, and the earlier note goes.
+  await page.evaluate(() => {
+    const w = window as { ClipboardItem?: unknown };
+    const saved = w.ClipboardItem;
+    delete w.ClipboardItem;
+    (window as unknown as { restoreClipboardItem: () => void }).restoreClipboardItem = () => void (w.ClipboardItem = saved);
+  });
+  await card.getByRole("button", { name: "Copy image" }).click();
+  await expect(card.getByText("This browser cannot copy pictures; use Download PNG instead.")).toBeVisible();
+  await expect(card.getByTestId("qr-copy-note")).toHaveText("");
+  await page.evaluate(() => (window as unknown as { restoreClipboardItem: () => void }).restoreClipboardItem());
+  // A refused write says so.
+  await page.evaluate(() => {
+    navigator.clipboard.write = () => Promise.reject(new DOMException("Denied", "NotAllowedError"));
+  });
+  await card.getByRole("button", { name: "Copy image" }).click();
+  await expect(card.getByText("The browser did not let the page copy the picture; use Download PNG instead.")).toBeVisible();
+  await expect(card.getByTestId("qr-copy-note")).toHaveText("");
 
   // A link with an expiry says when a printed code stops working.
   const expires = new Date(Date.now() + 3 * 86_400_000).toISOString();

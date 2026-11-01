@@ -1964,7 +1964,11 @@ export const videoQuerySchema = z.object({
   /** A folder name; an empty string means unfiled; absent means every folder. */
   folder: z.string().trim().max(MAX_FOLDER_NAME).optional(),
   batch: z.string().max(80).optional(),
-  sort: z.enum(["newest", "oldest", "title", "views"]).default("newest"),
+  /**
+   * `viewed` puts the latest counted viewer visit first (share page or embed; the studio's own visits do not count) and
+   * `length` the longest render; a video never viewed (for `viewed`) or not yet timed (for `length`) comes last.
+   */
+  sort: z.enum(["newest", "oldest", "title", "views", "viewed", "length"]).default("newest"),
   /** Review state in a workspace: "pending" (awaiting an owner), "approved", "changes", or "none" (never asked). */
   review: z.enum(["all", "pending", "approved", "changes", "none"]).default("all"),
   /**
@@ -2013,6 +2017,10 @@ const SORTERS: Record<VideoQuery["sort"], (a: Video, b: Video) => number> = {
   oldest: (a, b) => a.createdAt.localeCompare(b.createdAt),
   title: (a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }) || b.createdAt.localeCompare(a.createdAt),
   views: (a, b) => (b.views ?? 0) - (a.views ?? 0) || b.createdAt.localeCompare(a.createdAt),
+  // Never viewed (or unreadable) sorts as the epoch, so it falls behind every view; ties go newest first.
+  viewed: (a, b) => (Date.parse(b.lastViewedAt ?? "") || 0) - (Date.parse(a.lastViewedAt ?? "") || 0) || b.createdAt.localeCompare(a.createdAt),
+  // A render with no length yet (still rendering, or failed) comes after every timed one.
+  length: (a, b) => (b.durationSec ?? -1) - (a.durationSec ?? -1) || b.createdAt.localeCompare(a.createdAt),
 };
 
 const CREATED_WITHIN_DAYS: Record<Exclude<VideoQuery["created"], "all">, number> = { "7d": 7, "30d": 30, "90d": 90 };

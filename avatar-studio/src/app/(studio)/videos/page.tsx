@@ -705,6 +705,8 @@ function VideosInner() {
             <option value="oldest">Oldest first</option>
             <option value="title">Title A–Z</option>
             <option value="views">Most viewed</option>
+            <option value="viewed">Latest viewer visit</option>
+            <option value="length">Longest first</option>
           </select>
         </div>
       )}

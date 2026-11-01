@@ -3271,9 +3271,10 @@ test("captions, share page, rename, and library filters", async ({ page }) => {
   await expect(page.locator("button[title='Rename']")).toHaveText("Renamed video");
 });
 
-test("library sorts by date, title, and views", async ({ page }) => {
-  const older = await createVideoViaApi(page, "Zulu sortcheck");
-  await createVideoViaApi(page, "Alpha sortcheck");
+test("library sorts by date, title, views, latest view, and length", async ({ page }) => {
+  // The older one has much the longer script, so the length sort has an order to show.
+  const older = await createVideoViaApi(page, "Zulu sortcheck", { script: Array.from({ length: 12 }, (_, i) => `This is sentence number ${i + 1} of a longer tour.`).join(" ") });
+  const newer = await createVideoViaApi(page, "Alpha sortcheck");
   await page.goto("/videos");
   await page.getByPlaceholder(/Search title/).fill("sortcheck");
   const titles = page.locator("a[href^='/videos/vid_'] .truncate");
@@ -3291,6 +3292,22 @@ test("library sorts by date, title, and views", async ({ page }) => {
   await page.getByPlaceholder(/Search title/).fill("sortcheck");
   await page.getByLabel("Sort videos").selectOption("views");
   await expect(titles.first()).toHaveText("Zulu sortcheck");
+  // The only one viewed comes first by latest view too, and the longer one first by length (each from title order).
+  await page.getByLabel("Sort videos").selectOption("title");
+  await expect(titles.first()).toHaveText("Alpha sortcheck");
+  await page.getByLabel("Sort videos").selectOption("viewed");
+  await expect(titles.first()).toHaveText("Zulu sortcheck");
+  await page.getByLabel("Sort videos").selectOption("title");
+  await expect(titles.first()).toHaveText("Alpha sortcheck");
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${newer.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  const lengths = ((await (await page.request.get("/api/videos?q=sortcheck&sort=length")).json()).videos as { title: string; durationSec?: number }[]).map((v) => [v.title, v.durationSec]);
+  expect(lengths[0][0]).toBe("Zulu sortcheck");
+  expect(Number(lengths[0][1])).toBeGreaterThan(Number(lengths[1][1]));
+  await page.reload();
+  await page.getByPlaceholder(/Search title/).fill("sortcheck");
+  await page.getByLabel("Sort videos").selectOption("length");
+  await expect(titles.first()).toHaveText("Zulu sortcheck");
+  expect((await page.request.get("/api/videos?sort=random")).status()).toBe(400);
 });
 
 test("the share page transcript plays the video from a line and marks the line being spoken", async ({ page }) => {

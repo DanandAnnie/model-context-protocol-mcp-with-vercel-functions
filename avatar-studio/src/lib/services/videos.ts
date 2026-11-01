@@ -302,7 +302,7 @@ export async function resolveRenderContext(
  * best-effort under concurrent requests; batches reserve their rows up front.
  */
 /** Library fields a caller may set on a new video alongside the render request (batch row, folder, retry link). */
-export type VideoExtras = Partial<Pick<Video, "folder" | "description" | "batchId" | "rowLabel" | "retryOf" | "resizedFrom" | "captionCues" | "subtitles">> & {
+export type VideoExtras = Partial<Pick<Video, "folder" | "description" | "batchId" | "rowLabel" | "batchRow" | "retryOf" | "resizedFrom" | "captionCues" | "subtitles">> & {
   /** The video's id, when a client key decides it (a template render retried after a lost answer). */
   id?: string;
   /** Called once the renderer has started this render here, never for a replay of one started before (never stored). */
@@ -815,7 +815,7 @@ async function loadVideos(ownerId: string): Promise<{ live: Video[]; trashed: Vi
 }
 
 /** Refreshes the newest in-flight renders of a library list from the provider; see `listVideos`. */
-async function refreshPending(videos: Video[]): Promise<Video[]> {
+export async function refreshPending(videos: Video[]): Promise<Video[]> {
   const now = Date.now();
   const pending = videos.filter((v) => isPending(v) && !isRefreshDeferred(v.id, now)).slice(0, REFRESH_PER_LIST);
   if (pending.length === 0) return videos;
@@ -1317,7 +1317,7 @@ export async function retryVideo(id: string, ownerId: string = LOCAL_OWNER): Pro
   if (failed.directed?.editOf) throw new ConflictError(`An edited cut is not retried; edit the scenes of “${failed.directed.editOf.title}” again`);
   const req = requestOf(failed);
   // One write: the provider's webhook can land as soon as the job exists, so nothing may overwrite the stored video afterwards.
-  return createVideo(req, ownerId, undefined, false, { folder: failed.folder, description: failed.description, batchId: failed.batchId, rowLabel: failed.rowLabel, retryOf: failed.id, resizedFrom: failed.resizedFrom });
+  return createVideo(req, ownerId, undefined, false, { folder: failed.folder, description: failed.description, batchId: failed.batchId, rowLabel: failed.rowLabel, batchRow: failed.batchRow, retryOf: failed.id, resizedFrom: failed.resizedFrom });
 }
 
 /**

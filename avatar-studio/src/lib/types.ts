@@ -1090,6 +1090,8 @@ export interface Video extends VideoRequest {
   /** Set when the video was produced by a personalized batch; `rowLabel` identifies the row. */
   batchId?: string;
   rowLabel?: string;
+  /** The batch's CSV row this video was made from (1 is the first row under the header); absent before rows were kept. */
+  batchRow?: number;
   avatarName?: string;
   voiceName?: string;
   /** Library folder name; unfiled when absent. */

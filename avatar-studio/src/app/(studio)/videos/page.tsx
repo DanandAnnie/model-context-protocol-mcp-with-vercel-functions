@@ -172,7 +172,17 @@ function VideosInner() {
             Showing one personalized batch{skipped > 0 ? `. ${skipped} ${skipped === 1 ? "row was" : "rows were"} not started because the monthly allowance was reached` : ""}
             {failedCount > 0 ? `. ${failedCount} ${failedCount === 1 ? "render" : "renders"} could not be started; open the failed cards for the provider's message` : ""}.
           </span>
-          <Link href="/videos" className="font-medium underline hover:no-underline">Show all videos</Link>
+          <span className="flex flex-wrap items-center gap-3">
+            <a
+              href={`/api/videos/batch/${encodeURIComponent(batch)}`}
+              download
+              className="font-medium underline hover:no-underline"
+              title="Each recipient's row, status, and share link, the link left blank until it can be sent"
+            >
+              Download links (CSV)
+            </a>
+            <Link href="/videos" className="font-medium underline hover:no-underline">Show all videos</Link>
+          </span>
         </div>
       )}
       {hasAny && (

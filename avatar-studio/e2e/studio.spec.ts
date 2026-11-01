@@ -4254,6 +4254,14 @@ test("personalized batch creates one video per CSV row", async ({ page }) => {
   expect(mine.every((v) => v.resolution === "720p")).toBe(true);
   expect(mine.find((v) => v.rowLabel === "Priya")?.script).toBe("Hi Priya, see you at 48 Harbor View on November 15.");
   expect(mine.every((v) => (v as { emotion?: string; pitch?: number }).emotion === "Friendly" && (v as { pitch?: number }).pitch === 10)).toBe(true);
+  // The batch's links download in the CSV's order, each with its recipient, status, and, once ready, its share link.
+  const linksDownload = page.waitForEvent("download");
+  await page.getByRole("link", { name: "Download links (CSV)" }).click();
+  const links = parseCsv(await readFile(await (await linksDownload).path(), "utf8"));
+  expect(links.columns).toEqual(["row", "recipient", "title", "status", "share_link", "share_expires", "password_required", "email_required", "video_id", "created"]);
+  expect(links.rows.map((r) => [r.row, r.recipient, r.title])).toEqual([["1", "Jordan", "Welcome video – Jordan"], ["2", "Priya", "Welcome video – Priya"]]);
+  for (const r of links.rows) expect(r.share_link).toBe(r.status === "completed" ? `http://localhost:3100/share/${r.video_id}` : "");
+  expect((await page.request.get("/api/videos/batch/batch_nosuch")).status()).toBe(404);
   // A saved template fills in the script (its scenes as paragraphs) and its settings.
   const tpl = await page.request.post("/api/templates", {
     data: { title: `Batch start ${Date.now().toString(36)}`, scenes: [{ script: "Hi {name}.", background: { type: "color", value: "#112233" } }, { script: "See you at {property}.", background: { type: "color", value: "#112233" } }], aspect: "9:16", captions: true, captionStyle: { position: "top", size: "large" }, speed: 1.2, emotion: "Serious", expressiveness: "high", motionPrompt: "Waves hello" },

@@ -1,0 +1,86 @@
+// A personalized batch's links for a mail merge: the CSV row each video was made from, its recipient and status, and
+// the share link only once a recipient can open it. Run with: npm test
+import assert from "node:assert/strict";
+import { beforeEach, describe, it } from "node:test";
+import { MemoryStore } from "../store/memory";
+import { getStore } from "../store";
+import { BATCH_LINK_COLUMNS, batchLinkRows, batchRequestSchema, batchVideos, createBatch, retryVideo } from "../services";
+import { NotFoundError } from "../errors";
+import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
+import { parseCsv, toCsv } from "../csv";
+import type { Video } from "../types";
+
+const OWNER = "user_batch_links";
+
+beforeEach(() => {
+  globalThis.__avatarStudioStore = new MemoryStore();
+});
+
+const request = (csv: string) => batchRequestSchema.parse({ title: "Open house", scriptTemplate: "Hi {name}, see you at {time}.", csv, avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id });
+
+describe("batch links", () => {
+  it("keeps each video's CSV row and lists the batch in that order, whatever order the renders started in", async () => {
+    const { batchId, videos } = await createBatch(request("name,time\nAmy,9am\nBen,10am\nCara,11am"), OWNER);
+    assert.deepEqual(videos.map((v) => [v.batchRow, v.rowLabel]), [[1, "Amy"], [2, "Ben"], [3, "Cara"]]);
+    // Stored out of order, the rows still come back in the CSV's.
+    const listed = (await batchVideos(batchId, OWNER)).reverse();
+    const rows = batchLinkRows(listed, "https://studio.example/");
+    assert.deepEqual(rows.map((r) => [r.row, r.recipient]), [[1, "Amy"], [2, "Ben"], [3, "Cara"]]);
+    assert.ok(rows.every((r) => r.title?.toString().startsWith("Open house – ") && r.video_id && r.created));
+    await assert.rejects(batchVideos(batchId, "someone_else"), (err: unknown) => err instanceof NotFoundError);
+    await assert.rejects(batchVideos("batch_nosuch", OWNER), (err: unknown) => err instanceof NotFoundError);
+  });
+
+  it("gives a share link only for a ready video whose link is on, and lets a retry stand in for the render it replaced", async () => {
+    const now = Date.parse("2026-11-01T12:00:00.000Z");
+    const at = (n: number) => new Date(now - n * 1000).toISOString();
+    const video = (id: string, extra: Partial<Video>): Video =>
+      ({ id, ownerId: OWNER, batchId: "batch_x", title: id, script: "Hi", avatarId: "a", voiceId: "v", status: "completed", provider: "mock", createdAt: at(100), updatedAt: at(100), ...extra }) as Video;
+    const rows = batchLinkRows(
+      [
+        video("ready", { batchRow: 1, rowLabel: "Amy", shareExpiresAt: at(-3600), shareLocked: true, shareGate: true }),
+        video("off", { batchRow: 2, rowLabel: "Ben", shareDisabled: true }),
+        video("expired", { batchRow: 3, rowLabel: "Cara", shareExpiresAt: at(1) }),
+        video("rendering", { batchRow: 4, rowLabel: "Dee", status: "processing" }),
+        video("first-try", { batchRow: 5, rowLabel: "Eve", status: "failed", createdAt: at(90) }),
+        video("second-try", { batchRow: 5, rowLabel: "Eve", retryOf: "first-try", createdAt: at(80) }),
+        // The same failed render retried twice: one line, the ready retry, not two links for one recipient.
+        video("third-try", { batchRow: 5, rowLabel: "Eve", status: "failed", retryOf: "first-try", createdAt: at(70) }),
+        // A middle retry in the trash (not listed) still leaves one line for its row.
+        video("g-first", { batchRow: 6, rowLabel: "Gus", status: "failed", createdAt: at(60) }),
+        video("g-third", { batchRow: 6, rowLabel: "Gus", status: "processing", retryOf: "g-second", createdAt: at(40) }),
+        video("older", { rowLabel: "Fay", createdAt: at(200) }),
+      ],
+      "https://studio.example",
+      now,
+    );
+    assert.deepEqual(
+      rows.map((r) => [r.video_id, r.share_link ?? ""]),
+      [
+        ["ready", "https://studio.example/share/ready"],
+        ["off", ""],
+        ["expired", ""],
+        ["rendering", ""],
+        ["second-try", "https://studio.example/share/second-try"],
+        ["g-third", ""],
+        ["older", "https://studio.example/share/older"],
+      ],
+    );
+    assert.equal(rows.at(-1)!.row, undefined, "a video made before rows were kept comes last, with no row");
+    // A link that will lapse, or asks for a password or an email first, says so; one that cannot be sent says nothing.
+    assert.deepEqual([rows[0].share_expires, rows[0].password_required, rows[0].email_required], [at(-3600), "yes", "yes"]);
+    assert.deepEqual([rows[1].share_expires, rows[1].password_required], [undefined, undefined]);
+    const csv = parseCsv(toCsv([...BATCH_LINK_COLUMNS], rows));
+    assert.deepEqual(csv.columns, [...BATCH_LINK_COLUMNS]);
+  });
+
+  it("keeps the row when a failed render of the batch is retried", async () => {
+    // Stamped with the same instant as its retry will be, so only the retry link tells them apart.
+    const failed: Video = { id: "vid_batch_failed", ownerId: OWNER, batchId: "batch_y", rowLabel: "Gus", batchRow: 7, title: "Open house – Gus", script: "Hi Gus.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, status: "failed", provider: "mock", error: "boom", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } as Video;
+    await getStore().put("video", failed);
+    const retried = await retryVideo(failed.id, OWNER);
+    await getStore().put("video", { ...(await getStore().get<Video>("video", failed.id))!, createdAt: retried.createdAt });
+    assert.deepEqual([retried.batchId, retried.rowLabel, retried.batchRow, retried.retryOf], ["batch_y", "Gus", 7, failed.id]);
+    assert.deepEqual(batchLinkRows(await batchVideos("batch_y", OWNER), "https://s").map((r) => r.video_id), [retried.id]);
+  });
+});

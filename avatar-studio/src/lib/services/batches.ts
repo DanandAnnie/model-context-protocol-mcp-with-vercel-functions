@@ -5,9 +5,10 @@ import { getStore } from "../store";
 import type { Video } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { renderLimitFor } from "../billing";
-import { ValidationError } from "../errors";
+import { NotFoundError, ValidationError } from "../errors";
 import { fillTemplate, parseCsv, placeholdersIn } from "../csv";
-import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, createVideo, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, rendersThisMonth, resolveRenderContext } from "./videos";
+import { shareOffline } from "../client";
+import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, listVideos, refreshPending, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, createVideo, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, rendersThisMonth, resolveRenderContext } from "./videos";
 import { getBrandKit } from "./brand";
 import { stripPauses } from "../pauses";
 
@@ -147,7 +148,7 @@ export async function createBatch(input: z.infer<typeof batchRequestSchema>, own
       ownerId,
       ctx,
       true,
-      { batchId, rowLabel: label },
+      { batchId, rowLabel: label, batchRow: i + 1 },
     );
     videos[i] = video;
     if (video.status === "failed") failed.push({ row: i + 1, reason: video.error ?? "The render could not be started" });
@@ -155,6 +156,68 @@ export async function createBatch(input: z.infer<typeof batchRequestSchema>, own
   await runWithConcurrency(allowedRows, BATCH_CONCURRENCY, startRow);
   failed.sort((a, b) => a.row - b.row);
   return { batchId, videos, skipped, failed };
+}
+
+/** The columns of a batch's links download, one row per recipient. */
+export const BATCH_LINK_COLUMNS = ["row", "recipient", "title", "status", "share_link", "share_expires", "password_required", "email_required", "video_id", "created"] as const;
+
+/**
+ * A batch's videos as rows for a mail merge, one per recipient: in the order of the CSV it was made from (videos made
+ * before rows were kept come after, oldest first). Where a row has several videos (a failed render and its retries),
+ * the one kept is a ready one if there is one, else the newest. The share link is given only where a recipient can
+ * open it (the video is ready and its link is on and not expired), so a blank cell means "do not send yet"; a link
+ * that will expire, needs a password, or asks for an email says so in its own column.
+ */
+export function batchLinkRows(videos: Video[], base: string, now = Date.now()): Array<Record<(typeof BATCH_LINK_COLUMNS)[number], string | number | undefined>> {
+  const origin = base.replace(/\/$/, "");
+  const byId = new Map(videos.map((v) => [v.id, v]));
+  // A video made before rows were kept is told apart by the first render of its retry chain.
+  const rootOf = (v: Video) => {
+    let id = v.id;
+    for (let hops = 0, at: Video | undefined = v; at?.retryOf && hops < 100; hops++) {
+      id = at.retryOf;
+      at = byId.get(at.retryOf);
+    }
+    return id;
+  };
+  // A ready video first; then one no other video retried (a retry stands in for the render it replaced, even when both
+  // were made in the same millisecond); then the newest.
+  const retried = new Set(videos.map((v) => v.retryOf).filter(Boolean));
+  const better = (a: Video, b: Video) => {
+    if ((a.status === "completed") !== (b.status === "completed")) return a.status === "completed";
+    if (retried.has(a.id) !== retried.has(b.id)) return !retried.has(a.id);
+    return a.createdAt > b.createdAt;
+  };
+  const kept = new Map<string, Video>();
+  for (const v of videos) {
+    const key = v.batchRow !== undefined ? `row ${v.batchRow}` : `first ${rootOf(v)}`;
+    const held = kept.get(key);
+    if (!held || better(v, held)) kept.set(key, v);
+  }
+  return [...kept.values()]
+    .sort((a, b) => (a.batchRow ?? Infinity) - (b.batchRow ?? Infinity) || a.createdAt.localeCompare(b.createdAt))
+    .map((v) => {
+      const live = v.status === "completed" && !shareOffline(v, now);
+      return {
+        row: v.batchRow,
+        recipient: v.rowLabel,
+        title: v.title,
+        status: v.status,
+        share_link: live ? `${origin}/share/${v.id}` : undefined,
+        share_expires: live ? v.shareExpiresAt : undefined,
+        password_required: live && v.shareLocked ? "yes" : undefined,
+        email_required: live && v.shareGate ? "yes" : undefined,
+        video_id: v.id,
+        created: v.createdAt,
+      };
+    });
+}
+
+/** The library's videos of one batch (not those in the trash), renders in flight refreshed first; a batch with none is not found. */
+export async function batchVideos(batchId: string, ownerId: string = LOCAL_OWNER): Promise<Video[]> {
+  const videos = (await listVideos(ownerId, false)).filter((v) => v.batchId === batchId);
+  if (!videos.length) throw new NotFoundError("Batch not found");
+  return refreshPending(videos);
 }
 
 const BATCH_CONCURRENCY = 5;

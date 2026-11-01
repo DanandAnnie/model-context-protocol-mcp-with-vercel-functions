@@ -893,6 +893,12 @@ async function refreshNow(video: Video): Promise<Video> {
 
 export const MAX_FOLDER_NAME = 40;
 
+/** A share link's go-live time: ISO 8601 with a UTC offset, in the future; null makes the link live now. */
+export const shareStartsAtSchema = z.iso
+  .datetime({ offset: true, message: "The go-live time must be an ISO 8601 date and time with a UTC offset" })
+  .refine((v) => Date.parse(v) > Date.now(), "The go-live time must be in the future")
+  .nullable();
+
 export const videoPatchSchema = z
   .object({
     title: z.string().trim().min(1).max(120).optional(),
@@ -912,11 +918,7 @@ export const videoPatchSchema = z
       .nullable()
       .optional(),
     /** When the public link starts working (ISO 8601 with a UTC offset, in the future); null makes it live now. */
-    shareStartsAt: z.iso
-      .datetime({ offset: true, message: "The go-live time must be an ISO 8601 date and time with a UTC offset" })
-      .refine((v) => Date.parse(v) > Date.now(), "The go-live time must be in the future")
-      .nullable()
-      .optional(),
+    shareStartsAt: shareStartsAtSchema.optional(),
     /** A `data:image/...` URL (PNG, JPEG, WebP, or GIF; 2 MB decoded) or null to remove the cover. */
     cover: z
       .string()
@@ -1264,15 +1266,19 @@ export const bulkVideoSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("move"), ids: z.array(z.string().min(1)).min(1).max(200), folder: z.string().trim().max(MAX_FOLDER_NAME) }),
   /** Switch the share links of many videos off (`shareDisabled: true`) or back on. */
   z.object({ action: z.literal("share"), ids: z.array(z.string().min(1)).min(1).max(200), shareDisabled: z.boolean() }),
+  /** Schedule the share links of many videos to go live at one time (`null` makes them live now). */
+  z.object({ action: z.literal("schedule"), ids: z.array(z.string().min(1)).min(1).max(200), shareStartsAt: shareStartsAtSchema }),
 ]);
 
 /**
- * Trash, restore, purge, move, or switch the share links of many videos at once. Ids that are
+ * Trash, restore, purge, move, switch, or schedule the share links of many videos at once. Ids that are
  * missing or belong to someone else are reported, not failed; so is a purge of a video that is
- * not in the trash, since deleting for good is only offered from there.
+ * not in the trash, since deleting for good is only offered from there. A go-live time that a video's
+ * own expiry comes before is reported in `refused` for that video, and the rest are still scheduled.
  */
-export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId: string = LOCAL_OWNER): Promise<{ done: number; missing: string[] }> {
+export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId: string = LOCAL_OWNER): Promise<{ done: number; missing: string[]; refused?: string[] }> {
   const missing: string[] = [];
+  const refused: string[] = [];
   let done = 0;
   for (const id of Array.from(new Set(input.ids))) {
     const existing = await getStore().get<Video>("video", id);
@@ -1285,10 +1291,21 @@ export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId
     else if (input.action === "restore") await restoreVideo(id, ownerId);
     else if (input.action === "purge") await purgeVideo(id, ownerId);
     else if (input.action === "move") await updateVideo(id, { folder: input.folder }, ownerId);
-    else await updateVideo(id, { shareDisabled: input.shareDisabled }, ownerId);
+    else if (input.action === "share") await updateVideo(id, { shareDisabled: input.shareDisabled }, ownerId);
+    else {
+      try {
+        await updateVideo(id, { shareStartsAt: input.shareStartsAt }, ownerId);
+      } catch (err) {
+        // Deleted for good between the check above and the write: reported like the others not there.
+        if (err instanceof NotFoundError) missing.push(id);
+        else if (err instanceof ValidationError) refused.push(id);
+        else throw err;
+        continue;
+      }
+    }
     done += 1;
   }
-  return { done, missing };
+  return input.action === "schedule" ? { done, missing, refused } : { done, missing };
 }
 
 export const folderRenameSchema = z.object({

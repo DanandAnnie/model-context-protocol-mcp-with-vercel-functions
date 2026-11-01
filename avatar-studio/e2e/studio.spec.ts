@@ -4684,6 +4684,42 @@ test("library multi-select moves and deletes videos in bulk", async ({ page }) =
   await expect(badgeOn(b.id)).toContainText("Link off");
   expect((await page.request.get(`/share/${a.id}`)).status()).toBe(200);
 
+  // A go-live time can be set on the selection: not found until then, "Scheduled" on the card, and live again at once.
+  await page.getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: `Select Bulk one ${tag}` }).click();
+  await page.getByRole("button", { name: "Schedule go-live" }).click();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const launch = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+  launch.setHours(12, 0, 0, 0);
+  await page.getByLabel("Go-live time for the selected videos").fill(`${launch.getFullYear()}-${pad(launch.getMonth() + 1)}-${pad(launch.getDate())}T12:00`);
+  await page.getByTestId("bulk-schedule").getByRole("button", { name: "Schedule", exact: true }).click();
+  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+  await expect(badgeOn(a.id)).toContainText("Scheduled");
+  expect((await (await page.request.get(`/api/videos/${a.id}`)).json()).video.shareStartsAt).toBe(launch.toISOString());
+  expect((await page.request.get(`/share/${a.id}`)).status()).toBe(404);
+  // A video whose own expiry comes first is left as it was and stays selected, the banner says why.
+  const sooner = new Date(launch.getTime() - 24 * 60 * 60 * 1000);
+  expect((await page.request.patch(`/api/videos/${b.id}`, { data: { shareExpiresAt: sooner.toISOString() } })).ok()).toBe(true);
+  await page.getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: `Select Bulk two ${tag}` }).click();
+  await page.getByRole("button", { name: "Schedule go-live" }).click();
+  await page.getByLabel("Go-live time for the selected videos").fill(`${launch.getFullYear()}-${pad(launch.getMonth() + 1)}-${pad(launch.getDate())}T12:00`);
+  await page.getByTestId("bulk-schedule").getByRole("button", { name: "Schedule", exact: true }).click();
+  await expect(page.getByText("1 selected video expires at or before that time, so it was not scheduled and is still selected; set a later expiry on it first.")).toBeVisible();
+  await expect(page.getByTestId("bulk-bar")).toContainText("1 selected");
+  expect((await (await page.request.get(`/api/videos/${b.id}`)).json()).video.shareStartsAt).toBeUndefined();
+  await page.getByRole("button", { name: "Close go-live time" }).click();
+  await expect(page.getByTestId("bulk-schedule")).toHaveCount(0);
+  await page.getByRole("button", { name: "Done selecting" }).click();
+  expect((await page.request.patch(`/api/videos/${b.id}`, { data: { shareExpiresAt: null } })).ok()).toBe(true);
+  await page.getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: `Select Bulk one ${tag}` }).click();
+  await page.getByRole("button", { name: "Schedule go-live" }).click();
+  await page.getByTestId("bulk-schedule").getByRole("button", { name: "Go live now" }).click();
+  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+  await expect(badgeOn(a.id)).toHaveCount(0);
+  expect((await page.request.get(`/share/${a.id}`)).status()).toBe(200);
+
   // Delete moves to the trash: gone from the library, 404 to the public, still the owner's to restore.
   await page.getByRole("button", { name: "Select" }).click();
   await page.getByRole("button", { name: `Select Bulk two ${tag}` }).click();

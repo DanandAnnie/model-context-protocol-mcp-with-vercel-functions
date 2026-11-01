@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import { getStore } from "../store";
-import { createVideo, getVideo, recordView, updateVideo, videoPatchSchema, videoRequestSchema } from "../services";
+import { bulkVideoSchema, bulkVideos, createVideo, getVideo, recordView, updateVideo, videoPatchSchema, videoRequestSchema } from "../services";
 import { shareNotYet, shareOffline } from "../client";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import { batchLinkRows } from "../services";
@@ -65,5 +65,22 @@ describe("share link go-live time", () => {
     assert.deepEqual([both.shareStartsAt, both.shareExpiresAt], [start, end]);
     // Clearing the expiry leaves the go-live time on its own.
     assert.equal((await updateVideo(v.id, videoPatchSchema.parse({ shareExpiresAt: null }), OWNER)).shareStartsAt, start);
+  });
+
+  it("schedules many videos at once, reporting the ones whose own expiry comes first and the ones not there", async () => {
+    const [a, b, c] = [await readyVideo(), await readyVideo(), await readyVideo()];
+    await updateVideo(c.id, videoPatchSchema.parse({ shareExpiresAt: inDays(5) }), OWNER);
+    assert.throws(() => bulkVideoSchema.parse({ action: "schedule", ids: [a.id], shareStartsAt: "2001-01-01T00:00:00Z" }), /in the future/);
+    const at = inDays(10);
+    const result = await bulkVideos(bulkVideoSchema.parse({ action: "schedule", ids: [a.id, b.id, c.id, "vid_nosuch"], shareStartsAt: at }), OWNER);
+    assert.deepEqual(result, { done: 2, missing: ["vid_nosuch"], refused: [c.id] });
+    assert.deepEqual([(await getVideo(a.id, OWNER, false)).shareStartsAt, (await getVideo(b.id, OWNER, false)).shareStartsAt], [at, at]);
+    assert.equal("shareStartsAt" in (await getVideo(c.id, OWNER, false)), false, "a video whose expiry comes first keeps its link as it was");
+    await assert.rejects(getVideo(a.id, null, false), /not found/);
+    // Live now again, in one request.
+    assert.deepEqual(await bulkVideos(bulkVideoSchema.parse({ action: "schedule", ids: [a.id, b.id], shareStartsAt: null }), OWNER), { done: 2, missing: [], refused: [] });
+    assert.equal((await getVideo(a.id, null, false)).id, a.id);
+    // Another owner's video is not touched.
+    assert.deepEqual(await bulkVideos(bulkVideoSchema.parse({ action: "schedule", ids: [a.id], shareStartsAt: at }), "someone_else"), { done: 0, missing: [a.id], refused: [] });
   });
 });

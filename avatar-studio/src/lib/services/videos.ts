@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName, getScriptProvider } from "../providers";
 import { getStore } from "../store";
-import { EMPTY_WATCH, MAX_AGENT_MESSAGE, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
+import { EMPTY_TRASH_MAX, EMPTY_WATCH, MAX_AGENT_MESSAGE, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
 import type { AgentMessage, AudioClip, Avatar, Backdrop, Background, CaptionCue, DirectedMedia, DirectedScene, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
 import { buildCues } from "../captions";
 import { captionDurationSec, sceneBoundsMs, videoChapters, type Timed } from "../chapters";
@@ -821,6 +821,58 @@ export async function refreshPending(videos: Video[]): Promise<Video[]> {
   if (pending.length === 0) return videos;
   const refreshed = new Map((await Promise.all(pending.map((v) => refreshStatus(v)))).map((v) => [v.id, v]));
   return videos.map((v) => refreshed.get(v.id) ?? v);
+}
+
+export const emptyTrashSchema = z.object({
+  /** How many videos the caller saw in the trash; a trash that holds a different number now is refused, so nobody deletes more than they were shown. */
+  expected: z.number().int().min(0),
+});
+
+/** Past this, "Empty trash" starts no more deletes and reports the rest as remaining, so the request ends in time. */
+const EMPTY_TRASH_DEADLINE_MS = 60_000;
+
+/**
+ * Deletes the owner's whole trash for good, side records included, up to `EMPTY_TRASH_MAX` videos a call (the
+ * longest-trashed first, the ones nearest their own purge, and any already past retention that the listings have
+ * not purged yet, which count toward the cap but not toward `done`, as the owner no longer saw them). A trash
+ * holding other than `expected` videos is a `ConflictError`, so a teammate's deletions since the caller looked are
+ * not destroyed unseen (it compares counts, not which videos). Each video is read again under its lock first, so one restored meanwhile through this server instance
+ * stays; a delete that fails is logged and left in the trash. `remaining` is what the trash still shows.
+ */
+export async function emptyTrash(input: z.infer<typeof emptyTrashSchema>, ownerId: string = LOCAL_OWNER, now: () => number = Date.now): Promise<{ done: number; remaining: number }> {
+  const started = now();
+  const trashed = (await getStore().list<Video>("video", ownerId))
+    .filter((v) => !!v.deletedAt)
+    .sort((a, b) => a.deletedAt!.localeCompare(b.deletedAt!) || a.createdAt.localeCompare(b.createdAt));
+  const shown = trashed.filter((v) => !purgeDue(v, started)).length;
+  if (shown !== input.expected) {
+    throw new ConflictError(`The trash now holds ${shown === 1 ? "1 video" : `${shown} videos`}, not ${input.expected}; look at it again before emptying it`);
+  }
+  let done = 0;
+  for (const video of trashed.slice(0, EMPTY_TRASH_MAX)) {
+    if (now() - started > EMPTY_TRASH_DEADLINE_MS) break;
+    try {
+      const purged = await withCounterLock(video.id, async () => {
+        const stored = await getStore().get<Video>("video", video.id);
+        if (!stored?.deletedAt || (stored.ownerId ?? LOCAL_OWNER) !== ownerId) return null;
+        await purgeVideo(video.id, ownerId);
+        return stored;
+      });
+      if (purged && !purgeDue(purged, started)) done += 1;
+    } catch (err) {
+      console.error(`emptying the trash of ${ownerId} failed for one video:`, err);
+    }
+  }
+  // The deletes are done; a failed recount must not turn them into an error (or cost the activity line).
+  let remaining = Math.max(0, shown - done);
+  try {
+    const after = await getStore().list<Video>("video", ownerId);
+    const end = now();
+    remaining = after.filter((v) => !!v.deletedAt && !purgeDue(v, end)).length;
+  } catch (err) {
+    console.error(`counting the trash of ${ownerId} after emptying it failed:`, err);
+  }
+  return { done, remaining };
 }
 
 /** The owner's library (or, with `trash`, the trash), newest first. See `loadVideos` for the purge. */

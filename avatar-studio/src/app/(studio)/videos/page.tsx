@@ -1,15 +1,15 @@
 "use client";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { ArchiveRestore, CheckSquare, Clapperboard, Clock, LayoutGrid, List, Download, FolderInput, KeyRound, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
 import { api } from "@/lib/client";
 import { VideoCard, VideoRow } from "@/components/VideoCard";
 import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
-import { useWorkspaceRole } from "@/hooks/useCanEdit";
+import { useCanEdit, useWorkspaceRole } from "@/hooks/useCanEdit";
 import type { VideoPage, VideoQuery } from "@/lib/services/videos";
-import { MAX_RETRY_AT_ONCE, SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, TRASH_RETENTION_DAYS, type VideoStatus } from "@/lib/types";
+import { EMPTY_TRASH_MAX, MAX_RETRY_AT_ONCE, SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, TRASH_RETENTION_DAYS, type VideoStatus } from "@/lib/types";
 
 const STATUSES: Array<"all" | VideoStatus> = ["all", "processing", "completed", "failed"];
 type SortKey = VideoQuery["sort"];
@@ -29,7 +29,7 @@ function localMinute(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links" | "password" | "nopassword" | "settings" | "retry" | "star" | "unstar";
+type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links" | "password" | "nopassword" | "settings" | "retry" | "star" | "unstar" | "empty";
 
 export default function VideosPage() {
   return (
@@ -51,6 +51,11 @@ function VideosInner() {
   const [sort, setSort] = useState<SortKey>("newest");
   // Reviews exist only in a workspace, so the filter shows there.
   const inWorkspace = !!useWorkspaceRole()?.workspaceId;
+  // Viewers can browse the trash but not empty it (the server refuses them too).
+  const canEdit = useCanEdit() !== false;
+  const trashToggleRef = useRef<HTMLButtonElement>(null);
+  // Set once the trash is emptied; the toggle takes the focus when it is enabled again, after the request.
+  const focusTrashToggle = useRef(false);
   const [review, setReview] = useState<VideoQuery["review"]>("all");
   // Share link state, as the cards' badges say; with the bulk go-live and expiry it finds a campaign's links to fix.
   const [share, setShare] = useState<VideoQuery["share"]>("all");
@@ -307,6 +312,46 @@ function VideosInner() {
   // Afterwards the selection holds only what is left to look at: the ones not started, and a copy that failed again.
   const retriedShown = new Set(videos.map((v) => v.retryOf).filter(Boolean));
   const failedSelected = videos.filter((v) => selected.has(v.id) && v.status === "failed" && !v.directed?.editOf && !retriedShown.has(v.id)).map((v) => v.id);
+  useEffect(() => {
+    if (busy !== null || !focusTrashToggle.current) return;
+    focusTrashToggle.current = false;
+    trashToggleRef.current?.focus();
+  }, [busy]);
+
+  // Everything in the trash, whatever the filters show. The count is read fresh (a teammate may have trashed more since
+  // the page loaded) and sent along, so the server refuses rather than delete videos the confirm never counted.
+  async function emptyTheTrash() {
+    setBusy("empty");
+    setBulkErr(null);
+    try {
+      const { trashed: count } = await api<VideoPage>("/api/videos?trash=true&limit=1");
+      if (!count) {
+        // Emptied elsewhere meanwhile: the button goes, and the focus goes to the Trash toggle rather than the page.
+        focusTrashToggle.current = true;
+        return void (await refetch());
+      }
+      const what = count === 1 ? "the 1 video" : `all ${count} videos`;
+      const one = count === 1;
+      const over = count > EMPTY_TRASH_MAX ? ` Only ${EMPTY_TRASH_MAX} go at a time; empty it again for the rest.` : "";
+      if (!window.confirm(`Delete ${what} in the trash for good? ${one ? "Its" : "Their"} comments, the emails ${one ? "its share page" : "their share pages"} collected, short clips, and the cleaned, lip-synced, and music copies made from ${one ? "it" : "them"} go too. This cannot be undone.${over}`)) {
+        // The toolbar's count may be older than the one just asked about.
+        if (count !== trashed) await refetch();
+        return;
+      }
+      const { remaining } = await api<{ done: number; remaining: number }>("/api/videos/empty-trash", { method: "POST", body: JSON.stringify({ expected: count }) });
+      await refetch();
+      if (remaining) setBulkErr(`${remaining === 1 ? "1 video is" : `${remaining} videos are`} still in the trash; empty it again to delete ${remaining === 1 ? "it" : "them"}.`);
+      // The button goes with the last of the trash; focus lands on the Trash toggle rather than the page.
+      else focusTrashToggle.current = true;
+    } catch (e) {
+      // Some may have gone before the request failed; show what is left.
+      await refetch();
+      setBulkErr(e instanceof Error ? e.message : "Could not empty the trash");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function retryFailed() {
     const ids = failedSelected.slice(0, MAX_RETRY_AT_ONCE);
     if (!ids.length) return;
@@ -642,8 +687,13 @@ function VideosInner() {
               </button>
             </div>
           ) : (
-            <Button variant="secondary" className="px-3 py-1.5 text-xs" onClick={() => setSelecting(true)}>
+            <Button variant="secondary" className="px-3 py-1.5 text-xs" onClick={() => setSelecting(true)} disabled={busy === "empty"}>
               <CheckSquare className="h-3.5 w-3.5" /> Select
+            </Button>
+          )}
+          {trash && !selecting && trashed > 0 && canEdit && (
+            <Button variant="danger" className="px-3 py-1.5 text-xs" onClick={() => void emptyTheTrash()} disabled={busy !== null && busy !== "empty"} loading={busy === "empty"} title="Deletes every video in the trash for good, whatever the filters show">
+              <Trash2 className="h-3.5 w-3.5" /> Empty trash
             </Button>
           )}
           {STATUSES.map((s) => (
@@ -658,6 +708,8 @@ function VideosInner() {
           ))}
           <button
             type="button"
+            ref={trashToggleRef}
+            disabled={busy === "empty"}
             onClick={() => {
               setTrash((t) => !t);
               // Trashed links answer "not found" whatever they were set to, so the share filter has no place there.
@@ -666,7 +718,7 @@ function VideosInner() {
             aria-pressed={trash}
             data-testid="trash-toggle"
             title={`Videos you deleted; each is removed for good ${TRASH_RETENTION_DAYS} days after it was trashed`}
-            className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium ${trash ? "bg-rose-700 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
+            className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium disabled:opacity-50 ${trash ? "bg-rose-700 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
           >
             <Trash2 className="h-3 w-3" /> Trash{trashed ? ` (${trashed})` : ""}
           </button>

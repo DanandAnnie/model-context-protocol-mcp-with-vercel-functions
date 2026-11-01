@@ -8821,3 +8821,59 @@ test("the library's folder picker says how many videos each folder holds", async
   await page.getByLabel("Folder", { exact: true }).selectOption(folder);
   await expect(page.locator(`a[href="/videos/${two.id}"]`)).toBeVisible();
 });
+
+test("Empty trash deletes every trashed video for good and keeps the library", async ({ page }) => {
+  const trashCount = async () => (await (await page.request.get("/api/videos?trash=true&limit=1")).json()).trashed as number;
+  // Start from an empty trash (earlier tests leave videos there), through the API, 50 a call.
+  for (let left = await trashCount(), i = 0; left > 0 && i < 20; left = await trashCount(), i++) {
+    const r = await page.request.post("/api/videos/empty-trash", { data: { expected: left } });
+    expect(r.ok()).toBe(true);
+  }
+  expect(await trashCount()).toBe(0);
+  const tag = Date.now().toString(36);
+  const [keep, a, b] = [await createVideoViaApi(page, `Kept ${tag}`), await createVideoViaApi(page, `Trashed A ${tag}`), await createVideoViaApi(page, `Trashed B ${tag}`)];
+  for (const v of [a, b]) expect((await page.request.delete(`/api/videos/${v.id}`)).ok()).toBe(true);
+  // The count the caller saw is part of the request: a different one deletes nothing.
+  const stale = await page.request.post("/api/videos/empty-trash", { data: { expected: 1 } });
+  expect(stale.status()).toBe(409);
+  expect((await stale.json()).error).toContain("The trash now holds 2 videos, not 1");
+  expect((await page.request.post("/api/videos/empty-trash", { data: {} })).status()).toBe(400);
+  await page.goto("/videos");
+  // Only the trash view offers it.
+  await expect(page.getByRole("button", { name: "Empty trash" })).toHaveCount(0);
+  await page.getByTestId("trash-toggle").click();
+  // A search narrows the view, not what the button empties: the confirm counts the whole trash.
+  await page.getByLabel("Search videos").fill(`Trashed A ${tag}`);
+  await expect(page.locator(`a[href="/videos/${b.id}"]`)).toHaveCount(0);
+  const dialogs: string[] = [];
+  page.once("dialog", (d) => {
+    dialogs.push(d.message());
+    void d.dismiss();
+  });
+  await page.getByRole("button", { name: "Empty trash" }).click();
+  await expect.poll(() => dialogs.length).toBe(1);
+  expect(dialogs[0]).toBe("Delete all 2 videos in the trash for good? Their comments, the emails their share pages collected, short clips, and the cleaned, lip-synced, and music copies made from them go too. This cannot be undone.");
+  // Dismissed: nothing went, and the page is usable again.
+  await expect(page.getByTestId("trash-toggle")).toBeEnabled();
+  expect(await trashCount()).toBe(2);
+  // A video trashed since the page loaded is counted by the confirm, not left out of it.
+  const c = await createVideoViaApi(page, `Trashed C ${tag}`);
+  expect((await page.request.delete(`/api/videos/${c.id}`)).ok()).toBe(true);
+  page.once("dialog", (d) => {
+    dialogs.push(d.message());
+    void d.accept();
+  });
+  await page.getByRole("button", { name: "Empty trash" }).click();
+  await expect(page.getByText("The trash is empty")).toBeVisible();
+  expect(dialogs[1]).toContain("Delete all 3 videos in the trash for good?");
+  await expect(page.getByRole("button", { name: "Empty trash" })).toHaveCount(0);
+  await expect(page.getByTestId("trash-toggle")).toHaveText("Trash");
+  await expect(page.getByTestId("trash-toggle")).toBeFocused();
+  for (const v of [a, b, c]) expect((await page.request.get(`/api/videos/${v.id}`)).status()).toBe(404);
+  expect((await page.request.get(`/api/videos/${keep.id}`)).ok()).toBe(true);
+  // The activity feed says how many went in one line.
+  const events = (await (await page.request.get("/api/activity")).json()).events as Array<{ kind: string; count?: number }>;
+  expect(events[0]).toMatchObject({ kind: "video.purged", count: 3 });
+  // Once empty, the endpoint has nothing to do.
+  expect(await (await page.request.post("/api/videos/empty-trash", { data: { expected: 0 } })).json()).toEqual({ done: 0, remaining: 0 });
+});

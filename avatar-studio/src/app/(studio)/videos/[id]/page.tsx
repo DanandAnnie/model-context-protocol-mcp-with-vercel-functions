@@ -12,6 +12,7 @@ import { SubtitleLanguages } from "@/components/SubtitleLanguages";
 import { CaptionEditor } from "@/components/CaptionEditor";
 import { ViewerEmails } from "@/components/ViewerEmails";
 import { VideoChapters } from "@/components/VideoChapters";
+import { ShareQrCode } from "@/components/ShareQrCode";
 import { OtherSizes } from "@/components/OtherSizes";
 import { HighlightClips } from "@/components/HighlightClips";
 import { DirectedSceneEdits } from "@/components/DirectedSceneEdits";
@@ -1346,6 +1347,23 @@ export default function VideoDetailPage() {
                       </span>
                     </div>
                   </form>
+                </Card>
+              )}
+              {video.status === "completed" && (
+                <Card className="p-4" data-testid="share-qr-card">
+                  <h3 className="text-sm font-semibold text-slate-900">QR code</h3>
+                  {video.deletedAt || !shareLive || shareExpired(video) ? (
+                    <p className="mt-1 text-xs text-slate-500">{video.deletedAt ? "Restore the video from the trash first." : "Turn the share link on first."}</p>
+                  ) : !shareOrigin ? null : (
+                    <>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Scanning it opens the share page{linkNotYet && startsAt ? `, live from ${formatDate(startsAt)}; print it now and it works then` : ""}. For a flyer, a slide, or a sign.
+                        {video.shareExpiresAt ? ` It stops working ${formatDate(video.shareExpiresAt)}, when the link expires.` : ""}
+                        {video.shareLocked ? " Viewers will need the password." : ""}
+                      </p>
+                      <ShareQrCode url={`${shareOrigin}/share/${video.id}`} title={video.title} />
+                    </>
+                  )}
                 </Card>
               )}
               {video.status === "completed" && (

@@ -4,6 +4,7 @@ import { strToU8, zipSync } from "fflate";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import jsQR from "jsqr";
 import { parseCsv } from "../src/lib/csv";
 
 // Demo-mode flows. The mock renderer completes ~12s after submission.
@@ -9271,6 +9272,60 @@ test("Copy links puts the selected videos' sendable share links on the clipboard
   await bar.getByRole("button", { name: "Copy links" }).click();
   await expect(page.getByText("The browser did not let the page copy to the clipboard; Download links gives the same links as a file.")).toBeVisible();
   await expect(page.getByTestId("copy-note")).toHaveText("");
+});
+
+test("a video's share link has a QR code to print, saved as an SVG or a PNG that scans back to the link", async ({ page }) => {
+  const v = await createVideoViaApi(page, "Open house QR");
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  await page.goto(`/videos/${v.id}`);
+  const card = page.getByTestId("share-qr-card");
+  const qr = card.getByRole("img", { name: "QR code for the share link" });
+  await expect(qr).toBeVisible();
+  const shareUrl = `${new URL(page.url()).origin}/share/${v.id}`;
+
+  // The SVG is a file of its own, named after the video, sharp at any size.
+  const svgDownload = page.waitForEvent("download");
+  await card.getByRole("button", { name: "Download SVG" }).click();
+  const svgFile = await svgDownload;
+  expect(svgFile.suggestedFilename()).toBe("qr-Open house QR.svg");
+  const svg = await readFile((await svgFile.path())!, "utf8");
+  expect(svg).toMatch(/^<svg xmlns="http:\/\/www.w3.org\/2000\/svg" viewBox="0 0 \d+ \d+"/);
+  expect(svg).toContain("<title>Scan to watch “Open house QR”</title>");
+  // It draws what the page shows.
+  expect(svg).toContain(`d="${await qr.locator("path").getAttribute("d")}"`);
+
+  // The PNG, read back pixel by pixel, scans to the share link.
+  const pngDownload = page.waitForEvent("download");
+  await card.getByRole("button", { name: "Download PNG" }).click();
+  const pngFile = await pngDownload;
+  expect(pngFile.suggestedFilename()).toBe("qr-Open house QR.png");
+  const png = (await readFile((await pngFile.path())!)).toString("base64");
+  const read = await page.evaluate(async (data) => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${data}`;
+    await img.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 256;
+    const ctx = canvas.getContext("2d")!;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, 0, 0, 256, 256);
+    return { width: img.naturalWidth, pixels: Array.from(ctx.getImageData(0, 0, 256, 256).data) };
+  }, png);
+  expect(read.width).toBe(1024);
+  expect(jsQR(new Uint8ClampedArray(read.pixels), 256, 256)?.data).toBe(shareUrl);
+
+  // A link with an expiry says when a printed code stops working.
+  const expires = new Date(Date.now() + 3 * 86_400_000).toISOString();
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareExpiresAt: expires } })).status()).toBe(200);
+  await page.reload();
+  await expect(page.getByTestId("share-qr-card")).toContainText(/It stops working .+, when the link expires\./);
+  await expect(page.getByTestId("share-qr")).toBeVisible();
+
+  // With the link switched off there is nothing to scan to.
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareDisabled: true } })).status()).toBe(200);
+  await page.reload();
+  await expect(page.getByTestId("share-qr-card")).toContainText("Turn the share link on first.");
+  await expect(page.getByTestId("share-qr")).toHaveCount(0);
 });
 
 test("the bulk bar never sends more than the 200 videos one action takes", async ({ page }) => {

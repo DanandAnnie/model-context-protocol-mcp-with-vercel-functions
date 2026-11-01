@@ -1973,6 +1973,11 @@ export const videoQuerySchema = z.object({
    * render's status. A trashed video is in none of them.
    */
   share: z.enum(["all", "live", "expiring", "scheduled", "off", "expired"]).default("all"),
+  /**
+   * Only the videos made within the last 7, 30, or 90 days (rolling windows of 24-hour days, counted from when the
+   * render was asked for), in the trash view too.
+   */
+  created: z.enum(["all", "7d", "30d", "90d"]).default("all"),
   /** `true` lists only the starred videos (in the trash too, where a star is kept for when it is restored). */
   starred: z
     .string()
@@ -2010,6 +2015,8 @@ const SORTERS: Record<VideoQuery["sort"], (a: Video, b: Video) => number> = {
   views: (a, b) => (b.views ?? 0) - (a.views ?? 0) || b.createdAt.localeCompare(a.createdAt),
 };
 
+const CREATED_WITHIN_DAYS: Record<Exclude<VideoQuery["created"], "all">, number> = { "7d": 7, "30d": 30, "90d": 90 };
+
 /** The videos matching `query`, sorted; `limit` is not applied here. */
 export function filterVideos(videos: Video[], query: VideoQuery): Video[] {
   const needle = query.q.toLowerCase();
@@ -2019,6 +2026,8 @@ export function filterVideos(videos: Video[], query: VideoQuery): Video[] {
     .filter((v) => {
       if (query.batch && v.batchId !== query.batch) return false;
       if (query.starred && !v.starred) return false;
+      // Written so an unreadable creation time (NaN) is in no window rather than in every one.
+      if (query.created !== "all" && !(Date.parse(v.createdAt) >= now - CREATED_WITHIN_DAYS[query.created] * 86_400_000)) return false;
       if (query.review !== "all" && (v.review?.status ?? "none") !== query.review) return false;
       // A trashed video's link answers "not found" whatever it was set to, so it is in no share state.
       if (query.share !== "all" && (v.deletedAt || (query.share === "expiring" ? !shareExpiresSoon(v, now) : shareState(v, now) !== query.share))) return false;

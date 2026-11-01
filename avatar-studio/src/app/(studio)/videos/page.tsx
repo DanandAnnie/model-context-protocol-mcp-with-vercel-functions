@@ -51,6 +51,8 @@ function VideosInner() {
   const [trash, setTrash] = useState(false);
   // Only the starred videos (in the trash view too, where a star is kept for when a video comes back).
   const [starred, setStarred] = useState(false);
+  // When the videos were made: a campaign's renders of this week or month, whatever folder they went to.
+  const [created, setCreated] = useState<VideoQuery["created"]>("all");
   // Search as you type, one request per pause rather than per keystroke.
   useEffect(() => {
     const t = setTimeout(() => setNeedle(q.trim()), 250);
@@ -58,7 +60,7 @@ function VideosInner() {
   }, [q]);
   // "Show more" extends the page for the current filters only: a new filter starts again
   // from the first page in the same render, with no extra request for the old extent.
-  const filterKey = [needle, status, folder, batch ?? "", sort, trash ? "trash" : "", review, share, starred ? "starred" : ""].join("\u0000");
+  const filterKey = [needle, status, folder, batch ?? "", sort, trash ? "trash" : "", review, share, starred ? "starred" : "", created].join("\u0000");
   const [extent, setExtent] = useState({ key: filterKey, limit: PAGE });
   const limit = extent.key === filterKey ? extent.limit : PAGE;
   const path = useMemo(() => {
@@ -73,8 +75,9 @@ function VideosInner() {
     if (review !== "all") params.set("review", review);
     if (share !== "all") params.set("share", share);
     if (starred) params.set("starred", "1");
+    if (created !== "all") params.set("created", created);
     return `/api/videos?${params}`;
-  }, [limit, needle, status, folder, batch, sort, trash, review, share, starred]);
+  }, [limit, needle, status, folder, batch, sort, trash, review, share, starred, created]);
   // The filtering, sorting, and paging happen on the server; the page only holds what it shows.
   const { data, loading, error, refetch } = useApi<VideoPage>(path, { pollMs: 6000, pollWhile: (d) => d.rendering > 0 });
   const videos = data?.videos ?? [];
@@ -82,6 +85,8 @@ function VideosInner() {
   const hasAny = (data?.total ?? 0) > 0 || (data?.trashed ?? 0) > 0;
   const trashed = data?.trashed ?? 0;
   const remaining = data ? data.matched - videos.length : 0;
+  // Whether a filter other than Starred narrows the list, for the empty state's advice.
+  const narrowed = !!needle || status !== "all" || folder !== "all" || review !== "all" || share !== "all" || created !== "all" || !!batch;
 
   // Multi-select: move the chosen videos to a folder or delete them in one request.
   const [selecting, setSelecting] = useState(false);
@@ -140,7 +145,7 @@ function VideosInner() {
     setTimeField(null);
     setTimeDraft("");
     setLinkSettings({ download: "", gate: "" });
-  }, [q, status, folder, batch, trash, review, share, starred]);
+  }, [q, status, folder, batch, trash, review, share, starred, created]);
   // The last purge empties both views; leave the trash so the "No videos yet" state (and the filter bar) comes back.
   useEffect(() => {
     if (trash && data && data.total === 0 && data.trashed === 0) setTrash(false);
@@ -659,6 +664,12 @@ function VideosInner() {
             <option value="expired">Expired</option>
           </select>
           )}
+          <select aria-label="Filter by date made" value={created} onChange={(e) => setCreated(e.target.value as VideoQuery["created"])} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700">
+            <option value="all">Made any time</option>
+            <option value="7d">Made in the last 7 days</option>
+            <option value="30d">Made in the last 30 days</option>
+            <option value="90d">Made in the last 90 days</option>
+          </select>
           <select aria-label="Sort videos" value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className="ml-auto rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700">
             <option value="newest">Newest first</option>
             <option value="oldest">Oldest first</option>
@@ -677,7 +688,18 @@ function VideosInner() {
         <EmptyState
           icon={trash ? <Trash2 className="h-8 w-8" /> : <Clapperboard className="h-8 w-8" />}
           title={trash ? (trashed ? "No trashed videos match" : "The trash is empty") : hasAny ? "No videos match" : "No videos yet"}
-          body={trash ? `Deleted videos wait here for ${TRASH_RETENTION_DAYS} days before they are removed for good.` : hasAny ? starred && !q.trim() && status === "all" && folder === "all" && review === "all" && share === "all" && !batch ? "No video is starred yet; star one from its page, or several from Select." : `Try a different search, status, folder, ${starred ? "share link, or turn off Starred" : "or share link"}.` : "Your rendered videos will show up here."}
+          body={
+            trash
+              ? // Trashed videos the filters hide are still counted on the toggle, so say what hides them.
+                trashed && (narrowed || starred)
+                ? `Try a different search, status, folder, or date${starred ? ", or turn off Starred" : ""}.`
+                : `Deleted videos wait here for ${TRASH_RETENTION_DAYS} days before they are removed for good.`
+              : hasAny
+                ? starred && !narrowed
+                  ? "No video is starred yet; star one from its page, or several from Select."
+                  : `Try a different search, status, folder, date, ${starred ? "share link, or turn off Starred" : "or share link"}.`
+                : "Your rendered videos will show up here."
+          }
         />
       ) : (
         <>

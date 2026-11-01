@@ -8633,7 +8633,7 @@ test("videos are starred from their page or in bulk, and the library filters by 
   expect((await a11y("main")).violations.map((v) => v.id)).toEqual([]);
   // With a search that hides every starred video, the empty state points at the filters rather than at starring.
   await page.getByLabel("Search videos").fill(`${tag} nothing like it`);
-  await expect(page.getByText("Try a different search, status, folder, share link, or turn off Starred.")).toBeVisible();
+  await expect(page.getByText("Try a different search, status, folder, date, share link, or turn off Starred.")).toBeVisible();
   await page.getByLabel("Search videos").fill(tag);
   await expect(card(one.id)).toBeVisible();
   // Starring in bulk from the whole library, then taking both stars off from the filtered view.
@@ -8652,4 +8652,35 @@ test("videos are starred from their page or in bulk, and the library filters by 
   await page.getByTestId("bulk-bar").getByRole("button", { name: "Unstar" }).click();
   await expect(page.getByText("No videos match")).toBeVisible();
   expect(await starredIds()).toEqual([]);
+});
+
+test("the library filters by when videos were made", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const fresh = await createVideoViaApi(page, `Made lately ${tag}`);
+  // The server filters, so the API answers the same as the page; an unknown window is refused.
+  const listed = async (created: string) => ((await (await page.request.get(`/api/videos?q=${tag}&created=${created}`)).json()).videos as { id: string }[]).map((v) => v.id);
+  expect(await listed("7d")).toEqual([fresh.id]);
+  expect(await listed("90d")).toEqual([fresh.id]);
+  expect((await page.request.get("/api/videos?created=1y")).status()).toBe(400);
+
+  await page.goto("/videos");
+  await page.getByLabel("Search videos").fill(tag);
+  const card = page.locator(`a[href="/videos/${fresh.id}"]`);
+  await expect(card).toBeVisible();
+  // A selection does not survive a new window, as for the other filters.
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await page.getByRole("button", { name: `Select Made lately ${tag}` }).click();
+  await expect(page.getByTestId("bulk-bar")).toContainText("1 selected");
+  const filter = page.getByLabel("Filter by date made");
+  await expect(filter.locator("option:checked")).toHaveText("Made any time");
+  await filter.selectOption("7d");
+  await expect(page.getByTestId("bulk-bar").getByText(/selected$/)).toHaveText("0 selected");
+  await expect(page.getByRole("button", { name: `Select Made lately ${tag}` })).toBeVisible();
+  await page.getByRole("button", { name: "Done selecting" }).click();
+  await filter.selectOption("30d");
+  await expect(card).toBeVisible();
+  await filter.selectOption("all");
+  await expect(card).toBeVisible();
+  const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(axe.violations.map((v) => v.id)).toEqual([]);
 });

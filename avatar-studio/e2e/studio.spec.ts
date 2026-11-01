@@ -5952,6 +5952,62 @@ test("website embed script adds a launcher that opens the talk page", async ({ p
     await expect(page.getByRole("button", { name: "Close" })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("button", { name: "Ask Dana" })).toBeVisible();
+
+    // With `open`, the chat opens by itself after that many seconds, once per tab: not again on the next page.
+    expect(await (await page.request.get(`/embed/agent.js?id=${agent.id}&open=999`)).text()).toContain("var autoOpen = 0;");
+    // This tab's visitor already opened the chat, so a new tab stands in for a new visit.
+    const tab = await page.context().newPage();
+    await tab.route("http://localhost:3100/customer-open.html", (route) =>
+      route.fulfill({ contentType: "text/html", body: `<!doctype html><html><body><h1>Acme Realty</h1><script src="/embed/agent.js?id=${agent.id}&label=Ask%20Dana&open=1"></script></body></html>` }),
+    );
+    await tab.goto("http://localhost:3100/customer-open.html");
+    await expect(tab.getByRole("button", { name: "Close" })).toBeVisible({ timeout: 5000 });
+    await expect(tab.locator("iframe[title='Chat with our presenter']")).toBeVisible();
+    await expect(tab.locator("iframe[title='Chat with our presenter']")).toHaveAttribute("src", /&auto=1$/);
+    await tab.reload();
+    await tab.waitForTimeout(1500);
+    await expect(tab.getByRole("button", { name: "Ask Dana" })).toBeVisible();
+    await expect(tab.locator("iframe[title='Chat with our presenter']")).toBeHidden();
+    await tab.close();
+    // Where the site blocks storage, a visitor who opened and closed the chat before the timer is not reopened over.
+    const blocked = await page.context().newPage();
+    await blocked.addInitScript(() => Object.defineProperty(window, "sessionStorage", { get: () => { throw new Error("blocked"); } }));
+    await blocked.route("http://localhost:3100/customer-open.html", (route) =>
+      route.fulfill({ contentType: "text/html", body: `<!doctype html><html><body><h1>Acme Realty</h1><script src="/embed/agent.js?id=${agent.id}&label=Ask%20Dana&open=2"></script></body></html>` }),
+    );
+    await blocked.goto("http://localhost:3100/customer-open.html");
+    await blocked.getByRole("button", { name: "Ask Dana" }).click();
+    await blocked.keyboard.press("Escape");
+    await blocked.waitForTimeout(2600);
+    await expect(blocked.locator("iframe[title='Chat with our presenter']")).toBeHidden();
+    await blocked.close();
+    // A phone-sized screen never gets the chat opened over the page.
+    const phone = await page.context().newPage();
+    await phone.setViewportSize({ width: 390, height: 800 });
+    await phone.route("http://localhost:3100/customer-open.html", (route) =>
+      route.fulfill({ contentType: "text/html", body: `<!doctype html><html><body><h1>Acme Realty</h1><script src="/embed/agent.js?id=${agent.id}&label=Ask%20Dana&open=1"></script></body></html>` }),
+    );
+    await phone.goto("http://localhost:3100/customer-open.html");
+    await phone.waitForTimeout(1500);
+    await expect(phone.locator("iframe[title='Chat with our presenter']")).toBeHidden();
+    await phone.close();
+
+    // The presenter's row builds the snippet from the choices made, carrying only what differs from the defaults.
+    await page.goto("/interactive");
+    await page.getByRole("button", { name: "Embed code for Embed agent", exact: true }).click();
+    const builder = page.getByTestId("embed-builder");
+    await expect(builder.getByTestId("embed-snippet")).toHaveText(new RegExp(`/embed/agent\\.js\\?id=${agent.id}(&color=%23[0-9a-f]{6})?" async></script>$`));
+    await builder.getByLabel("Side").selectOption("left");
+    await builder.getByLabel("Button text").fill("Ask Dana");
+    await builder.getByLabel("Opens by itself").selectOption("10");
+    await expect(builder).toContainText("Once per visit");
+    const snippet = await builder.getByTestId("embed-snippet").innerText();
+    expect(snippet).toContain("position=left");
+    expect(snippet).toContain("label=Ask+Dana");
+    expect(snippet).toContain("open=10");
+    await expect(builder.getByRole("button", { name: "Copy embed code for Embed agent" })).toBeVisible();
+    await page.getByRole("button", { name: "Embed code for Embed agent", exact: true }).click();
+    await expect(builder).toHaveCount(0);
   } finally {
     await page.request.delete(`/api/agents/${agent.id}`);
   }

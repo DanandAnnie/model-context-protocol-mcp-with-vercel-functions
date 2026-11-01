@@ -52,6 +52,22 @@ function writeSeen(seen: SeenVisits) {
   }
 }
 
+/** The website launcher's own look, as `/embed/agent.js` draws it with no options. */
+const EMBED_DEFAULTS = { side: "right" as "right" | "left", color: "#4f46e5", label: "Chat with us", open: 0 };
+type EmbedOptions = typeof EMBED_DEFAULTS;
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+
+/** The `<script>` tag for a presenter's website launcher, carrying only the options that differ from the defaults. */
+function embedSnippet(origin: string, id: string, o: EmbedOptions): string {
+  const q = new URLSearchParams({ id });
+  if (o.side === "left") q.set("position", "left");
+  if (HEX_COLOR.test(o.color) && o.color.toLowerCase() !== EMBED_DEFAULTS.color) q.set("color", o.color.toLowerCase());
+  const label = o.label.trim().slice(0, 40);
+  if (label && label !== EMBED_DEFAULTS.label) q.set("label", label);
+  if (o.open > 0) q.set("open", String(o.open));
+  return `<script src="${origin}/embed/agent.js?${q.toString()}" async></script>`;
+}
+
 const DEFAULT_INSTRUCTIONS = "You represent a real estate team. Help visitors with open houses, listings, and how to book a showing. Be warm and concise.";
 
 /**
@@ -137,6 +153,9 @@ export default function InteractivePage() {
   const focusAfterRender = useFocusAfterRender();
   const [savedLink, setSavedLink] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  /** The presenter whose website launcher is being set up on its row, and the choices made for it. */
+  const [embedFor, setEmbedFor] = useState<string | null>(null);
+  const [embedOptions, setEmbedOptions] = useState<EmbedOptions>(EMBED_DEFAULTS);
   /** The presenter being copied, and what the last copy left to say beside the list. */
   const [duplicating, setDuplicating] = useState<string | null>(null);
   const [listNote, setListNote] = useState<{ text: string; error?: true } | null>(null);
@@ -870,11 +889,19 @@ export default function InteractivePage() {
                     <Button
                       variant="secondary"
                       className="px-2.5 py-1 text-xs"
-                      onClick={() => copy(`<script src="${linkOrigin()}/embed/agent.js?id=${a.id}" async></script>`, `embed-${a.id}`)}
-                      aria-label={`Copy embed code for ${a.name}`}
-                      title="Paste before </body> on your site to add a floating chat launcher"
+                      onClick={() => {
+                        if (embedFor === a.id) return setEmbedFor(null);
+                        // Starts from the brand kit's colour, when it has one.
+                        const brandColor = brandData?.brand?.primaryColor;
+                        setEmbedOptions({ ...EMBED_DEFAULTS, ...(brandColor && HEX_COLOR.test(brandColor) ? { color: brandColor.toLowerCase() } : {}) });
+                        setEmbedFor(a.id);
+                      }}
+                      aria-label={`Embed code for ${a.name}`}
+                      aria-expanded={embedFor === a.id}
+                      aria-controls={embedFor === a.id ? `embed-builder-${a.id}` : undefined}
+                      title="A floating chat launcher for your website"
                     >
-                      {copied === `embed-${a.id}` ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Code2 className="h-3.5 w-3.5" />} Embed
+                      <Code2 className="h-3.5 w-3.5" /> Embed
                     </Button>
                     <Button
                       variant="secondary"
@@ -921,6 +948,52 @@ export default function InteractivePage() {
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </div>
+                  {embedFor === a.id && (
+                    <div id={`embed-builder-${a.id}`} className="basis-full rounded-lg border border-slate-200 bg-slate-50 p-3" data-testid="embed-builder">
+                      <p className="text-xs text-slate-600">Paste this before &lt;/body&gt; on your site to add a floating chat launcher.</p>
+                      <div className="mt-2 grid gap-2 sm:grid-cols-4">
+                        <label className="text-xs text-slate-700">
+                          Side
+                          <select className={`${inputClass} mt-1 text-xs`} value={embedOptions.side} onChange={(e) => setEmbedOptions((o) => ({ ...o, side: e.target.value === "left" ? "left" : "right" }))}>
+                            <option value="right">Bottom right</option>
+                            <option value="left">Bottom left</option>
+                          </select>
+                        </label>
+                        <label className="text-xs text-slate-700">
+                          Button colour
+                          <input type="color" className="mt-1 block h-9 w-full cursor-pointer rounded-lg border border-slate-300 bg-white" value={embedOptions.color} onChange={(e) => setEmbedOptions((o) => ({ ...o, color: e.target.value }))} />
+                        </label>
+                        <label className="text-xs text-slate-700">
+                          Button text
+                          <input className={`${inputClass} mt-1 text-xs`} value={embedOptions.label} maxLength={40} onChange={(e) => setEmbedOptions((o) => ({ ...o, label: e.target.value }))} />
+                        </label>
+                        <label className="text-xs text-slate-700">
+                          Opens by itself
+                          <select className={`${inputClass} mt-1 text-xs`} aria-describedby={embedOptions.open > 0 ? `embed-open-hint-${a.id}` : undefined} value={embedOptions.open} onChange={(e) => setEmbedOptions((o) => ({ ...o, open: Number(e.target.value) }))}>
+                            <option value={0}>Never</option>
+                            {[5, 10, 30, 60].map((s) => (
+                              <option key={s} value={s}>
+                                After {s} seconds
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                      {embedOptions.open > 0 && (
+                        <p id={`embed-open-hint-${a.id}`} className="mt-1 text-xs text-slate-500">
+                          Once per visit, not after the visitor has opened or closed it, and not on phones; live video waits for their first question.
+                        </p>
+                      )}
+                      <div className="mt-2 flex items-start gap-2">
+                        <code className="min-w-0 flex-1 break-all rounded bg-white px-2 py-1.5 text-[11px] text-slate-800" data-testid="embed-snippet">
+                          {embedSnippet(linkOrigin(), a.id, embedOptions)}
+                        </code>
+                        <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => copy(embedSnippet(linkOrigin(), a.id, embedOptions), `embed-${a.id}`)} aria-label={`Copy embed code for ${a.name}`}>
+                          {copied === `embed-${a.id}` ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />} {copied === `embed-${a.id}` ? "Copied" : "Copy"}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </li>
               );
             })}

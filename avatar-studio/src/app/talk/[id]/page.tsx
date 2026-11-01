@@ -33,7 +33,10 @@ export default function TalkPage() {
 
 function TalkInner() {
   const { id } = useParams<{ id: string }>();
-  const embed = useSearchParams().get("embed") === "1";
+  const query = useSearchParams();
+  const embed = query.get("embed") === "1";
+  // Opened by the website launcher on its own: live video waits for the visitor's first question.
+  const openedByItself = query.get("auto") === "1";
   const { data, loading, error } = useApi<{ agent: PublicAgent }>(`/api/talk/${id}`);
   const agent = data?.agent;
   const accent = agent?.brand?.accentColor ?? agent?.brand?.primaryColor;
@@ -74,7 +77,7 @@ function TalkInner() {
   }
   const showLead = !!agent?.collectEmail && turns >= 1 && leadState !== "dismissed";
   const live = useLiveAvatar({
-    enabled: !!agent?.liveVideo,
+    enabled: !!agent?.liveVideo && (!openedByItself || turns > 0),
     openPath: `/api/talk/${id}/live`,
     openBody: {},
     sessionPath: (sid) => `/api/talk/${id}/live/${sid}`,

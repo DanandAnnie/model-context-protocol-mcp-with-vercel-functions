@@ -14,7 +14,7 @@ const CACHE_SEC = 300;
 /**
  * oEmbed for share links: `?url=<share link>&maxwidth=&maxheight=&format=json` → an oEmbed 1.0 `video` answer whose
  * `html` is an iframe of the share page's embed player. A link that is not one of this studio's share pages, or a video
- * whose link is off, expired, in the trash, or missing, is a `404`; `format=xml` is a `501`, as the spec has it.
+ * whose link is off, expired, not live yet, in the trash, or missing, is a `404`; `format=xml` is a `501`, as the spec has it.
  */
 export async function GET(req: Request) {
   try {

@@ -22,7 +22,7 @@ import { captionsBurnedIn } from "@/lib/captions";
 import { silentSeconds, stripPauses } from "@/lib/pauses";
 import { languageLabel } from "@/lib/language";
 import { useApi } from "@/hooks/useApi";
-import { ApiError, api, formatDate, formatSeconds, isDarkHex, emailSnippet, posterUrl, purgeAt, shareExpired } from "@/lib/client";
+import { ApiError, api, formatDate, formatSeconds, isDarkHex, emailSnippet, posterUrl, purgeAt, shareExpired, shareNotYet } from "@/lib/client";
 import { socialShareLinks } from "@/lib/social";
 import { TRASH_RETENTION_DAYS, type Video } from "@/lib/types";
 
@@ -163,7 +163,7 @@ export default function VideoDetailPage() {
    * description, a link turned back on) must disappear too, or the control flips back until the
    * refetch lands.
    */
-  const OPTIONAL_KEYS = ["description", "folder", "cover", "subtitles", "captionCues", "review", "shareGate", "shareDisabled", "shareDownload", "shareLocked", "shareCta", "shareExpiresAt"] as const;
+  const OPTIONAL_KEYS = ["description", "folder", "cover", "subtitles", "captionCues", "review", "shareGate", "shareDisabled", "shareDownload", "shareLocked", "shareCta", "shareExpiresAt", "shareStartsAt"] as const;
   function applyServer(next: Video) {
     setData((d) => {
       const merged = { ...d?.video, ...next } as Video;
@@ -256,7 +256,7 @@ export default function VideoDetailPage() {
 
   const [shareErr, setShareErr] = useState<string | null>(null);
   // Optimistic: a box flips at once and reverts if the save fails.
-  type SharePatch = { shareDownload?: boolean; shareGate?: boolean; shareDisabled?: boolean; shareExpiresAt?: string | null };
+  type SharePatch = { shareDownload?: boolean; shareGate?: boolean; shareDisabled?: boolean; shareExpiresAt?: string | null; shareStartsAt?: string | null };
   const [shareDraft, setShareDraft] = useState<SharePatch>({});
   async function patchShare(patch: SharePatch): Promise<boolean> {
     if (!video) return false;
@@ -283,19 +283,22 @@ export default function VideoDetailPage() {
   // A picture for an email loads only from a live, unprotected share link. The expiry is the one being saved, if any.
   const expiresAt = shareDraft.shareExpiresAt !== undefined ? shareDraft.shareExpiresAt ?? undefined : video?.shareExpiresAt;
   const linkExpired = !!video && shareExpired({ shareExpiresAt: expiresAt });
+  const startsAt = shareDraft.shareStartsAt !== undefined ? shareDraft.shareStartsAt ?? undefined : video?.shareStartsAt;
+  const linkNotYet = !!video && shareNotYet({ shareStartsAt: startsAt });
   // Made from a description rather than a script (a cinematic shot, or a video HeyGen's Video Agent directed): no
   // script to caption, subtitle, copy, or resize.
   const described = !!video?.cinematic || !!video?.directed;
-  const emailReady = !!video && shareLive && !linkExpired && !video.shareLocked;
-  const emailBlocked = !video ? "" : video.shareLocked ? "Email preview unavailable while the link has a password." : !shareLive ? "Turn the share link on to copy an email preview." : linkExpired ? "Link expired: set a later expiry to copy an email preview." : "";
-  // Drawn again when the link expires, so the button and the note follow without a reload.
+  const emailReady = !!video && shareLive && !linkExpired && !linkNotYet && !video.shareLocked;
+  const emailBlocked = !video ? "" : video.shareLocked ? "Email preview unavailable while the link has a password." : !shareLive ? "Turn the share link on to copy an email preview." : linkExpired ? "Link expired: set a later expiry to copy an email preview." : linkNotYet ? "The link is not live yet: copy an email preview once it goes live." : "";
+  // Drawn again when the link expires or goes live, so the buttons and notes follow without a reload.
   const [, setExpiryTick] = useState(0);
   useEffect(() => {
-    const left = expiresAt ? Date.parse(expiresAt) - Date.now() : NaN;
-    if (!(left > 0) || left > 2 ** 31 - 1) return;
-    const timer = setTimeout(() => setExpiryTick((t) => t + 1), left + 50);
-    return () => clearTimeout(timer);
-  }, [expiresAt]);
+    const timers = [expiresAt, startsAt].flatMap((at) => {
+      const left = at ? Date.parse(at) - Date.now() : NaN;
+      return left > 0 && left <= 2 ** 31 - 1 ? [setTimeout(() => setExpiryTick((t) => t + 1), left + 50)] : [];
+    });
+    return () => timers.forEach(clearTimeout);
+  }, [expiresAt, startsAt]);
   // Expiry: the owner types a local date and time; the API stores it as an instant.
   const [expiryDraft, setExpiryDraft] = useState("");
   const expiryInput = (iso?: string) => {
@@ -312,6 +315,25 @@ export default function VideoDetailPage() {
       return;
     }
     if (await patchShare({ shareExpiresAt: at.toISOString() })) setExpiryDraft("");
+  }
+  // Go-live time: as the expiry, a local date and time stored as an instant.
+  const [startDraft, setStartDraft] = useState("");
+  async function saveStart() {
+    const at = new Date(startDraft);
+    if (!startDraft || Number.isNaN(at.getTime())) return;
+    if (at.getTime() <= Date.now()) {
+      setShareErr("The go-live time must be in the future");
+      return;
+    }
+    if (linkExpired) {
+      setShareErr("The link has expired: set a later expiry first");
+      return;
+    }
+    if (expiresAt && at.getTime() >= Date.parse(expiresAt)) {
+      setShareErr("The link must go live before it expires");
+      return;
+    }
+    if (await patchShare({ shareStartsAt: at.toISOString() })) setStartDraft("");
   }
 
   // Cover image: downscaled in the browser to fit a 1280px box, sent as a JPEG data URL.
@@ -755,6 +777,38 @@ export default function VideoDetailPage() {
                       Ask for an email before playing
                     </label>
                     {!shareLive && <span className="text-xs text-slate-500" data-testid="share-off-note">Share link off: the share page, embed, and email preview answer “not found”.</span>}
+                    <form
+                      className="inline-flex flex-wrap items-center gap-2"
+                      data-testid="share-start"
+                      noValidate
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void saveStart();
+                      }}
+                    >
+                      {startsAt && linkNotYet && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-900" data-testid="share-start-badge">
+                          <Clock className="h-3 w-3" /> Goes live {formatDate(startsAt)}
+                          {!shareLive && " (the link is off, so it stays offline until it is turned on)"}
+                        </span>
+                      )}
+                      <input
+                        type="datetime-local"
+                        aria-label="Share link go-live time"
+                        className={`${inputClass} w-52 py-1.5 text-xs`}
+                        value={startDraft}
+                        min={expiryInput(new Date().toISOString())}
+                        onChange={(e) => setStartDraft(e.target.value)}
+                      />
+                      <Button type="submit" variant="secondary" disabled={!startDraft} title="Until this time the share page, embed, and email preview answer “not found”; you keep access">
+                        {startsAt && linkNotYet ? "Change go-live time" : "Schedule go-live"}
+                      </Button>
+                      {startsAt && (
+                        <Button type="button" variant="ghost" onClick={() => void patchShare({ shareStartsAt: null })}>
+                          {linkNotYet ? "Go live now" : "Clear go-live time"}
+                        </Button>
+                      )}
+                    </form>
                     <form
                       className="inline-flex flex-wrap items-center gap-2"
                       data-testid="share-expiry"
@@ -1253,10 +1307,10 @@ export default function VideoDetailPage() {
                     />
                     <textarea className={`${inputClass} min-h-[60px]`} aria-label="Message" placeholder="A note for the recipients (optional)" maxLength={500} value={mailMsg} onChange={(e) => setMailMsg(e.target.value)} />
                     <div className="flex flex-wrap items-center gap-2">
-                      <Button type="submit" className="px-3 py-1.5 text-xs" loading={mailBusy} disabled={mailRecipients.length === 0 || !shareLive || shareExpired(video) || !!video.deletedAt}>
+                      <Button type="submit" className="px-3 py-1.5 text-xs" loading={mailBusy} disabled={mailRecipients.length === 0 || !shareLive || shareExpired(video) || linkNotYet || !!video.deletedAt}>
                         Send link
                       </Button>
-                      {video.deletedAt ? <span className="text-xs text-slate-500">Restore the video from the trash first.</span> : (!shareLive || shareExpired(video)) && <span className="text-xs text-slate-500">Turn the share link on first.</span>}
+                      {video.deletedAt ? <span className="text-xs text-slate-500">Restore the video from the trash first.</span> : shareLive && !shareExpired(video) && linkNotYet && startsAt ? <span className="text-xs text-slate-500">The link goes live {formatDate(startsAt)}; send it then.</span> : (!shareLive || shareExpired(video)) && <span className="text-xs text-slate-500">Turn the share link on first.</span>}
                       {/* Always mounted so screen readers announce the first message too. */}
                       <span className={`text-xs ${mailStatus?.ok ? "text-emerald-700" : "text-rose-600"}`} data-testid="share-email-status" role="status">
                         {mailStatus?.text}
@@ -1268,8 +1322,8 @@ export default function VideoDetailPage() {
               {video.status === "completed" && (
                 <Card className="p-4" data-testid="share-social-card">
                   <h3 className="text-sm font-semibold text-slate-900">Post the link</h3>
-                  {video.deletedAt || !shareLive || shareExpired(video) ? (
-                    <p className="mt-1 text-xs text-slate-500">{video.deletedAt ? "Restore the video from the trash first." : "Turn the share link on first."}</p>
+                  {video.deletedAt || !shareLive || shareExpired(video) || linkNotYet ? (
+                    <p className="mt-1 text-xs text-slate-500">{video.deletedAt ? "Restore the video from the trash first." : shareLive && !shareExpired(video) && startsAt ? `The link goes live ${formatDate(startsAt)}; post it then.` : "Turn the share link on first."}</p>
                   ) : !shareOrigin ? null : (
                     <>
                       <p className="mt-1 text-xs text-slate-500">

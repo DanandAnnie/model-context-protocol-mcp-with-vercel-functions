@@ -3570,6 +3570,43 @@ test("the owner can take a share link offline and back", async ({ page }) => {
   await expect.poll(async () => (await (await page.request.get(`/share/${v.id}`)).status())).toBe(200);
 });
 
+test("a share link can be scheduled to go live later, and is not found until then", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Launch ${Date.now().toString(36)}`);
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  await page.goto(`/videos/${v.id}`);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const local = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const start = page.getByTestId("share-start");
+  // A past time is refused; so is one at or after the link's expiry.
+  await page.getByLabel("Share link go-live time").fill(local(new Date(Date.now() - 60 * 60 * 1000)));
+  await start.getByRole("button", { name: "Schedule go-live" }).click();
+  await expect(page.getByText("The go-live time must be in the future")).toBeVisible();
+  const launch = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+  launch.setHours(12, 0, 0, 0); // noon: never inside a daylight-saving transition
+  await page.getByLabel("Share link go-live time").fill(local(launch));
+  await start.getByRole("button", { name: "Schedule go-live" }).click();
+  await expect(page.getByTestId("share-start-badge")).toContainText("Goes live");
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.shareStartsAt).toBe(launch.toISOString());
+  // Until then the share page, its beacons, and oEmbed answer "not found"; the owner keeps the page.
+  expect((await page.request.get(`/share/${v.id}`)).status()).toBe(404);
+  expect((await page.request.post(`/api/videos/${v.id}/view`)).status()).toBe(404);
+  expect((await page.request.get(`/api/oembed?url=${encodeURIComponent(`http://localhost:3100/share/${v.id}`)}`)).status()).toBe(404);
+  const early = new Date(launch.getTime() - 24 * 60 * 60 * 1000);
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareExpiresAt: early.toISOString() } })).status()).toBe(400);
+  // The email form waits for it.
+  await expect(page.getByText(/^The link goes live .+; send it then\.$/)).toBeVisible();
+  // The library card says it is scheduled.
+  await page.goto("/videos");
+  await expect(page.locator(`a[href="/videos/${v.id}"]`).getByTestId("share-badges")).toContainText("Scheduled");
+  // "Go live now" opens it at once.
+  await page.goto(`/videos/${v.id}`);
+  await start.getByRole("button", { name: "Go live now" }).click();
+  await expect(page.getByTestId("share-start-badge")).toHaveCount(0);
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.shareStartsAt).toBeUndefined();
+  await expect.poll(async () => (await page.request.get(`/share/${v.id}`)).status()).toBe(200);
+  expect((await page.request.get(`/api/oembed?url=${encodeURIComponent(`http://localhost:3100/share/${v.id}`)}`)).status()).toBe(200);
+});
+
 test("a share link can require a password", async ({ page }) => {
   const v = await createVideoViaApi(page, `Locked ${Date.now().toString(36)}`);
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");

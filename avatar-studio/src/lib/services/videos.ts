@@ -911,6 +911,12 @@ export const videoPatchSchema = z
       .refine((v) => Date.parse(v) > Date.now(), "The expiry must be in the future")
       .nullable()
       .optional(),
+    /** When the public link starts working (ISO 8601 with a UTC offset, in the future); null makes it live now. */
+    shareStartsAt: z.iso
+      .datetime({ offset: true, message: "The go-live time must be an ISO 8601 date and time with a UTC offset" })
+      .refine((v) => Date.parse(v) > Date.now(), "The go-live time must be in the future")
+      .nullable()
+      .optional(),
     /** A `data:image/...` URL (PNG, JPEG, WebP, or GIF; 2 MB decoded) or null to remove the cover. */
     cover: z
       .string()
@@ -962,6 +968,7 @@ export const videoPatchSchema = z
       p.shareGate !== undefined ||
       p.shareDisabled !== undefined ||
       p.shareExpiresAt !== undefined ||
+      p.shareStartsAt !== undefined ||
       p.sharePassword !== undefined ||
       p.shareCta !== undefined ||
       p.cover !== undefined,
@@ -1021,6 +1028,14 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
   if (patch.shareExpiresAt !== undefined) {
     if (patch.shareExpiresAt) next.shareExpiresAt = new Date(patch.shareExpiresAt).toISOString();
     else delete next.shareExpiresAt;
+  }
+  if (patch.shareStartsAt !== undefined) {
+    if (patch.shareStartsAt) next.shareStartsAt = new Date(patch.shareStartsAt).toISOString();
+    else delete next.shareStartsAt;
+  }
+  // Checked on the result, so moving either time (or both in one request) cannot leave a link that never goes live.
+  if ((patch.shareStartsAt || patch.shareExpiresAt) && next.shareStartsAt && next.shareExpiresAt && Date.parse(next.shareStartsAt) >= Date.parse(next.shareExpiresAt)) {
+    throw new ValidationError("The link must go live before it expires");
   }
   if (patch.shareCta !== undefined) {
     if (patch.shareCta) next.shareCta = patch.shareCta;

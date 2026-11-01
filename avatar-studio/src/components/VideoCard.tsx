@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { Clock, Film, LinkIcon, Lock, Trash2 } from "lucide-react";
 import { StatusBadge } from "./ui";
-import { daysUntilPurge, formatDate, formatSeconds, posterUrl, shareExpired } from "@/lib/client";
+import { daysUntilPurge, formatDate, formatSeconds, posterUrl, shareExpired, shareNotYet } from "@/lib/client";
 import { REVIEW_LABEL, type Video } from "@/lib/types";
 
 export function VideoCard({ video, selectable = false, selected = false, onToggle }: { video: Video; selectable?: boolean; selected?: boolean; onToggle?: () => void }) {
@@ -38,7 +38,7 @@ export function VideoCard({ video, selectable = false, selected = false, onToggl
             <Trash2 className="h-3 w-3" /> {daysUntilPurge(video) === 0 ? "Deleted today" : `${daysUntilPurge(video)} ${daysUntilPurge(video) === 1 ? "day" : "days"} left`}
           </span>
         )}
-        {!video.deletedAt && (video.shareDisabled || video.shareLocked || shareExpired(video)) && (
+        {!video.deletedAt && (video.shareDisabled || video.shareLocked || shareExpired(video) || shareNotYet(video)) && (
           <span className="absolute bottom-2 left-2 flex gap-1" data-testid="share-badges">
             {video.shareDisabled && (
               <span className="inline-flex items-center gap-1 rounded bg-black/70 px-1.5 py-0.5 text-xs text-white" title="The share link is off">
@@ -48,6 +48,11 @@ export function VideoCard({ video, selectable = false, selected = false, onToggl
             {!video.shareDisabled && shareExpired(video) && (
               <span className="inline-flex items-center gap-1 rounded bg-black/70 px-1.5 py-0.5 text-xs text-white" title={`The share link expired ${formatDate(video.shareExpiresAt!)}`}>
                 <Clock className="h-3 w-3" /> Expired
+              </span>
+            )}
+            {!video.shareDisabled && !shareExpired(video) && shareNotYet(video) && (
+              <span className="inline-flex items-center gap-1 rounded bg-black/70 px-1.5 py-0.5 text-xs text-white" title={`The share link goes live ${formatDate(video.shareStartsAt!)}`}>
+                <Clock className="h-3 w-3" /> Scheduled
               </span>
             )}
             {video.shareLocked && (

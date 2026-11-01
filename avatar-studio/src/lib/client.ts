@@ -88,9 +88,17 @@ export function shareExpired(video: { shareExpiresAt?: string }, now = Date.now(
   return !!video.shareExpiresAt && Date.parse(video.shareExpiresAt) <= now;
 }
 
-/** True while the public should see "not found": the owner switched the link off, it expired, or the video is in the trash. */
-export function shareOffline(video: { shareDisabled?: boolean; shareExpiresAt?: string; deletedAt?: string }, now = Date.now()): boolean {
-  return !!video.shareDisabled || !!video.deletedAt || shareExpired(video, now);
+/** True while a link scheduled to go live later has not gone live yet. */
+export function shareNotYet(video: { shareStartsAt?: string }, now = Date.now()): boolean {
+  return !!video.shareStartsAt && Date.parse(video.shareStartsAt) > now;
+}
+
+/**
+ * True while the public should see "not found": the owner switched the link off, it expired, it is scheduled to go
+ * live later, or the video is in the trash.
+ */
+export function shareOffline(video: { shareDisabled?: boolean; shareExpiresAt?: string; shareStartsAt?: string; deletedAt?: string }, now = Date.now()): boolean {
+  return !!video.shareDisabled || !!video.deletedAt || shareExpired(video, now) || shareNotYet(video, now);
 }
 
 /** When a trashed video is deleted for good, as an ISO instant; undefined for a video that is not in the trash. */

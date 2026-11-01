@@ -1112,6 +1112,8 @@ export interface Video extends VideoRequest {
   shareDisabled?: boolean;
   /** ISO time after which the share link behaves as if switched off (the owner keeps access). */
   shareExpiresAt?: string;
+  /** ISO time before which the share link behaves as if switched off: a link scheduled to go live then. */
+  shareStartsAt?: string;
   /** Visitors must enter a password (kept as a salted hash in its own record) before the share page plays. */
   shareLocked?: boolean;
   /** A custom poster image is stored in its own record; `updatedAt` versions its URL, `bytes` is its decoded size. */

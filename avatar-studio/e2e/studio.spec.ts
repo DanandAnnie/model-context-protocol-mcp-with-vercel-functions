@@ -4720,6 +4720,34 @@ test("library multi-select moves and deletes videos in bulk", async ({ page }) =
   await expect(badgeOn(a.id)).toHaveCount(0);
   expect((await page.request.get(`/share/${a.id}`)).status()).toBe(200);
 
+  // An expiry can be set on the selection the same way: live until then, a video going live at or after it is left
+  // as it was and stays selected, and "No expiry" clears it. The two fields open one at a time.
+  const launchField = `${launch.getFullYear()}-${pad(launch.getMonth() + 1)}-${pad(launch.getDate())}T12:00`;
+  expect((await page.request.patch(`/api/videos/${b.id}`, { data: { shareStartsAt: launch.toISOString() } })).ok()).toBe(true);
+  await page.getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: `Select Bulk one ${tag}` }).click();
+  await page.getByRole("button", { name: `Select Bulk two ${tag}` }).click();
+  await page.getByRole("button", { name: "Schedule go-live" }).click();
+  await page.getByRole("button", { name: "Set expiry" }).click();
+  await expect(page.getByTestId("bulk-schedule")).toHaveCount(0);
+  await page.getByLabel("Expiry for the selected videos").fill(launchField);
+  await page.getByTestId("bulk-expiry").getByRole("button", { name: "Set expiry", exact: true }).click();
+  await expect(page.getByText("1 selected video goes live at or after that time, so it was not given that expiry and is still selected; set an earlier go-live time on it first.")).toBeVisible();
+  await expect(page.getByTestId("bulk-bar")).toContainText("1 selected");
+  expect((await (await page.request.get(`/api/videos/${a.id}`)).json()).video.shareExpiresAt).toBe(launch.toISOString());
+  expect((await (await page.request.get(`/api/videos/${b.id}`)).json()).video.shareExpiresAt).toBeUndefined();
+  expect((await page.request.get(`/share/${a.id}`)).status()).toBe(200);
+  await page.getByRole("button", { name: "Close expiry" }).click();
+  await expect(page.getByTestId("bulk-expiry")).toHaveCount(0);
+  await page.getByRole("button", { name: "Done selecting" }).click();
+  expect((await page.request.patch(`/api/videos/${b.id}`, { data: { shareStartsAt: null } })).ok()).toBe(true);
+  await page.getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: `Select Bulk one ${tag}` }).click();
+  await page.getByRole("button", { name: "Set expiry" }).click();
+  await page.getByTestId("bulk-expiry").getByRole("button", { name: "No expiry" }).click();
+  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+  expect((await (await page.request.get(`/api/videos/${a.id}`)).json()).video.shareExpiresAt).toBeUndefined();
+
   // Delete moves to the trash: gone from the library, 404 to the public, still the owner's to restore.
   await page.getByRole("button", { name: "Select" }).click();
   await page.getByRole("button", { name: `Select Bulk two ${tag}` }).click();

@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { ArchiveRestore, CheckSquare, Clapperboard, Clock, FolderInput, FolderMinus, FolderPen, Link2, Link2Off, Trash2, X } from "lucide-react";
+import { ArchiveRestore, CheckSquare, Clapperboard, Clock, FolderInput, FolderMinus, FolderPen, Link2, Link2Off, TimerOff, Trash2, X } from "lucide-react";
 import { api } from "@/lib/client";
 import { VideoCard } from "@/components/VideoCard";
 import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -22,7 +22,7 @@ function localMinute(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "restore" | "purge";
+type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge";
 
 export default function VideosPage() {
   return (
@@ -82,9 +82,9 @@ function VideosInner() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<BulkAction | null>(null);
   const [bulkErr, setBulkErr] = useState<string | null>(null);
-  // "Schedule go-live" opens a date and time field in the bar; it is a local time, sent as an instant.
-  const [scheduling, setScheduling] = useState(false);
-  const [goLiveDraft, setGoLiveDraft] = useState("");
+  // "Schedule go-live" and "Set expiry" open a date and time field in the bar, one at a time; it is a local time, sent as an instant.
+  const [timeField, setTimeField] = useState<"golive" | "expiry" | null>(null);
+  const [timeDraft, setTimeDraft] = useState("");
   function toggle(id: string) {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -96,8 +96,8 @@ function VideosInner() {
   function stopSelecting() {
     setSelecting(false);
     setSelected(new Set());
-    setScheduling(false);
-    setGoLiveDraft("");
+    setTimeField(null);
+    setTimeDraft("");
   }
   // Folder management: rename the chosen folder (merging into an existing name) or remove it, leaving its videos unfiled.
   const [folderBusy, setFolderBusy] = useState(false);
@@ -127,8 +127,8 @@ function VideosInner() {
   // A new filter hides cards; drop the selection so bulk actions only ever touch what is visible.
   useEffect(() => {
     setSelected(new Set());
-    setScheduling(false);
-    setGoLiveDraft("");
+    setTimeField(null);
+    setTimeDraft("");
   }, [q, status, folder, batch, trash]);
   // The last purge empties both views; leave the trash so the "No videos yet" state (and the filter bar) comes back.
   useEffect(() => {
@@ -144,11 +144,11 @@ function VideosInner() {
       targetFolder = answer;
     } else if (action === "delete" && !window.confirm(`Move ${ids.length} ${ids.length === 1 ? "video" : "videos"} to the trash? You can restore ${ids.length === 1 ? "it" : "them"} for ${TRASH_RETENTION_DAYS} days.`)) {
       return;
-    } else if (action === "schedule") {
-      const at = new Date(goLiveDraft);
-      if (!goLiveDraft || Number.isNaN(at.getTime())) return;
+    } else if (action === "schedule" || action === "expire") {
+      const at = new Date(timeDraft);
+      if (!timeDraft || Number.isNaN(at.getTime())) return;
       if (at.getTime() <= Date.now()) {
-        setBulkErr("The go-live time must be in the future");
+        setBulkErr(action === "schedule" ? "The go-live time must be in the future" : "The expiry must be in the future");
         return;
       }
     } else if (action === "purge" && !window.confirm(`Delete ${ids.length} ${ids.length === 1 ? "video" : "videos"} for good? ${ids.length === 1 ? "Its" : "Their"} short clips, and the cleaned and lip-synced copies made from ${ids.length === 1 ? "it" : "them"}, go too. This cannot be undone.`)) {
@@ -163,14 +163,21 @@ function VideosInner() {
           : action === "share-off" || action === "share-on"
             ? { action: "share", ids, shareDisabled: action === "share-off" }
             : action === "schedule" || action === "golive"
-              ? { action: "schedule", ids, shareStartsAt: action === "golive" ? null : new Date(goLiveDraft).toISOString() }
-              : { action, ids };
+              ? { action: "schedule", ids, shareStartsAt: action === "golive" ? null : new Date(timeDraft).toISOString() }
+              : action === "expire" || action === "noexpiry"
+                ? { action: "expire", ids, shareExpiresAt: action === "noexpiry" ? null : new Date(timeDraft).toISOString() }
+                : { action, ids };
       const { missing, refused = [] } = await api<{ done: number; missing: string[]; refused?: string[] }>("/api/videos/bulk", { method: "POST", body: JSON.stringify(body) });
       await refetch();
       const notes: string[] = [];
-      // A video whose own expiry comes first keeps its link as it was; the others are scheduled.
+      // A video whose own expiry comes first (or, for an expiry, whose go-live comes at or after it) keeps its link as it was.
       if (refused.length) {
-        notes.push(`${refused.length === 1 ? "1 selected video expires" : `${refused.length} selected videos expire`} at or before that time, so ${refused.length === 1 ? "it was" : "they were"} not scheduled and ${refused.length === 1 ? "is" : "are"} still selected; set a later expiry on ${refused.length === 1 ? "it" : "them"} first.`);
+        const one = refused.length === 1;
+        notes.push(
+          action === "expire"
+            ? `${one ? "1 selected video goes" : `${refused.length} selected videos go`} live at or after that time, so ${one ? "it was" : "they were"} not given that expiry and ${one ? "is" : "are"} still selected; set an earlier go-live time on ${one ? "it" : "them"} first.`
+            : `${one ? "1 selected video expires" : `${refused.length} selected videos expire`} at or before that time, so ${one ? "it was" : "they were"} not scheduled and ${one ? "is" : "are"} still selected; set a later expiry on ${one ? "it" : "them"} first.`,
+        );
       }
       // Videos deleted elsewhere since the page loaded are skipped by the server; say so rather than pretend.
       // For a delete that is the outcome asked for, so it reads as "already deleted" rather than a skip.
@@ -191,6 +198,73 @@ function VideosInner() {
     } finally {
       setBusy(null);
     }
+  }
+
+  // The banner stays: after a refusal it says which of the two times to move, which may be the field being opened.
+  function openTimeField(kind: "golive" | "expiry") {
+    setTimeField(kind);
+    setTimeDraft("");
+  }
+  // The go-live and expiry fields share their shape: a time, a button that sets it, and one that clears it.
+  function timeForm(kind: "golive" | "expiry") {
+    const golive = kind === "golive";
+    const [set, clear] = golive ? (["schedule", "golive"] as const) : (["expire", "noexpiry"] as const);
+    return (
+      <form
+        className="inline-flex flex-wrap items-center gap-1.5"
+        data-testid={golive ? "bulk-schedule" : "bulk-expiry"}
+        noValidate
+        onSubmit={(e) => {
+          e.preventDefault();
+          void bulk(set);
+        }}
+      >
+        <input
+          type="datetime-local"
+          aria-label={golive ? "Go-live time for the selected videos" : "Expiry for the selected videos"}
+          className={`${inputClass} w-48 py-1 text-xs`}
+          value={timeDraft}
+          min={localMinute(new Date())}
+          onChange={(e) => {
+            setTimeDraft(e.target.value);
+            setBulkErr(null);
+          }}
+        />
+        <Button
+          type="submit"
+          variant="secondary"
+          className="px-2.5 py-1 text-xs"
+          disabled={!selected.size || !timeDraft || busy !== null}
+          loading={busy === set}
+          title={golive ? "Until this time the share pages, embeds, and email previews of the selected videos answer “not found”" : "From this time the share pages, embeds, and email previews of the selected videos answer “not found”"}
+        >
+          {golive ? "Schedule" : "Set expiry"}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          className="px-2.5 py-1 text-xs"
+          onClick={() => bulk(clear)}
+          disabled={!selected.size || busy !== null}
+          loading={busy === clear}
+          title={golive ? "Clear the go-live time of the selected videos, so their links are live now (unless switched off or expired)" : "Clear the expiry of the selected videos, so their links stay open until switched off"}
+        >
+          {golive ? "Go live now" : "No expiry"}
+        </Button>
+        <button
+          type="button"
+          onClick={() => {
+            setTimeField(null);
+            setTimeDraft("");
+          }}
+          disabled={busy !== null}
+          aria-label={golive ? "Close go-live time" : "Close expiry"}
+          className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </form>
+    );
   }
 
   return (
@@ -275,49 +349,18 @@ function VideosInner() {
               <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => bulk("share-on")} disabled={!selected.size || busy !== null} loading={busy === "share-on"} title="Turn the share links of the selected videos back on. A password, expiry, or go-live time set on a video stays in place.">
                 <Link2 className="h-3.5 w-3.5" /> Links on
               </Button>
-              {scheduling ? (
-                <form
-                  className="inline-flex flex-wrap items-center gap-1.5"
-                  data-testid="bulk-schedule"
-                  noValidate
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    void bulk("schedule");
-                  }}
-                >
-                  <input
-                    type="datetime-local"
-                    aria-label="Go-live time for the selected videos"
-                    className={`${inputClass} w-48 py-1 text-xs`}
-                    value={goLiveDraft}
-                    min={localMinute(new Date())}
-                    onChange={(e) => {
-                      setGoLiveDraft(e.target.value);
-                      setBulkErr(null);
-                    }}
-                  />
-                  <Button type="submit" variant="secondary" className="px-2.5 py-1 text-xs" disabled={!selected.size || !goLiveDraft || busy !== null} loading={busy === "schedule"} title="Until this time the share pages, embeds, and email previews of the selected videos answer “not found”">
-                    Schedule
-                  </Button>
-                  <Button type="button" variant="ghost" className="px-2.5 py-1 text-xs" onClick={() => bulk("golive")} disabled={!selected.size || busy !== null} loading={busy === "golive"} title="Clear the go-live time of the selected videos, so their links are live now (unless switched off or expired)">
-                    Go live now
-                  </Button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setScheduling(false);
-                      setGoLiveDraft("");
-                    }}
-                    disabled={busy !== null}
-                    aria-label="Close go-live time"
-                    className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </form>
+              {timeField === "golive" ? (
+                timeForm("golive")
               ) : (
-                <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => setScheduling(true)} disabled={!selected.size || busy !== null}>
+                <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => openTimeField("golive")} disabled={!selected.size || busy !== null}>
                   <Clock className="h-3.5 w-3.5" /> Schedule go-live
+                </Button>
+              )}
+              {timeField === "expiry" ? (
+                timeForm("expiry")
+              ) : (
+                <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => openTimeField("expiry")} disabled={!selected.size || busy !== null}>
+                  <TimerOff className="h-3.5 w-3.5" /> Set expiry
                 </Button>
               )}
               <Button variant="danger" className="px-2.5 py-1 text-xs" onClick={() => bulk("delete")} disabled={!selected.size || busy !== null} loading={busy === "delete"} title={`Moves the selected videos to the trash, where they can be restored for ${TRASH_RETENTION_DAYS} days`}>

@@ -899,6 +899,12 @@ export const shareStartsAtSchema = z.iso
   .refine((v) => Date.parse(v) > Date.now(), "The go-live time must be in the future")
   .nullable();
 
+/** When a share link stops working: ISO 8601 with a UTC offset, in the future; null keeps it open indefinitely. */
+export const shareExpiresAtSchema = z.iso
+  .datetime({ offset: true, message: "The expiry must be an ISO 8601 date and time with a UTC offset" })
+  .refine((v) => Date.parse(v) > Date.now(), "The expiry must be in the future")
+  .nullable();
+
 export const videoPatchSchema = z
   .object({
     title: z.string().trim().min(1).max(120).optional(),
@@ -912,11 +918,7 @@ export const videoPatchSchema = z
     shareGate: z.boolean().optional(),
     shareDisabled: z.boolean().optional(),
     /** When the public link stops working (ISO 8601 with a UTC offset, in the future); null keeps it open indefinitely. */
-    shareExpiresAt: z.iso
-      .datetime({ offset: true, message: "The expiry must be an ISO 8601 date and time with a UTC offset" })
-      .refine((v) => Date.parse(v) > Date.now(), "The expiry must be in the future")
-      .nullable()
-      .optional(),
+    shareExpiresAt: shareExpiresAtSchema.optional(),
     /** When the public link starts working (ISO 8601 with a UTC offset, in the future); null makes it live now. */
     shareStartsAt: shareStartsAtSchema.optional(),
     /** A `data:image/...` URL (PNG, JPEG, WebP, or GIF; 2 MB decoded) or null to remove the cover. */
@@ -1268,13 +1270,16 @@ export const bulkVideoSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("share"), ids: z.array(z.string().min(1)).min(1).max(200), shareDisabled: z.boolean() }),
   /** Schedule the share links of many videos to go live at one time (`null` makes them live now). */
   z.object({ action: z.literal("schedule"), ids: z.array(z.string().min(1)).min(1).max(200), shareStartsAt: shareStartsAtSchema }),
+  /** Make the share links of many videos stop working at one time (`null` keeps them open indefinitely). */
+  z.object({ action: z.literal("expire"), ids: z.array(z.string().min(1)).min(1).max(200), shareExpiresAt: shareExpiresAtSchema }),
 ]);
 
 /**
- * Trash, restore, purge, move, switch, or schedule the share links of many videos at once. Ids that are
- * missing or belong to someone else are reported, not failed; so is a purge of a video that is
- * not in the trash, since deleting for good is only offered from there. A go-live time that a video's
- * own expiry comes before is reported in `refused` for that video, and the rest are still scheduled.
+ * Trash, restore, purge, move, switch, schedule, or set the expiry of the share links of many videos at once.
+ * Ids that are missing or belong to someone else are reported, not failed; so is a purge of a video that is
+ * not in the trash, since deleting for good is only offered from there. A go-live time at or after a video's
+ * own expiry, or an expiry at or before its own go-live time, is reported in `refused` for that video, and
+ * the rest are still written.
  */
 export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId: string = LOCAL_OWNER): Promise<{ done: number; missing: string[]; refused?: string[] }> {
   const missing: string[] = [];
@@ -1294,7 +1299,7 @@ export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId
     else if (input.action === "share") await updateVideo(id, { shareDisabled: input.shareDisabled }, ownerId);
     else {
       try {
-        await updateVideo(id, { shareStartsAt: input.shareStartsAt }, ownerId);
+        await updateVideo(id, input.action === "schedule" ? { shareStartsAt: input.shareStartsAt } : { shareExpiresAt: input.shareExpiresAt }, ownerId);
       } catch (err) {
         // Deleted for good between the check above and the write: reported like the others not there.
         if (err instanceof NotFoundError) missing.push(id);
@@ -1305,7 +1310,7 @@ export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId
     }
     done += 1;
   }
-  return input.action === "schedule" ? { done, missing, refused } : { done, missing };
+  return input.action === "schedule" || input.action === "expire" ? { done, missing, refused } : { done, missing };
 }
 
 export const folderRenameSchema = z.object({

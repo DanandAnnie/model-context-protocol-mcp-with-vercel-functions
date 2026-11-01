@@ -1,5 +1,6 @@
 // A share link scheduled to go live later: "not found" to the public (page, beacons, email) until its time, the
-// owner keeping access, and never set to go live after it expires. Run with: npm test
+// owner keeping access, and never set to go live after it expires; and both times set on many videos at once.
+// Run with: npm test
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
@@ -82,5 +83,24 @@ describe("share link go-live time", () => {
     assert.equal((await getVideo(a.id, null, false)).id, a.id);
     // Another owner's video is not touched.
     assert.deepEqual(await bulkVideos(bulkVideoSchema.parse({ action: "schedule", ids: [a.id], shareStartsAt: at }), "someone_else"), { done: 0, missing: [a.id], refused: [] });
+  });
+
+  it("sets the expiry of many videos at once, reporting the ones that go live at or after it and the ones not there", async () => {
+    const [a, b, c] = [await readyVideo(), await readyVideo(), await readyVideo()];
+    const end = inDays(10);
+    await updateVideo(c.id, videoPatchSchema.parse({ shareStartsAt: end }), OWNER);
+    assert.throws(() => bulkVideoSchema.parse({ action: "expire", ids: [a.id], shareExpiresAt: "2001-01-01T00:00:00Z" }), /in the future/);
+    assert.throws(() => bulkVideoSchema.parse({ action: "expire", ids: [a.id], shareExpiresAt: "next week" }), /UTC offset/);
+    const result = await bulkVideos(bulkVideoSchema.parse({ action: "expire", ids: [a.id, b.id, c.id, "vid_nosuch"], shareExpiresAt: end }), OWNER);
+    assert.deepEqual(result, { done: 2, missing: ["vid_nosuch"], refused: [c.id] });
+    // A go-live after the expiry is refused as one at the same time is.
+    assert.deepEqual(await bulkVideos(bulkVideoSchema.parse({ action: "expire", ids: [c.id], shareExpiresAt: inDays(9) }), OWNER), { done: 0, missing: [], refused: [c.id] });
+    assert.deepEqual([(await getVideo(a.id, OWNER, false)).shareExpiresAt, (await getVideo(b.id, OWNER, false)).shareExpiresAt], [end, end]);
+    assert.equal("shareExpiresAt" in (await getVideo(c.id, OWNER, false)), false, "a video going live at that time keeps its link as it was");
+    // Still live until then, and open indefinitely again in one request.
+    assert.equal((await getVideo(a.id, null, false)).id, a.id);
+    assert.deepEqual(await bulkVideos(bulkVideoSchema.parse({ action: "expire", ids: [a.id, b.id], shareExpiresAt: null }), OWNER), { done: 2, missing: [], refused: [] });
+    assert.equal("shareExpiresAt" in (await getVideo(a.id, OWNER, false)), false);
+    assert.deepEqual(await bulkVideos(bulkVideoSchema.parse({ action: "expire", ids: [a.id], shareExpiresAt: end }), "someone_else"), { done: 0, missing: [a.id], refused: [] });
   });
 });

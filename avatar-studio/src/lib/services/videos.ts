@@ -905,6 +905,14 @@ export const shareExpiresAtSchema = z.iso
   .refine((v) => Date.parse(v) > Date.now(), "The expiry must be in the future")
   .nullable();
 
+/** A share link's password (4–64 characters, trimmed); null removes it. Kept only as a salted hash. */
+export const sharePasswordSchema = z
+  .string()
+  .trim()
+  .min(SHARE_PASSWORD_MIN, `The share password needs at least ${SHARE_PASSWORD_MIN} characters`)
+  .max(SHARE_PASSWORD_MAX, `The share password can have at most ${SHARE_PASSWORD_MAX} characters`)
+  .nullable();
+
 export const videoPatchSchema = z
   .object({
     title: z.string().trim().min(1).max(120).optional(),
@@ -928,13 +936,7 @@ export const videoPatchSchema = z
       .refine((v) => v.startsWith("data:image/"), "The cover must be an uploaded image")
       .nullable()
       .optional(),
-    sharePassword: z
-      .string()
-      .trim()
-      .min(SHARE_PASSWORD_MIN, `The share password needs at least ${SHARE_PASSWORD_MIN} characters`)
-      .max(SHARE_PASSWORD_MAX, `The share password can have at most ${SHARE_PASSWORD_MAX} characters`)
-      .nullable()
-      .optional(),
+    sharePassword: sharePasswordSchema.optional(),
     /** A call-to-action button on the share page; null removes it. */
     shareCta: z
       .object({
@@ -1272,10 +1274,12 @@ export const bulkVideoSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("schedule"), ids: z.array(z.string().min(1)).min(1).max(200), shareStartsAt: shareStartsAtSchema }),
   /** Make the share links of many videos stop working at one time (`null` keeps them open indefinitely). */
   z.object({ action: z.literal("expire"), ids: z.array(z.string().min(1)).min(1).max(200), shareExpiresAt: shareExpiresAtSchema }),
+  /** Put one password on the share links of many videos (each kept as its own salted hash), or remove theirs with `null`. */
+  z.object({ action: z.literal("password"), ids: z.array(z.string().min(1)).min(1).max(200), sharePassword: sharePasswordSchema }),
 ]);
 
 /**
- * Trash, restore, purge, move, switch, schedule, or set the expiry of the share links of many videos at once.
+ * Trash, restore, purge, move, switch, schedule, set the expiry of, or put a password on the share links of many videos at once.
  * Ids that are missing or belong to someone else are reported, not failed; so is a purge of a video that is
  * not in the trash, since deleting for good is only offered from there. A go-live time at or after a video's
  * own expiry, or an expiry at or before its own go-live time, is reported in `refused` for that video, and
@@ -1297,6 +1301,16 @@ export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId
     else if (input.action === "purge") await purgeVideo(id, ownerId);
     else if (input.action === "move") await updateVideo(id, { folder: input.folder }, ownerId);
     else if (input.action === "share") await updateVideo(id, { shareDisabled: input.shareDisabled }, ownerId);
+    else if (input.action === "password") {
+      try {
+        await updateVideo(id, { sharePassword: input.sharePassword }, ownerId);
+      } catch (err) {
+        // Deleted for good between the check above and the write: reported like the others not there.
+        if (!(err instanceof NotFoundError)) throw err;
+        missing.push(id);
+        continue;
+      }
+    }
     else {
       try {
         await updateVideo(id, input.action === "schedule" ? { shareStartsAt: input.shareStartsAt } : { shareExpiresAt: input.shareExpiresAt }, ownerId);

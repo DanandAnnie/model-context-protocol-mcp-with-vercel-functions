@@ -2,14 +2,14 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { ArchiveRestore, CheckSquare, Clapperboard, Clock, Download, FolderInput, FolderMinus, FolderPen, Link2, Link2Off, TimerOff, Trash2, X } from "lucide-react";
+import { ArchiveRestore, CheckSquare, Clapperboard, Clock, Download, FolderInput, KeyRound, FolderMinus, FolderPen, Link2, Link2Off, TimerOff, Trash2, X } from "lucide-react";
 import { api } from "@/lib/client";
 import { VideoCard } from "@/components/VideoCard";
 import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useWorkspaceRole } from "@/hooks/useCanEdit";
 import type { VideoPage, VideoQuery } from "@/lib/services/videos";
-import { TRASH_RETENTION_DAYS, type VideoStatus } from "@/lib/types";
+import { SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, TRASH_RETENTION_DAYS, type VideoStatus } from "@/lib/types";
 
 const STATUSES: Array<"all" | VideoStatus> = ["all", "processing", "completed", "failed"];
 type SortKey = VideoQuery["sort"];
@@ -22,7 +22,7 @@ function localMinute(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links";
+type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links" | "password" | "nopassword";
 
 export default function VideosPage() {
   return (
@@ -86,7 +86,8 @@ function VideosInner() {
   const [busy, setBusy] = useState<BulkAction | null>(null);
   const [bulkErr, setBulkErr] = useState<string | null>(null);
   // "Schedule go-live" and "Set expiry" open a date and time field in the bar, one at a time; it is a local time, sent as an instant.
-  const [timeField, setTimeField] = useState<"golive" | "expiry" | null>(null);
+  // The share password field takes the same place in the bar, so only one of the three is open at a time.
+  const [timeField, setTimeField] = useState<"golive" | "expiry" | "password" | null>(null);
   const [timeDraft, setTimeDraft] = useState("");
   function toggle(id: string) {
     setSelected((prev) => {
@@ -147,6 +148,17 @@ function VideosInner() {
       targetFolder = answer;
     } else if (action === "delete" && !window.confirm(`Move ${ids.length} ${ids.length === 1 ? "video" : "videos"} to the trash? You can restore ${ids.length === 1 ? "it" : "them"} for ${TRASH_RETENTION_DAYS} days.`)) {
       return;
+    } else if (action === "password") {
+      const length = timeDraft.trim().length;
+      if (length < SHARE_PASSWORD_MIN || length > SHARE_PASSWORD_MAX) {
+        setBulkErr(`The share password needs ${SHARE_PASSWORD_MIN} to ${SHARE_PASSWORD_MAX} characters`);
+        return;
+      }
+      // A video already locked gets the new password in place of its own, and its unlocked visitors must enter it again.
+      const locked = videos.filter((v) => selected.has(v.id) && v.shareLocked).length;
+      if (locked && !window.confirm(`${locked === 1 ? "1 selected video already has" : `${locked} selected videos already have`} a share password. Replace ${locked === 1 ? "it" : "them"} with this one? Visitors who unlocked ${locked === 1 ? "it" : "them"} must enter the new one.`)) return;
+    } else if (action === "nopassword" && !window.confirm(`Remove the share password from ${ids.length} ${ids.length === 1 ? "video" : "videos"}? Anyone with ${ids.length === 1 ? "the link" : "their links"} can then watch.`)) {
+      return;
     } else if (action === "schedule" || action === "expire") {
       const at = new Date(timeDraft);
       if (!timeDraft || Number.isNaN(at.getTime())) return;
@@ -169,7 +181,9 @@ function VideosInner() {
               ? { action: "schedule", ids, shareStartsAt: action === "golive" ? null : new Date(timeDraft).toISOString() }
               : action === "expire" || action === "noexpiry"
                 ? { action: "expire", ids, shareExpiresAt: action === "noexpiry" ? null : new Date(timeDraft).toISOString() }
-                : { action, ids };
+                : action === "password" || action === "nopassword"
+                  ? { action: "password", ids, sharePassword: action === "nopassword" ? null : timeDraft }
+                  : { action, ids };
       const { missing, refused = [] } = await api<{ done: number; missing: string[]; refused?: string[] }>("/api/videos/bulk", { method: "POST", body: JSON.stringify(body) });
       await refetch();
       const notes: string[] = [];
@@ -233,9 +247,55 @@ function VideosInner() {
   }
 
   // The banner stays: after a refusal it says which of the two times to move, which may be the field being opened.
-  function openTimeField(kind: "golive" | "expiry") {
+  function openTimeField(kind: "golive" | "expiry" | "password") {
     setTimeField(kind);
     setTimeDraft("");
+  }
+  // A password for every selected link: typed once, kept only as each video's own salted hash.
+  function passwordForm() {
+    return (
+      <form
+        className="inline-flex flex-wrap items-center gap-1.5"
+        data-testid="bulk-password"
+        noValidate
+        onSubmit={(e) => {
+          e.preventDefault();
+          void bulk("password");
+        }}
+      >
+        <input
+          type="password"
+          autoComplete="new-password"
+          aria-label="Share password for the selected videos"
+          placeholder={`${SHARE_PASSWORD_MIN}–${SHARE_PASSWORD_MAX} characters`}
+          className={`${inputClass} w-44 py-1 text-xs`}
+          value={timeDraft}
+          maxLength={SHARE_PASSWORD_MAX}
+          onChange={(e) => {
+            setTimeDraft(e.target.value);
+            setBulkErr(null);
+          }}
+        />
+        <Button type="submit" variant="secondary" className="px-2.5 py-1 text-xs" disabled={!selected.size || !timeDraft.trim() || busy !== null} loading={busy === "password"} title="Visitors to the selected videos' share pages must enter this password before the video plays">
+          Protect
+        </Button>
+        <Button type="button" variant="ghost" className="px-2.5 py-1 text-xs" onClick={() => bulk("nopassword")} disabled={!selected.size || busy !== null} loading={busy === "nopassword"} title="Remove the share password from the selected videos">
+          Remove password
+        </Button>
+        <button
+          type="button"
+          onClick={() => {
+            setTimeField(null);
+            setTimeDraft("");
+          }}
+          disabled={busy !== null}
+          aria-label="Close share password"
+          className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </form>
+    );
   }
   // The go-live and expiry fields share their shape: a time, a button that sets it, and one that clears it.
   function timeForm(kind: "golive" | "expiry") {
@@ -396,6 +456,13 @@ function VideosInner() {
               ) : (
                 <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => openTimeField("expiry")} disabled={!selected.size || busy !== null}>
                   <TimerOff className="h-3.5 w-3.5" /> Set expiry
+                </Button>
+              )}
+              {timeField === "password" ? (
+                passwordForm()
+              ) : (
+                <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => openTimeField("password")} disabled={!selected.size || busy !== null}>
+                  <KeyRound className="h-3.5 w-3.5" /> Password
                 </Button>
               )}
               <Button variant="danger" className="px-2.5 py-1 text-xs" onClick={() => bulk("delete")} disabled={!selected.size || busy !== null} loading={busy === "delete"} title={`Moves the selected videos to the trash, where they can be restored for ${TRASH_RETENTION_DAYS} days`}>

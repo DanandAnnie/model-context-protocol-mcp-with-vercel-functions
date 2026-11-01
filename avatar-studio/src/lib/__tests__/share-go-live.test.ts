@@ -7,6 +7,7 @@ import { MemoryStore } from "../store/memory";
 import { getStore } from "../store";
 import { bulkVideoSchema, bulkVideos, createVideo, getVideo, recordView, updateVideo, videoPatchSchema, videoRequestSchema } from "../services";
 import { shareExpiresSoon, shareNotYet, shareOffline } from "../client";
+import { getShareLock, shareCookieValue, shareUnlocked, verifySharePassword } from "../share-lock";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import { batchLinkRows } from "../services";
 import type { Video } from "../types";
@@ -102,6 +103,32 @@ describe("share link go-live time", () => {
     assert.deepEqual(await bulkVideos(bulkVideoSchema.parse({ action: "expire", ids: [a.id, b.id], shareExpiresAt: null }), OWNER), { done: 2, missing: [], refused: [] });
     assert.equal("shareExpiresAt" in (await getVideo(a.id, OWNER, false)), false);
     assert.deepEqual(await bulkVideos(bulkVideoSchema.parse({ action: "expire", ids: [a.id], shareExpiresAt: end }), "someone_else"), { done: 0, missing: [a.id], refused: [] });
+  });
+
+  it("puts one password on many videos' links at once, each its own lock, and removes them in one step", async () => {
+    const [a, b] = [await readyVideo(), await readyVideo()];
+    assert.throws(() => bulkVideoSchema.parse({ action: "password", ids: [a.id], sharePassword: "abc" }), /at least 4/);
+    assert.deepEqual(await bulkVideos(bulkVideoSchema.parse({ action: "password", ids: [a.id, b.id, "vid_nosuch"], sharePassword: "  launch day  " }), OWNER), { done: 2, missing: ["vid_nosuch"] });
+    for (const v of [a, b]) assert.equal((await getVideo(v.id, OWNER, false)).shareLocked, true);
+    // Each video keeps its own salted lock; the trimmed password opens both, and nothing of it is on the video.
+    const [la, lb] = [await getShareLock(a.id), await getShareLock(b.id)];
+    assert.ok(la && lb && la.salt !== lb.salt);
+    assert.ok(await verifySharePassword(a.id, "launch day"));
+    assert.ok(await verifySharePassword(b.id, "launch day"));
+    assert.equal(JSON.stringify(await getVideo(a.id, OWNER, false)).includes("launch"), false);
+    // Protecting again, even with the same password, rotates the lock, so a visitor's earlier unlock no longer opens it.
+    const cookie = shareCookieValue(la);
+    assert.equal(await shareUnlocked(await getVideo(a.id, OWNER, false), cookie), true);
+    await bulkVideos(bulkVideoSchema.parse({ action: "password", ids: [a.id], sharePassword: "launch day" }), OWNER);
+    assert.equal(await shareUnlocked(await getVideo(a.id, OWNER, false), cookie), false);
+    // The server holds the bounds after trimming, whatever the page checked.
+    assert.throws(() => bulkVideoSchema.parse({ action: "password", ids: [a.id], sharePassword: "      " }), /at least 4/);
+    assert.throws(() => bulkVideoSchema.parse({ action: "password", ids: [a.id], sharePassword: "x".repeat(65) }), /at most 64/);
+    assert.equal(bulkVideoSchema.safeParse({ action: "password", ids: [a.id], sharePassword: ` ${"x".repeat(64)} ` }).success, true);
+    assert.deepEqual(await bulkVideos(bulkVideoSchema.parse({ action: "password", ids: [a.id, b.id], sharePassword: null }), OWNER), { done: 2, missing: [] });
+    assert.equal("shareLocked" in (await getVideo(a.id, OWNER, false)), false);
+    assert.equal(await getShareLock(b.id), null);
+    assert.deepEqual(await bulkVideos(bulkVideoSchema.parse({ action: "password", ids: [a.id], sharePassword: "letmein" }), "someone_else"), { done: 0, missing: [a.id] });
   });
 
   it("points out a live link's expiry only within a week, and not for a link the public cannot reach", () => {

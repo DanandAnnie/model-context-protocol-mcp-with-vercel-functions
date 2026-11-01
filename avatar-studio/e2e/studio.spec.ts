@@ -4832,6 +4832,43 @@ test("library multi-select moves and deletes videos in bulk", async ({ page }) =
   expect((await (await page.request.get(`/api/videos/${a.id}`)).json()).video.shareExpiresAt).toBeUndefined();
   await expect(badgeOn(a.id)).toHaveCount(0);
 
+  // One password goes on every selected link (too short is refused in the page), and comes off again in one step.
+  await page.getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: `Select Bulk one ${tag}` }).click();
+  await page.getByRole("button", { name: `Select Bulk two ${tag}` }).click();
+  await page.getByRole("button", { name: "Password", exact: true }).click();
+  await page.getByLabel("Share password for the selected videos").fill("abc");
+  await page.getByTestId("bulk-password").getByRole("button", { name: "Protect" }).click();
+  await expect(page.getByText("The share password needs 4 to 64 characters")).toBeVisible();
+  await page.getByLabel("Share password for the selected videos").fill("open sesame");
+  await page.getByTestId("bulk-password").getByRole("button", { name: "Protect" }).click();
+  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+  await expect(badgeOn(a.id)).toContainText("Password");
+  await expect(badgeOn(b.id)).toContainText("Password");
+  for (const id of [a.id, b.id]) {
+    const record = (await (await page.request.get(`/api/videos/${id}`)).json()).video;
+    expect(record.shareLocked).toBe(true);
+    expect(JSON.stringify(record)).not.toContain("sesame");
+  }
+  expect((await page.request.post(`/api/videos/${a.id}/unlock`, { data: { password: "open sesame" } })).ok()).toBe(true);
+  // Protecting a video that already has a password asks first, and the old one stops working.
+  await page.getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: `Select Bulk one ${tag}` }).click();
+  await page.getByRole("button", { name: "Password", exact: true }).click();
+  await page.getByLabel("Share password for the selected videos").fill("new sesame");
+  await page.getByTestId("bulk-password").getByRole("button", { name: "Protect" }).click();
+  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+  expect((await page.request.post(`/api/videos/${a.id}/unlock`, { data: { password: "open sesame" } })).status()).toBe(401);
+  expect((await page.request.post(`/api/videos/${a.id}/unlock`, { data: { password: "new sesame" } })).ok()).toBe(true);
+  await page.getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: `Select Bulk one ${tag}` }).click();
+  await page.getByRole("button", { name: `Select Bulk two ${tag}` }).click();
+  await page.getByRole("button", { name: "Password", exact: true }).click();
+  await page.getByTestId("bulk-password").getByRole("button", { name: "Remove password" }).click();
+  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+  await expect(badgeOn(a.id)).toHaveCount(0);
+  expect((await (await page.request.get(`/api/videos/${b.id}`)).json()).video.shareLocked).toBeUndefined();
+
   // Delete moves to the trash: gone from the library, 404 to the public, still the owner's to restore.
   await page.getByRole("button", { name: "Select" }).click();
   await page.getByRole("button", { name: `Select Bulk two ${tag}` }).click();
@@ -4869,7 +4906,7 @@ test("library multi-select moves and deletes videos in bulk", async ({ page }) =
   expect(await (await page.request.post("/api/videos/bulk", { data: { action: "purge", ids: [a.id] } })).json()).toEqual({ done: 0, missing: [a.id] });
   expect((await page.request.get(`/api/videos/${a.id}`)).status()).toBe(200);
   expect((await page.request.post("/api/videos/bulk", { data: { action: "move", ids: [] } })).status()).toBe(400);
-  expect(dialogs).toEqual(["Folder name (leave empty to move to Unfiled)", "Move 1 video to the trash? You can restore it for 30 days.", "Delete this video for good? Its short clips, and the cleaned and lip-synced copies made from it, go too. This cannot be undone."]);
+  expect(dialogs).toEqual(["Folder name (leave empty to move to Unfiled)", "1 selected video already has a share password. Replace it with this one? Visitors who unlocked it must enter the new one.", "Remove the share password from 2 videos? Anyone with their links can then watch.", "Move 1 video to the trash? You can restore it for 30 days.", "Delete this video for good? Its short clips, and the cleaned and lip-synced copies made from it, go too. This cannot be undone."]);
 });
 
 test("webhook settings reject private hosts and show the signing secret", async ({ page }) => {

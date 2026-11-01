@@ -1058,6 +1058,10 @@ export const EMPTY_WATCH: WatchCounts = { q25: 0, q50: 0, q75: 0, q100: 0 };
 /** How long a trashed video can be restored before it is deleted for good. */
 export const TRASH_RETENTION_DAYS = 30;
 
+/** Bounds of a share link's password, here so the browser can say them as the server checks them. */
+export const SHARE_PASSWORD_MIN = 4;
+export const SHARE_PASSWORD_MAX = 64;
+
 /** A viewer who gave an email at a video's share-page gate; one row per address per video. */
 export interface VideoLead {
   id: string;

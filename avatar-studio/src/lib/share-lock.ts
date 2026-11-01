@@ -16,8 +16,7 @@ export type ShareLock = { id: string; videoId: string; ownerId?: string; salt: s
  */
 export const shareLockId = (videoId: string) => `sharelock_${videoId}`;
 
-export const SHARE_PASSWORD_MIN = 4;
-export const SHARE_PASSWORD_MAX = 64;
+export { SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN } from "./types";
 /** The cookie that marks a viewer who passed a video's email gate. It is a courtesy, not a lock: the gate collects emails, it does not protect the video. */
 export const shareGateCookieName = (videoId: string) => `as_gate_${videoId.replace(/[^A-Za-z0-9_-]/g, "")}`;
 /**

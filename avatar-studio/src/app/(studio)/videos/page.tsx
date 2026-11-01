@@ -2,14 +2,14 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { ArchiveRestore, CheckSquare, Clapperboard, Clock, Download, FolderInput, KeyRound, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, TimerOff, Trash2, X } from "lucide-react";
+import { ArchiveRestore, CheckSquare, Clapperboard, Clock, Download, FolderInput, KeyRound, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, RotateCcw, TimerOff, Trash2, X } from "lucide-react";
 import { api } from "@/lib/client";
 import { VideoCard } from "@/components/VideoCard";
 import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useWorkspaceRole } from "@/hooks/useCanEdit";
 import type { VideoPage, VideoQuery } from "@/lib/services/videos";
-import { SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, TRASH_RETENTION_DAYS, type VideoStatus } from "@/lib/types";
+import { MAX_RETRY_AT_ONCE, SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, TRASH_RETENTION_DAYS, type VideoStatus } from "@/lib/types";
 
 const STATUSES: Array<"all" | VideoStatus> = ["all", "processing", "completed", "failed"];
 type SortKey = VideoQuery["sort"];
@@ -22,7 +22,7 @@ function localMinute(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links" | "password" | "nopassword" | "settings";
+type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links" | "password" | "nopassword" | "settings" | "retry";
 
 export default function VideosPage() {
   return (
@@ -254,6 +254,53 @@ function VideosInner() {
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) {
       setBulkErr(e instanceof Error ? e.message : "Could not download the links");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // The selection's failed renders, each started again as its own retry. Edited cuts are not retried, and a failed render
+  // already retried is left for its newest copy (the server checks both too), so the same cards cannot be paid for twice.
+  // Afterwards the selection holds only what is left to look at: the ones not started, and a copy that failed again.
+  const retriedShown = new Set(videos.map((v) => v.retryOf).filter(Boolean));
+  const failedSelected = videos.filter((v) => selected.has(v.id) && v.status === "failed" && !v.directed?.editOf && !retriedShown.has(v.id)).map((v) => v.id);
+  async function retryFailed() {
+    const ids = failedSelected.slice(0, MAX_RETRY_AT_ONCE);
+    if (!ids.length) return;
+    const over = failedSelected.slice(MAX_RETRY_AT_ONCE);
+    const what = ids.length === 1 ? "1 failed render" : `${ids.length} failed renders`;
+    if (!window.confirm(`Start ${what} again with the same settings?${over.length ? ` Only the first ${MAX_RETRY_AT_ONCE} are started now; the other ${over.length} stay selected.` : ""} Each counts toward this month's renders.`)) return;
+    setBusy("retry");
+    setBulkErr(null);
+    try {
+      const r = await api<{ started: Array<{ from: string; id: string }>; failedAgain: Array<{ from: string; id?: string; reason: string }>; skipped: Array<{ id: string; code: "not_failed" | "trashed" | "edited_cut" | "retried" | "allowance" }>; missing: string[] }>("/api/videos/retry", { method: "POST", body: JSON.stringify({ ids }) });
+      await refetch();
+      const count = (code: string) => r.skipped.filter((x) => x.code === code).length;
+      const n = (k: number, one: string, many: string) => (k === 1 ? one : many.replace("#", String(k)));
+      const notes: string[] = [];
+      if (r.started.length) notes.push(`${n(r.started.length, "1 render was", "# renders were")} started again.`);
+      if (count("allowance")) notes.push(`${n(count("allowance"), "1 was", "# were")} not started: this month's render allowance is used up.`);
+      if (count("retried")) notes.push(`${n(count("retried"), "1 had", "# had")} already been started again; retry the newer copy if it failed too.`);
+      if (count("edited_cut")) notes.push(`${n(count("edited_cut"), "1 is an edited cut", "# are edited cuts")}, which ${count("edited_cut") === 1 ? "is" : "are"} not retried; edit the original's scenes again instead.`);
+      if (count("trashed")) notes.push(`${n(count("trashed"), "1 is", "# are")} in the trash; restore ${count("trashed") === 1 ? "it" : "them"} first.`);
+      if (count("not_failed")) notes.push(`${n(count("not_failed"), "1 was", "# were")} no longer a failed render.`);
+      if (r.failedAgain.length) {
+        const reason = r.failedAgain[0].reason.replace(/\.$/, "");
+        notes.push(r.failedAgain.length === 1 ? `1 render could not be started again: ${reason}.` : `${r.failedAgain.length} renders could not be started again (the first: ${reason}).`);
+      }
+      if (r.missing.length) notes.push(`${n(r.missing.length, "1 was", "# were")} no longer in the library.`);
+      if (over.length) notes.push(`The other ${over.length} failed ${over.length === 1 ? "render is" : "renders are"} still selected; retry ${over.length === 1 ? "it" : "them"} next.`);
+      // A copy refused straight away is the one to retry next (its original now counts as retried), so it is selected.
+      const left = new Set([...r.skipped.map((x) => x.id), ...r.failedAgain.map((f) => f.id ?? f.from), ...over]);
+      // Everything started reads as done: the new renders show in the library with no note needed.
+      if (left.size || r.missing.length) {
+        setBulkErr(notes.join(" "));
+        setSelected(left);
+      } else stopSelecting();
+    } catch (e) {
+      // Some may have started before the request failed; show them, so the next click does not start them twice.
+      await refetch();
+      setBulkErr(e instanceof Error ? e.message : "Could not start the renders again");
     } finally {
       setBusy(null);
     }
@@ -492,6 +539,11 @@ function VideosInner() {
               <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void downloadLinks()} disabled={!selected.size || busy !== null} loading={busy === "links"} title="A CSV of the selected videos' share links, each left blank until it can be sent (a render still under way included), with the reason">
                 <Download className="h-3.5 w-3.5" /> Download links
               </Button>
+              {failedSelected.length > 0 && (
+                <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void retryFailed()} disabled={busy !== null} loading={busy === "retry"} title={`Start the selected failed renders again with the same settings, up to ${MAX_RETRY_AT_ONCE} at a time; each counts toward this month's renders`}>
+                  <RotateCcw className="h-3.5 w-3.5" /> Retry failed ({failedSelected.length})
+                </Button>
+              )}
               <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => bulk("move")} disabled={!selected.size || busy !== null} loading={busy === "move"}>
                 <FolderInput className="h-3.5 w-3.5" /> Move to folder
               </Button>

@@ -5,10 +5,11 @@ import { getStore } from "../store";
 import type { Video } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { renderLimitFor } from "../billing";
+import { MAX_RETRY_AT_ONCE } from "../types";
 import { NotFoundError, ValidationError } from "../errors";
 import { fillTemplate, parseCsv, placeholdersIn } from "../csv";
 import { shareOffline, shareState } from "../client";
-import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, listVideos, refreshPending, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, createVideo, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, rendersThisMonth, resolveRenderContext } from "./videos";
+import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, listVideos, purgeDue, refreshPending, retryVideo, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, createVideo, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, rendersThisMonth, resolveRenderContext } from "./videos";
 import { getBrandKit } from "./brand";
 import { stripPauses } from "../pauses";
 
@@ -265,6 +266,77 @@ export async function batchVideos(batchId: string, ownerId: string = LOCAL_OWNER
 }
 
 const BATCH_CONCURRENCY = 5;
+
+export { MAX_RETRY_AT_ONCE };
+const RETRY_CONCURRENCY = 3;
+
+export const retryManySchema = z.object({ ids: z.array(z.string().min(1).max(80)).min(1).max(MAX_RETRY_AT_ONCE, `Retry up to ${MAX_RETRY_AT_ONCE} renders at a time`) });
+
+/** Why a video was not started again, for the page to word. */
+export type RetrySkip = "not_failed" | "trashed" | "edited_cut" | "retried" | "allowance";
+
+const RETRY_SKIP_REASONS: Record<RetrySkip, string> = {
+  not_failed: "Not a failed render",
+  trashed: "In the trash",
+  edited_cut: "An edited cut is not retried",
+  retried: "Already started again",
+  allowance: "This month's render allowance is used up",
+};
+
+export interface RetryManyResult {
+  /** New videos started, each with the failed render it stands in for. */
+  started: Array<{ from: string; id: string }>;
+  /**
+   * Not started after all: refused by the renderer straight away (`id` is the new video, kept as failed, as a single
+   * retry's is) or not created at all (no `id`; the allowance used up in the meantime, say).
+   */
+  failedAgain: Array<{ from: string; id?: string; reason: string }>;
+  /** Not started, with why. */
+  skipped: Array<{ id: string; code: RetrySkip; reason: string }>;
+  /** Not the owner's, unknown, or deleted for good. */
+  missing: string[];
+}
+
+/**
+ * Start many failed renders again, as one retry each (same settings, folder, and batch row), in the order given.
+ * A failed render already retried is left alone (its newest copy is the one to retry), so selecting the same failed
+ * cards twice does not pay for them twice. The month's allowance is checked for all of them before any starts, and
+ * the ones past it are skipped; each start checks it again, so requests running side by side cannot pass it.
+ */
+export async function retryVideos(ids: string[], ownerId: string = LOCAL_OWNER): Promise<RetryManyResult> {
+  const result: RetryManyResult = { started: [], failedAgain: [], skipped: [], missing: [] };
+  const skip = (id: string, code: RetrySkip) => result.skipped.push({ id, code, reason: RETRY_SKIP_REASONS[code] });
+  const retried = new Set((await listVideos(ownerId, false)).map((v) => v.retryOf).filter(Boolean));
+  const eligible: string[] = [];
+  const now = Date.now();
+  for (const id of Array.from(new Set(ids))) {
+    const v = await getStore().get<Video>("video", id);
+    if (!v || (v.ownerId ?? LOCAL_OWNER) !== ownerId || purgeDue(v, now)) result.missing.push(id);
+    else if (v.deletedAt) skip(id, "trashed");
+    else if (v.status !== "failed") skip(id, "not_failed");
+    else if (v.directed?.editOf) skip(id, "edited_cut");
+    else if (retried.has(id)) skip(id, "retried");
+    else eligible.push(id);
+  }
+  const limit = await renderLimitFor(ownerId);
+  const allowed = limit ? Math.max(0, Math.min(eligible.length, limit - (await rendersThisMonth(ownerId)))) : eligible.length;
+  for (const id of eligible.slice(allowed)) skip(id, "allowance");
+  const outcomes: Array<{ from: string; id?: string; reason?: string }> = new Array(allowed);
+  await runWithConcurrency(allowed, RETRY_CONCURRENCY, async (i) => {
+    const from = eligible[i];
+    try {
+      const video = await retryVideo(from, ownerId);
+      outcomes[i] = video.status === "failed" ? { from, id: video.id, reason: video.error ?? "The render could not be started" } : { from, id: video.id };
+    } catch (err) {
+      outcomes[i] = { from, reason: err instanceof Error ? err.message : "The render could not be started" };
+    }
+  });
+  for (const o of outcomes) {
+    if (o.reason) result.failedAgain.push({ from: o.from, ...(o.id ? { id: o.id } : {}), reason: o.reason });
+    else result.started.push({ from: o.from, id: o.id! });
+  }
+  return result;
+}
 
 async function runWithConcurrency(count: number, concurrency: number, task: (i: number) => Promise<void>): Promise<void> {
   let next = 0;

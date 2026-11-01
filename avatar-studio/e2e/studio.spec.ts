@@ -8564,3 +8564,42 @@ test("the keyboard shortcuts open with Ctrl+/ or the sidebar, with this computer
   await page.keyboard.press("Control+Enter");
   await page.waitForURL(/\/videos\/vid_/);
 });
+
+test("the library retries the selected failed renders", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const [ready, other] = [await createVideoViaApi(page, `Retry ready ${tag}`), await createVideoViaApi(page, `Retry other ${tag}`)];
+  // The API accounts for every id: a render that is not failed is skipped with why, an unknown one is missing.
+  expect((await page.request.post("/api/videos/retry", { data: { ids: [] } })).status()).toBe(400);
+  expect((await page.request.post("/api/videos/retry", { data: { ids: Array.from({ length: 51 }, (_, i) => `vid_${i}`) } })).status()).toBe(400);
+  const res = await page.request.post("/api/videos/retry", { data: { ids: [ready.id, "vid_nope"] } });
+  expect(res.status()).toBe(200);
+  expect(await res.json()).toEqual({ started: [], failedAgain: [], skipped: [{ id: ready.id, code: "not_failed", reason: "Not a failed render" }], missing: ["vid_nope"] });
+
+  // The demo renderer never fails, so the library is shown one of the two as failed; the server still decides.
+  await page.route("**/api/videos?*", async (route) => {
+    const response = await route.fetch();
+    const body = (await response.json()) as { videos: Array<{ id: string; status: string; error?: string }> };
+    for (const v of body.videos) if (v.id === ready.id) Object.assign(v, { status: "failed", error: "Rendering failed" });
+    await route.fulfill({ response, json: body });
+  });
+  const dialogs: string[] = [];
+  page.on("dialog", (d) => {
+    dialogs.push(d.message());
+    void d.accept();
+  });
+  await page.goto("/videos");
+  await page.getByLabel("Search videos").fill(tag);
+  await expect(page.locator(`a[href="/videos/${other.id}"]`)).toBeVisible();
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await page.getByRole("button", { name: `Select Retry other ${tag}` }).click();
+  // Only a selection holding a failed render offers the retry, counting the failed ones.
+  await expect(page.getByRole("button", { name: /Retry failed/ })).toHaveCount(0);
+  await page.getByRole("button", { name: `Select Retry ready ${tag}` }).click();
+  await page.getByRole("button", { name: "Retry failed (1)" }).click();
+  await expect(page.getByText("1 was no longer a failed render.")).toBeVisible();
+  expect(dialogs).toEqual(["Start 1 failed render again with the same settings? Each counts toward this month's renders."]);
+  // What was not started stays selected, so it can be found.
+  await expect(page.getByTestId("bulk-bar")).toContainText("1 selected");
+  await expect(page.getByRole("button", { name: `Select Retry ready ${tag}` })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: `Select Retry other ${tag}` })).toHaveAttribute("aria-pressed", "false");
+});

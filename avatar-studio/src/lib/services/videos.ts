@@ -756,7 +756,7 @@ function prepareBackdropOnce(provider: AvatarProvider, backdrop: Backdrop, owner
 }
 
 /** True once a trashed video has sat in the trash for the whole retention period. */
-function purgeDue(video: Video, now: number): boolean {
+export function purgeDue(video: Video, now: number): boolean {
   return !!video.deletedAt && Date.parse(video.deletedAt) + TRASH_RETENTION_DAYS * 86_400_000 <= now;
 }
 

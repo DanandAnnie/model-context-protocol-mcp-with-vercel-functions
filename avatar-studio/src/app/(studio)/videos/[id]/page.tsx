@@ -1340,7 +1340,7 @@ export default function VideoDetailPage() {
                       <Button type="submit" className="px-3 py-1.5 text-xs" loading={mailBusy} disabled={mailRecipients.length === 0 || !shareLive || shareExpired(video) || linkNotYet || !!video.deletedAt}>
                         Send link
                       </Button>
-                      {video.deletedAt ? <span className="text-xs text-slate-500">Restore the video from the trash first.</span> : shareLive && !shareExpired(video) && linkNotYet && startsAt ? <span className="text-xs text-slate-500">The link goes live {formatDate(startsAt)}; send it then.</span> : (!shareLive || shareExpired(video)) && <span className="text-xs text-slate-500">Turn the share link on first.</span>}
+                      {video.deletedAt ? <span className="text-xs text-slate-500">Restore the video from the trash first.</span> : shareLive && !shareExpired(video) && linkNotYet && startsAt ? <span className="text-xs text-slate-500">The link goes live {formatDate(startsAt)}; send it then.</span> : (!shareLive || shareExpired(video)) && <span className="text-xs text-slate-500">{shareLive ? "Link expired: set a later expiry first." : "Turn the share link on first."}</span>}
                       {/* Always mounted so screen readers announce the first message too. */}
                       <span className={`text-xs ${mailStatus?.ok ? "text-emerald-700" : "text-rose-600"}`} data-testid="share-email-status" role="status">
                         {mailStatus?.text}
@@ -1353,7 +1353,7 @@ export default function VideoDetailPage() {
                 <Card className="p-4" data-testid="share-qr-card">
                   <h3 className="text-sm font-semibold text-slate-900">QR code</h3>
                   {video.deletedAt || !shareLive || shareExpired(video) ? (
-                    <p className="mt-1 text-xs text-slate-500">{video.deletedAt ? "Restore the video from the trash first." : "Turn the share link on first."}</p>
+                    <p className="mt-1 text-xs text-slate-500">{video.deletedAt ? "Restore the video from the trash first." : shareLive ? "Link expired: set a later expiry first." : "Turn the share link on first."}</p>
                   ) : !shareOrigin ? null : (
                     <>
                       <p className="mt-1 text-xs text-slate-500">
@@ -1370,7 +1370,7 @@ export default function VideoDetailPage() {
                 <Card className="p-4" data-testid="share-social-card">
                   <h3 className="text-sm font-semibold text-slate-900">Post the link</h3>
                   {video.deletedAt || !shareLive || shareExpired(video) || linkNotYet ? (
-                    <p className="mt-1 text-xs text-slate-500">{video.deletedAt ? "Restore the video from the trash first." : shareLive && !shareExpired(video) && startsAt ? `The link goes live ${formatDate(startsAt)}; post it then.` : "Turn the share link on first."}</p>
+                    <p className="mt-1 text-xs text-slate-500">{video.deletedAt ? "Restore the video from the trash first." : shareLive && !shareExpired(video) && startsAt ? `The link goes live ${formatDate(startsAt)}; post it then.` : shareLive ? "Link expired: set a later expiry first." : "Turn the share link on first."}</p>
                   ) : !shareOrigin ? null : (
                     <>
                       <p className="mt-1 text-xs text-slate-500">

@@ -9321,8 +9321,18 @@ test("a video's share link has a QR code to print, saved as an SVG or a PNG that
   await expect(page.getByTestId("share-qr-card")).toContainText(/It stops working .+, when the link expires\./);
   await expect(page.getByTestId("share-qr")).toBeVisible();
 
+  // Once the link expires, while the page is open, the share cards say so rather than to turn the link on.
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareExpiresAt: new Date(Date.now() + 10_000).toISOString() } })).status()).toBe(200);
+  await page.reload();
+  await expect(page.getByTestId("share-qr")).toBeVisible();
+  for (const id of ["share-qr-card", "share-social-card", "share-email-card"]) {
+    await expect(page.getByTestId(id)).toContainText("Link expired: set a later expiry first.", { timeout: 15_000 });
+    await expect(page.getByTestId(id)).not.toContainText("Turn the share link on first.");
+  }
+  await expect(page.getByTestId("share-qr")).toHaveCount(0);
+
   // With the link switched off there is nothing to scan to.
-  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareDisabled: true } })).status()).toBe(200);
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareDisabled: true, shareExpiresAt: null } })).status()).toBe(200);
   await page.reload();
   await expect(page.getByTestId("share-qr-card")).toContainText("Turn the share link on first.");
   await expect(page.getByTestId("share-qr")).toHaveCount(0);

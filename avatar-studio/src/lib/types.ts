@@ -1405,6 +1405,8 @@ export interface Agent {
   dailyReplyLimit?: number;
   /** Replies to visitors per UTC day ("YYYY-MM-DD" → count), the last 90 days, which the daily limit is checked against. */
   repliesByDay?: Record<string, number>;
+  /** Websites the talk page may be embedded on, as origins (`https://*.example.com` for subdomains); none means any. */
+  allowedSites?: string[];
   /** When the newest visit started, so the owner's page can show visits made since its transcripts were last opened. */
   lastVisitAt?: string;
   messages: number;

@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { getStore } from "@/lib/store";
+import type { Agent } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -11,8 +13,10 @@ const HEX = /^#[0-9a-fA-F]{6}$/;
  * (right | left), `color` (hex), `label` (launcher text, 40 chars), `open` (1–120: opens the chat by itself that many
  * seconds after the launcher appears, once per browser tab, never after the visitor has opened or closed it, never on a
  * phone-sized screen, and only once the tab is in view; a chat opened so waits for a question before starting live video).
+ * A presenter kept to some websites adds no launcher on any other site, nor on a page of one shown in another site's
+ * frame (its talk page refuses those frames anyway); when the presenter cannot be read, the launcher is left out.
  */
-export function GET(req: Request) {
+export async function GET(req: Request) {
   const url = new URL(req.url);
   const id = url.searchParams.get("id") ?? "";
   if (!ID.test(id)) return new NextResponse("// avatar-studio: missing or invalid id", { status: 400, headers: { "Content-Type": "application/javascript; charset=utf-8" } });
@@ -23,9 +27,35 @@ export function GET(req: Request) {
   const openAfter = Number(url.searchParams.get("open"));
   const autoOpen = Number.isInteger(openAfter) && openAfter >= 1 && openAfter <= 120 ? openAfter : 0;
   const talkUrl = `${url.origin}/talk/${id}?embed=1`;
+  let sites: string[];
+  try {
+    sites = (await getStore().get<Agent>("agent", id))?.allowedSites ?? [];
+  } catch {
+    return new NextResponse("// avatar-studio: this presenter could not be read; try again shortly", { status: 503, headers: { "Content-Type": "application/javascript; charset=utf-8", "Cache-Control": "no-store" } });
+  }
 
   const js = `(function () {
   if (document.getElementById("avs-launcher-${id}")) return;
+  // The same reading of a site as the talk page's frame-ancestors: scheme (http also covers https), host, and port,
+  // for this page and, where the browser lists them, every page it is framed in.
+  var sites = ${JSON.stringify(sites)};
+  function covered(origin) {
+    var page;
+    try { page = new URL(origin); } catch (e) { return false; }
+    return sites.some(function (site) {
+      var m = /^(https?:)\\/\\/(\\*\\.)?(.+)$/.exec(site);
+      if (!m) return false;
+      var at = new URL(m[1] + "//" + m[3]);
+      if (page.protocol !== m[1] && !(m[1] === "http:" && page.protocol === "https:")) return false;
+      if (page.port !== at.port) return false;
+      return m[2] ? page.hostname.endsWith("." + at.hostname) : page.hostname === at.hostname;
+    });
+  }
+  var ancestors = location.ancestorOrigins ? Array.prototype.slice.call(location.ancestorOrigins) : [];
+  if (sites.length && !(covered(location.origin) && ancestors.every(covered))) {
+    if (window.console) console.warn("avatar-studio: this presenter is not set up for " + location.origin + "; add it to the presenter's allowed websites.");
+    return;
+  }
   var talk = ${JSON.stringify(talkUrl)};
   var color = ${JSON.stringify(color)};
   var side = ${JSON.stringify(position)};

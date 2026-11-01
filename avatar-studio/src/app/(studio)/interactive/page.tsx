@@ -13,6 +13,7 @@ import { MAX_CONVERSATIONS_PER_AGENT, MAX_TRANSCRIPT_MESSAGES, MAX_TRANSCRIPT_QU
 import { useLiveAvatar } from "@/hooks/useLiveAvatar";
 import { hasNewVisits, markVisitsSeen, mergeSeenVisits, parseSeenVisits, seedSeenVisits, type SeenVisits } from "@/lib/seen-visits";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
+import { MAX_ALLOWED_SITES, parseSites, splitSites } from "@/lib/allowed-sites";
 import { ApiError, api, formatDate } from "@/lib/client";
 import { MAX_AGENT_NOTES, MAX_VISIT_NOTE, type Agent, type Avatar, type BrandKit, type Conversation, type ProviderStatus, type Voice } from "@/lib/types";
 
@@ -31,6 +32,8 @@ type FormState = {
   brandStyle: boolean;
   /** Replies a day the presenter may give, as typed; empty is no limit. */
   replyLimit: string;
+  /** The websites it may be embedded on, as typed; empty is any. */
+  sites: string;
 };
 
 /** Where this browser keeps what it has shown of each presenter's visits (`SeenVisits`), for the "New visits" mark. */
@@ -126,6 +129,11 @@ export default function InteractivePage() {
   const replyLimitDigits = replyLimit.trim().replace(/[,\s]/g, "");
   const replyLimitValue = replyLimitDigits ? (/^\d+$/.test(replyLimitDigits) ? Number(replyLimitDigits) : NaN) : null;
   const replyLimitOk = replyLimitValue === null || (Number.isInteger(replyLimitValue) && replyLimitValue >= 1 && replyLimitValue <= 10000);
+  const [sites, setSites] = useState("");
+  // Read as the server reads them, so what is sent is what is checked here: a list, or the first entry that is not a site.
+  const siteCheck = parseSites(splitSites(sites));
+  const siteError = "bad" in siteCheck ? `"${siteCheck.bad.slice(0, 60)}" is not a website address, such as example.com.` : siteCheck.sites.length > MAX_ALLOWED_SITES ? `At most ${MAX_ALLOWED_SITES} websites.` : null;
+  const siteList = "sites" in siteCheck ? siteCheck.sites : [];
   const [knowledgeUrl, setKnowledgeUrl] = useState("");
   const [notes, setNotes] = useState("");
   const [suggesting, setSuggesting] = useState(false);
@@ -423,7 +431,7 @@ export default function InteractivePage() {
     return reply;
   }
 
-  const formState = (): FormState => ({ avatar, voice, agentName, instructions, language, greeting, starters, notes, knowledgeUrl, collectEmail, brandStyle, replyLimit });
+  const formState = (): FormState => ({ avatar, voice, agentName, instructions, language, greeting, starters, notes, knowledgeUrl, collectEmail, brandStyle, replyLimit, sites });
   function setForm(f: FormState) {
     setAvatar(f.avatar);
     setVoice(f.voice);
@@ -437,6 +445,7 @@ export default function InteractivePage() {
     setCollectEmail(f.collectEmail);
     setBrandStyle(f.brandStyle);
     setReplyLimit(f.replyLimit);
+    setSites(f.sites);
   }
   // A switch flipped on the edited presenter's row is kept by Save (it is not sent unless changed in the form) and shown
   // in the form, unless the form's own value was already changed.
@@ -490,6 +499,7 @@ export default function InteractivePage() {
       collectEmail: !!agent.collectEmail,
       brandStyle: !!agent.brandStyle,
       replyLimit: agent.dailyReplyLimit ? String(agent.dailyReplyLimit) : "",
+      sites: (agent.allowedSites ?? []).join("\n"),
     };
     setForm(loaded);
     loadedForm.current = loaded;
@@ -536,6 +546,10 @@ export default function InteractivePage() {
       setSaveErr("The daily reply limit is a whole number from 1 to 10,000, or empty for no limit.");
       return;
     }
+    if (siteError) {
+      setSaveErr(`Allowed websites: ${siteError}`);
+      return;
+    }
     if (language.trim().length < 2) {
       setSaveErr("Name the reply language (at least 2 characters), for example English.");
       return;
@@ -567,6 +581,7 @@ export default function InteractivePage() {
         if (collectEmail !== was.collectEmail) patch.collectEmail = collectEmail;
         if (brandStyle !== was.brandStyle) patch.brandStyle = brandStyle;
         if ((replyLimitValue === null ? "" : String(replyLimitValue)) !== was.replyLimit) patch.dailyReplyLimit = replyLimitValue;
+        if (siteList.join("\n") !== (editing.allowedSites ?? []).join("\n")) patch.allowedSites = siteList;
         if (page !== (editing.knowledgeUrl ?? "")) patch.knowledgeUrl = page || null;
         else if (page && rereadPage) patch.knowledgeUrl = page;
         const editedId = editing.id;
@@ -583,7 +598,7 @@ export default function InteractivePage() {
       } else {
         ({ agent } = await api<{ agent: Agent }>("/api/agents", {
           method: "POST",
-          body: JSON.stringify({ name, avatarId: avatar.id, voiceId: voice?.id, instructions, language, isPublic: true, collectEmail, brandStyle, ...(greeting.trim() ? { greeting: greeting.trim() } : {}), ...(starterList.length ? { starters: starterList } : {}), ...(notes.trim() ? { notes: notes.trim() } : {}), ...(knowledgeUrl.trim() ? { knowledgeUrl: knowledgeUrl.trim() } : {}), ...(replyLimitValue ? { dailyReplyLimit: replyLimitValue } : {}) }),
+          body: JSON.stringify({ name, avatarId: avatar.id, voiceId: voice?.id, instructions, language, isPublic: true, collectEmail, brandStyle, ...(greeting.trim() ? { greeting: greeting.trim() } : {}), ...(starterList.length ? { starters: starterList } : {}), ...(notes.trim() ? { notes: notes.trim() } : {}), ...(knowledgeUrl.trim() ? { knowledgeUrl: knowledgeUrl.trim() } : {}), ...(replyLimitValue ? { dailyReplyLimit: replyLimitValue } : {}), ...(siteList.length ? { allowedSites: siteList } : {}) }),
         }));
         setSavedLink(`${linkOrigin()}/talk/${agent.id}`);
         clearOwnFields();
@@ -817,6 +832,28 @@ export default function InteractivePage() {
                 </span>
               )}
             </Field>
+            <Field
+              label="Allowed websites (optional)"
+              hintId="agent-sites-hint"
+              hint="Only these sites can show the presenter in a frame or add its website launcher, one a line (example.com, or *.example.com for its subdomains; www.example.com is a site of its own). Empty lets any site embed it. The talk link itself still opens for anyone who has it, and the launcher can take up to five minutes to notice a change."
+            >
+              <textarea
+                aria-label="Allowed websites"
+                aria-invalid={!!siteError}
+                aria-describedby={siteError ? "agent-sites-hint agent-sites-error" : "agent-sites-hint"}
+                value={sites}
+                onChange={(e) => setSites(e.target.value)}
+                rows={2}
+                maxLength={2200}
+                placeholder={"example.com\n*.example.com"}
+                className={inputClass}
+              />
+              {siteError && (
+                <span id="agent-sites-error" className="mt-1 block text-xs font-medium text-rose-700">
+                  {siteError}
+                </span>
+              )}
+            </Field>
             <Field label="Knowledge page (optional)" hint="A public web page read once when the presenter is saved; its text becomes reference material for replies and is never shown to visitors.">
               <input aria-label="Knowledge page URL" value={knowledgeUrl} onChange={(e) => setKnowledgeUrl(e.target.value)} placeholder="https://…/about-us" className={inputClass} maxLength={2000} type="url" />
             </Field>
@@ -992,6 +1029,11 @@ export default function InteractivePage() {
                   {embedFor === a.id && (
                     <div id={`embed-builder-${a.id}`} className="basis-full rounded-lg border border-slate-200 bg-slate-50 p-3" data-testid="embed-builder">
                       <p className="text-xs text-slate-600">Paste this before &lt;/body&gt; on your site to add a floating chat launcher.</p>
+                      <p className="mt-1 text-xs text-slate-500" data-testid="embed-sites">
+                        {a.allowedSites?.length
+                          ? `Shows only on ${a.allowedSites.map((s) => s.replace(/^https:\/\//, "")).join(", ")}; change the allowed websites with Edit.`
+                          : "Works on any website; set allowed websites with Edit to keep it to yours."}
+                      </p>
                       <div className="mt-2 grid gap-2 sm:grid-cols-4">
                         <label className="text-xs text-slate-700">
                           Side

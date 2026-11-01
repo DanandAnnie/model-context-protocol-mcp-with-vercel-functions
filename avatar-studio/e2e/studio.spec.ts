@@ -2,6 +2,8 @@ import { expect, test, type Dialog, type Page } from "@playwright/test";
 import { AxeBuilder } from "@axe-core/playwright";
 import { strToU8, zipSync } from "fflate";
 import { readFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { parseCsv } from "../src/lib/csv";
 
 // Demo-mode flows. The mock renderer completes ~12s after submission.
@@ -5689,6 +5691,72 @@ test("a presenter's daily reply limit stops visitor replies for the day and show
     await expect(row.getByTestId("replies-today")).toHaveCount(0);
     expect((await page.request.patch(`/api/agents/${id}`, { data: { dailyReplyLimit: 0 } })).status()).toBe(400);
   } finally {
+    if (id) await page.request.delete(`/api/agents/${id}`);
+  }
+});
+
+test("a presenter kept to some websites is framed and launched only on those", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  let id = "";
+  // A customer's site on its own loopback server: Chrome lets a page there load the studio's script and frames, which it
+  // refuses a routed page. The same server is two sites, 127.0.0.1 (allowed) and localhost (not).
+  const site = createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://x");
+    const label = url.searchParams.get("label") ?? "Ask";
+    const byHand = url.searchParams.has("frame") ? `<iframe title="By hand" src="http://localhost:3100/talk/${id}?embed=1"></iframe>` : "";
+    res.writeHead(200, { "Content-Type": "text/html" });
+    res.end(`<!doctype html><html><body><h1>Acme Realty</h1>${byHand}<script src="http://localhost:3100/embed/agent.js?id=${id}&label=${encodeURIComponent(label)}"></script></body></html>`);
+  });
+  await new Promise<void>((done) => site.listen(0, "127.0.0.1", done));
+  const port = (site.address() as AddressInfo).port;
+  try {
+    await page.goto("/interactive");
+    await page.getByLabel("Agent name").fill(`Fenced ${tag}`);
+    // Something that is not a site is said under the field and not saved.
+    await page.getByLabel("Allowed websites").fill("acme.example\njavascript:alert(1)");
+    await expect(page.getByText('"javascript:alert(1)" is not a website address, such as example.com.', { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Save and get link" }).click();
+    await expect(page.getByText("Allowed websites: ")).toBeVisible();
+    await page.getByLabel("Allowed websites").fill(`http://127.0.0.1:${port}/listings`);
+    await page.getByRole("button", { name: "Save and get link" }).click();
+    const link = (await page.getByTestId("agent-link").locator("code").innerText()).trim();
+    id = link.split("/talk/")[1];
+    const row = page.getByTestId("agent-list").locator("li", { hasText: `Fenced ${tag}` });
+    await row.getByRole("button", { name: `Embed code for Fenced ${tag}`, exact: true }).click();
+    await expect(row.getByTestId("embed-sites")).toHaveText(`Shows only on http://127.0.0.1:${port}; change the allowed websites with Edit.`);
+    // The talk page may be framed by the studio and that site only.
+    const talk = await page.request.get(`/talk/${id}`);
+    expect(talk.headers()["content-security-policy"]).toBe(`frame-ancestors 'self' http://127.0.0.1:${port}`);
+
+    // On the allowed site the launcher appears and opens the chat.
+    await page.goto(`http://127.0.0.1:${port}/?label=Ask%20Fenced`);
+    await page.getByRole("button", { name: "Ask Fenced" }).click();
+    await expect(page.frameLocator("iframe[title='Chat with our presenter']").getByTestId("talk-name")).toContainText(`Fenced ${tag}`);
+
+    // Anywhere else the launcher stays away, and a frame made by hand is refused by the browser.
+    const warned = page.waitForEvent("console", (m) => m.text().includes(`this presenter is not set up for http://localhost:${port}`));
+    await page.goto(`http://localhost:${port}/?label=Ask%20Other&frame=1`);
+    await warned;
+    await expect(page.getByRole("button", { name: "Ask Other" })).toHaveCount(0);
+    // The browser shows its error page in the frame instead of the talk page.
+    await expect.poll(() => page.frames().map((f) => f.url())).toContain("chrome-error://chromewebdata/");
+    await expect(page.frameLocator("iframe[title='By hand']").getByTestId("talk-name")).toHaveCount(0);
+
+    // Cleared, the presenter can be embedded anywhere again.
+    await page.goto("/interactive");
+    await page.getByRole("button", { name: `Edit Fenced ${tag}` }).click();
+    await expect(page.getByLabel("Allowed websites")).toHaveValue(`http://127.0.0.1:${port}`);
+    await page.getByLabel("Allowed websites").fill("");
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await row.getByRole("button", { name: `Embed code for Fenced ${tag}`, exact: true }).click();
+    await expect(row.getByTestId("embed-sites")).toHaveText("Works on any website; set allowed websites with Edit to keep it to yours.");
+    expect((await page.request.get(`/talk/${id}`)).headers()["content-security-policy"]).toBeUndefined();
+    await page.goto(`http://localhost:${port}/?label=Ask%20Anywhere&frame=1`);
+    await expect(page.getByRole("button", { name: "Ask Anywhere" })).toBeVisible();
+    await expect(page.frameLocator("iframe[title='By hand']").getByTestId("talk-name")).toContainText(`Fenced ${tag}`);
+    expect((await page.request.patch(`/api/agents/${id}`, { data: { allowedSites: ["ftp://example.com"] } })).status()).toBe(400);
+  } finally {
+    site.close();
     if (id) await page.request.delete(`/api/agents/${id}`);
   }
 });

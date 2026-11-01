@@ -22,6 +22,7 @@ import { fetchPageText } from "../webpage";
 import type { FetchLike } from "../safe-fetch";
 import { KNOWLEDGE_END, KNOWLEDGE_MARKER, withNotes } from "../providers/types";
 import { MAX_AGENT_NOTES } from "../types";
+import { MAX_ALLOWED_SITES, parseSites } from "../allowed-sites";
 
 export const MAX_AGENTS = 20;
 
@@ -54,6 +55,18 @@ const agentFields = {
   brandStyle: z.boolean(),
   /** Replies to visitors a UTC day may hold at most; `null` removes the limit. */
   dailyReplyLimit: z.number().int().min(1).max(10000).nullable(),
+  /** Websites the talk page may be embedded on (see `allowed-sites`); an empty list lets any site embed it. */
+  allowedSites: z
+    .array(z.string().max(200))
+    .max(MAX_ALLOWED_SITES)
+    .transform((list, ctx) => {
+      const parsed = parseSites(list);
+      if ("bad" in parsed) {
+        ctx.addIssue({ code: "custom", message: `"${parsed.bad.slice(0, 60)}" is not a website address, such as example.com or https://www.example.com` });
+        return z.NEVER;
+      }
+      return parsed.sites;
+    }),
 };
 
 export const agentSchema = z.object({
@@ -68,6 +81,7 @@ export const agentSchema = z.object({
   collectEmail: agentFields.collectEmail.default(false),
   brandStyle: agentFields.brandStyle.default(false),
   dailyReplyLimit: agentFields.dailyReplyLimit.optional(),
+  allowedSites: agentFields.allowedSites.optional(),
 });
 
 /** Any subset of the fields, none defaulted; `knowledgeUrl: null` forgets the page, a URL (the same one included) reads it again. */
@@ -192,10 +206,10 @@ async function presenterSnapshot(avatarId: string, voiceId: string | undefined, 
 export async function createAgent(input: z.infer<typeof agentSchema>, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<Agent> {
   if ((await listAgents(ownerId)).length >= MAX_AGENTS) throw new ValidationError(`At most ${MAX_AGENTS} agents per account`);
   const snapshot = await presenterSnapshot(input.avatarId, input.voiceId, ownerId);
-  const { knowledgeUrl, greeting, starters, notes, dailyReplyLimit, ...rest } = input;
+  const { knowledgeUrl, greeting, starters, notes, dailyReplyLimit, allowedSites, ...rest } = input;
   const knowledge = knowledgeUrl ? await readKnowledge(knowledgeUrl, fetchImpl) : {};
   const now = nowIso();
-  return getStore().put("agent", { id: newId("agent"), ownerId, ...rest, ...(greeting ? { greeting } : {}), ...(starters?.length ? { starters } : {}), ...(notes ? { notes } : {}), ...(dailyReplyLimit ? { dailyReplyLimit } : {}), ...snapshot, ...knowledge, conversations: 0, messages: 0, createdAt: now, updatedAt: now });
+  return getStore().put("agent", { id: newId("agent"), ownerId, ...rest, ...(greeting ? { greeting } : {}), ...(starters?.length ? { starters } : {}), ...(notes ? { notes } : {}), ...(dailyReplyLimit ? { dailyReplyLimit } : {}), ...(allowedSites?.length ? { allowedSites } : {}), ...snapshot, ...knowledge, conversations: 0, messages: 0, createdAt: now, updatedAt: now });
 }
 
 /**
@@ -224,7 +238,7 @@ export async function duplicateAgent(id: string, ownerId: string = LOCAL_OWNER):
     createdAt: now,
     updatedAt: now,
   };
-  for (const key of ["voiceId", "voiceLanguage", "greeting", "starters", "notes", "knowledgeUrl", "knowledge", "knowledgeUpdatedAt", "collectEmail", "brandStyle", "dailyReplyLimit"] as const) {
+  for (const key of ["voiceId", "voiceLanguage", "greeting", "starters", "notes", "knowledgeUrl", "knowledge", "knowledgeUpdatedAt", "collectEmail", "brandStyle", "dailyReplyLimit", "allowedSites"] as const) {
     if (source[key] !== undefined) Object.assign(copy, { [key]: source[key] });
   }
   return getStore().put("agent", copy);
@@ -273,7 +287,7 @@ export async function suggestStarters(input: z.infer<typeof startersSchema>, own
 
 export async function updateAgent(id: string, patch: z.infer<typeof agentPatchSchema>, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<Agent> {
   const first = await getAgent(id, ownerId);
-  const { knowledgeUrl, greeting, starters, notes, dailyReplyLimit, ...rest } = patch;
+  const { knowledgeUrl, greeting, starters, notes, dailyReplyLimit, allowedSites, ...rest } = patch;
   // The slow parts (a page read, the presenter and voice looked up) run before the agent is read for the write: a link
   // turned off or a delete that landed meanwhile then holds, rather than being written over by an older copy.
   const knowledge = knowledgeUrl ? await readKnowledge(knowledgeUrl, fetchImpl) : null;
@@ -288,6 +302,8 @@ export async function updateAgent(id: string, patch: z.infer<typeof agentPatchSc
   else if (notes) next.notes = notes;
   if (dailyReplyLimit === null) delete next.dailyReplyLimit;
   else if (dailyReplyLimit) next.dailyReplyLimit = dailyReplyLimit;
+  if (allowedSites && allowedSites.length === 0) delete next.allowedSites;
+  else if (allowedSites) next.allowedSites = allowedSites;
   if (knowledgeUrl === null) {
     delete next.knowledgeUrl;
     delete next.knowledge;

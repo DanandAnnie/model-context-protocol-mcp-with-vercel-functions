@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { ArchiveRestore, CheckSquare, Clapperboard, Clock, LayoutGrid, List, Download, FolderInput, KeyRound, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
-import { api, folderFor, overSelection } from "@/lib/client";
+import { api, clickSelect, folderFor, overSelection } from "@/lib/client";
 import { VideoCard, VideoRow } from "@/components/VideoCard";
 import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
@@ -137,17 +137,19 @@ function VideosInner() {
   const [timeDraft, setTimeDraft] = useState("");
   // The download button and email gate, each left as it is ("") or turned on or off on every selected video.
   const [linkSettings, setLinkSettings] = useState<{ download: "" | "on" | "off"; gate: "" | "on" | "off" }>({ download: "", gate: "" });
-  function toggle(id: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  // The video clicked last while selecting, where a Shift+click's run of cards starts. It is forgotten whenever the
+  // selection is replaced rather than clicked, so a run never starts from a card the user did not just choose.
+  const anchor = useRef<string | null>(null);
+  // From `selected` as rendered rather than an updater, as the anchor moves in step with it.
+  function click(id: string, shift: boolean) {
+    const done = clickSelect(selected, videos.map((v) => v.id), anchor.current, id, shift);
+    anchor.current = done.anchor;
+    setSelected(done.selected);
   }
   function stopSelecting() {
     setSelecting(false);
     setSelected(new Set());
+    anchor.current = null;
     setSelectAllFor(null);
     setTimeField(null);
     setTimeDraft("");
@@ -191,6 +193,7 @@ function VideosInner() {
   const selectShownRef = useRef<HTMLButtonElement>(null);
   function selectLoaded() {
     setSelected(new Set(videos.slice(0, BULK_MAX).map((v) => v.id)));
+    anchor.current = null;
     setSelectAllFor(null);
     // The button goes once everything is loaded, which drops the focus to the page; keep the keyboard in the bar.
     requestAnimationFrame(() => {
@@ -223,6 +226,7 @@ function VideosInner() {
   // what is visible, and any "Select all matching" still loading for the old filters.
   useEffect(() => {
     setSelected(new Set());
+    anchor.current = null;
     setSelectAllFor(null);
     setTimeField(null);
     setTimeDraft("");
@@ -319,6 +323,7 @@ function VideosInner() {
       if (refused.length) {
         // The refused ones stay selected (with the field open), so they can be found and their expiry moved.
         setSelected(new Set(refused));
+        anchor.current = null;
         return;
       }
       stopSelecting();
@@ -467,6 +472,7 @@ function VideosInner() {
       if (left.size || r.missing.length) {
         setBulkErr(notes.join(" "));
         setSelected(left);
+        anchor.current = null;
       } else stopSelecting();
     } catch (e) {
       // Some may have started before the request failed; show them, so the next click does not start them twice.
@@ -759,6 +765,7 @@ function VideosInner() {
                 onClick={() => {
                   // Never more than one action takes, so every button in the bar can act on what is chosen.
                   setSelected(new Set(videos.slice(0, BULK_MAX).map((v) => v.id)));
+                  anchor.current = null;
                   if (videos.length > BULK_MAX) setBulkErr(`Selected the first ${BULK_MAX} of the ${videos.length} shown, as one action takes up to ${BULK_MAX}.`);
                 }}
                 disabled={busy !== null} className="text-xs text-brand-700 hover:underline disabled:opacity-50">
@@ -854,7 +861,7 @@ function VideosInner() {
               </button>
             </div>
           ) : (
-            <Button variant="secondary" className="px-3 py-1.5 text-xs" onClick={() => setSelecting(true)} disabled={busy === "empty" || busy === "restoreall"}>
+            <Button variant="secondary" className="px-3 py-1.5 text-xs" onClick={() => setSelecting(true)} disabled={busy === "empty" || busy === "restoreall"} title="Choose videos for one action; Shift+click a video to select, or unselect, every one from the video clicked last to it">
               <CheckSquare className="h-3.5 w-3.5" /> Select
             </Button>
           )}
@@ -992,13 +999,13 @@ function VideosInner() {
           {layout === "list" ? (
             <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200" data-testid="video-list">
               {videos.map((v) => (
-                <VideoRow key={v.id} video={v} selectable={selecting} selected={selected.has(v.id)} onToggle={() => busy === null && toggle(v.id)} />
+                <VideoRow key={v.id} video={v} selectable={selecting} selected={selected.has(v.id)} onToggle={(shift) => busy === null && click(v.id, shift)} />
               ))}
             </div>
           ) : (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {videos.map((v) => (
-                <VideoCard key={v.id} video={v} selectable={selecting} selected={selected.has(v.id)} onToggle={() => busy === null && toggle(v.id)} />
+                <VideoCard key={v.id} video={v} selectable={selecting} selected={selected.has(v.id)} onToggle={(shift) => busy === null && click(v.id, shift)} />
               ))}
             </div>
           )}

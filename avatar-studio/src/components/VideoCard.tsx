@@ -7,7 +7,7 @@ import { REVIEW_LABEL, type Video } from "@/lib/types";
 
 const reviewClass = (status: NonNullable<Video["review"]>["status"]) => (status === "approved" ? "bg-emerald-50 text-emerald-800" : status === "changes" ? "bg-amber-50 text-amber-900" : "bg-brand-50 text-brand-800");
 
-export function VideoCard({ video, selectable = false, selected = false, onToggle }: { video: Video; selectable?: boolean; selected?: boolean; onToggle?: () => void }) {
+export function VideoCard({ video, selectable = false, selected = false, onToggle }: { video: Video; selectable?: boolean; selected?: boolean; onToggle?: (shift: boolean) => void }) {
   const expiresSoon = shareExpiresSoon(video);
   const body = (
     <>
@@ -99,7 +99,9 @@ export function VideoCard({ video, selectable = false, selected = false, onToggl
   const frame = `group block w-full overflow-hidden rounded-xl border bg-white text-left transition hover:shadow-sm ${selected ? "border-brand-500 ring-2 ring-brand-100" : "border-slate-200 hover:border-slate-300"}`;
   if (selectable) {
     return (
-      <button type="button" onClick={onToggle} aria-pressed={selected} aria-label={`Select ${video.title}`} className={frame}>
+      // Shift+click picks a run of cards; select-none keeps a browser that extends a text selection on Shift+click from
+      // also selecting the text between them (Chromium does not).
+      <button type="button" onClick={(e) => onToggle?.(e.shiftKey)} aria-pressed={selected} aria-label={`Select ${video.title}`} className={`${frame} select-none`}>
         {body}
       </button>
     );
@@ -118,7 +120,7 @@ function shareTitle(video: Video): string | undefined {
 }
 
 /** The library's list layout: one compact row per video, with the card's status, badges, and details in a line. */
-export function VideoRow({ video, selectable = false, selected = false, onToggle }: { video: Video; selectable?: boolean; selected?: boolean; onToggle?: () => void }) {
+export function VideoRow({ video, selectable = false, selected = false, onToggle }: { video: Video; selectable?: boolean; selected?: boolean; onToggle?: (shift: boolean) => void }) {
   const share = shareSummary(video);
   const body = (
     <>
@@ -185,7 +187,7 @@ export function VideoRow({ video, selectable = false, selected = false, onToggle
   const frame = `flex w-full items-center gap-3 px-3 py-2 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500 ${selected ? "bg-brand-50 hover:bg-brand-100" : "bg-white hover:bg-slate-50"}`;
   if (selectable) {
     return (
-      <button type="button" onClick={onToggle} aria-pressed={selected} aria-label={`Select ${video.title}`} className={frame} data-testid="video-row">
+      <button type="button" onClick={(e) => onToggle?.(e.shiftKey)} aria-pressed={selected} aria-label={`Select ${video.title}`} className={`${frame} select-none`} data-testid="video-row">
         {body}
       </button>
     );

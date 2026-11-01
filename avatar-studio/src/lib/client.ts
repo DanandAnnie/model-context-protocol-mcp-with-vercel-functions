@@ -156,6 +156,35 @@ export function folderFor(typed: string, folders: readonly string[]): string {
 }
 
 /**
+ * A click on a library video while selecting. A plain click turns that one video on or off; Shift+click sets every
+ * video from the last one clicked to this one, in the order shown, as the last one clicked now is (so a run of cards
+ * is picked, or dropped, in two clicks). Either way this video is the one clicked last. With no video clicked last, or
+ * one no longer among `order` (deleted, or moved out of the folder shown, by someone else), Shift+click is a plain click.
+ */
+export function clickSelect(
+  selected: ReadonlySet<string>,
+  order: readonly string[],
+  anchor: string | null,
+  id: string,
+  shift: boolean,
+): { selected: Set<string>; anchor: string } {
+  const next = new Set(selected);
+  const from = anchor === null ? -1 : order.indexOf(anchor);
+  const to = order.indexOf(id);
+  if (!shift || anchor === null || from < 0 || to < 0 || from === to) {
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return { selected: next, anchor: id };
+  }
+  const on = next.has(anchor);
+  for (const v of order.slice(Math.min(from, to), Math.max(from, to) + 1)) {
+    if (on) next.add(v);
+    else next.delete(v);
+  }
+  return { selected: next, anchor: id };
+}
+
+/**
  * Why a library bulk action cannot take this selection, or null when it can: one action takes up to `max` videos
  * (the server's own limit), and a bigger selection is refused here with how many to unselect rather than as a 400.
  */

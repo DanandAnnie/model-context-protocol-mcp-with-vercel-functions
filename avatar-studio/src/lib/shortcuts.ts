@@ -37,6 +37,11 @@ export function shortcutGroups(apple: boolean): Array<{ title: string; shortcuts
       ],
     },
     {
+      title: "In My videos, while selecting",
+      // A focused card's Space or Enter clicks it with the Shift key as held, so the keyboard picks a run the same way.
+      shortcuts: [{ keys: [[shift, "Click"], [shift, "Space"]], does: "Select, or unselect, a run of videos: every one from the video clicked last to the one Shift+clicked" }],
+    },
+    {
       title: "In quick find",
       shortcuts: [
         { keys: [["↑"], ["↓"]], does: "Move through the results" },

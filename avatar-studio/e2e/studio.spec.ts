@@ -9003,6 +9003,73 @@ test("Select all matching selects past the first page and hands every match to a
   await page.unroute(/\/api\/videos\?.*limit=50/);
 });
 
+test("Shift+click selects, or unselects, a run of videos from the one clicked last, in the grid and the list", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const rows = Array.from({ length: 6 }, (_, i) => `Runner ${i + 1}`);
+  const made = await page.request.post("/api/videos/batch", {
+    data: { title: `Range ${tag}`, scriptTemplate: "Hello {name}.", csv: `name\n${rows.join("\n")}`, avatarId: "stock_1", voiceId: "stock_voice_1" },
+  });
+  expect(made.status()).toBe(201);
+  const { batchId } = (await made.json()) as { batchId: string };
+  await page.goto(`/videos?batch=${batchId}`);
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  const bar = page.getByTestId("bulk-bar");
+  const count = bar.getByText(/selected$/);
+  // The cards in the order shown, whatever order the batch's rows were made in.
+  const cards = page.locator("button[aria-pressed][aria-label^='Select ']");
+  await expect(cards).toHaveCount(6);
+  const pressed = async () => Promise.all((await cards.all()).map(async (c) => (await c.getAttribute("aria-pressed")) === "true"));
+
+  await cards.nth(1).click();
+  await cards.nth(3).click({ modifiers: ["Shift"] });
+  await expect(count).toHaveText("3 selected");
+  await expect.poll(pressed).toEqual([false, true, true, true, false, false]);
+  // Back up the page from the one clicked last, keeping what was already selected.
+  await cards.nth(5).click();
+  await cards.nth(4).click({ modifiers: ["Shift"] });
+  await expect(count).toHaveText("5 selected");
+  await expect.poll(pressed).toEqual([false, true, true, true, true, true]);
+  // A run from a card just unselected unselects.
+  await cards.nth(2).click();
+  await cards.nth(4).click({ modifiers: ["Shift"] });
+  await expect(count).toHaveText("2 selected");
+  await expect.poll(pressed).toEqual([false, true, false, false, false, true]);
+
+  // The list's rows take Shift+click the same way, and the selection carries over to them.
+  await page.getByRole("group", { name: "Layout" }).getByRole("button", { name: "List" }).click();
+  const listed = page.getByTestId("video-list").locator("button[aria-pressed]");
+  await expect(listed).toHaveCount(6);
+  await expect(count).toHaveText("2 selected");
+  await listed.nth(0).click();
+  await listed.nth(2).click({ modifiers: ["Shift"] });
+  await expect(count).toHaveText("4 selected");
+  await expect.poll(pressed).toEqual([true, true, true, false, false, true]);
+
+  // Done drops where the last run started, so the first Shift+click after it picks one card.
+  await bar.getByRole("button", { name: "Done selecting" }).click();
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await listed.nth(4).click({ modifiers: ["Shift"] });
+  await expect(count).toHaveText("1 selected");
+  await expect.poll(pressed).toEqual([false, false, false, false, true, false]);
+  // From the keyboard, Shift+Space on a focused row picks the run too.
+  await listed.nth(2).focus();
+  await page.keyboard.press("Shift+Space");
+  await expect(count).toHaveText("3 selected");
+  await expect.poll(pressed).toEqual([false, false, true, true, true, false]);
+  // Picking all shown starts afresh: the next Shift+click picks one card rather than a run from before.
+  await bar.getByRole("button", { name: "Select all shown" }).click();
+  await expect(count).toHaveText("6 selected");
+  await listed.nth(0).click({ modifiers: ["Shift"] });
+  await expect(count).toHaveText("5 selected");
+  await page.getByRole("group", { name: "Layout" }).getByRole("button", { name: "Grid" }).click();
+
+  // The keyboard shortcuts list it.
+  await page.keyboard.press("Control+/");
+  const dialog = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+  await expect(dialog.getByRole("heading", { name: "In My videos, while selecting" })).toBeVisible();
+  await expect(dialog).toContainText("Select, or unselect, a run of videos: every one from the video clicked last to the one Shift+clicked");
+});
+
 test("the bulk bar never sends more than the 200 videos one action takes", async ({ page }) => {
   test.slow();
   const tag = `Over ${Date.now().toString(36)}`;

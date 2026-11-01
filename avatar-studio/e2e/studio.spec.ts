@@ -4740,6 +4740,8 @@ test("library multi-select moves and deletes videos in bulk", async ({ page }) =
   await page.getByRole("button", { name: "Close expiry" }).click();
   await expect(page.getByTestId("bulk-expiry")).toHaveCount(0);
   await page.getByRole("button", { name: "Done selecting" }).click();
+  // Within a week of it, the card says so (noon three days out is three or four days away, rounded up).
+  await expect(badgeOn(a.id)).toContainText(/Expires in [34] days/);
   expect((await page.request.patch(`/api/videos/${b.id}`, { data: { shareStartsAt: null } })).ok()).toBe(true);
   await page.getByRole("button", { name: "Select" }).click();
   await page.getByRole("button", { name: `Select Bulk one ${tag}` }).click();
@@ -4747,6 +4749,7 @@ test("library multi-select moves and deletes videos in bulk", async ({ page }) =
   await page.getByTestId("bulk-expiry").getByRole("button", { name: "No expiry" }).click();
   await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
   expect((await (await page.request.get(`/api/videos/${a.id}`)).json()).video.shareExpiresAt).toBeUndefined();
+  await expect(badgeOn(a.id)).toHaveCount(0);
 
   // Delete moves to the trash: gone from the library, 404 to the public, still the owner's to restore.
   await page.getByRole("button", { name: "Select" }).click();

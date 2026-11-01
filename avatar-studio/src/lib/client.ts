@@ -101,6 +101,25 @@ export function shareOffline(video: { shareDisabled?: boolean; shareExpiresAt?: 
   return !!video.shareDisabled || !!video.deletedAt || shareExpired(video, now) || shareNotYet(video, now);
 }
 
+/** Days within which a live link's coming expiry is pointed out on its library card. */
+export const EXPIRES_SOON_DAYS = 7;
+
+/**
+ * "Expires in N days" (rounded up) when a live link expires within `EXPIRES_SOON_DAYS`, or in hours when less than a
+ * day is left, so a link about to lapse does not read as having a day to spare; undefined for a link with no expiry,
+ * one further off, or one the public cannot reach anyway (off, expired, not live yet, or in the trash).
+ */
+export function shareExpiresSoon(video: { shareDisabled?: boolean; shareExpiresAt?: string; shareStartsAt?: string; deletedAt?: string }, now = Date.now()): string | undefined {
+  if (!video.shareExpiresAt || shareOffline(video, now)) return undefined;
+  const left = Date.parse(video.shareExpiresAt) - now;
+  if (left < 86_400_000) {
+    const hours = Math.ceil(left / 3_600_000);
+    return `Expires in ${hours} ${hours === 1 ? "hour" : "hours"}`;
+  }
+  const days = Math.ceil(left / 86_400_000);
+  return days <= EXPIRES_SOON_DAYS ? `Expires in ${days} ${days === 1 ? "day" : "days"}` : undefined;
+}
+
 /** When a trashed video is deleted for good, as an ISO instant; undefined for a video that is not in the trash. */
 export function purgeAt(video: { deletedAt?: string }): string | undefined {
   return video.deletedAt ? new Date(Date.parse(video.deletedAt) + TRASH_RETENTION_DAYS * 86_400_000).toISOString() : undefined;

@@ -2,10 +2,11 @@
 import Link from "next/link";
 import { Clock, Film, LinkIcon, Lock, Trash2 } from "lucide-react";
 import { StatusBadge } from "./ui";
-import { daysUntilPurge, formatDate, formatSeconds, posterUrl, shareExpired, shareNotYet } from "@/lib/client";
+import { daysUntilPurge, formatDate, formatSeconds, posterUrl, shareExpired, shareExpiresSoon, shareNotYet } from "@/lib/client";
 import { REVIEW_LABEL, type Video } from "@/lib/types";
 
 export function VideoCard({ video, selectable = false, selected = false, onToggle }: { video: Video; selectable?: boolean; selected?: boolean; onToggle?: () => void }) {
+  const expiresSoon = shareExpiresSoon(video);
   const body = (
     <>
       <div className="relative aspect-video w-full overflow-hidden bg-slate-900">
@@ -38,8 +39,9 @@ export function VideoCard({ video, selectable = false, selected = false, onToggl
             <Trash2 className="h-3 w-3" /> {daysUntilPurge(video) === 0 ? "Deleted today" : `${daysUntilPurge(video)} ${daysUntilPurge(video) === 1 ? "day" : "days"} left`}
           </span>
         )}
-        {!video.deletedAt && (video.shareDisabled || video.shareLocked || shareExpired(video) || shareNotYet(video)) && (
-          <span className="absolute bottom-2 left-2 flex gap-1" data-testid="share-badges">
+        {!video.deletedAt && (video.shareDisabled || video.shareLocked || shareExpired(video) || shareNotYet(video) || expiresSoon) && (
+          // Wraps rather than running under the duration in the opposite corner on a narrow card.
+          <span className="absolute bottom-2 left-2 flex max-w-[calc(100%-4rem)] flex-wrap gap-1" data-testid="share-badges">
             {video.shareDisabled && (
               <span className="inline-flex items-center gap-1 rounded bg-black/70 px-1.5 py-0.5 text-xs text-white" title="The share link is off">
                 <LinkIcon className="h-3 w-3" /> Link off
@@ -53,6 +55,11 @@ export function VideoCard({ video, selectable = false, selected = false, onToggl
             {!video.shareDisabled && !shareExpired(video) && shareNotYet(video) && (
               <span className="inline-flex items-center gap-1 rounded bg-black/70 px-1.5 py-0.5 text-xs text-white" title={`The share link goes live ${formatDate(video.shareStartsAt!)}`}>
                 <Clock className="h-3 w-3" /> Scheduled
+              </span>
+            )}
+            {expiresSoon && (
+              <span className="inline-flex items-center gap-1 rounded bg-black/70 px-1.5 py-0.5 text-xs text-white" title={`The share link stops working ${formatDate(video.shareExpiresAt!)}`}>
+                <Clock className="h-3 w-3" /> {expiresSoon}
               </span>
             )}
             {video.shareLocked && (

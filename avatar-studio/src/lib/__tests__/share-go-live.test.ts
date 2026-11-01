@@ -6,7 +6,7 @@ import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import { getStore } from "../store";
 import { bulkVideoSchema, bulkVideos, createVideo, getVideo, recordView, updateVideo, videoPatchSchema, videoRequestSchema } from "../services";
-import { shareNotYet, shareOffline } from "../client";
+import { shareExpiresSoon, shareNotYet, shareOffline } from "../client";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import { batchLinkRows } from "../services";
 import type { Video } from "../types";
@@ -102,5 +102,24 @@ describe("share link go-live time", () => {
     assert.deepEqual(await bulkVideos(bulkVideoSchema.parse({ action: "expire", ids: [a.id, b.id], shareExpiresAt: null }), OWNER), { done: 2, missing: [], refused: [] });
     assert.equal("shareExpiresAt" in (await getVideo(a.id, OWNER, false)), false);
     assert.deepEqual(await bulkVideos(bulkVideoSchema.parse({ action: "expire", ids: [a.id], shareExpiresAt: end }), "someone_else"), { done: 0, missing: [a.id], refused: [] });
+  });
+
+  it("points out a live link's expiry only within a week, and not for a link the public cannot reach", () => {
+    const now = Date.parse("2030-06-01T12:00:00Z");
+    const at = (ms: number) => new Date(now + ms).toISOString();
+    assert.equal(shareExpiresSoon({}, now), undefined, "no expiry");
+    assert.equal(shareExpiresSoon({ shareExpiresAt: at(10 * 60_000) }, now), "Expires in 1 hour", "minutes away reads in hours, not as a day");
+    assert.equal(shareExpiresSoon({ shareExpiresAt: at(5 * 3_600_000 + 1) }, now), "Expires in 6 hours");
+    assert.equal(shareExpiresSoon({ shareExpiresAt: at(86_400_000) }, now), "Expires in 1 day");
+    assert.equal(shareExpiresSoon({ shareExpiresAt: at(3 * 86_400_000) }, now), "Expires in 3 days");
+    assert.equal(shareExpiresSoon({ shareExpiresAt: at(6 * 86_400_000 + 1) }, now), "Expires in 7 days", "rounded up");
+    assert.equal(shareExpiresSoon({ shareExpiresAt: at(7 * 86_400_000) }, now), "Expires in 7 days");
+    assert.equal(shareExpiresSoon({ shareExpiresAt: at(2 * 86_400_000), shareStartsAt: at(-3_600_000) }, now), "Expires in 2 days", "went live already");
+    assert.equal(shareExpiresSoon({ shareExpiresAt: "not a time" }, now), undefined, "unreadable");
+    assert.equal(shareExpiresSoon({ shareExpiresAt: at(7 * 86_400_000 + 1) }, now), undefined, "more than a week away");
+    assert.equal(shareExpiresSoon({ shareExpiresAt: at(0) }, now), undefined, "already expired");
+    assert.equal(shareExpiresSoon({ shareExpiresAt: at(86_400_000), shareDisabled: true }, now), undefined, "switched off");
+    assert.equal(shareExpiresSoon({ shareExpiresAt: at(2 * 86_400_000), shareStartsAt: at(86_400_000) }, now), undefined, "not live yet");
+    assert.equal(shareExpiresSoon({ shareExpiresAt: at(86_400_000), deletedAt: at(-1) }, now), undefined, "in the trash");
   });
 });

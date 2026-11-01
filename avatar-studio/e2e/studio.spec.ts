@@ -8795,3 +8795,29 @@ test("the library's analytics CSV holds what the library shows", async ({ page }
   await page.getByTestId("trash-toggle").click();
   await expect(link).toHaveCount(0);
 });
+
+test("the library's folder picker says how many videos each folder holds", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const folder = `Counted ${tag}`;
+  const [one, two] = [await createVideoViaApi(page, `Count one ${tag}`), await createVideoViaApi(page, `Count two ${tag}`)];
+  for (const v of [one, two]) expect((await page.request.patch(`/api/videos/${v.id}`, { data: { folder } })).ok()).toBe(true);
+  const counts = (await (await page.request.get(`/api/videos?folder=${encodeURIComponent(folder)}`)).json()).folderCounts as Record<string, number>;
+  expect(counts[folder]).toBe(2);
+  await page.goto("/videos");
+  const picker = page.getByLabel("Folder", { exact: true });
+  await expect(picker.locator("option", { hasText: folder })).toHaveText(`${folder} (2)`);
+  const total = (await (await page.request.get("/api/videos?limit=1")).json()).total as number;
+  await expect(picker.locator("option[value='all']")).toHaveText(`All folders (${total})`);
+  // Whatever the other filters: a search that hides one of the two leaves the count at two.
+  const searched = (await (await page.request.get(`/api/videos?q=${encodeURIComponent(`Count one ${tag}`)}`)).json()) as { matched: number; folderCounts: Record<string, number> };
+  expect([searched.matched, searched.folderCounts[folder]]).toEqual([1, 2]);
+  // Moving one to the trash leaves one in the library's count; the trash counts its own.
+  expect((await page.request.delete(`/api/videos/${two.id}`)).ok()).toBe(true);
+  await page.reload();
+  await expect(page.getByLabel("Folder", { exact: true }).locator("option", { hasText: folder })).toHaveText(`${folder} (1)`);
+  await page.getByTestId("trash-toggle").click();
+  await expect(page.getByLabel("Folder", { exact: true }).locator("option", { hasText: folder })).toHaveText(`${folder} (1)`);
+  // Picking it still filters by the folder's name.
+  await page.getByLabel("Folder", { exact: true }).selectOption(folder);
+  await expect(page.locator(`a[href="/videos/${two.id}"]`)).toBeVisible();
+});

@@ -18,6 +18,11 @@ const LAYOUT_KEY = "avatar-studio:library-layout";
 /** Cards per request; "Show more" asks for another page's worth. */
 const PAGE = 48;
 
+/** " (12)" after a folder's name in the picker. */
+const withCount = (n: number) => ` (${n})`;
+/** A folder's count, read as the folder's own entry only: a folder named "constructor" is not the object's prototype. */
+const countOf = (counts: Record<string, number>, folder: string) => (Object.hasOwn(counts, folder) && typeof counts[folder] === "number" ? counts[folder] : 0);
+
 /** A time as a datetime-local field holds it: the browser's local date and time, to the minute. */
 function localMinute(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -109,6 +114,7 @@ function VideosInner() {
   const { data, loading, error, refetch } = useApi<VideoPage>(path, { pollMs: 6000, pollWhile: (d) => d.rendering > 0 });
   const videos = data?.videos ?? [];
   const folders = data?.folders ?? [];
+  const folderCounts = data?.folderCounts ?? {};
   const hasAny = (data?.total ?? 0) > 0 || (data?.trashed ?? 0) > 0;
   const trashed = data?.trashed ?? 0;
   const remaining = data ? data.matched - videos.length : 0;
@@ -536,11 +542,13 @@ function VideosInner() {
           <input aria-label="Search videos" className={`${inputClass} max-w-xs`} placeholder="Search title, description, script, avatar, voice" value={q} onChange={(e) => setQ(e.target.value)} />
           {folders.length > 0 && (
             <select aria-label="Folder" value={folder} onChange={(e) => setFolder(e.target.value)} className={`${inputClass} w-auto`}>
-              <option value="all">All folders</option>
-              <option value="unfiled">Unfiled</option>
+              {/* Each with how many videos it holds in this view, whatever the other filters, so an empty pick is not a surprise. */}
+              <option value="all">All folders{withCount(trash ? trashed : (data?.total ?? 0))}</option>
+              <option value="unfiled">Unfiled{withCount(countOf(folderCounts, ""))}</option>
               {folders.map((f) => (
                 <option key={f} value={f}>
                   {f}
+                  {withCount(countOf(folderCounts, f))}
                 </option>
               ))}
             </select>

@@ -2006,6 +2006,8 @@ export interface VideoPage {
   hasMore: boolean;
   /** Folder names in use, for the filter control. */
   folders: string[];
+  /** How many videos each folder holds, in this view (the library or the trash), whatever the other filters; `""` is unfiled. */
+  folderCounts: Record<string, number>;
   /** Renders still in flight, across the whole library. */
   rendering: number;
   /** Videos in the trash, so the library can offer the view. */
@@ -2047,6 +2049,16 @@ export function filterVideos(videos: Video[], query: VideoQuery): Video[] {
 }
 
 /**
+ * Videos per folder name, with `""` for the unfiled ones; a folder no video is in is not listed. Counted in a Map, so a
+ * folder a user named "constructor" or "__proto__" is counted like any other rather than reading the object's prototype.
+ */
+export function countFolders(videos: Video[]): Record<string, number> {
+  const counts = new Map<string, number>();
+  for (const v of videos) counts.set(v.folder || "", (counts.get(v.folder || "") ?? 0) + 1);
+  return Object.fromEntries(counts);
+}
+
+/**
  * One page of the owner's library (in-flight renders refreshed first; see listVideos), or of the
  * trash with `query.trash`, where `sort: "newest"` orders by deletion time.
  */
@@ -2066,6 +2078,7 @@ export async function queryVideos(ownerId: string = LOCAL_OWNER, query: VideoQue
     total: live.length,
     hasMore: videos.length < matched.length,
     folders: Array.from(new Set(all.map((v) => v.folder).filter((f): f is string => !!f))).sort(),
+    folderCounts: countFolders(all),
     // Renders in flight in the library, whichever view this is: the trash view must not poll for a trashed render.
     rendering: live.filter((v) => v.status === "processing" || v.status === "queued").length,
     trashed,

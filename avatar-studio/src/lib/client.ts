@@ -101,6 +101,17 @@ export function shareOffline(video: { shareDisabled?: boolean; shareExpiresAt?: 
   return !!video.shareDisabled || !!video.deletedAt || shareExpired(video, now) || shareNotYet(video, now);
 }
 
+/**
+ * Which one of the share states a video's link is in, as its card's badges say: switched off wins over expired, which
+ * wins over not live yet; anything else is live (a password or a coming expiry does not take it offline).
+ */
+export function shareState(video: { shareDisabled?: boolean; shareExpiresAt?: string; shareStartsAt?: string }, now = Date.now()): "off" | "expired" | "scheduled" | "live" {
+  if (video.shareDisabled) return "off";
+  if (shareExpired(video, now)) return "expired";
+  if (shareNotYet(video, now)) return "scheduled";
+  return "live";
+}
+
 /** Days within which a live link's coming expiry is pointed out on its library card. */
 export const EXPIRES_SOON_DAYS = 7;
 

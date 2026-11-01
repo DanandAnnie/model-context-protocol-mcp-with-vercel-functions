@@ -4645,6 +4645,57 @@ test("folders filter the library and share views are counted once per viewer", a
   expect((await page.request.post("/api/videos/folders", { data: { from: "", to: "x" } })).status()).toBe(400);
 });
 
+test("the library filters by share link state", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const [off, later, soon, open] = [
+    await createVideoViaApi(page, `Share off ${tag}`),
+    await createVideoViaApi(page, `Share later ${tag}`),
+    await createVideoViaApi(page, `Share soon ${tag}`),
+    await createVideoViaApi(page, `Share open ${tag}`),
+  ];
+  const inDays = (n: number) => new Date(Date.now() + n * 24 * 60 * 60 * 1000).toISOString();
+  expect((await page.request.patch(`/api/videos/${off.id}`, { data: { shareDisabled: true } })).ok()).toBe(true);
+  expect((await page.request.patch(`/api/videos/${later.id}`, { data: { shareStartsAt: inDays(2) } })).ok()).toBe(true);
+  expect((await page.request.patch(`/api/videos/${soon.id}`, { data: { shareExpiresAt: inDays(3) } })).ok()).toBe(true);
+  // The server filters, so the API answers the same as the page.
+  const listed = async (share: string) => ((await (await page.request.get(`/api/videos?q=${tag}&share=${share}`)).json()).videos as { id: string }[]).map((v) => v.id).sort();
+  expect(await listed("off")).toEqual([off.id]);
+  expect(await listed("scheduled")).toEqual([later.id]);
+  expect(await listed("expiring")).toEqual([soon.id]);
+  expect(await listed("live")).toEqual([soon.id, open.id].sort());
+  expect((await page.request.get(`/api/videos?share=public`)).status()).toBe(400);
+
+  await page.goto("/videos");
+  await page.getByLabel("Search videos").fill(tag);
+  const card = (id: string) => page.locator(`a[href="/videos/${id}"]`);
+  await expect(card(open.id)).toBeVisible();
+  const filter = page.getByLabel("Filter by share link");
+  // Each step first waits for a card the filter drops, so the checks after it read the filtered list.
+  await filter.selectOption("expiring");
+  await expect(card(open.id)).toHaveCount(0);
+  await expect(card(soon.id).getByTestId("share-badges")).toContainText(/Expires in [34] days/);
+  await filter.selectOption("scheduled");
+  await expect(card(soon.id)).toHaveCount(0);
+  await expect(card(later.id).getByTestId("share-badges")).toContainText("Scheduled");
+  await filter.selectOption("off");
+  await expect(card(later.id)).toHaveCount(0);
+  await expect(card(off.id).getByTestId("share-badges")).toContainText("Link off");
+  await filter.selectOption("live");
+  await expect(card(off.id)).toHaveCount(0);
+  await expect(card(open.id)).toBeVisible();
+  await expect(card(soon.id)).toBeVisible();
+  await expect(card(later.id)).toHaveCount(0);
+  await filter.selectOption("expired");
+  await expect(page.getByText("No videos match")).toBeVisible();
+  // The trash has no share filter (trashed links answer "not found" whatever they were set to), and leaving it starts from any.
+  await page.getByTestId("trash-toggle").click();
+  await expect(filter).toHaveCount(0);
+  await page.getByTestId("trash-toggle").click();
+  await expect(filter).toHaveValue("all");
+  await expect(card(off.id)).toBeVisible();
+  await expect(card(open.id)).toBeVisible();
+});
+
 test("library multi-select moves and deletes videos in bulk", async ({ page }) => {
   const tag = Date.now().toString(36);
   const a = await createVideoViaApi(page, `Bulk one ${tag}`);

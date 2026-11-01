@@ -25,7 +25,7 @@ import { listVoices } from "./voices";
 import { PUBLIC_ACCESS, owned, scheduleNotification, stripUndefined } from "./shared";
 import { SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, clearShareLock, setShareLock, shareUnlocked } from "../share-lock";
 import { clearCover, setCover } from "../cover";
-import { posterUrl, shareOffline } from "../client";
+import { posterUrl, shareExpiresSoon, shareOffline, shareState } from "../client";
 import { bumpViewsByDay } from "../insights";
 
 import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneNameSchema, sceneTextSchema } from "./schemas";
@@ -1934,6 +1934,12 @@ export const videoQuerySchema = z.object({
   sort: z.enum(["newest", "oldest", "title", "views"]).default("newest"),
   /** Review state in a workspace: "pending" (awaiting an owner), "approved", "changes", or "none" (never asked). */
   review: z.enum(["all", "pending", "approved", "changes", "none"]).default("all"),
+  /**
+   * Share link state, as the cards' badges say: "live" (public now, password or not), "expiring" (live and stopping
+   * within the week the card counts down), "scheduled" (not live yet), "off" (switched off), or "expired"; whatever the
+   * render's status. A trashed video is in none of them.
+   */
+  share: z.enum(["all", "live", "expiring", "scheduled", "off", "expired"]).default("all"),
   /** Omit for every match (scripts); the library pages with it. */
   limit: z.coerce.number().int().min(1).max(200).optional(),
   /** `true` lists the trash (newest deletion first) instead of the library. */
@@ -1969,10 +1975,14 @@ const SORTERS: Record<VideoQuery["sort"], (a: Video, b: Video) => number> = {
 /** The videos matching `query`, sorted; `limit` is not applied here. */
 export function filterVideos(videos: Video[], query: VideoQuery): Video[] {
   const needle = query.q.toLowerCase();
+  // One clock for the whole list, so a link lapsing mid-filter cannot land in two states.
+  const now = Date.now();
   return videos
     .filter((v) => {
       if (query.batch && v.batchId !== query.batch) return false;
       if (query.review !== "all" && (v.review?.status ?? "none") !== query.review) return false;
+      // A trashed video's link answers "not found" whatever it was set to, so it is in no share state.
+      if (query.share !== "all" && (v.deletedAt || (query.share === "expiring" ? !shareExpiresSoon(v, now) : shareState(v, now) !== query.share))) return false;
       if (query.folder !== undefined && (v.folder ?? "") !== query.folder) return false;
       if (query.status === "processing" ? v.status !== "processing" && v.status !== "queued" : query.status !== "all" && v.status !== query.status) return false;
       return !needle || `${v.title} ${v.description ?? ""} ${stripPauses(v.script)} ${v.cinematic?.prompt ?? ""} ${v.directed?.prompt ?? ""} ${v.avatarName ?? ""} ${v.voiceName ?? ""}`.toLowerCase().includes(needle);

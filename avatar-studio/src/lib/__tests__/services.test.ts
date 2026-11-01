@@ -423,6 +423,32 @@ describe("videos", () => {
     assert.deepEqual(filterVideos(all, query({ status: "processing" })).map((v) => v.id), [b.id, a.id]);
     assert.deepEqual(filterVideos(all, query({ sort: "title" })).map((v) => v.title), ["Alpha intro", "Mike update", "Zulu tour"]);
     assert.deepEqual(filterVideos(all, query({ sort: "oldest" })).map((v) => v.id), [a.id, b.id, c.id]);
+    // Share states, as the cards' badges say; one video is in exactly one of off, expired, scheduled, and live.
+    const day = 86_400_000;
+    const at = (ms: number) => new Date(Date.now() + ms).toISOString();
+    const shared = [
+      { ...a, shareDisabled: true, shareExpiresAt: at(-day) },
+      { ...b, shareExpiresAt: at(-day) },
+      { ...c, shareStartsAt: at(day), shareExpiresAt: at(2 * day) },
+      { ...a, id: "vid_soon", shareExpiresAt: at(3 * day), shareLocked: true },
+      { ...a, id: "vid_later", shareExpiresAt: at(30 * day) },
+      { ...a, id: "vid_open", shareStartsAt: undefined },
+    ];
+    const ids = (share: string) => filterVideos(shared, query({ share, sort: "title" })).map((v) => v.id).sort();
+    assert.deepEqual(ids("off"), [a.id], "switched off wins over expired");
+    assert.deepEqual(ids("expired"), [b.id]);
+    assert.deepEqual(ids("scheduled"), [c.id], "not live yet, though it expires within the week");
+    assert.deepEqual(ids("expiring"), ["vid_soon"], "live and within the week, password or not");
+    assert.deepEqual(ids("live"), ["vid_later", "vid_open", "vid_soon"].sort());
+    assert.equal(filterVideos(shared, query({ share: "all" })).length, shared.length);
+    // A trashed video's link answers "not found", so it is in no share state; other filters still narrow.
+    const trashedSoon = { ...a, id: "vid_trashed", shareExpiresAt: at(3 * day), deletedAt: at(-1) };
+    for (const share of ["live", "expiring", "off", "expired", "scheduled"]) {
+      assert.equal(filterVideos([trashedSoon], query({ share })).length, 0, `trashed is not ${share}`);
+    }
+    assert.deepEqual(filterVideos(shared, query({ share: "live", q: "zulu" })).map((v) => v.id).sort(), ["vid_later", "vid_open", "vid_soon"].sort(), "with a search");
+    assert.deepEqual(filterVideos(shared, query({ share: "expired", status: "failed" })).map((v) => v.id), [], "with a status");
+    assert.equal(videoQuerySchema.safeParse({ share: "public" }).success, false);
     assert.deepEqual(filterVideos(all, query({ sort: "views" }))[0].id, b.id);
     assert.throws(() => query({ limit: "0" }));
     assert.throws(() => query({ sort: "random" }));

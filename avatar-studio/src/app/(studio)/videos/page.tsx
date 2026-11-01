@@ -45,6 +45,8 @@ function VideosInner() {
   // Reviews exist only in a workspace, so the filter shows there.
   const inWorkspace = !!useWorkspaceRole()?.workspaceId;
   const [review, setReview] = useState<VideoQuery["review"]>("all");
+  // Share link state, as the cards' badges say; with the bulk go-live and expiry it finds a campaign's links to fix.
+  const [share, setShare] = useState<VideoQuery["share"]>("all");
   // The trash is its own view of the same page: same search, status, and folder filters, different bulk actions.
   const [trash, setTrash] = useState(false);
   // Search as you type, one request per pause rather than per keystroke.
@@ -54,7 +56,7 @@ function VideosInner() {
   }, [q]);
   // "Show more" extends the page for the current filters only: a new filter starts again
   // from the first page in the same render, with no extra request for the old extent.
-  const filterKey = [needle, status, folder, batch ?? "", sort, trash ? "trash" : "", review].join("\u0000");
+  const filterKey = [needle, status, folder, batch ?? "", sort, trash ? "trash" : "", review, share].join("\u0000");
   const [extent, setExtent] = useState({ key: filterKey, limit: PAGE });
   const limit = extent.key === filterKey ? extent.limit : PAGE;
   const path = useMemo(() => {
@@ -67,8 +69,9 @@ function VideosInner() {
     if (sort !== "newest") params.set("sort", sort);
     if (trash) params.set("trash", "true");
     if (review !== "all") params.set("review", review);
+    if (share !== "all") params.set("share", share);
     return `/api/videos?${params}`;
-  }, [limit, needle, status, folder, batch, sort, trash, review]);
+  }, [limit, needle, status, folder, batch, sort, trash, review, share]);
   // The filtering, sorting, and paging happen on the server; the page only holds what it shows.
   const { data, loading, error, refetch } = useApi<VideoPage>(path, { pollMs: 6000, pollWhile: (d) => d.rendering > 0 });
   const videos = data?.videos ?? [];
@@ -129,7 +132,7 @@ function VideosInner() {
     setSelected(new Set());
     setTimeField(null);
     setTimeDraft("");
-  }, [q, status, folder, batch, trash]);
+  }, [q, status, folder, batch, trash, review, share]);
   // The last purge empties both views; leave the trash so the "No videos yet" state (and the filter bar) comes back.
   useEffect(() => {
     if (trash && data && data.total === 0 && data.trashed === 0) setTrash(false);
@@ -389,7 +392,11 @@ function VideosInner() {
           ))}
           <button
             type="button"
-            onClick={() => setTrash((t) => !t)}
+            onClick={() => {
+              setTrash((t) => !t);
+              // Trashed links answer "not found" whatever they were set to, so the share filter has no place there.
+              setShare("all");
+            }}
             aria-pressed={trash}
             data-testid="trash-toggle"
             title={`Videos you deleted; each is removed for good ${TRASH_RETENTION_DAYS} days after it was trashed`}
@@ -405,6 +412,16 @@ function VideosInner() {
               <option value="changes">Changes requested</option>
               <option value="none">Not reviewed</option>
             </select>
+          )}
+          {!trash && (
+          <select aria-label="Filter by share link" value={share} onChange={(e) => setShare(e.target.value as VideoQuery["share"])} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700">
+            <option value="all">Any share link</option>
+            <option value="live">Link live</option>
+            <option value="expiring">Expiring within a week</option>
+            <option value="scheduled">Going live later</option>
+            <option value="off">Link off</option>
+            <option value="expired">Expired</option>
+          </select>
           )}
           <select aria-label="Sort videos" value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className="ml-auto rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700">
             <option value="newest">Newest first</option>
@@ -424,7 +441,7 @@ function VideosInner() {
         <EmptyState
           icon={trash ? <Trash2 className="h-8 w-8" /> : <Clapperboard className="h-8 w-8" />}
           title={trash ? (trashed ? "No trashed videos match" : "The trash is empty") : hasAny ? "No videos match" : "No videos yet"}
-          body={trash ? `Deleted videos wait here for ${TRASH_RETENTION_DAYS} days before they are removed for good.` : hasAny ? "Try a different search, status, or folder." : "Your rendered videos will show up here."}
+          body={trash ? `Deleted videos wait here for ${TRASH_RETENTION_DAYS} days before they are removed for good.` : hasAny ? "Try a different search, status, folder, or share link." : "Your rendered videos will show up here."}
         />
       ) : (
         <>

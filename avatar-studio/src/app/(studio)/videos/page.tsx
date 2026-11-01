@@ -97,6 +97,14 @@ function VideosInner() {
     if (created !== "all") params.set("created", created);
     return `/api/videos?${params}`;
   }, [limit, needle, status, folder, batch, sort, trash, review, share, starred, created]);
+  // The share analytics of what the library shows now, every match rather than the page loaded, in the same order.
+  const analyticsHref = useMemo(() => {
+    const params = new URLSearchParams(path.split("?")[1]);
+    params.delete("limit");
+    params.delete("trash");
+    const query = params.toString();
+    return `/api/videos/analytics${query ? `?${query}` : ""}`;
+  }, [path]);
   // The filtering, sorting, and paging happen on the server; the page only holds what it shows.
   const { data, loading, error, refetch } = useApi<VideoPage>(path, { pollMs: 6000, pollWhile: (d) => d.rendering > 0 });
   const videos = data?.videos ?? [];
@@ -700,6 +708,12 @@ function VideosInner() {
               <span className="sr-only">List</span>
             </button>
           </span>
+          {/* Shown only when the file would hold a video: the share analytics of what the library shows, in its order. */}
+          {!trash && (data?.matched ?? 0) > 0 && (
+            <a href={analyticsHref} download className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50" title="Views, watch-through, clicks, and share links for the videos shown, every match and in this order" data-testid="library-analytics">
+              <Download className="h-3 w-3" aria-hidden /> Download analytics
+            </a>
+          )}
           <select aria-label="Sort videos" value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className="ml-auto rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700">
             <option value="newest">Newest first</option>
             <option value="oldest">Oldest first</option>

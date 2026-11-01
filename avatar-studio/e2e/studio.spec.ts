@@ -8746,3 +8746,52 @@ test("the library shows videos as compact rows, remembered by the browser", asyn
   await page.getByRole("group", { name: "Layout" }).getByRole("button", { name: "Grid" }).click();
   await expect(page.getByTestId("video-list")).toHaveCount(0);
 });
+
+test("the library's analytics CSV holds what the library shows", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const [starred, plain] = [await createVideoViaApi(page, `Csv starred ${tag}`), await createVideoViaApi(page, `Csv plain ${tag}`)];
+  expect((await page.request.patch(`/api/videos/${starred.id}`, { data: { starred: true } })).ok()).toBe(true);
+  const idsIn = async (url: string) => {
+    const res = await page.request.get(url);
+    expect(res.status()).toBe(200);
+    const lines = (await res.text()).replace(/^﻿/, "").trim().split(/\r?\n/).slice(1);
+    return lines.map((l) => l.split(",")[0].replace(/"/g, ""));
+  };
+  expect(await idsIn(`/api/videos/analytics?q=${tag}&starred=1`)).toEqual([starred.id]);
+  expect((await idsIn(`/api/videos/analytics?q=${tag}`)).sort()).toEqual([starred.id, plain.id].sort());
+  // In the order asked for, and the library's page size is not the file's.
+  expect(await idsIn(`/api/videos/analytics?q=${tag}&sort=title`)).toEqual([plain.id, starred.id]);
+  expect(await idsIn(`/api/videos/analytics?q=${tag}&sort=title&limit=500`)).toEqual([plain.id, starred.id]);
+  expect((await page.request.get("/api/videos/analytics?trash=true")).status()).toBe(400);
+  expect((await page.request.get("/api/videos/analytics?share=public")).status()).toBe(400);
+
+  // The library's link carries its filters, and downloads the file.
+  await page.goto("/videos");
+  await page.getByLabel("Search videos").fill(tag);
+  await expect(page.locator(`a[href="/videos/${plain.id}"]`)).toBeVisible();
+  await page.getByTestId("starred-toggle").click();
+  await expect(page.locator(`a[href="/videos/${plain.id}"]`)).toHaveCount(0);
+  const link = page.getByTestId("library-analytics");
+  await expect(link).toHaveAttribute("href", `/api/videos/analytics?q=${tag}&starred=1`);
+  await expect(link).toHaveAccessibleName("Download analytics");
+  const download = page.waitForEvent("download");
+  await link.click();
+  expect((await download).suggestedFilename()).toMatch(/^video-analytics-\d{4}-\d{2}-\d{2}\.csv$/);
+  // A folder (with characters that need encoding) carries through; with nothing matching, there is no file to offer.
+  const folder = `Q&A ${tag}`;
+  expect((await page.request.patch(`/api/videos/${starred.id}`, { data: { folder } })).ok()).toBe(true);
+  await page.reload();
+  await page.getByLabel("Search videos").fill(tag);
+  await page.getByLabel("Folder").selectOption(folder);
+  await expect(page.locator(`a[href="/videos/${plain.id}"]`)).toHaveCount(0);
+  const href = (await link.getAttribute("href"))!;
+  expect(new URL(href, "http://x").searchParams.get("folder")).toBe(folder);
+  expect(await idsIn(href)).toEqual([starred.id]);
+  await page.getByLabel("Search videos").fill(`${tag} nothing like it`);
+  await expect(page.getByText("No videos match")).toBeVisible();
+  await expect(link).toHaveCount(0);
+  // The trash has no share analytics, so the link is not offered there.
+  await page.getByLabel("Search videos").fill(tag);
+  await page.getByTestId("trash-toggle").click();
+  await expect(link).toHaveCount(0);
+});

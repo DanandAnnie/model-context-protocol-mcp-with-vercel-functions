@@ -4694,6 +4694,36 @@ test("the library filters by share link state", async ({ page }) => {
   await expect(filter).toHaveValue("all");
   await expect(card(off.id)).toBeVisible();
   await expect(card(open.id)).toBeVisible();
+
+  // The selection's links download as a CSV in the order picked: the link where it can be sent, and why the others are blank.
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${open.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  await page.reload();
+  await page.getByLabel("Search videos").fill(tag);
+  await expect(card(open.id)).toBeVisible();
+  await page.getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: `Select Share open ${tag}` }).click();
+  await page.getByRole("button", { name: `Select Share off ${tag}` }).click();
+  await page.getByRole("button", { name: `Select Share later ${tag}` }).click();
+  const saved = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download links" }).click();
+  const file = await saved;
+  expect(file.suggestedFilename()).toMatch(/^links-\d{4}-\d{2}-\d{2}\.csv$/);
+  const links = parseCsv(await readFile(await file.path(), "utf8"));
+  expect(links.columns).toEqual(["title", "status", "share_state", "share_link", "share_goes_live", "share_expires", "password_required", "email_required", "folder", "video_id", "created"]);
+  expect(links.rows.map((r) => [r.video_id, r.share_state, r.share_link])).toEqual([
+    [open.id, "live", `http://localhost:3100/share/${open.id}`],
+    [off.id, "off", ""],
+    [later.id, "scheduled", ""],
+  ]);
+  expect(links.rows[2].share_goes_live).not.toBe("");
+  // The selection stays, so the links can be fixed and the file downloaded again.
+  await expect(page.getByTestId("bulk-bar")).toContainText("3 selected");
+  expect((await page.request.post("/api/videos/links", { data: { ids: [] } })).status()).toBe(400);
+  expect((await page.request.post("/api/videos/links", { data: { ids: ["vid_nosuch"] } })).status()).toBe(404);
+  // Ids left out are counted, so the page can say so.
+  const partial = await page.request.post("/api/videos/links", { data: { ids: [open.id, "vid_nosuch", open.id] } });
+  expect(partial.headers()["x-omitted"]).toBe("1");
+  expect(parseCsv(await partial.text()).rows.map((r) => r.video_id)).toEqual([open.id]);
 });
 
 test("library multi-select moves and deletes videos in bulk", async ({ page }) => {

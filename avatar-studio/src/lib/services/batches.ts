@@ -7,7 +7,7 @@ import { LOCAL_OWNER } from "../owner-id";
 import { renderLimitFor } from "../billing";
 import { NotFoundError, ValidationError } from "../errors";
 import { fillTemplate, parseCsv, placeholdersIn } from "../csv";
-import { shareOffline } from "../client";
+import { shareOffline, shareState } from "../client";
 import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, listVideos, refreshPending, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, createVideo, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, rendersThisMonth, resolveRenderContext } from "./videos";
 import { getBrandKit } from "./brand";
 import { stripPauses } from "../pauses";
@@ -211,6 +211,50 @@ export function batchLinkRows(videos: Video[], base: string, now = Date.now()): 
         created: v.createdAt,
       };
     });
+}
+
+/** Columns of the links file for any selection of videos (the library's "Download links"). */
+export const SELECTION_LINK_COLUMNS = ["title", "status", "share_state", "share_link", "share_goes_live", "share_expires", "password_required", "email_required", "folder", "video_id", "created"] as const;
+
+export const selectionLinksSchema = z.object({ ids: z.array(z.string().min(1).max(80)).min(1).max(200) });
+
+/**
+ * The chosen videos as rows to send, in the order given, the link filled in only where a viewer can open it now (ready,
+ * on, live, not expired), as for a batch; `share_state` says why one is blank: "failed" for a render that will never be
+ * sendable (whatever its link says), else the link's "off", "expired", or "scheduled", else "not ready" while it renders.
+ * A go-live time or expiry still ahead is given whatever the state, since it applies once the link is on or the render done.
+ */
+export function selectionLinkRows(videos: Video[], base: string, now = Date.now()): Array<Record<(typeof SELECTION_LINK_COLUMNS)[number], string | undefined>> {
+  const origin = base.replace(/\/$/, "");
+  return videos.map((v) => {
+    const state = shareState(v, now);
+    const live = v.status === "completed" && !shareOffline(v, now);
+    const ahead = (iso?: string) => (iso && Date.parse(iso) > now ? iso : undefined);
+    return {
+      title: v.title,
+      status: v.status,
+      share_state: v.status === "failed" ? "failed" : live ? "live" : state === "live" ? "not ready" : state,
+      share_link: live ? `${origin}/share/${v.id}` : undefined,
+      share_goes_live: ahead(v.shareStartsAt),
+      share_expires: ahead(v.shareExpiresAt),
+      password_required: v.shareLocked ? "yes" : undefined,
+      email_required: v.shareGate ? "yes" : undefined,
+      folder: v.folder,
+      video_id: v.id,
+      created: v.createdAt,
+    };
+  });
+}
+
+/**
+ * The owner's videos among `ids` (not those in the trash), in the order asked, renders in flight refreshed first (up to
+ * 10 at a time, as the library's list); others are left out, which the route reports in a header.
+ */
+export async function selectionVideos(ids: string[], ownerId: string = LOCAL_OWNER): Promise<Video[]> {
+  const byId = new Map((await listVideos(ownerId, false)).map((v) => [v.id, v]));
+  const chosen = Array.from(new Set(ids)).flatMap((id) => byId.get(id) ?? []);
+  if (!chosen.length) throw new NotFoundError("None of those videos are in the library");
+  return refreshPending(chosen);
 }
 
 /** The library's videos of one batch (not those in the trash), renders in flight refreshed first; a batch with none is not found. */

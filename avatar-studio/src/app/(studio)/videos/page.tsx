@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { ArchiveRestore, CheckSquare, Clapperboard, Clock, FolderInput, FolderMinus, FolderPen, Link2, Link2Off, TimerOff, Trash2, X } from "lucide-react";
+import { ArchiveRestore, CheckSquare, Clapperboard, Clock, Download, FolderInput, FolderMinus, FolderPen, Link2, Link2Off, TimerOff, Trash2, X } from "lucide-react";
 import { api } from "@/lib/client";
 import { VideoCard } from "@/components/VideoCard";
 import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -22,7 +22,7 @@ function localMinute(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge";
+type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links";
 
 export default function VideosPage() {
   return (
@@ -203,6 +203,35 @@ function VideosInner() {
     }
   }
 
+  // The selection's share links as a CSV to send from: the link where it can be sent now, and why the others are blank.
+  // The selection stays, so its links can be fixed (go-live, expiry, links on) and the file downloaded again.
+  async function downloadLinks() {
+    const ids = Array.from(selected);
+    if (!ids.length) return;
+    setBusy("links");
+    // A note from an earlier go-live or expiry refusal stays: it names the links to fix, which this file is for checking.
+    try {
+      const res = await fetch("/api/videos/links", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) }).catch(() => {
+        throw new Error("Could not reach the server to download the links");
+      });
+      if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? "Could not download the links");
+      const omitted = Number(res.headers.get("X-Omitted") ?? 0);
+      if (omitted > 0) setBulkErr(`${omitted === 1 ? "1 selected video is" : `${omitted} selected videos are`} no longer in the library and ${omitted === 1 ? "was" : "were"} left out of the file.`);
+      const url = URL.createObjectURL(await res.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? "links.csv";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      setBulkErr(e instanceof Error ? e.message : "Could not download the links");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   // The banner stays: after a refusal it says which of the two times to move, which may be the field being opened.
   function openTimeField(kind: "golive" | "expiry") {
     setTimeField(kind);
@@ -343,6 +372,9 @@ function VideosInner() {
                 </>
               ) : (
                 <>
+              <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void downloadLinks()} disabled={!selected.size || busy !== null} loading={busy === "links"} title="A CSV of the selected videos' share links, each left blank until it can be sent (a render still under way included), with the reason">
+                <Download className="h-3.5 w-3.5" /> Download links
+              </Button>
               <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => bulk("move")} disabled={!selected.size || busy !== null} loading={busy === "move"}>
                 <FolderInput className="h-3.5 w-3.5" /> Move to folder
               </Button>

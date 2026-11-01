@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { Suspense, useRef, useState } from "react";
-import { Sparkles } from "lucide-react";
+import { Download, Sparkles } from "lucide-react";
 import { ChatPanel, type ChatTurn } from "@/components/ChatPanel";
 import { useApi } from "@/hooks/useApi";
 import { useLiveAvatar } from "@/hooks/useLiveAvatar";
@@ -20,6 +20,19 @@ interface PublicAgent {
   collectEmail: boolean;
   liveVideo: boolean;
   brand: { name: string; logoUrl?: string; primaryColor: string; accentColor?: string } | null;
+}
+
+/** The file name a download was given: the presenter's own name (`filename*`) where it can be read, else the ASCII one. */
+function downloadName(disposition: string): string {
+  const own = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+  if (own) {
+    try {
+      return decodeURIComponent(own);
+    } catch {
+      // Not percent-encoded as it should be: the plain name below.
+    }
+  }
+  return /filename="([^"]+)"/.exec(disposition)?.[1] ?? "conversation.txt";
 }
 
 /** Public page where visitors talk to a shared presenter. No sign-in; the owner's instructions stay server-side. */
@@ -44,6 +57,8 @@ function TalkInner() {
   // One transcript per visit: the first turn returns an id that later turns send back.
   const conversationId = useRef<string | undefined>(undefined);
   const [turns, setTurns] = useState(0);
+  // Set once a turn of this visit made it into the transcript, so there is something to download.
+  const [recorded, setRecorded] = useState(false);
   const [lead, setLead] = useState<{ email: string; name: string }>({ email: "", name: "" });
   const [leadState, setLeadState] = useState<"idle" | "sending" | "done" | "dismissed">("idle");
   const [leadErr, setLeadErr] = useState<string | null>(null);
@@ -55,6 +70,7 @@ function TalkInner() {
     if (asked !== visit.current) return res.reply;
     conversationId.current = res.conversationId;
     setTurns((n) => n + 1);
+    if (res.at) setRecorded(true);
     // The reply's time names it in this visit, so the visitor can rate it.
     return { reply: res.reply, ref: res.at ? `${res.conversationId} ${res.at}` : undefined };
   }
@@ -73,6 +89,34 @@ function TalkInner() {
     } catch (e) {
       setLeadErr(e instanceof Error ? e.message : "Could not send");
       setLeadState("idle");
+    }
+  }
+  const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState<string | null>(null);
+  /** Downloads this visit's conversation as a text file; the visit's id goes in the body, not the address. */
+  async function downloadConversation() {
+    if (!conversationId.current) return;
+    // A download still under way when the visitor starts over saves nothing and says nothing on the new visit.
+    const asked = visit.current;
+    setSaving(true);
+    setSaveErr(null);
+    try {
+      const res = await fetch(`/api/talk/${id}/transcript`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: conversationId.current }) });
+      if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? "Could not download the conversation");
+      const blob = await res.blob();
+      if (asked !== visit.current) return;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = downloadName(res.headers.get("Content-Disposition") ?? "");
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      if (asked === visit.current) setSaveErr(e instanceof Error ? e.message : "Could not download the conversation");
+    } finally {
+      if (asked === visit.current) setSaving(false);
     }
   }
   const showLead = !!agent?.collectEmail && turns >= 1 && leadState !== "dismissed";
@@ -136,9 +180,25 @@ function TalkInner() {
                 visit.current += 1;
                 conversationId.current = undefined;
                 setTurns(0);
+                setRecorded(false);
                 setLeadState("idle");
+                setSaveErr(null);
+                setSaving(false);
               }}
             />
+            {recorded && (
+              <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
+                <button type="button" onClick={downloadConversation} disabled={saving} className="inline-flex items-center gap-1.5 text-slate-300 hover:text-white disabled:opacity-60">
+                  <Download className="h-3.5 w-3.5" aria-hidden />
+                  {saving ? "Preparing…" : "Download this conversation"}
+                </button>
+                {saveErr && (
+                  <span role="alert" className="text-rose-300">
+                    {saveErr}
+                  </span>
+                )}
+              </div>
+            )}
             {showLead && (
               <div className="mt-4 rounded-xl border border-slate-800 bg-slate-900 p-4" data-testid="lead-form">
                 {leadState === "done" ? (

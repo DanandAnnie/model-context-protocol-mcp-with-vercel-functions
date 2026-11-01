@@ -5761,6 +5761,41 @@ test("a presenter kept to some websites is framed and launched only on those", a
   }
 });
 
+test("a visitor downloads their own conversation, without the owner's note or mark", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const res = await page.request.post("/api/agents", { data: { name: `Kept ${tag}`, avatarId: "stock_1" } });
+  const { id } = (await res.json()).agent as { id: string };
+  try {
+    await page.setExtraHTTPHeaders({ "x-forwarded-for": `198.51.100.${Math.floor(Math.random() * 200) + 1}` });
+    await page.goto(`/talk/${id}`);
+    // Nothing to download before the first reply.
+    await expect(page.getByRole("button", { name: "Download this conversation" })).toHaveCount(0);
+    await page.getByLabel("Your message").fill("When are the open houses?");
+    await page.getByRole("button", { name: "Send" }).click();
+    await expect(page.locator("[data-testid=chat-log] [data-role=assistant]")).toHaveCount(1);
+    // The owner marks and notes the visit; the visitor's copy leaves both out.
+    const { conversations } = (await (await page.request.get(`/api/agents/${id}/conversations`)).json()) as { conversations: { id: string }[] };
+    expect((await page.request.patch(`/api/agents/${id}/conversations/${conversations[0].id}`, { data: { followedUp: true, note: `Private ${tag}` } })).ok()).toBe(true);
+    const saved = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Download this conversation" }).click();
+    const download = await saved;
+    expect(download.suggestedFilename()).toMatch(new RegExp(`^conversation-Kept ${tag}-\\d{4}-\\d{2}-\\d{2}\\.txt$`));
+    const text = await readFile((await download.path())!, "utf8");
+    expect(text).toContain(`Conversation with Kept ${tag}`);
+    expect(text).toMatch(/\] Visitor: When are the open houses\?$/m);
+    expect(text).not.toContain(`Private ${tag}`);
+    expect(text).not.toMatch(/^(Followed up|Note):/m);
+    // A visit that is not one, or no visit, gets nothing.
+    expect((await page.request.post(`/api/talk/${id}/transcript`, { data: { conversationId: "conv_nosuch" } })).status()).toBe(404);
+    expect((await page.request.post(`/api/talk/${id}/transcript`, { data: {} })).status()).toBe(400);
+    // Starting over leaves nothing to download until the next reply.
+    await page.getByRole("button", { name: "Start over" }).click();
+    await expect(page.getByRole("button", { name: "Download this conversation" })).toHaveCount(0);
+  } finally {
+    await page.request.delete(`/api/agents/${id}`);
+  }
+});
+
 test("a visitor rates the presenter's replies, and the owner sees the ratings in the transcripts and downloads", async ({ page }) => {
   const tag = Date.now().toString(36);
   const res = await page.request.post("/api/agents", { data: { name: `Rated ${tag}`, avatarId: "stock_1" } });

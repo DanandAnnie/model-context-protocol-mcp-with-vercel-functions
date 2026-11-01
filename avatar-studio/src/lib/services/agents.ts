@@ -182,6 +182,23 @@ export async function rateReply(agentId: string, input: z.infer<typeof rateSchem
   if (written === "busy") throw new ConflictError("The conversation is busy; try again");
 }
 
+export const visitorTranscriptSchema = z.object({ conversationId: rateSchema.shape.conversationId });
+
+/**
+ * A visitor's own conversation, to download: the visit's id is their token, as for a rating or a lead. Only what is
+ * theirs is kept (their messages with their ratings, and the details they left), so the owner's followed-up mark and
+ * private note, or any field of the owner's added later, never reach them; of the presenter, only its name.
+ */
+export async function visitorTranscript(agentId: string, input: z.infer<typeof visitorTranscriptSchema>): Promise<{ agentName: string; conversation: Conversation }> {
+  const agent = await getStore().get<Agent>("agent", agentId);
+  if (!agent || !agent.isPublic) throw new NotFoundError("This presenter is not available");
+  const c = await getStore().get<Conversation>("conversation", input.conversationId);
+  if (!c || c.agentId !== agentId) throw new NotFoundError("Conversation not found");
+  const messages = c.messages.map(({ role, content, at, rating }) => ({ role, content, at, ...(rating ? { rating } : {}) }));
+  const visitor = c.visitor ? { email: c.visitor.email, ...(c.visitor.name ? { name: c.visitor.name } : {}) } : undefined;
+  return { agentName: agent.name, conversation: { id: c.id, ownerId: c.ownerId, agentId: c.agentId, messages, ...(visitor ? { visitor } : {}), startedAt: c.startedAt, updatedAt: c.updatedAt } };
+}
+
 export async function listAgents(ownerId: string = LOCAL_OWNER): Promise<Agent[]> {
   const agents = await getStore().list<Agent>("agent", ownerId);
   return agents.sort((a, b) => b.createdAt.localeCompare(a.createdAt));

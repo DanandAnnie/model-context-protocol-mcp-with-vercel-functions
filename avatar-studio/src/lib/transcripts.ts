@@ -260,3 +260,26 @@ export function transcriptText(agentName: string, c: Conversation): string {
   });
   return `${[...head, "", ...body].join("\n")}\n`;
 }
+
+/** Percent-encodes a value for `filename*` (RFC 8187), where `encodeURIComponent` leaves ', (, ), and * as they are. */
+function rfc5987(value: string): string {
+  return encodeURIComponent(value).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+/**
+ * A transcript download's `Content-Disposition`: an ASCII slug for every client, and the presenter's own name for those
+ * that read `filename*`.
+ */
+export function transcriptFilename(name: string, date: string): string {
+  const agentName = wellFormed(name);
+  const slug = agentName.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40).replace(/^-+|-+$/g, "") || "presenter";
+  // Joiners stay, so an emoji sequence keeps its picture; the cut falls between letters and keeps the name within 200 bytes.
+  const named = agentName.replace(/(?:(?!\u200D)[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\\/:*?"<>|])+/gu, "-").trim();
+  let own = "";
+  for (const g of graphemes(named)) {
+    if (new TextEncoder().encode(own + g).length > 200) break;
+    own += g;
+  }
+  own ||= "presenter";
+  return `attachment; filename="conversation-${slug}-${date}.txt"; filename*=UTF-8''${rfc5987(`conversation-${own}-${date}.txt`)}`;
+}

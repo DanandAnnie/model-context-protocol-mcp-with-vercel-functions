@@ -170,3 +170,15 @@ export function formatSeconds(total: number): string {
   const s = total % 60;
   return m > 0 ? `${m}m ${s.toString().padStart(2, "0")}s` : `${s}s`;
 }
+
+/**
+ * A line on what a video's share link does now, as its card's badges say: why it cannot be opened ("Link off",
+ * "Expired", "Scheduled"), or when it stops ("Expires in 3 days"), and whether it asks for a password. Nothing for a link
+ * open as it is, or for a video in the trash (its link answers "not found" whatever it was set to).
+ */
+export function shareSummary(video: { shareDisabled?: boolean; shareExpiresAt?: string; shareStartsAt?: string; shareLocked?: boolean; deletedAt?: string }, now = Date.now()): string | undefined {
+  if (video.deletedAt) return undefined;
+  const state = video.shareDisabled ? "Link off" : shareExpired(video, now) ? "Expired" : shareNotYet(video, now) ? "Scheduled" : shareExpiresSoon(video, now);
+  const notes = [state, video.shareLocked ? "Password" : undefined].filter(Boolean);
+  return notes.length ? notes.join(" · ") : undefined;
+}

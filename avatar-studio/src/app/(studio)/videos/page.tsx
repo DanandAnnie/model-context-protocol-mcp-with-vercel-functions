@@ -2,9 +2,9 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { ArchiveRestore, CheckSquare, Clapperboard, Clock, Download, FolderInput, KeyRound, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
+import { ArchiveRestore, CheckSquare, Clapperboard, Clock, LayoutGrid, List, Download, FolderInput, KeyRound, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
 import { api } from "@/lib/client";
-import { VideoCard } from "@/components/VideoCard";
+import { VideoCard, VideoRow } from "@/components/VideoCard";
 import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useWorkspaceRole } from "@/hooks/useCanEdit";
@@ -13,6 +13,8 @@ import { MAX_RETRY_AT_ONCE, SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, TRASH_RETENT
 
 const STATUSES: Array<"all" | VideoStatus> = ["all", "processing", "completed", "failed"];
 type SortKey = VideoQuery["sort"];
+/** Where this browser keeps the library's layout (grid of cards or list of rows). */
+const LAYOUT_KEY = "avatar-studio:library-layout";
 /** Cards per request; "Show more" asks for another page's worth. */
 const PAGE = 48;
 
@@ -53,6 +55,23 @@ function VideosInner() {
   const [starred, setStarred] = useState(false);
   // When the videos were made: a campaign's renders of this week or month, whatever folder they went to.
   const [created, setCreated] = useState<VideoQuery["created"]>("all");
+  // Cards or compact rows; remembered by this browser only (read after mounting, so the server render stays the grid).
+  const [layout, setLayout] = useState<"grid" | "list">("grid");
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(LAYOUT_KEY) === "list") setLayout("list");
+    } catch {
+      // Storage blocked (a private window, say): the grid it is.
+    }
+  }, []);
+  function chooseLayout(next: "grid" | "list") {
+    setLayout(next);
+    try {
+      window.localStorage.setItem(LAYOUT_KEY, next);
+    } catch {
+      // Not remembered, but the choice still holds for this visit.
+    }
+  }
   // Search as you type, one request per pause rather than per keystroke.
   useEffect(() => {
     const t = setTimeout(() => setNeedle(q.trim()), 250);
@@ -670,6 +689,17 @@ function VideosInner() {
             <option value="30d">Made in the last 30 days</option>
             <option value="90d">Made in the last 90 days</option>
           </select>
+          {/* Rounded children rather than a clipping parent, so a focus ring shows whole. */}
+          <span className="inline-flex rounded-full border border-slate-200 bg-white" role="group" aria-label="Layout">
+            <button type="button" onClick={() => chooseLayout("grid")} aria-pressed={layout === "grid"} title="Grid" className={`rounded-l-full px-2 py-1 ${layout === "grid" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}>
+              <LayoutGrid className="h-3.5 w-3.5" aria-hidden />
+              <span className="sr-only">Grid</span>
+            </button>
+            <button type="button" onClick={() => chooseLayout("list")} aria-pressed={layout === "list"} title="List" className={`rounded-r-full px-2 py-1 ${layout === "list" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}>
+              <List className="h-3.5 w-3.5" aria-hidden />
+              <span className="sr-only">List</span>
+            </button>
+          </span>
           <select aria-label="Sort videos" value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className="ml-auto rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700">
             <option value="newest">Newest first</option>
             <option value="oldest">Oldest first</option>
@@ -679,11 +709,19 @@ function VideosInner() {
         </div>
       )}
       {loading && !data ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {[0, 1, 2].map((i) => (
-            <Skeleton key={i} className="aspect-[16/11]" />
-          ))}
-        </div>
+        layout === "list" ? (
+          <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-14 rounded-none" />
+            ))}
+          </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="aspect-[16/11]" />
+            ))}
+          </div>
+        )
       ) : videos.length === 0 ? (
         <EmptyState
           icon={trash ? <Trash2 className="h-8 w-8" /> : <Clapperboard className="h-8 w-8" />}
@@ -703,11 +741,19 @@ function VideosInner() {
         />
       ) : (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {videos.map((v) => (
-              <VideoCard key={v.id} video={v} selectable={selecting} selected={selected.has(v.id)} onToggle={() => busy === null && toggle(v.id)} />
-            ))}
-          </div>
+          {layout === "list" ? (
+            <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200" data-testid="video-list">
+              {videos.map((v) => (
+                <VideoRow key={v.id} video={v} selectable={selecting} selected={selected.has(v.id)} onToggle={() => busy === null && toggle(v.id)} />
+              ))}
+            </div>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {videos.map((v) => (
+                <VideoCard key={v.id} video={v} selectable={selecting} selected={selected.has(v.id)} onToggle={() => busy === null && toggle(v.id)} />
+              ))}
+            </div>
+          )}
           {remaining > 0 && (
             <div className="mt-6 flex flex-col items-center gap-2 text-sm text-slate-500">
               <span>Showing {videos.length} of {data?.matched}</span>

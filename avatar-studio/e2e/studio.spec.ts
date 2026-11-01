@@ -7979,6 +7979,9 @@ test("HeyGen's Video Agent stops at its storyboard for review, takes feedback, a
   const library = await page.context().newPage();
   await library.goto("/videos");
   await expect(library.getByText("Waiting for your review").first()).toBeVisible();
+  // In the list layout as well.
+  await library.getByRole("group", { name: "Layout" }).getByRole("button", { name: "List" }).click();
+  await expect(library.getByTestId("video-list").locator(`a[href="/videos/${id}"]`)).toContainText("Waiting for your review");
   await library.close();
   // Feedback first: it is shown as the account's, and the agent works on it and answers again.
   const answer = talk.getByRole("textbox", { name: "Your answer" });
@@ -8683,4 +8686,46 @@ test("the library filters by when videos were made", async ({ page }) => {
   await expect(card).toBeVisible();
   const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
   expect(axe.violations.map((v) => v.id)).toEqual([]);
+});
+
+test("the library shows videos as compact rows, remembered by the browser", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const [one, two] = [await createVideoViaApi(page, `Row one ${tag}`), await createVideoViaApi(page, `Row two ${tag}`)];
+  expect((await page.request.patch(`/api/videos/${one.id}`, { data: { starred: true, shareDisabled: true, folder: `Rows ${tag}` } })).ok()).toBe(true);
+  await page.goto("/videos");
+  await page.getByLabel("Search videos").fill(tag);
+  await expect(page.locator(`a[href="/videos/${two.id}"]`)).toBeVisible();
+  const layout = page.getByRole("group", { name: "Layout" });
+  await expect(layout.getByRole("button", { name: "Grid" })).toHaveAttribute("aria-pressed", "true");
+  await layout.getByRole("button", { name: "List" }).click();
+  await expect(layout.getByRole("button", { name: "List" })).toHaveAttribute("aria-pressed", "true");
+  const list = page.getByTestId("video-list");
+  const row = list.locator(`a[href="/videos/${one.id}"]`);
+  await expect(row).toContainText(`Row one ${tag}`);
+  await expect(row).toContainText(`Rows ${tag}`);
+  await expect(row.getByTestId("star-badge")).toBeVisible();
+  await expect(row.getByTestId("row-share")).toHaveText("Link off");
+  // At phone width the row still says why it is off, without running past the screen.
+  await page.setViewportSize({ width: 375, height: 800 });
+  await expect(row.getByTestId("row-share")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await expect(list.locator(`a[href="/videos/${two.id}"]`)).toBeVisible();
+  const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(axe.violations.map((v) => v.id)).toEqual([]);
+  // Selecting works the same in rows.
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await page.getByRole("button", { name: `Select Row two ${tag}` }).click();
+  await expect(page.getByRole("button", { name: `Select Row two ${tag}` })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("bulk-bar").getByText(/selected$/)).toHaveText("1 selected");
+  await page.getByRole("button", { name: "Done selecting" }).click();
+  // The browser keeps the choice; the row opens the video.
+  await page.reload();
+  await page.getByLabel("Search videos").fill(tag);
+  await expect(page.getByTestId("video-list").locator(`a[href="/videos/${two.id}"]`)).toBeVisible();
+  await page.getByTestId("video-list").locator(`a[href="/videos/${two.id}"]`).click();
+  await page.waitForURL(`**/videos/${two.id}`);
+  await page.goto("/videos");
+  await page.getByRole("group", { name: "Layout" }).getByRole("button", { name: "Grid" }).click();
+  await expect(page.getByTestId("video-list")).toHaveCount(0);
 });

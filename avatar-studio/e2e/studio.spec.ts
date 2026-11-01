@@ -4747,11 +4747,11 @@ test("library multi-select moves and deletes videos in bulk", async ({ page }) =
   const tag = Date.now().toString(36);
   const a = await createVideoViaApi(page, `Bulk one ${tag}`);
   const b = await createVideoViaApi(page, `Bulk two ${tag}`);
-  // Only Move (prompt) and Delete (confirm) may open a dialog; the share buttons must not.
+  // Only the confirms may open a dialog: Move to folder is a field in the bar, and the share buttons ask nothing.
   const dialogs: string[] = [];
   page.on("dialog", (d) => {
     dialogs.push(d.message());
-    void d.accept(`Bulk ${tag}`);
+    void d.accept();
   });
 
   await page.goto("/videos");
@@ -4760,9 +4760,37 @@ test("library multi-select moves and deletes videos in bulk", async ({ page }) =
   await page.getByRole("button", { name: `Select Bulk two ${tag}` }).click();
   await expect(page.getByTestId("bulk-bar")).toContainText("2 selected");
   await page.getByRole("button", { name: "Move to folder" }).click();
+  const folderField = page.getByLabel("Folder for the selected videos");
+  await expect(folderField).toBeFocused();
+  await folderField.fill(`Bulk ${tag}`);
+  await expect(page.getByTestId("bulk-folder")).toContainText("A new folder");
+  await page.getByTestId("bulk-folder").getByRole("button", { name: "Move", exact: true }).click();
   await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
   expect((await (await page.request.get(`/api/videos/${a.id}`)).json()).video.folder).toBe(`Bulk ${tag}`);
   expect((await (await page.request.get(`/api/videos/${b.id}`)).json()).video.folder).toBe(`Bulk ${tag}`);
+  // A name that differs only in case and spacing joins that folder rather than starting a twin of it.
+  const c = await createVideoViaApi(page, `Bulk three ${tag}`);
+  await page.reload();
+  await page.getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: `Select Bulk three ${tag}` }).click();
+  await page.getByRole("button", { name: "Move to folder" }).click();
+  await page.getByLabel("Folder for the selected videos").fill(`  BULK ${tag.toUpperCase()} `);
+  await expect(page.getByTestId("bulk-folder")).toContainText(`Into the existing “Bulk ${tag}”`);
+  // Enter moves them, as Move does.
+  await page.getByLabel("Folder for the selected videos").press("Enter");
+  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+  expect((await (await page.request.get(`/api/videos/${c.id}`)).json()).video.folder).toBe(`Bulk ${tag}`);
+  // Unfiled takes it out again; closing the field moves nothing.
+  await page.getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: `Select Bulk three ${tag}` }).click();
+  await page.getByRole("button", { name: "Move to folder" }).click();
+  await page.getByRole("button", { name: "Close folder" }).click();
+  await expect(page.getByTestId("bulk-folder")).toHaveCount(0);
+  expect((await (await page.request.get(`/api/videos/${c.id}`)).json()).video.folder).toBe(`Bulk ${tag}`);
+  await page.getByRole("button", { name: "Move to folder" }).click();
+  await page.getByTestId("bulk-folder").getByRole("button", { name: "Unfiled" }).click();
+  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+  expect((await (await page.request.get(`/api/videos/${c.id}`)).json()).video.folder ?? "").toBe("");
 
   // Share links switch off and on for the selection; the cards show the badge.
   await page.getByRole("button", { name: "Select" }).click();
@@ -4949,7 +4977,7 @@ test("library multi-select moves and deletes videos in bulk", async ({ page }) =
   expect(await (await page.request.post("/api/videos/bulk", { data: { action: "purge", ids: [a.id] } })).json()).toEqual({ done: 0, missing: [a.id] });
   expect((await page.request.get(`/api/videos/${a.id}`)).status()).toBe(200);
   expect((await page.request.post("/api/videos/bulk", { data: { action: "move", ids: [] } })).status()).toBe(400);
-  expect(dialogs).toEqual(["Folder name (leave empty to move to Unfiled)", "1 selected video already has a share password. Replace it with this one? Visitors who unlocked it must enter the new one.", "Remove the share password from 2 videos? Anyone with their links can then watch.", "Ask for an email before the 2 selected videos play? Everyone opening their links or embeds, including people you have already sent them to, sees the form first.", "Move 1 video to the trash? You can restore it for 30 days.", "Delete this video for good? Its short clips, and the cleaned and lip-synced copies made from it, go too. This cannot be undone."]);
+  expect(dialogs).toEqual(["1 selected video already has a share password. Replace it with this one? Visitors who unlocked it must enter the new one.", "Remove the share password from 2 videos? Anyone with their links can then watch.", "Ask for an email before the 2 selected videos play? Everyone opening their links or embeds, including people you have already sent them to, sees the form first.", "Move 1 video to the trash? You can restore it for 30 days.", "Delete this video for good? Its short clips, and the cleaned and lip-synced copies made from it, go too. This cannot be undone."]);
 });
 
 test("webhook settings reject private hosts and show the signing secret", async ({ page }) => {
@@ -8948,8 +8976,9 @@ test("Select all matching selects past the first page and hands every match to a
   await expect(page.getByTestId("load-more")).toHaveCount(0);
   await expect(bar.getByRole("button", { name: /matching/ })).toHaveCount(0);
   await expect(bar.getByRole("button", { name: "Select all shown" })).toBeFocused();
-  page.once("dialog", (d) => void d.accept(folder));
   await bar.getByRole("button", { name: "Move to folder" }).click();
+  await page.getByLabel("Folder for the selected videos").fill(folder);
+  await page.getByTestId("bulk-folder").getByRole("button", { name: "Move", exact: true }).click();
   await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
   const counts = (await (await page.request.get("/api/videos?limit=1")).json()).folderCounts as Record<string, number>;
   expect(counts[folder]).toBe(50);

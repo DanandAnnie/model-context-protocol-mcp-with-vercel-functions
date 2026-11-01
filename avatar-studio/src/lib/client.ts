@@ -142,6 +142,19 @@ export function daysUntilPurge(video: { deletedAt?: string }, now = Date.now()):
   return at ? Math.max(0, Math.ceil((Date.parse(at) - now) / 86_400_000)) : 0;
 }
 
+/**
+ * The folder a typed name means: the existing folder of exactly that name (trimmed, as the server stores it), else one
+ * whose name matches apart from letter case and spacing (so "launch " joins "Launch" rather than starting a near twin),
+ * else the name as typed, trimmed. Empty is Unfiled.
+ */
+export function folderFor(typed: string, folders: readonly string[]): string {
+  const name = typed.trim();
+  if (!name || folders.includes(name)) return name;
+  // Locale-independent, so a Turkish browser lowercases "INFO" as everyone else does.
+  const key = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
+  return folders.find((f) => key(f) === key(name)) ?? name;
+}
+
 export function formatDate(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }

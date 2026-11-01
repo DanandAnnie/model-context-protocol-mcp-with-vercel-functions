@@ -3,13 +3,13 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { ArchiveRestore, CheckSquare, Clapperboard, Clock, LayoutGrid, List, Download, FolderInput, KeyRound, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
-import { api } from "@/lib/client";
+import { api, folderFor } from "@/lib/client";
 import { VideoCard, VideoRow } from "@/components/VideoCard";
 import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit, useWorkspaceRole } from "@/hooks/useCanEdit";
 import type { VideoPage, VideoQuery } from "@/lib/services/videos";
-import { BULK_MAX, EMPTY_TRASH_MAX, MAX_RETRY_AT_ONCE, RESTORE_ALL_MAX, SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, TRASH_RETENTION_DAYS, type VideoStatus } from "@/lib/types";
+import { BULK_MAX, EMPTY_TRASH_MAX, MAX_FOLDER_NAME, MAX_RETRY_AT_ONCE, RESTORE_ALL_MAX, SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, TRASH_RETENTION_DAYS, type VideoStatus } from "@/lib/types";
 
 const STATUSES: Array<"all" | VideoStatus> = ["all", "processing", "completed", "failed"];
 type SortKey = VideoQuery["sort"];
@@ -29,7 +29,7 @@ function localMinute(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links" | "password" | "nopassword" | "settings" | "retry" | "star" | "unstar" | "empty" | "restoreall";
+type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links" | "password" | "nopassword" | "settings" | "retry" | "star" | "unstar" | "empty" | "restoreall" | "unfile";
 
 export default function VideosPage() {
   return (
@@ -132,8 +132,8 @@ function VideosInner() {
   const [busy, setBusy] = useState<BulkAction | null>(null);
   const [bulkErr, setBulkErr] = useState<string | null>(null);
   // "Schedule go-live" and "Set expiry" open a date and time field in the bar, one at a time; it is a local time, sent as an instant.
-  // The share password field takes the same place in the bar, so only one of the three is open at a time.
-  const [timeField, setTimeField] = useState<"golive" | "expiry" | "password" | "settings" | null>(null);
+  // The share password, link settings, and folder fields take the same place in the bar, so only one of them is open at a time.
+  const [timeField, setTimeField] = useState<"golive" | "expiry" | "password" | "settings" | "folder" | null>(null);
   const [timeDraft, setTimeDraft] = useState("");
   // The download button and email gate, each left as it is ("") or turned on or off on every selected video.
   const [linkSettings, setLinkSettings] = useState<{ download: "" | "on" | "off"; gate: "" | "on" | "off" }>({ download: "", gate: "" });
@@ -232,10 +232,15 @@ function VideosInner() {
     const ids = Array.from(selected);
     if (!ids.length) return;
     let targetFolder: string | undefined;
-    if (action === "move") {
-      const answer = window.prompt("Folder name (leave empty to move to Unfiled)", "");
-      if (answer === null) return;
-      targetFolder = answer;
+    if (action === "move" || action === "unfile") {
+      // A name that only differs from an existing folder in case or spacing goes into that folder. The length is checked
+      // after trimming, as the server does, so spaces pasted around a full-length name do not cut it short.
+      targetFolder = action === "unfile" ? "" : folderFor(timeDraft, folders);
+      if (action === "move" && !targetFolder) return;
+      if (targetFolder.length > MAX_FOLDER_NAME) {
+        setBulkErr(`Keep the folder name to ${MAX_FOLDER_NAME} characters`);
+        return;
+      }
     } else if (action === "delete" && !window.confirm(`Move ${ids.length} ${ids.length === 1 ? "video" : "videos"} to the trash? You can restore ${ids.length === 1 ? "it" : "them"} for ${TRASH_RETENTION_DAYS} days.`)) {
       return;
     } else if (action === "password") {
@@ -265,8 +270,8 @@ function VideosInner() {
     setBulkErr(null);
     try {
       const body =
-        action === "move"
-          ? { action, ids, folder: targetFolder }
+        action === "move" || action === "unfile"
+          ? { action: "move", ids, folder: targetFolder }
           : action === "share-off" || action === "share-on"
             ? { action: "share", ids, shareDisabled: action === "share-off" }
             : action === "star" || action === "unstar"
@@ -465,10 +470,66 @@ function VideosInner() {
   }
 
   // The banner stays: after a refusal it says which of the two times to move, which may be the field being opened.
-  function openTimeField(kind: "golive" | "expiry" | "password" | "settings") {
+  function openTimeField(kind: "golive" | "expiry" | "password" | "settings" | "folder") {
     setTimeField(kind);
     setTimeDraft("");
     setLinkSettings({ download: "", gate: "" });
+  }
+  // A folder for every selected video: one of the library's folders (suggested as it is typed), a new one, or Unfiled.
+  function folderForm() {
+    const target = folderFor(timeDraft, folders);
+    const joins = !!target && folders.includes(target);
+    return (
+      <form
+        className="inline-flex flex-wrap items-center gap-1.5"
+        data-testid="bulk-folder"
+        noValidate
+        onSubmit={(e) => {
+          e.preventDefault();
+          void bulk("move");
+        }}
+      >
+        <input
+          autoFocus
+          list="bulk-folder-names"
+          aria-label="Folder for the selected videos"
+          aria-describedby="bulk-folder-hint"
+          placeholder="Folder name"
+          className={`${inputClass} w-44 py-1 text-xs`}
+          value={timeDraft}
+          onChange={(e) => {
+            setTimeDraft(e.target.value);
+            setBulkErr(null);
+          }}
+        />
+        <datalist id="bulk-folder-names">
+          {folders.map((f) => (
+            <option key={f} value={f} />
+          ))}
+        </datalist>
+        <span id="bulk-folder-hint" aria-live="polite" className="text-xs text-slate-500">
+          {!target ? "" : joins ? `Into the existing “${target}”` : "A new folder"}
+        </span>
+        <Button type="submit" variant="secondary" className="px-2.5 py-1 text-xs" disabled={!selected.size || !target || busy !== null} loading={busy === "move"}>
+          Move
+        </Button>
+        <Button type="button" variant="ghost" className="px-2.5 py-1 text-xs" onClick={() => bulk("unfile")} disabled={!selected.size || busy !== null} loading={busy === "unfile"} title="Take the selected videos out of their folders">
+          Unfiled
+        </Button>
+        <button
+          type="button"
+          onClick={() => {
+            setTimeField(null);
+            setTimeDraft("");
+          }}
+          disabled={busy !== null}
+          aria-label="Close folder"
+          className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </form>
+    );
   }
   // A password for every selected link: typed once, kept only as each video's own salted hash.
   function passwordForm() {
@@ -724,9 +785,13 @@ function VideosInner() {
               <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => bulk("unstar")} disabled={!selected.size || busy !== null} loading={busy === "unstar"} title="Take the stars off the selected videos">
                 <StarOff className="h-3.5 w-3.5" /> Unstar
               </Button>
-              <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => bulk("move")} disabled={!selected.size || busy !== null} loading={busy === "move"}>
-                <FolderInput className="h-3.5 w-3.5" /> Move to folder
-              </Button>
+              {timeField === "folder" ? (
+                folderForm()
+              ) : (
+                <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => openTimeField("folder")} disabled={!selected.size || busy !== null}>
+                  <FolderInput className="h-3.5 w-3.5" /> Move to folder
+                </Button>
+              )}
               <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => bulk("share-off")} disabled={!selected.size || busy !== null} loading={busy === "share-off"} title="The share pages and embeds of the selected videos answer “not found” until turned back on">
                 <Link2Off className="h-3.5 w-3.5" /> Links off
               </Button>

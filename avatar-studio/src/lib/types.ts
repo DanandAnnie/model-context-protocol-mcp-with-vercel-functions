@@ -1110,6 +1110,8 @@ export interface Video extends VideoRequest {
   countedIn?: string;
   /** Set while the video sits in the trash; it is deleted for good `TRASH_RETENTION_DAYS` later unless restored. */
   deletedAt?: string;
+  /** Marked to find again (the library's Starred filter); shared by the workspace, never shown on the share page. */
+  starred?: boolean;
   /** Share page offers a download link when true (off by default). */
   shareDownload?: boolean;
   /** The share page asks for the viewer's email before the player shows; the answers are `VideoLead` rows. */

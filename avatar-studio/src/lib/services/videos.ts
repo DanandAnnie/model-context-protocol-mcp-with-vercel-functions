@@ -301,8 +301,8 @@ export async function resolveRenderContext(
  * Start a render. The allowance check is read-then-write and therefore
  * best-effort under concurrent requests; batches reserve their rows up front.
  */
-/** Library fields a caller may set on a new video alongside the render request (batch row, folder, retry link). */
-export type VideoExtras = Partial<Pick<Video, "folder" | "description" | "batchId" | "rowLabel" | "batchRow" | "retryOf" | "resizedFrom" | "captionCues" | "subtitles">> & {
+/** Library fields a caller may set on a new video alongside the render request (batch row, folder, star, retry link). */
+export type VideoExtras = Partial<Pick<Video, "folder" | "starred" | "description" | "batchId" | "rowLabel" | "batchRow" | "retryOf" | "resizedFrom" | "captionCues" | "subtitles">> & {
   /** The video's id, when a client key decides it (a template render retried after a lost answer). */
   id?: string;
   /** Called once the renderer has started this render here, never for a replay of one started before (never stored). */
@@ -920,6 +920,8 @@ export const videoPatchSchema = z
     description: z.string().trim().max(500).optional(),
     /** Folder name; an empty string moves the video back to "unfiled". */
     folder: z.string().trim().max(MAX_FOLDER_NAME).optional(),
+    /** Marked to find again in the library (the Starred filter); not part of what the share page shows. */
+    starred: z.boolean().optional(),
     /** Whether the public share page offers a download link. */
     shareDownload: z.boolean().optional(),
     /** Whether the share page asks for the viewer's email before the player shows. */
@@ -970,6 +972,7 @@ export const videoPatchSchema = z
       p.sceneNames !== undefined ||
       p.description !== undefined ||
       p.folder !== undefined ||
+      p.starred !== undefined ||
       p.shareDownload !== undefined ||
       p.shareGate !== undefined ||
       p.shareDisabled !== undefined ||
@@ -1018,6 +1021,10 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
   if (patch.folder !== undefined) {
     if (patch.folder) next.folder = patch.folder;
     else delete next.folder;
+  }
+  if (patch.starred !== undefined) {
+    if (patch.starred) next.starred = true;
+    else delete next.starred;
   }
   if (patch.shareDownload !== undefined) {
     if (patch.shareDownload) next.shareDownload = true;
@@ -1074,6 +1081,7 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
   // The names go onto the scenes as stored when the write happens, and whether one changes is judged against them too,
   // so a request that read the scenes earlier neither writes back the names it saw nor misjudges the approval.
   return putKeepingCounters(next, {
+    ...(patch.starred !== undefined ? { starred: patch.starred } : {}),
     dropApproval: (stored) => publicChange || (!!renames && [...renames].some(([i, name]) => stored.scenes?.[i]?.name !== name)),
     ...(renames ? { scenes: (stored) => renamedScenes(stored, renames) } : {}),
   });
@@ -1118,11 +1126,13 @@ const CONCURRENT_FIELDS = [...COUNTER_FIELDS, "subtitles", "captionCues", "delet
  * trip must not undo the views, watch marks, and clicks counted meanwhile, drop (or bring back) a
  * track a translation added or removed meanwhile, or undo a trash or restore. The scenes are the
  * stored ones too (`opts.scenes` renames them), so an edit cannot write back scene names it read
- * before another request changed them. Runs under the video's counter lock.
+ * before another request changed them. The star is the stored one too unless `opts.starred` sets it, so an edit held up by
+ * a cover upload or a password hash cannot take off (or put back) a star someone set meanwhile. Runs under the video's
+ * counter lock.
  */
 function putKeepingCounters(
   base: Video,
-  opts: { dropApproval?: boolean | ((stored: Video) => boolean); scenes?: (stored: Scene[] | undefined) => Scene[] | undefined } = {},
+  opts: { dropApproval?: boolean | ((stored: Video) => boolean); scenes?: (stored: Scene[] | undefined) => Scene[] | undefined; starred?: boolean } = {},
 ): Promise<Video> {
   return withCounterLock(base.id, async () => {
     const stored = await getStore().get<Video>("video", base.id);
@@ -1139,6 +1149,8 @@ function putKeepingCounters(
     const scenes = opts.scenes ? opts.scenes(stored.scenes) : stored.scenes;
     if (scenes) next.scenes = scenes;
     else delete next.scenes;
+    if (opts.starred ?? stored.starred) next.starred = true;
+    else delete next.starred;
     return getStore().put("video", { ...next, ...theirs });
   });
 }
@@ -1268,6 +1280,8 @@ export const bulkVideoSchema = z.discriminatedUnion("action", [
   /** Delete trashed videos for good; a video that is not in the trash is reported as missing. */
   z.object({ action: z.literal("purge"), ids: z.array(z.string().min(1)).min(1).max(200) }),
   z.object({ action: z.literal("move"), ids: z.array(z.string().min(1)).min(1).max(200), folder: z.string().trim().max(MAX_FOLDER_NAME) }),
+  /** Star many videos (`starred: true`) or take their stars off. */
+  z.object({ action: z.literal("star"), ids: z.array(z.string().min(1)).min(1).max(200), starred: z.boolean() }),
   /** Switch the share links of many videos off (`shareDisabled: true`) or back on. */
   z.object({ action: z.literal("share"), ids: z.array(z.string().min(1)).min(1).max(200), shareDisabled: z.boolean() }),
   /** Schedule the share links of many videos to go live at one time (`null` makes them live now). */
@@ -1283,8 +1297,8 @@ export const bulkVideoSchema = z.discriminatedUnion("action", [
 ]);
 
 /**
- * Trash, restore, purge, move, switch, schedule, set the expiry of, put a password on, or change the download button and
- * email gate of the share links of many videos at once.
+ * Trash, restore, purge, move, star, or switch, schedule, set the expiry of, put a password on, or change the download
+ * button and email gate of the share links of many videos at once.
  * Ids that are missing or belong to someone else are reported, not failed; so is a purge of a video that is
  * not in the trash, since deleting for good is only offered from there. A go-live time at or after a video's
  * own expiry, or an expiry at or before its own go-live time, is reported in `refused` for that video, and
@@ -1306,9 +1320,9 @@ export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId
     else if (input.action === "purge") await purgeVideo(id, ownerId);
     else if (input.action === "move") await updateVideo(id, { folder: input.folder }, ownerId);
     else if (input.action === "share") await updateVideo(id, { shareDisabled: input.shareDisabled }, ownerId);
-    else if (input.action === "password" || input.action === "settings") {
+    else if (input.action === "password" || input.action === "settings" || input.action === "star") {
       try {
-        await updateVideo(id, input.action === "password" ? { sharePassword: input.sharePassword } : { shareDownload: input.shareDownload, shareGate: input.shareGate }, ownerId);
+        await updateVideo(id, input.action === "password" ? { sharePassword: input.sharePassword } : input.action === "star" ? { starred: input.starred } : { shareDownload: input.shareDownload, shareGate: input.shareGate }, ownerId);
       } catch (err) {
         // Deleted for good between the check above and the write: reported like the others not there.
         if (!(err instanceof NotFoundError)) throw err;
@@ -1373,7 +1387,7 @@ export async function retryVideo(id: string, ownerId: string = LOCAL_OWNER): Pro
   if (failed.directed?.editOf) throw new ConflictError(`An edited cut is not retried; edit the scenes of “${failed.directed.editOf.title}” again`);
   const req = requestOf(failed);
   // One write: the provider's webhook can land as soon as the job exists, so nothing may overwrite the stored video afterwards.
-  return createVideo(req, ownerId, undefined, false, { folder: failed.folder, description: failed.description, batchId: failed.batchId, rowLabel: failed.rowLabel, batchRow: failed.batchRow, retryOf: failed.id, resizedFrom: failed.resizedFrom });
+  return createVideo(req, ownerId, undefined, false, { folder: failed.folder, starred: failed.starred, description: failed.description, batchId: failed.batchId, rowLabel: failed.rowLabel, batchRow: failed.batchRow, retryOf: failed.id, resizedFrom: failed.resizedFrom });
 }
 
 /**
@@ -1959,6 +1973,11 @@ export const videoQuerySchema = z.object({
    * render's status. A trashed video is in none of them.
    */
   share: z.enum(["all", "live", "expiring", "scheduled", "off", "expired"]).default("all"),
+  /** `true` lists only the starred videos (in the trash too, where a star is kept for when it is restored). */
+  starred: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
   /** Omit for every match (scripts); the library pages with it. */
   limit: z.coerce.number().int().min(1).max(200).optional(),
   /** `true` lists the trash (newest deletion first) instead of the library. */
@@ -1999,6 +2018,7 @@ export function filterVideos(videos: Video[], query: VideoQuery): Video[] {
   return videos
     .filter((v) => {
       if (query.batch && v.batchId !== query.batch) return false;
+      if (query.starred && !v.starred) return false;
       if (query.review !== "all" && (v.review?.status ?? "none") !== query.review) return false;
       // A trashed video's link answers "not found" whatever it was set to, so it is in no share state.
       if (query.share !== "all" && (v.deletedAt || (query.share === "expiring" ? !shareExpiresSoon(v, now) : shareState(v, now) !== query.share))) return false;

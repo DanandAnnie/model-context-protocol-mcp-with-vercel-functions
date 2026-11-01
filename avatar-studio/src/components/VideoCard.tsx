@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { Clock, Film, LinkIcon, Lock, Trash2 } from "lucide-react";
+import { Clock, Film, LinkIcon, Lock, Star, Trash2 } from "lucide-react";
 import { StatusBadge } from "./ui";
 import { daysUntilPurge, formatDate, formatSeconds, posterUrl, shareExpired, shareExpiresSoon, shareNotYet } from "@/lib/client";
 import { REVIEW_LABEL, type Video } from "@/lib/types";
@@ -72,6 +72,12 @@ export function VideoCard({ video, selectable = false, selected = false, onToggl
       </div>
       <div className="p-3">
         <div className="flex items-center gap-2">
+          {video.starred && (
+            <span className="shrink-0" title="Starred" data-testid="star-badge">
+              <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-500" aria-hidden />
+              <span className="sr-only">Starred</span>
+            </span>
+          )}
           <div className="min-w-0 flex-1 truncate text-sm font-medium text-slate-900">{video.title}</div>
           {video.review && (
             <span

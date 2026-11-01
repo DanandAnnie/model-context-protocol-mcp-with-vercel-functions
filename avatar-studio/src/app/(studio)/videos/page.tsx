@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { ArchiveRestore, CheckSquare, Clapperboard, Clock, Download, FolderInput, KeyRound, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, RotateCcw, TimerOff, Trash2, X } from "lucide-react";
+import { ArchiveRestore, CheckSquare, Clapperboard, Clock, Download, FolderInput, KeyRound, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
 import { api } from "@/lib/client";
 import { VideoCard } from "@/components/VideoCard";
 import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -22,7 +22,7 @@ function localMinute(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links" | "password" | "nopassword" | "settings" | "retry";
+type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links" | "password" | "nopassword" | "settings" | "retry" | "star" | "unstar";
 
 export default function VideosPage() {
   return (
@@ -49,6 +49,8 @@ function VideosInner() {
   const [share, setShare] = useState<VideoQuery["share"]>("all");
   // The trash is its own view of the same page: same search, status, and folder filters, different bulk actions.
   const [trash, setTrash] = useState(false);
+  // Only the starred videos (in the trash view too, where a star is kept for when a video comes back).
+  const [starred, setStarred] = useState(false);
   // Search as you type, one request per pause rather than per keystroke.
   useEffect(() => {
     const t = setTimeout(() => setNeedle(q.trim()), 250);
@@ -56,7 +58,7 @@ function VideosInner() {
   }, [q]);
   // "Show more" extends the page for the current filters only: a new filter starts again
   // from the first page in the same render, with no extra request for the old extent.
-  const filterKey = [needle, status, folder, batch ?? "", sort, trash ? "trash" : "", review, share].join("\u0000");
+  const filterKey = [needle, status, folder, batch ?? "", sort, trash ? "trash" : "", review, share, starred ? "starred" : ""].join("\u0000");
   const [extent, setExtent] = useState({ key: filterKey, limit: PAGE });
   const limit = extent.key === filterKey ? extent.limit : PAGE;
   const path = useMemo(() => {
@@ -70,8 +72,9 @@ function VideosInner() {
     if (trash) params.set("trash", "true");
     if (review !== "all") params.set("review", review);
     if (share !== "all") params.set("share", share);
+    if (starred) params.set("starred", "1");
     return `/api/videos?${params}`;
-  }, [limit, needle, status, folder, batch, sort, trash, review, share]);
+  }, [limit, needle, status, folder, batch, sort, trash, review, share, starred]);
   // The filtering, sorting, and paging happen on the server; the page only holds what it shows.
   const { data, loading, error, refetch } = useApi<VideoPage>(path, { pollMs: 6000, pollWhile: (d) => d.rendering > 0 });
   const videos = data?.videos ?? [];
@@ -137,7 +140,7 @@ function VideosInner() {
     setTimeField(null);
     setTimeDraft("");
     setLinkSettings({ download: "", gate: "" });
-  }, [q, status, folder, batch, trash, review, share]);
+  }, [q, status, folder, batch, trash, review, share, starred]);
   // The last purge empties both views; leave the trash so the "No videos yet" state (and the filter bar) comes back.
   useEffect(() => {
     if (trash && data && data.total === 0 && data.trashed === 0) setTrash(false);
@@ -183,6 +186,8 @@ function VideosInner() {
           ? { action, ids, folder: targetFolder }
           : action === "share-off" || action === "share-on"
             ? { action: "share", ids, shareDisabled: action === "share-off" }
+            : action === "star" || action === "unstar"
+              ? { action: "star", ids, starred: action === "star" }
             : action === "schedule" || action === "golive"
               ? { action: "schedule", ids, shareStartsAt: action === "golive" ? null : new Date(timeDraft).toISOString() }
               : action === "expire" || action === "noexpiry"
@@ -544,6 +549,12 @@ function VideosInner() {
                   <RotateCcw className="h-3.5 w-3.5" /> Retry failed ({failedSelected.length})
                 </Button>
               )}
+              <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => bulk("star")} disabled={!selected.size || busy !== null} loading={busy === "star"} title="Star the selected videos to find them again with the Starred filter">
+                <Star className="h-3.5 w-3.5" /> Star
+              </Button>
+              <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => bulk("unstar")} disabled={!selected.size || busy !== null} loading={busy === "unstar"} title="Take the stars off the selected videos">
+                <StarOff className="h-3.5 w-3.5" /> Unstar
+              </Button>
               <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => bulk("move")} disabled={!selected.size || busy !== null} loading={busy === "move"}>
                 <FolderInput className="h-3.5 w-3.5" /> Move to folder
               </Button>
@@ -619,6 +630,16 @@ function VideosInner() {
           >
             <Trash2 className="h-3 w-3" /> Trash{trashed ? ` (${trashed})` : ""}
           </button>
+          <button
+            type="button"
+            onClick={() => setStarred((s) => !s)}
+            aria-pressed={starred}
+            data-testid="starred-toggle"
+            title="Only starred videos"
+            className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium ${starred ? "bg-amber-800 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
+          >
+            <Star className={`h-3 w-3 ${starred ? "fill-white" : ""}`} /> Starred
+          </button>
           {inWorkspace && (
             <select aria-label="Filter by review" value={review} onChange={(e) => setReview(e.target.value as VideoQuery["review"])} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700">
               <option value="all">Any review state</option>
@@ -656,7 +677,7 @@ function VideosInner() {
         <EmptyState
           icon={trash ? <Trash2 className="h-8 w-8" /> : <Clapperboard className="h-8 w-8" />}
           title={trash ? (trashed ? "No trashed videos match" : "The trash is empty") : hasAny ? "No videos match" : "No videos yet"}
-          body={trash ? `Deleted videos wait here for ${TRASH_RETENTION_DAYS} days before they are removed for good.` : hasAny ? "Try a different search, status, folder, or share link." : "Your rendered videos will show up here."}
+          body={trash ? `Deleted videos wait here for ${TRASH_RETENTION_DAYS} days before they are removed for good.` : hasAny ? starred && !q.trim() && status === "all" && folder === "all" && review === "all" && share === "all" && !batch ? "No video is starred yet; star one from its page, or several from Select." : `Try a different search, status, folder, ${starred ? "share link, or turn off Starred" : "or share link"}.` : "Your rendered videos will show up here."}
         />
       ) : (
         <>

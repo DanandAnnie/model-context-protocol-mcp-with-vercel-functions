@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { ArchiveRestore, ArrowLeft, Captions, Check, Clock, Code2, Copy, Download, Eye, Film, FolderOpen, Languages, LayoutTemplate, Link2, Lock, Mail, Pencil, RotateCcw, Sparkles, Trash2 } from "lucide-react";
+import { ArchiveRestore, ArrowLeft, Captions, Check, Clock, Code2, Copy, Download, Eye, Film, FolderOpen, Languages, LayoutTemplate, Link2, Lock, Mail, Pencil, RotateCcw, Sparkles, Star, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge, inputClass } from "@/components/ui";
 import { LANGUAGES } from "@/lib/stock";
 import { ViewSparkline } from "@/components/ViewSparkline";
@@ -163,13 +163,30 @@ export default function VideoDetailPage() {
    * description, a link turned back on) must disappear too, or the control flips back until the
    * refetch lands.
    */
-  const OPTIONAL_KEYS = ["description", "folder", "cover", "subtitles", "captionCues", "review", "shareGate", "shareDisabled", "shareDownload", "shareLocked", "shareCta", "shareExpiresAt", "shareStartsAt"] as const;
+  const OPTIONAL_KEYS = ["description", "folder", "cover", "subtitles", "captionCues", "review", "starred", "shareGate", "shareDisabled", "shareDownload", "shareLocked", "shareCta", "shareExpiresAt", "shareStartsAt"] as const;
   function applyServer(next: Video) {
     setData((d) => {
       const merged = { ...d?.video, ...next } as Video;
       for (const key of OPTIONAL_KEYS) if (!(key in next)) delete merged[key];
       return { video: merged };
     });
+  }
+
+  // A star marks the video to find again (the library's Starred filter); it is the workspace's, as the folder is.
+  const [starBusy, setStarBusy] = useState(false);
+  const [starErr, setStarErr] = useState<string | null>(null);
+  async function toggleStar() {
+    if (!video) return;
+    setStarBusy(true);
+    try {
+      const res = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify({ starred: !video.starred }) });
+      applyServer(res.video);
+      setStarErr(null);
+    } catch (e) {
+      setStarErr(e instanceof Error ? e.message : "Could not star the video");
+    } finally {
+      setStarBusy(false);
+    }
   }
 
   async function saveFolder() {
@@ -646,7 +663,7 @@ export default function VideoDetailPage() {
       <Link href="/videos" className="mb-4 inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900">
         <ArrowLeft className="h-4 w-4" /> All videos
       </Link>
-      <ErrorBanner message={error ?? renameErr ?? folderErr} />
+      <ErrorBanner message={error ?? renameErr ?? folderErr ?? starErr} />
       {video?.deletedAt && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900" data-testid="trash-banner" role="status">
           <span>
@@ -711,6 +728,18 @@ export default function VideoDetailPage() {
             subtitle={`Created ${formatDate(video.createdAt)} · ${video.aspect}${video.resolution ? ` · ${video.resolution}` : ""} · ${video.provider}`}
             action={
               <div className="flex flex-wrap items-center gap-2">
+                {/* A toggle keeps one name; whether it is on is its pressed state (and the filled star). */}
+                {canEdit === true && !video.deletedAt ? (
+                  <Button type="button" variant="secondary" aria-pressed={!!video.starred} loading={starBusy} onClick={() => void toggleStar()} title={video.starred ? "Starred: press to take the star off" : "Star this video to find it again with the library's Starred filter"}>
+                    {!starBusy && <Star className={`h-4 w-4 ${video.starred ? "fill-amber-400 text-amber-600" : ""}`} />} Star
+                  </Button>
+                ) : (
+                  video.starred && (
+                    <span className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700" data-testid="starred-label">
+                      <Star className="h-4 w-4 fill-amber-400 text-amber-600" aria-hidden /> Starred
+                    </span>
+                  )
+                )}
                 {canEdit === true && !video.deletedAt && !described && !video.studioTemplate && hasWords(video) && (
                   <Button ref={suggestButton} type="button" variant="secondary" loading={titlesBusy} onClick={() => void suggestTitlesFromScript()}>
                     {!titlesBusy && <Sparkles className="h-4 w-4" />} Suggest titles

@@ -8603,3 +8603,53 @@ test("the library retries the selected failed renders", async ({ page }) => {
   await expect(page.getByRole("button", { name: `Select Retry ready ${tag}` })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: `Select Retry other ${tag}` })).toHaveAttribute("aria-pressed", "false");
 });
+
+test("videos are starred from their page or in bulk, and the library filters by star", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const [one, two] = [await createVideoViaApi(page, `Star one ${tag}`), await createVideoViaApi(page, `Star two ${tag}`)];
+  expect((await page.request.patch(`/api/videos/${one.id}`, { data: { starred: "yes" } })).status()).toBe(400);
+  await page.goto(`/videos/${one.id}`);
+  // One name for the toggle; whether it is on is its pressed state.
+  const star = page.getByRole("button", { name: "Star", exact: true });
+  await expect(star).toHaveAttribute("aria-pressed", "false");
+  await star.click();
+  await expect(star).toHaveAttribute("aria-pressed", "true");
+  const a11y = (selector: string) => new AxeBuilder({ page }).include(selector).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect((await a11y("main")).violations.map((v) => v.id)).toEqual([]);
+  const starredIds = async () => ((await (await page.request.get(`/api/videos?q=${tag}&starred=1`)).json()).videos as { id: string }[]).map((v) => v.id).sort();
+  expect(await starredIds()).toEqual([one.id]);
+
+  await page.goto("/videos");
+  await page.getByLabel("Search videos").fill(tag);
+  const card = (id: string) => page.locator(`a[href="/videos/${id}"]`);
+  await expect(card(two.id)).toBeVisible();
+  await expect(card(one.id).getByTestId("star-badge")).toBeVisible();
+  await expect(card(two.id).getByTestId("star-badge")).toHaveCount(0);
+  await page.getByTestId("starred-toggle").click();
+  await expect(page.getByTestId("starred-toggle")).toHaveAttribute("aria-pressed", "true");
+  await expect(card(two.id)).toHaveCount(0);
+  await expect(card(one.id)).toBeVisible();
+  // The pressed filter and the starred card's badge are readable (the filter pill's contrast included).
+  expect((await a11y("main")).violations.map((v) => v.id)).toEqual([]);
+  // With a search that hides every starred video, the empty state points at the filters rather than at starring.
+  await page.getByLabel("Search videos").fill(`${tag} nothing like it`);
+  await expect(page.getByText("Try a different search, status, folder, share link, or turn off Starred.")).toBeVisible();
+  await page.getByLabel("Search videos").fill(tag);
+  await expect(card(one.id)).toBeVisible();
+  // Starring in bulk from the whole library, then taking both stars off from the filtered view.
+  await page.getByTestId("starred-toggle").click();
+  await expect(card(two.id)).toBeVisible();
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await page.getByRole("button", { name: `Select Star two ${tag}` }).click();
+  await page.getByTestId("bulk-bar").getByRole("button", { name: "Star", exact: true }).click();
+  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+  await expect(card(two.id).getByTestId("star-badge")).toBeVisible();
+  expect(await starredIds()).toEqual([one.id, two.id].sort());
+  await page.getByTestId("starred-toggle").click();
+  await expect(card(two.id)).toBeVisible();
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await page.getByRole("button", { name: "Select all shown" }).click();
+  await page.getByTestId("bulk-bar").getByRole("button", { name: "Unstar" }).click();
+  await expect(page.getByText("No videos match")).toBeVisible();
+  expect(await starredIds()).toEqual([]);
+});

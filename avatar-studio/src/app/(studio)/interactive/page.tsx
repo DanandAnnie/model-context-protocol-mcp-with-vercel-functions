@@ -29,6 +29,8 @@ type FormState = {
   knowledgeUrl: string;
   collectEmail: boolean;
   brandStyle: boolean;
+  /** Replies a day the presenter may give, as typed; empty is no limit. */
+  replyLimit: string;
 };
 
 /** Where this browser keeps what it has shown of each presenter's visits (`SeenVisits`), for the "New visits" mark. */
@@ -119,6 +121,11 @@ export default function InteractivePage() {
   const [agentName, setAgentName] = useState("");
   const [collectEmail, setCollectEmail] = useState(false);
   const [brandStyle, setBrandStyle] = useState(false);
+  const [replyLimit, setReplyLimit] = useState("");
+  // Digits only (thousands separators allowed), from 1 to 10,000, or nothing; anything else is not sent, and says so.
+  const replyLimitDigits = replyLimit.trim().replace(/[,\s]/g, "");
+  const replyLimitValue = replyLimitDigits ? (/^\d+$/.test(replyLimitDigits) ? Number(replyLimitDigits) : NaN) : null;
+  const replyLimitOk = replyLimitValue === null || (Number.isInteger(replyLimitValue) && replyLimitValue >= 1 && replyLimitValue <= 10000);
   const [knowledgeUrl, setKnowledgeUrl] = useState("");
   const [notes, setNotes] = useState("");
   const [suggesting, setSuggesting] = useState(false);
@@ -416,7 +423,7 @@ export default function InteractivePage() {
     return reply;
   }
 
-  const formState = (): FormState => ({ avatar, voice, agentName, instructions, language, greeting, starters, notes, knowledgeUrl, collectEmail, brandStyle });
+  const formState = (): FormState => ({ avatar, voice, agentName, instructions, language, greeting, starters, notes, knowledgeUrl, collectEmail, brandStyle, replyLimit });
   function setForm(f: FormState) {
     setAvatar(f.avatar);
     setVoice(f.voice);
@@ -429,6 +436,7 @@ export default function InteractivePage() {
     setKnowledgeUrl(f.knowledgeUrl);
     setCollectEmail(f.collectEmail);
     setBrandStyle(f.brandStyle);
+    setReplyLimit(f.replyLimit);
   }
   // A switch flipped on the edited presenter's row is kept by Save (it is not sent unless changed in the form) and shown
   // in the form, unless the form's own value was already changed.
@@ -481,6 +489,7 @@ export default function InteractivePage() {
       knowledgeUrl: agent.knowledgeUrl ?? "",
       collectEmail: !!agent.collectEmail,
       brandStyle: !!agent.brandStyle,
+      replyLimit: agent.dailyReplyLimit ? String(agent.dailyReplyLimit) : "",
     };
     setForm(loaded);
     loadedForm.current = loaded;
@@ -523,6 +532,10 @@ export default function InteractivePage() {
       setSaveErr(`Each suggested question is at most 80 characters ("${tooLong.slice(0, 30)}…" is ${tooLong.length})`);
       return;
     }
+    if (!replyLimitOk) {
+      setSaveErr("The daily reply limit is a whole number from 1 to 10,000, or empty for no limit.");
+      return;
+    }
     if (language.trim().length < 2) {
       setSaveErr("Name the reply language (at least 2 characters), for example English.");
       return;
@@ -553,6 +566,7 @@ export default function InteractivePage() {
         if (starterList.join("\n") !== (editing.starters ?? []).join("\n")) patch.starters = starterList;
         if (collectEmail !== was.collectEmail) patch.collectEmail = collectEmail;
         if (brandStyle !== was.brandStyle) patch.brandStyle = brandStyle;
+        if ((replyLimitValue === null ? "" : String(replyLimitValue)) !== was.replyLimit) patch.dailyReplyLimit = replyLimitValue;
         if (page !== (editing.knowledgeUrl ?? "")) patch.knowledgeUrl = page || null;
         else if (page && rereadPage) patch.knowledgeUrl = page;
         const editedId = editing.id;
@@ -569,7 +583,7 @@ export default function InteractivePage() {
       } else {
         ({ agent } = await api<{ agent: Agent }>("/api/agents", {
           method: "POST",
-          body: JSON.stringify({ name, avatarId: avatar.id, voiceId: voice?.id, instructions, language, isPublic: true, collectEmail, brandStyle, ...(greeting.trim() ? { greeting: greeting.trim() } : {}), ...(starterList.length ? { starters: starterList } : {}), ...(notes.trim() ? { notes: notes.trim() } : {}), ...(knowledgeUrl.trim() ? { knowledgeUrl: knowledgeUrl.trim() } : {}) }),
+          body: JSON.stringify({ name, avatarId: avatar.id, voiceId: voice?.id, instructions, language, isPublic: true, collectEmail, brandStyle, ...(greeting.trim() ? { greeting: greeting.trim() } : {}), ...(starterList.length ? { starters: starterList } : {}), ...(notes.trim() ? { notes: notes.trim() } : {}), ...(knowledgeUrl.trim() ? { knowledgeUrl: knowledgeUrl.trim() } : {}), ...(replyLimitValue ? { dailyReplyLimit: replyLimitValue } : {}) }),
         }));
         setSavedLink(`${linkOrigin()}/talk/${agent.id}`);
         clearOwnFields();
@@ -782,6 +796,27 @@ export default function InteractivePage() {
                 {notes.length} / {MAX_AGENT_NOTES}
               </span>
             </Field>
+            <Field
+              label="Daily reply limit (optional)"
+              hintId="agent-reply-limit-hint"
+              hint="At most this many replies to visitors per day (UTC), so a busy or misused link cannot run up the model's costs; after that, visitors are asked to try again later and no new live video session is opened. Replies already on their way still count, so the limit can be passed by those. The try-it chat here is not counted."
+            >
+              <input
+                aria-label="Daily reply limit"
+                aria-invalid={!replyLimitOk}
+                aria-describedby={replyLimitOk ? "agent-reply-limit-hint" : "agent-reply-limit-hint agent-reply-limit-error"}
+                value={replyLimit}
+                onChange={(e) => setReplyLimit(e.target.value)}
+                inputMode="numeric"
+                placeholder="No limit"
+                className={`${inputClass} w-40`}
+              />
+              {!replyLimitOk && (
+                <span id="agent-reply-limit-error" className="mt-1 block text-xs font-medium text-rose-700">
+                  A whole number from 1 to 10,000, or empty for no limit.
+                </span>
+              )}
+            </Field>
             <Field label="Knowledge page (optional)" hint="A public web page read once when the presenter is saved; its text becomes reference material for replies and is never shown to visitors.">
               <input aria-label="Knowledge page URL" value={knowledgeUrl} onChange={(e) => setKnowledgeUrl(e.target.value)} placeholder="https://…/about-us" className={inputClass} maxLength={2000} type="url" />
             </Field>
@@ -868,6 +903,12 @@ export default function InteractivePage() {
                     <div className="text-xs text-slate-500">
                       {a.conversations} {a.conversations === 1 ? "conversation" : "conversations"} · {a.messages} {a.messages === 1 ? "question" : "questions"} · {a.isPublic ? "link on" : "link off"} · {formatDate(a.createdAt)}
                       {a.notes && <> · has notes</>}
+                      {a.dailyReplyLimit && (
+                        <span data-testid="replies-today">
+                          {" "}
+                          · {a.repliesByDay?.[new Date().toISOString().slice(0, 10)] ?? 0} of {a.dailyReplyLimit} replies today
+                        </span>
+                      )}
                       {a.knowledgeUrl && <> · knows {(() => { try { return new URL(a.knowledgeUrl).hostname; } catch { return "a page"; } })()}</>}
                       {seen && hasNewVisits(seen, a) && (
                         <span className="ml-1.5 rounded bg-brand-100 px-1.5 py-0.5 font-medium text-brand-800" data-testid="new-visits">

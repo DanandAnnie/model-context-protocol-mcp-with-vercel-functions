@@ -5648,6 +5648,51 @@ test("a visit can be marked followed up, listed apart, and carried in the downlo
   }
 });
 
+test("a presenter's daily reply limit stops visitor replies for the day and shows on its row", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  let id = "";
+  try {
+    await page.goto("/interactive");
+    await page.getByLabel("Agent name").fill(`Capped ${tag}`);
+    // Not a whole number from 1 to 10,000: said under the field and not saved.
+    await page.getByLabel("Daily reply limit").fill("0");
+    await expect(page.getByText("A whole number from 1 to 10,000, or empty for no limit.", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Save and get link" }).click();
+    await expect(page.getByText("The daily reply limit is a whole number from 1 to 10,000")).toBeVisible();
+    await page.getByLabel("Daily reply limit").fill("1e3");
+    await expect(page.getByText("A whole number from 1 to 10,000, or empty for no limit.", { exact: true })).toBeVisible();
+    await page.getByLabel("Daily reply limit").fill("1");
+    await page.getByRole("button", { name: "Save and get link" }).click();
+    const link = (await page.getByTestId("agent-link").locator("code").innerText()).trim();
+    id = link.split("/talk/")[1];
+    const row = page.getByTestId("agent-list").locator("li", { hasText: `Capped ${tag}` });
+    await expect(row.getByTestId("replies-today")).toHaveText(" · 0 of 1 replies today");
+    // The visitor gets one reply, then is asked to come back tomorrow.
+    await page.setExtraHTTPHeaders({ "x-forwarded-for": `198.51.100.${Math.floor(Math.random() * 200) + 1}` });
+    await page.goto(`/talk/${id}`);
+    await page.getByLabel("Your message").fill("First question");
+    await page.getByRole("button", { name: "Send" }).click();
+    await expect(page.locator("[data-testid=chat-log] [data-role=assistant]")).toHaveCount(1);
+    await page.getByLabel("Your message").fill("Second question");
+    await page.getByRole("button", { name: "Send" }).click();
+    await expect(page.getByText(`Capped ${tag} can't answer any more questions for now. Please try again later.`)).toBeVisible();
+    expect((await page.request.post(`/api/talk/${id}`, { data: { messages: [{ role: "user", content: "Again?" }] } })).status()).toBe(429);
+    // No live video session is opened for a presenter at its limit.
+    expect(await (await page.request.post(`/api/talk/${id}/live`)).json()).toEqual({ available: false });
+    // The owner sees the count, and the limit loads into the form; cleared, it goes.
+    await page.goto("/interactive");
+    await expect(row.getByTestId("replies-today")).toHaveText(" · 1 of 1 replies today");
+    await page.getByRole("button", { name: `Edit Capped ${tag}` }).click();
+    await expect(page.getByLabel("Daily reply limit")).toHaveValue("1");
+    await page.getByLabel("Daily reply limit").fill("");
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(row.getByTestId("replies-today")).toHaveCount(0);
+    expect((await page.request.patch(`/api/agents/${id}`, { data: { dailyReplyLimit: 0 } })).status()).toBe(400);
+  } finally {
+    if (id) await page.request.delete(`/api/agents/${id}`);
+  }
+});
+
 test("a visitor rates the presenter's replies, and the owner sees the ratings in the transcripts and downloads", async ({ page }) => {
   const tag = Date.now().toString(36);
   const res = await page.request.post("/api/agents", { data: { name: `Rated ${tag}`, avatarId: "stock_1" } });

@@ -1401,6 +1401,10 @@ export interface Agent {
   conversations: number;
   /** Visits started per UTC day ("YYYY-MM-DD" → count), the last 90 days; kept when transcripts are deleted. */
   visitsByDay?: Record<string, number>;
+  /** At most this many replies to visitors per UTC day (a cap on what the presenter can cost); none when absent. */
+  dailyReplyLimit?: number;
+  /** Replies to visitors per UTC day ("YYYY-MM-DD" → count), the last 90 days, which the daily limit is checked against. */
+  repliesByDay?: Record<string, number>;
   /** When the newest visit started, so the owner's page can show visits made since its transcripts were last opened. */
   lastVisitAt?: string;
   messages: number;

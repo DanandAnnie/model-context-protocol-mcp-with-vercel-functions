@@ -7,7 +7,7 @@ import { getStore } from "../store";
 import type { Agent, Conversation } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { dispatchNotification, getNotifySettings } from "../notifications";
-import { ConflictError, NotFoundError, ValidationError } from "../errors";
+import { ConflictError, LimitError, NotFoundError, ValidationError } from "../errors";
 import { getStreamingProvider } from "../streaming";
 import { afterResponse, nextUpdatedAt, owned } from "./shared";
 import { getAvatar } from "./avatars";
@@ -52,6 +52,8 @@ const agentFields = {
   collectEmail: z.boolean(),
   /** Word replies in the brand kit's writing style. */
   brandStyle: z.boolean(),
+  /** Replies to visitors a UTC day may hold at most; `null` removes the limit. */
+  dailyReplyLimit: z.number().int().min(1).max(10000).nullable(),
 };
 
 export const agentSchema = z.object({
@@ -65,6 +67,7 @@ export const agentSchema = z.object({
   isPublic: agentFields.isPublic.default(true),
   collectEmail: agentFields.collectEmail.default(false),
   brandStyle: agentFields.brandStyle.default(false),
+  dailyReplyLimit: agentFields.dailyReplyLimit.optional(),
 });
 
 /** Any subset of the fields, none defaulted; `knowledgeUrl: null` forgets the page, a URL (the same one included) reads it again. */
@@ -128,6 +131,11 @@ export async function captureLead(agentId: string, input: z.infer<typeof leadSch
   }
 }
 
+/** Whether a presenter has given as many replies today (UTC) as its daily limit allows; never, without a limit. */
+export function atReplyLimit(agent: Pick<Agent, "dailyReplyLimit" | "repliesByDay">, now = nowIso()): boolean {
+  return !!agent.dailyReplyLimit && (agent.repliesByDay?.[now.slice(0, 10)] ?? 0) >= agent.dailyReplyLimit;
+}
+
 export const rateSchema = z.object({
   conversationId: z.string().regex(/^conv_[a-z0-9]+$/),
   /** The reply's time, as the turn that brought it answered. */
@@ -184,10 +192,10 @@ async function presenterSnapshot(avatarId: string, voiceId: string | undefined, 
 export async function createAgent(input: z.infer<typeof agentSchema>, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<Agent> {
   if ((await listAgents(ownerId)).length >= MAX_AGENTS) throw new ValidationError(`At most ${MAX_AGENTS} agents per account`);
   const snapshot = await presenterSnapshot(input.avatarId, input.voiceId, ownerId);
-  const { knowledgeUrl, greeting, starters, notes, ...rest } = input;
+  const { knowledgeUrl, greeting, starters, notes, dailyReplyLimit, ...rest } = input;
   const knowledge = knowledgeUrl ? await readKnowledge(knowledgeUrl, fetchImpl) : {};
   const now = nowIso();
-  return getStore().put("agent", { id: newId("agent"), ownerId, ...rest, ...(greeting ? { greeting } : {}), ...(starters?.length ? { starters } : {}), ...(notes ? { notes } : {}), ...snapshot, ...knowledge, conversations: 0, messages: 0, createdAt: now, updatedAt: now });
+  return getStore().put("agent", { id: newId("agent"), ownerId, ...rest, ...(greeting ? { greeting } : {}), ...(starters?.length ? { starters } : {}), ...(notes ? { notes } : {}), ...(dailyReplyLimit ? { dailyReplyLimit } : {}), ...snapshot, ...knowledge, conversations: 0, messages: 0, createdAt: now, updatedAt: now });
 }
 
 /**
@@ -216,7 +224,7 @@ export async function duplicateAgent(id: string, ownerId: string = LOCAL_OWNER):
     createdAt: now,
     updatedAt: now,
   };
-  for (const key of ["voiceId", "voiceLanguage", "greeting", "starters", "notes", "knowledgeUrl", "knowledge", "knowledgeUpdatedAt", "collectEmail", "brandStyle"] as const) {
+  for (const key of ["voiceId", "voiceLanguage", "greeting", "starters", "notes", "knowledgeUrl", "knowledge", "knowledgeUpdatedAt", "collectEmail", "brandStyle", "dailyReplyLimit"] as const) {
     if (source[key] !== undefined) Object.assign(copy, { [key]: source[key] });
   }
   return getStore().put("agent", copy);
@@ -265,7 +273,7 @@ export async function suggestStarters(input: z.infer<typeof startersSchema>, own
 
 export async function updateAgent(id: string, patch: z.infer<typeof agentPatchSchema>, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<Agent> {
   const first = await getAgent(id, ownerId);
-  const { knowledgeUrl, greeting, starters, notes, ...rest } = patch;
+  const { knowledgeUrl, greeting, starters, notes, dailyReplyLimit, ...rest } = patch;
   // The slow parts (a page read, the presenter and voice looked up) run before the agent is read for the write: a link
   // turned off or a delete that landed meanwhile then holds, rather than being written over by an older copy.
   const knowledge = knowledgeUrl ? await readKnowledge(knowledgeUrl, fetchImpl) : null;
@@ -278,6 +286,8 @@ export async function updateAgent(id: string, patch: z.infer<typeof agentPatchSc
   else if (starters) next.starters = starters;
   if (notes === "") delete next.notes;
   else if (notes) next.notes = notes;
+  if (dailyReplyLimit === null) delete next.dailyReplyLimit;
+  else if (dailyReplyLimit) next.dailyReplyLimit = dailyReplyLimit;
   if (knowledgeUrl === null) {
     delete next.knowledgeUrl;
     delete next.knowledge;
@@ -329,6 +339,8 @@ export async function talkToAgent(id: string, input: z.infer<typeof talkSchema>)
   if (!agent || !agent.isPublic) throw new NotFoundError("This presenter is not available");
   const last = input.messages[input.messages.length - 1];
   if (last.role !== "user") throw new ValidationError("The last message must be from the visitor");
+  // Checked before the model is asked, so a presenter at its limit costs nothing more today.
+  if (atReplyLimit(agent)) throw new LimitError(`${agent.name} can't answer any more questions for now. Please try again later.`);
   // The kit's style as it is now, so an edit on the Brand page reaches a presenter already shared; the style only words
   // the reply, so a kit that cannot be read leaves it out rather than failing the visitor's turn.
   const style = agent.brandStyle ? (await getBrandKit(agent.ownerId).catch(() => null))?.writingStyle : undefined;
@@ -364,6 +376,8 @@ export async function talkToAgent(id: string, input: z.infer<typeof talkSchema>)
       // The newest visit's start; a slower write for an earlier visit does not move it back.
       ...(isNew ? { visitsByDay: bumpViewsByDay(current.visitsByDay, Date.parse(now)), lastVisitAt: current.lastVisitAt && current.lastVisitAt > now ? current.lastVisitAt : now } : {}),
       messages: current.messages + 1,
+      // Counted on the day the reply was given, which the daily limit is checked against.
+      repliesByDay: bumpViewsByDay(current.repliesByDay, Date.parse(now)),
     });
     if (isNew) await pruneConversations(agent);
   };

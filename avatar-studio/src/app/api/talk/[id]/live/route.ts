@@ -3,6 +3,7 @@ import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { getStore } from "@/lib/store";
 import { openLiveSession } from "@/lib/streaming";
 import type { Agent } from "@/lib/types";
+import { atReplyLimit } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     const { id } = await ctx.params;
     const agent = await getStore().get<Agent>("agent", id);
     if (!agent || !agent.isPublic) return json({ error: "This presenter is not available" }, { status: 404 });
+    // A presenter at its daily reply limit answers no one, so no paid video session is opened for it either.
+    if (atReplyLimit(agent)) return json({ available: false });
     const ip = clientIp(req);
     const gate = rateLimit(`live:${ip}`, 6, 10 * 60 * 1000);
     if (!gate.allowed) return json({ error: "Too many live sessions; try again later" }, { status: 429, headers: { "Retry-After": String(gate.retryAfterSec) } });

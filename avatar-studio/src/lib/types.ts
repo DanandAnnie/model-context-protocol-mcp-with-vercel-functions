@@ -1068,6 +1068,8 @@ export const MAX_RETRY_AT_ONCE = 50;
  * few enough to finish within a request's time; a bigger trash takes another.
  */
 export const EMPTY_TRASH_MAX = 50;
+/** Videos one library bulk action takes (`POST /api/videos/bulk`, `/links`), and so the most "Select all matching" selects. */
+export const BULK_MAX = 200;
 /** Trashed videos one "Restore all" brings back (`POST /api/videos/restore-all`), one write each; a bigger trash takes another. */
 export const RESTORE_ALL_MAX = 200;
 

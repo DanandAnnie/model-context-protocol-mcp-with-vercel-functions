@@ -8924,3 +8924,52 @@ test("Restore all brings every trashed video back to the library", async ({ page
   expect(events[0]).toMatchObject({ kind: "video.restored", count: 2 });
   expect(await (await page.request.post("/api/videos/restore-all")).json()).toEqual({ done: 0, remaining: 0 });
 });
+
+test("Select all matching selects past the first page and hands every match to a bulk action", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const folder = `All of them ${tag}`;
+  // One more page's worth than the library shows at first (48), in one batch.
+  const rows = Array.from({ length: 50 }, (_, i) => `Guest ${String(i + 1).padStart(2, "0")}`);
+  const made = await page.request.post("/api/videos/batch", {
+    data: { title: `Matching ${tag}`, scriptTemplate: "Hello {name}.", csv: `name\n${rows.join("\n")}`, avatarId: "stock_1", voiceId: "stock_voice_1" },
+  });
+  expect(made.status()).toBe(201);
+  const { batchId } = (await made.json()) as { batchId: string };
+  await page.goto(`/videos?batch=${batchId}`);
+  await expect(page.getByText("Showing 48 of 50")).toBeVisible();
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  const bar = page.getByTestId("bulk-bar");
+  const count = bar.getByText(/selected$/);
+  await bar.getByRole("button", { name: "Select all shown" }).click();
+  await expect(count).toHaveText("48 selected");
+  await bar.getByRole("button", { name: "Select all 50 matching" }).click();
+  await expect(count).toHaveText("50 selected");
+  // Everything selected is on the page, so there is nothing left to load, and the keyboard stays in the bar.
+  await expect(page.getByTestId("load-more")).toHaveCount(0);
+  await expect(bar.getByRole("button", { name: /matching/ })).toHaveCount(0);
+  await expect(bar.getByRole("button", { name: "Select all shown" })).toBeFocused();
+  page.once("dialog", (d) => void d.accept(folder));
+  await bar.getByRole("button", { name: "Move to folder" }).click();
+  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+  const counts = (await (await page.request.get("/api/videos?limit=1")).json()).folderCounts as Record<string, number>;
+  expect(counts[folder]).toBe(50);
+
+  // Typing a search while the matches load cancels the select: nothing is chosen for a list no longer shown.
+  await page.reload();
+  await expect(page.getByText("Showing 48 of 50")).toBeVisible();
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  await page.route(/\/api\/videos\?.*limit=50/, async (route) => {
+    await held;
+    await route.continue();
+  });
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await page.getByTestId("bulk-bar").getByRole("button", { name: "Select all 50 matching" }).click();
+  await expect(page.getByTestId("bulk-bar").getByRole("button", { name: "Selecting…" })).toBeVisible();
+  await page.getByLabel("Search videos").fill("Guest 0");
+  release();
+  // In select mode the cards are toggle buttons named for their videos.
+  await expect(page.getByRole("button", { name: new RegExp(`^Select Matching ${tag} – Guest`) })).toHaveCount(9);
+  await expect(page.getByTestId("bulk-bar").getByText(/selected$/)).toHaveText("0 selected");
+  await page.unroute(/\/api\/videos\?.*limit=50/);
+});

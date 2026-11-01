@@ -9,7 +9,7 @@ import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } f
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit, useWorkspaceRole } from "@/hooks/useCanEdit";
 import type { VideoPage, VideoQuery } from "@/lib/services/videos";
-import { EMPTY_TRASH_MAX, MAX_RETRY_AT_ONCE, RESTORE_ALL_MAX, SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, TRASH_RETENTION_DAYS, type VideoStatus } from "@/lib/types";
+import { BULK_MAX, EMPTY_TRASH_MAX, MAX_RETRY_AT_ONCE, RESTORE_ALL_MAX, SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, TRASH_RETENTION_DAYS, type VideoStatus } from "@/lib/types";
 
 const STATUSES: Array<"all" | VideoStatus> = ["all", "processing", "completed", "failed"];
 type SortKey = VideoQuery["sort"];
@@ -148,6 +148,7 @@ function VideosInner() {
   function stopSelecting() {
     setSelecting(false);
     setSelected(new Set());
+    setSelectAllFor(null);
     setTimeField(null);
     setTimeDraft("");
     setLinkSettings({ download: "", gate: "" });
@@ -177,13 +178,52 @@ function VideosInner() {
       setFolderBusy(false);
     }
   }
-  // A new filter hides cards; drop the selection so bulk actions only ever touch what is visible.
+  // "Select all matching": the filters it was asked for. Every match (up to what one bulk action takes) is loaded onto the
+  // page first and then selected, so the selection stays within what is shown and the bar's counts stay true.
+  // `seen` is the page as it was when more was asked for: only a response after it can say whether everything is in.
+  const [selectAllFor, setSelectAllFor] = useState<{ key: string; seen: VideoPage | null; seenError: string | null } | null>(null);
+  const selectTarget = data ? Math.min(data.matched, BULK_MAX) : 0;
+  const selectAllRef = useRef<HTMLButtonElement>(null);
+  const selectShownRef = useRef<HTMLButtonElement>(null);
+  function selectLoaded() {
+    setSelected(new Set(videos.slice(0, BULK_MAX).map((v) => v.id)));
+    setSelectAllFor(null);
+    // The button goes once everything is loaded, which drops the focus to the page; keep the keyboard in the bar.
+    requestAnimationFrame(() => {
+      if (!document.activeElement || document.activeElement === document.body) selectShownRef.current?.focus();
+    });
+  }
+  useEffect(() => {
+    if (selectAllFor === null) return;
+    // The filters (or the search being typed) changed before the matches came in: nothing is selected for them.
+    if (selectAllFor.key !== filterKey || q.trim() !== needle) return setSelectAllFor(null);
+    // A failed load leaves the old page; give up rather than wait for a page that will not come.
+    if (error && error !== selectAllFor.seenError) return setSelectAllFor(null);
+    if (loading || !data || data === selectAllFor.seen) return;
+    if (videos.length >= selectTarget) return selectLoaded();
+    // More match now than when the button was pressed: load up to the new count (never past BULK_MAX), then select.
+    if (limit < selectTarget) {
+      setSelectAllFor({ key: filterKey, seen: data, seenError: error });
+      setExtent({ key: filterKey, limit: selectTarget });
+    } else setSelectAllFor(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectAllFor, filterKey, q, needle, data, error, loading, videos, selectTarget, limit]);
+  function selectAllMatching() {
+    if (selectAllFor !== null || !data) return;
+    // Everything that one action takes is already on the page.
+    if (videos.length >= selectTarget) return selectLoaded();
+    setSelectAllFor({ key: filterKey, seen: data, seenError: error });
+    setExtent({ key: filterKey, limit: selectTarget });
+  }
+  // A new filter (or sort, which starts the page again) hides cards; drop the selection so bulk actions only ever touch
+  // what is visible, and any "Select all matching" still loading for the old filters.
   useEffect(() => {
     setSelected(new Set());
+    setSelectAllFor(null);
     setTimeField(null);
     setTimeDraft("");
     setLinkSettings({ download: "", gate: "" });
-  }, [q, status, folder, batch, trash, review, share, starred, created]);
+  }, [q, status, folder, batch, sort, trash, review, share, starred, created]);
   // The last purge empties both views; leave the trash so the "No videos yet" state (and the filter bar) comes back.
   useEffect(() => {
     if (trash && data && data.total === 0 && data.trashed === 0) setTrash(false);
@@ -641,10 +681,24 @@ function VideosInner() {
           <span className="flex-1" />
           {selecting ? (
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1" data-testid="bulk-bar">
-              <span className="px-1 text-xs font-medium text-slate-700">{selected.size} selected</span>
-              <button type="button" onClick={() => setSelected(new Set(videos.map((v) => v.id)))} disabled={busy !== null} className="text-xs text-brand-700 hover:underline disabled:opacity-50">
+              <span role="status" className="px-1 text-xs font-medium text-slate-700">{selected.size} selected</span>
+              <button ref={selectShownRef} type="button" onClick={() => setSelected(new Set(videos.map((v) => v.id)))} disabled={busy !== null} className="text-xs text-brand-700 hover:underline disabled:opacity-50">
                 Select all shown
               </button>
+              {remaining > 0 && videos.length < BULK_MAX && (
+                <button
+                  ref={selectAllRef}
+                  type="button"
+                  onClick={selectAllMatching}
+                  disabled={busy !== null}
+                  // While the matches load it stays focusable (marked, ignoring clicks), as the studio's buttons do.
+                  aria-disabled={selectAllFor !== null || undefined}
+                  title={data && data.matched > BULK_MAX ? `One bulk action takes up to ${BULK_MAX} videos; the first ${BULK_MAX} in this order are loaded and selected` : "Loads every video that matches the filters and selects them all"}
+                  className="text-xs text-brand-700 hover:underline disabled:opacity-50 aria-disabled:cursor-wait"
+                >
+                  {selectAllFor !== null ? "Selecting…" : data && data.matched > BULK_MAX ? `Select the first ${BULK_MAX} matching` : `Select all ${data?.matched ?? 0} matching`}
+                </button>
+              )}
               {trash ? (
                 <>
                   <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => bulk("restore")} disabled={!selected.size || busy !== null} loading={busy === "restore"}>

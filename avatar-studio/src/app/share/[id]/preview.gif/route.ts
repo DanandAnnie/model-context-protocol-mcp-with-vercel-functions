@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 /**
  * How long a mail client's image proxy (or a CDN) may keep the answer: well inside the renderer link's lifetime, and
- * short, since switching the link off or adding a password reaches a kept answer only once it lapses.
+ * short, since switching the link off, adding a password, or turning the email gate on reaches a kept answer only once it lapses.
  */
 const MAX_AGE_SEC = 300;
 

@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { ArchiveRestore, CheckSquare, Clapperboard, Clock, Download, FolderInput, KeyRound, FolderMinus, FolderPen, Link2, Link2Off, TimerOff, Trash2, X } from "lucide-react";
+import { ArchiveRestore, CheckSquare, Clapperboard, Clock, Download, FolderInput, KeyRound, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, TimerOff, Trash2, X } from "lucide-react";
 import { api } from "@/lib/client";
 import { VideoCard } from "@/components/VideoCard";
 import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -22,7 +22,7 @@ function localMinute(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links" | "password" | "nopassword";
+type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links" | "password" | "nopassword" | "settings";
 
 export default function VideosPage() {
   return (
@@ -87,8 +87,10 @@ function VideosInner() {
   const [bulkErr, setBulkErr] = useState<string | null>(null);
   // "Schedule go-live" and "Set expiry" open a date and time field in the bar, one at a time; it is a local time, sent as an instant.
   // The share password field takes the same place in the bar, so only one of the three is open at a time.
-  const [timeField, setTimeField] = useState<"golive" | "expiry" | "password" | null>(null);
+  const [timeField, setTimeField] = useState<"golive" | "expiry" | "password" | "settings" | null>(null);
   const [timeDraft, setTimeDraft] = useState("");
+  // The download button and email gate, each left as it is ("") or turned on or off on every selected video.
+  const [linkSettings, setLinkSettings] = useState<{ download: "" | "on" | "off"; gate: "" | "on" | "off" }>({ download: "", gate: "" });
   function toggle(id: string) {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -102,6 +104,7 @@ function VideosInner() {
     setSelected(new Set());
     setTimeField(null);
     setTimeDraft("");
+    setLinkSettings({ download: "", gate: "" });
   }
   // Folder management: rename the chosen folder (merging into an existing name) or remove it, leaving its videos unfiled.
   const [folderBusy, setFolderBusy] = useState(false);
@@ -133,6 +136,7 @@ function VideosInner() {
     setSelected(new Set());
     setTimeField(null);
     setTimeDraft("");
+    setLinkSettings({ download: "", gate: "" });
   }, [q, status, folder, batch, trash, review, share]);
   // The last purge empties both views; leave the trash so the "No videos yet" state (and the filter bar) comes back.
   useEffect(() => {
@@ -157,6 +161,8 @@ function VideosInner() {
       // A video already locked gets the new password in place of its own, and its unlocked visitors must enter it again.
       const locked = videos.filter((v) => selected.has(v.id) && v.shareLocked).length;
       if (locked && !window.confirm(`${locked === 1 ? "1 selected video already has" : `${locked} selected videos already have`} a share password. Replace ${locked === 1 ? "it" : "them"} with this one? Visitors who unlocked ${locked === 1 ? "it" : "them"} must enter the new one.`)) return;
+    } else if (action === "settings" && linkSettings.gate === "on" && !window.confirm(`Ask for an email before ${ids.length === 1 ? "the selected video plays" : `the ${ids.length} selected videos play`}? Everyone opening ${ids.length === 1 ? "its link or embed" : "their links or embeds"}, including people you have already sent ${ids.length === 1 ? "it" : "them"} to, sees the form first.`)) {
+      return;
     } else if (action === "nopassword" && !window.confirm(`Remove the share password from ${ids.length} ${ids.length === 1 ? "video" : "videos"}? Anyone with ${ids.length === 1 ? "the link" : "their links"} can then watch.`)) {
       return;
     } else if (action === "schedule" || action === "expire") {
@@ -183,7 +189,14 @@ function VideosInner() {
                 ? { action: "expire", ids, shareExpiresAt: action === "noexpiry" ? null : new Date(timeDraft).toISOString() }
                 : action === "password" || action === "nopassword"
                   ? { action: "password", ids, sharePassword: action === "nopassword" ? null : timeDraft }
-                  : { action, ids };
+                  : action === "settings"
+                    ? {
+                        action,
+                        ids,
+                        ...(linkSettings.download ? { shareDownload: linkSettings.download === "on" } : {}),
+                        ...(linkSettings.gate ? { shareGate: linkSettings.gate === "on" } : {}),
+                      }
+                    : { action, ids };
       const { missing, refused = [] } = await api<{ done: number; missing: string[]; refused?: string[] }>("/api/videos/bulk", { method: "POST", body: JSON.stringify(body) });
       await refetch();
       const notes: string[] = [];
@@ -247,9 +260,10 @@ function VideosInner() {
   }
 
   // The banner stays: after a refusal it says which of the two times to move, which may be the field being opened.
-  function openTimeField(kind: "golive" | "expiry" | "password") {
+  function openTimeField(kind: "golive" | "expiry" | "password" | "settings") {
     setTimeField(kind);
     setTimeDraft("");
+    setLinkSettings({ download: "", gate: "" });
   }
   // A password for every selected link: typed once, kept only as each video's own salted hash.
   function passwordForm() {
@@ -290,6 +304,49 @@ function VideosInner() {
           }}
           disabled={busy !== null}
           aria-label="Close share password"
+          className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </form>
+    );
+  }
+  // The share page's download button and email gate, for every selected video; a setting left as it is is not sent.
+  function settingsForm() {
+    const choice = (label: string, key: "download" | "gate") => (
+      <select
+        aria-label={label}
+        value={linkSettings[key]}
+        onChange={(e) => setLinkSettings((prev) => ({ ...prev, [key]: e.target.value as "" | "on" | "off" }))}
+        className="rounded-full border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+      >
+        <option value="">{key === "download" ? "Viewers can download: leave as is" : "Ask for an email before playing: leave as is"}</option>
+        <option value="on">{key === "download" ? "Viewers can download: yes" : "Ask for an email before playing: yes"}</option>
+        <option value="off">{key === "download" ? "Viewers can download: no" : "Ask for an email before playing: no"}</option>
+      </select>
+    );
+    return (
+      <form
+        className="inline-flex flex-wrap items-center gap-1.5"
+        data-testid="bulk-settings"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void bulk("settings");
+        }}
+      >
+        {choice("Download button for the selected videos", "download")}
+        {choice("Ask for email for the selected videos", "gate")}
+        <Button type="submit" variant="secondary" className="px-2.5 py-1 text-xs" disabled={!selected.size || (!linkSettings.download && !linkSettings.gate) || busy !== null} loading={busy === "settings"}>
+          Apply
+        </Button>
+        <button
+          type="button"
+          onClick={() => {
+            setTimeField(null);
+            setLinkSettings({ download: "", gate: "" });
+          }}
+          disabled={busy !== null}
+          aria-label="Close link settings"
           className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
         >
           <X className="h-3.5 w-3.5" />
@@ -463,6 +520,13 @@ function VideosInner() {
               ) : (
                 <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => openTimeField("password")} disabled={!selected.size || busy !== null}>
                   <KeyRound className="h-3.5 w-3.5" /> Password
+                </Button>
+              )}
+              {timeField === "settings" ? (
+                settingsForm()
+              ) : (
+                <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => openTimeField("settings")} disabled={!selected.size || busy !== null} title="Let viewers of the selected videos download them, or ask them for an email before playing, or stop either">
+                  <SlidersHorizontal className="h-3.5 w-3.5" /> Download &amp; email
                 </Button>
               )}
               <Button variant="danger" className="px-2.5 py-1 text-xs" onClick={() => bulk("delete")} disabled={!selected.size || busy !== null} loading={busy === "delete"} title={`Moves the selected videos to the trash, where they can be restored for ${TRASH_RETENTION_DAYS} days`}>

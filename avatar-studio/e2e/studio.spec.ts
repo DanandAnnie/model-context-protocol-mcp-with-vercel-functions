@@ -4869,6 +4869,32 @@ test("library multi-select moves and deletes videos in bulk", async ({ page }) =
   await expect(badgeOn(a.id)).toHaveCount(0);
   expect((await (await page.request.get(`/api/videos/${b.id}`)).json()).video.shareLocked).toBeUndefined();
 
+  // The download button and email gate go on or off for the selection; a setting left "as is" is not touched.
+  const settingsOf = async (id: string) => {
+    const v = (await (await page.request.get(`/api/videos/${id}`)).json()).video;
+    return [v.shareDownload ?? false, v.shareGate ?? false];
+  };
+  await page.getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: `Select Bulk one ${tag}` }).click();
+  await page.getByRole("button", { name: `Select Bulk two ${tag}` }).click();
+  await page.getByRole("button", { name: "Download & email" }).click();
+  await expect(page.getByTestId("bulk-settings").getByRole("button", { name: "Apply" })).toBeDisabled();
+  await page.getByLabel("Download button for the selected videos").selectOption("on");
+  await page.getByLabel("Ask for email for the selected videos").selectOption("on");
+  await page.getByTestId("bulk-settings").getByRole("button", { name: "Apply" }).click();
+  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+  expect(await settingsOf(a.id)).toEqual([true, true]);
+  expect(await settingsOf(b.id)).toEqual([true, true]);
+  await page.getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: `Select Bulk one ${tag}` }).click();
+  await page.getByRole("button", { name: "Download & email" }).click();
+  await page.getByLabel("Ask for email for the selected videos").selectOption("off");
+  await page.getByTestId("bulk-settings").getByRole("button", { name: "Apply" }).click();
+  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+  expect(await settingsOf(a.id)).toEqual([true, false]);
+  expect(await settingsOf(b.id)).toEqual([true, true]);
+  expect((await page.request.post("/api/videos/bulk", { data: { action: "settings", ids: [a.id] } })).status()).toBe(400);
+
   // Delete moves to the trash: gone from the library, 404 to the public, still the owner's to restore.
   await page.getByRole("button", { name: "Select" }).click();
   await page.getByRole("button", { name: `Select Bulk two ${tag}` }).click();
@@ -4906,7 +4932,7 @@ test("library multi-select moves and deletes videos in bulk", async ({ page }) =
   expect(await (await page.request.post("/api/videos/bulk", { data: { action: "purge", ids: [a.id] } })).json()).toEqual({ done: 0, missing: [a.id] });
   expect((await page.request.get(`/api/videos/${a.id}`)).status()).toBe(200);
   expect((await page.request.post("/api/videos/bulk", { data: { action: "move", ids: [] } })).status()).toBe(400);
-  expect(dialogs).toEqual(["Folder name (leave empty to move to Unfiled)", "1 selected video already has a share password. Replace it with this one? Visitors who unlocked it must enter the new one.", "Remove the share password from 2 videos? Anyone with their links can then watch.", "Move 1 video to the trash? You can restore it for 30 days.", "Delete this video for good? Its short clips, and the cleaned and lip-synced copies made from it, go too. This cannot be undone."]);
+  expect(dialogs).toEqual(["Folder name (leave empty to move to Unfiled)", "1 selected video already has a share password. Replace it with this one? Visitors who unlocked it must enter the new one.", "Remove the share password from 2 videos? Anyone with their links can then watch.", "Ask for an email before the 2 selected videos play? Everyone opening their links or embeds, including people you have already sent them to, sees the form first.", "Move 1 video to the trash? You can restore it for 30 days.", "Delete this video for good? Its short clips, and the cleaned and lip-synced copies made from it, go too. This cannot be undone."]);
 });
 
 test("webhook settings reject private hosts and show the signing secret", async ({ page }) => {

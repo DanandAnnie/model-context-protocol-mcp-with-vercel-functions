@@ -131,6 +131,29 @@ describe("share link go-live time", () => {
     assert.deepEqual(await bulkVideos(bulkVideoSchema.parse({ action: "password", ids: [a.id], sharePassword: "letmein" }), "someone_else"), { done: 0, missing: [a.id] });
   });
 
+  it("turns the download button and email gate on or off for many videos, leaving out a setting not asked for", async () => {
+    const [a, b] = [await readyVideo(), await readyVideo()];
+    assert.throws(() => bulkVideoSchema.parse({ action: "settings", ids: [a.id] }), /Choose a setting/);
+    assert.deepEqual(await bulkVideos(bulkVideoSchema.parse({ action: "settings", ids: [a.id, b.id, "vid_nosuch"], shareDownload: true, shareGate: true }), OWNER), { done: 2, missing: ["vid_nosuch"] });
+    for (const v of [a, b]) {
+      const got = await getVideo(v.id, OWNER, false);
+      assert.deepEqual([got.shareDownload, got.shareGate], [true, true]);
+    }
+    // Only the gate goes off; the download button stays on.
+    await bulkVideos(bulkVideoSchema.parse({ action: "settings", ids: [a.id, b.id], shareGate: false }), OWNER);
+    const after = await getVideo(a.id, OWNER, false);
+    assert.equal(after.shareDownload, true);
+    assert.equal("shareGate" in after, false);
+    assert.deepEqual(await bulkVideos(bulkVideoSchema.parse({ action: "settings", ids: [a.id], shareDownload: false }), "someone_else"), { done: 0, missing: [a.id] });
+    // Both in one request, one on and one off; the link's other settings are left alone.
+    await updateVideo(b.id, videoPatchSchema.parse({ shareDisabled: true, sharePassword: "keep me", shareStartsAt: inDays(3) }), OWNER);
+    await bulkVideos(bulkVideoSchema.parse({ action: "settings", ids: [b.id], shareDownload: false, shareGate: true }), OWNER);
+    const both = await getVideo(b.id, OWNER, false);
+    assert.equal("shareDownload" in both, false, "off removes it");
+    assert.equal(both.shareGate, true);
+    assert.deepEqual([both.shareDisabled, both.shareLocked, typeof both.shareStartsAt], [true, true, "string"]);
+  });
+
   it("points out a live link's expiry only within a week, and not for a link the public cannot reach", () => {
     const now = Date.parse("2030-06-01T12:00:00Z");
     const at = (ms: number) => new Date(now + ms).toISOString();

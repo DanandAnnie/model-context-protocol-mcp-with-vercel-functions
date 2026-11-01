@@ -3,13 +3,13 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { ArchiveRestore, CheckSquare, Clapperboard, Clock, LayoutGrid, List, Download, FolderInput, KeyRound, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
-import { api, folderFor } from "@/lib/client";
+import { api, folderFor, overSelection } from "@/lib/client";
 import { VideoCard, VideoRow } from "@/components/VideoCard";
 import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit, useWorkspaceRole } from "@/hooks/useCanEdit";
 import type { VideoPage, VideoQuery } from "@/lib/services/videos";
-import { BULK_MAX, EMPTY_TRASH_MAX, MAX_FOLDER_NAME, MAX_RETRY_AT_ONCE, RESTORE_ALL_MAX, SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, TRASH_RETENTION_DAYS, type VideoStatus } from "@/lib/types";
+import { BULK_MAX, EMPTY_TRASH_MAX, LIBRARY_PAGE_MAX, MAX_FOLDER_NAME, MAX_RETRY_AT_ONCE, RESTORE_ALL_MAX, SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, TRASH_RETENTION_DAYS, type VideoStatus } from "@/lib/types";
 
 const STATUSES: Array<"all" | VideoStatus> = ["all", "processing", "completed", "failed"];
 type SortKey = VideoQuery["sort"];
@@ -178,6 +178,10 @@ function VideosInner() {
       setFolderBusy(false);
     }
   }
+  // The refusal of an over-limit selection goes once the selection is back within what one action takes.
+  useEffect(() => {
+    if (selected.size <= BULK_MAX) setBulkErr((note) => (note?.startsWith("One action takes up to") ? null : note));
+  }, [selected]);
   // "Select all matching": the filters it was asked for. Every match (up to what one bulk action takes) is loaded onto the
   // page first and then selected, so the selection stays within what is shown and the bar's counts stay true.
   // `seen` is the page as it was when more was asked for: only a response after it can say whether everything is in.
@@ -231,6 +235,8 @@ function VideosInner() {
   async function bulk(action: BulkAction) {
     const ids = Array.from(selected);
     if (!ids.length) return;
+    const over = overSelection(ids.length, BULK_MAX);
+    if (over) return setBulkErr(over);
     let targetFolder: string | undefined;
     if (action === "move" || action === "unfile") {
       // A name that only differs from an existing folder in case or spacing goes into that folder. The length is checked
@@ -328,6 +334,8 @@ function VideosInner() {
   async function downloadLinks() {
     const ids = Array.from(selected);
     if (!ids.length) return;
+    const over = overSelection(ids.length, BULK_MAX);
+    if (over) return setBulkErr(over);
     setBusy("links");
     // A note from an earlier go-live or expiry refusal stays: it names the links to fix, which this file is for checking.
     try {
@@ -742,8 +750,18 @@ function VideosInner() {
           <span className="flex-1" />
           {selecting ? (
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1" data-testid="bulk-bar">
-              <span role="status" className="px-1 text-xs font-medium text-slate-700">{selected.size} selected</span>
-              <button ref={selectShownRef} type="button" onClick={() => setSelected(new Set(videos.map((v) => v.id)))} disabled={busy !== null} className="text-xs text-brand-700 hover:underline disabled:opacity-50">
+              <span role="status" className={`px-1 text-xs font-medium ${selected.size > BULK_MAX ? "text-amber-800" : "text-slate-700"}`}>
+                {selected.size} selected{selected.size > BULK_MAX ? `, over the ${BULK_MAX} one action takes` : ""}
+              </span>
+              <button
+                ref={selectShownRef}
+                type="button"
+                onClick={() => {
+                  // Never more than one action takes, so every button in the bar can act on what is chosen.
+                  setSelected(new Set(videos.slice(0, BULK_MAX).map((v) => v.id)));
+                  if (videos.length > BULK_MAX) setBulkErr(`Selected the first ${BULK_MAX} of the ${videos.length} shown, as one action takes up to ${BULK_MAX}.`);
+                }}
+                disabled={busy !== null} className="text-xs text-brand-700 hover:underline disabled:opacity-50">
                 Select all shown
               </button>
               {remaining > 0 && videos.length < BULK_MAX && (
@@ -987,9 +1005,13 @@ function VideosInner() {
           {remaining > 0 && (
             <div className="mt-6 flex flex-col items-center gap-2 text-sm text-slate-500">
               <span>Showing {videos.length} of {data?.matched}</span>
-              <Button variant="secondary" onClick={() => setExtent({ key: filterKey, limit: limit + PAGE })} loading={loading} data-testid="load-more">
-                Show {Math.min(remaining, PAGE)} more
-              </Button>
+              {videos.length < LIBRARY_PAGE_MAX ? (
+                <Button variant="secondary" onClick={() => setExtent({ key: filterKey, limit: Math.min(limit + PAGE, LIBRARY_PAGE_MAX) })} loading={loading} data-testid="load-more">
+                  Show {Math.min(remaining, PAGE, LIBRARY_PAGE_MAX - limit)} more
+                </Button>
+              ) : (
+                <span role="status" data-testid="page-cap">That is as many as the library shows at once; search or filter to find the rest.</span>
+              )}
             </div>
           )}
         </>

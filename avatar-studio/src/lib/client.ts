@@ -155,6 +155,16 @@ export function folderFor(typed: string, folders: readonly string[]): string {
   return folders.find((f) => key(f) === key(name)) ?? name;
 }
 
+/**
+ * Why a library bulk action cannot take this selection, or null when it can: one action takes up to `max` videos
+ * (the server's own limit), and a bigger selection is refused here with how many to unselect rather than as a 400.
+ */
+export function overSelection(count: number, max: number): string | null {
+  if (count <= max) return null;
+  const extra = count - max;
+  return `One action takes up to ${max} videos and ${count} are selected; unselect ${extra} first, or act on them in two goes.`;
+}
+
 export function formatDate(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }

@@ -5,7 +5,7 @@ import { getStore } from "../store";
 import type { Video } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { renderLimitFor } from "../billing";
-import { MAX_RETRY_AT_ONCE } from "../types";
+import { BULK_MAX, MAX_RETRY_AT_ONCE } from "../types";
 import { NotFoundError, ValidationError } from "../errors";
 import { fillTemplate, parseCsv, placeholdersIn } from "../csv";
 import { shareOffline, shareState } from "../client";
@@ -217,7 +217,7 @@ export function batchLinkRows(videos: Video[], base: string, now = Date.now()): 
 /** Columns of the links file for any selection of videos (the library's "Download links"). */
 export const SELECTION_LINK_COLUMNS = ["title", "status", "share_state", "share_link", "share_goes_live", "share_expires", "password_required", "email_required", "folder", "video_id", "created"] as const;
 
-export const selectionLinksSchema = z.object({ ids: z.array(z.string().min(1).max(80)).min(1).max(200) });
+export const selectionLinksSchema = z.object({ ids: z.array(z.string().min(1).max(80)).min(1).max(BULK_MAX) });
 
 /**
  * The chosen videos as rows to send, in the order given, the link filled in only where a viewer can open it now (ready,

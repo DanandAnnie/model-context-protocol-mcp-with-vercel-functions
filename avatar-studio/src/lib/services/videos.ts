@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName, getScriptProvider } from "../providers";
 import { getStore } from "../store";
-import { EMPTY_TRASH_MAX, EMPTY_WATCH, MAX_FOLDER_NAME, RESTORE_ALL_MAX, MAX_AGENT_MESSAGE, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
+import { BULK_MAX, EMPTY_TRASH_MAX, EMPTY_WATCH, LIBRARY_PAGE_MAX, MAX_FOLDER_NAME, RESTORE_ALL_MAX, MAX_AGENT_MESSAGE, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
 import type { AgentMessage, AudioClip, Avatar, Backdrop, Background, CaptionCue, DirectedMedia, DirectedScene, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
 import { buildCues } from "../captions";
 import { captionDurationSec, sceneBoundsMs, videoChapters, type Timed } from "../chapters";
@@ -1363,25 +1363,25 @@ export function recordCtaClick(id: string, gate: () => boolean = () => true, sha
 
 export const bulkVideoSchema = z.discriminatedUnion("action", [
   /** Move to the trash (restorable for `TRASH_RETENTION_DAYS`). */
-  z.object({ action: z.literal("delete"), ids: z.array(z.string().min(1)).min(1).max(200) }),
+  z.object({ action: z.literal("delete"), ids: z.array(z.string().min(1)).min(1).max(BULK_MAX) }),
   /** Bring trashed videos back to the library. */
-  z.object({ action: z.literal("restore"), ids: z.array(z.string().min(1)).min(1).max(200) }),
+  z.object({ action: z.literal("restore"), ids: z.array(z.string().min(1)).min(1).max(BULK_MAX) }),
   /** Delete trashed videos for good; a video that is not in the trash is reported as missing. */
-  z.object({ action: z.literal("purge"), ids: z.array(z.string().min(1)).min(1).max(200) }),
-  z.object({ action: z.literal("move"), ids: z.array(z.string().min(1)).min(1).max(200), folder: z.string().trim().max(MAX_FOLDER_NAME) }),
+  z.object({ action: z.literal("purge"), ids: z.array(z.string().min(1)).min(1).max(BULK_MAX) }),
+  z.object({ action: z.literal("move"), ids: z.array(z.string().min(1)).min(1).max(BULK_MAX), folder: z.string().trim().max(MAX_FOLDER_NAME) }),
   /** Star many videos (`starred: true`) or take their stars off. */
-  z.object({ action: z.literal("star"), ids: z.array(z.string().min(1)).min(1).max(200), starred: z.boolean() }),
+  z.object({ action: z.literal("star"), ids: z.array(z.string().min(1)).min(1).max(BULK_MAX), starred: z.boolean() }),
   /** Switch the share links of many videos off (`shareDisabled: true`) or back on. */
-  z.object({ action: z.literal("share"), ids: z.array(z.string().min(1)).min(1).max(200), shareDisabled: z.boolean() }),
+  z.object({ action: z.literal("share"), ids: z.array(z.string().min(1)).min(1).max(BULK_MAX), shareDisabled: z.boolean() }),
   /** Schedule the share links of many videos to go live at one time (`null` makes them live now). */
-  z.object({ action: z.literal("schedule"), ids: z.array(z.string().min(1)).min(1).max(200), shareStartsAt: shareStartsAtSchema }),
+  z.object({ action: z.literal("schedule"), ids: z.array(z.string().min(1)).min(1).max(BULK_MAX), shareStartsAt: shareStartsAtSchema }),
   /** Make the share links of many videos stop working at one time (`null` keeps them open indefinitely). */
-  z.object({ action: z.literal("expire"), ids: z.array(z.string().min(1)).min(1).max(200), shareExpiresAt: shareExpiresAtSchema }),
+  z.object({ action: z.literal("expire"), ids: z.array(z.string().min(1)).min(1).max(BULK_MAX), shareExpiresAt: shareExpiresAtSchema }),
   /** Put one password on the share links of many videos (each kept as its own salted hash), or remove theirs with `null`. */
-  z.object({ action: z.literal("password"), ids: z.array(z.string().min(1)).min(1).max(200), sharePassword: sharePasswordSchema }),
+  z.object({ action: z.literal("password"), ids: z.array(z.string().min(1)).min(1).max(BULK_MAX), sharePassword: sharePasswordSchema }),
   /** Turn the share page's download button and email gate on or off for many videos; a setting left out stays as it is. */
   z
-    .object({ action: z.literal("settings"), ids: z.array(z.string().min(1)).min(1).max(200), shareDownload: z.boolean().optional(), shareGate: z.boolean().optional() })
+    .object({ action: z.literal("settings"), ids: z.array(z.string().min(1)).min(1).max(BULK_MAX), shareDownload: z.boolean().optional(), shareGate: z.boolean().optional() })
     .refine((v) => v.shareDownload !== undefined || v.shareGate !== undefined, { message: "Choose a setting to change" }),
 ]);
 
@@ -2080,7 +2080,7 @@ export const videoQuerySchema = z.object({
     .optional()
     .transform((v) => v === "true" || v === "1"),
   /** Omit for every match (scripts); the library pages with it. */
-  limit: z.coerce.number().int().min(1).max(200).optional(),
+  limit: z.coerce.number().int().min(1).max(LIBRARY_PAGE_MAX).optional(),
   /** `true` lists the trash (newest deletion first) instead of the library. */
   trash: z
     .string()

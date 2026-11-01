@@ -14,7 +14,7 @@ export function VideoCard({ video, selectable = false, selected = false, onToggl
       <div className="relative aspect-video w-full overflow-hidden bg-slate-900">
         {posterUrl(video) ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={posterUrl(video)} alt="" className="h-full w-full object-cover" onError={(e) => (e.currentTarget.style.display = "none")} />
+          <img src={posterUrl(video)} alt="" loading="lazy" className="h-full w-full object-cover" onError={(e) => (e.currentTarget.style.display = "none")} />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-slate-500">
             <Film className="h-8 w-8" />
@@ -134,7 +134,7 @@ export function VideoRow({ video, selectable = false, selected = false, onToggle
       <span className="relative hidden aspect-video w-24 shrink-0 overflow-hidden rounded bg-slate-900 sm:block">
         {posterUrl(video) ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={posterUrl(video)} alt="" className="h-full w-full object-cover" onError={(e) => (e.currentTarget.style.display = "none")} />
+          <img src={posterUrl(video)} alt="" loading="lazy" className="h-full w-full object-cover" onError={(e) => (e.currentTarget.style.display = "none")} />
         ) : (
           <span className="flex h-full w-full items-center justify-center text-slate-500">
             <Film className="h-5 w-5" />

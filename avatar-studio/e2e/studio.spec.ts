@@ -9002,3 +9002,67 @@ test("Select all matching selects past the first page and hands every match to a
   await expect(page.getByTestId("bulk-bar").getByText(/selected$/)).toHaveText("0 selected");
   await page.unroute(/\/api\/videos\?.*limit=50/);
 });
+
+test("the bulk bar never sends more than the 200 videos one action takes", async ({ page }) => {
+  test.slow();
+  const tag = `Over ${Date.now().toString(36)}`;
+  // 205 videos, in batches of up to 100 rows.
+  for (const [from, n] of [[0, 100], [100, 100], [200, 5]] as const) {
+    const rows = Array.from({ length: n }, (_, i) => `Guest ${String(from + i + 1).padStart(3, "0")}`);
+    const made = await page.request.post("/api/videos/batch", {
+      data: { title: tag, scriptTemplate: "Hello {name}.", csv: `name\n${rows.join("\n")}`, avatarId: "stock_1", voiceId: "stock_voice_1" },
+    });
+    expect(made.status()).toBe(201);
+  }
+  let bulkCalls = 0;
+  await page.route("**/api/videos/bulk", async (route) => {
+    bulkCalls += 1;
+    await route.continue();
+  });
+  await page.goto("/videos");
+  // The search applies after a pause in typing; page only once its results are in, or "Show more" pages the old list.
+  const searched = page.waitForResponse((r) => r.url().includes("/api/videos?") && new URL(r.url()).searchParams.get("q") === tag);
+  await page.getByLabel("Search videos").fill(tag);
+  await searched;
+  await expect(page.getByText("Showing 48 of 205")).toBeVisible();
+  for (const shown of [96, 144, 192]) {
+    await page.getByTestId("load-more").click();
+    await expect(page.getByText(`Showing ${shown} of 205`)).toBeVisible();
+  }
+  // Past 192 the page asks for 240, which used to be refused ("Too big"); now the last 13 come in.
+  await page.getByTestId("load-more").click();
+  await expect(page.getByTestId("load-more")).toHaveCount(0);
+  await expect(page.getByText(/Too big/)).toHaveCount(0);
+  await expect(page.locator(`a[href^="/videos/vid_"]`).filter({ hasText: tag })).toHaveCount(205);
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  const bar = page.getByTestId("bulk-bar");
+  const count = bar.getByRole("status");
+  // Select all shown stops at what one action takes, and says so.
+  await bar.getByRole("button", { name: "Select all shown" }).click();
+  await expect(count).toHaveText("200 selected");
+  await expect(page.getByText("Selected the first 200 of the 205 shown, as one action takes up to 200.")).toBeVisible();
+  // One more by hand goes over: the count says so, and an action refuses before sending anything.
+  await page.locator(`button[aria-pressed="false"][aria-label^="Select ${tag}"]`).first().click();
+  await expect(count).toHaveText("201 selected, over the 200 one action takes");
+  let linkCalls = 0;
+  await page.route("**/api/videos/links", async (route) => {
+    linkCalls += 1;
+    await route.continue();
+  });
+  const refusal = page.getByText("One action takes up to 200 videos and 201 are selected; unselect 1 first, or act on them in two goes.");
+  await bar.getByRole("button", { name: "Star", exact: true }).click();
+  await expect(refusal).toBeVisible();
+  await bar.getByRole("button", { name: "Download links" }).click();
+  await expect(refusal).toBeVisible();
+  expect([bulkCalls, linkCalls]).toEqual([0, 0]);
+  // Back to 200, the same action goes through.
+  await page.locator(`button[aria-pressed="true"][aria-label^="Select ${tag}"]`).first().click();
+  await expect(count).toHaveText("200 selected");
+  // Back within the limit, the refusal goes with it.
+  await expect(refusal).toHaveCount(0);
+  await bar.getByRole("button", { name: "Star", exact: true }).click();
+  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+  expect(bulkCalls).toBe(1);
+  const starred = (await (await page.request.get(`/api/videos?q=${encodeURIComponent(tag)}&starred=1&limit=1`)).json()).matched as number;
+  expect(starred).toBe(200);
+});

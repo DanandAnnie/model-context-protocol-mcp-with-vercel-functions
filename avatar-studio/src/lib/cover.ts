@@ -16,7 +16,8 @@ const COVER_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif
 /** Prefixed like every other per-video record: the Supabase table keys every kind by id alone. */
 export const coverId = (videoId: string) => `cover_${videoId}`;
 
-export async function setCover(video: Pick<Video, "id" | "ownerId">, dataUrl: string): Promise<Cover> {
+/** The picture in a cover's data URL, or a ValidationError saying why it cannot be a cover; nothing is stored. */
+export function readCover(dataUrl: string): { bytes: Uint8Array; mimeType: string } {
   if (!dataUrl.startsWith("data:image/")) throw new ValidationError("The cover must be an uploaded image");
   let decoded: ReturnType<typeof decodeDataUrl>;
   try {
@@ -24,9 +25,13 @@ export async function setCover(video: Pick<Video, "id" | "ownerId">, dataUrl: st
   } catch {
     throw new ValidationError("The cover image data is malformed");
   }
-  const { bytes, mimeType } = decoded;
-  if (!COVER_TYPES.has(mimeType)) throw new ValidationError("The cover must be a PNG, JPEG, WebP, or GIF image");
-  if (bytes.byteLength > MAX_COVER_BYTES) throw new ValidationError("The cover image is too large (2 MB max)");
+  if (!COVER_TYPES.has(decoded.mimeType)) throw new ValidationError("The cover must be a PNG, JPEG, WebP, or GIF image");
+  if (decoded.bytes.byteLength > MAX_COVER_BYTES) throw new ValidationError("The cover image is too large (2 MB max)");
+  return decoded;
+}
+
+export async function setCover(video: Pick<Video, "id" | "ownerId">, dataUrl: string): Promise<Cover> {
+  const { bytes, mimeType } = readCover(dataUrl);
   const cover: Cover = { id: coverId(video.id), videoId: video.id, ownerId: video.ownerId, mimeType, bytes: bytes.byteLength, ...imageSize(bytes, mimeType), data: Buffer.from(bytes).toString("base64"), updatedAt: nowIso() };
   return getStore().put("cover", cover);
 }

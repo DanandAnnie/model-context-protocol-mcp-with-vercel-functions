@@ -2,9 +2,10 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArchiveRestore, Captions, CheckSquare, FileText, Clapperboard, Clock, Copy, LayoutGrid, List, Download, FolderInput, KeyRound, MousePointerClick, QrCode, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
+import { ArchiveRestore, Captions, ImageIcon, CheckSquare, FileText, Clapperboard, Clock, Copy, LayoutGrid, List, Download, FolderInput, KeyRound, MousePointerClick, QrCode, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
 import { CREATED_WITHIN_DAYS, SHARE_FILTERS, api, clickSelect, folderFor, nextShareChange, overSelection } from "@/lib/client";
 import { libraryKey } from "@/lib/shortcuts";
+import { fileToCover } from "@/lib/image-upload";
 import { isApple } from "@/components/QuickFind";
 import { VideoCard, VideoRow } from "@/components/VideoCard";
 import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -38,7 +39,7 @@ function localMinute(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links" | "password" | "nopassword" | "settings" | "retry" | "star" | "unstar" | "empty" | "restoreall" | "unfile" | "cta" | "nocta" | "copylinks" | "qrcodes" | "captions" | "scripts";
+type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links" | "password" | "nopassword" | "settings" | "retry" | "star" | "unstar" | "empty" | "restoreall" | "unfile" | "cta" | "nocta" | "copylinks" | "qrcodes" | "captions" | "scripts" | "cover" | "nocover";
 
 export default function VideosPage() {
   return (
@@ -179,9 +180,14 @@ function VideosInner() {
   const [bulkErr, setBulkErr] = useState<string | null>(null);
   // "Schedule go-live" and "Set expiry" open a date and time field in the bar, one at a time; it is a local time, sent as an instant.
   // The share password, link settings, and folder fields take the same place in the bar, so only one of them is open at a time.
-  const [timeField, setTimeField] = useState<"golive" | "expiry" | "password" | "settings" | "folder" | "cta" | null>(null);
+  const [timeField, setTimeField] = useState<"golive" | "expiry" | "password" | "settings" | "folder" | "cta" | "cover" | null>(null);
   // The call-to-action button's text and link, for every selected video's share page.
   const [ctaDraft, setCtaDraft] = useState({ label: "", url: "" });
+  // The picture chosen for every selected video's cover, made ready to send (a JPEG fitted in 1280px) when it is picked.
+  const [coverDraft, setCoverDraft] = useState<{ name: string; dataUrl: string } | null>(null);
+  // A picture still being read; each pick is numbered so only the latest one, picked while the field is open, is kept.
+  const [coverReading, setCoverReading] = useState(false);
+  const coverPick = useRef(0);
   const [timeDraft, setTimeDraft] = useState("");
   // The download button and email gate, each left as it is ("") or turned on or off on every selected video.
   const [linkSettings, setLinkSettings] = useState<{ download: "" | "on" | "off"; gate: "" | "on" | "off" }>({ download: "", gate: "" });
@@ -210,6 +216,9 @@ function VideosInner() {
     setTimeDraft("");
     setLinkSettings({ download: "", gate: "" });
     setCtaDraft({ label: "", url: "" });
+    setCoverDraft(null);
+    coverPick.current += 1;
+    setCoverReading(false);
     requestAnimationFrame(() => {
       if (document.activeElement && document.activeElement !== document.body) return;
       const opener = barRef.current?.querySelector<HTMLButtonElement>(`[data-opens='${kind}']`);
@@ -253,6 +262,9 @@ function VideosInner() {
     setTimeDraft("");
     setLinkSettings({ download: "", gate: "" });
     setCtaDraft({ label: "", url: "" });
+    setCoverDraft(null);
+    coverPick.current += 1;
+    setCoverReading(false);
   }
   // Folder management: rename the chosen folder (merging into an existing name) or remove it, leaving its videos unfiled.
   const [folderBusy, setFolderBusy] = useState(false);
@@ -331,6 +343,9 @@ function VideosInner() {
     setTimeDraft("");
     setLinkSettings({ download: "", gate: "" });
     setCtaDraft({ label: "", url: "" });
+    setCoverDraft(null);
+    coverPick.current += 1;
+    setCoverReading(false);
   }, [q, status, folder, batch, sort, trash, review, share, starred, created]);
   // The last purge empties both views; leave the trash so the "No videos yet" state (and the filter bar) comes back.
   useEffect(() => {
@@ -387,6 +402,22 @@ function VideosInner() {
         approved ? `${approved === 1 ? "1 approved video goes" : `${approved} approved videos go`} back to not reviewed, as ${approved === 1 ? "its" : "their"} share page changes.` : "",
       ].filter(Boolean);
       if (notes.length && !window.confirm(`${notes.join(" ")} ${action === "cta" ? "Set this button" : replaced === 1 ? "Remove it" : "Remove them"}?`)) return;
+    } else if (action === "cover" || action === "nocover") {
+      if (action === "cover" && !coverDraft) return;
+      // The cover is part of what a share page shows, so changing it sends an approved video back to not reviewed.
+      const chosen = videos.filter((v) => selected.has(v.id));
+      const replaced = chosen.filter((v) => v.cover).length;
+      const approved = chosen.filter((v) => v.review?.status === "approved" && (action === "cover" || v.cover)).length;
+      const notes = [
+        !replaced
+          ? ""
+          : action === "cover"
+            ? `${replaced === 1 ? "1 selected video has a cover already, which this replaces" : `${replaced} selected videos have a cover already, which this replaces`}.`
+            : `${replaced === 1 ? "1 selected video has a cover; without it the share page shows the renderer's own picture of the video" : `${replaced} selected videos have a cover; without one the share page shows the renderer's own picture of the video`}.`,
+        approved ? `${approved === 1 ? "1 approved video goes" : `${approved} approved videos go`} back to not reviewed, as ${approved === 1 ? "its" : "their"} share page changes.` : "",
+      ].filter(Boolean);
+      if (action === "nocover" && !replaced) return setBulkErr(`${ids.length === 1 ? "The selected video has no" : "None of the selected videos has a"} cover to remove.`);
+      if (notes.length && !window.confirm(`${notes.join(" ")} ${action === "cover" ? "Set this cover" : replaced === 1 ? "Remove it" : "Remove them"}?`)) return;
     } else if (action === "nopassword" && !window.confirm(`Remove the share password from ${ids.length} ${ids.length === 1 ? "video" : "videos"}? Anyone with ${ids.length === 1 ? "the link" : "their links"} can then watch.`)) {
       return;
     } else if (action === "schedule" || action === "expire") {
@@ -417,6 +448,8 @@ function VideosInner() {
                   ? { action: "password", ids, sharePassword: action === "nopassword" ? null : timeDraft }
                   : action === "cta" || action === "nocta"
                     ? { action: "cta", ids, shareCta: action === "nocta" ? null : { label: ctaDraft.label.trim(), url: ctaDraft.url.trim() } }
+                  : action === "cover" || action === "nocover"
+                    ? { action: "cover", ids, cover: action === "nocover" ? null : coverDraft!.dataUrl }
                   : action === "settings"
                     ? {
                         action,
@@ -700,8 +733,11 @@ function VideosInner() {
   }
 
   // The banner stays: after a refusal it says which of the two times to move, which may be the field being opened.
-  function openTimeField(kind: "golive" | "expiry" | "password" | "settings" | "folder" | "cta") {
+  function openTimeField(kind: "golive" | "expiry" | "password" | "settings" | "folder" | "cta" | "cover") {
     setCtaDraft({ label: "", url: "" });
+    setCoverDraft(null);
+    coverPick.current += 1;
+    setCoverReading(false);
     setTimeField(kind);
     setTimeDraft("");
     setLinkSettings({ download: "", gate: "" });
@@ -848,6 +884,76 @@ function VideosInner() {
           onClick={closeTimeField}
           disabled={busy !== null}
           aria-label="Close call to action"
+          className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </form>
+    );
+  }
+  // One cover picture for every selected video's share page and card (each keeps its own copy), or none.
+  function coverForm() {
+    return (
+      <form
+        className="inline-flex flex-wrap items-center gap-1.5"
+        data-testid="bulk-cover"
+        noValidate
+        onSubmit={(e) => {
+          e.preventDefault();
+          void bulk("cover");
+        }}
+      >
+        <label className={`inline-flex cursor-pointer items-center rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-800 hover:bg-slate-50 focus-within:ring-2 focus-within:ring-brand-500 ${busy !== null ? "pointer-events-none opacity-50" : ""}`}>
+          {coverReading ? "Reading picture…" : coverDraft ? "Choose another picture" : "Choose picture"}
+          <input
+            autoFocus
+            type="file"
+            accept="image/*"
+            aria-label={`${coverDraft ? "Choose another picture" : "Choose picture"} for the selected videos' cover`}
+            aria-describedby={coverDraft ? "bulk-cover-chosen" : undefined}
+            className="sr-only"
+            disabled={busy !== null}
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (!file) return;
+              setBulkErr(null);
+              // The picture being read replaces the one shown, so Set cover never sends a picture other than the last chosen.
+              const pick = ++coverPick.current;
+              setCoverDraft(null);
+              setCoverReading(true);
+              try {
+                const dataUrl = await fileToCover(file);
+                if (pick === coverPick.current) setCoverDraft({ name: file.name, dataUrl });
+              } catch (err) {
+                if (pick === coverPick.current) setBulkErr(err instanceof Error ? err.message : "Could not read that picture");
+              } finally {
+                if (pick === coverPick.current) setCoverReading(false);
+              }
+            }}
+          />
+        </label>
+        {coverDraft && (
+          <span id="bulk-cover-chosen" role="status" className="inline-flex items-center gap-1.5 text-xs text-slate-600">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={coverDraft.dataUrl} alt="" className="h-6 w-10 rounded border border-slate-200 object-cover" data-testid="bulk-cover-preview" />
+            <span className="max-w-32 truncate" title={coverDraft.name}>
+              <span className="sr-only">Chosen: </span>
+              {coverDraft.name}
+            </span>
+          </span>
+        )}
+        <Button type="submit" variant="secondary" className="px-2.5 py-1 text-xs" disabled={!selected.size || !coverDraft || coverReading || busy !== null} loading={busy === "cover"} title="Shows this picture before the selected videos play, on their share pages and cards">
+          Set cover
+        </Button>
+        <Button type="button" variant="ghost" className="px-2.5 py-1 text-xs" onClick={() => bulk("nocover")} disabled={!selected.size || busy !== null} loading={busy === "nocover"} title="Remove the selected videos' covers, so each shows the renderer's own picture of it again">
+          No cover
+        </Button>
+        <button
+          type="button"
+          onClick={closeTimeField}
+          disabled={busy !== null}
+          aria-label="Close cover"
           className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
         >
           <X className="h-3.5 w-3.5" />
@@ -1122,6 +1228,13 @@ function VideosInner() {
               ) : (
                 <Button variant="secondary" className="px-2.5 py-1 text-xs" data-opens="cta" onClick={() => openTimeField("cta")} disabled={!selected.size || busy !== null} title="Put one call-to-action button on the selected videos' share pages, or take theirs off">
                   <MousePointerClick className="h-3.5 w-3.5" /> Call to action
+                </Button>
+              )}
+              {timeField === "cover" ? (
+                coverForm()
+              ) : (
+                <Button variant="secondary" className="px-2.5 py-1 text-xs" data-opens="cover" onClick={() => openTimeField("cover")} disabled={!selected.size || busy !== null} title="Give the selected videos one cover picture, or take theirs off">
+                  <ImageIcon className="h-3.5 w-3.5" /> Cover
                 </Button>
               )}
               <Button variant="danger" className="px-2.5 py-1 text-xs" onClick={() => bulk("delete")} disabled={!selected.size || busy !== null} loading={busy === "delete"} title={`Moves the selected videos to the trash, where they can be restored for ${TRASH_RETENTION_DAYS} days`}>

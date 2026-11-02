@@ -25,6 +25,7 @@ import { languageLabel } from "@/lib/language";
 import { useApi } from "@/hooks/useApi";
 import { ApiError, api, formatDate, formatSeconds, isDarkHex, emailSnippet, posterUrl, purgeAt, shareExpired, shareNotYet } from "@/lib/client";
 import { socialShareLinks } from "@/lib/social";
+import { fileToCover } from "@/lib/image-upload";
 import { TRASH_RETENTION_DAYS, type Video } from "@/lib/types";
 
 /** Whether a drawn image is a single flat colour, judged on a 20 × 20 grid across the whole frame. Throws if the canvas is tainted. */
@@ -357,30 +358,6 @@ export default function VideoDetailPage() {
   // Cover image: downscaled in the browser to fit a 1280px box, sent as a JPEG data URL.
   const [coverBusy, setCoverBusy] = useState<"save" | "frame" | "remove" | null>(null);
   const [coverErr, setCoverErr] = useState<string | null>(null);
-  async function fileToCover(file: File): Promise<string> {
-    const url = URL.createObjectURL(file);
-    try {
-      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-        const el = new Image();
-        el.onload = () => resolve(el);
-        el.onerror = () => reject(new Error("That file is not an image"));
-        el.src = url;
-      });
-      // Fit in a 1280px box, so a tall portrait image stays well under the 2 MB cover limit.
-      const scale = Math.min(1, 1280 / img.naturalWidth, 1280 / img.naturalHeight);
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
-      canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
-      const ctx = canvas.getContext("2d")!;
-      // JPEG has no alpha: a transparent PNG lands on white rather than black.
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      return canvas.toDataURL("image/jpeg", 0.85);
-    } finally {
-      URL.revokeObjectURL(url);
-    }
-  }
   /**
    * The frame at `time` as a cover, read from a separate video element loaded with CORS so the page's
    * own player is never affected: a host that does not allow it fails here with a clear message, and

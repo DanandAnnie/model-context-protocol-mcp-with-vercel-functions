@@ -24,7 +24,7 @@ import { shootPhotoLink } from "./shoots";
 import { listVoices } from "./voices";
 import { PUBLIC_ACCESS, owned, scheduleNotification, stripUndefined } from "./shared";
 import { SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, clearShareLock, setShareLock, shareUnlocked } from "../share-lock";
-import { clearCover, setCover } from "../cover";
+import { clearCover, readCover, setCover } from "../cover";
 import { SHARE_FILTERS, inShareFilter, madeWithin, posterUrl, shareOffline } from "../client";
 import { bumpViewsByDay } from "../insights";
 
@@ -1014,6 +1014,13 @@ export const shareCtaSchema = z
   })
   .nullable();
 
+/** A cover picture as a `data:image/...` URL (PNG, JPEG, WebP, or GIF; 2 MB decoded), or null for none. */
+const coverDataUrlSchema = z
+  .string()
+  .max(3_000_000, "The cover image is too large (2 MB max)")
+  .refine((v) => v.startsWith("data:image/"), "The cover must be an uploaded image")
+  .nullable();
+
 export const videoPatchSchema = z
   .object({
     title: z.string().trim().min(1).max(120).optional(),
@@ -1033,12 +1040,7 @@ export const videoPatchSchema = z
     /** When the public link starts working (ISO 8601 with a UTC offset, in the future); null makes it live now. */
     shareStartsAt: shareStartsAtSchema.optional(),
     /** A `data:image/...` URL (PNG, JPEG, WebP, or GIF; 2 MB decoded) or null to remove the cover. */
-    cover: z
-      .string()
-      .max(3_000_000, "The cover image is too large (2 MB max)")
-      .refine((v) => v.startsWith("data:image/"), "The cover must be an uploaded image")
-      .nullable()
-      .optional(),
+    cover: coverDataUrlSchema.optional(),
     sharePassword: sharePasswordSchema.optional(),
     /** A call-to-action button on the share page; null removes it. */
     shareCta: shareCtaSchema.optional(),
@@ -1167,7 +1169,8 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
   const publicChange =
     (patch.title !== undefined && patch.title !== existing.title) ||
     (patch.description !== undefined && (patch.description || undefined) !== existing.description) ||
-    patch.cover !== undefined ||
+    // Removing a cover the video does not have (a bulk "No cover" over a mixed selection) changes nothing it shows.
+    (patch.cover !== undefined && (patch.cover !== null || !!existing.cover)) ||
     (patch.shareCta !== undefined && JSON.stringify(patch.shareCta ?? null) !== JSON.stringify(existing.shareCta ?? null));
   // The names go onto the scenes as stored when the write happens, and whether one changes is judged against them too,
   // so a request that read the scenes earlier neither writes back the names it saw nor misjudges the approval.
@@ -1387,12 +1390,16 @@ export const bulkVideoSchema = z.discriminatedUnion("action", [
     .refine((v) => v.shareDownload !== undefined || v.shareGate !== undefined, { message: "Choose a setting to change" }),
   /** Put one call-to-action button on the share pages of many videos, in place of any they had, or remove theirs with `null`. */
   z.object({ action: z.literal("cta"), ids: z.array(z.string().min(1)).min(1).max(BULK_MAX), shareCta: shareCtaSchema }),
+  /** Give many videos one cover picture, in place of any they had (each video keeps its own copy), or remove theirs with `null`. */
+  z.object({ action: z.literal("cover"), ids: z.array(z.string().min(1)).min(1).max(BULK_MAX), cover: coverDataUrlSchema }),
 ]);
 
 /**
  * Trash, restore, purge, move, star, or switch, schedule, set the expiry of, put a password on, change the download
- * button and email gate of, or set the call-to-action button of the share links of many videos at once. A new button
- * is a change to what the share page shows, so it sends an approved video back to not reviewed, as on one video.
+ * button and email gate of, or set the call-to-action button or the cover picture of the share links of many videos at
+ * once. A new button or cover is a change to what the share page shows, so it sends an approved video back to not
+ * reviewed, as on one video (removing a cover a video does not have changes nothing); a cover the server cannot read
+ * is refused before any video is written.
  * Ids that are missing or belong to someone else are reported, not failed; so is a purge of a video that is
  * not in the trash, since deleting for good is only offered from there. A go-live time at or after a video's
  * own expiry, or an expiry at or before its own go-live time, is reported in `refused` for that video, and
@@ -1402,6 +1409,8 @@ export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId
   const missing: string[] = [];
   const refused: string[] = [];
   let done = 0;
+  // Checked once, before any video is written, rather than relying on the first video's write to refuse it.
+  if (input.action === "cover" && input.cover) readCover(input.cover);
   for (const id of Array.from(new Set(input.ids))) {
     const existing = await getStore().get<Video>("video", id);
     // A trashed video past its retention is as good as gone, so it is reported rather than restored, moved, or written.
@@ -1414,7 +1423,7 @@ export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId
     else if (input.action === "purge") await purgeVideo(id, ownerId);
     else if (input.action === "move") await updateVideo(id, { folder: input.folder }, ownerId);
     else if (input.action === "share") await updateVideo(id, { shareDisabled: input.shareDisabled }, ownerId);
-    else if (input.action === "password" || input.action === "settings" || input.action === "star" || input.action === "cta") {
+    else if (input.action === "password" || input.action === "settings" || input.action === "star" || input.action === "cta" || input.action === "cover") {
       try {
         await updateVideo(
           id,
@@ -1424,7 +1433,9 @@ export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId
               ? { starred: input.starred }
               : input.action === "cta"
                 ? { shareCta: input.shareCta }
-                : { shareDownload: input.shareDownload, shareGate: input.shareGate },
+                : input.action === "cover"
+                  ? { cover: input.cover }
+                  : { shareDownload: input.shareDownload, shareGate: input.shareGate },
           ownerId,
         );
       } catch (err) {

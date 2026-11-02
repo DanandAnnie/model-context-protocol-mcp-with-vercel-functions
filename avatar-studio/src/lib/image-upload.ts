@@ -55,3 +55,29 @@ export async function toUploadable(file: File, { maxBytes, maxEdge }: { maxBytes
     bitmap.close();
   }
 }
+
+/** A picture picked for a video's cover, as a JPEG fitted in a 1280px box: well under the 2 MB cover limit, a tall portrait included. */
+export async function fileToCover(file: File): Promise<string> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("That file is not an image"));
+      el.src = url;
+    });
+    // Fit in a 1280px box, so a tall portrait image stays well under the 2 MB cover limit.
+    const scale = Math.min(1, 1280 / img.naturalWidth, 1280 / img.naturalHeight);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+    const ctx = canvas.getContext("2d")!;
+    // JPEG has no alpha: a transparent PNG lands on white rather than black.
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.85);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}

@@ -9215,6 +9215,97 @@ test("Call to action puts one button on the share pages of the selected videos, 
   await expect(page.getByTestId("share-cta")).toHaveCount(0);
 });
 
+test("Cover gives the selected videos one cover picture, or takes theirs off", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const made = await page.request.post("/api/videos/batch", {
+    data: { title: `Covers ${tag}`, scriptTemplate: "Hello {name}.", csv: "name\nAda\nBo", avatarId: "stock_1", voiceId: "stock_voice_1" },
+  });
+  expect(made.status()).toBe(201);
+  const { batchId } = (await made.json()) as { batchId: string };
+  type Listed = { id: string; status: string; cover?: { updatedAt: string; mimeType: string } };
+  const listed = async () => ((await (await page.request.get(`/api/videos?batch=${batchId}`)).json()) as { videos: Listed[] }).videos;
+  await expect.poll(async () => (await Promise.all((await listed()).map(async (v) => ((await (await page.request.get(`/api/videos/${v.id}`)).json()) as { video: { status: string } }).video.status))).join(","), { timeout: 30_000 }).toBe("completed,completed");
+  const [first, second] = await listed();
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+  expect((await page.request.patch(`/api/videos/${second.id}`, { data: { cover: `data:image/png;base64,${png.toString("base64")}` } })).status()).toBe(200);
+  const dialogs: string[] = [];
+  page.on("dialog", (d) => {
+    dialogs.push(d.message());
+    void d.accept();
+  });
+  const sent: string[] = [];
+  page.on("request", (r) => r.url().endsWith("/api/videos/bulk") && sent.push(r.postData() ?? ""));
+
+  await page.goto(`/videos?batch=${batchId}`);
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  const bar = page.getByTestId("bulk-bar");
+  await expect(page.locator("button[aria-pressed][aria-label^='Select ']")).toHaveCount(2);
+  await page.keyboard.press("Control+a");
+  await expect(bar.getByText(/selected$/)).toHaveText("2 selected");
+  await bar.getByRole("button", { name: "Cover", exact: true }).click();
+  const field = page.getByTestId("bulk-cover");
+  const picker = page.getByLabel(/for the selected videos' cover$/);
+  await expect(picker).toBeFocused();
+  await expect(field.getByRole("button", { name: "Set cover" })).toBeDisabled();
+  // A file that is not a picture is refused in the browser, and nothing is sent.
+  await picker.setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("not a picture") });
+  await expect(page.getByText("That file is not an image")).toBeVisible();
+  await expect(field.getByRole("button", { name: "Set cover" })).toBeDisabled();
+  await picker.setInputFiles({ name: "launch.png", mimeType: "image/png", buffer: png });
+  await expect(page.getByText("That file is not an image")).toHaveCount(0);
+  await expect(field.getByText("launch.png")).toBeVisible();
+  await expect(page.getByTestId("bulk-cover-preview")).toHaveAttribute("src", /^data:image\/jpeg;base64,/);
+  expect(sent).toEqual([]);
+  await field.getByRole("button", { name: "Set cover" }).click();
+  await expect(bar).toHaveCount(0);
+  expect(dialogs).toEqual(["1 selected video has a cover already, which this replaces. Set this cover?"]);
+  // Each video has its own copy, sent once as the JPEG the browser made, and the cards and share pages show it.
+  expect(sent).toHaveLength(1);
+  expect(JSON.parse(sent[0])).toMatchObject({ action: "cover", ids: expect.arrayContaining([first.id, second.id]), cover: expect.stringMatching(/^data:image\/jpeg;base64,/) });
+  const covered = await listed();
+  expect(covered.map((v) => v.cover?.mimeType)).toEqual(["image/jpeg", "image/jpeg"]);
+  for (const v of covered) {
+    await expect(page.locator(`a[href="/videos/${v.id}"] img`)).toHaveAttribute("src", `/api/videos/${v.id}/cover?v=${Date.parse(v.cover!.updatedAt)}`);
+    const served = await page.request.get(`/api/videos/${v.id}/cover?v=${Date.parse(v.cover!.updatedAt)}`);
+    expect(served.status()).toBe(200);
+    expect(served.headers()["content-type"]).toBe("image/jpeg");
+    expect(await (await page.request.get(`/share/${v.id}`)).text()).toContain(`/api/videos/${v.id}/cover?v=`);
+  }
+
+  // No cover takes them off, after saying what the share pages show instead; Escape closes the field without a change.
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await expect(page.locator("button[aria-pressed][aria-label^='Select ']")).toHaveCount(2);
+  await page.keyboard.press("Control+a");
+  await bar.getByRole("button", { name: "Cover", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await expect(field).toHaveCount(0);
+  await expect(bar.getByRole("button", { name: "Cover", exact: true })).toBeFocused();
+  await bar.getByRole("button", { name: "Cover", exact: true }).click();
+  await field.getByRole("button", { name: "No cover" }).click();
+  await expect(bar).toHaveCount(0);
+  expect(dialogs[1]).toBe("2 selected videos have a cover; without one the share page shows the renderer's own picture of the video. Remove them?");
+  expect((await listed()).map((v) => v.cover)).toEqual([undefined, undefined]);
+  for (const v of [first, second]) expect((await page.request.get(`/api/videos/${v.id}/cover`)).status()).toBe(404);
+
+  // With no cover left to remove, the bar says so and sends nothing.
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await expect(page.locator("button[aria-pressed][aria-label^='Select ']")).toHaveCount(2);
+  await page.keyboard.press("Control+a");
+  await bar.getByRole("button", { name: "Cover", exact: true }).click();
+  await field.getByRole("button", { name: "No cover" }).click();
+  await expect(page.getByText("None of the selected videos has a cover to remove.")).toBeVisible();
+  // One video selected, the same, in the singular.
+  await page.getByRole("button", { name: "Done selecting" }).click();
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await page.locator(`button[aria-pressed][aria-label^='Select ']`).first().click();
+  await expect(bar.getByText(/selected$/)).toHaveText("1 selected");
+  await bar.getByRole("button", { name: "Cover", exact: true }).click();
+  await field.getByRole("button", { name: "No cover" }).click();
+  await expect(page.getByText("The selected video has no cover to remove.")).toBeVisible();
+  expect(sent).toHaveLength(2);
+  expect(dialogs).toHaveLength(2);
+});
+
 test("Copy links puts the selected videos' sendable share links on the clipboard, one a line", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const tag = Date.now().toString(36);

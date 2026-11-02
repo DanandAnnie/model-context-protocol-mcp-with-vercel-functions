@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { isApple } from "@/components/QuickFind";
-import { isShortcutsKey, shortcutGroups } from "@/lib/shortcuts";
+import { SINGLE_KEY_SHORTCUTS_KEY, isShortcutsKey, readSingleKeyShortcuts, shortcutGroups } from "@/lib/shortcuts";
 
 const OPEN_EVENT = "shortcuts:open";
 
@@ -19,12 +19,15 @@ export function ShortcutsHelp() {
   const opener = useRef<HTMLElement | null>(null);
   const [open, setOpen] = useState(false);
   const [apple, setApple] = useState(false);
+  // Single-key shortcuts ("/") can be turned off, for speech input or a key that gets in the way; the browser keeps it.
+  const [singleKeys, setSingleKeys] = useState(true);
 
   useEffect(() => {
     setApple(isApple());
     const show = () => {
       if (dialog.current?.open) return;
       opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      setSingleKeys(readSingleKeyShortcuts());
       setOpen(true);
     };
     const onKey = (e: KeyboardEvent) => {
@@ -107,6 +110,26 @@ export function ShortcutsHelp() {
               </section>
             ))}
           </div>
+          <label className="mt-4 flex items-start gap-2 border-t border-slate-100 pt-3 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={singleKeys}
+              onChange={(e) => {
+                setSingleKeys(e.target.checked);
+                try {
+                  if (e.target.checked) window.localStorage.removeItem(SINGLE_KEY_SHORTCUTS_KEY);
+                  else window.localStorage.setItem(SINGLE_KEY_SHORTCUTS_KEY, "off");
+                } catch {
+                  // Storage can be unavailable (private mode); the choice then lasts for this page only.
+                }
+              }}
+            />
+            <span>
+              Single-key shortcuts
+              <span className="block text-xs text-slate-500">Keys pressed on their own, such as “/” in My videos. Turn them off if you use speech input or they get in your way; this browser remembers.</span>
+            </span>
+          </label>
         </div>
       )}
     </dialog>

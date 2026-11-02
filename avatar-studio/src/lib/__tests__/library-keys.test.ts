@@ -3,7 +3,7 @@
 // Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { libraryKey, shortcutGroups } from "../shortcuts";
+import { isSearchKey, libraryKey, shortcutGroups, singleKeyShortcutsOn, typesText } from "../shortcuts";
 
 type Extra = Partial<Record<"ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "repeat" | "isComposing", boolean>> & { code?: string; keyCode?: number };
 const key = (k: string, extra: Extra = {}) => ({
@@ -85,5 +85,53 @@ describe("libraryKey", () => {
         [["Esc"]],
       ]);
     }
+  });
+});
+
+describe("isSearchKey", () => {
+  const on = { editable: false, enabled: true };
+  it("is \"/\" where it would not be typed, however the layout types it", () => {
+    assert.equal(isSearchKey(key("/", { code: "Slash" }), on), true);
+    assert.equal(isSearchKey(key("/", { code: "Digit7", shiftKey: true }), on), true, "Shift does not refuse it (Shift+7 on a German keyboard)");
+    assert.equal(isSearchKey(key("/", { code: "NumpadDivide" }), on), true, "the number pad's / too");
+    const altGr = { ...key("/", { code: "KeyQ", ctrlKey: true, altKey: true }), getModifierState: (k: string) => k === "AltGraph" };
+    assert.equal(isSearchKey(altGr, on), true, "AltGr+Q on a Brazilian keyboard, which reports Ctrl and Alt");
+  });
+
+  it("leaves \"/\" to text, to a key press with Ctrl, ⌘, or Alt, and to a reader who turned single keys off", () => {
+    assert.equal(isSearchKey(key("/"), { editable: true, enabled: true }), false);
+    for (const extra of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }, { ctrlKey: true, altKey: true }]) assert.equal(isSearchKey(key("/", extra), on), false, JSON.stringify(extra));
+    assert.equal(isSearchKey(key("/"), { editable: false, enabled: false }), false);
+  });
+
+  it("is no other character, nor a held or composing one", () => {
+    for (const k of ["?", "s", "\\", "÷"]) assert.equal(isSearchKey(key(k), on), false, k);
+    assert.equal(isSearchKey(key("/", { repeat: true }), on), false);
+    assert.equal(isSearchKey(key("/", { isComposing: true }), on), false);
+    assert.equal(isSearchKey(key("/", { keyCode: 229 }), on), false);
+  });
+
+  it("is listed in the Keyboard shortcuts dialog", () => {
+    const group = shortcutGroups(false).find((g) => g.title === "In My videos")!;
+    assert.deepEqual(group.shortcuts.map((s) => s.keys), [[["/"]]]);
+  });
+});
+
+describe("single-key shortcuts", () => {
+  it("are on unless this browser was told to turn them off", () => {
+    assert.equal(singleKeyShortcutsOn(null), true);
+    assert.equal(singleKeyShortcutsOn("off"), false);
+    assert.equal(singleKeyShortcutsOn("on"), true);
+  });
+
+  it("are not taken where a key press goes into text", () => {
+    assert.equal(typesText(null), false);
+    for (const type of ["text", "search", "email", "url", "number", "password", "datetime-local", "TEXT"]) assert.equal(typesText({ tagName: "INPUT", type }), true, type);
+    assert.equal(typesText({ tagName: "INPUT" }), true, "an input with no type is text");
+    for (const type of ["checkbox", "radio", "button", "submit", "file", "range", "color"]) assert.equal(typesText({ tagName: "INPUT", type }), false, type);
+    assert.equal(typesText({ tagName: "TEXTAREA" }), true);
+    assert.equal(typesText({ tagName: "SELECT" }), true, "a list box types to choose");
+    assert.equal(typesText({ tagName: "DIV", isContentEditable: true }), true);
+    for (const tagName of ["A", "BUTTON", "DIV", "BODY"]) assert.equal(typesText({ tagName }), false, tagName);
   });
 });

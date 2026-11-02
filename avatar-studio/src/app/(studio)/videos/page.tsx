@@ -4,7 +4,8 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArchiveRestore, Captions, ImageIcon, CheckSquare, FileText, Clapperboard, Clock, Copy, LayoutGrid, List, Download, FolderInput, KeyRound, MousePointerClick, QrCode, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
 import { CREATED_WITHIN_DAYS, SHARE_FILTERS, api, clickSelect, folderFor, nextShareChange, overSelection } from "@/lib/client";
-import { libraryKey } from "@/lib/shortcuts";
+import { isSearchKey, libraryKey, readSingleKeyShortcuts, typesText } from "@/lib/shortcuts";
+import { useMobileNav } from "@/components/MobileNav";
 import { fileToCover } from "@/lib/image-upload";
 import { isApple } from "@/components/QuickFind";
 import { VideoCard, VideoRow } from "@/components/VideoCard";
@@ -227,6 +228,11 @@ function VideosInner() {
     });
   }
   const selectButtonRef = useRef<HTMLButtonElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  // "/" moved the focus to the search box and is still held: its repeats are not typed into the box.
+  const slashHeld = useRef(false);
+  // The small-screen menu covers the page while open; "/" does not reach behind it.
+  const { open: navOpen } = useMobileNav();
   // Escape and Ctrl/⌘+A while selecting (see libraryKey), read through a ref, set once each render commits, so the
   // listener sees the state on screen. In Firefox an Escape that closes the folder field's list of suggestions also
   // reaches here and closes the field; Chromium keeps that Escape to the list.
@@ -237,6 +243,14 @@ function VideosInner() {
       const el = e.target instanceof HTMLElement ? e.target : null;
       const editable = !!el && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName));
       const inField = !!el && !!barRef.current?.contains(el) && !!el.closest("form");
+      // "/" jumps to the search box, with what it holds selected so typing replaces it; a library with nothing in it has none.
+      if (!navOpen && searchRef.current && isSearchKey(e, { editable: typesText(el), enabled: readSingleKeyShortcuts() })) {
+        e.preventDefault();
+        slashHeld.current = true;
+        searchRef.current.focus();
+        searchRef.current.select();
+        return;
+      }
       const does = libraryKey(e, { apple: isApple(), selecting, busy: busy !== null, fieldOpen: timeField !== null, inField, editable, inSelect: el?.tagName === "SELECT" });
       if (!does) return;
       e.preventDefault();
@@ -1093,7 +1107,23 @@ function VideosInner() {
       )}
       {hasAny && (
         <div className="mb-5 flex flex-wrap items-center gap-2">
-          <input aria-label="Search videos" className={`${inputClass} max-w-xs`} placeholder="Search title, description, script, avatar, voice" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input
+            ref={searchRef}
+            type="search"
+            aria-label="Search videos"
+            aria-keyshortcuts="/"
+            className={`${inputClass} max-w-xs`}
+            placeholder="Search title, description, script, avatar, voice"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "/" && e.repeat && slashHeld.current) e.preventDefault();
+            }}
+            onKeyUp={(e) => {
+              if (e.key === "/") slashHeld.current = false;
+            }}
+            onBlur={() => (slashHeld.current = false)}
+          />
           {folders.length > 0 && (
             <select aria-label="Folder" value={folder} onChange={(e) => setFolder(e.target.value)} className={`${inputClass} w-auto`}>
               {/* Each with how many videos it holds in this view, whatever the other filters, so an empty pick is not a surprise. */}

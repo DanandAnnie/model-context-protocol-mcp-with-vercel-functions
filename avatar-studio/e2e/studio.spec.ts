@@ -9071,6 +9071,68 @@ test("Shift+click selects, or unselects, a run of videos from the one clicked la
   await expect(dialog).toContainText("Select, or unselect, a run of videos: every one from the video clicked last to the one Shift+clicked");
 });
 
+test("\"/\" jumps to the library's search box, outside a text box", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  await createVideoViaApi(page, `Slash ${tag}`);
+  await page.goto("/videos");
+  const search = page.getByRole("searchbox", { name: "Search videos" });
+  await expect(search).toBeVisible();
+  await expect(search).toHaveAttribute("aria-keyshortcuts", "/");
+  await page.getByRole("heading", { name: "My videos" }).click();
+  await page.keyboard.press("/");
+  await expect(search).toBeFocused();
+  // The key moved focus rather than being typed.
+  await expect(search).toHaveValue("");
+  await page.keyboard.type(`Slash ${tag}`);
+  await expect(page.locator("a[href^='/videos/vid_']")).toHaveCount(1);
+  // In the box, "/" is a character like any other.
+  await page.keyboard.type("/");
+  await expect(search).toHaveValue(`Slash ${tag}/`);
+  await page.keyboard.press("Backspace");
+  // From anywhere else, it comes back with what it holds selected, so typing replaces the search.
+  await page.getByRole("heading", { name: "My videos" }).click();
+  await page.keyboard.press("/");
+  await expect(search).toBeFocused();
+  expect(await search.evaluate((el: HTMLInputElement) => [el.selectionStart, el.selectionEnd])).toEqual([0, `Slash ${tag}`.length]);
+  // From a focused card's link too; a held "/" moves the focus once and types nothing into the box.
+  await page.locator("a[href^='/videos/vid_']").first().focus();
+  await page.keyboard.down("/");
+  await page.evaluate(() => {
+    const el = document.activeElement!;
+    for (let i = 0; i < 3; i++) el.dispatchEvent(new KeyboardEvent("keydown", { key: "/", code: "Slash", repeat: true, bubbles: true, cancelable: true }));
+  });
+  await page.keyboard.up("/");
+  await expect(search).toBeFocused();
+  await expect(search).toHaveValue(`Slash ${tag}`);
+  // Ctrl+/ is still the shortcuts list, and it shows "/"; with the dialog open, "/" stays in it.
+  await page.getByRole("heading", { name: "My videos" }).click();
+  await page.keyboard.press("Control+/");
+  const dialog = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+  await expect(dialog.getByRole("heading", { name: "In My videos", exact: true })).toBeVisible();
+  await expect(dialog).toContainText("Search the videos (outside a text box)");
+  await page.keyboard.press("/");
+  await expect(dialog).toBeVisible();
+  await expect(search).not.toBeFocused();
+  // Single-key shortcuts can be turned off there (for speech input), and the browser remembers it.
+  const singleKeys = dialog.getByRole("checkbox", { name: /Single-key shortcuts/ });
+  await expect(singleKeys).toBeChecked();
+  await singleKeys.uncheck();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await page.reload();
+  await page.getByRole("heading", { name: "My videos" }).click();
+  await page.keyboard.press("/");
+  await expect(search).not.toBeFocused();
+  await page.keyboard.press("Control+/");
+  await expect(singleKeys).not.toBeChecked();
+  await singleKeys.check();
+  await page.keyboard.press("Escape");
+  await page.getByRole("heading", { name: "My videos" }).click();
+  await page.keyboard.press("/");
+  await expect(search).toBeFocused();
+  expect(await page.evaluate(() => localStorage.getItem("avatar-studio:single-key-shortcuts"))).toBeNull();
+});
+
 test("while selecting, Ctrl+A selects all shown and Escape closes the bar's field, then stops selecting", async ({ page }) => {
   const tag = Date.now().toString(36);
   const made = await page.request.post("/api/videos/batch", {

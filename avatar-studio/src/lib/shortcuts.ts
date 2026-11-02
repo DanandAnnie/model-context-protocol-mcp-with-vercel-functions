@@ -38,6 +38,48 @@ export function libraryKey(
   return null;
 }
 
+/** Where this browser keeps whether the single-key shortcuts (a key with no Ctrl, ⌘, or Alt, such as "/") are off. */
+export const SINGLE_KEY_SHORTCUTS_KEY = "avatar-studio:single-key-shortcuts";
+
+/** Whether the single-key shortcuts are on, from what the browser keeps: on unless they were turned off. */
+export function singleKeyShortcutsOn(stored: string | null): boolean {
+  return stored !== "off";
+}
+
+/** The same, read from this browser (on when its storage cannot be read). */
+export function readSingleKeyShortcuts(): boolean {
+  try {
+    return singleKeyShortcutsOn(window.localStorage.getItem(SINGLE_KEY_SHORTCUTS_KEY));
+  } catch {
+    return true;
+  }
+}
+
+const NOT_TEXT_INPUTS = new Set(["button", "checkbox", "color", "file", "image", "radio", "range", "reset", "submit"]);
+
+/** Whether a key press there goes into text: a text area, a text-like input, a list box (it types to choose), or editable content. */
+export function typesText(el: { tagName: string; type?: string; isContentEditable?: boolean } | null): boolean {
+  if (!el) return false;
+  if (el.isContentEditable || el.tagName === "TEXTAREA" || el.tagName === "SELECT") return true;
+  return el.tagName === "INPUT" && !NOT_TEXT_INPUTS.has((el.type ?? "text").toLowerCase());
+}
+
+/**
+ * Whether a key press is "/" to jump to the library's search box: the character itself, however the layout types it
+ * (Shift+7 on a German keyboard, AltGr+Q on a Brazilian one), with no Ctrl, ⌘, or Alt of its own, where it would not
+ * be typed into text, while the single-key shortcuts are on, not held down, and not part of composing text with an
+ * input method.
+ */
+export function isSearchKey(
+  e: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "repeat" | "isComposing" | "keyCode"> & { getModifierState?: (key: string) => boolean },
+  state: { editable: boolean; enabled: boolean },
+): boolean {
+  // AltGr reports Ctrl and Alt on Windows; the character it types is the key, not a shortcut on top of it.
+  const altGraph = !!e.getModifierState?.("AltGraph");
+  const modified = e.metaKey || (!altGraph && (e.ctrlKey || e.altKey));
+  return state.enabled && e.key === "/" && !modified && !e.repeat && !e.isComposing && e.keyCode !== 229 && !state.editable;
+}
+
 /** The studio's shortcuts, with the keys as this computer has them: each entry is one or more ways to press it. */
 export function shortcutGroups(apple: boolean): Array<{ title: string; shortcuts: Shortcut[] }> {
   const mod = apple ? "⌘" : "Ctrl";
@@ -61,6 +103,10 @@ export function shortcutGroups(apple: boolean): Array<{ title: string; shortcuts
         { keys: [[mod, "Z"]], does: "Undo a scene change (outside a text box, whose own undo takes back typing)" },
         { keys: apple ? [[mod, shift, "Z"]] : [[mod, shift, "Z"], [mod, "Y"]], does: "Redo it" },
       ],
+    },
+    {
+      title: "In My videos",
+      shortcuts: [{ keys: [["/"]], does: "Search the videos (outside a text box)" }],
     },
     {
       title: "In My videos, while selecting",

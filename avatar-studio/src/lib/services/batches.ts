@@ -14,6 +14,7 @@ import { getBrandKit } from "./brand";
 import { stripPauses } from "../pauses";
 import { qrFileNames, qrSvg, qrWording, uniqueFileNames } from "../qr";
 import { cuesToSrt, cuesToVtt } from "../captions";
+import { scriptFile } from "../script-export";
 
 export const MAX_BATCH_ROWS = 100;
 /** Characters that show nothing: zero-width spaces and joiners, direction marks and embeddings, a soft hyphen, a byte-order mark. */
@@ -286,6 +287,25 @@ export function selectionCaptionFiles(videos: Video[], vtt = false): { files: Ar
   );
   const files = ready.map((r, i) => ({ name: names[i], text: vtt ? cuesToVtt(r.cues, r.video.captionStyle?.position) : cuesToSrt(r.cues) }));
   return { files, missing: videos.length - files.length };
+}
+
+/**
+ * The script of each of these videos that has one, as a text file named after the video (in the order given, no two
+ * names alike), its scenes apart on `---` lines as the editor's Download script writes it, so Import script reads it
+ * back scene for scene; whatever the render's state, as the words are the owner's before it is made. A cinematic shot, a
+ * video HeyGen directed, or a render of a HeyGen studio template (its words filled into the template's own scenes, which
+ * the editor does not open) has no script of ours. How many had none is counted.
+ */
+export function selectionScriptFiles(videos: Video[]): { files: Array<{ name: string; text: string }>; missing: number } {
+  const ready = videos.flatMap((v) => {
+    const text = v.cinematic || v.directed || v.studioTemplate ? "" : scriptFile(v.scenes?.length ? v.scenes.map((sc) => sc.script) : [v.script]);
+    return text ? [{ video: v, text }] : [];
+  });
+  const names = uniqueFileNames(
+    ready.map((r) => r.video.title),
+    "txt",
+  );
+  return { files: ready.map((r, i) => ({ name: names[i], text: r.text })), missing: videos.length - ready.length };
 }
 
 /**

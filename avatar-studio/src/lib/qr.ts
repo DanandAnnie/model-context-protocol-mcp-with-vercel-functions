@@ -103,14 +103,15 @@ export function qrFileNames(titles: string[], ext = "svg"): string[] {
 }
 
 /**
- * A file name for each title (`<prefix><title>.<ext>`, "video" for a title with nothing a file name can keep), cut to fit
+ * A file name for each title (`<prefix><title>.<ext>`, "video" for a title with nothing a file name can keep, a title
+ * already ending in `.<ext>` not given it twice), cut to fit
  * what a file system allows, with " (2)" and so on on a name another already has, ignoring case, so none overwrites another
  * once a zip of them is unpacked.
  */
 export function uniqueFileNames(titles: string[], ext: string, prefix = ""): string[] {
   const taken = new Set<string>();
   return titles.map((title) => {
-    const stem = `${prefix}${byteFit(safeFileStem(title)) || "video"}`;
+    const stem = `${prefix}${byteFit(safeFileStem(title, [ext])) || "video"}`;
     let name = `${stem}.${ext}`;
     for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${stem} (${n}).${ext}`;
     taken.add(name.toLowerCase());

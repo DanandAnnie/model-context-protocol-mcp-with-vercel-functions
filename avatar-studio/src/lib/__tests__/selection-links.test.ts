@@ -5,8 +5,10 @@ import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import { getStore } from "../store";
 import jsQR from "jsqr";
-import { SELECTION_LINK_COLUMNS, captionCuesFor, createVideo, selectionCaptionFiles, selectionLinkRows, selectionLinkText, selectionLinksSchema, selectionQrFiles, selectionVideos, videoRequestSchema } from "../services";
+import { SELECTION_LINK_COLUMNS, captionCuesFor, createVideo, selectionCaptionFiles, selectionScriptFiles, selectionLinkRows, selectionLinkText, selectionLinksSchema, selectionQrFiles, selectionVideos, videoRequestSchema } from "../services";
 import { cuesToSrt, cuesToVtt } from "../captions";
+import { scriptFile } from "../script-export";
+import { decodeScript, scenesFromText } from "../script-import";
 import { QR_MARGIN, qrFileNames, qrMatrix, qrSvg, qrWording, uniqueFileNames } from "../qr";
 import { NotFoundError } from "../errors";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
@@ -149,5 +151,23 @@ describe("selection links", () => {
     assert.deepEqual(uniqueFileNames(["A/B", "a-b", "", "A-B", "Tour: 12 Elm"], "srt"), ["A B.srt", "a-b.srt", "video.srt", "A-B (2).srt", "Tour 12 Elm.srt"], "what a file name cannot hold goes, and a name taken in another case is numbered");
     assert.deepEqual(qrFileNames(["Open house", "open house"]), uniqueFileNames(["Open house", "open house"], "svg", "qr-"));
     assert.deepEqual(qrFileNames(["Open house", "open house"]), ["qr-Open house.svg", "qr-open house (2).svg"]);
+    assert.deepEqual(uniqueFileNames(["Notes.txt", "Notes.TXT"], "txt"), ["Notes.txt", "Notes (2).txt"], "a title ending in the extension is not given it twice");
+  });
+
+  it("saves each video's script as the editor's Download script writes it, whatever its render's state", async () => {
+    const one = await video("Open house", { status: "processing" });
+    const two = await video("open house", { scenes: [{ script: "Welcome in." }, { script: "Here is the kitchen.\n---\nAnd the yard." }] as Video["scenes"] });
+    const shot = await video("Shot", { cinematic: { prompt: "A slow pan over the bay" } as Video["cinematic"] });
+    const empty = await video("Empty", { script: "  ", scenes: undefined });
+    const directed = await video("Directed", { directed: { prompt: "A launch video" } as Video["directed"] });
+    const fromTemplate = await video("Template", { script: "Listing promo", studioTemplate: { templateId: "tpl_1", name: "Listing promo" } as unknown as Video["studioTemplate"] });
+    const { files, missing } = selectionScriptFiles([one, two, shot, empty, directed, fromTemplate]);
+    assert.equal(missing, 4, "a cinematic shot, a directed video, a studio template's render, and a video with no words are left out");
+    assert.deepEqual(files.map((f) => f.name), ["Open house.txt", "open house (2).txt"]);
+    assert.equal(files[0].text, scriptFile([one.script]));
+    assert.equal(files[1].text, scriptFile(["Welcome in.", "Here is the kitchen.\n---\nAnd the yard."]));
+    // Import script reads each back scene for scene (a .txt as plain text), a line that looks like a break kept in its scene.
+    const back = scenesFromText(decodeScript(new TextEncoder().encode(files[1].text)), { markdown: false });
+    assert.deepEqual(back.scenes, ["Welcome in.", "Here is the kitchen. --- And the yard."], "two scenes, as the editor's own round trip gives");
   });
 });

@@ -9831,6 +9831,39 @@ test("Captions saves a zip of each selected video's captions as SRT, named after
   expect((await page.request.post("/api/videos/captions", { data: { ids: ["vid_nope"] } })).status()).toBe(404);
 });
 
+test("Scripts saves a zip of each selected video's script, which the editor's Import script reads back scene for scene", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const bg = { type: "color", value: "#ffffff" };
+  const tour = { ...(await createVideoViaApi(page, `Tour ${tag}`, { script: undefined, scenes: [{ script: "Welcome in. [pause 1s] Come through.", background: bg }, { script: "This is the kitchen.", background: bg }] })), title: `Tour ${tag}` };
+  const intro = { ...(await createVideoViaApi(page, `Intro ${tag}`)), title: `Intro ${tag}` };
+  await page.goto("/videos");
+  await page.getByLabel("Search videos").fill(tag);
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  const bar = page.getByTestId("bulk-bar");
+  await expect(page.locator("button[aria-pressed][aria-label^='Select ']")).toHaveCount(2);
+  await page.keyboard.press("Control+a");
+  const download = page.waitForEvent("download");
+  await bar.getByRole("button", { name: "Scripts", exact: true }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toMatch(/^scripts-\d{4}-\d{2}-\d{2}\.zip$/);
+  await expect(page.getByTestId("copy-note")).toHaveText("Saved 2 scripts");
+  const entries = unzipSync(new Uint8Array(await readFile((await file.path())!)));
+  expect(Object.keys(entries).sort()).toEqual([`${intro.title}.txt`, `${tour.title}.txt`].sort());
+  // The scenes apart on --- lines, the pause kept, a byte order mark first, as the editor's Download script writes it.
+  expect(Buffer.from(entries[`${tour.title}.txt`]).toString("utf8")).toBe("\uFEFFWelcome in. [pause 1s] Come through.\n\n---\n\nThis is the kitchen.\n");
+  expect(Buffer.from(entries[`${intro.title}.txt`]).toString("utf8")).toBe("\uFEFFHello there. This is the first sentence. And here is the second one!\n\n---\n");
+
+  // The editor's Import script makes the same two scenes of the file.
+  await page.goto("/create");
+  await page.evaluate(() => localStorage.removeItem("avatar-studio:draft"));
+  await page.reload();
+  await page.getByLabel("Import a script file").setInputFiles({ name: `${tour.title}.txt`, mimeType: "text/plain", buffer: Buffer.from(entries[`${tour.title}.txt`]) });
+  await expect(page.getByTestId("import-note")).toContainText(`Imported 2 scenes from ${tour.title}.txt`);
+  await expect(page.locator("textarea")).toHaveValue("Welcome in. [pause 1s] Come through.");
+
+  expect((await page.request.post("/api/videos/scripts", { data: { ids: ["vid_nope"] } })).status()).toBe(404);
+});
+
 test("the bulk bar never sends more than the 200 videos one action takes", async ({ page }) => {
   test.slow();
   const tag = `Over ${Date.now().toString(36)}`;

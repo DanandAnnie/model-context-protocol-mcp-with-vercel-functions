@@ -119,6 +119,14 @@ function VideosInner() {
   }, [path]);
   // The filtering, sorting, and paging happen on the server; the page only holds what it shows.
   const { data, loading, error, refetch } = useApi<VideoPage>(path, { pollMs: 6000, pollWhile: (d) => d.rendering > 0 });
+  // What a card's Copy link did, said once for the whole page rather than by each card; cleared first, so the same
+  // words said again are heard again. A link that can no longer be sent means the list is out of date, so it is read again.
+  const [cardNote, setCardNote] = useState("");
+  const cardCopyNote = (note: string, stale: boolean) => {
+    setCardNote("");
+    requestAnimationFrame(() => setCardNote(note));
+    if (stale) void refetch();
+  };
   const videos = data?.videos ?? [];
   const folders = data?.folders ?? [];
   const folderCounts = data?.folderCounts ?? {};
@@ -1210,16 +1218,19 @@ function VideosInner() {
         />
       ) : (
         <>
+          <span role="status" className="sr-only" data-testid="card-copy-note">
+            {cardNote}
+          </span>
           {layout === "list" ? (
             <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200" data-testid="video-list">
               {videos.map((v) => (
-                <VideoRow key={v.id} video={v} selectable={selecting} selected={selected.has(v.id)} onToggle={(shift) => busy === null && click(v.id, shift)} />
+                <VideoRow key={v.id} video={v} selectable={selecting} selected={selected.has(v.id)} onToggle={(shift) => busy === null && click(v.id, shift)} shareOrigin={data?.shareOrigin} onCopyNote={cardCopyNote} />
               ))}
             </div>
           ) : (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {videos.map((v) => (
-                <VideoCard key={v.id} video={v} selectable={selecting} selected={selected.has(v.id)} onToggle={(shift) => busy === null && click(v.id, shift)} />
+                <VideoCard key={v.id} video={v} selectable={selecting} selected={selected.has(v.id)} onToggle={(shift) => busy === null && click(v.id, shift)} shareOrigin={data?.shareOrigin} onCopyNote={cardCopyNote} />
               ))}
             </div>
           )}

@@ -1,5 +1,6 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { recordRequestActivity } from "@/lib/activity-request";
+import { publicOrigin } from "@/lib/config";
 import { requireEditor, requireOwner } from "@/lib/owner";
 import { createVideo, queryVideos, videoQuerySchema, videoRequestSchema } from "@/lib/services";
 
@@ -10,7 +11,7 @@ export async function GET(req: Request) {
   try {
     const owner = await requireOwner();
     const query = videoQuerySchema.parse(Object.fromEntries(new URL(req.url).searchParams));
-    return json(await queryVideos(owner, query));
+    return json({ ...(await queryVideos(owner, query)), shareOrigin: publicOrigin(req) });
   } catch (err) {
     return errorResponse(err);
   }

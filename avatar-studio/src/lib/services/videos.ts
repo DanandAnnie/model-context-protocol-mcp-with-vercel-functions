@@ -2119,6 +2119,8 @@ export interface VideoPage {
   rendering: number;
   /** Videos in the trash, so the library can offer the view. */
   trashed: number;
+  /** Where share links point (the public origin), for the cards' Copy link; set by the route. */
+  shareOrigin?: string;
 }
 
 const SORTERS: Record<VideoQuery["sort"], (a: Video, b: Video) => number> = {

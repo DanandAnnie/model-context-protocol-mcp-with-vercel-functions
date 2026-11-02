@@ -1,13 +1,57 @@
 "use client";
 import Link from "next/link";
-import { Clock, Film, LinkIcon, Lock, Star, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Check, Clock, Copy, Film, LinkIcon, Lock, Star, Trash2 } from "lucide-react";
 import { StatusBadge } from "./ui";
-import { daysUntilPurge, formatDate, formatSeconds, posterUrl, shareExpired, shareExpiresSoon, shareNotYet, shareSummary } from "@/lib/client";
+import { daysUntilPurge, formatDate, formatSeconds, posterUrl, sendableShareLink, shareExpired, shareExpiresSoon, shareNotYet, shareSummary } from "@/lib/client";
 import { REVIEW_LABEL, type Video } from "@/lib/types";
+
+/** What a card's copy button tells the page: a note to announce, and whether the list is out of date. */
+export type CardCopyNote = (note: string, stale: boolean) => void;
+
+/**
+ * Copies a video's share link from its card, beside (not inside) the card's link. The link is worked out again on the
+ * click, so a link that expired while the page stood open is not copied; the page is told what happened (`onNote`), or,
+ * without one, the button says it itself. A browser without the clipboard shows the link to copy by hand.
+ */
+function CopyShareLink({ video, origin, className, onNote }: { video: Video; origin: string; className: string; onNote?: CardCopyNote }) {
+  const [copied, setCopied] = useState(false);
+  const [own, setOwn] = useState("");
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 2500);
+    return () => clearTimeout(t);
+  }, [copied]);
+  const say = (note: string, stale = false) => (onNote ? onNote(note, stale) : setOwn(note));
+  async function copy() {
+    const link = sendableShareLink(video, origin);
+    if (!link) return say(`The link for ${video.title} can no longer be sent; open the video to see why.`, true);
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("No clipboard");
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      say(`Link for ${video.title} copied`);
+    } catch {
+      window.prompt("Copy this link", link);
+    }
+  }
+  return (
+    <>
+      <button type="button" onClick={() => void copy()} aria-label={`Copy link for ${video.title}`} title="Copy the share link" className={className}>
+        {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+      </button>
+      {!onNote && (
+        <span role="status" className="sr-only">
+          {own}
+        </span>
+      )}
+    </>
+  );
+}
 
 const reviewClass = (status: NonNullable<Video["review"]>["status"]) => (status === "approved" ? "bg-emerald-50 text-emerald-800" : status === "changes" ? "bg-amber-50 text-amber-900" : "bg-brand-50 text-brand-800");
 
-export function VideoCard({ video, selectable = false, selected = false, onToggle }: { video: Video; selectable?: boolean; selected?: boolean; onToggle?: (shift: boolean) => void }) {
+export function VideoCard({ video, selectable = false, selected = false, onToggle, shareOrigin, onCopyNote }: { video: Video; selectable?: boolean; selected?: boolean; onToggle?: (shift: boolean) => void; shareOrigin?: string; onCopyNote?: CardCopyNote }) {
   const expiresSoon = shareExpiresSoon(video);
   const body = (
     <>
@@ -106,10 +150,23 @@ export function VideoCard({ video, selectable = false, selected = false, onToggl
       </button>
     );
   }
+  if (!shareOrigin) {
+    return (
+      <Link href={`/videos/${video.id}`} className={frame}>
+        {body}
+      </Link>
+    );
+  }
+  // The same wrapper whether or not the link can be sent, so a poll that changes that does not remount the card.
   return (
-    <Link href={`/videos/${video.id}`} className={frame}>
-      {body}
-    </Link>
+    <div className="relative h-full">
+      <Link href={`/videos/${video.id}`} className={`${frame} h-full`}>
+        {body}
+      </Link>
+      {sendableShareLink(video, shareOrigin) && (
+        <CopyShareLink video={video} origin={shareOrigin} onNote={onCopyNote} className="absolute right-2 top-2 rounded-md bg-white/90 p-1.5 text-slate-700 shadow-sm hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500" />
+      )}
+    </div>
   );
 }
 
@@ -120,7 +177,7 @@ function shareTitle(video: Video): string | undefined {
 }
 
 /** The library's list layout: one compact row per video, with the card's status, badges, and details in a line. */
-export function VideoRow({ video, selectable = false, selected = false, onToggle }: { video: Video; selectable?: boolean; selected?: boolean; onToggle?: (shift: boolean) => void }) {
+export function VideoRow({ video, selectable = false, selected = false, onToggle, shareOrigin, onCopyNote }: { video: Video; selectable?: boolean; selected?: boolean; onToggle?: (shift: boolean) => void; shareOrigin?: string; onCopyNote?: CardCopyNote }) {
   const share = shareSummary(video);
   const body = (
     <>
@@ -184,7 +241,8 @@ export function VideoRow({ video, selectable = false, selected = false, onToggle
     </>
   );
   // The ring is drawn inside, since the list's rounded border clips anything outside a row.
-  const frame = `flex w-full items-center gap-3 px-3 py-2 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500 ${selected ? "bg-brand-50 hover:bg-brand-100" : "bg-white hover:bg-slate-50"}`;
+  const shape = "flex w-full items-center gap-3 px-3 py-2 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500";
+  const frame = `${shape} ${selected ? "bg-brand-50 hover:bg-brand-100" : "bg-white hover:bg-slate-50"}`;
   if (selectable) {
     return (
       <button type="button" onClick={(e) => onToggle?.(e.shiftKey)} aria-pressed={selected} aria-label={`Select ${video.title}`} className={`${frame} select-none`} data-testid="video-row">
@@ -192,9 +250,25 @@ export function VideoRow({ video, selectable = false, selected = false, onToggle
       </button>
     );
   }
+  if (!shareOrigin) {
+    return (
+      <Link href={`/videos/${video.id}`} className={frame} data-testid="video-row">
+        {body}
+      </Link>
+    );
+  }
+  // The row's hover is on the whole line, button included, and a row with nothing to copy keeps the button's room, so
+  // the status badges line up down the list.
   return (
-    <Link href={`/videos/${video.id}`} className={frame} data-testid="video-row">
-      {body}
-    </Link>
+    <div className="flex items-center bg-white transition hover:bg-slate-50">
+      <Link href={`/videos/${video.id}`} className={`${shape} min-w-0 flex-1`} data-testid="video-row">
+        {body}
+      </Link>
+      {sendableShareLink(video, shareOrigin) ? (
+        <CopyShareLink video={video} origin={shareOrigin} onNote={onCopyNote} className="mr-2 shrink-0 rounded-md p-1.5 text-slate-600 hover:bg-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500" />
+      ) : (
+        <span className="mr-2 h-[26px] w-[26px] shrink-0" aria-hidden />
+      )}
+    </div>
   );
 }

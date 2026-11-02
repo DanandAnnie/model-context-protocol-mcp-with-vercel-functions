@@ -19,7 +19,7 @@ const QUICK = [
 ];
 
 export default function HomePage() {
-  const { data, loading } = useApi<{ videos: Video[] }>("/api/videos");
+  const { data, loading } = useApi<{ videos: Video[]; shareOrigin?: string }>("/api/videos");
   const recent = data?.videos.slice(0, 4) ?? [];
 
   return (
@@ -72,7 +72,7 @@ export default function HomePage() {
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {recent.map((v) => (
-              <VideoCard key={v.id} video={v} />
+              <VideoCard key={v.id} video={v} shareOrigin={data?.shareOrigin} />
             ))}
           </div>
         )}

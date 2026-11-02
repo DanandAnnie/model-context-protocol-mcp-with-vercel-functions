@@ -9504,6 +9504,65 @@ test("QR codes saves a zip of a QR code of each selected video's sendable share 
   await expect(refused).toHaveCount(0);
 });
 
+test("a library card copies its video's share link in one click, when the link can be sent", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const tag = Date.now().toString(36);
+  const made = await page.request.post("/api/videos/batch", {
+    data: { title: `Card ${tag}`, scriptTemplate: "Hello {name}.", csv: "name\nAda\nBo", avatarId: "stock_1", voiceId: "stock_voice_1" },
+  });
+  expect(made.status()).toBe(201);
+  const { batchId } = (await made.json()) as { batchId: string };
+  const listed = async () => ((await (await page.request.get(`/api/videos?batch=${batchId}`)).json()) as { videos: Array<{ id: string; title: string }> }).videos;
+  await expect.poll(async () => (await Promise.all((await listed()).map(async (v) => ((await (await page.request.get(`/api/videos/${v.id}`)).json()) as { video: { status: string } }).video.status))).join(","), { timeout: 30_000 }).toBe("completed,completed");
+  const [live, off] = await listed();
+  expect((await page.request.patch(`/api/videos/${off.id}`, { data: { shareDisabled: true } })).status()).toBe(200);
+
+  await page.goto(`/videos?batch=${batchId}`);
+  const origin = new URL(page.url()).origin;
+  // Only the video whose link can be sent has the button; it sits beside the card's link, not inside it.
+  const copy = page.getByRole("button", { name: `Copy link for ${live.title}`, exact: true });
+  await expect(copy).toBeVisible();
+  await expect(page.getByRole("button", { name: `Copy link for ${off.title}`, exact: true })).toHaveCount(0);
+  expect(await copy.evaluate((el) => !!el.closest("a"))).toBe(false);
+  await copy.click();
+  await expect(page.getByTestId("card-copy-note")).toHaveText(`Link for ${live.title} copied`);
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(`${origin}/share/${live.id}`);
+  // Copying did not open the video.
+  expect(new URL(page.url()).pathname).toBe("/videos");
+
+  // The list's rows have it too.
+  await page.evaluate(() => navigator.clipboard.writeText("unchanged"));
+  await page.getByRole("group", { name: "Layout" }).getByRole("button", { name: "List" }).click();
+  await expect(page.getByTestId("video-row")).toHaveCount(2);
+  await page.getByRole("button", { name: `Copy link for ${live.title}`, exact: true }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(`${origin}/share/${live.id}`);
+  await expect(page.getByRole("button", { name: `Copy link for ${off.title}`, exact: true })).toHaveCount(0);
+
+  // Rows line up whether or not they have the button, and the page passes an accessibility check with them.
+  const rowBox = async (title: string) => (await page.getByTestId("video-row").filter({ hasText: title }).getByText("Completed", { exact: true }).boundingBox())?.x;
+  expect(await rowBox(off.title)).toBe(await rowBox(live.title));
+  const axe = await new AxeBuilder({ page }).include("[data-testid='video-list']").analyze();
+  expect(axe.violations).toEqual([]);
+
+  // While selecting, a click picks the video, so there is nothing to copy from.
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await expect(page.getByRole("button", { name: /^Copy link for / })).toHaveCount(0);
+  await page.getByRole("button", { name: "Done selecting" }).click();
+
+  // A link that expires while the page stands open is not copied; the page says so and reads the list again.
+  const expires = Date.now() + 6000;
+  expect((await page.request.patch(`/api/videos/${live.id}`, { data: { shareExpiresAt: new Date(expires).toISOString() } })).status()).toBe(200);
+  await page.reload();
+  const button = page.getByRole("button", { name: `Copy link for ${live.title}`, exact: true });
+  await expect(button).toBeVisible();
+  await page.evaluate(() => navigator.clipboard.writeText("unchanged"));
+  await page.waitForTimeout(Math.max(0, expires - Date.now() + 500));
+  await button.click();
+  await expect(page.getByTestId("card-copy-note")).toHaveText(`The link for ${live.title} can no longer be sent; open the video to see why.`);
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("unchanged");
+  await expect(button).toHaveCount(0);
+});
+
 test("the bulk bar never sends more than the 200 videos one action takes", async ({ page }) => {
   test.slow();
   const tag = `Over ${Date.now().toString(36)}`;

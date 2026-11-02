@@ -8,7 +8,7 @@ import { renderLimitFor } from "../billing";
 import { BULK_MAX, MAX_RETRY_AT_ONCE } from "../types";
 import { NotFoundError, ValidationError } from "../errors";
 import { fillTemplate, parseCsv, placeholdersIn } from "../csv";
-import { shareOffline, shareState } from "../client";
+import { sendableShareLink, shareOffline, shareState } from "../client";
 import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, listVideos, purgeDue, refreshPending, retryVideo, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, createVideo, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, rendersThisMonth, resolveRenderContext } from "./videos";
 import { getBrandKit } from "./brand";
 import { stripPauses } from "../pauses";
@@ -227,16 +227,16 @@ export const selectionLinksSchema = z.object({ ids: z.array(z.string().min(1).ma
  * A go-live time or expiry still ahead is given whatever the state, since it applies once the link is on or the render done.
  */
 export function selectionLinkRows(videos: Video[], base: string, now = Date.now()): Array<Record<(typeof SELECTION_LINK_COLUMNS)[number], string | undefined>> {
-  const origin = base.replace(/\/$/, "");
   return videos.map((v) => {
     const state = shareState(v, now);
-    const live = v.status === "completed" && !shareOffline(v, now);
+    const link = sendableShareLink(v, base, now);
+    const live = !!link;
     const ahead = (iso?: string) => (iso && Date.parse(iso) > now ? iso : undefined);
     return {
       title: v.title,
       status: v.status,
       share_state: v.status === "failed" ? "failed" : live ? "live" : state === "live" ? "not ready" : state,
-      share_link: live ? `${origin}/share/${v.id}` : undefined,
+      share_link: link,
       share_goes_live: ahead(v.shareStartsAt),
       share_expires: ahead(v.shareExpiresAt),
       password_required: v.shareLocked ? "yes" : undefined,

@@ -102,6 +102,14 @@ export function shareOffline(video: { shareDisabled?: boolean; shareExpiresAt?: 
 }
 
 /**
+ * A video's share link when a viewer can open it now (rendered, out of the trash, switched on, live, not expired) on
+ * `origin`, else undefined; a password or an email gate does not stop it being sent.
+ */
+export function sendableShareLink(video: { id: string; status: string; shareDisabled?: boolean; shareExpiresAt?: string; shareStartsAt?: string; deletedAt?: string }, origin: string, now = Date.now()): string | undefined {
+  return video.status === "completed" && !shareOffline(video, now) ? `${origin.replace(/\/$/, "")}/share/${video.id}` : undefined;
+}
+
+/**
  * Which one of the share states a video's link is in, as its card's badges say: switched off wins over expired, which
  * wins over not live yet; anything else is live (a password or a coming expiry does not take it offline).
  */

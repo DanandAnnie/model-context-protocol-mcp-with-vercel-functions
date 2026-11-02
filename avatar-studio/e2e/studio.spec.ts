@@ -9882,6 +9882,84 @@ test("home says when this month's renders are nearly or all used, linking to the
   }
 });
 
+test("home offers the editor's unsent draft to continue or discard", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  await page.getByLabel("Video title").fill(`Open house ${tag}`);
+  await page.locator("textarea").fill("Welcome to 12 Oak Lane. [pause 1s] Come in.");
+  const stored = () => page.evaluate(() => (JSON.parse(localStorage.getItem("avatar-studio:draft") ?? "{}") as { title?: string }).title ?? null);
+  await expect.poll(stored).toBe(`Open house ${tag}`);
+  await page.goto("/home");
+  const card = page.getByTestId("home-draft");
+  await expect(card).toBeVisible();
+  await expect(card.getByText(`Continue your draft: Open house ${tag}`)).toBeVisible();
+  // Pause markers are not words.
+  await expect(card.getByText(/^1 scene, 7 words, saved /)).toBeVisible();
+  await expect(card.getByText("“Welcome to 12 Oak Lane. Come in.”")).toBeVisible();
+  await card.getByRole("link", { name: "Continue editing" }).click();
+  await expect(page).toHaveURL(/\/create$/);
+  await expect(page.getByText("Restored your unsent draft")).toBeVisible();
+  await expect(page.getByLabel("Video title")).toHaveValue(`Open house ${tag}`);
+
+  // Discarding asks first; declined, the draft stays, and accepted, it is gone from the editor too.
+  await page.goto("/home");
+  const dialogs: string[] = [];
+  let accept = false;
+  page.on("dialog", (d) => {
+    dialogs.push(d.message());
+    void (accept ? d.accept() : d.dismiss());
+  });
+  await card.getByRole("button", { name: "Discard draft" }).click();
+  expect(dialogs).toEqual([`Discard your unsent draft “Open house ${tag}”? It is kept only in this browser, so it cannot be brought back; an editor still open in another tab keeps its copy.`]);
+  await expect(card).toBeVisible();
+  expect(await stored()).toBe(`Open house ${tag}`);
+  accept = true;
+  await card.getByRole("button", { name: "Discard draft" }).click();
+  await expect(card).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: "Draft discarded." })).toBeAttached();
+  await expect(page.getByRole("link", { name: /^Avatar video/ })).toBeFocused();
+  expect(await page.evaluate(() => localStorage.getItem("avatar-studio:draft"))).toBeNull();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
+  await expect(card).toHaveCount(0);
+});
+
+test("home offers each space's own draft, and none to a workspace's viewers", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const workspace = (await (await page.request.post("/api/workspaces", { data: { name: `Home drafts ${tag}` } })).json()).workspace as { id: string };
+  try {
+    await page.evaluate(([id, t]) => {
+      localStorage.setItem("avatar-studio:draft", JSON.stringify({ title: `Personal ${t}`, scenes: [{ script: "Mine." }], savedAt: new Date().toISOString() }));
+      localStorage.setItem(`avatar-studio:draft:${id}`, JSON.stringify({ title: `Team ${t}`, scenes: [{ script: "Ours." }], savedAt: new Date().toISOString() }));
+    }, [workspace.id, tag] as const);
+    await page.goto("/home");
+    await expect(page.getByTestId("home-draft").getByText(`Continue your draft: Personal ${tag}`)).toBeVisible();
+    expect((await page.request.post("/api/workspaces/switch", { data: { id: workspace.id } })).status()).toBe(200);
+    await page.goto("/home");
+    await expect(page.getByTestId("home-draft").getByText(`Continue your draft: Team ${tag}`)).toBeVisible();
+    // A viewer makes no videos, so the space's draft is not offered to one.
+    await page.route("**/api/workspaces", async (route) => {
+      const res = await route.fetch();
+      const body = (await res.json()) as { workspaces: Array<{ id: string; role: string }> };
+      await route.fulfill({ response: res, json: { ...body, workspaces: body.workspaces.map((w) => (w.id === workspace.id ? { ...w, role: "viewer" } : w)) } });
+    });
+    // Home reads the space's draft once it knows the space; wait for that answer before checking nothing is offered.
+    const spaces = page.waitForResponse((r) => r.url().endsWith("/api/workspaces") && r.request().method() === "GET");
+    await page.goto("/home");
+    await spaces;
+    await expect(page.getByRole("link", { name: /^Avatar video/ })).toBeVisible();
+    await page.waitForTimeout(300);
+    await expect(page.getByTestId("home-draft")).toHaveCount(0);
+    await page.unroute("**/api/workspaces");
+  } finally {
+    await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
+    await page.request.delete(`/api/workspaces/${workspace.id}`);
+    await page.evaluate((id) => {
+      localStorage.removeItem(`avatar-studio:draft:${id}`);
+      localStorage.removeItem("avatar-studio:draft");
+    }, workspace.id);
+  }
+});
+
 test("Captions saves a zip of each selected video's captions as SRT, named after the video, as its own download gives them", async ({ page }) => {
   const tag = Date.now().toString(36);
   const made = await page.request.post("/api/videos/batch", {

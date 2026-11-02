@@ -1,12 +1,14 @@
 "use client";
 import Link from "next/link";
-import { AlertTriangle, Camera, ClipboardCheck, Clapperboard, Clock, Gauge, Languages, Layers3, LayoutTemplate, MessageSquare, Sparkles, TimerOff, Wand2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { AlertTriangle, Camera, ClipboardCheck, Clapperboard, Clock, FilePenLine, Gauge, Languages, Layers3, LayoutTemplate, MessageSquare, Sparkles, TimerOff, Wand2 } from "lucide-react";
 import { Insights } from "@/components/Insights";
 import { VideoCard } from "@/components/VideoCard";
 import { EmptyState, SectionTitle, Skeleton } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useWorkspaceRole } from "@/hooks/useCanEdit";
 import { allowanceNotice, awaitingReview, failedThisWeek, shareAttention } from "@/lib/client";
+import { draftKeyFor, draftSummary, type DraftSummary } from "@/lib/editor-draft";
 import type { Video } from "@/lib/types";
 
 const QUICK = [
@@ -25,7 +27,56 @@ export default function HomePage() {
   const recent = data?.videos.slice(0, 4) ?? [];
   // This month's renders against the plan's allowance, once little or none of it is left.
   const { data: status } = useApi<{ renderLimitPerMonth?: number | null; usage?: { rendersThisMonth: number } }>("/api/status");
-  const role = useWorkspaceRole()?.role;
+  const space = useWorkspaceRole();
+  const role = space?.role;
+  // The editor's unsent draft for the space being worked in, as this browser keeps it (another tab's edits included).
+  const draftKey = space ? draftKeyFor({ personalId: space.userId, activeId: space.workspaceId ?? space.userId }) : null;
+  const [draft, setDraft] = useState<{ key: string; summary: DraftSummary } | null>(null);
+  useEffect(() => {
+    if (!draftKey) return;
+    const read = () => {
+      let summary: DraftSummary | null = null;
+      try {
+        summary = draftSummary(window.localStorage.getItem(draftKey));
+      } catch {
+        // Storage can be unavailable (private mode); drafts are a convenience only.
+      }
+      setDraft(summary ? { key: draftKey, summary } : null);
+    };
+    read();
+    const onStorage = (e: StorageEvent) => (e.key === draftKey || e.key === null) && read();
+    // A tab brought back from the browser's page cache, or frozen while in the background, can miss those events.
+    const onShow = () => document.visibilityState === "visible" && read();
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("pageshow", read);
+    window.addEventListener("focus", read);
+    document.addEventListener("visibilitychange", onShow);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("pageshow", read);
+      window.removeEventListener("focus", read);
+      document.removeEventListener("visibilitychange", onShow);
+    };
+  }, [draftKey]);
+  // Only the draft of the space shown now: a switch of space never shows the last one's for a moment.
+  const shownDraft = draft && draft.key === draftKey && role !== "viewer" ? draft.summary : null;
+  // Said once the card has gone, and where the keyboard goes then: the first quick action, not the top of the page.
+  const [draftNote, setDraftNote] = useState("");
+  const quickRef = useRef<HTMLDivElement>(null);
+  function discardDraft() {
+    if (!draft) return;
+    const name = draft.summary.title ? ` “${draft.summary.title}”` : "";
+    // An editor still open in another tab holds its own copy, and saves it again at its next change.
+    if (!window.confirm(`Discard your unsent draft${name}? It is kept only in this browser, so it cannot be brought back; an editor still open in another tab keeps its copy.`)) return;
+    try {
+      window.localStorage.removeItem(draft.key);
+    } catch {
+      // Nothing was kept to remove.
+    }
+    setDraft(null);
+    setDraftNote("Draft discarded.");
+    requestAnimationFrame(() => quickRef.current?.querySelector<HTMLAnchorElement>("a")?.focus());
+  }
   // A workspace's viewers make no renders, so the allowance is not theirs to watch.
   const allowance = status?.usage && role !== "viewer" ? allowanceNotice(status.usage.rendersThisMonth, status.renderLimitPerMonth) : undefined;
   // Only a workspace's owners decide a review; everyone else is told whose decision it waits on.
@@ -97,7 +148,31 @@ export default function HomePage() {
         </section>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      {shownDraft && (
+        <section aria-label="Your unsent draft" data-testid="home-draft" className="mb-6 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-slate-200 bg-white px-4 py-3">
+          <FilePenLine className="h-5 w-5 shrink-0 text-brand-600" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-slate-900">Continue your draft: {shownDraft.title || "Untitled video"}</p>
+            <p className="text-xs text-slate-500">
+              {shownDraft.scenes === 1 ? "1 scene" : `${shownDraft.scenes} scenes`}, {shownDraft.words === 1 ? "1 word" : `${shownDraft.words.toLocaleString()} words`}
+              {shownDraft.savedAt && `, saved ${new Date(shownDraft.savedAt).toLocaleString()}`}
+            </p>
+            {shownDraft.opening && <p className="mt-0.5 truncate text-xs italic text-slate-600">“{shownDraft.opening}”</p>}
+          </div>
+          <Link href="/create" className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700">
+            Continue editing
+          </Link>
+          <button type="button" onClick={discardDraft} className="rounded-lg px-2 py-1.5 text-sm font-medium text-slate-500 hover:bg-slate-100 hover:text-rose-700">
+            Discard draft
+          </button>
+        </section>
+      )}
+
+      <p role="status" className="sr-only">
+        {draftNote}
+      </p>
+
+      <div ref={quickRef} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {QUICK.map(({ href, icon: Icon, title, body, accent }) => (
           <Link key={title} href={href} className="rounded-xl border border-slate-200 bg-white p-5 transition hover:border-slate-300 hover:shadow-sm">
             <span className={`flex h-10 w-10 items-center justify-center rounded-lg text-white ${accent}`}>

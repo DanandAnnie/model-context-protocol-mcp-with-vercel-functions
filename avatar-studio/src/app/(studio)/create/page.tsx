@@ -37,22 +37,14 @@ import { mergeScenes, moveItem, splitParagraphs, splitScene } from "@/lib/scene-
 import { amendLast, emptyHistory, record, redo, undo, type History, type HistoryEntry } from "@/lib/scene-history";
 import { graphemes, withSuffix } from "@/lib/text";
 import { takeAgentDraft, type AgentDraft } from "@/lib/agent-draft";
+import { draftKeyFor, restorableScenes } from "@/lib/editor-draft";
 import { DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, footageIdOf, footageLength, footagePath, type FootageJob, framingFor, isDefaultLayout, isPhotoAvatar, rendersOnAvatarV, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, type PhotoExpressiveness, VOICE_ACCENTS, type VoiceAccent, AVATAR_ENGINES, type AvatarEngine } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
-/** Where the personal space's draft is kept; a workspace's has its id after it (see `draftKeyFor`). */
-const DRAFT_KEY = "avatar-studio:draft";
 /** The drag type a scene tab carries: only another tab takes it (a text field does not). */
 const SCENE_DRAG = "application/x-avatar-studio-scene";
 
-/**
- * Each space keeps its own draft: one started in Personal never shows up, or loses its uploaded images, in a
- * workspace (the images are the space's own). Personal keeps the original key, so drafts saved before survive.
- */
-function draftKeyFor(spaces: { personalId: string; activeId: string } | null): string | null {
-  return spaces ? (spaces.activeId === spaces.personalId ? DRAFT_KEY : `${DRAFT_KEY}:${spaces.activeId}`) : null;
-}
 
 /** What a scene change can change: the scenes, and the video's presenter, voice, pace, and format. */
 interface EditorState {
@@ -90,7 +82,8 @@ function readDraft(key: string): Draft | null {
     const raw = window.localStorage.getItem(key);
     if (!raw) return null;
     const d = JSON.parse(raw) as Draft;
-    return Array.isArray(d.scenes) && d.scenes.length ? d : null;
+    // Scenes another build wrote in a shape this one cannot restore are left alone rather than crash the editor.
+    return d && restorableScenes(d.scenes) ? d : null;
   } catch {
     return null;
   }

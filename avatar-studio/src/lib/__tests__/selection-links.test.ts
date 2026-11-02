@@ -5,8 +5,9 @@ import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import { getStore } from "../store";
 import jsQR from "jsqr";
-import { SELECTION_LINK_COLUMNS, createVideo, selectionLinkRows, selectionLinkText, selectionLinksSchema, selectionQrFiles, selectionVideos, videoRequestSchema } from "../services";
-import { QR_MARGIN, qrMatrix, qrSvg, qrWording } from "../qr";
+import { SELECTION_LINK_COLUMNS, captionCuesFor, createVideo, selectionCaptionFiles, selectionLinkRows, selectionLinkText, selectionLinksSchema, selectionQrFiles, selectionVideos, videoRequestSchema } from "../services";
+import { cuesToSrt, cuesToVtt } from "../captions";
+import { QR_MARGIN, qrFileNames, qrMatrix, qrSvg, qrWording, uniqueFileNames } from "../qr";
 import { NotFoundError } from "../errors";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import { parseCsv, toCsv } from "../csv";
@@ -119,5 +120,34 @@ describe("selection links", () => {
       assert.equal(jsQR(pixels, side * scale, side * scale)?.data, link);
     }
     assert.deepEqual(selectionQrFiles(selectionLinkRows([off], "https://x")), { files: [], links: 0, unsendable: 1 });
+  });
+
+  it("saves each rendered video's captions as a file named after it, as its own download gives them", async () => {
+    const tour = await video("Tour 12 Elm St", { durationSec: 6 });
+    const again = await video("tour 12 elm st", { durationSec: 4, captionCues: [{ startMs: 0, endMs: 1500, text: "Fixed line" }], captionStyle: { position: "top" } as Video["captionStyle"] });
+    const rendering = await video("Rendering", { status: "processing" });
+    const failed = await video("Failed", { status: "failed" });
+    const silent = await video("Silent", { durationSec: 3, script: "", scenes: undefined });
+    const queued = await video("Queued", { status: "queued" });
+    const shot = await video("Shot", { durationSec: 5, cinematic: { prompt: "A slow pan over the bay" } as Video["cinematic"] });
+    const srt = selectionCaptionFiles([tour, again, rendering, failed, silent, queued, shot]);
+    assert.equal(srt.missing, 5, "still rendering or queued, failed, nothing to say, and a cinematic shot are left out");
+    assert.deepEqual(srt.files.map((f) => f.name), ["Tour 12 Elm St.srt", "tour 12 elm st (2).srt"], "named in the order chosen, a name differing only in case kept apart");
+    assert.equal(srt.files[0].text, cuesToSrt(captionCuesFor(tour).cues));
+    // A translated track is a download of its own; the zip holds the script's language.
+    const dubbed = selectionCaptionFiles([{ ...tour, subtitles: { Spanish: "Hola." } }]);
+    assert.equal(dubbed.files[0].text, srt.files[0].text);
+    assert.match(srt.files[0].text, /^1\n00:00:00,000 --> /);
+    assert.equal(srt.files[1].text, cuesToSrt([{ startMs: 0, endMs: 1500, text: "Fixed line" }]), "an editor's corrected captions");
+    const vtt = selectionCaptionFiles([tour, again], true);
+    assert.deepEqual(vtt.files.map((f) => f.name), ["Tour 12 Elm St.vtt", "tour 12 elm st (2).vtt"]);
+    assert.equal(vtt.files[1].text, cuesToVtt([{ startMs: 0, endMs: 1500, text: "Fixed line" }], "top"), "WebVTT keeps the caption position");
+    assert.ok(vtt.files[0].text.startsWith("WEBVTT"));
+  });
+
+  it("names files once each, with a prefix when asked, as the QR codes always were", () => {
+    assert.deepEqual(uniqueFileNames(["A/B", "a-b", "", "A-B", "Tour: 12 Elm"], "srt"), ["A B.srt", "a-b.srt", "video.srt", "A-B (2).srt", "Tour 12 Elm.srt"], "what a file name cannot hold goes, and a name taken in another case is numbered");
+    assert.deepEqual(qrFileNames(["Open house", "open house"]), uniqueFileNames(["Open house", "open house"], "svg", "qr-"));
+    assert.deepEqual(qrFileNames(["Open house", "open house"]), ["qr-Open house.svg", "qr-open house (2).svg"]);
   });
 });

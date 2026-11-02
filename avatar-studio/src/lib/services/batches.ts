@@ -9,10 +9,11 @@ import { BULK_MAX, MAX_RETRY_AT_ONCE } from "../types";
 import { NotFoundError, ValidationError } from "../errors";
 import { fillTemplate, parseCsv, placeholdersIn } from "../csv";
 import { sendableShareLink, shareOffline, shareState } from "../client";
-import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, listVideos, purgeDue, refreshPending, retryVideo, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, createVideo, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, rendersThisMonth, resolveRenderContext } from "./videos";
+import { MORE_BLINKING_NEEDS_V, captionCuesFor, accentSchema, avatarEngineSchema, listVideos, purgeDue, refreshPending, retryVideo, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, createVideo, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, rendersThisMonth, resolveRenderContext } from "./videos";
 import { getBrandKit } from "./brand";
 import { stripPauses } from "../pauses";
-import { qrFileNames, qrSvg, qrWording } from "../qr";
+import { qrFileNames, qrSvg, qrWording, uniqueFileNames } from "../qr";
+import { cuesToSrt, cuesToVtt } from "../captions";
 
 export const MAX_BATCH_ROWS = 100;
 /** Characters that show nothing: zero-width spaces and joiners, direction marks and embeddings, a soft hyphen, a byte-order mark. */
@@ -266,6 +267,25 @@ export function selectionQrFiles(rows: ReturnType<typeof selectionLinkRows>): { 
   const names = qrFileNames(sendable.map((r) => r.title));
   const files = sendable.map((r, i) => ({ name: names[i], svg: qrSvg(r.link, qrWording("share", r.title).title) }));
   return { files, links: files.length, unsendable: rows.length - files.length };
+}
+
+/**
+ * The captions of each of these videos that has them (a finished render with a script to say), as SRT files, or WebVTT
+ * with `vtt`, named after the videos (in the order given, no two names alike): an editor's corrected captions where
+ * saved, else lines timed from the script, as a finished video's own download gives. A cinematic shot or a video HeyGen
+ * directed has no script of ours, so none, as its page offers none. How many had none to give is counted.
+ */
+export function selectionCaptionFiles(videos: Video[], vtt = false): { files: Array<{ name: string; text: string }>; missing: number } {
+  const ready = videos.flatMap((v) => {
+    const cues = v.status === "completed" && !v.cinematic && !v.directed ? captionCuesFor(v).cues : [];
+    return cues.length ? [{ video: v, cues }] : [];
+  });
+  const names = uniqueFileNames(
+    ready.map((r) => r.video.title),
+    vtt ? "vtt" : "srt",
+  );
+  const files = ready.map((r, i) => ({ name: names[i], text: vtt ? cuesToVtt(r.cues, r.video.captionStyle?.position) : cuesToSrt(r.cues) }));
+  return { files, missing: videos.length - files.length };
 }
 
 /**

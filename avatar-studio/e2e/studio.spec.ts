@@ -9791,6 +9791,46 @@ test("home says when this month's renders are nearly or all used, linking to the
   }
 });
 
+test("Captions saves a zip of each selected video's captions as SRT, named after the video, as its own download gives them", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const made = await page.request.post("/api/videos/batch", {
+    data: { title: `Course ${tag}`, scriptTemplate: "Welcome to lesson {n}. Today we cover the basics.", csv: "n\n1\n2", avatarId: "stock_1", voiceId: "stock_voice_1" },
+  });
+  expect(made.status()).toBe(201);
+  const { batchId } = (await made.json()) as { batchId: string };
+  const listed = async () => ((await (await page.request.get(`/api/videos?batch=${batchId}`)).json()) as { videos: Array<{ id: string; title: string }> }).videos;
+  await expect.poll(async () => (await Promise.all((await listed()).map(async (v) => ((await (await page.request.get(`/api/videos/${v.id}`)).json()) as { video: { status: string } }).video.status))).join(","), { timeout: 30_000 }).toBe("completed,completed");
+  const shown = await listed();
+  // One of them has corrected captions, which the file carries.
+  expect((await page.request.put(`/api/videos/${shown[0].id}/captions`, { data: { cues: [{ startMs: 0, endMs: 1800, text: "Welcome, everyone." }] } })).status()).toBe(200);
+
+  await page.goto(`/videos?batch=${batchId}`);
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  const bar = page.getByTestId("bulk-bar");
+  await expect(page.locator("button[aria-pressed][aria-label^='Select ']")).toHaveCount(2);
+  await page.keyboard.press("Control+a");
+  const download = page.waitForEvent("download");
+  await bar.getByRole("button", { name: "Captions", exact: true }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toMatch(/^captions-\d{4}-\d{2}-\d{2}\.zip$/);
+  await expect(page.getByTestId("copy-note")).toHaveText("Saved captions for 2 videos");
+  const entries = unzipSync(new Uint8Array(await readFile((await file.path())!)));
+  expect(Object.keys(entries).sort()).toEqual(shown.map((v) => `${v.title}.srt`).sort());
+  // Each file is what the video's own caption download gives.
+  for (const v of shown) {
+    expect(strFromU8(entries[`${v.title}.srt`])).toBe(await (await page.request.get(`/api/videos/${v.id}/captions`)).text());
+  }
+  expect(strFromU8(entries[`${shown[0].title}.srt`])).toBe("1\n00:00:00,000 --> 00:00:01,800\nWelcome, everyone.\n");
+
+  // WebVTT through the API, and nothing to give for a selection the library no longer has.
+  const vtt = await page.request.post("/api/videos/captions?format=vtt", { data: { ids: shown.map((v) => v.id) } });
+  expect(vtt.status()).toBe(200);
+  expect(vtt.headers()["x-files"]).toBe("2");
+  const vttEntries = unzipSync(new Uint8Array(await vtt.body()));
+  expect(strFromU8(vttEntries[`${shown[1].title}.vtt`])).toBe(await (await page.request.get(`/api/videos/${shown[1].id}/captions?format=vtt`)).text());
+  expect((await page.request.post("/api/videos/captions", { data: { ids: ["vid_nope"] } })).status()).toBe(404);
+});
+
 test("the bulk bar never sends more than the 200 videos one action takes", async ({ page }) => {
   test.slow();
   const tag = `Over ${Date.now().toString(36)}`;

@@ -99,9 +99,18 @@ function byteFit(stem: string): string {
  * unpacked.
  */
 export function qrFileNames(titles: string[], ext = "svg"): string[] {
+  return uniqueFileNames(titles, ext, "qr-");
+}
+
+/**
+ * A file name for each title (`<prefix><title>.<ext>`, "video" for a title with nothing a file name can keep), cut to fit
+ * what a file system allows, with " (2)" and so on on a name another already has, ignoring case, so none overwrites another
+ * once a zip of them is unpacked.
+ */
+export function uniqueFileNames(titles: string[], ext: string, prefix = ""): string[] {
   const taken = new Set<string>();
   return titles.map((title) => {
-    const stem = `qr-${byteFit(safeFileStem(title)) || "video"}`;
+    const stem = `${prefix}${byteFit(safeFileStem(title)) || "video"}`;
     let name = `${stem}.${ext}`;
     for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${stem} (${n}).${ext}`;
     taken.add(name.toLowerCase());

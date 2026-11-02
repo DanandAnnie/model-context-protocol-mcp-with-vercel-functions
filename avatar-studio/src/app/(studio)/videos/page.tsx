@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArchiveRestore, CheckSquare, Clapperboard, Clock, Copy, LayoutGrid, List, Download, FolderInput, KeyRound, MousePointerClick, QrCode, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
+import { ArchiveRestore, Captions, CheckSquare, Clapperboard, Clock, Copy, LayoutGrid, List, Download, FolderInput, KeyRound, MousePointerClick, QrCode, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
 import { CREATED_WITHIN_DAYS, SHARE_FILTERS, api, clickSelect, folderFor, nextShareChange, overSelection } from "@/lib/client";
 import { libraryKey } from "@/lib/shortcuts";
 import { isApple } from "@/components/QuickFind";
@@ -38,7 +38,7 @@ function localMinute(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links" | "password" | "nopassword" | "settings" | "retry" | "star" | "unstar" | "empty" | "restoreall" | "unfile" | "cta" | "nocta" | "copylinks" | "qrcodes";
+type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links" | "password" | "nopassword" | "settings" | "retry" | "star" | "unstar" | "empty" | "restoreall" | "unfile" | "cta" | "nocta" | "copylinks" | "qrcodes" | "captions";
 
 export default function VideosPage() {
   return (
@@ -461,13 +461,14 @@ function VideosInner() {
 
   // The selection's share links as a CSV to send from: the link where it can be sent now, and why the others are blank.
   // The selection stays, so its links can be fixed (go-live, expiry, links on) and the file downloaded again. With
-  // "qrcodes", a zip of a QR code of each link that can be sent now, for printing flyers or signs for several at once.
-  async function downloadLinks(kind: "links" | "qrcodes" = "links") {
+  // "qrcodes", a zip of a QR code of each link that can be sent now, for printing flyers or signs for several at once;
+  // with "captions", a zip of each rendered video's captions (SRT), to upload with the videos on another site.
+  async function downloadLinks(kind: "links" | "qrcodes" | "captions" = "links") {
     const ids = Array.from(selected);
     if (!ids.length) return;
     const over = overSelection(ids.length, BULK_MAX);
     if (over) return setBulkErr(over);
-    const what = kind === "links" ? "the links" : "the QR codes";
+    const what = kind === "links" ? "the links" : kind === "qrcodes" ? "the QR codes" : "the captions";
     const madeFor = selected;
     setBusy(kind);
     setCopyNote(null);
@@ -475,7 +476,7 @@ function VideosInner() {
     setBulkErr((note) => (note !== null && note === copyErr.current ? null : note));
     // A note from an earlier go-live or expiry refusal stays: it names the links to fix, which this file is for checking.
     try {
-      const res = await fetch(`/api/videos/links${kind === "qrcodes" ? "?format=qr" : ""}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) }).catch(() => {
+      const res = await fetch(kind === "captions" ? "/api/videos/captions" : `/api/videos/links${kind === "qrcodes" ? "?format=qr" : ""}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) }).catch(() => {
         throw new Error(`Could not reach the server to download ${what}`);
       });
       if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? `Could not download ${what}`);
@@ -483,7 +484,7 @@ function VideosInner() {
       const url = URL.createObjectURL(await res.blob());
       const link = document.createElement("a");
       link.href = url;
-      link.download = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? (kind === "links" ? "links.csv" : "qr-codes.zip");
+      link.download = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? (kind === "links" ? "links.csv" : kind === "qrcodes" ? "qr-codes.zip" : "captions.zip");
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -495,6 +496,11 @@ function VideosInner() {
         const links = Number(res.headers.get("X-Links") ?? 0);
         const unsendable = Number(res.headers.get("X-Unsendable") ?? 0);
         setCopyNote(`Saved ${links} QR ${links === 1 ? "code" : "codes"}${unsendable ? `; left out: ${unsendable} ${unsendable === 1 ? "has" : "have"} no link that can be sent yet` : ""}`);
+      }
+      if (kind === "captions") {
+        const files = Number(res.headers.get("X-Files") ?? 0);
+        const missing = Number(res.headers.get("X-Missing") ?? 0);
+        setCopyNote(`Saved captions for ${files} ${files === 1 ? "video" : "videos"}${missing ? `; left out: ${missing} ${missing === 1 ? "has" : "have"} none (still rendering, failed, or no script of its own)` : ""}`);
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : `Could not download ${what}`;
@@ -1046,6 +1052,9 @@ function VideosInner() {
               </Button>
               <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void downloadLinks("qrcodes")} disabled={!selected.size || busy !== null} loading={busy === "qrcodes"} title="A zip of a QR code (SVG, sharp at any size) of each selected video's share link that can be sent now, named after the video, for flyers or signs">
                 <QrCode className="h-3.5 w-3.5" /> QR codes
+              </Button>
+              <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void downloadLinks("captions")} disabled={!selected.size || busy !== null} loading={busy === "captions"} title="A zip of the captions (SRT) of each selected video that has rendered, named after the video, to upload with it on YouTube, LinkedIn, or a course platform">
+                <Captions className="h-3.5 w-3.5" /> Captions
               </Button>
               {failedSelected.length > 0 && (
                 <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void retryFailed()} disabled={busy !== null} loading={busy === "retry"} title={`Start the selected failed renders again with the same settings, up to ${MAX_RETRY_AT_ONCE} at a time; each counts toward this month's renders`}>

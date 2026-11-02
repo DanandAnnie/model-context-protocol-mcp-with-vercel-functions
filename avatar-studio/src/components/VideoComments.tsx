@@ -8,7 +8,7 @@ import { formatTimestamp } from "@/lib/text";
 import { refocusIfLost } from "@/lib/focus";
 import { isSubmitKey } from "@/lib/shortcuts";
 import { isApple } from "@/components/QuickFind";
-import { COMMENT_REACTIONS, REACTION_NAMES, repliesByThread, splitComments, threadLink, type CommentReaction, type ReactionView } from "@/lib/comment-list";
+import { COMMENT_ORDER_KEY, COMMENT_REACTIONS, REACTION_NAMES, commentOrderFrom, orderThreads, repliesByThread, splitComments, threadLink, type CommentOrder, type CommentReaction, type ReactionView } from "@/lib/comment-list";
 import type { VideoComment, WorkspaceRole } from "@/lib/types";
 
 /**
@@ -72,7 +72,26 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const comments = data?.comments ?? [];
-  const { open, resolved } = splitComments(comments);
+  // Open threads as written, or by their moment in the video; remembered by this browser only (read after mounting).
+  const [order, setOrder] = useState<CommentOrder>("written");
+  useEffect(() => {
+    try {
+      setOrder(commentOrderFrom(window.localStorage.getItem(COMMENT_ORDER_KEY)));
+    } catch {
+      // Storage blocked (a private window, say): as written it is.
+    }
+  }, []);
+  function chooseOrder(next: CommentOrder) {
+    setOrder(next);
+    try {
+      window.localStorage.setItem(COMMENT_ORDER_KEY, next);
+    } catch {
+      // Not remembered, but the choice still holds for this visit.
+    }
+  }
+  const split = splitComments(comments);
+  const open = orderThreads(split.open, order);
+  const resolved = split.resolved;
   const replies = repliesByThread(comments);
   const [showResolved, setShowResolved] = useState(false);
   // With nothing resolved the toggle goes, so the next note resolved starts folded again.
@@ -658,6 +677,16 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
         <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="comment-link-gone">
           {LINK_GONE}
         </p>
+      )}
+      {/* With two or more open and one of them pinned to a moment, they can be listed in the video's order. */}
+      {open.length > 1 && open.some((c) => c.atSec !== undefined) && (
+        <label className="mt-2 flex items-center gap-2 text-xs text-slate-600">
+          Order
+          <select value={order} onChange={(e) => chooseOrder(e.target.value as CommentOrder)} data-testid="comment-order" className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-xs">
+            <option value="written">As written</option>
+            <option value="moment">By time in the video</option>
+          </select>
+        </label>
       )}
       <div ref={card}>
       {open.length > 0 && (

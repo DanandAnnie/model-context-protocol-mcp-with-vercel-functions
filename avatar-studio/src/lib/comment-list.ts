@@ -14,6 +14,28 @@ export function splitComments<T extends Pick<VideoComment, "id" | "resolvedAt" |
   return { open, resolved };
 }
 
+/** How the open threads are listed: as they were written, or by the moment in the video each is about. */
+export type CommentOrder = "written" | "moment";
+
+/** Where this browser keeps the order chosen for a video's comments. */
+export const COMMENT_ORDER_KEY = "avatar-studio:comment-order";
+
+/** The order kept by this browser, read back: by moment only when that was chosen. */
+export function commentOrderFrom(stored: string | null): CommentOrder {
+  return stored === "moment" ? "moment" : "written";
+}
+
+/**
+ * Threads in the chosen order. As written keeps the order given. By moment puts the threads pinned to a moment in the
+ * video first, earliest moment first, then the notes on the whole video; threads at the same moment, and the notes on
+ * the whole video, keep the order given.
+ */
+export function orderThreads<T extends Pick<VideoComment, "atSec">>(threads: T[], order: CommentOrder): T[] {
+  if (order === "written") return threads;
+  const at = (c: T) => c.atSec ?? Number.POSITIVE_INFINITY;
+  return threads.map((c, i) => ({ c, i })).sort((a, b) => at(a.c) - at(b.c) || a.i - b.i).map(({ c }) => c);
+}
+
 /** Each thread's replies, oldest first, by the id of the note they answer. */
 export function repliesByThread<T extends Pick<VideoComment, "parentId" | "createdAt">>(comments: T[]): Map<string, T[]> {
   const out = new Map<string, T[]>();

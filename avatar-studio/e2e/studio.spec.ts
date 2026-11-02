@@ -3835,6 +3835,47 @@ test("every open comment on a video is resolved in one step, after asking", asyn
   expect((await page.request.post("/api/videos/vid_nope/comments/resolve-all", { data: { ids: [first.id] } })).status()).toBe(404);
 });
 
+test("a video's open comments list by their moment in the video, an order the browser remembers", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Order ${Date.now().toString(36)}`);
+  // Notes are pinned to a moment once the render has finished.
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  const post = async (text: string, atSec?: number) => expect((await page.request.post(`/api/videos/${v.id}/comments`, { data: { text, atSec } })).status()).toBe(201);
+  await post("About the whole video.");
+  await page.goto(`/videos/${v.id}`);
+  const comments = page.getByTestId("comments");
+  const order = comments.getByRole("combobox", { name: "Order" });
+  // With no note pinned to a moment there is nothing to order by.
+  await expect(comments.getByTestId("comment-list")).toContainText("About the whole video.");
+  await expect(order).toHaveCount(0);
+  await post("Cut the pause here.", 8);
+  await post("Brighter title card.", 2);
+  await page.reload();
+  const rows = comments.getByTestId("comment-list").locator("> li");
+  await expect(order).toHaveValue("written");
+  await expect(rows).toHaveText([/About the whole video\./, /Cut the pause here\./, /Brighter title card\./]);
+  await order.selectOption("moment");
+  await expect(rows).toHaveText([/0:02\s*Brighter title card\./, /0:08\s*Cut the pause here\./, /About the whole video\./]);
+  // Resolving a note hands the focus to the next one shown, in this order.
+  await comments.getByRole("button", { name: "Resolve comment: Brighter title card." }).click();
+  await expect(comments.getByRole("button", { name: "Resolve comment: Cut the pause here." })).toBeFocused();
+  await comments.getByRole("button", { name: "Show 1 resolved" }).click();
+  await comments.getByRole("button", { name: "Reopen comment: Brighter title card." }).click();
+  await expect(rows.first()).toContainText("Brighter title card.");
+  // The browser keeps the choice for the next video page it opens.
+  const w = await createVideoViaApi(page, `Order too ${Date.now().toString(36)}`);
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${w.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  for (const [text, atSec] of [["Late moment.", 6], ["Early moment.", 1]] as const) {
+    expect((await page.request.post(`/api/videos/${w.id}/comments`, { data: { text, atSec } })).status()).toBe(201);
+  }
+  await page.goto(`/videos/${w.id}`);
+  await expect(order).toHaveValue("moment");
+  await expect(rows).toHaveText([/Early moment\./, /Late moment\./]);
+  await order.selectOption("written");
+  await page.goto(`/videos/${v.id}`);
+  await expect(order).toHaveValue("written");
+  await expect(rows.first()).toContainText("About the whole video.");
+});
+
 test("share page offers a download only when the owner allows it", async ({ page }) => {
   const v = await createVideoViaApi(page, `Downloadable ${Date.now().toString(36)}`);
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");

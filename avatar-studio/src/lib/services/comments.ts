@@ -11,7 +11,7 @@ import { releaseRateLimit, reserveRateLimit } from "../rate-limit";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../errors";
 import { owned } from "./shared";
 import { formatTimestamp } from "../text";
-import { COMMENT_REACTIONS, threadLink } from "../comment-list";
+import { COMMENT_REACTIONS, splitComments, threadLink } from "../comment-list";
 
 export const MAX_COMMENTS_PER_VIDEO = 200;
 
@@ -253,8 +253,8 @@ export const commentPatchSchema = z.union([
   z.object({ reaction: z.preprocess((v) => (v === "\u2764" ? "\u2764\uFE0F" : v), z.enum(COMMENT_REACTIONS)), on: z.boolean() }).strict(),
 ]);
 
-/** How many times a reaction is written again after someone else changed the note in the same moment. */
-const REACTION_TRIES = 5;
+/** How many times a reaction, or a resolve among many, is tried on a note someone else changed in the same moment. */
+const RACE_TRIES = 5;
 
 /**
  * Gives a reaction to a note or reply, or takes it back, for the person `user`; anyone who can comment may react to
@@ -291,7 +291,7 @@ export async function reactToComment(
     try {
       return await rewrite(comment, Object.keys(reactions).length ? { ...rest, reactions } : rest);
     } catch (err) {
-      if (!(err instanceof ConflictError) || attempt >= REACTION_TRIES) throw err;
+      if (!(err instanceof ConflictError) || attempt >= RACE_TRIES) throw err;
     }
   }
 }
@@ -337,6 +337,60 @@ export async function resolveComment(videoId: string, commentId: string, resolve
   const { resolvedAt: _at, resolvedById: _by, resolvedByEmail: _email, ...open } = comment;
   const next: VideoComment = resolved ? { ...open, resolvedAt: nowIso(), resolvedById: user.id, ...(user.email ? { resolvedByEmail: user.email } : {}) } : open;
   return rewrite(comment, next);
+}
+
+export const resolveAllSchema = z.object({
+  /** The threads the caller was shown as open (their first notes' ids), so one started since is left open. */
+  ids: z.array(z.string().min(1).max(80)).min(1).max(MAX_COMMENTS_PER_VIDEO),
+});
+
+/** How many threads Resolve all writes at a time. */
+const RESOLVE_ALL_AT_ONCE = 8;
+
+/**
+ * Marks the open threads `ids` on the video done at once, for the person `user`, as resolving each would: a thread's
+ * replies go with its note, and a reply whose note is gone counts as a thread of its own. Only threads the caller
+ * named are resolved, so one started after they looked stays open; an id that is not an open thread start (resolved
+ * already, deleted, or a reply in a thread) is left alone. A thread changed in the same moment (a reaction, say) is
+ * read again and resolved. Returns how many of them are resolved now (one someone else resolved in the same moment
+ * included), how many could not be (`failed`), and how many threads are open on the video afterwards.
+ */
+export async function resolveAllComments(
+  videoId: string,
+  ids: string[],
+  ownerId: string = LOCAL_OWNER,
+  user: User = { id: ownerId },
+): Promise<{ resolved: number; failed: number; open: number }> {
+  const comments = await listComments(videoId, ownerId);
+  const all = new Set(comments.map((c) => c.id));
+  const wanted = new Set(ids);
+  const targets = comments.filter((c) => wanted.has(c.id) && !c.resolvedAt && (!c.parentId || !all.has(c.parentId)));
+  let resolved = 0;
+  let failed = 0;
+  let next = 0;
+  async function worker() {
+    while (next < targets.length) {
+      const thread = targets[next++];
+      for (let attempt = 1; ; attempt++) {
+        try {
+          await resolveComment(videoId, thread.id, true, ownerId, user);
+          resolved++;
+          break;
+        } catch (err) {
+          if (err instanceof NotFoundError) break;
+          if (err instanceof ConflictError && attempt < RACE_TRIES) continue;
+          // One thread that cannot be resolved does not stop the others; the caller is told how many.
+          console.error(`resolve all: comment ${thread.id} on ${videoId} failed:`, err);
+          failed++;
+          break;
+        }
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(RESOLVE_ALL_AT_ONCE, targets.length) }, worker));
+  // Read again, so a thread started meanwhile is counted, and a video deleted meanwhile is a 404 rather than a count.
+  const { open } = splitComments(await listComments(videoId, ownerId));
+  return { resolved, failed, open: open.length };
 }
 
 /** How many open (unresolved) threads each of the owner's videos has, by video id; a video with none is not listed. */

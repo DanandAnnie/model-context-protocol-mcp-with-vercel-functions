@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
-import { addComment, commentPatchSchema, createVideo, listComments, resolveComment, videoRequestSchema } from "../services";
+import { addComment, commentPatchSchema, createVideo, listComments, reactToComment, resolveAllComments, resolveAllSchema, resolveComment, videoRequestSchema } from "../services";
 import { splitComments } from "../comment-list";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import { getStore } from "../store";
@@ -83,6 +83,68 @@ describe("resolveComment", () => {
     for (const bad of [{}, { resolved: "yes" }, { resolved: true, text: "edit" }, { resolved: null }]) {
       assert.equal(commentPatchSchema.safeParse(bad).success, false, JSON.stringify(bad));
     }
+  });
+});
+
+describe("resolveAllComments", () => {
+  it("resolves the open threads named, with their replies, by the person who asked, and counts them", async () => {
+    const v = await video();
+    const a = await addComment(v.id, { text: "Tighten the intro." }, "ws_team", bob);
+    const reply = await addComment(v.id, { text: "On it.", parentId: a.id }, "ws_team", ann);
+    const b = await addComment(v.id, { text: "Brighter end card." }, "ws_team", bob);
+    const done = await addComment(v.id, { text: "Typo in the title." }, "ws_team", bob);
+    const first = await resolveComment(v.id, done.id, true, "ws_team", bob);
+    // A reply whose note is gone is a thread of its own.
+    const gone = await addComment(v.id, { text: "Swap the music." }, "ws_team", bob);
+    const orphan = await addComment(v.id, { text: "Which track?", parentId: gone.id }, "ws_team", ann);
+    await getStore().remove("comment", gone.id);
+    // Started after the person looked, so not among the ids sent: it stays open.
+    const later = await addComment(v.id, { text: "One more thing." }, "ws_team", bob);
+    const ids = [a.id, b.id, orphan.id, done.id, reply.id, "cmt_missing"];
+    assert.deepEqual(await resolveAllComments(v.id, ids, "ws_team", ann), { resolved: 3, failed: 0, open: 1 });
+    const after = await listComments(v.id, "ws_team");
+    assert.deepEqual(splitComments(after).open.map((c) => c.id), [later.id]);
+    assert.equal(after.find((c) => c.id === a.id)?.resolvedById, ann.id, "resolved by the person who asked");
+    assert.equal(after.find((c) => c.id === done.id)?.resolvedAt, first.resolvedAt, "one resolved before keeps who did it");
+    assert.equal(after.find((c) => c.id === reply.id)?.resolvedAt, undefined, "a reply goes with its thread, not on its own");
+    assert.deepEqual(await resolveAllComments(v.id, ids, "ws_team", ann), { resolved: 0, failed: 0, open: 1 }, "none of them open is none resolved");
+  });
+
+  it("tries a thread changed meanwhile again, and counts one that keeps changing as failed without stopping the rest", async () => {
+    const v = await video();
+    const a = await addComment(v.id, { text: "One" }, "ws_team", ann);
+    const b = await addComment(v.id, { text: "Two" }, "ws_team", bob);
+    const store = getStore();
+    const putIf = store.putIf.bind(store);
+    const tries = new Map<string, number>();
+    store.putIf = (async (kind: Parameters<typeof putIf>[0], item: { id: string }, ...rest: unknown[]) => {
+      tries.set(item.id, (tries.get(item.id) ?? 0) + 1);
+      // The first write to "One" loses a race; "Two" loses every time.
+      if (item.id === b.id || (item.id === a.id && tries.get(a.id) === 1)) return false;
+      return (putIf as (...args: unknown[]) => Promise<boolean>)(kind, item, ...rest);
+    }) as typeof store.putIf;
+    try {
+      assert.deepEqual(await resolveAllComments(v.id, [a.id, b.id], "ws_team", ann), { resolved: 1, failed: 1, open: 1 });
+    } finally {
+      store.putIf = putIf;
+    }
+    assert.equal(tries.get(a.id), 2, "tried again after losing the race");
+    assert.equal(tries.get(b.id), 5, "given up after five tries");
+    const after = await listComments(v.id, "ws_team");
+    assert.ok(after.find((c) => c.id === a.id)?.resolvedAt);
+    assert.equal(after.find((c) => c.id === b.id)?.resolvedAt, undefined);
+  });
+
+  it("keeps a reaction given in the same moment, and to the owner's own video", async () => {
+    const v = await video();
+    const a = await addComment(v.id, { text: "One" }, "ws_team", ann);
+    await Promise.all([resolveAllComments(v.id, [a.id], "ws_team", ann), reactToComment(v.id, a.id, "👍", true, "ws_team", bob)]);
+    const [after] = await listComments(v.id, "ws_team");
+    assert.ok(after.resolvedAt);
+    assert.equal(after.reactions?.["👍"]?.length, 1);
+    await assert.rejects(resolveAllComments(v.id, [a.id], "someone-else", ann), /not found/);
+    assert.equal(resolveAllSchema.safeParse({ ids: [] }).success, false, "nothing named is a 400");
+    assert.equal(resolveAllSchema.safeParse({ ids: Array.from({ length: 201 }, (_, i) => `cmt_${i}`) }).success, false);
   });
 });
 

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
-import { Check, ChevronDown, CornerDownRight, Download, Link2, MessageSquare, Pencil, RotateCcw, SmilePlus, Trash2 } from "lucide-react";
+import { Check, CheckCheck, ChevronDown, CornerDownRight, Download, Link2, MessageSquare, Pencil, RotateCcw, SmilePlus, Trash2 } from "lucide-react";
 import { Button, Card, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
@@ -121,8 +121,8 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
   // from the keyboard. A reopened note's Resolve button takes the focus back.
   const card = useRef<HTMLDivElement>(null);
   // Where the focus goes once the list has been drawn again: a note's action button, or the toggle (null), or
-  // the first of other controls, named by their selectors, that is still there.
-  const focusNext = useRef<{ id: string | null; selectors?: string[] } | null>(null);
+  // the first of other controls, named by their selectors, that is still there; `orBox` falls back to the comment box.
+  const focusNext = useRef<{ id: string | null; selectors?: string[]; orBox?: boolean } | null>(null);
   useEffect(() => {
     const target = focusNext.current;
     focusNext.current = null;
@@ -131,7 +131,7 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
     const el = target.selectors
       ? (target.selectors.map((s) => root.querySelector<HTMLElement>(s)).find(Boolean) ?? null)
       : root.querySelector<HTMLElement>(target.id ? `[data-comment-action="${target.id}"]` : "[data-resolved-toggle]");
-    refocusIfLost(el);
+    refocusIfLost(el ?? (target.orBox ? box.current : null));
   }, [data]);
   // A comment email links here with ?comment=<id> (the note that starts the thread): once the notes are in,
   // that thread is shown (a resolved one unfolded), scrolled to, focused, and marked for a few seconds. The
@@ -190,6 +190,29 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
     } catch (e) {
       setErr(e instanceof Error ? e.message : value ? "Could not resolve the comment" : "Could not reopen the comment");
       // A note deleted meanwhile drops out of the list rather than keeping a button that always fails.
+      await refetch();
+    } finally {
+      setActing(null);
+    }
+  }
+
+  // The open threads shown, marked done at once after asking; one started since stays open. The focus goes to the
+  // resolved notes' toggle, as it does after the last open note is resolved (else to the comment box).
+  async function resolveAll() {
+    if (acting || !open.length) return;
+    const ids = open.map((c) => c.id);
+    if (!window.confirm(`Resolve all ${ids.length} open comments? Each can be reopened.`)) return;
+    setActing("all");
+    setErr(null);
+    try {
+      const done = await api<{ resolved: number; failed: number; open: number }>(`/api/videos/${videoId}/comments/resolve-all`, { method: "POST", body: JSON.stringify({ ids }) });
+      focusNext.current = { id: null, orBox: true };
+      announce(`${done.resolved} ${done.resolved === 1 ? "comment" : "comments"} resolved; ${done.open ? `${done.open} open` : "none open"}`);
+      if (done.failed) setErr(`${done.failed} ${done.failed === 1 ? "comment" : "comments"} could not be resolved; try again`);
+      await refetch();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not resolve the comments");
+      focusNext.current = { id: null, orBox: true };
       await refetch();
     } finally {
       setActing(null);
@@ -609,17 +632,25 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
 
   return (
     <Card className="p-4" data-testid="comments">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
           <MessageSquare className="h-4 w-4 text-slate-400" /> Comments
           {open.length + resolved.length ? (resolved.length ? ` · ${open.length} open, ${resolved.length} resolved` : ` · ${open.length}`) : ""}
         </h3>
-        {/* Every note and reply, open or resolved, as a spreadsheet to hand on. */}
-        {comments.length > 0 && (
-          <a href={`/api/videos/${encodeURIComponent(videoId)}/comments?format=csv`} download data-testid="comments-csv" aria-label="Download comments as CSV" className="inline-flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800">
-            <Download className="h-3.5 w-3.5" aria-hidden /> Download CSV
-          </a>
-        )}
+        <div className="flex shrink-0 items-center gap-1">
+          {/* With two or more open, they can be marked done together, as at the end of a review. */}
+          {open.length > 1 && (
+            <button type="button" onClick={() => void resolveAll()} aria-disabled={acting !== null || undefined} data-testid="comments-resolve-all" title="Mark every open comment as dealt with" className={actionClass}>
+              <CheckCheck className="h-3.5 w-3.5" aria-hidden /> Resolve all
+            </button>
+          )}
+          {/* Every note and reply, open or resolved, as a spreadsheet to hand on. */}
+          {comments.length > 0 && (
+            <a href={`/api/videos/${encodeURIComponent(videoId)}/comments?format=csv`} download data-testid="comments-csv" aria-label="Download comments as CSV" className="inline-flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800">
+              <Download className="h-3.5 w-3.5" aria-hidden /> Download CSV
+            </a>
+          )}
+        </div>
       </div>
       <p className="mt-1 text-xs text-slate-500">Notes for you and your workspace; viewers of the share page never see them.</p>
       {/* Said to a screen reader through the card's status line, which is there from the start. */}

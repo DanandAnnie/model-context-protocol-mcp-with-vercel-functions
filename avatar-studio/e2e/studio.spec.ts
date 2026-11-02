@@ -3791,6 +3791,50 @@ test("a review comment takes reactions from the picker, shown as pills that take
   expect((await page.request.patch(`/api/videos/${v.id}/comments/${note.id}`, { data: { reaction: "🤡", on: true } })).status()).toBe(400);
 });
 
+test("every open comment on a video is resolved in one step, after asking", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Resolve all ${Date.now().toString(36)}`);
+  const post = async (text: string, parentId?: string) => (await (await page.request.post(`/api/videos/${v.id}/comments`, { data: { text, parentId } })).json()).comment;
+  const first = await post("Tighten the intro.");
+  await post("On it.", first.id);
+  await page.goto(`/videos/${v.id}`);
+  const comments = page.getByTestId("comments");
+  const resolveAll = comments.getByRole("button", { name: "Resolve all" });
+  // One open note is resolved on its own.
+  await expect(comments).toContainText("Comments · 1");
+  await expect(resolveAll).toHaveCount(0);
+  await post("Brighter end card.");
+  await post("Fix the typo in the title.");
+  await page.reload();
+  await expect(comments).toContainText("Comments · 3");
+  // Saying no leaves them open.
+  const asked: string[] = [];
+  page.once("dialog", (d) => {
+    asked.push(d.message());
+    void d.dismiss();
+  });
+  await resolveAll.click();
+  await expect.poll(() => asked).toEqual(["Resolve all 3 open comments? Each can be reopened."]);
+  await expect(comments.getByTestId("comment-list").locator("> li")).toHaveCount(3);
+  // A note a teammate posts while the question is open was never seen, so it stays open.
+  page.once("dialog", async (d) => {
+    await post("A late note.");
+    await d.accept();
+  });
+  await resolveAll.click();
+  await expect(comments.getByRole("status")).toHaveText("3 comments resolved; 1 open");
+  await expect(comments.getByTestId("comment-list")).toContainText("A late note.");
+  await expect(comments.getByTestId("comment-list").locator("> li")).toHaveCount(1);
+  await expect(comments.getByRole("button", { name: "Show 3 resolved" })).toBeFocused();
+  await expect(resolveAll).toHaveCount(0);
+  const stored = (await (await page.request.get(`/api/videos/${v.id}/comments`)).json()).comments as Array<{ id: string; text: string; parentId?: string; resolvedAt?: string }>;
+  expect(stored.filter((c) => !c.parentId && c.text !== "A late note.").every((c) => c.resolvedAt)).toBe(true);
+  expect(stored.find((c) => c.parentId)?.resolvedAt).toBeUndefined();
+  // Threads no longer open are left as they are; naming none is a 400.
+  expect(await (await page.request.post(`/api/videos/${v.id}/comments/resolve-all`, { data: { ids: [first.id] } })).json()).toEqual({ resolved: 0, failed: 0, open: 1 });
+  expect((await page.request.post(`/api/videos/${v.id}/comments/resolve-all`, { data: { ids: [] } })).status()).toBe(400);
+  expect((await page.request.post("/api/videos/vid_nope/comments/resolve-all", { data: { ids: [first.id] } })).status()).toBe(404);
+});
+
 test("share page offers a download only when the owner allows it", async ({ page }) => {
   const v = await createVideoViaApi(page, `Downloadable ${Date.now().toString(36)}`);
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");

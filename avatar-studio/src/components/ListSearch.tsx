@@ -23,6 +23,10 @@ export function useListSearch() {
     },
     pin: (id: string) => setPinned((prev) => (prev.has(id) ? prev : new Set(prev).add(id))),
     matches: (id: string, ...texts: Array<string | undefined>) => !needle || pinned.has(id) || texts.some((t) => !!t && foldTerm(t).includes(needle)),
+    /** The same over text folded once ahead (`foldTerm`), for a long list whose words would be folded on every key. */
+    matchesFolded: (id: string, folded: string) => !needle || pinned.has(id) || folded.includes(needle),
+    /** Whether the folded text itself holds the search (a pinned item shown anyway is not a match). */
+    finds: (folded: string) => !!needle && folded.includes(needle),
   };
 }
 

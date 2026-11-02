@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Copy, LayoutTemplate, Pencil, Trash2 } from "lucide-react";
 import { Card, ErrorBanner, SectionTitle, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
@@ -8,19 +8,29 @@ import { ApiError, api } from "@/lib/client";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { refocusIfLost } from "@/lib/focus";
-import { SCRIPT_TEMPLATES, type ScriptTemplate } from "@/lib/templates";
+import { SCRIPT_TEMPLATES, savedTemplateTexts, scriptTemplateTexts, type ScriptTemplate } from "@/lib/templates";
+import { foldTerm } from "@/lib/glossary";
+import { useListSearch } from "@/components/ListSearch";
 import { MAX_TEMPLATES, type VideoTemplate } from "@/lib/types";
 import { stripPauses } from "@/lib/pauses";
 import { StudioTemplates } from "@/components/StudioTemplates";
 
 const CATEGORIES = ["All", ...Array.from(new Set(SCRIPT_TEMPLATES.map((t) => t.category)))];
+/** Each script template's words for the search, folded once: they never change. */
+const SCRIPT_HAYSTACK = new Map(SCRIPT_TEMPLATES.map((t) => [t.id, foldTerm(scriptTemplateTexts(t).join("\n"))]));
 
 export default function TemplatesPage() {
   const [category, setCategory] = useState("All");
-  const items = useMemo(
-    () => (category === "All" ? SCRIPT_TEMPLATES : SCRIPT_TEMPLATES.filter((t) => t.category === category)),
-    [category],
-  );
+  // One search over both lists: a saved template's name, description, and scenes, a script template's too.
+  const search = useListSearch();
+  const inCategory = useMemo(() => (category === "All" ? SCRIPT_TEMPLATES : SCRIPT_TEMPLATES.filter((t) => t.category === category)), [category]);
+  const items = inCategory.filter((t) => search.matchesFolded(t.id, SCRIPT_HAYSTACK.get(t.id)!));
+  // Script templates in other categories that match, when the one chosen has none: the way to them is one click.
+  const elsewhere = search.needle && category !== "All" ? SCRIPT_TEMPLATES.filter((t) => t.category !== category && search.finds(SCRIPT_HAYSTACK.get(t.id)!)).length : 0;
+  const searchId = useId();
+  const labelId = useId();
+  // Saved templates with their edit form open stay in view whatever is typed, so an unsaved rename is not thrown away.
+  const [editingIds, setEditingIds] = useState<ReadonlySet<string>>(new Set());
 
   const canEdit = useCanEdit();
   const { data: mine, error, refetch, setData } = useApi<{ templates: VideoTemplate[] }>("/api/templates");
@@ -35,6 +45,19 @@ export default function TemplatesPage() {
   const [focusEdit, setFocusEdit] = useState<string | null>(null);
   const [copying, setCopying] = useState<string | null>(null);
   const atLimit = (mine?.templates.length ?? 0) >= MAX_TEMPLATES;
+  // Each saved template's words folded once per list read, not on every key.
+  const mineHaystack = useMemo(() => new Map((mine?.templates ?? []).map((t) => [t.id, foldTerm(savedTemplateTexts(t).join("\n"))])), [mine]);
+  const shownMine = (mine?.templates ?? []).filter((t) => editingIds.has(t.id) || search.matchesFolded(t.id, mineHaystack.get(t.id) ?? ""));
+  const mineMatches = (mine?.templates ?? []).filter((t) => search.finds(mineHaystack.get(t.id) ?? "")).length;
+  const scriptMatches = inCategory.filter((t) => search.finds(SCRIPT_HAYSTACK.get(t.id)!)).length;
+  const counts = search.needle
+    ? [
+        mine && mine.templates.length > 0 ? `${mineMatches} of ${mine.templates.length} saved templates` : "",
+        `${scriptMatches} of ${inCategory.length} script templates${category === "All" ? "" : ` in ${category}`}`,
+      ]
+        .filter(Boolean)
+        .join(", ")
+    : "";
   async function duplicate(t: VideoTemplate) {
     if (copying) return;
     if (atLimit) return announce(`You have ${MAX_TEMPLATES} templates, the most you can keep; delete one to make a copy.`);
@@ -46,6 +69,8 @@ export default function TemplatesPage() {
     try {
       const { template } = await api<{ template: VideoTemplate }>("/api/templates", { method: "POST", body: JSON.stringify({ fromTemplateId: t.id }) });
       setData((prev) => (prev ? { templates: [template, ...prev.templates.filter((x) => x.id !== template.id)] } : prev));
+      // A copy made while searching stays in view, whatever its name, so its Edit button can take the focus.
+      search.pin(template.id);
       const now = document.activeElement;
       if (now === from || !now || now === document.body || !now.isConnected) setFocusEdit(template.id);
       announce(`Made a copy: “${template.title}”.`);
@@ -88,6 +113,26 @@ export default function TemplatesPage() {
           {note}
         </p>
       )}
+      <div role="search" className="mb-5">
+        <label id={labelId} htmlFor={`${searchId}-box`} className="mb-1 block text-xs font-medium text-slate-600">
+          Search my templates and script templates
+        </label>
+        <div className="flex flex-wrap items-center gap-3">
+        <input
+          id={`${searchId}-box`}
+          type="search"
+          aria-describedby={searchId}
+          className={`${inputClass} max-w-xs`}
+          placeholder="Search names, descriptions, and scripts"
+          maxLength={200}
+          value={search.q}
+          onChange={(e) => search.search(e.target.value)}
+        />
+        <span id={searchId} role="status" className="text-xs text-slate-500" data-testid="template-matches">
+          {counts}
+        </span>
+        </div>
+      </div>
       <section className="mb-8" data-testid="my-templates">
         <h2 ref={mineHeading} tabIndex={-1} className="mb-1 text-sm font-semibold text-slate-900 focus:outline-none">My templates</h2>
         <p className="mb-4 text-xs text-slate-500">Save any video as a template from its page: scenes, presenter, voice, and settings come along.</p>
@@ -98,9 +143,11 @@ export default function TemplatesPage() {
         )}
         {mine && mine.templates.length === 0 ? (
           <p className="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-6 text-center text-sm text-slate-500">No saved templates yet.</p>
+        ) : mine && shownMine.length === 0 ? (
+          <p className="text-sm text-slate-600">None of your templates matches “{search.q.trim()}”.</p>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {(mine?.templates ?? []).map((t) => (
+            {shownMine.map((t) => (
               <MyTemplateCard
                 key={t.id}
                 template={t}
@@ -113,6 +160,8 @@ export default function TemplatesPage() {
                 onDuplicate={() => void duplicate(t)}
                 onSaved={(saved) => {
                   setRemoveErr(null);
+                  // Renamed while a search is typed, it stays in view (with the focus on it) until the search changes.
+                  search.pin(saved.id);
                   setData((prev) => (prev ? { templates: prev.templates.map((x) => (x.id === saved.id ? saved : x)) } : prev));
                   announce(`Saved the template “${saved.title}”.`);
                   // A list read before the save could still land and show the old name; read it again after it.
@@ -123,6 +172,15 @@ export default function TemplatesPage() {
                   void refetch().then(() => refocusIfLost(mineHeading.current));
                 }}
                 onDelete={() => remove(t)}
+                onEditing={(open) =>
+                  setEditingIds((prev) => {
+                    if (open === prev.has(t.id)) return prev;
+                    const next = new Set(prev);
+                    if (open) next.add(t.id);
+                    else next.delete(t.id);
+                    return next;
+                  })
+                }
               />
             ))}
           </div>
@@ -143,10 +201,26 @@ export default function TemplatesPage() {
           </button>
         ))}
       </div>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {items.map((t) => (
-          <TemplateCard key={t.id} template={t} />
-        ))}
+      <div data-testid="script-templates">
+        {items.length === 0 ? (
+          <p className="text-sm text-slate-600">
+          No script template{category === "All" ? "" : ` in ${category}`} matches “{search.q.trim()}”.
+          {elsewhere > 0 && (
+            <>
+              {" "}
+              <button type="button" onClick={() => setCategory("All")} className="font-medium text-brand-700 underline hover:no-underline">
+                Show {elsewhere === 1 ? "the 1 match" : `the ${elsewhere} matches`} in other categories
+              </button>
+            </>
+          )}
+        </p>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {items.map((t) => (
+              <TemplateCard key={t.id} template={t} />
+            ))}
+          </div>
+        )}
       </div>
     </>
   );
@@ -165,9 +239,19 @@ function MyTemplateCard(props: {
   onSaved: (t: VideoTemplate) => void;
   onGone: () => void;
   onDelete: () => void;
+  onEditing: (open: boolean) => void;
 }) {
   const t = props.template;
   const [editing, setEditing] = useState(false);
+  // The page keeps an open form's card in view; told through a ref, as the callback is a new one on every render.
+  const onEditing = useRef(props.onEditing);
+  useLayoutEffect(() => {
+    onEditing.current = props.onEditing;
+  });
+  useEffect(() => {
+    onEditing.current(editing);
+  }, [editing]);
+  useEffect(() => () => onEditing.current(false), []);
   // What the form opened with: only the fields changed from these are sent, so a rename someone else saved meanwhile
   // is not undone by a description edit here.
   const opened = useRef({ title: t.title, description: t.description ?? "" });

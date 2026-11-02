@@ -1,5 +1,6 @@
 // Ready-made script templates. Each one pre-fills the editor.
-import type { AspectRatio } from "./types";
+import { stripPauses } from "./pauses";
+import type { AspectRatio, VideoTemplate } from "./types";
 
 export interface ScriptTemplate {
   id: string;
@@ -87,4 +88,14 @@ export const SCRIPT_TEMPLATES: ScriptTemplate[] = [
 
 export function findTemplate(id: string | null | undefined): ScriptTemplate | undefined {
   return id ? SCRIPT_TEMPLATES.find((t) => t.id === id) : undefined;
+}
+
+/** What the Templates page's search looks through in a script template: its name, description, category, and words. */
+export function scriptTemplateTexts(t: ScriptTemplate): string[] {
+  return [t.title, t.description, t.category, stripPauses(t.script)];
+}
+
+/** The same for a saved template: its name, description, and each scene's name and words (pause markers are not words). */
+export function savedTemplateTexts(t: Pick<VideoTemplate, "title" | "description" | "scenes">): string[] {
+  return [t.title, t.description ?? "", ...t.scenes.flatMap((sc) => [sc.name ?? "", stripPauses(sc.script ?? "")])].filter(Boolean);
 }

@@ -225,6 +225,90 @@ test("a video can be saved as a template, reopened from it, renamed, and duplica
   expect(((await (await page.request.get("/api/templates")).json()).templates as unknown[]).length).toBe(0);
 });
 
+test("one search looks through the saved templates and the script templates", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const v = await createVideoViaApi(page, `Search source ${tag}`, {
+    scenes: [
+      { script: `Welcome to the ${tag} bakery. [pause 1s] Fresh bread daily.`, name: "Storefront", background: { type: "color", value: "#ffffff" } },
+      { script: "Order online tonight.", background: { type: "color", value: "#0f172a" } },
+    ],
+  });
+  const made = await page.request.post("/api/templates", { data: { fromVideoId: v.id, title: `Bakery promo ${tag}` } });
+  expect(made.status()).toBe(201);
+  try {
+    await page.goto("/templates");
+    const mine = page.getByTestId("my-templates");
+    const search = page.getByRole("searchbox", { name: "Search my templates and script templates" });
+    const matches = page.getByTestId("template-matches");
+    const card = (title: string) => mine.getByText(title, { exact: true });
+    await expect(card(`Bakery promo ${tag}`)).toBeVisible();
+    const scriptCards = page.getByTestId("script-templates").getByRole("link", { name: "Use template" });
+    const allScripts = await scriptCards.count();
+    expect(allScripts).toBeGreaterThan(3);
+    await expect(matches).toHaveText("");
+    // A word of a saved template's scene finds it, and no script template has it.
+    await search.fill(`${tag} BAKERY`);
+    await expect(card(`Bakery promo ${tag}`)).toBeVisible();
+    await expect(scriptCards).toHaveCount(0);
+    await expect(page.getByText(`No script template matches “${tag} BAKERY”.`)).toBeVisible();
+    await expect(matches).toHaveText(new RegExp(`^1 of \\d+ saved templates, 0 of ${allScripts} script templates$`));
+    // A scene's name counts; a pause marker does not.
+    await search.fill("Storefront");
+    await expect(card(`Bakery promo ${tag}`)).toBeVisible();
+    await search.fill(`${tag} bakery. fresh`);
+    await expect(card(`Bakery promo ${tag}`)).toBeVisible();
+    await search.fill(`${tag} pause 1s`);
+    await expect(card(`Bakery promo ${tag}`)).toHaveCount(0);
+    // A category's name finds its script templates; a category chosen that hides them offers the way back.
+    await search.fill("real estate");
+    await expect(page.getByTestId("script-templates").getByText("Property listing walkthrough")).toBeVisible();
+    await expect(card(`Bakery promo ${tag}`)).toHaveCount(0);
+    await page.getByRole("button", { name: "Marketing", exact: true }).click();
+    await expect(scriptCards).toHaveCount(0);
+    await expect(page.getByText("No script template in Marketing matches “real estate”.")).toBeVisible();
+    await expect(matches).toContainText("script templates in Marketing");
+    await page.getByRole("button", { name: /^Show the \d+ match(es)? in other categories$/ }).click();
+    await expect(page.getByTestId("script-templates").getByText("Property listing walkthrough")).toBeVisible();
+
+    // A copy made while searching stays in view, with its Edit button focused, even when its name does not match:
+    // a copy of "(copy)" is "(copy 2)", which "(copy)" does not find.
+    await search.fill(`Bakery promo ${tag}`);
+    await mine.getByRole("button", { name: `Duplicate template Bakery promo ${tag}` }).click();
+    await expect(card(`Bakery promo ${tag} (copy)`)).toBeVisible();
+    await search.fill(`${tag} (copy)`);
+    await expect(card(`Bakery promo ${tag}`)).toHaveCount(0);
+    await mine.getByRole("button", { name: `Duplicate template Bakery promo ${tag} (copy)` }).click();
+    await expect(card(`Bakery promo ${tag} (copy 2)`)).toBeVisible();
+    await expect(mine.getByRole("button", { name: `Edit template Bakery promo ${tag} (copy 2)` })).toBeFocused();
+    await expect(matches).toHaveText(new RegExp(`^1 of \\d+ saved templates`), { timeout: 5000 });
+
+    // Renamed while a search is typed to a name it does not find, a template stays in view with its Edit button focused.
+    await search.fill(`Bakery promo ${tag} (copy)`);
+    await mine.getByRole("button", { name: `Edit template Bakery promo ${tag} (copy)`, exact: true }).click();
+    await mine.getByLabel("Template name").fill(`Cake stand ${tag}`);
+    await mine.getByRole("button", { name: "Save" }).click();
+    await expect(card(`Cake stand ${tag}`)).toBeVisible();
+    await expect(mine.getByRole("button", { name: `Edit template Cake stand ${tag}` })).toBeFocused();
+
+    // An open edit form stays in view whatever is typed, so what it holds is not thrown away.
+    await search.fill(`Cake stand ${tag}`);
+    await mine.getByRole("button", { name: `Edit template Cake stand ${tag}` }).click();
+    await mine.getByLabel("Template name").fill(`Cake stand ${tag} draft`);
+    await search.fill(`nothing like it ${tag}`);
+    await expect(mine.getByLabel("Template name")).toHaveValue(`Cake stand ${tag} draft`);
+    await mine.getByRole("button", { name: "Cancel" }).click();
+    await expect(card(`Cake stand ${tag}`)).toHaveCount(0);
+
+    // Clearing the search shows everything again.
+    await search.fill("");
+    await expect(scriptCards).toHaveCount(allScripts);
+    await expect(matches).toHaveText("");
+  } finally {
+    const { templates } = (await (await page.request.get("/api/templates")).json()) as { templates: Array<{ id: string; title: string }> };
+    for (const t of templates.filter((x) => x.title.includes(tag))) await page.request.delete(`/api/templates/${t.id}`);
+  }
+});
+
 test("each scene shows its own running time", async ({ page }) => {
   await page.goto("/create");
   await page.locator("textarea").fill(Array.from({ length: 25 }, (_, i) => `word${i}`).join(" "));

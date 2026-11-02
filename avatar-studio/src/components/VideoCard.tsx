@@ -1,9 +1,9 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FocusEvent, type PointerEvent } from "react";
 import { Check, Clock, Copy, Film, LinkIcon, Lock, Star, Trash2 } from "lucide-react";
 import { StatusBadge } from "./ui";
-import { daysUntilPurge, formatDate, formatSeconds, posterUrl, sendableShareLink, shareExpired, shareExpiresSoon, shareNotYet, shareSummary } from "@/lib/client";
+import { CARD_PREVIEW_DELAY_MS, cardPreviewSrc, daysUntilPurge, formatDate, formatSeconds, posterUrl, sendableShareLink, shareExpired, shareExpiresSoon, shareNotYet, shareSummary } from "@/lib/client";
 import { REVIEW_LABEL, type Video } from "@/lib/types";
 
 /** What a card's copy button tells the page: a note to announce, and whether the list is out of date. */
@@ -51,8 +51,57 @@ function CopyShareLink({ video, origin, className, onNote }: { video: Video; ori
 
 const reviewClass = (status: NonNullable<Video["review"]>["status"]) => (status === "approved" ? "bg-emerald-50 text-emerald-800" : status === "changes" ? "bg-amber-50 text-amber-900" : "bg-brand-50 text-brand-800");
 
+/** Whether the system asks for less motion, followed as it changes. */
+function useReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    if (!query) return;
+    const read = () => setReduced(query.matches);
+    read();
+    query.addEventListener?.("change", read);
+    return () => query.removeEventListener?.("change", read);
+  }, []);
+  return reduced;
+}
+
+/**
+ * A finished video's clip, played muted over its card's poster while a mouse rests on the card or the keyboard has
+ * brought focus to it, after a moment so a pointer passing over the grid loads nothing; not for a reader who asks the
+ * system for less motion. A tap is neither (it would start a clip that plays on until the next tap elsewhere), focus
+ * moving within the card (its link to its copy button) keeps the clip going, and the card's element changing (a
+ * selection ending, which replaces the focused button without a blur) starts it afresh.
+ */
+function useCardPreview(src: string | undefined, element: string) {
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const reduced = useReducedMotion();
+  const wanted = !!src && !reduced && (hovered || focused);
+  useEffect(() => {
+    setHovered(false);
+    setFocused(false);
+  }, [element]);
+  useEffect(() => {
+    if (!wanted) return setPreviewing(false);
+    const timer = setTimeout(() => setPreviewing(true), CARD_PREVIEW_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [wanted]);
+  return {
+    previewing: previewing && wanted,
+    handlers: {
+      onPointerEnter: (e: PointerEvent<HTMLElement>) => e.pointerType === "mouse" && setHovered(true),
+      onPointerLeave: () => setHovered(false),
+      onFocus: (e: FocusEvent<HTMLElement>) => (e.target as HTMLElement).matches?.(":focus-visible") && setFocused(true),
+      onBlur: (e: FocusEvent<HTMLElement>) => !e.currentTarget.contains(e.relatedTarget as Node | null) && setFocused(false),
+    },
+  };
+}
+
 export function VideoCard({ video, selectable = false, selected = false, onToggle, shareOrigin, onCopyNote }: { video: Video; selectable?: boolean; selected?: boolean; onToggle?: (shift: boolean) => void; shareOrigin?: string; onCopyNote?: CardCopyNote }) {
   const expiresSoon = shareExpiresSoon(video);
+  const previewSrc = cardPreviewSrc(video);
+  const { previewing, handlers } = useCardPreview(previewSrc, selectable ? "select" : shareOrigin ? "card" : "link");
   const body = (
     <>
       <div className="relative aspect-video w-full overflow-hidden bg-slate-900">
@@ -63,6 +112,34 @@ export function VideoCard({ video, selectable = false, selected = false, onToggl
           <div className="flex h-full w-full items-center justify-center text-slate-500">
             <Film className="h-8 w-8" />
           </div>
+        )}
+        {/* Right after the poster, so the badges drawn later stay on top of the clip. It is see-through until it plays,
+            so the poster stays while it loads (or if the browser will not play it), and framed as the poster is. */}
+        {previewing && (
+          <video
+            ref={(el) => {
+              if (!el) return;
+              // Taken off the page, a video keeps downloading until it is collected; stop that at once.
+              return () => {
+                el.pause();
+                el.removeAttribute("src");
+                el.load();
+              };
+            }}
+            src={previewSrc}
+            poster={posterUrl(video)}
+            muted
+            loop
+            autoPlay
+            playsInline
+            preload="auto"
+            aria-hidden="true"
+            data-testid="card-preview"
+            style={{ opacity: 0 }}
+            className="absolute inset-0 h-full w-full object-cover transition-opacity"
+            onPlaying={(e) => (e.currentTarget.style.opacity = "1")}
+            onError={(e) => (e.currentTarget.style.display = "none")}
+          />
         )}
         <span className="absolute left-2 top-2 flex flex-wrap gap-1">
           <StatusBadge status={video.status} />
@@ -145,21 +222,22 @@ export function VideoCard({ video, selectable = false, selected = false, onToggl
     return (
       // Shift+click picks a run of cards; select-none keeps a browser that extends a text selection on Shift+click from
       // also selecting the text between them (Chromium does not).
-      <button type="button" onClick={(e) => onToggle?.(e.shiftKey)} aria-pressed={selected} aria-label={`Select ${video.title}`} className={`${frame} select-none`}>
+      <button type="button" onClick={(e) => onToggle?.(e.shiftKey)} aria-pressed={selected} aria-label={`Select ${video.title}`} className={`${frame} select-none`} {...handlers}>
         {body}
       </button>
     );
   }
   if (!shareOrigin) {
     return (
-      <Link href={`/videos/${video.id}`} className={frame}>
+      <Link href={`/videos/${video.id}`} className={frame} {...handlers}>
         {body}
       </Link>
     );
   }
   // The same wrapper whether or not the link can be sent, so a poll that changes that does not remount the card.
   return (
-    <div className="relative h-full">
+    // The preview follows the whole card, so moving onto its copy button (by mouse or by Tab) does not stop the clip.
+    <div className="relative h-full" {...handlers}>
       <Link href={`/videos/${video.id}`} className={`${frame} h-full`}>
         {body}
       </Link>

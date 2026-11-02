@@ -57,6 +57,19 @@ export function isRefusal(e: unknown): boolean {
   return e instanceof ApiError && e.status >= 400 && e.status < 500 && !(e.status === 409 && /still being sent/.test(e.message));
 }
 
+/**
+ * The clip a library card plays, muted, while it is hovered: the finished render's own file, for a video out of the
+ * trash. A render still under way or failed has none, and only a web address or a path on this site is played (a path
+ * a browser would read as another host, as `/\\host` or `//host`, is neither).
+ */
+export function cardPreviewSrc(video: { status: string; videoUrl?: string; deletedAt?: string }): string | undefined {
+  if (video.status !== "completed" || video.deletedAt || !video.videoUrl) return undefined;
+  return /^https?:\/\//i.test(video.videoUrl) || /^\/(?![\/\\])[\x21-\x7e]*$/.test(video.videoUrl) ? video.videoUrl : undefined;
+}
+
+/** How long a card is hovered (or focused) before its clip starts, so moving the pointer across the grid loads nothing. */
+export const CARD_PREVIEW_DELAY_MS = 300;
+
 /** The poster to show for a video: its custom cover (versioned so a replacement is never cached) or the provider thumbnail. */
 export function posterUrl(video: { id: string; cover?: { updatedAt: string }; thumbnailUrl?: string }, base = ""): string | undefined {
   if (video.cover) return `${base}/api/videos/${video.id}/cover?v=${Date.parse(video.cover.updatedAt)}`;

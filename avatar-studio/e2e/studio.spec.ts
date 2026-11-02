@@ -9215,6 +9215,95 @@ test("Call to action puts one button on the share pages of the selected videos, 
   await expect(page.getByTestId("share-cta")).toHaveCount(0);
 });
 
+test("a finished video's card plays its clip, muted, while a mouse rests on it or the keyboard focuses it", async ({ page, browser }) => {
+  const title = `Hover ${Date.now().toString(36)}`;
+  const v = await createVideoViaApi(page, title);
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  const { videoUrl } = (await (await page.request.get(`/api/videos/${v.id}`)).json()).video as { videoUrl: string };
+  // The page's clock, so the wait before a clip starts is measured rather than slept through.
+  await page.clock.install();
+  await page.goto("/videos");
+  const link = page.locator(`a[href="/videos/${v.id}"]`);
+  const preview = link.getByTestId("card-preview");
+  const heading = page.getByRole("heading", { name: "My videos" });
+  await expect(link).toBeVisible();
+  await expect(preview).toHaveCount(0);
+  await link.hover();
+  await page.clock.runFor(250);
+  await expect(preview).toHaveCount(0);
+  await page.clock.runFor(100);
+  await expect(preview).toHaveAttribute("src", videoUrl);
+  await expect(preview).toHaveJSProperty("muted", true);
+  await expect(preview).toHaveJSProperty("loop", true);
+  // The status badge is drawn on top of the clip, not under it.
+  const badge = link.getByText("Completed", { exact: true });
+  expect(
+    await badge.evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      return !!hit && (hit === el || el.contains(hit));
+    }),
+  ).toBe(true);
+  // Moving onto the card's copy button keeps it playing; leaving the card stops it.
+  await page.getByRole("button", { name: `Copy link for ${title}` }).hover();
+  await page.clock.runFor(400);
+  await expect(preview).toHaveCount(1);
+  await heading.hover();
+  await expect(preview).toHaveCount(0);
+  // A pointer passing over the card loads nothing.
+  await link.hover();
+  await page.clock.runFor(100);
+  await heading.hover();
+  await page.clock.runFor(400);
+  await expect(preview).toHaveCount(0);
+
+  // The keyboard gets it too, and Tab from the card to its copy button keeps it going.
+  await page.getByRole("button", { name: "Select", exact: true }).focus();
+  for (let i = 0; i < 80 && !(await link.evaluate((el) => el === document.activeElement)); i++) await page.keyboard.press("Tab");
+  await expect(link).toBeFocused();
+  await page.clock.runFor(350);
+  await expect(preview).toHaveCount(1);
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: `Copy link for ${title}` })).toBeFocused();
+  await page.clock.runFor(400);
+  await expect(preview).toHaveCount(1);
+  await page.keyboard.press("Tab");
+  await expect(preview).toHaveCount(0);
+
+  // Ending a selection with Escape replaces the focused card's button; the clip goes with it.
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  const pick = page.getByRole("button", { name: `Select ${title}` });
+  await pick.focus();
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Tab");
+  await expect(pick).toBeFocused();
+  await page.clock.runFor(350);
+  await expect(pick.getByTestId("card-preview")).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(pick).toHaveCount(0);
+  await page.clock.runFor(400);
+  await expect(preview).toHaveCount(0);
+
+  // A reader who asks for less motion is shown the poster only.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await link.hover();
+  await page.clock.runFor(600);
+  await expect(preview).toHaveCount(0);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+
+  // A tap is not a hover: tapping the copy button on a phone starts no clip.
+  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, baseURL: "http://localhost:3100" });
+  try {
+    const tab = await phone.newPage();
+    await tab.goto("/videos");
+    await tab.getByRole("button", { name: `Copy link for ${title}` }).tap();
+    await tab.waitForTimeout(700);
+    await expect(tab.locator(`a[href="/videos/${v.id}"]`).getByTestId("card-preview")).toHaveCount(0);
+  } finally {
+    await phone.close();
+  }
+});
+
 test("Cover gives the selected videos one cover picture, or takes theirs off", async ({ page }) => {
   const tag = Date.now().toString(36);
   const made = await page.request.post("/api/videos/batch", {

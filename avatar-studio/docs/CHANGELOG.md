@@ -1043,3 +1043,19 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - A unit test forces the retry, and its limit, with a store that loses the race.
 - Comments by their moment (`10e90aa`): with two or more open threads, one of them pinned to a moment, the video page's comments card has an Order select. "As written" is the order the threads were started. "By time in the video" lists the pinned threads from the earliest moment, then the notes on the whole video. Threads at the same moment keep the order they were written. This browser remembers the choice for every video page. Resolving the next note, Resolve all, and the links that open a thread all follow the order shown. `orderThreads` and `commentOrderFrom` have unit tests, and the e2e test switches the order, resolves a note in that order, and opens a second video, which keeps the order chosen.
   - An independent review found nothing blocking. From its optional findings, the e2e test now opens another video to check the order is kept, and checks that resolving a note in the video's order hands the focus to the next note shown.
+- Comments that mention you, or that you wrote in (`a135839`): in a workspace, the video page's comments card has a Show select with three choices:
+  - "All open".
+  - "Mentioning me": threads whose note or a reply names you as `@email`.
+  - "I wrote in": threads whose note or a reply you wrote.
+
+  The choice lasts for this visit. The card's counts stay those of every open thread. When nothing is left to show, the card says so ("No open comment mentions you." or "You have not written in any open comment.") and offers "Show all N open". Resolving hands the focus to the next thread shown. Resolve all takes only the threads shown, and its question says "the N comments shown". A link to a thread shows every thread again, so the one it names is there. `filterThreads` has unit tests. The e2e test runs in a workspace, where the page's data plays two teammates, one of whom names you, and narrows the threads each way.
+  - An independent review found two blocking problems, now fixed:
+    - Reopening a note that the filter hides made it vanish and lost the focus. Now every open thread is shown again, and the focus is on the reopened note's Resolve button.
+    - A filter left on after every thread was resolved, with its select gone, hid the next note posted. The filter now goes back to all with the select. A note posted under "Mentioning me" also shows every thread, since a note never names its own writer.
+  - Fixed from the optional findings:
+    - A screen reader hears how many threads are shown each time the filter changes, as in "1 of 2 open shown".
+    - "Show all" hands the focus to the select.
+    - When the last thread shown is resolved, the focus goes to "Show all".
+    - Resolve all's title names the comments shown.
+  - Left as it is: a reply or edit form on a thread that the filter hides keeps its draft until the thread is shown again.
+  - The e2e test covers each of these.

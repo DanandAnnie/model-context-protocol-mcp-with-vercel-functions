@@ -11,6 +11,7 @@ import { releaseRateLimit, reserveRateLimit } from "../rate-limit";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../errors";
 import { owned } from "./shared";
 import { formatTimestamp } from "../text";
+import { threadLink } from "../comment-list";
 
 export const MAX_COMMENTS_PER_VIDEO = 200;
 
@@ -121,15 +122,6 @@ export async function addComment(videoId: string, input: z.infer<typeof commentS
 }
 
 /**
- * The video page's address for a comment's thread: in the workspace it belongs to, the player at a pinned
- * thread's moment (`t`, whole seconds), and the page scrolled to the thread (`comment`, the note that starts it).
- */
-function threadUrl(video: Video, thread: VideoComment): string {
-  const at = thread.atSec !== undefined ? `&t=${Math.floor(thread.atSec)}` : "";
-  return `${config.appUrl.replace(/\/$/, "")}/videos/${encodeURIComponent(video.id)}?ws=${encodeURIComponent(thread.ownerId)}${at}&comment=${encodeURIComponent(thread.id)}`;
-}
-
-/**
  * Takes `n` comment emails from the author's hourly allowance and the instance's, shared by mentions and
  * replies: posting and deleting a comment in a loop would otherwise mail teammates without limit.
  */
@@ -157,7 +149,7 @@ export async function notifyMentions(comment: VideoComment, mailed?: Set<string>
   if (!reserveCommentEmails(comment, comment.mentions.length, "mention")) return 0;
   // A mention in a reply links to the thread it is in, at that thread's moment.
   const thread = (comment.parentId && (await getStore().get<VideoComment>("comment", comment.parentId))) || comment;
-  const url = threadUrl(video, thread);
+  const url = threadLink(config.appUrl, thread);
   let sent = 0;
   for (const m of comment.mentions) {
     try {
@@ -198,7 +190,7 @@ export async function notifyReply(reply: VideoComment, mentionsMailed?: Set<stri
     if (email) to.push(email);
   }
   if (!to.length || !reserveCommentEmails(reply, to.length, "reply")) return 0;
-  const url = threadUrl(video, note);
+  const url = threadLink(config.appUrl, note);
   let sent = 0;
   for (const address of to) {
     try {

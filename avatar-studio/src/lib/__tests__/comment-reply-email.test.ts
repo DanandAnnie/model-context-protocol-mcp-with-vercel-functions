@@ -9,6 +9,7 @@ import { acceptInvite, createInvite, createWorkspace, inviteSchema, removeMember
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import { resetRateLimit } from "../rate-limit";
 import { getStore } from "../store";
+import { threadLink } from "../comment-list";
 import type { Video } from "../types";
 
 let mail: MockEmailProvider;
@@ -151,5 +152,12 @@ describe("reply emails", () => {
     const over = await addComment(video.id, say("One more.", note.id), ws.id, bob);
     assert.equal(over.parentId, note.id);
     assert.equal(await notifyReply(over), 0);
+  });
+
+  it("builds a thread's link: its workspace, a pinned moment in whole seconds, the thread, each part encoded", () => {
+    assert.equal(threadLink("https://studio.example/", { id: "cmt_1", videoId: "vid_1", ownerId: "ws_a" }), "https://studio.example/videos/vid_1?ws=ws_a&comment=cmt_1");
+    assert.equal(threadLink("https://studio.example", { id: "cmt 2", videoId: "v/2", ownerId: "ws_&b", atSec: 65.9 }), "https://studio.example/videos/v%2F2?ws=ws_%26b&t=65&comment=cmt%202");
+    // A personal space's thread names no space; the page opens it in the one the reader is in.
+    assert.equal(threadLink("https://studio.example", { id: "cmt_3", videoId: "vid_3", ownerId: "user_alice", atSec: 4 }), "https://studio.example/videos/vid_3?t=4&comment=cmt_3");
   });
 });

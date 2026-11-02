@@ -3650,7 +3650,7 @@ test("a review comment is answered in a thread that is resolved and deleted with
   expect((await (await page.request.get(`/api/videos/${v.id}/comments`)).json()).comments).toEqual([]);
 });
 
-test("a comment email's link opens the video at its thread, marked for a moment, and says when it is gone", async ({ page }) => {
+test("a comment email's link, or one copied from the thread, opens the video at its thread, marked for a moment, and says when it is gone", async ({ page }) => {
   const v = await createVideoViaApi(page, `Linked ${Date.now().toString(36)}`);
   const post = async (data: { text: string; parentId?: string }) => (await (await page.request.post(`/api/videos/${v.id}/comments`, { data })).json()).comment as { id: string };
   const notes: Array<{ id: string }> = [];
@@ -3672,6 +3672,17 @@ test("a comment email's link opens the video at its thread, marked for a moment,
   await expect(comments.locator(`[data-comment-id="${notes[1].id}"]`)).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(comments.getByRole("button", { name: "Resolve comment: Note 2" })).toBeFocused();
+  // Copy link puts the same kind of link on the clipboard, for a teammate, and says so.
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  const copy = comments.getByRole("button", { name: "Copy link to comment: Note 4" });
+  await copy.click();
+  await expect(comments.getByRole("status")).toHaveText("Link to the comment copied");
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  // A personal space's thread names no space: it opens in the one the reader is in.
+  expect(copied).toMatch(new RegExp(`/videos/${v.id}\\?comment=${notes[3].id}$`));
+  await expect(comments.getByRole("button", { name: "Copy link to comment: Answer to note 2" })).toHaveCount(0);
+  await page.goto(copied);
+  await expect(comments.locator("[data-linked]")).toHaveAttribute("data-comment-id", notes[3].id);
   // A resolved thread is unfolded to be shown.
   await page.goto(`/videos/${v.id}?comment=${notes[0].id}`);
   await expect(comments.getByTestId("resolved-comment-list")).toBeVisible();
@@ -3682,6 +3693,31 @@ test("a comment email's link opens the video at its thread, marked for a moment,
   await expect(comments.getByRole("status")).toHaveText("The comment this link points to is no longer here; it may have been deleted.");
   await expect(comments.locator("[data-linked]")).toHaveCount(0);
   await expect(comments.getByTestId("comment-list")).toContainText("Note 6");
+});
+
+test("a thread's copied link in a workspace switches a member who is elsewhere into it", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const ws = (await (await page.request.post("/api/workspaces", { data: { name: `Threads ${tag}` } })).json()).workspace as { id: string };
+  try {
+    expect((await page.request.post("/api/workspaces/switch", { data: { id: ws.id } })).status()).toBe(200);
+    const v = await createVideoViaApi(page, `Team thread ${tag}`);
+    const note = (await (await page.request.post(`/api/videos/${v.id}/comments`, { data: { text: "Check the logo size." } })).json()).comment as { id: string };
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.goto(`/videos/${v.id}`);
+    await page.getByTestId("comments").getByRole("button", { name: "Copy link to comment: Check the logo size." }).click();
+    const copied = await page.evaluate(() => navigator.clipboard.readText());
+    expect(copied).toMatch(new RegExp(`/videos/${v.id}\\?ws=${ws.id}&comment=${note.id}$`));
+    // Read from the personal space, the link switches into the workspace and opens at the thread.
+    await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
+    await page.goto(copied);
+    await expect(page.getByRole("heading", { name: `Team thread ${tag}` })).toBeVisible();
+    await expect(page.getByLabel("Workspace")).toHaveValue(ws.id);
+    await expect(page.getByTestId("comments").locator("[data-linked]")).toHaveAttribute("data-comment-id", note.id);
+    await expect(page).not.toHaveURL(/[?&](ws|comment)=/);
+  } finally {
+    await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
+    await page.request.delete(`/api/workspaces/${ws.id}`);
+  }
 });
 
 test("share page offers a download only when the owner allows it", async ({ page }) => {

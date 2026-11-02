@@ -26,3 +26,19 @@ export function repliesByThread<T extends Pick<VideoComment, "parentId" | "creat
 export function markMine<T extends Pick<VideoComment, "authorId">>(comments: T[], userId: string): Array<T & { mine: boolean }> {
   return comments.map((c) => ({ ...c, mine: c.authorId === userId }));
 }
+
+/**
+ * The video page's address for a comment's thread: in the workspace it belongs to (`ws`, which switches a member
+ * into it), the player at a pinned thread's moment (`t`, whole seconds), and the page scrolled to the thread
+ * (`comment`, the note that starts it). Emails and the page's Copy link share it. A personal space's thread names
+ * no space: the page never moves a reader out of a workspace on a link's say-so, so it opens in the one they are in.
+ */
+export function threadLink(origin: string, thread: Pick<VideoComment, "id" | "videoId" | "ownerId" | "atSec">): string {
+  // Workspace ids start "ws_" (isWorkspaceId, which lives with server code).
+  const params = [
+    ...(thread.ownerId.startsWith("ws_") ? [`ws=${encodeURIComponent(thread.ownerId)}`] : []),
+    ...(thread.atSec !== undefined ? [`t=${Math.floor(thread.atSec)}`] : []),
+    `comment=${encodeURIComponent(thread.id)}`,
+  ];
+  return `${origin.replace(/\/$/, "")}/videos/${encodeURIComponent(thread.videoId)}?${params.join("&")}`;
+}

@@ -1,12 +1,12 @@
 "use client";
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { Check, ChevronDown, CornerDownRight, MessageSquare, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { Check, ChevronDown, CornerDownRight, Link2, MessageSquare, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { Button, Card, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
 import { formatTimestamp } from "@/lib/text";
 import { refocusIfLost } from "@/lib/focus";
-import { repliesByThread, splitComments } from "@/lib/comment-list";
+import { repliesByThread, splitComments, threadLink } from "@/lib/comment-list";
 import type { VideoComment, WorkspaceRole } from "@/lib/types";
 
 const LINK_GONE = "The comment this link points to is no longer here; it may have been deleted.";
@@ -296,6 +296,24 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
     }
   }
 
+  // A thread's link, copied for a teammate: it opens this page at the thread, in its space (see threadLink).
+  const [copiedLink, setCopiedLink] = useState<string | null>(null);
+  // One timer for the tick, so a second copy within two seconds keeps it for two seconds more.
+  const copiedTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(copiedTimer.current), []);
+  async function copyLink(c: VideoComment) {
+    const url = threadLink(window.location.origin, c);
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedLink(c.id);
+      announce("Link to the comment copied");
+      window.clearTimeout(copiedTimer.current);
+      copiedTimer.current = window.setTimeout(() => setCopiedLink(null), 2000);
+    } catch {
+      // No clipboard (or no permission): the link is offered to copy by hand.
+      window.prompt("Copy this link to the comment", url);
+    }
+  }
   const excerpt = (c: VideoComment) => c.text.slice(0, 60);
   // A note and, for one that starts a thread, its replies and the way to answer it (open threads only).
   const row = (c: Note, action: ReactNode, reply = false): ReactNode => (
@@ -388,6 +406,11 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
       {editing?.id !== c.id && !replies.get(c.id)?.some((r) => r.id === editing?.id) && (
         <div className="flex shrink-0 items-center gap-0.5">
           {action}
+          {!reply && (
+            <button type="button" onClick={() => void copyLink(c)} data-comment-link={c.id} aria-label={`Copy link to comment: ${excerpt(c)}`} title="Copy a link that opens this thread" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+              {copiedLink === c.id ? <Check className="h-4 w-4 text-emerald-600" /> : <Link2 className="h-4 w-4" />}
+            </button>
+          )}
           {c.mine && (
             <button type="button" onClick={() => setEditing({ id: c.id, text: c.text })} data-comment-edit={c.id} aria-label={`Edit comment: ${excerpt(c)}`} title="Change this comment's text" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
               <Pencil className="h-4 w-4" />

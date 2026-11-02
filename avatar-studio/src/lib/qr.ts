@@ -1,5 +1,6 @@
 // QR codes for share links, for a flyer, a slide, or a sign. Pure, so the video page and the tests share it.
 import qrcode from "qrcode-generator";
+import { safeFileStem } from "./attachment";
 
 /** The quiet zone a reader needs around the code, in modules (the QR standard's four). */
 export const QR_MARGIN = 4;
@@ -72,4 +73,38 @@ export type QrSubject = "share" | "talk";
 /** How a code is named on the page (`label`) and inside its SVG file (`title`), for a video or presenter `name`. */
 export function qrWording(subject: QrSubject, name: string): { label: string; title: string } {
   return subject === "talk" ? { label: "QR code for the talk link", title: `Scan to talk to “${name}”` } : { label: "QR code for the share link", title: `Scan to watch “${name}”` };
+}
+
+/** The most UTF-8 bytes a name's title part takes, so the whole name stays under the 255 bytes macOS and Linux allow. */
+const QR_NAME_BYTES = 200;
+
+/** `stem` cut to `QR_NAME_BYTES` of UTF-8 at a character a person sees as one, without loose dots or spaces at its end. */
+function byteFit(stem: string): string {
+  const bytes = new TextEncoder();
+  if (bytes.encode(stem).length <= QR_NAME_BYTES) return stem;
+  let out = "";
+  let used = 0;
+  for (const { segment } of new Intl.Segmenter().segment(stem)) {
+    used += bytes.encode(segment).length;
+    if (used > QR_NAME_BYTES) break;
+    out += segment;
+  }
+  return out.replace(/[\s.]+$/u, "");
+}
+
+/**
+ * File names for a set of codes saved together, one per title in order: `qr-<title>.svg` (`qr-video.svg` for a title
+ * with nothing left to name a file by, and a title cut to fit the 255 bytes a name may take), with " (2)", " (3)"… on a
+ * name already taken, compared as a file system that ignores case would, so no file in a zip overwrites another once
+ * unpacked.
+ */
+export function qrFileNames(titles: string[], ext = "svg"): string[] {
+  const taken = new Set<string>();
+  return titles.map((title) => {
+    const stem = `qr-${byteFit(safeFileStem(title)) || "video"}`;
+    let name = `${stem}.${ext}`;
+    for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${stem} (${n}).${ext}`;
+    taken.add(name.toLowerCase());
+    return name;
+  });
 }

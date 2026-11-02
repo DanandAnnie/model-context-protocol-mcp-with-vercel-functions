@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArchiveRestore, CheckSquare, Clapperboard, Clock, Copy, LayoutGrid, List, Download, FolderInput, KeyRound, MousePointerClick, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
+import { ArchiveRestore, CheckSquare, Clapperboard, Clock, Copy, LayoutGrid, List, Download, FolderInput, KeyRound, MousePointerClick, QrCode, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
 import { api, clickSelect, folderFor, overSelection } from "@/lib/client";
 import { libraryKey } from "@/lib/shortcuts";
 import { isApple } from "@/components/QuickFind";
@@ -31,7 +31,7 @@ function localMinute(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links" | "password" | "nopassword" | "settings" | "retry" | "star" | "unstar" | "empty" | "restoreall" | "unfile" | "cta" | "nocta" | "copylinks";
+type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links" | "password" | "nopassword" | "settings" | "retry" | "star" | "unstar" | "empty" | "restoreall" | "unfile" | "cta" | "nocta" | "copylinks" | "qrcodes";
 
 export default function VideosPage() {
   return (
@@ -416,31 +416,46 @@ function VideosInner() {
   }
 
   // The selection's share links as a CSV to send from: the link where it can be sent now, and why the others are blank.
-  // The selection stays, so its links can be fixed (go-live, expiry, links on) and the file downloaded again.
-  async function downloadLinks() {
+  // The selection stays, so its links can be fixed (go-live, expiry, links on) and the file downloaded again. With
+  // "qrcodes", a zip of a QR code of each link that can be sent now, for printing flyers or signs for several at once.
+  async function downloadLinks(kind: "links" | "qrcodes" = "links") {
     const ids = Array.from(selected);
     if (!ids.length) return;
     const over = overSelection(ids.length, BULK_MAX);
     if (over) return setBulkErr(over);
-    setBusy("links");
+    const what = kind === "links" ? "the links" : "the QR codes";
+    const madeFor = selected;
+    setBusy(kind);
+    setCopyNote(null);
+    // An earlier copy's or download's own refusal goes; it said why that one failed.
+    setBulkErr((note) => (note !== null && note === copyErr.current ? null : note));
     // A note from an earlier go-live or expiry refusal stays: it names the links to fix, which this file is for checking.
     try {
-      const res = await fetch("/api/videos/links", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) }).catch(() => {
-        throw new Error("Could not reach the server to download the links");
+      const res = await fetch(`/api/videos/links${kind === "qrcodes" ? "?format=qr" : ""}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) }).catch(() => {
+        throw new Error(`Could not reach the server to download ${what}`);
       });
-      if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? "Could not download the links");
+      if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? `Could not download ${what}`);
       const omitted = Number(res.headers.get("X-Omitted") ?? 0);
-      if (omitted > 0) setBulkErr(`${omitted === 1 ? "1 selected video is" : `${omitted} selected videos are`} no longer in the library and ${omitted === 1 ? "was" : "were"} left out of the file.`);
       const url = URL.createObjectURL(await res.blob());
       const link = document.createElement("a");
       link.href = url;
-      link.download = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? "links.csv";
+      link.download = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? (kind === "links" ? "links.csv" : "qr-codes.zip");
       document.body.appendChild(link);
       link.click();
       link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      // What the file holds is said only for the selection it was made for, and once it is saved.
+      if (selectedNow.current !== madeFor) return;
+      if (omitted > 0) setBulkErr(`${omitted === 1 ? "1 selected video is" : `${omitted} selected videos are`} no longer in the library and ${omitted === 1 ? "was" : "were"} left out of the file.`);
+      if (kind === "qrcodes") {
+        const links = Number(res.headers.get("X-Links") ?? 0);
+        const unsendable = Number(res.headers.get("X-Unsendable") ?? 0);
+        setCopyNote(`Saved ${links} QR ${links === 1 ? "code" : "codes"}${unsendable ? `; left out: ${unsendable} ${unsendable === 1 ? "has" : "have"} no link that can be sent yet` : ""}`);
+      }
     } catch (e) {
-      setBulkErr(e instanceof Error ? e.message : "Could not download the links");
+      const message = e instanceof Error ? e.message : `Could not download ${what}`;
+      copyErr.current = message;
+      setBulkErr(message);
     } finally {
       setBusy(null);
     }
@@ -984,6 +999,9 @@ function VideosInner() {
               </Button>
               <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void copyLinks()} disabled={!selected.size || busy !== null} loading={busy === "copylinks"} title="Copies the share links of the selected videos that can be sent now, one a line, to paste into an email or a chat">
                 <Copy className="h-3.5 w-3.5" /> Copy links
+              </Button>
+              <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void downloadLinks("qrcodes")} disabled={!selected.size || busy !== null} loading={busy === "qrcodes"} title="A zip of a QR code (SVG, sharp at any size) of each selected video's share link that can be sent now, named after the video, for flyers or signs">
+                <QrCode className="h-3.5 w-3.5" /> QR codes
               </Button>
               {failedSelected.length > 0 && (
                 <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void retryFailed()} disabled={busy !== null} loading={busy === "retry"} title={`Start the selected failed renders again with the same settings, up to ${MAX_RETRY_AT_ONCE} at a time; each counts toward this month's renders`}>

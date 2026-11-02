@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import jsQR from "jsqr";
-import { QR_MARGIN, qrDraw, qrMatrix, qrPath, qrSide, qrSvg, qrWording } from "../qr";
+import { QR_MARGIN, qrDraw, qrFileNames, qrMatrix, qrPath, qrSide, qrSvg, qrWording } from "../qr";
 
 const url = "https://studio.example.com/share/vid_mf3k2abcd1234efgh";
 
@@ -159,5 +159,32 @@ describe("qrWording", () => {
   it("gives a title qrSvg keeps to what an SVG file may hold", () => {
     const { title } = qrWording("talk", `Ask <Dana> & "Sam"\u0007`);
     assert.match(qrSvg(url, title), /<title>Scan to talk to “Ask &lt;Dana&gt; &amp; &quot;Sam&quot;”<\/title>/);
+  });
+});
+
+describe("qrFileNames", () => {
+  it("names each code after its title, keeping names that differ only in case or are taken apart", () => {
+    assert.deepEqual(qrFileNames(["Open house", "Open House", "open house", "Kitchen / tour", "", "...", "Open house (2)"]), [
+      "qr-Open house.svg",
+      "qr-Open House (2).svg",
+      "qr-open house (3).svg",
+      "qr-Kitchen tour.svg",
+      "qr-video.svg",
+      "qr-video (2).svg",
+      "qr-Open house (2) (2).svg",
+    ]);
+    assert.deepEqual(qrFileNames(["A"], "png"), ["qr-A.png"]);
+    // A title in a script of many bytes a letter is cut so the name fits the 255 bytes macOS and Linux allow, at a whole
+    // character and without a loose space, and its second copy still fits.
+    const long = "क्षि ".repeat(30);
+    const [first, second] = qrFileNames([long, long]);
+    const bytes = (s: string) => new TextEncoder().encode(s).length;
+    assert.ok(bytes(first) <= 255 && bytes(second) <= 255, `${bytes(first)} and ${bytes(second)} bytes`);
+    assert.ok(bytes(first) > 150);
+    assert.match(first, /^qr-(क्षि )*क्षि\.svg$/u);
+    assert.equal(second, first.replace(/\.svg$/, " (2).svg"));
+    // A short title of many bytes is kept whole.
+    assert.deepEqual(qrFileNames(["Café ☕ 東京"]), ["qr-Café ☕ 東京.svg"]);
+    assert.deepEqual(qrFileNames([]), []);
   });
 });

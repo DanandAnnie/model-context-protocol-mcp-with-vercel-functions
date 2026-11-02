@@ -12,6 +12,7 @@ import { shareOffline, shareState } from "../client";
 import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, listVideos, purgeDue, refreshPending, retryVideo, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, createVideo, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, rendersThisMonth, resolveRenderContext } from "./videos";
 import { getBrandKit } from "./brand";
 import { stripPauses } from "../pauses";
+import { qrFileNames, qrSvg, qrWording } from "../qr";
 
 export const MAX_BATCH_ROWS = 100;
 /** Characters that show nothing: zero-width spaces and joiners, direction marks and embeddings, a soft hyphen, a byte-order mark. */
@@ -254,6 +255,17 @@ export function selectionLinkRows(videos: Video[], base: string, now = Date.now(
 export function selectionLinkText(rows: ReturnType<typeof selectionLinkRows>): { text: string; links: number; unsendable: number } {
   const links = rows.flatMap((r) => (r.share_link ? [r.share_link] : []));
   return { text: links.join("\n"), links: links.length, unsendable: rows.length - links.length };
+}
+
+/**
+ * A QR code of each of those rows' links a viewer can open now, as SVG files named after the videos (in the order given,
+ * no two names alike), for printing several at once, and how many rows had no link to draw.
+ */
+export function selectionQrFiles(rows: ReturnType<typeof selectionLinkRows>): { files: Array<{ name: string; svg: string }>; links: number; unsendable: number } {
+  const sendable = rows.flatMap((r) => (r.share_link ? [{ title: r.title ?? "", link: r.share_link }] : []));
+  const names = qrFileNames(sendable.map((r) => r.title));
+  const files = sendable.map((r, i) => ({ name: names[i], svg: qrSvg(r.link, qrWording("share", r.title).title) }));
+  return { files, links: files.length, unsendable: rows.length - files.length };
 }
 
 /**

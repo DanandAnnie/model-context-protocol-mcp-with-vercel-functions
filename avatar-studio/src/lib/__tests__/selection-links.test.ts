@@ -4,7 +4,9 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import { getStore } from "../store";
-import { SELECTION_LINK_COLUMNS, createVideo, selectionLinkRows, selectionLinkText, selectionLinksSchema, selectionVideos, videoRequestSchema } from "../services";
+import jsQR from "jsqr";
+import { SELECTION_LINK_COLUMNS, createVideo, selectionLinkRows, selectionLinkText, selectionLinksSchema, selectionQrFiles, selectionVideos, videoRequestSchema } from "../services";
+import { QR_MARGIN, qrMatrix, qrSvg, qrWording } from "../qr";
 import { NotFoundError } from "../errors";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import { parseCsv, toCsv } from "../csv";
@@ -83,5 +85,39 @@ describe("selection links", () => {
     });
     assert.deepEqual(selectionLinkText(selectionLinkRows([off], "https://x")), { text: "", links: 0, unsendable: 1 });
     assert.deepEqual(selectionLinkText([]), { text: "", links: 0, unsendable: 0 });
+  });
+
+  it("draws a QR code of each link that can be sent, as SVG files named after the videos, and counts the rest", async () => {
+    const tour = await video("Tour: 12 Elm St");
+    const off = await video("Off", { shareDisabled: true });
+    const again = await video("tour: 12 elm st");
+    const scheduled = await video("Later", { shareStartsAt: at(day) });
+    const rows = selectionLinkRows([tour, off, again, scheduled], "https://studio.example.com");
+    const { files, links, unsendable } = selectionQrFiles(rows);
+    assert.equal(links, 2);
+    assert.equal(unsendable, 2);
+    // Named after the videos in the order chosen, a second name that only differs in case kept apart.
+    assert.deepEqual(files.map((f) => f.name), ["qr-Tour 12 Elm St.svg", "qr-tour 12 elm st (2).svg"]);
+    // Each file is the code of that video's link, titled as the video page's download is.
+    for (const [file, v] of [[files[0], tour], [files[1], again]] as const) {
+      const link = `https://studio.example.com/share/${v.id}`;
+      assert.equal(file.svg, qrSvg(link, qrWording("share", v.title).title));
+      const matrix = qrMatrix(link);
+      const side = matrix.length + 2 * QR_MARGIN;
+      const scale = 4;
+      const pixels = new Uint8ClampedArray((side * scale) ** 2 * 4).fill(255);
+      matrix.forEach((row, y) =>
+        row.forEach((dark, x) => {
+          if (!dark) return;
+          for (let dy = 0; dy < scale; dy++)
+            for (let dx = 0; dx < scale; dx++) {
+              const i = (((y + QR_MARGIN) * scale + dy) * side * scale + (x + QR_MARGIN) * scale + dx) * 4;
+              pixels[i] = pixels[i + 1] = pixels[i + 2] = 0;
+            }
+        }),
+      );
+      assert.equal(jsQR(pixels, side * scale, side * scale)?.data, link);
+    }
+    assert.deepEqual(selectionQrFiles(selectionLinkRows([off], "https://x")), { files: [], links: 0, unsendable: 1 });
   });
 });

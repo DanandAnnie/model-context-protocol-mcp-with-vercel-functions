@@ -1,6 +1,6 @@
 import { expect, test, type Dialog, type Page } from "@playwright/test";
 import { AxeBuilder } from "@axe-core/playwright";
-import { strToU8, zipSync } from "fflate";
+import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -9426,6 +9426,82 @@ test("a shared presenter's row has a QR code of its talk link, for a sign at an 
   } finally {
     await page.request.delete(`/api/agents/${agent.id}`);
   }
+});
+
+test("QR codes saves a zip of a QR code of each selected video's sendable share link, named after the video", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const made = await page.request.post("/api/videos/batch", {
+    data: { title: `Flyer ${tag}`, scriptTemplate: "Hello {name}.", csv: "name\nAda\nBo\nCy", avatarId: "stock_1", voiceId: "stock_voice_1" },
+  });
+  expect(made.status()).toBe(201);
+  const { batchId } = (await made.json()) as { batchId: string };
+  const listed = async () => ((await (await page.request.get(`/api/videos?batch=${batchId}`)).json()) as { videos: Array<{ id: string; title: string }> }).videos;
+  await expect.poll(async () => (await Promise.all((await listed()).map(async (v) => ((await (await page.request.get(`/api/videos/${v.id}`)).json()) as { video: { status: string } }).video.status))).join(","), { timeout: 30_000 }).toBe("completed,completed,completed");
+  const shown = await listed();
+  const off = shown[1];
+  expect((await page.request.patch(`/api/videos/${off.id}`, { data: { shareDisabled: true } })).status()).toBe(200);
+
+  await page.goto(`/videos?batch=${batchId}`);
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  const bar = page.getByTestId("bulk-bar");
+  await expect(page.locator("button[aria-pressed][aria-label^='Select ']")).toHaveCount(3);
+  await page.keyboard.press("Control+a");
+  const download = page.waitForEvent("download");
+  await bar.getByRole("button", { name: "QR codes" }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toMatch(/^qr-codes-\d{4}-\d{2}-\d{2}\.zip$/);
+  await expect(page.getByTestId("copy-note")).toHaveText("Saved 2 QR codes; left out: 1 has no link that can be sent yet");
+
+  // One SVG a sendable video, named after it; the switched-off one has none.
+  const entries = unzipSync(new Uint8Array(await readFile((await file.path())!)));
+  const sendable = shown.filter((v) => v.id !== off.id);
+  expect(Object.keys(entries).sort()).toEqual(sendable.map((v) => `qr-${v.title}.svg`).sort());
+  const origin = new URL(page.url()).origin;
+  for (const v of sendable) {
+    const svg = strFromU8(entries[`qr-${v.title}.svg`]);
+    expect(svg).toContain(`<title>Scan to watch “${v.title}”</title>`);
+    // Drawn in the browser and read back, it scans to that video's share link.
+    const pixels = await page.evaluate(async (data) => {
+      const img = new Image();
+      img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(data)}`;
+      await img.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 400;
+      const ctx = canvas.getContext("2d")!;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, 0, 0, 400, 400);
+      return Array.from(ctx.getImageData(0, 0, 400, 400).data);
+    }, svg);
+    expect(jsQR(new Uint8ClampedArray(pixels), 400, 400)?.data).toBe(`${origin}/share/${v.id}`);
+  }
+
+  // With only the switched-off video chosen, nothing is saved and the bar says why.
+  await bar.getByRole("button", { name: "Done selecting" }).click();
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await page.getByRole("button", { name: `Select ${off.title}`, exact: true }).click();
+  await expect(bar.getByText(/selected$/)).toHaveText("1 selected");
+  let saved = false;
+  page.on("download", () => (saved = true));
+  await bar.getByRole("button", { name: "QR codes" }).click();
+  const refused = page.getByText(/^None of the selected videos has a link that can be sent yet/);
+  await expect(refused).toBeVisible();
+  await expect(page.getByTestId("copy-note")).toHaveText("");
+  expect(saved).toBe(false);
+  // Adding a video that can be sent clears that refusal, and the file that follows says only what it holds.
+  await page.getByRole("button", { name: `Select ${sendable[0].title}`, exact: true }).click();
+  await expect(refused).toHaveCount(0);
+  const again = page.waitForEvent("download");
+  await bar.getByRole("button", { name: "QR codes" }).click();
+  expect(Object.keys(unzipSync(new Uint8Array(await readFile((await (await again).path())!))))).toEqual([`qr-${sendable[0].title}.svg`]);
+  await expect(page.getByTestId("copy-note")).toHaveText("Saved 1 QR code; left out: 1 has no link that can be sent yet");
+  // A refusal shown again after a selection change goes once a later file is saved.
+  await page.getByRole("button", { name: `Select ${sendable[0].title}`, exact: true }).click();
+  await bar.getByRole("button", { name: "QR codes" }).click();
+  await expect(refused).toBeVisible();
+  await page.getByRole("button", { name: `Select ${sendable[1].title}`, exact: true }).click();
+  await bar.getByRole("button", { name: "QR codes" }).click();
+  await expect(page.getByTestId("copy-note")).toHaveText("Saved 1 QR code; left out: 1 has no link that can be sent yet");
+  await expect(refused).toHaveCount(0);
 });
 
 test("the bulk bar never sends more than the 200 videos one action takes", async ({ page }) => {

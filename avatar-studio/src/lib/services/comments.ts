@@ -193,6 +193,15 @@ export async function resolveComment(videoId: string, commentId: string, resolve
   return rewrite(comment, next);
 }
 
+/** How many open (unresolved) notes each of the owner's videos has, by video id; a video with none is not listed. */
+export async function openCommentCounts(ownerId: string): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  for (const c of await getStore().list<VideoComment>("comment", ownerId)) {
+    if (!c.resolvedAt) counts.set(c.videoId, (counts.get(c.videoId) ?? 0) + 1);
+  }
+  return counts;
+}
+
 /** Removes every comment on a video; part of deleting the video for good. */
 export async function clearComments(videoId: string, ownerId: string): Promise<void> {
   const all = await getStore().list<VideoComment>("comment", ownerId);

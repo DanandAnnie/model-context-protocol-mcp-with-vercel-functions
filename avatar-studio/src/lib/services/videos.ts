@@ -31,7 +31,7 @@ import { bumpViewsByDay } from "../insights";
 import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneNameSchema, sceneTextSchema } from "./schemas";
 import { getBrandKit } from "./brand";
 import { pronunciationsFor, spokenCopy } from "../pronounce";
-import { clearComments } from "./comments";
+import { clearComments, openCommentCounts } from "./comments";
 import { clearVideoLeads } from "./leads";
 import { clearHighlights } from "./highlights";
 import { clearCleanups } from "./cleanups";
@@ -2100,6 +2100,8 @@ export const videoQuerySchema = z.object({
    * render was asked for), in the trash view too.
    */
   created: z.enum(["all", "7d", "30d", "90d"]).default("all"),
+  /** "open" lists only the videos with a review note no one has resolved yet (in the trash too). */
+  comments: z.enum(["all", "open"]).default("all"),
   /** `true` lists only the starred videos (in the trash too, where a star is kept for when it is restored). */
   starred: z
     .string()
@@ -2130,6 +2132,8 @@ export interface VideoPage {
   rendering: number;
   /** Videos in the trash, so the library can offer the view. */
   trashed: number;
+  /** Open (unresolved) review notes on the videos of this page that have any, by video id. */
+  openComments: Record<string, number>;
   /** Where share links point (the public origin), for the cards' Copy link; set by the route. */
   shareOrigin?: string;
 }
@@ -2145,8 +2149,12 @@ const SORTERS: Record<VideoQuery["sort"], (a: Video, b: Video) => number> = {
   length: (a, b) => (b.durationSec ?? -1) - (a.durationSec ?? -1) || b.createdAt.localeCompare(a.createdAt),
 };
 
-/** The videos matching `query`, sorted; `limit` is not applied here. */
-export function filterVideos(videos: Video[], query: VideoQuery): Video[] {
+/**
+ * The videos matching `query`, sorted; `limit` is not applied here. `openComments` (from openCommentCounts) says which
+ * videos have open notes, and the `comments` filter needs it: asked for without it, this throws rather than match nothing.
+ */
+export function filterVideos(videos: Video[], query: VideoQuery, openComments?: Map<string, number>): Video[] {
+  if (query.comments === "open" && !openComments) throw new Error("filterVideos: the open comments filter needs the counts");
   const needle = query.q.toLowerCase();
   // One clock for the whole list, so a link lapsing mid-filter cannot land in two states.
   const now = Date.now();
@@ -2154,6 +2162,7 @@ export function filterVideos(videos: Video[], query: VideoQuery): Video[] {
     .filter((v) => {
       if (query.batch && v.batchId !== query.batch) return false;
       if (query.starred && !v.starred) return false;
+      if (query.comments === "open" && !openComments!.get(v.id)) return false;
       if (query.created !== "all" && !madeWithin(v, query.created, now)) return false;
       if (query.review !== "all" && (v.review?.status ?? "none") !== query.review) return false;
       if (query.share !== "all" && !inShareFilter(v, query.share, now)) return false;
@@ -2179,11 +2188,12 @@ export function countFolders(videos: Video[]): Record<string, number> {
  * trash with `query.trash`, where `sort: "newest"` orders by deletion time.
  */
 export async function queryVideos(ownerId: string = LOCAL_OWNER, query: VideoQuery): Promise<VideoPage> {
-  const split = await loadVideos(ownerId);
+  // The open notes are counted while the videos load: a second read of the store, side by side rather than after.
+  const [split, openComments] = await Promise.all([loadVideos(ownerId), openCommentCounts(ownerId)]);
   const live = query.trash ? split.live : await refreshPending(split.live);
   const all = query.trash ? split.trashed : live;
   const trashed = split.trashed.length;
-  const filtered = filterVideos(all, query);
+  const filtered = filterVideos(all, query, openComments);
   // The trash reads newest deletion first; `filterVideos` sorted by creation, so put the deletion order back.
   const matched = query.trash && query.sort === "newest" ? filtered.sort((a, b) => b.deletedAt!.localeCompare(a.deletedAt!) || b.createdAt.localeCompare(a.createdAt)) : filtered;
   const videos = query.limit ? matched.slice(0, query.limit) : matched;
@@ -2195,6 +2205,7 @@ export async function queryVideos(ownerId: string = LOCAL_OWNER, query: VideoQue
     hasMore: videos.length < matched.length,
     folders: Array.from(new Set(all.map((v) => v.folder).filter((f): f is string => !!f))).sort(),
     folderCounts: countFolders(all),
+    openComments: Object.fromEntries(videos.flatMap((v) => (openComments.has(v.id) ? [[v.id, openComments.get(v.id)!]] : []))),
     // Renders in flight in the library, whichever view this is: the trash view must not poll for a trashed render.
     rendering: live.filter((v) => v.status === "processing" || v.status === "queued").length,
     trashed,

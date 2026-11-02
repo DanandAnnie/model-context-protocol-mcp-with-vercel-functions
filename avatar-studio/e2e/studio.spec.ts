@@ -3536,6 +3536,52 @@ test("an author edits their own comment in place, from the keyboard", async ({ p
   expect(typeof stored.editedAt).toBe("string");
 });
 
+test("the library counts each video's open comments and can show only the videos that have some", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const noted = await createVideoViaApi(page, `Noted ${tag}`);
+  const quiet = await createVideoViaApi(page, `Quiet ${tag}`);
+  const ids: string[] = [];
+  for (const text of ["Fix the intro.", "Shorter outro."]) ids.push((await (await page.request.post(`/api/videos/${noted.id}/comments`, { data: { text } })).json()).comment.id);
+  const resolved = (await (await page.request.post(`/api/videos/${quiet.id}/comments`, { data: { text: "Done." } })).json()).comment.id;
+  expect((await page.request.patch(`/api/videos/${quiet.id}/comments/${resolved}`, { data: { resolved: true } })).status()).toBe(200);
+  const api = (await (await page.request.get(`/api/videos?q=${tag}`)).json()) as { openComments: Record<string, number> };
+  expect(api.openComments).toEqual({ [noted.id]: 2 });
+  expect((await page.request.get("/api/videos?comments=closed")).status()).toBe(400);
+
+  await page.goto("/videos");
+  await page.getByLabel("Search videos").fill(tag);
+  const notedCard = page.locator(`a[href="/videos/${noted.id}"]`);
+  const quietCard = page.locator(`a[href="/videos/${quiet.id}"]`);
+  await expect(quietCard).toBeVisible();
+  // The badge shows the count and says it whole to a screen reader, as part of the card's link.
+  const badge = notedCard.getByTestId("open-comments-badge");
+  await expect(badge.locator("[aria-hidden]").last()).toHaveText("2");
+  await expect(badge.getByText("2 open comments", { exact: true })).toHaveClass(/sr-only/);
+  await expect(notedCard).toHaveAccessibleName(/2 open comments/);
+  await expect(badge).toHaveAttribute("title", "2 open comments");
+  await expect(quietCard.getByTestId("open-comments-badge")).toHaveCount(0);
+  // The toggle shows only the videos with a note still open.
+  const toggle = page.getByTestId("open-comments-toggle");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await expect(quietCard).toHaveCount(0);
+  await expect(notedCard).toBeVisible();
+  // The list layout shows the count too.
+  await page.getByRole("button", { name: "List" }).click();
+  await expect(notedCard).toHaveAccessibleName(/2 open comments/);
+  await page.getByRole("button", { name: "Grid" }).click();
+  // Resolving the last open note takes the video out of the filtered list, which then says so.
+  for (const id of ids) await page.request.patch(`/api/videos/${noted.id}/comments/${id}`, { data: { resolved: true } });
+  await page.goto("/videos?comments=open");
+  await expect(page.getByTestId("open-comments-toggle")).toHaveAttribute("aria-pressed", "true");
+  await page.getByLabel("Search videos").fill(tag);
+  await expect(notedCard).toHaveCount(0);
+  await expect(page.getByText("Try a different search, status, folder, date, share link, or turn off Open comments.")).toBeVisible();
+  await page.getByTestId("open-comments-toggle").click();
+  await expect(notedCard).toBeVisible();
+  await expect(notedCard.getByTestId("open-comments-badge")).toHaveCount(0);
+});
+
 test("share page offers a download only when the owner allows it", async ({ page }) => {
   const v = await createVideoViaApi(page, `Downloadable ${Date.now().toString(36)}`);
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");

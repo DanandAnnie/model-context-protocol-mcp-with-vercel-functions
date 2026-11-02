@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArchiveRestore, Captions, ImageIcon, CheckSquare, FileText, Clapperboard, Clock, Copy, LayoutGrid, List, Download, FolderInput, KeyRound, MousePointerClick, QrCode, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
+import { ArchiveRestore, Captions, ImageIcon, CheckSquare, FileText, Clapperboard, Clock, Copy, LayoutGrid, List, Download, FolderInput, KeyRound, MousePointerClick, QrCode, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, MessageSquare, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
 import { CREATED_WITHIN_DAYS, SHARE_FILTERS, api, clickSelect, folderFor, nextShareChange, overSelection } from "@/lib/client";
 import { isSearchKey, libraryKey, readSingleKeyShortcuts, typesText } from "@/lib/shortcuts";
 import { useMobileNav } from "@/components/MobileNav";
@@ -57,9 +57,10 @@ function VideosInner() {
   const failedCount = Number(params.get("failed") ?? 0);
   const [q, setQ] = useState("");
   const [needle, setNeedle] = useState("");
-  // Home's notices open the library at `?share=`, `?status=`, `?created=`, and `?review=`, read again whenever the
-  // address changes (the sidebar's My videos goes back to every video); a value the library does not know is ignored.
-  const askedFilters = ["share", "status", "created", "review"].map((k) => params.get(k) ?? "").join("\u0000");
+  // Home's notices open the library at `?share=`, `?status=`, `?created=`, and `?review=` (and `?comments=open` is read
+  // too), again whenever the address changes (the sidebar's My videos goes back to every video); a value the library does
+  // not know is ignored.
+  const askedFilters = ["share", "status", "created", "review", "comments"].map((k) => params.get(k) ?? "").join("\u0000");
   const [status, setStatus] = useState<"all" | VideoStatus>(() => fromAddress(params.get("status"), STATUSES));
   const [folder, setFolder] = useState<string>("all"); // "all" | "unfiled" | folder name
   const [sort, setSort] = useState<SortKey>("newest");
@@ -77,6 +78,8 @@ function VideosInner() {
   const [trash, setTrash] = useState(false);
   // Only the starred videos (in the trash view too, where a star is kept for when a video comes back).
   const [starred, setStarred] = useState(false);
+  // Only the videos with a review note no one has resolved yet: what the team still has to act on.
+  const [openOnly, setOpenOnly] = useState(() => params.get("comments") === "open");
   // When the videos were made: a campaign's renders of this week or month, whatever folder they went to.
   const [created, setCreated] = useState<VideoQuery["created"]>(() => fromAddress(params.get("created"), CREATED_FILTERS));
   const [filtersAsked, setFiltersAsked] = useState(askedFilters);
@@ -86,6 +89,7 @@ function VideosInner() {
     setStatus(fromAddress(params.get("status"), STATUSES));
     setCreated(fromAddress(params.get("created"), CREATED_FILTERS));
     setReview(fromAddress(params.get("review"), REVIEW_FILTERS));
+    setOpenOnly(params.get("comments") === "open");
   }
   // Cards or compact rows; remembered by this browser only (read after mounting, so the server render stays the grid).
   const [layout, setLayout] = useState<"grid" | "list">("grid");
@@ -111,7 +115,7 @@ function VideosInner() {
   }, [q]);
   // "Show more" extends the page for the current filters only: a new filter starts again
   // from the first page in the same render, with no extra request for the old extent.
-  const filterKey = [needle, status, folder, batch ?? "", sort, trash ? "trash" : "", review, share, starred ? "starred" : "", created].join("\u0000");
+  const filterKey = [needle, status, folder, batch ?? "", sort, trash ? "trash" : "", review, share, starred ? "starred" : "", openOnly ? "open" : "", created].join("\u0000");
   const [extent, setExtent] = useState({ key: filterKey, limit: PAGE });
   const limit = extent.key === filterKey ? extent.limit : PAGE;
   const path = useMemo(() => {
@@ -126,9 +130,10 @@ function VideosInner() {
     if (review !== "all") params.set("review", review);
     if (share !== "all") params.set("share", share);
     if (starred) params.set("starred", "1");
+    if (openOnly) params.set("comments", "open");
     if (created !== "all") params.set("created", created);
     return `/api/videos?${params}`;
-  }, [limit, needle, status, folder, batch, sort, trash, review, share, starred, created]);
+  }, [limit, needle, status, folder, batch, sort, trash, review, share, starred, openOnly, created]);
   // The share analytics of what the library shows now, every match rather than the page loaded, in the same order.
   const analyticsHref = useMemo(() => {
     const params = new URLSearchParams(path.split("?")[1]);
@@ -171,7 +176,9 @@ function VideosInner() {
   const hasAny = (data?.total ?? 0) > 0 || (data?.trashed ?? 0) > 0;
   const trashed = data?.trashed ?? 0;
   const remaining = data ? data.matched - videos.length : 0;
-  // Whether a filter other than Starred narrows the list, for the empty state's advice.
+  // The on/off filters an empty list names, so the way back is said.
+  const toggledOn = [starred && "Starred", openOnly && "Open comments"].filter((t): t is string => !!t);
+  // Whether a filter other than Starred and Open comments narrows the list, for the empty state's advice.
   const narrowed = !!needle || status !== "all" || folder !== "all" || review !== "all" || share !== "all" || created !== "all" || !!batch;
 
   // Multi-select: move the chosen videos to a folder or delete them in one request.
@@ -360,7 +367,7 @@ function VideosInner() {
     setCoverDraft(null);
     coverPick.current += 1;
     setCoverReading(false);
-  }, [q, status, folder, batch, sort, trash, review, share, starred, created]);
+  }, [q, status, folder, batch, sort, trash, review, share, starred, openOnly, created]);
   // The last purge empties both views; leave the trash so the "No videos yet" state (and the filter bar) comes back.
   useEffect(() => {
     if (trash && data && data.total === 0 && data.trashed === 0) setTrash(false);
@@ -1330,6 +1337,16 @@ function VideosInner() {
           >
             <Star className={`h-3 w-3 ${starred ? "fill-white" : ""}`} /> Starred
           </button>
+          <button
+            type="button"
+            onClick={() => setOpenOnly((s) => !s)}
+            aria-pressed={openOnly}
+            data-testid="open-comments-toggle"
+            title="Only videos with a comment no one has resolved yet"
+            className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium ${openOnly ? "bg-sky-800 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
+          >
+            <MessageSquare className="h-3 w-3" /> Open comments
+          </button>
           {/* Shown outside a workspace too while the address set it (a link from Home, then a switch of space), so it can be cleared. */}
           {(inWorkspace || review !== "all") && (
             <select aria-label="Filter by review" value={review} onChange={(e) => setReview(e.target.value as VideoQuery["review"])} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700">
@@ -1404,13 +1421,15 @@ function VideosInner() {
           body={
             trash
               ? // Trashed videos the filters hide are still counted on the toggle, so say what hides them.
-                trashed && (narrowed || starred)
-                ? `Try a different search, status, folder, or date${starred ? ", or turn off Starred" : ""}.`
+                trashed && (narrowed || toggledOn.length > 0)
+                ? `Try a different search, status, folder, or date${toggledOn.length ? `, or turn off ${toggledOn.join(" and ")}` : ""}.`
                 : `Deleted videos wait here for ${TRASH_RETENTION_DAYS} days before they are removed for good.`
               : hasAny
-                ? starred && !narrowed
-                  ? "No video is starred yet; star one from its page, or several from Select."
-                  : `Try a different search, status, folder, date, ${starred ? "share link, or turn off Starred" : "or share link"}.`
+                ? !narrowed && toggledOn.length === 1
+                  ? starred
+                    ? "No video is starred yet; star one from its page, or several from Select."
+                    : "No video has an open comment."
+                  : `Try a different search, status, folder, date, ${toggledOn.length ? `share link, or turn off ${toggledOn.join(" and ")}` : "or share link"}.`
                 : "Your rendered videos will show up here."
           }
         />
@@ -1422,13 +1441,13 @@ function VideosInner() {
           {layout === "list" ? (
             <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200" data-testid="video-list">
               {videos.map((v) => (
-                <VideoRow key={v.id} video={v} selectable={selecting} selected={selected.has(v.id)} onToggle={(shift) => busy === null && click(v.id, shift)} shareOrigin={data?.shareOrigin} onCopyNote={cardCopyNote} />
+                <VideoRow key={v.id} video={v} openComments={data?.openComments?.[v.id]} selectable={selecting} selected={selected.has(v.id)} onToggle={(shift) => busy === null && click(v.id, shift)} shareOrigin={data?.shareOrigin} onCopyNote={cardCopyNote} />
               ))}
             </div>
           ) : (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {videos.map((v) => (
-                <VideoCard key={v.id} video={v} selectable={selecting} selected={selected.has(v.id)} onToggle={(shift) => busy === null && click(v.id, shift)} shareOrigin={data?.shareOrigin} onCopyNote={cardCopyNote} />
+                <VideoCard key={v.id} video={v} openComments={data?.openComments?.[v.id]} selectable={selecting} selected={selected.has(v.id)} onToggle={(shift) => busy === null && click(v.id, shift)} shareOrigin={data?.shareOrigin} onCopyNote={cardCopyNote} />
               ))}
             </div>
           )}

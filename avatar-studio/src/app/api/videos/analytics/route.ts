@@ -4,7 +4,7 @@ import { toCsv } from "@/lib/csv";
 import { ValidationError } from "@/lib/errors";
 import { ANALYTICS_COLUMNS, analyticsRows } from "@/lib/insights";
 import { requireOwner } from "@/lib/owner";
-import { filterVideos, listVideos, videoQuerySchema } from "@/lib/services";
+import { filterVideos, listVideos, openCommentCounts, videoQuerySchema } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +20,7 @@ export async function GET(req: Request) {
     const query = videoQuerySchema.omit({ limit: true }).parse(Object.fromEntries(new URL(req.url).searchParams));
     // A trashed video's share link answers "not found", so it has no share analytics to give.
     if (query.trash) throw new ValidationError("The trash has no share analytics; restore the videos first");
-    const videos = filterVideos(await listVideos(owner, false), query);
+    const videos = filterVideos(await listVideos(owner, false), query, query.comments === "open" ? await openCommentCounts(owner) : undefined);
     const origin = publicOrigin(req);
     return new Response(toCsv([...ANALYTICS_COLUMNS], analyticsRows(videos, origin)), {
       headers: {

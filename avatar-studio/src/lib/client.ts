@@ -231,6 +231,15 @@ export function awaitingReview(videos: { review?: { status: string } }[]): numbe
 }
 
 /**
+ * Videos with a review note no one has resolved yet, and how many such notes there are, from the library's
+ * `openComments` (by video id); only the videos it lists count, so pass the counts of every video, not of a page.
+ */
+export function openCommentSummary(counts: Record<string, number> | undefined): { videos: number; notes: number } {
+  const values = Object.values(counts ?? {}).filter((n) => n > 0);
+  return { videos: values.length, notes: values.reduce((sum, n) => sum + n, 0) };
+}
+
+/**
  * What Home says about this month's render allowance: once a fifth of it or less is left (at least the last render), how
  * many are left and when it starts again (the 1st of next month, UTC, as the server counts); undefined with no allowance
  * or plenty left.

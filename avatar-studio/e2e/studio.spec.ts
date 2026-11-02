@@ -10154,7 +10154,7 @@ test("home points out share links expiring within a week or expired, each line o
 
     // Home's own list, answered here: one link of each kind reads in the singular, and none shows no notice.
     const real = await (await page.request.get("/api/videos")).json();
-    const one = (list: unknown[]) => page.route("**/api/videos", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...real, videos: list }) }));
+    const one = (list: unknown[]) => page.route("**/api/videos", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...real, videos: list, openComments: {} }) }));
     const byId = (id: string) => (real.videos as { id: string }[]).find((v) => v.id === id)!;
     await one([byId(soon.id), byId(gone.id)]);
     await page.goto("/home");
@@ -10181,7 +10181,7 @@ test("home points out this week's failed renders, opening the library filtered t
     const failed = (createdAt: string, id: string) => ({ ...mine, id, status: "failed", error: "The renderer gave up", createdAt, shareDisabled: true });
     const now = new Date().toISOString();
     const list = [failed(now, "vid_failed_now"), failed(new Date(Date.now() - 8 * 86_400_000).toISOString(), "vid_failed_old"), failed(now, "vid_failed_retried"), { ...mine, id: "vid_retry", retryOf: "vid_failed_retried" }];
-    await page.route("**/api/videos", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...real, videos: list }) }));
+    await page.route("**/api/videos", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...real, videos: list, openComments: {} }) }));
     await page.goto("/home");
     const notice = page.getByRole("region", { name: "Things to check" });
     await expect(notice.getByRole("listitem")).toHaveText(["1 render made in the last 7 days failed and has not been retried.Show failed renders"]);
@@ -10243,6 +10243,41 @@ test("home points out workspace videos waiting for review, opening the library f
   } finally {
     await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
     if (ws) expect((await page.request.delete(`/api/workspaces/${ws.id}`)).status()).toBe(204);
+  }
+});
+
+test("home counts the comments no one has resolved, opening the library filtered to their videos", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  let ws: { id: string } | undefined;
+  try {
+    // A workspace of its own, so notes other tests leave open are not counted.
+    ws = (await (await page.request.post("/api/workspaces", { data: { name: `Notes ${tag}` } })).json()).workspace as { id: string };
+    expect((await page.request.post("/api/workspaces/switch", { data: { id: ws.id } })).status()).toBe(200);
+    const a = await createVideoViaApi(page, `First ${tag}`);
+    const b = await createVideoViaApi(page, `Second ${tag}`);
+    const quiet = await createVideoViaApi(page, `Quiet ${tag}`);
+    const notes: Array<[string, string]> = [];
+    for (const [v, text] of [[a, "Intro"], [a, "Outro"], [b, "Logo"]] as const) notes.push([v.id, (await (await page.request.post(`/api/videos/${v.id}/comments`, { data: { text } })).json()).comment.id]);
+    await page.goto("/home");
+    const line = page.getByTestId("open-comments-notice");
+    await expect(line).toHaveText("3 comments on 2 videos are not resolved yet.Show videos with open comments");
+    await line.getByRole("link", { name: "Show videos with open comments" }).click();
+    await expect(page).toHaveURL(/\/videos\?comments=open$/);
+    await expect(page.getByTestId("open-comments-toggle")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator(`a[href="/videos/${a.id}"]`)).toBeVisible();
+    await expect(page.locator(`a[href="/videos/${b.id}"]`)).toBeVisible();
+    await expect(page.locator(`a[href="/videos/${quiet.id}"]`)).toHaveCount(0);
+    // One left open reads in the singular; none left, and Home says nothing of it.
+    for (const [videoId, id] of notes.slice(1)) await page.request.patch(`/api/videos/${videoId}/comments/${id}`, { data: { resolved: true } });
+    await page.goto("/home");
+    await expect(line).toHaveText("1 comment on 1 video is not resolved yet.Show videos with open comments");
+    await page.request.patch(`/api/videos/${notes[0][0]}/comments/${notes[0][1]}`, { data: { resolved: true } });
+    await page.goto("/home");
+    await expect(page.locator(`a[href="/videos/${a.id}"]`)).toBeVisible();
+    await expect(page.getByTestId("home-attention")).toHaveCount(0);
+  } finally {
+    await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
+    if (ws) await page.request.delete(`/api/workspaces/${ws.id}`);
   }
 });
 

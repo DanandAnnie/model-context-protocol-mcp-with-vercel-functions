@@ -2,7 +2,7 @@
 // Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { allowanceNotice, awaitingReview, failedThisWeek, madeWithin } from "../client";
+import { allowanceNotice, awaitingReview, failedThisWeek, madeWithin, openCommentSummary } from "../client";
 import { filterVideos, videoQuerySchema } from "../services";
 import type { Video } from "../types";
 
@@ -61,5 +61,14 @@ describe("failed renders on Home", () => {
     assert.deepEqual(allowanceNotice(2, 3, now)?.left, 1, "the last render is always pointed out");
     assert.equal(allowanceNotice(0, 3, now), undefined);
     assert.equal(allowanceNotice(9, 10, Date.parse("2030-12-31T23:59:59Z"))?.resetsAt, "2031-01-01T00:00:00.000Z", "December runs into January");
+  });
+});
+
+describe("openCommentSummary", () => {
+  it("counts the videos with open notes and the notes themselves", () => {
+    assert.deepEqual(openCommentSummary({ a: 2, b: 1 }), { videos: 2, notes: 3 });
+    assert.deepEqual(openCommentSummary({ a: 0 }), { videos: 0, notes: 0 }, "a zero is not a video with notes");
+    assert.deepEqual(openCommentSummary({}), { videos: 0, notes: 0 });
+    assert.deepEqual(openCommentSummary(undefined), { videos: 0, notes: 0 }, "before the library answers");
   });
 });

@@ -7,7 +7,7 @@ import { VideoCard } from "@/components/VideoCard";
 import { EmptyState, SectionTitle, Skeleton } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useWorkspaceRole } from "@/hooks/useCanEdit";
-import { allowanceNotice, awaitingReview, failedThisWeek, shareAttention } from "@/lib/client";
+import { allowanceNotice, awaitingReview, failedThisWeek, openCommentSummary, shareAttention } from "@/lib/client";
 import { draftKeyFor, draftSummary, type DraftSummary } from "@/lib/editor-draft";
 import type { Video } from "@/lib/types";
 
@@ -23,7 +23,7 @@ const QUICK = [
 ];
 
 export default function HomePage() {
-  const { data, loading } = useApi<{ videos: Video[]; shareOrigin?: string }>("/api/videos");
+  const { data, loading } = useApi<{ videos: Video[]; shareOrigin?: string; openComments?: Record<string, number> }>("/api/videos");
   const recent = data?.videos.slice(0, 4) ?? [];
   // This month's renders against the plan's allowance, once little or none of it is left.
   const { data: status } = useApi<{ renderLimitPerMonth?: number | null; usage?: { rendersThisMonth: number } }>("/api/status");
@@ -84,12 +84,14 @@ export default function HomePage() {
   // Videos waiting for a review decision, this week's failed renders, and links about to lapse or lapsed and still
   // handed out; each line opens the library filtered to those videos.
   const attention = data ? { ...shareAttention(data.videos), failed: failedThisWeek(data.videos), review: awaitingReview(data.videos) } : { expiring: 0, expired: 0, failed: 0, review: 0 };
+  // Review notes no one has resolved yet, across the library (Home asks for every video, so the counts are for all of them).
+  const comments = openCommentSummary(data?.openComments);
 
   return (
     <>
       <SectionTitle title="Home" subtitle="What do you want to make today?" />
 
-      {(allowance || attention.expiring > 0 || attention.expired > 0 || attention.failed > 0 || attention.review > 0) && (
+      {(allowance || attention.expiring > 0 || attention.expired > 0 || attention.failed > 0 || attention.review > 0 || comments.videos > 0) && (
         <section aria-label="Things to check" data-testid="home-attention" className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <ul className="space-y-1.5">
             {allowance && (
@@ -114,6 +116,17 @@ export default function HomePage() {
                 </span>
                 <Link href="/videos?review=pending" className="font-medium underline hover:no-underline">
                   Show videos in review
+                </Link>
+              </li>
+            )}
+            {comments.videos > 0 && (
+              <li className="flex flex-wrap items-center gap-x-2" data-testid="open-comments-notice">
+                <MessageSquare className="h-4 w-4 shrink-0" />
+                <span>
+                  {comments.notes === 1 ? "1 comment" : `${comments.notes} comments`} on {comments.videos === 1 ? "1 video" : `${comments.videos} videos`} {comments.notes === 1 ? "is" : "are"} not resolved yet.
+                </span>
+                <Link href="/videos?comments=open" className="font-medium underline hover:no-underline">
+                  Show videos with open comments
                 </Link>
               </li>
             )}

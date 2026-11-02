@@ -1,7 +1,8 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { ValidationError } from "@/lib/errors";
 import { requireOwner, userOrOwner } from "@/lib/owner";
-import { commentPatchSchema, deleteComment, editComment, notifyMentions, resolveComment } from "@/lib/services";
+import { commentPatchSchema, deleteComment, editComment, notifyMentions, reactToComment, resolveComment } from "@/lib/services";
+import { markMine } from "@/lib/comment-list";
 import { afterResponse } from "@/lib/services/shared";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +24,10 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string; 
   }
 }
 
-/** `{ resolved }` marks the note done or open again, as anyone who can comment may; `{ text }` edits the author's own note. */
+/**
+ * `{ resolved }` marks the note done or open again, as anyone who can comment may; `{ text }` edits the author's own
+ * note; `{ reaction, on }` gives or takes back the caller's reaction.
+ */
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string; commentId: string }> }) {
   try {
     const owner = await requireOwner();
@@ -32,12 +36,16 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string; c
     const user = await userOrOwner(owner);
     if ("resolved" in patch) {
       const comment = await resolveComment(id, commentId, patch.resolved, owner, user);
-      return json({ comment: { ...comment, mine: comment.authorId === user.id } });
+      return json({ comment: markMine([comment], user.id)[0] });
+    }
+    if ("reaction" in patch) {
+      const comment = await reactToComment(id, commentId, patch.reaction, patch.on, owner, user);
+      return json({ comment: markMine([comment], user.id)[0] });
     }
     const { comment, newMentions } = await editComment(id, commentId, patch.text, owner, user);
     // Only members the note never named before are emailed, after the response, as for a new comment.
     if (newMentions?.length) await afterResponse(() => notifyMentions({ ...comment, mentions: newMentions }));
-    return json({ comment: { ...comment, mine: true } });
+    return json({ comment: markMine([comment], user.id)[0] });
   } catch (err) {
     return errorResponse(err);
   }

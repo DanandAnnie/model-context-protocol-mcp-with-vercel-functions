@@ -1493,6 +1493,8 @@ export interface VideoComment {
   resolvedAt?: string;
   resolvedById?: string;
   resolvedByEmail?: string;
+  /** Who reacted with each emoji (one of COMMENT_REACTIONS), in the order they did; an emoji no one uses is left out. */
+  reactions?: Record<string, Array<{ userId: string; email?: string }>>;
 }
 
 /** Where a workspace video stands in review: awaiting an owner, approved, or sent back with changes. */

@@ -45,7 +45,7 @@ export async function POST(req: Request, ctx: Ctx) {
         await notifyReply(comment, mailed);
       });
     }
-    return json({ comment: { ...comment, mine: true } }, { status: 201 });
+    return json({ comment: markMine([comment], comment.authorId)[0] }, { status: 201 });
   } catch (err) {
     return errorResponse(err);
   }

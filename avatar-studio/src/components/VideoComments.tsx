@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
-import { Check, ChevronDown, CornerDownRight, Download, Link2, MessageSquare, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { Check, ChevronDown, CornerDownRight, Download, Link2, MessageSquare, Pencil, RotateCcw, SmilePlus, Trash2 } from "lucide-react";
 import { Button, Card, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
@@ -8,7 +8,7 @@ import { formatTimestamp } from "@/lib/text";
 import { refocusIfLost } from "@/lib/focus";
 import { isSubmitKey } from "@/lib/shortcuts";
 import { isApple } from "@/components/QuickFind";
-import { repliesByThread, splitComments, threadLink } from "@/lib/comment-list";
+import { COMMENT_REACTIONS, REACTION_NAMES, repliesByThread, splitComments, threadLink, type CommentReaction, type ReactionView } from "@/lib/comment-list";
 import type { VideoComment, WorkspaceRole } from "@/lib/types";
 
 /**
@@ -24,8 +24,8 @@ function submitOnModEnter(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
 
 const LINK_GONE = "The comment this link points to is no longer here; it may have been deleted.";
 
-/** A note as the list returns it: `mine` marks the caller's own, which they can edit and delete. */
-type Note = VideoComment & { mine?: boolean };
+/** A note as the list returns it: `mine` marks the caller's own, which they can edit and delete; its reactions as the caller sees them. */
+type Note = VideoComment & { mine?: boolean; reactionList?: ReactionView[] };
 
 interface WorkspaceSummary {
   personalId: string;
@@ -120,13 +120,17 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
   // note's Resolve (else the one before, else the resolved notes' toggle), so a list can be worked through
   // from the keyboard. A reopened note's Resolve button takes the focus back.
   const card = useRef<HTMLDivElement>(null);
-  // Where the focus goes once the list has been drawn again: a note's action button, or the toggle (null).
-  const focusNext = useRef<{ id: string | null } | null>(null);
+  // Where the focus goes once the list has been drawn again: a note's action button, or the toggle (null), or
+  // the first of other controls, named by their selectors, that is still there.
+  const focusNext = useRef<{ id: string | null; selectors?: string[] } | null>(null);
   useEffect(() => {
     const target = focusNext.current;
     focusNext.current = null;
     if (!target || !card.current) return;
-    const el = card.current.querySelector<HTMLElement>(target.id ? `[data-comment-action="${target.id}"]` : "[data-resolved-toggle]");
+    const root = card.current;
+    const el = target.selectors
+      ? (target.selectors.map((s) => root.querySelector<HTMLElement>(s)).find(Boolean) ?? null)
+      : root.querySelector<HTMLElement>(target.id ? `[data-comment-action="${target.id}"]` : "[data-resolved-toggle]");
     refocusIfLost(el);
   }, [data]);
   // A comment email links here with ?comment=<id> (the note that starts the thread): once the notes are in,
@@ -327,6 +331,34 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
       window.prompt("Copy this link to the comment", url);
     }
   }
+  // The note whose reactions are being picked from, and the note whose reaction is on its way; every reaction
+  // control waits, disabled, until it is done.
+  const [picking, setPicking] = useState<string | null>(null);
+  const [reacting, setReacting] = useState<string | null>(null);
+  const pickerOpener = (id: string) => `[data-comment-react="${CSS.escape(id)}"]`;
+  function closePicker(id: string) {
+    setPicking(null);
+    card.current?.querySelector<HTMLElement>(pickerOpener(id))?.focus();
+  }
+  // Giving or taking back the caller's reaction. A pill pressed keeps the focus while it is there; one taken back to
+  // none goes, as the picker does once a reaction is picked, and the focus goes to the note's reaction button.
+  async function react(c: VideoComment, emoji: CommentReaction, on: boolean, fromPill = false) {
+    if (reacting) return;
+    setReacting(c.id);
+    setErr(null);
+    try {
+      await api(`/api/videos/${videoId}/comments/${c.id}`, { method: "PATCH", body: JSON.stringify({ reaction: emoji, on }) });
+      announce(on ? `Reacted with ${REACTION_NAMES[emoji]}` : `${REACTION_NAMES[emoji]} taken back`);
+      const pill = `[data-reaction="${CSS.escape(`${c.id}:${emoji}`)}"]`;
+      focusNext.current = { id: c.id, selectors: fromPill ? [pill, pickerOpener(c.id)] : [pickerOpener(c.id)] };
+      await refetch();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not change the reaction");
+      await refetch();
+    } finally {
+      setReacting(null);
+    }
+  }
   const excerpt = (c: VideoComment) => c.text.slice(0, 60);
   // A note and, for one that starts a thread, its replies and the way to answer it (open threads only).
   const row = (c: Note, action: ReactNode, reply = false): ReactNode => (
@@ -416,18 +448,102 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
             Resolved by {c.resolvedByEmail ?? "you"} · {formatDate(c.resolvedAt)}
           </div>
         )}
+        {(c.reactionList?.length ?? 0) > 0 && (
+          <div className="mt-1 flex flex-wrap gap-1" data-testid="comment-reactions">
+            {c.reactionList!.map((r) => (
+              <button
+                key={r.emoji}
+                type="button"
+                data-reaction={`${c.id}:${r.emoji}`}
+                aria-pressed={r.mine}
+                disabled={reacting !== null}
+                onClick={() => void react(c, r.emoji, !r.mine, true)}
+                aria-label={`${REACTION_NAMES[r.emoji]}, ${r.count}, from ${r.by.join(", ")}${r.mine ? "; press to take yours back" : "; press to add yours"}`}
+                title={`${REACTION_NAMES[r.emoji]} from ${r.by.join(", ")}`}
+                className={`rounded-full border px-2 py-0.5 text-xs disabled:opacity-60 ${r.mine ? "border-brand-300 bg-brand-50 text-brand-800" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+              >
+                <span aria-hidden="true">{r.emoji}</span> {r.count}
+              </button>
+            ))}
+          </div>
+        )}
+        {picking === c.id && (
+          // The picker closes on Escape or once a reaction is picked, back on the button that opened it, and when the
+          // focus leaves it for anywhere but that button (which closes it itself).
+          <div
+            id={`reactions-${c.id}`}
+            role="group"
+            aria-label={`Reactions for: ${excerpt(c)}`}
+            className="mt-1 flex gap-1 rounded-full border border-slate-200 bg-white px-1.5 py-1 shadow-sm"
+            onBlur={(e) => {
+              const to = e.relatedTarget as HTMLElement | null;
+              if (to && (e.currentTarget.contains(to) || to.matches(pickerOpener(c.id)))) return;
+              setPicking(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key !== "Escape") return;
+              e.preventDefault();
+              e.stopPropagation();
+              closePicker(c.id);
+            }}
+          >
+            {COMMENT_REACTIONS.map((emoji, i) => {
+              const mine = c.reactionList?.some((r) => r.emoji === emoji && r.mine) ?? false;
+              return (
+                <button
+                  key={emoji}
+                  type="button"
+                  autoFocus={i === 0}
+                  aria-pressed={mine}
+                  disabled={reacting !== null}
+                  onClick={() => {
+                    setPicking(null);
+                    void react(c, emoji, !mine);
+                  }}
+                  aria-label={REACTION_NAMES[emoji]}
+                  title={REACTION_NAMES[emoji]}
+                  className={`rounded-full px-1.5 py-0.5 text-base hover:bg-slate-100 ${mine ? "bg-brand-50" : ""}`}
+                >
+                  {emoji}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
       {/* While its text, or one of its replies, is being changed, a note is not resolved or deleted from under the form. */}
       {editing?.id !== c.id && !replies.get(c.id)?.some((r) => r.id === editing?.id) && (
         <div className="flex shrink-0 items-center gap-0.5">
           {action}
+          <button
+            type="button"
+            onClick={() => (picking === c.id ? closePicker(c.id) : setPicking(c.id))}
+            onKeyDown={(e) => {
+              if (e.key !== "Escape" || picking !== c.id) return;
+              e.preventDefault();
+              e.stopPropagation();
+              setPicking(null);
+            }}
+            data-comment-react={c.id}
+            aria-expanded={picking === c.id}
+            aria-controls={picking === c.id ? `reactions-${c.id}` : undefined}
+            aria-label={`React to comment: ${excerpt(c)}`}
+            title="React to this comment"
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+          >
+            <SmilePlus className="h-4 w-4" />
+          </button>
           {!reply && (
             <button type="button" onClick={() => void copyLink(c)} data-comment-link={c.id} aria-label={`Copy link to comment: ${excerpt(c)}`} title="Copy a link that opens this thread" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
               {copiedLink === c.id ? <Check className="h-4 w-4 text-emerald-600" /> : <Link2 className="h-4 w-4" />}
             </button>
           )}
           {c.mine && (
-            <button type="button" onClick={() => setEditing({ id: c.id, text: c.text })} data-comment-edit={c.id} aria-label={`Edit comment: ${excerpt(c)}`} title="Change this comment's text" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+            <button type="button" onClick={() => {
+                // The action group, with the picker's button, is hidden while the note is edited, so the picker closes.
+                setPicking(null);
+                setEditing({ id: c.id, text: c.text });
+              }} data-comment-edit={c.id} aria-label={`Edit comment: ${excerpt(c)}`} title="Change this comment's text" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
               <Pencil className="h-4 w-4" />
             </button>
           )}

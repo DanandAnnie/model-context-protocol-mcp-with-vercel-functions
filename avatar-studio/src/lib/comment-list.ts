@@ -22,9 +22,36 @@ export function repliesByThread<T extends Pick<VideoComment, "parentId" | "creat
   return out;
 }
 
-/** Marks the notes `userId` wrote as `mine`: the ones they can edit and delete. */
-export function markMine<T extends Pick<VideoComment, "authorId">>(comments: T[], userId: string): Array<T & { mine: boolean }> {
-  return comments.map((c) => ({ ...c, mine: c.authorId === userId }));
+/** The reactions a note can have, in the order the page shows them. */
+export const COMMENT_REACTIONS = ["👍", "✅", "❤️", "👀", "🎉"] as const;
+export type CommentReaction = (typeof COMMENT_REACTIONS)[number];
+
+/** What each reaction is called to a screen reader and in its title. */
+export const REACTION_NAMES: Record<CommentReaction, string> = { "👍": "Thumbs up", "✅": "Done", "❤️": "Love", "👀": "Looking", "🎉": "Celebrate" };
+
+/** A reaction as the page shows it: how many gave it, whether the reader did, and who gave it, the reader as "you". */
+export type ReactionView = { emoji: CommentReaction; count: number; mine: boolean; by: string[] };
+
+/**
+ * A note's reactions for the person `userId`: the ones someone gave, in COMMENT_REACTIONS order. Each names who gave
+ * it by email, the reader as "you" (first), and anyone the account mode knows no email for as "a teammate".
+ */
+export function reactionSummary(c: Pick<VideoComment, "reactions">, userId: string): ReactionView[] {
+  return COMMENT_REACTIONS.flatMap((emoji) => {
+    const who = c.reactions?.[emoji] ?? [];
+    if (!who.length) return [];
+    const mine = who.some((r) => r.userId === userId);
+    const others = who.filter((r) => r.userId !== userId).map((r) => r.email ?? "a teammate");
+    return [{ emoji, count: who.length, mine, by: mine ? ["you", ...others] : others }];
+  });
+}
+
+/**
+ * Marks the notes `userId` wrote as `mine`, the ones they can edit and delete, and gives each its reactions as that
+ * person sees them (`reactionList`), so the page can show their own as theirs to take back.
+ */
+export function markMine<T extends Pick<VideoComment, "authorId" | "reactions">>(comments: T[], userId: string): Array<T & { mine: boolean; reactionList: ReactionView[] }> {
+  return comments.map((c) => ({ ...c, mine: c.authorId === userId, reactionList: reactionSummary(c, userId) }));
 }
 
 /**

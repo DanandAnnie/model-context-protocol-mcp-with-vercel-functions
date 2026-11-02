@@ -3744,6 +3744,53 @@ test("a thread's copied link in a workspace switches a member who is elsewhere i
   }
 });
 
+test("a review comment takes reactions from the picker, shown as pills that take yours back", async ({ page }) => {
+  const v = await createVideoViaApi(page, `React ${Date.now().toString(36)}`);
+  const note = (await (await page.request.post(`/api/videos/${v.id}/comments`, { data: { text: "Love the new intro." } })).json()).comment;
+  await page.request.post(`/api/videos/${v.id}/comments`, { data: { text: "Agreed.", parentId: note.id } });
+  await page.goto(`/videos/${v.id}`);
+  const comments = page.getByTestId("comments");
+  const opener = comments.getByRole("button", { name: "React to comment: Love the new intro." });
+  // The picker opens on its first reaction; Escape closes it, back on the button.
+  await opener.click();
+  await expect(opener).toHaveAttribute("aria-expanded", "true");
+  const picker = comments.getByRole("group", { name: "Reactions for: Love the new intro." });
+  await expect(picker.getByRole("button", { name: "Thumbs up" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(picker).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  // Picking one closes it and shows the reaction as a pill of the reader's own.
+  await page.keyboard.press("Enter");
+  await picker.getByRole("button", { name: "Thumbs up" }).click();
+  await expect(picker).toHaveCount(0);
+  const thread = comments.locator(`[data-comment-id="${note.id}"]`);
+  const pills = thread.getByTestId("comment-reactions").first();
+  const thumbs = pills.getByRole("button", { name: /^Thumbs up, 1, from you/ });
+  await expect(thumbs).toHaveAttribute("aria-pressed", "true");
+  await expect(thumbs).toHaveText("👍 1");
+  await expect(opener).toBeFocused();
+  await expect(comments.getByRole("status")).toHaveText("Reacted with Thumbs up");
+  await opener.click();
+  await picker.getByRole("button", { name: "Done" }).click();
+  await expect(pills.getByRole("button")).toHaveText(["👍 1", "✅ 1"]);
+  // A reply takes its own reactions.
+  await comments.getByRole("button", { name: "React to comment: Agreed." }).click();
+  await comments.getByRole("group", { name: "Reactions for: Agreed." }).getByRole("button", { name: "Celebrate" }).click();
+  await expect(comments.getByTestId("comment-reply").getByTestId("comment-reactions")).toHaveText("🎉 1");
+  const stored = (await (await page.request.get(`/api/videos/${v.id}/comments`)).json()).comments;
+  // Stores may keep the emoji in any order; the page's order is the list's.
+  expect(Object.keys(stored.find((c: { id: string }) => c.id === note.id).reactions).sort()).toEqual(["👍", "✅"].sort());
+  // Pressing a pill of your own takes it back; the last one gone, the focus is on the note's React button.
+  await thumbs.click();
+  await expect(pills.getByRole("button")).toHaveText(["✅ 1"]);
+  await expect(comments.getByRole("status")).toHaveText("Thumbs up taken back");
+  await pills.getByRole("button", { name: /^Done, 1, from you/ }).click();
+  await expect(thread.getByTestId("comment-reactions")).toHaveCount(1);
+  await expect(opener).toBeFocused();
+  // Only the listed reactions are taken.
+  expect((await page.request.patch(`/api/videos/${v.id}/comments/${note.id}`, { data: { reaction: "🤡", on: true } })).status()).toBe(400);
+});
+
 test("share page offers a download only when the owner allows it", async ({ page }) => {
   const v = await createVideoViaApi(page, `Downloadable ${Date.now().toString(36)}`);
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");

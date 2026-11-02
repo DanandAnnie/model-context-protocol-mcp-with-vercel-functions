@@ -11,7 +11,7 @@ import { releaseRateLimit, reserveRateLimit } from "../rate-limit";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../errors";
 import { owned } from "./shared";
 import { formatTimestamp } from "../text";
-import { threadLink } from "../comment-list";
+import { COMMENT_REACTIONS, threadLink } from "../comment-list";
 
 export const MAX_COMMENTS_PER_VIDEO = 200;
 
@@ -242,8 +242,59 @@ async function rewrite(prev: VideoComment, next: VideoComment): Promise<VideoCom
   throw new ConflictError("This comment was changed meanwhile; reload to see it, then try again");
 }
 
-/** A change to a note: resolved or reopened by anyone who can comment, or its text by its author; one at a time. */
-export const commentPatchSchema = z.union([z.object({ resolved: z.boolean() }).strict(), z.object({ text: commentSchema.shape.text }).strict()]);
+/**
+ * A change to a note, one at a time: resolved or reopened by anyone who can comment, its text by its author, or a
+ * reaction given (`on: true`) or taken back by the person sending it.
+ */
+export const commentPatchSchema = z.union([
+  z.object({ resolved: z.boolean() }).strict(),
+  z.object({ text: commentSchema.shape.text }).strict(),
+  // A bare heart (U+2764, as many keyboards send it) is the listed one, which carries the emoji form (U+FE0F).
+  z.object({ reaction: z.preprocess((v) => (v === "\u2764" ? "\u2764\uFE0F" : v), z.enum(COMMENT_REACTIONS)), on: z.boolean() }).strict(),
+]);
+
+/** How many times a reaction is written again after someone else changed the note in the same moment. */
+const REACTION_TRIES = 5;
+
+/**
+ * Gives a reaction to a note or reply, or takes it back, for the person `user`; anyone who can comment may react to
+ * any note, open or resolved. Giving one already given, or taking back one not given, changes nothing. Reactions
+ * from two people at once both count: a write that lost the race to another change is made again on the note as it
+ * now is, so only a note deleted meanwhile (`404`) or one changing on every try (`409`) refuses it.
+ */
+export async function reactToComment(
+  videoId: string,
+  commentId: string,
+  reaction: (typeof COMMENT_REACTIONS)[number],
+  on: boolean,
+  ownerId: string = LOCAL_OWNER,
+  user: User = { id: ownerId },
+): Promise<VideoComment> {
+  await ownedVideo(videoId, ownerId);
+  for (let attempt = 1; ; attempt++) {
+    const comment = await getStore().get<VideoComment>("comment", commentId);
+    if (!comment || comment.videoId !== videoId || comment.ownerId !== ownerId) throw new NotFoundError("Comment not found");
+    // A note from before revisions is matched by when it was written, which two writes at once would both pass:
+    // it is given a revision first, so the reactions written after it are matched by that and none is lost.
+    if (!comment.rev) {
+      await rewrite(comment, comment).catch((err) => {
+        if (!(err instanceof ConflictError)) throw err;
+      });
+      continue;
+    }
+    const who = comment.reactions?.[reaction] ?? [];
+    if (who.some((r) => r.userId === user.id) === on) return comment;
+    const nextWho = on ? [...who, { userId: user.id, ...(user.email ? { email: user.email } : {}) }] : who.filter((r) => r.userId !== user.id);
+    const { reactions: _before, ...rest } = comment;
+    const reactions = { ...comment.reactions, [reaction]: nextWho };
+    if (!nextWho.length) delete reactions[reaction];
+    try {
+      return await rewrite(comment, Object.keys(reactions).length ? { ...rest, reactions } : rest);
+    } catch (err) {
+      if (!(err instanceof ConflictError) || attempt >= REACTION_TRIES) throw err;
+    }
+  }
+}
 
 /**
  * Changes the text of the author's own note (`403` for anyone else's). Mentions are read again from the new

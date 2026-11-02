@@ -192,6 +192,26 @@ export function shareAttention(videos: { shareDisabled?: boolean; shareExpiresAt
   return { expiring, expired };
 }
 
+/** The library's "made within" windows, in days: rolling windows of 24-hour days counted back from `now`. */
+export const CREATED_WITHIN_DAYS = { "7d": 7, "30d": 30, "90d": 90 } as const;
+
+export type CreatedWithin = keyof typeof CREATED_WITHIN_DAYS;
+
+/** Whether a video was made within `created` of `now`; an unreadable creation time (NaN) is in no window. */
+export function madeWithin(video: { createdAt: string }, created: CreatedWithin, now = Date.now()): boolean {
+  return Date.parse(video.createdAt) >= now - CREATED_WITHIN_DAYS[created] * 86_400_000;
+}
+
+/**
+ * Renders among these videos that failed, were asked for in the last 7 days, and have not been retried (no video here
+ * is a retry of them), so one put right does not stay on Home for the week. The library's Failed and "Made in the last
+ * 7 days" filters list these, with any retried ones beside them.
+ */
+export function failedThisWeek(videos: { id: string; status: string; createdAt: string; retryOf?: string }[], now = Date.now()): number {
+  const retried = new Set(videos.map((v) => v.retryOf).filter(Boolean));
+  return videos.filter((v) => v.status === "failed" && madeWithin(v, "7d", now) && !retried.has(v.id)).length;
+}
+
 /** When a trashed video is deleted for good, as an ISO instant; undefined for a video that is not in the trash. */
 export function purgeAt(video: { deletedAt?: string }): string | undefined {
   return video.deletedAt ? new Date(Date.parse(video.deletedAt) + TRASH_RETENTION_DAYS * 86_400_000).toISOString() : undefined;

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArchiveRestore, CheckSquare, Clapperboard, Clock, Copy, LayoutGrid, List, Download, FolderInput, KeyRound, MousePointerClick, QrCode, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
-import { SHARE_FILTERS, api, clickSelect, folderFor, nextShareChange, overSelection, type ShareFilter } from "@/lib/client";
+import { CREATED_WITHIN_DAYS, SHARE_FILTERS, api, clickSelect, folderFor, nextShareChange, overSelection } from "@/lib/client";
 import { libraryKey } from "@/lib/shortcuts";
 import { isApple } from "@/components/QuickFind";
 import { VideoCard, VideoRow } from "@/components/VideoCard";
@@ -14,6 +14,12 @@ import type { VideoPage, VideoQuery } from "@/lib/services/videos";
 import { BULK_MAX, EMPTY_TRASH_MAX, LIBRARY_PAGE_MAX, MAX_FOLDER_NAME, MAX_RETRY_AT_ONCE, RESTORE_ALL_MAX, SHARE_CTA_LABEL_MAX, SHARE_CTA_URL_MAX, SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, TRASH_RETENTION_DAYS, type VideoStatus } from "@/lib/types";
 
 const STATUSES: Array<"all" | VideoStatus> = ["all", "processing", "completed", "failed"];
+const CREATED_FILTERS = Object.keys(CREATED_WITHIN_DAYS) as (keyof typeof CREATED_WITHIN_DAYS)[];
+
+/** A filter's value from the page's address when the library knows it, else "all". */
+function fromAddress<T extends string>(asked: string | null, known: readonly T[]): T | "all" {
+  return known.includes(asked as T) ? (asked as T) : "all";
+}
 type SortKey = VideoQuery["sort"];
 /** Where this browser keeps the library's layout (grid of cards or list of rows). */
 const LAYOUT_KEY = "avatar-studio:library-layout";
@@ -48,7 +54,10 @@ function VideosInner() {
   const failedCount = Number(params.get("failed") ?? 0);
   const [q, setQ] = useState("");
   const [needle, setNeedle] = useState("");
-  const [status, setStatus] = useState<"all" | VideoStatus>("all");
+  // Home's notices open the library at `?share=`, `?status=`, and `?created=`, read again whenever the address changes
+  // (the sidebar's My videos goes back to every video); a value the library does not know is ignored.
+  const askedFilters = ["share", "status", "created"].map((k) => params.get(k) ?? "").join("\u0000");
+  const [status, setStatus] = useState<"all" | VideoStatus>(() => fromAddress(params.get("status"), STATUSES));
   const [folder, setFolder] = useState<string>("all"); // "all" | "unfiled" | folder name
   const [sort, setSort] = useState<SortKey>("newest");
   // Reviews exist only in a workspace, so the filter shows there.
@@ -60,22 +69,20 @@ function VideosInner() {
   const focusTrashToggle = useRef(false);
   const [review, setReview] = useState<VideoQuery["review"]>("all");
   // Share link state, as the cards' badges say; with the bulk go-live and expiry it finds a campaign's links to fix.
-  // Home's notice of links needing a look opens the library at `?share=`, read again whenever the address changes (the
-  // sidebar's My videos goes back to every link); a value the library does not know is ignored.
-  const askedShare = params.get("share");
-  const fromAddress = (asked: string | null): VideoQuery["share"] => (SHARE_FILTERS.includes(asked as ShareFilter) ? (asked as ShareFilter) : "all");
-  const [share, setShare] = useState<VideoQuery["share"]>(() => fromAddress(askedShare));
-  const [shareAsked, setShareAsked] = useState(askedShare);
-  if (askedShare !== shareAsked) {
-    setShareAsked(askedShare);
-    setShare(fromAddress(askedShare));
-  }
+  const [share, setShare] = useState<VideoQuery["share"]>(() => fromAddress(params.get("share"), SHARE_FILTERS));
   // The trash is its own view of the same page: same search, status, and folder filters, different bulk actions.
   const [trash, setTrash] = useState(false);
   // Only the starred videos (in the trash view too, where a star is kept for when a video comes back).
   const [starred, setStarred] = useState(false);
   // When the videos were made: a campaign's renders of this week or month, whatever folder they went to.
-  const [created, setCreated] = useState<VideoQuery["created"]>("all");
+  const [created, setCreated] = useState<VideoQuery["created"]>(() => fromAddress(params.get("created"), CREATED_FILTERS));
+  const [filtersAsked, setFiltersAsked] = useState(askedFilters);
+  if (askedFilters !== filtersAsked) {
+    setFiltersAsked(askedFilters);
+    setShare(fromAddress(params.get("share"), SHARE_FILTERS));
+    setStatus(fromAddress(params.get("status"), STATUSES));
+    setCreated(fromAddress(params.get("created"), CREATED_FILTERS));
+  }
   // Cards or compact rows; remembered by this browser only (read after mounting, so the server render stays the grid).
   const [layout, setLayout] = useState<"grid" | "list">("grid");
   useEffect(() => {

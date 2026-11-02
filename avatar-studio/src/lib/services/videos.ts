@@ -25,7 +25,7 @@ import { listVoices } from "./voices";
 import { PUBLIC_ACCESS, owned, scheduleNotification, stripUndefined } from "./shared";
 import { SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, clearShareLock, setShareLock, shareUnlocked } from "../share-lock";
 import { clearCover, setCover } from "../cover";
-import { SHARE_FILTERS, inShareFilter, posterUrl, shareOffline } from "../client";
+import { SHARE_FILTERS, inShareFilter, madeWithin, posterUrl, shareOffline } from "../client";
 import { bumpViewsByDay } from "../insights";
 
 import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneNameSchema, sceneTextSchema } from "./schemas";
@@ -2134,8 +2134,6 @@ const SORTERS: Record<VideoQuery["sort"], (a: Video, b: Video) => number> = {
   length: (a, b) => (b.durationSec ?? -1) - (a.durationSec ?? -1) || b.createdAt.localeCompare(a.createdAt),
 };
 
-const CREATED_WITHIN_DAYS: Record<Exclude<VideoQuery["created"], "all">, number> = { "7d": 7, "30d": 30, "90d": 90 };
-
 /** The videos matching `query`, sorted; `limit` is not applied here. */
 export function filterVideos(videos: Video[], query: VideoQuery): Video[] {
   const needle = query.q.toLowerCase();
@@ -2145,8 +2143,7 @@ export function filterVideos(videos: Video[], query: VideoQuery): Video[] {
     .filter((v) => {
       if (query.batch && v.batchId !== query.batch) return false;
       if (query.starred && !v.starred) return false;
-      // Written so an unreadable creation time (NaN) is in no window rather than in every one.
-      if (query.created !== "all" && !(Date.parse(v.createdAt) >= now - CREATED_WITHIN_DAYS[query.created] * 86_400_000)) return false;
+      if (query.created !== "all" && !madeWithin(v, query.created, now)) return false;
       if (query.review !== "all" && (v.review?.status ?? "none") !== query.review) return false;
       if (query.share !== "all" && !inShareFilter(v, query.share, now)) return false;
       if (query.folder !== undefined && (v.folder ?? "") !== query.folder) return false;

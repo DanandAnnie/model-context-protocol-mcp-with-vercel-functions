@@ -9638,7 +9638,7 @@ test("home points out share links expiring within a week or expired, each line o
     const expiring = (await ids("expiring")).length;
     const expired = (await ids("expired")).length;
     await page.goto("/home");
-    const notice = page.getByRole("region", { name: "Share links to check" });
+    const notice = page.getByRole("region", { name: "Videos to check" });
     await expect(notice).toContainText(expiring === 1 ? "1 share link expires within a week." : `${expiring} share links expire within a week.`);
     await expect(notice).toContainText(expired === 1 ? "1 share link has expired but is still on: visitors see that it has expired." : `${expired} share links have expired but are still on: visitors see that they have expired.`);
 
@@ -9649,7 +9649,7 @@ test("home points out share links expiring within a week or expired, each line o
     await expect(page.locator(`a[href="/videos/${gone.id}"]`)).toHaveCount(0);
 
     await page.goBack();
-    await page.getByRole("region", { name: "Share links to check" }).getByRole("link", { name: "Show expired links" }).click();
+    await page.getByRole("region", { name: "Videos to check" }).getByRole("link", { name: "Show expired links" }).click();
     await expect(page).toHaveURL(/\/videos\?share=expired$/);
     await expect(page.getByLabel("Filter by share link")).toHaveValue("expired");
     await expect(page.locator(`a[href="/videos/${gone.id}"]`)).toContainText("Expired");
@@ -9672,16 +9672,54 @@ test("home points out share links expiring within a week or expired, each line o
     const byId = (id: string) => (real.videos as { id: string }[]).find((v) => v.id === id)!;
     await one([byId(soon.id), byId(gone.id)]);
     await page.goto("/home");
-    const single = page.getByRole("region", { name: "Share links to check" }).getByRole("listitem");
+    const single = page.getByRole("region", { name: "Videos to check" }).getByRole("listitem");
     await expect(single).toHaveText(["1 share link expires within a week.Show expiring links", "1 share link has expired but is still on: visitors see that it has expired.Show expired links"]);
     await page.unroute("**/api/videos");
     await one([]);
     await page.goto("/home");
     await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
-    await expect(page.getByTestId("share-attention")).toHaveCount(0);
+    await expect(page.getByTestId("home-attention")).toHaveCount(0);
   } finally {
     // Switched off, neither link is counted on home for the tests after this one.
     for (const v of made) await page.request.patch(`/api/videos/${v.id}`, { data: { shareDisabled: true } });
+  }
+});
+
+test("home points out this week's failed renders, opening the library filtered to failed renders of the last 7 days", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Failing ${Date.now().toString(36)}`);
+  try {
+    const real = await (await page.request.get("/api/videos")).json();
+    const mine = (real.videos as { id: string }[]).find((x) => x.id === v.id)!;
+    // The demo renderer never fails, so Home is shown failed renders: one this week, one made too long ago to count, and
+    // one already retried.
+    const failed = (createdAt: string, id: string) => ({ ...mine, id, status: "failed", error: "The renderer gave up", createdAt, shareDisabled: true });
+    const now = new Date().toISOString();
+    const list = [failed(now, "vid_failed_now"), failed(new Date(Date.now() - 8 * 86_400_000).toISOString(), "vid_failed_old"), failed(now, "vid_failed_retried"), { ...mine, id: "vid_retry", retryOf: "vid_failed_retried" }];
+    await page.route("**/api/videos", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...real, videos: list }) }));
+    await page.goto("/home");
+    const notice = page.getByRole("region", { name: "Videos to check" });
+    await expect(notice.getByRole("listitem")).toHaveText(["1 render made in the last 7 days failed and has not been retried.Show failed renders"]);
+    // The library asks the server for just those: the demo video is neither failed nor shown.
+    const asked = page.waitForResponse((r) => /\/api\/videos\?/.test(r.url()) && new URL(r.url()).searchParams.get("status") === "failed" && new URL(r.url()).searchParams.get("created") === "7d");
+    await notice.getByRole("link", { name: "Show failed renders" }).click();
+    await expect(page).toHaveURL(/\/videos\?status=failed&created=7d$/);
+    expect((await asked).ok()).toBe(true);
+    await expect(page.getByRole("button", { name: "Failed", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByLabel("Filter by date made")).toHaveValue("7d");
+    await expect(page.getByLabel("Filter by share link")).toHaveValue("all");
+    await expect(page.locator(`a[href="/videos/${v.id}"]`)).toHaveCount(0);
+    // The sidebar's My videos clears what the address asked for.
+    await page.getByRole("link", { name: "My videos", exact: true }).filter({ visible: true }).first().click();
+    await expect(page).toHaveURL(/\/videos$/);
+    await expect(page.getByRole("button", { name: "All", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByLabel("Filter by date made")).toHaveValue("all");
+    await expect(page.locator(`a[href="/videos/${v.id}"]`)).toBeVisible();
+    // Values the library does not know are ignored.
+    await page.goto("/videos?status=queued&created=1y");
+    await expect(page.getByRole("button", { name: "All", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByLabel("Filter by date made")).toHaveValue("all");
+  } finally {
+    await page.request.delete(`/api/videos/${v.id}?permanent=true`);
   }
 });
 

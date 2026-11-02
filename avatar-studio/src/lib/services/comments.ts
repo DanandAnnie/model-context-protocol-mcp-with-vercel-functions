@@ -8,7 +8,7 @@ import { isWorkspaceId, type User } from "../workspaces";
 import { config } from "../config";
 import { getEmailProvider, mentionEmail } from "../providers/email";
 import { reserveRateLimit } from "../rate-limit";
-import { ForbiddenError, NotFoundError, ValidationError } from "../errors";
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../errors";
 import { owned } from "./shared";
 import { formatTimestamp } from "../text";
 
@@ -86,11 +86,15 @@ export async function addComment(videoId: string, input: z.infer<typeof commentS
     text: input.text,
     ...(input.atSec !== undefined ? { atSec: Math.round(input.atSec * 10) / 10 } : {}),
     createdAt: nowIso(),
+    rev: newId("rev"),
   };
   if (isWorkspaceId(ownerId)) {
     const ws = await getStore().get<Workspace>("workspace", ownerId);
     const mentions = ws ? findMentions(input.text, ws, author.id) : [];
-    if (mentions.length) comment.mentions = mentions;
+    if (mentions.length) {
+      comment.mentions = mentions;
+      comment.notified = mentions.map((m) => m.userId);
+    }
   }
   return getStore().put("comment", comment);
 }
@@ -134,7 +138,46 @@ export async function deleteComment(videoId: string, commentId: string, ownerId:
   await getStore().remove("comment", commentId);
 }
 
-export const commentPatchSchema = z.object({ resolved: z.boolean() }).strict();
+/**
+ * Writes a changed note over the one read, only while it is still that one: a note deleted meanwhile (by its
+ * author, or with its video) stays deleted, and one changed meanwhile (edited while being resolved, say) is not
+ * overwritten. A note from before revisions is matched by when it was written.
+ */
+async function rewrite(prev: VideoComment, next: VideoComment): Promise<VideoComment> {
+  const stamped = { ...next, rev: newId("rev") };
+  const written = prev.rev ? await getStore().putIf("comment", stamped, "rev", prev.rev) : await getStore().putIf("comment", stamped, "createdAt", prev.createdAt);
+  if (written) return stamped;
+  if (!(await getStore().get<VideoComment>("comment", prev.id))) throw new NotFoundError("Comment not found");
+  throw new ConflictError("This comment was changed meanwhile; reload to see it, then try again");
+}
+
+/** A change to a note: resolved or reopened by anyone who can comment, or its text by its author; one at a time. */
+export const commentPatchSchema = z.union([z.object({ resolved: z.boolean() }).strict(), z.object({ text: commentSchema.shape.text }).strict()]);
+
+/**
+ * Changes the text of the author's own note (`403` for anyone else's). Mentions are read again from the new
+ * text; only members the note has never named before are returned in `newMentions`, to be emailed, so fixing
+ * a typo, or taking a name out and putting it back, does not mail anyone twice. The same text changes nothing.
+ */
+export async function editComment(videoId: string, commentId: string, text: string, ownerId: string = LOCAL_OWNER, author: User = { id: ownerId }): Promise<{ comment: VideoComment; newMentions: VideoComment["mentions"] }> {
+  await ownedVideo(videoId, ownerId);
+  const comment = await getStore().get<VideoComment>("comment", commentId);
+  if (!comment || comment.videoId !== videoId || comment.ownerId !== ownerId) throw new NotFoundError("Comment not found");
+  if (comment.authorId !== author.id) throw new ForbiddenError("Only the author can edit this comment");
+  if (text === comment.text) return { comment, newMentions: [] };
+  const { mentions: _before, notified: _notified, ...rest } = comment;
+  let mentions: VideoComment["mentions"] = [];
+  if (isWorkspaceId(ownerId)) {
+    const ws = await getStore().get<Workspace>("workspace", ownerId);
+    mentions = ws ? findMentions(text, ws, author.id) : [];
+  }
+  // Everyone the note ever named was mailed then; naming them again, or again after taking them out, does not mail them twice.
+  const known = new Set([...(comment.notified ?? []), ...(comment.mentions ?? []).map((m) => m.userId)]);
+  const newMentions = mentions.filter((m) => !known.has(m.userId));
+  const notified = [...known, ...newMentions.map((m) => m.userId)];
+  const next: VideoComment = { ...rest, text, editedAt: nowIso(), ...(mentions.length ? { mentions } : {}), ...(notified.length ? { notified } : {}) };
+  return { comment: await rewrite(comment, next), newMentions };
+}
 
 /**
  * Marks a note done, or open again. Anyone who can comment on the video may, as in a shared review: the
@@ -147,9 +190,7 @@ export async function resolveComment(videoId: string, commentId: string, resolve
   if (resolved === !!comment.resolvedAt) return comment;
   const { resolvedAt: _at, resolvedById: _by, resolvedByEmail: _email, ...open } = comment;
   const next: VideoComment = resolved ? { ...open, resolvedAt: nowIso(), resolvedById: user.id, ...(user.email ? { resolvedByEmail: user.email } : {}) } : open;
-  // Only over the note read: one its author deleted meanwhile, or that went with its video, stays gone.
-  if (!(await getStore().putIf("comment", next, "createdAt", comment.createdAt))) throw new NotFoundError("Comment not found");
-  return next;
+  return rewrite(comment, next);
 }
 
 /** Removes every comment on a video; part of deleting the video for good. */

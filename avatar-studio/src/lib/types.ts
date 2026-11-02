@@ -1481,6 +1481,12 @@ export interface VideoComment {
   /** Workspace members named as `@email` in the text; each is emailed a link to the video once. */
   mentions?: Array<{ userId: string; email: string }>;
   createdAt: string;
+  /** Members ever emailed about this note, so an edit that names one again does not mail them twice. */
+  notified?: string[];
+  /** Changes on every write, so two changes at once cannot overwrite each other; absent on notes from before. */
+  rev?: string;
+  /** When its author last changed the text; absent for a note never edited. */
+  editedAt?: string;
   /** When the note was marked done, and by whom (their email when the account mode knows one); absent while it is open. */
   resolvedAt?: string;
   resolvedById?: string;

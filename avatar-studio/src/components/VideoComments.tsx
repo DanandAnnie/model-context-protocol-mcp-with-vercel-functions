@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { Check, ChevronDown, MessageSquare, RotateCcw, Trash2 } from "lucide-react";
+import { Check, ChevronDown, MessageSquare, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { Button, Card, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
@@ -8,6 +8,9 @@ import { formatTimestamp } from "@/lib/text";
 import { refocusIfLost } from "@/lib/focus";
 import { splitComments } from "@/lib/comment-list";
 import type { VideoComment, WorkspaceRole } from "@/lib/types";
+
+/** A note as the list returns it: `mine` marks the caller's own, which they can edit and delete. */
+type Note = VideoComment & { mine?: boolean };
 
 interface WorkspaceSummary {
   personalId: string;
@@ -19,10 +22,10 @@ interface WorkspaceSummary {
  * Review notes on a video for the owner and workspace members; each author can remove their own. With the
  * page's player, a note can be pinned to the moment the player is at when the box is ticked, and a pinned
  * note's time moves the player there. Anyone who can comment marks a note resolved once it is dealt with;
- * resolved notes fold away under the open ones and can be reopened.
+ * resolved notes fold away under the open ones and can be reopened. Authors edit and delete their own notes.
  */
 export function VideoComments({ videoId, player }: { videoId: string; player?: RefObject<HTMLVideoElement | null> }) {
-  const { data, error: loadErr, refetch } = useApi<{ comments: VideoComment[] }>(`/api/videos/${videoId}/comments`);
+  const { data, error: loadErr, refetch } = useApi<{ comments: Note[] }>(`/api/videos/${videoId}/comments`);
   const [draft, setDraft] = useState("");
   // The player's time in whole seconds (null without a player), followed here rather than on the page so
   // playback re-renders only this card; and the moment taken when the box was ticked, which playing on keeps.
@@ -59,6 +62,11 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
   if (showResolved && resolved.length === 0) setShowResolved(false);
   // Said to a screen reader after a note is resolved or reopened, as the note leaves where the focus was.
   const [status, setStatus] = useState("");
+  // Cleared first, so the same message twice in a row is still spoken the second time.
+  const announce = (message: string) => {
+    setStatus("");
+    window.setTimeout(() => setStatus(message), 50);
+  };
   // The note being resolved or reopened, so a second press waits for the first.
   const [acting, setActing] = useState<string | null>(null);
   // Teammates who can be mentioned: the open workspace's other members with an email.
@@ -117,7 +125,7 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
     try {
       await api(`/api/videos/${videoId}/comments/${c.id}`, { method: "PATCH", body: JSON.stringify({ resolved: value }) });
       focusNext.current = { id: next ?? null };
-      setStatus(value ? `Comment resolved${open.length > 1 ? `; ${open.length - 1} open` : "; none open"}` : "Comment reopened");
+      announce(value ? `Comment resolved${open.length > 1 ? `; ${open.length - 1} open` : "; none open"}` : "Comment reopened");
       await refetch();
     } catch (e) {
       setErr(e instanceof Error ? e.message : value ? "Could not resolve the comment" : "Could not reopen the comment");
@@ -125,6 +133,55 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
       await refetch();
     } finally {
       setActing(null);
+    }
+  }
+
+  // The note whose text is being changed, with the text as typed so far. Leaving the form (saved or not)
+  // hands the focus back to that note's Edit button.
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+  // The note whose Edit button takes the focus once its form has gone: at once after Cancel (the box that had
+  // it is gone), and after a save only if the person has not moved on meanwhile.
+  const editFocus = useRef<{ id: string; force: boolean } | null>(null);
+  useEffect(() => {
+    const target = editFocus.current;
+    if (!target || editing?.id === target.id) return;
+    editFocus.current = null;
+    const el = card.current?.querySelector<HTMLElement>(`[data-comment-edit="${target.id}"]`);
+    if (target.force) el?.focus();
+    else refocusIfLost(el);
+  }, [editing, data]);
+  // A note deleted or gone from the list (in another tab, say) takes its open form with it.
+  useEffect(() => {
+    if (editing && data && !data.comments.some((c) => c.id === editing.id)) setEditing(null);
+  }, [data, editing]);
+  const cancelEdit = () => {
+    if (editing) editFocus.current = { id: editing.id, force: true };
+    setEditing(null);
+  };
+  async function saveEdit() {
+    if (!editing || saving) return;
+    const { id } = editing;
+    const text = editing.text.trim();
+    if (!text) return;
+    setSaving(true);
+    setErr(null);
+    try {
+      await api(`/api/videos/${videoId}/comments/${id}`, { method: "PATCH", body: JSON.stringify({ text }) });
+      // Another note's form, opened while this one saved, stays open.
+      setEditing((cur) => {
+        if (cur?.id !== id) return cur;
+        editFocus.current = { id, force: false };
+        return null;
+      });
+      announce("Comment saved");
+      await refetch();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not save the comment");
+      // A note deleted or changed meanwhile is shown as it now is.
+      await refetch();
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -139,12 +196,53 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
     }
   }
 
-  const row = (c: VideoComment, action: ReactNode) => (
+  const excerpt = (c: VideoComment) => c.text.slice(0, 60);
+  const row = (c: Note, action: ReactNode) => (
     <li key={c.id} className="flex items-start justify-between gap-3 py-2 text-sm">
       <div className="min-w-0">
         <div className="text-xs text-slate-500">
           {c.authorEmail ?? "You"} · {formatDate(c.createdAt)}
+          {c.editedAt && (
+            <span title={`Edited ${formatDate(c.editedAt)}`} data-testid="comment-edited">
+              {" "}
+              · edited
+            </span>
+          )}
         </div>
+        {editing?.id === c.id ? (
+          <form
+            className="mt-1 space-y-1.5"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void saveEdit();
+            }}
+          >
+            <textarea
+              autoFocus
+              aria-label="Edit comment"
+              value={editing.text}
+              readOnly={saving}
+              onChange={(e) => setEditing({ id: c.id, text: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key !== "Escape") return;
+                e.preventDefault();
+                e.stopPropagation();
+                cancelEdit();
+              }}
+              rows={2}
+              maxLength={1000}
+              className={inputClass}
+            />
+            <div className="flex items-center gap-2">
+              <Button type="submit" className="px-3 py-1 text-xs" loading={saving} disabled={!editing.text.trim()}>
+                Save
+              </Button>
+              <Button type="button" variant="secondary" className="px-3 py-1 text-xs" onClick={cancelEdit}>
+                Cancel
+              </Button>
+            </div>
+          </form>
+        ) : (
         <p className={`whitespace-pre-wrap ${c.resolvedAt ? "text-slate-500" : "text-slate-800"}`}>
           {c.atSec !== undefined &&
             (playerTime !== null ? (
@@ -164,6 +262,7 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
             ))}
           {c.text}
         </p>
+        )}
         {c.mentions?.length ? (
           <div className="mt-0.5 text-xs text-slate-500" data-testid="comment-mentions">
             Mentioned {c.mentions.map((m) => m.email).join(", ")}
@@ -175,12 +274,22 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
           </div>
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-0.5">
-        {action}
-        <button type="button" onClick={() => remove(c)} aria-label="Delete comment" title="Remove this comment" className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-700">
-          <Trash2 className="h-4 w-4" />
-        </button>
-      </div>
+      {/* While its text is being changed, a note is not resolved or deleted from under the form. */}
+      {editing?.id !== c.id && (
+        <div className="flex shrink-0 items-center gap-0.5">
+          {action}
+          {c.mine && (
+            <button type="button" onClick={() => setEditing({ id: c.id, text: c.text })} data-comment-edit={c.id} aria-label={`Edit comment: ${excerpt(c)}`} title="Change this comment's text" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+              <Pencil className="h-4 w-4" />
+            </button>
+          )}
+          {c.mine && (
+            <button type="button" onClick={() => remove(c)} aria-label={`Delete comment: ${excerpt(c)}`} title="Remove this comment" className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-700">
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      )}
     </li>
   );
   const actionClass = "inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 aria-disabled:opacity-50";
@@ -198,7 +307,7 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
           {open.map((c) =>
             row(
               c,
-              <button type="button" onClick={() => setResolved(c, true)} aria-disabled={acting !== null || undefined} data-comment-action={c.id} aria-label={`Resolve comment: ${c.text.slice(0, 60)}`} title="Mark this note as dealt with" className={actionClass}>
+              <button type="button" onClick={() => setResolved(c, true)} aria-disabled={acting !== null || undefined} data-comment-action={c.id} aria-label={`Resolve comment: ${excerpt(c)}`} title="Mark this note as dealt with" className={actionClass}>
                 <Check className="h-3.5 w-3.5" /> Resolve
               </button>,
             ),
@@ -223,7 +332,7 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
             {resolved.map((c) =>
               row(
                 c,
-                <button type="button" onClick={() => setResolved(c, false)} aria-disabled={acting !== null || undefined} data-comment-action={c.id} aria-label={`Reopen comment: ${c.text.slice(0, 60)}`} title="Mark this note as open again" className={actionClass}>
+                <button type="button" onClick={() => setResolved(c, false)} aria-disabled={acting !== null || undefined} data-comment-action={c.id} aria-label={`Reopen comment: ${excerpt(c)}`} title="Mark this note as open again" className={actionClass}>
                   <RotateCcw className="h-3.5 w-3.5" /> Reopen
                 </button>,
               ),

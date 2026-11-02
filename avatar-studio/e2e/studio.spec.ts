@@ -3494,6 +3494,48 @@ test("review comments are resolved, folded away, and reopened, from the keyboard
   await expect(comments).toContainText("Comments · 0 open, 1 resolved");
 });
 
+test("an author edits their own comment in place, from the keyboard", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Editing ${Date.now().toString(36)}`);
+  const res = await page.request.post(`/api/videos/${v.id}/comments`, { data: { text: "Tighten the intro." } });
+  const id = (await res.json()).comment.id;
+  expect((await page.request.patch(`/api/videos/${v.id}/comments/${id}`, { data: { text: "  " } })).status()).toBe(400);
+  expect((await page.request.patch(`/api/videos/${v.id}/comments/${id}`, { data: { text: "x", resolved: true } })).status()).toBe(400);
+  const listed = (await (await page.request.get(`/api/videos/${v.id}/comments`)).json()).comments;
+  expect(listed.map((c: { mine?: boolean }) => c.mine)).toEqual([true]);
+
+  await page.goto(`/videos/${v.id}`);
+  const comments = page.getByTestId("comments");
+  const edit = comments.getByRole("button", { name: "Edit comment" });
+  await edit.click();
+  const box = comments.getByRole("textbox", { name: "Edit comment" });
+  await expect(box).toBeFocused();
+  await expect(box).toHaveValue("Tighten the intro.");
+  // Escape leaves the text as it was and hands the focus back to Edit.
+  await box.fill("Something else");
+  await box.press("Escape");
+  await expect(box).toHaveCount(0);
+  await expect(page.getByTestId("comment-list")).toContainText("Tighten the intro.");
+  await expect(edit).toBeFocused();
+  await expect(comments.getByTestId("comment-edited")).toHaveCount(0);
+  // Saving changes the note in place, marks it edited, and returns the focus to Edit.
+  await page.keyboard.press("Enter");
+  await expect(box).toBeFocused();
+  await box.fill("Tighten the intro and the outro.");
+  await comments.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByTestId("comment-list")).toContainText("Tighten the intro and the outro.");
+  await expect(comments.getByTestId("comment-edited")).toHaveText("· edited");
+  await expect(edit).toBeFocused();
+  await expect(comments.getByRole("status")).toHaveText("Comment saved");
+  await expect(comments).toContainText("Comments · 1");
+  // The edit holds across a reload, and a note can still be resolved after it.
+  await page.reload();
+  await expect(page.getByTestId("comment-list")).toContainText("Tighten the intro and the outro.");
+  await expect(comments.getByTestId("comment-edited")).toBeVisible();
+  const stored = (await (await page.request.get(`/api/videos/${v.id}/comments`)).json()).comments[0];
+  expect(stored.text).toBe("Tighten the intro and the outro.");
+  expect(typeof stored.editedAt).toBe("string");
+});
+
 test("share page offers a download only when the owner allows it", async ({ page }) => {
   const v = await createVideoViaApi(page, `Downloadable ${Date.now().toString(36)}`);
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
@@ -9443,6 +9485,9 @@ test("a finished video's card plays its clip, muted, while a mouse rests on it o
   const heading = page.getByRole("heading", { name: "My videos" });
   await expect(link).toBeVisible();
   await expect(preview).toHaveCount(0);
+  // Held still from here, so only the time the test runs on counts: an installed clock otherwise keeps
+  // flowing, and a slow step on a busy machine could carry the wait past 300 ms before it is checked.
+  await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000);
   await link.hover();
   await page.clock.runFor(250);
   await expect(preview).toHaveCount(0);

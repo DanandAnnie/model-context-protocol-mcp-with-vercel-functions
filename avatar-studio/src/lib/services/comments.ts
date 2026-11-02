@@ -21,6 +21,8 @@ export const commentSchema = z.object({
   text: z.string().trim().min(1).max(1000),
   /** Seconds from the start; `null` reads as a note on the whole video, as an API client may send for an empty field. */
   atSec: z.preprocess((v) => (v === null ? undefined : v), z.number().finite().min(0).max(MAX_COMMENT_AT_SEC).optional()),
+  /** A note on this video that starts a thread: the new note replies to it. */
+  parentId: z.string().min(1).max(80).optional(),
 });
 
 /** How many people one comment can notify. */
@@ -69,6 +71,14 @@ export async function addComment(videoId: string, input: z.infer<typeof commentS
   const video = await ownedVideo(videoId, ownerId);
   const existing = await listComments(videoId, ownerId);
   if (existing.length >= MAX_COMMENTS_PER_VIDEO) throw new ValidationError(`At most ${MAX_COMMENTS_PER_VIDEO} comments per video`);
+  if (input.parentId !== undefined) {
+    // One level of replies: a reply answers an open note that starts a thread, on this same video.
+    const parent = existing.find((c) => c.id === input.parentId);
+    if (!parent) throw new NotFoundError("The comment to reply to was not found");
+    if (parent.parentId) throw new ValidationError("Reply to the comment that starts the thread");
+    if (parent.resolvedAt) throw new ConflictError("This thread was resolved; reopen it to reply");
+    if (input.atSec !== undefined) throw new ValidationError("A reply cannot be pinned to a moment; the comment it answers can be");
+  }
   if (input.atSec !== undefined) {
     if (video.status !== "completed") throw new ValidationError("A note can be pinned to a moment once the video has finished rendering");
     // A player reports a little past the stated length at the very end, so half a second of slack. Demo
@@ -84,6 +94,7 @@ export async function addComment(videoId: string, input: z.infer<typeof commentS
     authorId: author.id,
     ...(author.email ? { authorEmail: author.email } : {}),
     text: input.text,
+    ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
     ...(input.atSec !== undefined ? { atSec: Math.round(input.atSec * 10) / 10 } : {}),
     createdAt: nowIso(),
     rev: newId("rev"),
@@ -96,7 +107,17 @@ export async function addComment(videoId: string, input: z.infer<typeof commentS
       comment.notified = mentions.map((m) => m.userId);
     }
   }
-  return getStore().put("comment", comment);
+  const saved = await getStore().put("comment", comment);
+  // A thread deleted or resolved while this reply was being written takes the reply back, before anyone is mailed about it.
+  if (input.parentId !== undefined) {
+    const parent = await getStore().get<VideoComment>("comment", input.parentId);
+    if (!parent || parent.resolvedAt) {
+      await getStore().remove("comment", saved.id);
+      if (!parent) throw new NotFoundError("The comment to reply to was deleted");
+      throw new ConflictError("This thread was resolved; reopen it to reply");
+    }
+  }
+  return saved;
 }
 
 /**
@@ -129,13 +150,30 @@ export async function notifyMentions(comment: VideoComment): Promise<number> {
   return sent;
 }
 
-/** The author may delete their own comment; anyone else with access gets 403. */
-export async function deleteComment(videoId: string, commentId: string, ownerId: string = LOCAL_OWNER, author: User = { id: ownerId }): Promise<void> {
+/**
+ * The author may delete their own comment; anyone else with access gets 403. A note that starts a thread takes its
+ * replies with it, whoever wrote them: they answer a note no longer there. `expectedReplies`, when given, is how many
+ * replies the caller saw and agreed to delete: a thread answered since is refused (409) rather than deleted unseen.
+ * The replies go first and the note last, so a failure part-way leaves a thread that can be deleted again.
+ * Returns how many replies went.
+ */
+export async function deleteComment(videoId: string, commentId: string, ownerId: string = LOCAL_OWNER, author: User = { id: ownerId }, expectedReplies?: number): Promise<{ replies: number }> {
   await ownedVideo(videoId, ownerId);
   const comment = await getStore().get<VideoComment>("comment", commentId);
   if (!comment || comment.videoId !== videoId || comment.ownerId !== ownerId) throw new NotFoundError("Comment not found");
   if (comment.authorId !== author.id) throw new ForbiddenError("Only the author can delete this comment");
+  const replies = comment.parentId ? [] : (await getStore().list<VideoComment>("comment", ownerId)).filter((c) => c.parentId === commentId);
+  if (expectedReplies !== undefined && replies.length > expectedReplies) {
+    const more = replies.length - expectedReplies;
+    throw new ConflictError(`This comment has ${more === 1 ? "a new reply" : `${more} new replies`} since you looked; reload to see ${more === 1 ? "it" : "them"} before deleting`);
+  }
+  await Promise.all(replies.map((r) => getStore().remove("comment", r.id)));
   await getStore().remove("comment", commentId);
+  if (comment.parentId) return { replies: 0 };
+  // A reply written while the note was being deleted (after the list above, before the note went) goes too.
+  const late = (await getStore().list<VideoComment>("comment", ownerId)).filter((c) => c.parentId === commentId);
+  await Promise.all(late.map((r) => getStore().remove("comment", r.id)));
+  return { replies: replies.length + late.length };
 }
 
 /**
@@ -187,17 +225,24 @@ export async function resolveComment(videoId: string, commentId: string, resolve
   await ownedVideo(videoId, ownerId);
   const comment = await getStore().get<VideoComment>("comment", commentId);
   if (!comment || comment.videoId !== videoId || comment.ownerId !== ownerId) throw new NotFoundError("Comment not found");
+  // A thread is resolved as a whole, from the note that starts it (a reply whose note is gone stands on its own).
+  if (comment.parentId && (await getStore().get<VideoComment>("comment", comment.parentId))) {
+    throw new ValidationError("Resolve the comment that starts the thread; its replies go with it");
+  }
   if (resolved === !!comment.resolvedAt) return comment;
   const { resolvedAt: _at, resolvedById: _by, resolvedByEmail: _email, ...open } = comment;
   const next: VideoComment = resolved ? { ...open, resolvedAt: nowIso(), resolvedById: user.id, ...(user.email ? { resolvedByEmail: user.email } : {}) } : open;
   return rewrite(comment, next);
 }
 
-/** How many open (unresolved) notes each of the owner's videos has, by video id; a video with none is not listed. */
+/** How many open (unresolved) threads each of the owner's videos has, by video id; a video with none is not listed. */
 export async function openCommentCounts(ownerId: string): Promise<Map<string, number>> {
   const counts = new Map<string, number>();
-  for (const c of await getStore().list<VideoComment>("comment", ownerId)) {
-    if (!c.resolvedAt) counts.set(c.videoId, (counts.get(c.videoId) ?? 0) + 1);
+  const all = await getStore().list<VideoComment>("comment", ownerId);
+  const ids = new Set(all.map((c) => c.id));
+  for (const c of all) {
+    // A thread counts once, by the note that starts it; its replies are part of it (one whose note is gone counts alone).
+    if (!c.resolvedAt && !(c.parentId && ids.has(c.parentId))) counts.set(c.videoId, (counts.get(c.videoId) ?? 0) + 1);
   }
   return counts;
 }

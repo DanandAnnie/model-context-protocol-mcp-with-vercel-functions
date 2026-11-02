@@ -3582,6 +3582,74 @@ test("the library counts each video's open comments and can show only the videos
   await expect(notedCard.getByTestId("open-comments-badge")).toHaveCount(0);
 });
 
+test("a review comment is answered in a thread that is resolved and deleted with it", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Thread ${Date.now().toString(36)}`);
+  const note = (await (await page.request.post(`/api/videos/${v.id}/comments`, { data: { text: "Tighten the intro." } })).json()).comment;
+  await page.goto(`/videos/${v.id}`);
+  const comments = page.getByTestId("comments");
+  const replyButton = comments.getByRole("button", { name: "Reply to comment: Tighten the intro." });
+  // Escape leaves without a reply and hands the focus back to Reply.
+  await replyButton.click();
+  const box = comments.getByRole("textbox", { name: "Reply to: Tighten the intro." });
+  await expect(box).toBeFocused();
+  await box.fill("Not this.");
+  await box.press("Escape");
+  await expect(box).toHaveCount(0);
+  await expect(replyButton).toBeFocused();
+  // A reply posted sits under the note; the thread still counts once.
+  await page.keyboard.press("Enter");
+  await box.fill("On it, shorter cut tomorrow.");
+  await comments.getByRole("button", { name: "Post reply" }).click();
+  const thread = comments.getByRole("list", { name: "Replies to: Tighten the intro." });
+  await expect(thread.getByTestId("comment-reply")).toHaveCount(1);
+  await expect(thread).toContainText("On it, shorter cut tomorrow.");
+  await expect(replyButton).toBeFocused();
+  await expect(comments.getByRole("status")).toHaveText("Reply posted");
+  await expect(comments).toContainText("Comments · 1");
+  const replyId = (await (await page.request.get(`/api/videos/${v.id}/comments`)).json()).comments.find((c: { parentId?: string }) => c.parentId === note.id).id;
+  // One level only, and a reply is resolved with its thread, not on its own.
+  expect((await page.request.post(`/api/videos/${v.id}/comments`, { data: { text: "Deeper", parentId: replyId } })).status()).toBe(400);
+  expect((await page.request.patch(`/api/videos/${v.id}/comments/${replyId}`, { data: { resolved: true } })).status()).toBe(400);
+  expect((await page.request.delete(`/api/videos/${v.id}/comments/${note.id}?replies=all`)).status()).toBe(400);
+  // A reply can be edited by its author like any note.
+  await thread.getByRole("button", { name: "Edit comment: On it, shorter cut tomorrow." }).click();
+  await comments.getByRole("textbox", { name: "Edit comment" }).fill("On it, cut tomorrow.");
+  await comments.getByRole("button", { name: "Save" }).click();
+  await expect(thread).toContainText("On it, cut tomorrow.");
+  // Resolving the note folds the whole thread away, with no Reply there.
+  await comments.getByRole("button", { name: "Resolve comment: Tighten the intro." }).click();
+  expect((await page.request.post(`/api/videos/${v.id}/comments`, { data: { text: "Still not fixed", parentId: note.id } })).status()).toBe(409);
+  await comments.getByRole("button", { name: "Show 1 resolved" }).click();
+  const resolvedList = page.getByTestId("resolved-comment-list");
+  await expect(resolvedList.getByTestId("comment-reply")).toHaveText(/On it, cut tomorrow\./);
+  await expect(resolvedList.getByRole("button", { name: /^Reply to comment/ })).toHaveCount(0);
+  await comments.getByRole("button", { name: "Reopen comment: Tighten the intro." }).click();
+  // Deleting the note asks first, as its reply goes with it.
+  const asked: string[] = [];
+  page.once("dialog", (d) => {
+    asked.push(d.message());
+    void d.dismiss();
+  });
+  await comments.getByRole("button", { name: "Delete comment: Tighten the intro." }).click();
+  await expect.poll(() => asked).toEqual(["Delete this comment and its reply? This cannot be undone."]);
+  await expect(thread.getByTestId("comment-reply")).toHaveCount(1);
+  // A reply posted elsewhere since is not deleted unseen: the server refuses, and the list shows it.
+  expect((await page.request.post(`/api/videos/${v.id}/comments`, { data: { text: "Late reply", parentId: note.id } })).status()).toBe(201);
+  page.once("dialog", (d) => void d.accept());
+  await comments.getByRole("button", { name: "Delete comment: Tighten the intro." }).click();
+  await expect(comments).toContainText("a new reply since you looked");
+  await expect(thread.getByTestId("comment-reply")).toHaveCount(2);
+  page.once("dialog", (d) => {
+    asked.push(d.message());
+    void d.accept();
+  });
+  await comments.getByRole("button", { name: "Delete comment: Tighten the intro." }).click();
+  await expect.poll(() => asked.at(-1)).toBe("Delete this comment and its 2 replies? This cannot be undone.");
+  await expect(page.getByTestId("comment-list")).toHaveCount(0);
+  await expect(comments.getByRole("status")).toHaveText("Comment and its 2 replies deleted");
+  expect((await (await page.request.get(`/api/videos/${v.id}/comments`)).json()).comments).toEqual([]);
+});
+
 test("share page offers a download only when the owner allows it", async ({ page }) => {
   const v = await createVideoViaApi(page, `Downloadable ${Date.now().toString(36)}`);
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");

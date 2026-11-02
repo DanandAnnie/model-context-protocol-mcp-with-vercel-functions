@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { Check, ChevronDown, CornerDownRight, Link2, MessageSquare, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { Check, ChevronDown, CornerDownRight, Download, Link2, MessageSquare, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { Button, Card, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
@@ -476,10 +476,18 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
 
   return (
     <Card className="p-4" data-testid="comments">
-      <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-        <MessageSquare className="h-4 w-4 text-slate-400" /> Comments
-        {open.length + resolved.length ? (resolved.length ? ` · ${open.length} open, ${resolved.length} resolved` : ` · ${open.length}`) : ""}
-      </h3>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+          <MessageSquare className="h-4 w-4 text-slate-400" /> Comments
+          {open.length + resolved.length ? (resolved.length ? ` · ${open.length} open, ${resolved.length} resolved` : ` · ${open.length}`) : ""}
+        </h3>
+        {/* Every note and reply, open or resolved, as a spreadsheet to hand on. */}
+        {comments.length > 0 && (
+          <a href={`/api/videos/${encodeURIComponent(videoId)}/comments?format=csv`} download data-testid="comments-csv" aria-label="Download comments as CSV" className="inline-flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800">
+            <Download className="h-3.5 w-3.5" aria-hidden /> Download CSV
+          </a>
+        )}
+      </div>
       <p className="mt-1 text-xs text-slate-500">Notes for you and your workspace; viewers of the share page never see them.</p>
       {/* Said to a screen reader through the card's status line, which is there from the start. */}
       {linkedGone && (

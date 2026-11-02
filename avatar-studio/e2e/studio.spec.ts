@@ -3582,7 +3582,7 @@ test("the library counts each video's open comments and can show only the videos
   await expect(notedCard.getByTestId("open-comments-badge")).toHaveCount(0);
 });
 
-test("a review comment is answered in a thread that is resolved and deleted with it", async ({ page }) => {
+test("a review comment is answered in a thread that is downloaded, resolved, and deleted with it", async ({ page }) => {
   const v = await createVideoViaApi(page, `Thread ${Date.now().toString(36)}`);
   const note = (await (await page.request.post(`/api/videos/${v.id}/comments`, { data: { text: "Tighten the intro." } })).json()).comment;
   await page.goto(`/videos/${v.id}`);
@@ -3606,6 +3606,15 @@ test("a review comment is answered in a thread that is resolved and deleted with
   await expect(replyButton).toBeFocused();
   await expect(comments.getByRole("status")).toHaveText("Reply posted");
   await expect(comments).toContainText("Comments · 1");
+  // The thread downloads as a spreadsheet: the note, then its reply, under one thread number.
+  const [download] = await Promise.all([page.waitForEvent("download"), comments.getByRole("link", { name: "Download comments as CSV" }).click()]);
+  expect(download.suggestedFilename()).toBe(`comments-${v.id}.csv`);
+  const sheet = parseCsv(await readFile((await download.path())!, "utf8"));
+  expect(sheet.columns).toEqual(["thread", "kind", "at", "author", "written", "edited", "status", "resolved_at", "resolved_by", "text"]);
+  expect(sheet.rows.map((r) => [r.thread, r.kind, r.status, r.text])).toEqual([
+    ["1", "note", "open", "Tighten the intro."],
+    ["1", "reply", "open", "On it, shorter cut tomorrow."],
+  ]);
   const replyId = (await (await page.request.get(`/api/videos/${v.id}/comments`)).json()).comments.find((c: { parentId?: string }) => c.parentId === note.id).id;
   // One level only, and a reply is resolved with its thread, not on its own.
   expect((await page.request.post(`/api/videos/${v.id}/comments`, { data: { text: "Deeper", parentId: replyId } })).status()).toBe(400);

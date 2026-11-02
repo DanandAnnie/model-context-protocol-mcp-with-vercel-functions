@@ -2,15 +2,28 @@ import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { requireOwner, userOrOwner } from "@/lib/owner";
 import { addComment, commentSchema, listComments, notifyMentions, notifyReply } from "@/lib/services";
 import { afterResponse } from "@/lib/services/shared";
-import { markMine } from "@/lib/comment-list";
+import { COMMENT_CSV_COLUMNS, commentRows, markMine } from "@/lib/comment-list";
+import { toCsv } from "@/lib/csv";
+import { formatTimestamp } from "@/lib/text";
 
 export const dynamic = "force-dynamic";
 type Ctx = { params: Promise<{ id: string }> };
 
-export async function GET(_req: Request, ctx: Ctx) {
+export async function GET(req: Request, ctx: Ctx) {
   try {
     const owner = await requireOwner();
-    const comments = await listComments((await ctx.params).id, owner);
+    const id = (await ctx.params).id;
+    const comments = await listComments(id, owner);
+    // ?format=csv: the same notes as a spreadsheet, threads in the order they were started.
+    if (new URL(req.url).searchParams.get("format") === "csv") {
+      return new Response(toCsv(COMMENT_CSV_COLUMNS, commentRows(comments, formatTimestamp)), {
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename="comments-${id.replace(/[^\w.-]+/g, "_")}.csv"`,
+          "Cache-Control": "no-store",
+        },
+      });
+    }
     return json({ comments: markMine(comments, (await userOrOwner(owner)).id) });
   } catch (err) {
     return errorResponse(err);

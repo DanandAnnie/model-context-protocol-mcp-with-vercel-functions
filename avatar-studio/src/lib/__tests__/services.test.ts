@@ -1537,6 +1537,19 @@ describe("hardening", () => {
     resetRateLimit("batch");
   });
 
+  it("gives back reserved slots that went unused, within their window only", async () => {
+    const { releaseRateLimit, reserveRateLimit, resetRateLimit } = await import("../rate-limit");
+    const t0 = 3_000_000;
+    assert.equal(reserveRateLimit("giveback", 8, 10, 60_000, t0).allowed, true);
+    releaseRateLimit("giveback", 5, t0 + 1);
+    assert.equal(reserveRateLimit("giveback", 7, 10, 60_000, t0 + 2).remaining, 0, "the five given back are free again");
+    releaseRateLimit("giveback", 50, t0 + 3);
+    assert.equal(reserveRateLimit("giveback", 10, 10, 60_000, t0 + 4).allowed, true, "never below zero");
+    releaseRateLimit("giveback", 10, t0 + 60_001);
+    assert.equal(reserveRateLimit("giveback", 1, 10, 60_000, t0 + 60_002).remaining, 9, "a lapsed window is started afresh");
+    resetRateLimit("giveback");
+  });
+
   it("builds WebVTT with dot separators and a header", async () => {
     const { buildVtt } = await import("../captions");
     const vtt = buildVtt("Hello there. Welcome!", 4);

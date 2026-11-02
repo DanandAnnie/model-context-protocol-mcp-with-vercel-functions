@@ -79,6 +79,20 @@ export function mentionEmail(input: { to: string; authorEmail?: string; videoTit
   return { to: input.to, subject, text, html, ...(input.authorEmail ? { replyTo: input.authorEmail } : {}) };
 }
 
+/** Tells someone in a comment thread that it was answered: the reply, the note it answers, and a link to the thread. */
+/** `at` is the moment the thread is pinned to, already formatted (`1:05`). */
+export function replyEmail(input: { to: string; authorEmail?: string; videoTitle: string; text: string; noteText: string; url: string; at?: string }): EmailMessage {
+  const who = input.authorEmail ?? "A teammate";
+  const subject = `${who} replied on "${input.videoTitle}"`;
+  const quote = input.text.length > 600 ? `${input.text.slice(0, 600)}…` : input.text;
+  const note = input.noteText.length > 200 ? `${input.noteText.slice(0, 200)}…` : input.noteText;
+  const where = input.at ? ` at ${input.at}` : "";
+  const text = `${who} replied to a comment you are in on "${input.videoTitle}"${where}:\n\n${quote}\n\nIn reply to:\n${note}\n\nOpen the thread:\n${input.url}`;
+  const block = "margin:0 0 12px;padding:8px 12px;border-left:3px solid #cbd5e1;white-space:pre-wrap";
+  const html = `<p>${escape(who)} replied to a comment you are in on <strong>${escape(input.videoTitle)}</strong>${escape(where)}:</p><blockquote style="${block};color:#334155">${escape(quote)}</blockquote><p style="color:#64748b;font-size:12px">In reply to:</p><blockquote style="${block};color:#64748b">${escape(note)}</blockquote><p><a href="${escape(input.url)}">Open the thread</a></p>`;
+  return { to: input.to, subject, text, html, ...(input.authorEmail ? { replyTo: input.authorEmail } : {}) };
+}
+
 export function inviteEmail(input: { to: string; workspaceName: string; inviterEmail?: string; role: string; url: string; expiresAt: string }): EmailMessage {
   const who = input.inviterEmail ? `${input.inviterEmail} invited you` : "You have been invited";
   const expires = new Date(input.expiresAt).toUTCString();

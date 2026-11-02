@@ -9,6 +9,8 @@ import { refocusIfLost } from "@/lib/focus";
 import { repliesByThread, splitComments } from "@/lib/comment-list";
 import type { VideoComment, WorkspaceRole } from "@/lib/types";
 
+const LINK_GONE = "The comment this link points to is no longer here; it may have been deleted.";
+
 /** A note as the list returns it: `mine` marks the caller's own, which they can edit and delete. */
 type Note = VideoComment & { mine?: boolean };
 
@@ -114,6 +116,45 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
     const el = card.current.querySelector<HTMLElement>(target.id ? `[data-comment-action="${target.id}"]` : "[data-resolved-toggle]");
     refocusIfLost(el);
   }, [data]);
+  // A comment email links here with ?comment=<id> (the note that starts the thread): once the notes are in,
+  // that thread is shown (a resolved one unfolded), scrolled to, focused, and marked for a few seconds. The
+  // parameter is taken off the address so a reload does not do it again. A link to a reply finds its thread.
+  const [linked, setLinked] = useState<string | null>(null);
+  // The thread focused from the link stays focusable until the focus leaves it, after its mark has faded.
+  const [linkFocus, setLinkFocus] = useState<string | null>(null);
+  const [linkedGone, setLinkedGone] = useState(false);
+  const linkTarget = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (linkTarget.current === undefined) {
+      const url = new URL(window.location.href);
+      linkTarget.current = url.searchParams.get("comment");
+      if (linkTarget.current !== null) {
+        url.searchParams.delete("comment");
+        window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+      }
+    }
+    const id = linkTarget.current;
+    if (!id || !data) return;
+    linkTarget.current = null;
+    const hit = data.comments.find((c) => c.id === id);
+    const thread = hit?.parentId ? (data.comments.find((c) => c.id === hit.parentId) ?? hit) : hit;
+    if (!thread) {
+      setLinkedGone(true);
+      announce(LINK_GONE);
+      return;
+    }
+    if (thread.resolvedAt) setShowResolved(true);
+    setLinked(thread.id);
+    setLinkFocus(thread.id);
+  }, [data]);
+  useEffect(() => {
+    if (!linked) return;
+    const el = card.current?.querySelector<HTMLElement>(`[data-comment-id="${CSS.escape(linked)}"]`);
+    el?.scrollIntoView({ block: "center" });
+    el?.focus({ preventScroll: true });
+    const timer = window.setTimeout(() => setLinked(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [linked]);
   // A reload that failed leaves the list as it was: no focus is moved later on its account.
   useEffect(() => {
     if (loadErr) focusNext.current = null;
@@ -258,7 +299,15 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
   const excerpt = (c: VideoComment) => c.text.slice(0, 60);
   // A note and, for one that starts a thread, its replies and the way to answer it (open threads only).
   const row = (c: Note, action: ReactNode, reply = false): ReactNode => (
-    <li key={c.id} className={reply ? "py-1.5 text-sm" : "py-2 text-sm"} data-testid={reply ? "comment-reply" : undefined}>
+    <li
+      key={c.id}
+      className={`${reply ? "py-1.5 text-sm" : "py-2 text-sm"}${linked === c.id ? " -mx-2 rounded-lg bg-amber-50 px-2 outline-none ring-2 ring-amber-300" : linkFocus === c.id ? " -mx-2 rounded-lg px-2 outline-none focus:ring-2 focus:ring-slate-300" : ""}`}
+      data-testid={reply ? "comment-reply" : undefined}
+      data-comment-id={c.id}
+      data-linked={linked === c.id || undefined}
+      tabIndex={linkFocus === c.id ? -1 : undefined}
+      onBlur={linkFocus === c.id ? (e) => e.target === e.currentTarget && setLinkFocus(null) : undefined}
+    >
      <div className="flex items-start justify-between gap-3">
       <div className="min-w-0">
         <div className="text-xs text-slate-500">
@@ -409,6 +458,12 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
         {open.length + resolved.length ? (resolved.length ? ` · ${open.length} open, ${resolved.length} resolved` : ` · ${open.length}`) : ""}
       </h3>
       <p className="mt-1 text-xs text-slate-500">Notes for you and your workspace; viewers of the share page never see them.</p>
+      {/* Said to a screen reader through the card's status line, which is there from the start. */}
+      {linkedGone && (
+        <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="comment-link-gone">
+          {LINK_GONE}
+        </p>
+      )}
       <div ref={card}>
       {open.length > 0 && (
         <ul className="mt-3 divide-y divide-slate-100" data-testid="comment-list">

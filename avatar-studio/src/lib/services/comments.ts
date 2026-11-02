@@ -6,8 +6,8 @@ import type { Video, VideoComment, Workspace } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { isWorkspaceId, type User } from "../workspaces";
 import { config } from "../config";
-import { getEmailProvider, mentionEmail } from "../providers/email";
-import { reserveRateLimit } from "../rate-limit";
+import { getEmailProvider, mentionEmail, replyEmail } from "../providers/email";
+import { releaseRateLimit, reserveRateLimit } from "../rate-limit";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../errors";
 import { owned } from "./shared";
 import { formatTimestamp } from "../text";
@@ -28,7 +28,7 @@ export const commentSchema = z.object({
 /** How many people one comment can notify. */
 export const MAX_MENTIONS = 10;
 
-/** Mention emails one person can set off per hour, and the whole instance; past either, comments still post but nobody is emailed. */
+/** Comment emails (mentions and replies) one person can set off per hour, and the whole instance; past either, comments still post but nobody is emailed. */
 export const MENTION_EMAILS_PER_HOUR = 60;
 export const MENTION_EMAILS_PER_HOUR_GLOBAL = 600;
 const HOUR_MS = 60 * 60 * 1000;
@@ -121,30 +121,91 @@ export async function addComment(videoId: string, input: z.infer<typeof commentS
 }
 
 /**
- * Emails each member a comment mentions, with the comment and a link that opens the video in its
- * workspace. Best effort: one failed send is logged and does not stop the others.
+ * The video page's address for a comment's thread: in the workspace it belongs to, the player at a pinned
+ * thread's moment (`t`, whole seconds), and the page scrolled to the thread (`comment`, the note that starts it).
  */
-export async function notifyMentions(comment: VideoComment): Promise<number> {
+function threadUrl(video: Video, thread: VideoComment): string {
+  const at = thread.atSec !== undefined ? `&t=${Math.floor(thread.atSec)}` : "";
+  return `${config.appUrl.replace(/\/$/, "")}/videos/${encodeURIComponent(video.id)}?ws=${encodeURIComponent(thread.ownerId)}${at}&comment=${encodeURIComponent(thread.id)}`;
+}
+
+/**
+ * Takes `n` comment emails from the author's hourly allowance and the instance's, shared by mentions and
+ * replies: posting and deleting a comment in a loop would otherwise mail teammates without limit.
+ */
+function reserveCommentEmails(comment: VideoComment, n: number, what: string): boolean {
+  const senderKey = `mention-email:sender:${comment.authorId}`;
+  const sender = reserveRateLimit(senderKey, n, MENTION_EMAILS_PER_HOUR, HOUR_MS);
+  const everyone = sender.allowed && reserveRateLimit("mention-email:global", n, MENTION_EMAILS_PER_HOUR_GLOBAL, HOUR_MS).allowed;
+  if (everyone) return true;
+  // Emails the instance refused are not counted against the author.
+  if (sender.allowed) releaseRateLimit(senderKey, n);
+  console.warn(`${what} emails for comment ${comment.id} skipped: hourly limit reached`);
+  return false;
+}
+
+/**
+ * Emails each member a comment mentions, with the comment and a link that opens the video in its
+ * workspace at the comment's thread. Best effort: one failed send is logged and does not stop the others.
+ * `mailed`, when given, collects who was emailed, so a reply's thread email can go to a mentioned member
+ * whose mention email did not.
+ */
+export async function notifyMentions(comment: VideoComment, mailed?: Set<string>): Promise<number> {
   if (!comment.mentions?.length) return 0;
   const video = await getStore().get<Video>("video", comment.videoId);
   if (!video) return 0;
-  // Posting and deleting a comment in a loop would otherwise mail teammates without limit.
-  const n = comment.mentions.length;
-  const sender = reserveRateLimit(`mention-email:sender:${comment.authorId}`, n, MENTION_EMAILS_PER_HOUR, HOUR_MS);
-  if (!sender.allowed || !reserveRateLimit("mention-email:global", n, MENTION_EMAILS_PER_HOUR_GLOBAL, HOUR_MS).allowed) {
-    console.warn(`mention emails for comment ${comment.id} skipped: hourly limit reached`);
-    return 0;
-  }
-  // A pinned note's link opens the player at its moment (`t`, whole seconds).
-  const at = comment.atSec !== undefined ? `&t=${Math.floor(comment.atSec)}` : "";
-  const url = `${config.appUrl.replace(/\/$/, "")}/videos/${encodeURIComponent(video.id)}?ws=${encodeURIComponent(comment.ownerId)}${at}`;
+  if (!reserveCommentEmails(comment, comment.mentions.length, "mention")) return 0;
+  // A mention in a reply links to the thread it is in, at that thread's moment.
+  const thread = (comment.parentId && (await getStore().get<VideoComment>("comment", comment.parentId))) || comment;
+  const url = threadUrl(video, thread);
   let sent = 0;
   for (const m of comment.mentions) {
     try {
-      await getEmailProvider().send(mentionEmail({ to: m.email, authorEmail: comment.authorEmail, videoTitle: video.title, text: comment.text, url, ...(comment.atSec !== undefined ? { at: formatTimestamp(comment.atSec) } : {}) }));
+      await getEmailProvider().send(mentionEmail({ to: m.email, authorEmail: comment.authorEmail, videoTitle: video.title, text: comment.text, url, ...(thread.atSec !== undefined ? { at: formatTimestamp(thread.atSec) } : {}) }));
+      mailed?.add(m.userId);
       sent++;
     } catch (err) {
       console.error(`mention email to ${m.email} failed:`, err);
+    }
+  }
+  return sent;
+}
+
+/**
+ * Emails the people in a thread that it was answered: whoever wrote the note and each earlier reply, at
+ * the address they have as a member of the workspace now (someone who has left is not emailed). The one
+ * replying, and anyone their reply mentions (who gets the mention email instead), are left out; with
+ * `mentionsMailed` (from `notifyMentions`), only the mentioned who were in fact emailed are. All or none of
+ * the thread is emailed within the author's hourly allowance. Workspace threads only: a personal space has
+ * one person in it. Best effort, as mentions.
+ */
+export async function notifyReply(reply: VideoComment, mentionsMailed?: Set<string>): Promise<number> {
+  if (!reply.parentId || !isWorkspaceId(reply.ownerId)) return 0;
+  const [video, note, ws, all] = await Promise.all([
+    getStore().get<Video>("video", reply.videoId),
+    getStore().get<VideoComment>("comment", reply.parentId),
+    getStore().get<Workspace>("workspace", reply.ownerId),
+    getStore().list<VideoComment>("comment", reply.ownerId),
+  ]);
+  if (!video || !note || !ws) return 0;
+  const skip = new Set([reply.authorId, ...(mentionsMailed ?? (reply.mentions ?? []).map((m) => m.userId))]);
+  const earlier = all.filter((c) => c.parentId === note.id && c.id !== reply.id && c.createdAt <= reply.createdAt).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const to: string[] = [];
+  for (const c of [note, ...earlier]) {
+    if (skip.has(c.authorId)) continue;
+    skip.add(c.authorId);
+    const email = ws.members.find((m) => m.userId === c.authorId)?.email;
+    if (email) to.push(email);
+  }
+  if (!to.length || !reserveCommentEmails(reply, to.length, "reply")) return 0;
+  const url = threadUrl(video, note);
+  let sent = 0;
+  for (const address of to) {
+    try {
+      await getEmailProvider().send(replyEmail({ to: address, authorEmail: reply.authorEmail, videoTitle: video.title, text: reply.text, noteText: note.text, url, ...(note.atSec !== undefined ? { at: formatTimestamp(note.atSec) } : {}) }));
+      sent++;
+    } catch (err) {
+      console.error(`reply email to ${address} failed:`, err);
     }
   }
   return sent;

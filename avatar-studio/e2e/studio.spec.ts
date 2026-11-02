@@ -3650,6 +3650,40 @@ test("a review comment is answered in a thread that is resolved and deleted with
   expect((await (await page.request.get(`/api/videos/${v.id}/comments`)).json()).comments).toEqual([]);
 });
 
+test("a comment email's link opens the video at its thread, marked for a moment, and says when it is gone", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Linked ${Date.now().toString(36)}`);
+  const post = async (data: { text: string; parentId?: string }) => (await (await page.request.post(`/api/videos/${v.id}/comments`, { data })).json()).comment as { id: string };
+  const notes: Array<{ id: string }> = [];
+  for (let i = 1; i <= 6; i += 1) notes.push(await post({ text: `Note ${i}` }));
+  const reply = await post({ text: "Answer to note 2", parentId: notes[1].id });
+  expect((await page.request.patch(`/api/videos/${v.id}/comments/${notes[0].id}`, { data: { resolved: true } })).status()).toBe(200);
+  // A reply email links to the thread; a link to the reply itself finds it too.
+  await page.goto(`/videos/${v.id}?comment=${reply.id}`);
+  const comments = page.getByTestId("comments");
+  const linked = comments.locator("[data-linked]");
+  await expect(linked).toHaveAttribute("data-comment-id", notes[1].id);
+  await expect(linked).toContainText("Answer to note 2");
+  await expect(linked).toBeFocused();
+  await expect(linked).toBeInViewport();
+  // The address loses the parameter so a reload does not jump again, and the mark fades.
+  await expect(page).not.toHaveURL(/comment=/);
+  await expect(linked).toHaveCount(0, { timeout: 10_000 });
+  // The focus stays on the thread after its mark fades, so Tab goes on to the thread's own buttons.
+  await expect(comments.locator(`[data-comment-id="${notes[1].id}"]`)).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(comments.getByRole("button", { name: "Resolve comment: Note 2" })).toBeFocused();
+  // A resolved thread is unfolded to be shown.
+  await page.goto(`/videos/${v.id}?comment=${notes[0].id}`);
+  await expect(comments.getByTestId("resolved-comment-list")).toBeVisible();
+  await expect(comments.locator("[data-linked]")).toHaveAttribute("data-comment-id", notes[0].id);
+  // A thread deleted since the email was sent is said to be gone.
+  await page.goto(`/videos/${v.id}?comment=cmt_gone`);
+  await expect(comments.getByTestId("comment-link-gone")).toHaveText("The comment this link points to is no longer here; it may have been deleted.");
+  await expect(comments.getByRole("status")).toHaveText("The comment this link points to is no longer here; it may have been deleted.");
+  await expect(comments.locator("[data-linked]")).toHaveCount(0);
+  await expect(comments.getByTestId("comment-list")).toContainText("Note 6");
+});
+
 test("share page offers a download only when the owner allows it", async ({ page }) => {
   const v = await createVideoViaApi(page, `Downloadable ${Date.now().toString(36)}`);
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");

@@ -66,6 +66,12 @@ export function reserveRateLimit(key: string, n: number, limit: number, windowMs
   return { allowed, remaining: Math.max(0, limit - b.count), retryAfterSec: Math.max(1, Math.ceil((b.resetAt - now) / 1000)) };
 }
 
+/** Give back `n` slots taken with `reserveRateLimit`, when what they were taken for did not happen. */
+export function releaseRateLimit(key: string, n: number, now = Date.now()): void {
+  const b = buckets.get(key);
+  if (b && b.resetAt > now) b.count = Math.max(0, b.count - n);
+}
+
 /** Forget a key, e.g. after a successful sign-in. */
 export function resetRateLimit(key: string): void {
   buckets.delete(key);

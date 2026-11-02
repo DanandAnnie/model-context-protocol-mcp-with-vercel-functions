@@ -8,7 +8,7 @@ import { formatTimestamp } from "@/lib/text";
 import { refocusIfLost } from "@/lib/focus";
 import { isSubmitKey } from "@/lib/shortcuts";
 import { isApple } from "@/components/QuickFind";
-import { COMMENT_ORDER_KEY, COMMENT_REACTIONS, REACTION_NAMES, commentOrderFrom, orderThreads, repliesByThread, splitComments, threadLink, type CommentOrder, type CommentReaction, type ReactionView } from "@/lib/comment-list";
+import { COMMENT_ORDER_KEY, COMMENT_REACTIONS, REACTION_NAMES, commentOrderFrom, filterThreads, orderThreads, repliesByThread, splitComments, threadLink, type CommentFilter, type CommentOrder, type CommentReaction, type ReactionView } from "@/lib/comment-list";
 import type { VideoComment, WorkspaceRole } from "@/lib/types";
 
 /**
@@ -107,7 +107,20 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
   const [acting, setActing] = useState<string | null>(null);
   // Teammates who can be mentioned: the open workspace's other members with an email.
   const { data: summary } = useApi<WorkspaceSummary>("/api/workspaces");
-  const teammates = (summary?.workspaces.find((w) => w.id === summary.activeId && w.id !== summary.personalId)?.members ?? []).filter((m) => m.email && !m.you);
+  const workspace = summary?.workspaces.find((w) => w.id === summary.activeId && w.id !== summary.personalId);
+  const teammates = (workspace?.members ?? []).filter((m) => m.email && !m.you);
+  // In a workspace the open threads can be narrowed to those naming the reader, or those they wrote in; for this visit only.
+  const myId = workspace?.members.find((m) => m.you)?.userId;
+  const [filter, setFilter] = useState<CommentFilter>("all");
+  // With nothing open the select goes, and so does the filter, so the next note posted is not hidden by it.
+  if (filter !== "all" && open.length === 0) setFilter("all");
+  const shown = filterThreads(open, replies, myId ? filter : "all", myId);
+  const filterSelect = useRef<HTMLSelectElement>(null);
+  function chooseFilter(next: CommentFilter) {
+    setFilter(next);
+    const count = filterThreads(open, replies, next, myId).length;
+    announce(next === "all" ? `${open.length} open shown` : `${count} of ${open.length} open shown`);
+  }
   // A chip completes an "@" or "@partial" the person already typed, else starts a new mention; the box's limit still holds.
   const mention = (email: string) =>
     setDraft((d) => {
@@ -125,6 +138,8 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
     try {
       await api(`/api/videos/${videoId}/comments`, { method: "POST", body: JSON.stringify({ text, ...(pinAt !== null ? { atSec: pinAt } : {}) }) });
       setDraft("");
+      // A note never names its own writer, so a new one would be hidden under "Mentioning me".
+      if (filter === "mentions") setFilter("all");
       setPinAt(null);
       await refetch();
       refocusIfLost(box.current);
@@ -180,6 +195,8 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
       return;
     }
     if (thread.resolvedAt) setShowResolved(true);
+    // A thread linked to is shown whatever the filter.
+    setFilter("all");
     setLinked(thread.id);
     setLinkFocus(thread.id);
   }, [data]);
@@ -199,11 +216,14 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
     if (acting) return;
     setActing(c.id);
     setErr(null);
-    const i = open.findIndex((o) => o.id === c.id);
-    const next = value ? (open[i + 1] ?? open[i - 1])?.id : c.id;
+    const i = shown.findIndex((o) => o.id === c.id);
+    const next = value ? (shown[i + 1] ?? shown[i - 1])?.id : c.id;
     try {
       await api(`/api/videos/${videoId}/comments/${c.id}`, { method: "PATCH", body: JSON.stringify({ resolved: value }) });
-      focusNext.current = { id: next ?? null };
+      // The last thread shown resolved while others are open: the way back to them takes the focus.
+      focusNext.current = next ? { id: next } : { id: null, selectors: ["[data-filter-show-all]", "[data-resolved-toggle]"] };
+      // A note reopened that the filter would hide is shown, with every other open one.
+      if (!value && !filterThreads([c], replies, myId ? filter : "all", myId).length) setFilter("all");
       announce(value ? `Comment resolved${open.length > 1 ? `; ${open.length - 1} open` : "; none open"}` : "Comment reopened");
       await refetch();
     } catch (e) {
@@ -218,9 +238,10 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
   // The open threads shown, marked done at once after asking; one started since stays open. The focus goes to the
   // resolved notes' toggle, as it does after the last open note is resolved (else to the comment box).
   async function resolveAll() {
-    if (acting || !open.length) return;
-    const ids = open.map((c) => c.id);
-    if (!window.confirm(`Resolve all ${ids.length} open comments? Each can be reopened.`)) return;
+    if (acting || !shown.length) return;
+    const ids = shown.map((c) => c.id);
+    const what = shown.length < open.length ? `the ${ids.length} comments shown` : `all ${ids.length} open comments`;
+    if (!window.confirm(`Resolve ${what}? Each can be reopened.`)) return;
     setActing("all");
     setErr(null);
     try {
@@ -657,9 +678,9 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
           {open.length + resolved.length ? (resolved.length ? ` · ${open.length} open, ${resolved.length} resolved` : ` · ${open.length}`) : ""}
         </h3>
         <div className="flex shrink-0 items-center gap-1">
-          {/* With two or more open, they can be marked done together, as at the end of a review. */}
-          {open.length > 1 && (
-            <button type="button" onClick={() => void resolveAll()} aria-disabled={acting !== null || undefined} data-testid="comments-resolve-all" title="Mark every open comment as dealt with" className={actionClass}>
+          {/* With two or more shown, they can be marked done together, as at the end of a review. */}
+          {shown.length > 1 && (
+            <button type="button" onClick={() => void resolveAll()} aria-disabled={acting !== null || undefined} data-testid="comments-resolve-all" title={shown.length < open.length ? "Mark every comment shown as dealt with" : "Mark every open comment as dealt with"} className={actionClass}>
               <CheckCheck className="h-3.5 w-3.5" aria-hidden /> Resolve all
             </button>
           )}
@@ -688,10 +709,36 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
           </select>
         </label>
       )}
+      {myId && open.length > 0 && (
+        <label className="mt-2 flex items-center gap-2 text-xs text-slate-600">
+          Show
+          <select ref={filterSelect} value={filter} onChange={(e) => chooseFilter(e.target.value as CommentFilter)} data-testid="comment-filter" className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-xs">
+            <option value="all">All open</option>
+            <option value="mentions">Mentioning me</option>
+            <option value="mine">I wrote in</option>
+          </select>
+        </label>
+      )}
       <div ref={card}>
-      {open.length > 0 && (
+      {open.length > 0 && shown.length === 0 && (
+        <p className="mt-3 text-sm text-slate-500" data-testid="comment-filter-empty">
+          {filter === "mentions" ? "No open comment mentions you." : "You have not written in any open comment."}{" "}
+          <button
+            type="button"
+            data-filter-show-all
+            onClick={() => {
+              chooseFilter("all");
+              filterSelect.current?.focus();
+            }}
+            className="font-medium text-brand-700 hover:underline"
+          >
+            Show all {open.length} open
+          </button>
+        </p>
+      )}
+      {shown.length > 0 && (
         <ul className="mt-3 divide-y divide-slate-100" data-testid="comment-list">
-          {open.map((c) =>
+          {shown.map((c) =>
             row(
               c,
               <button type="button" onClick={() => setResolved(c, true)} aria-disabled={acting !== null || undefined} data-comment-action={c.id} aria-label={`Resolve comment: ${excerpt(c)}`} title="Mark this note as dealt with" className={actionClass}>

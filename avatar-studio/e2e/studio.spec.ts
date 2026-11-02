@@ -3876,6 +3876,76 @@ test("a video's open comments list by their moment in the video, an order the br
   await expect(rows.first()).toContainText("About the whole video.");
 });
 
+test("in a workspace, a video's open comments narrow to those that mention you or that you wrote in", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const ws = (await (await page.request.post("/api/workspaces", { data: { name: `Filter ${tag}` } })).json()).workspace as { id: string };
+  try {
+    expect((await page.request.post("/api/workspaces/switch", { data: { id: ws.id } })).status()).toBe(200);
+    const me = ((await (await page.request.get("/api/workspaces")).json()).workspaces as Array<{ id: string; members: Array<{ userId: string; you?: boolean }> }>)
+      .find((w) => w.id === ws.id)!.members.find((m) => m.you)!.userId;
+    const v = await createVideoViaApi(page, `Filter ${tag}`);
+    for (const text of ["Logo is too small.", "Music is loud.", "Fix my typo."]) await page.request.post(`/api/videos/${v.id}/comments`, { data: { text } });
+    // Demo mode has one person without an email, so teammates are played by the page's data: two notes are theirs, one names you.
+    await page.route(`**/api/videos/${v.id}/comments`, async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      const real = await (await route.fetch()).json();
+      const comments = (real.comments as Array<{ text: string; authorId: string; mine: boolean; mentions?: unknown }>).map((c) =>
+        c.text === "Fix my typo." ? c : { ...c, authorId: "u-teammate", mine: false, ...(c.text === "Logo is too small." ? { mentions: [{ userId: me, email: "you@example.com" }] } : {}) },
+      );
+      await route.fulfill({ json: { ...real, comments } });
+    });
+    await page.goto(`/videos/${v.id}`);
+    const comments = page.getByTestId("comments");
+    const show = comments.getByRole("combobox", { name: "Show" });
+    const rows = comments.getByTestId("comment-list").locator("> li");
+    await expect(rows).toHaveCount(3);
+    await show.selectOption("mentions");
+    await expect(rows).toHaveText([/Logo is too small\./]);
+    await expect(comments).toContainText("Comments · 3");
+    await show.selectOption("mine");
+    await expect(rows).toHaveText([/Fix my typo\./]);
+    // Resolving the last one shown leaves none to show, with a way back to every open one.
+    await comments.getByRole("button", { name: "Resolve comment: Fix my typo." }).click();
+    await expect(comments.getByTestId("comment-filter-empty")).toHaveText("You have not written in any open comment. Show all 2 open");
+    // The last one shown resolved, the way back to the others takes the focus, and then hands it to the select.
+    await expect(comments.getByRole("button", { name: "Show all 2 open" })).toBeFocused();
+    await comments.getByRole("button", { name: "Show all 2 open" }).click();
+    await expect(show).toHaveValue("all");
+    await expect(show).toBeFocused();
+    await expect(comments.getByRole("status")).toHaveText("2 open shown");
+    await expect(rows).toHaveCount(2);
+    // A note reopened that the filter would hide brings every open thread back, the focus on its Resolve button.
+    await show.selectOption("mentions");
+    await expect(comments.getByRole("status")).toHaveText("1 of 2 open shown");
+    await comments.getByRole("button", { name: "Show 1 resolved" }).click();
+    await comments.getByRole("button", { name: "Reopen comment: Fix my typo." }).click();
+    await expect(show).toHaveValue("all");
+    await expect(rows).toHaveCount(3);
+    await expect(comments.getByRole("button", { name: "Resolve comment: Fix my typo." })).toBeFocused();
+    // A note posted under "Mentioning me" never names its writer, so every open thread is shown with it.
+    await show.selectOption("mentions");
+    await page.getByLabel("New comment").fill("One more thing.");
+    await page.getByLabel("New comment").press("Control+Enter");
+    await expect(show).toHaveValue("all");
+    await expect(rows).toHaveCount(4);
+    await expect(rows.last()).toContainText("One more thing.");
+    await comments.getByRole("button", { name: "Resolve comment: One more thing." }).click();
+    await expect(rows).toHaveCount(3);
+    await comments.getByRole("button", { name: "Resolve comment: Fix my typo." }).click();
+    await expect(rows).toHaveCount(2);
+    // Resolve all, with only one thread shown, is not offered; with every open thread shown it is.
+    await show.selectOption("mentions");
+    await expect(rows).toHaveCount(1);
+    await expect(comments.getByTestId("comments-resolve-all")).toHaveCount(0);
+    await show.selectOption("all");
+    await expect(comments.getByTestId("comments-resolve-all")).toBeVisible();
+  } finally {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
+    await page.request.delete(`/api/workspaces/${ws.id}`);
+  }
+});
+
 test("share page offers a download only when the owner allows it", async ({ page }) => {
   const v = await createVideoViaApi(page, `Downloadable ${Date.now().toString(36)}`);
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");

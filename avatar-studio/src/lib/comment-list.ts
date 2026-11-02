@@ -36,6 +36,25 @@ export function orderThreads<T extends Pick<VideoComment, "atSec">>(threads: T[]
   return threads.map((c, i) => ({ c, i })).sort((a, b) => at(a.c) - at(b.c) || a.i - b.i).map(({ c }) => c);
 }
 
+/** Which open threads are shown in a workspace: all, those naming the reader, or those the reader wrote in. */
+export type CommentFilter = "all" | "mentions" | "mine";
+
+/**
+ * The threads the filter keeps for the person `userId`: "mentions" those whose note or a reply names them as
+ * `@email`, "mine" those whose note or a reply they wrote; "all", or no reader known, keeps every one. The order
+ * given is kept.
+ */
+export function filterThreads<T extends Pick<VideoComment, "id" | "authorId" | "mentions">>(
+  threads: T[],
+  replies: Map<string, T[]>,
+  filter: CommentFilter,
+  userId?: string,
+): T[] {
+  if (filter === "all" || !userId) return threads;
+  const keeps = (c: T) => (filter === "mine" ? c.authorId === userId : !!c.mentions?.some((m) => m.userId === userId));
+  return threads.filter((t) => keeps(t) || (replies.get(t.id) ?? []).some(keeps));
+}
+
 /** Each thread's replies, oldest first, by the id of the note they answer. */
 export function repliesByThread<T extends Pick<VideoComment, "parentId" | "createdAt">>(comments: T[]): Map<string, T[]> {
   const out = new Map<string, T[]>();

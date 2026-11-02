@@ -10,6 +10,19 @@ export function isShortcutsKey(e: Pick<KeyboardEvent, "key" | "code" | "ctrlKey"
   return modifier && !e.altKey && (e.key === "/" || (e.code === "Slash" && !e.shiftKey && !/^[\x20-\x7e]$/.test(e.key)));
 }
 
+/**
+ * Whether a key press in a comment box is Ctrl+Enter (⌘Enter on a Mac), which posts what is typed there: not with Alt
+ * or Shift as well, not held down (a held key would post again once the box is clear), and not the Enter that ends an
+ * input method's composition.
+ */
+export function isSubmitKey(
+  e: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "repeat" | "isComposing" | "keyCode">,
+  apple: boolean,
+): boolean {
+  const modifier = apple ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+  return modifier && e.key === "Enter" && !e.altKey && !e.shiftKey && !e.repeat && !e.isComposing && e.keyCode !== 229;
+}
+
 export type Shortcut = { keys: string[][]; does: string };
 
 /**
@@ -102,6 +115,13 @@ export function shortcutGroups(apple: boolean): Array<{ title: string; shortcuts
         { keys: [["Home"], ["End"]], does: "Go to the first or last scene (on a scene's number in the Scenes row)" },
         { keys: [[mod, "Z"]], does: "Undo a scene change (outside a text box, whose own undo takes back typing)" },
         { keys: apple ? [[mod, shift, "Z"]] : [[mod, shift, "Z"], [mod, "Y"]], does: "Redo it" },
+      ],
+    },
+    {
+      title: "In a video's comments",
+      shortcuts: [
+        { keys: [[mod, "Enter"]], does: "Post a comment or reply, or save an edit" },
+        { keys: [["Esc"]], does: "Cancel a reply or an edit" },
       ],
     },
     {

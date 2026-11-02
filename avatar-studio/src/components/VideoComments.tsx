@@ -1,13 +1,26 @@
 "use client";
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { Check, ChevronDown, CornerDownRight, Download, Link2, MessageSquare, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { Button, Card, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
 import { formatTimestamp } from "@/lib/text";
 import { refocusIfLost } from "@/lib/focus";
+import { isSubmitKey } from "@/lib/shortcuts";
+import { isApple } from "@/components/QuickFind";
 import { repliesByThread, splitComments, threadLink } from "@/lib/comment-list";
 import type { VideoComment, WorkspaceRole } from "@/lib/types";
+
+/**
+ * Ctrl+Enter (⌘Enter on a Mac) in a comment box submits its form, through the form's own submit handler, so an empty
+ * box or a post already on its way is turned away there as the button's click would be.
+ */
+function submitOnModEnter(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
+  if (!isSubmitKey(e.nativeEvent, isApple())) return false;
+  e.preventDefault();
+  e.currentTarget.form?.requestSubmit();
+  return true;
+}
 
 const LINK_GONE = "The comment this link points to is no longer here; it may have been deleted.";
 
@@ -348,10 +361,12 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
             <textarea
               autoFocus
               aria-label="Edit comment"
+              aria-keyshortcuts="Control+Enter Meta+Enter"
               value={editing.text}
               readOnly={saving}
               onChange={(e) => setEditing({ id: c.id, text: e.target.value })}
               onKeyDown={(e) => {
+                if (submitOnModEnter(e)) return;
                 if (e.key !== "Escape") return;
                 e.preventDefault();
                 e.stopPropagation();
@@ -442,10 +457,12 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
             <textarea
               autoFocus
               aria-label={`Reply to: ${excerpt(c)}`}
+              aria-keyshortcuts="Control+Enter Meta+Enter"
               value={replying.text}
               readOnly={postingReply}
               onChange={(e) => setReplying({ id: c.id, text: e.target.value })}
               onKeyDown={(e) => {
+                if (submitOnModEnter(e)) return;
                 if (e.key !== "Escape") return;
                 e.preventDefault();
                 e.stopPropagation();
@@ -545,7 +562,16 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
           void post();
         }}
       >
-        <textarea ref={box} aria-label="New comment" value={draft} onChange={(e) => setDraft(e.target.value)} rows={2} maxLength={1000} placeholder={teammates.length ? "Leave a note for the team; type @ and a teammate's email to notify them" : "Leave a note for the team"} className={inputClass} />
+        <textarea
+          ref={box}
+          aria-label="New comment"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          // Read-only while posting, as the reply and edit boxes are, so the next note is not typed only to be cleared.
+          readOnly={busy}
+          onKeyDown={submitOnModEnter}
+          aria-keyshortcuts="Control+Enter Meta+Enter"
+          rows={2} maxLength={1000} placeholder={teammates.length ? "Leave a note for the team; type @ and a teammate's email to notify them" : "Leave a note for the team"} className={inputClass} />
         {teammates.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500" data-testid="mention-suggestions">
             <span>Mention:</span>

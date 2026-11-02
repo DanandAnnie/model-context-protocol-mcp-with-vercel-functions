@@ -2,7 +2,7 @@
 // Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { isShortcutsKey, shortcutGroups } from "../shortcuts";
+import { isShortcutsKey, isSubmitKey, shortcutGroups } from "../shortcuts";
 
 const press = (over: Partial<Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">>) => ({ key: "/", code: "Slash", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...over });
 
@@ -27,6 +27,26 @@ describe("keyboard shortcuts", () => {
     assert.equal(isShortcutsKey(press({ ctrlKey: true, key: "=" }), false), false);
     // Shift with the US place is ? and not this shortcut.
     assert.equal(isShortcutsKey(press({ ctrlKey: true, shiftKey: true, key: "?" }), false), false);
+  });
+
+  it("posts a comment on Ctrl+Enter, ⌘Enter on a Mac, and on nothing else", () => {
+    const enter = (over: Partial<KeyboardEvent>) => ({ key: "Enter", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, repeat: false, isComposing: false, keyCode: 13, ...over });
+    assert.equal(isSubmitKey(enter({ ctrlKey: true }), false), true);
+    assert.equal(isSubmitKey(enter({ metaKey: true }), true), true);
+    assert.equal(isSubmitKey(enter({ metaKey: true }), false), false);
+    assert.equal(isSubmitKey(enter({ ctrlKey: true }), true), false);
+    // A plain Enter is a new line in the box.
+    assert.equal(isSubmitKey(enter({}), false), false);
+    assert.equal(isSubmitKey(enter({ ctrlKey: true, shiftKey: true }), false), false);
+    assert.equal(isSubmitKey(enter({ ctrlKey: true, altKey: true }), false), false);
+    assert.equal(isSubmitKey(enter({ ctrlKey: true, key: "m" }), false), false);
+    // Held down it would post again once the box clears; ending an input method's text is not posting.
+    assert.equal(isSubmitKey(enter({ ctrlKey: true, repeat: true }), false), false);
+    assert.equal(isSubmitKey(enter({ ctrlKey: true, isComposing: true }), false), false);
+    assert.equal(isSubmitKey(enter({ ctrlKey: true, keyCode: 229 }), false), false);
+    const listed = shortcutGroups(true).find((g) => g.title === "In a video's comments")!.shortcuts;
+    assert.deepEqual(listed[0].keys, [["⌘", "Enter"]]);
+    assert.deepEqual(shortcutGroups(false).find((g) => g.title === "In a video's comments")!.shortcuts[0].keys, [["Ctrl", "Enter"]]);
   });
 
   it("lists the keys as each computer has them", () => {

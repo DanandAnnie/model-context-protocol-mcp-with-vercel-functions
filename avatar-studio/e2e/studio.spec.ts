@@ -3598,8 +3598,15 @@ test("a review comment is answered in a thread that is downloaded, resolved, and
   await expect(replyButton).toBeFocused();
   // A reply posted sits under the note; the thread still counts once.
   await page.keyboard.press("Enter");
+  // Ctrl+Enter posts it as Post reply does; with Shift as well it does not.
   await box.fill("On it, shorter cut tomorrow.");
-  await comments.getByRole("button", { name: "Post reply" }).click();
+  await box.press("Control+Shift+Enter");
+  await page.waitForTimeout(300);
+  await expect(box).toBeVisible();
+  await expect(comments.getByTestId("comment-reply")).toHaveCount(0);
+  expect((await (await page.request.get(`/api/videos/${v.id}/comments`)).json()).comments).toHaveLength(1);
+  await box.fill("On it, shorter cut tomorrow.");
+  await box.press("Control+Enter");
   const thread = comments.getByRole("list", { name: "Replies to: Tighten the intro." });
   await expect(thread.getByTestId("comment-reply")).toHaveCount(1);
   await expect(thread).toContainText("On it, shorter cut tomorrow.");
@@ -3623,8 +3630,16 @@ test("a review comment is answered in a thread that is downloaded, resolved, and
   // A reply can be edited by its author like any note.
   await thread.getByRole("button", { name: "Edit comment: On it, shorter cut tomorrow." }).click();
   await comments.getByRole("textbox", { name: "Edit comment" }).fill("On it, cut tomorrow.");
-  await comments.getByRole("button", { name: "Save" }).click();
+  await comments.getByRole("textbox", { name: "Edit comment" }).press("Control+Enter");
   await expect(thread).toContainText("On it, cut tomorrow.");
+  await expect(comments.getByRole("textbox", { name: "Edit comment" })).toHaveCount(0);
+  // The keyboard shortcuts list the comment box's keys.
+  await page.keyboard.press("Control+/");
+  const shortcuts = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+  await expect(shortcuts.getByRole("heading", { name: "In a video's comments" })).toBeVisible();
+  await expect(shortcuts).toContainText("Post a comment or reply, or save an edit");
+  await page.keyboard.press("Escape");
+  await expect(shortcuts).toBeHidden();
   // Resolving the note folds the whole thread away, with no Reply there.
   await comments.getByRole("button", { name: "Resolve comment: Tighten the intro." }).click();
   expect((await page.request.post(`/api/videos/${v.id}/comments`, { data: { text: "Still not fixed", parentId: note.id } })).status()).toBe(409);
@@ -3763,9 +3778,12 @@ test("share page offers a download only when the owner allows it", async ({ page
   // Playing on while typing keeps the moment the box was ticked at.
   await player.evaluate((el: HTMLVideoElement) => (el.currentTime = 10));
   await expect(comments.getByLabel("Pin to 0:08 in the video")).toBeChecked();
+  // Ctrl+Enter in the box posts it, as Post comment does, and leaves the focus there for the next note.
   await page.getByLabel("New comment").fill("Cut the pause here.");
-  await page.getByRole("button", { name: "Post comment" }).click();
+  await page.getByLabel("New comment").press("Control+Enter");
   await expect(page.getByTestId("comment-list")).toContainText("0:08Cut the pause here.");
+  await expect(page.getByLabel("New comment")).toHaveValue("");
+  await expect(page.getByLabel("New comment")).toBeFocused();
   await expect(comments.getByRole("checkbox")).not.toBeChecked();
   await expect(comments.getByText("Pin to 0:10 in the video")).toBeVisible();
   const listed = (await (await page.request.get(`/api/videos/${v.id}/comments`)).json()).comments;

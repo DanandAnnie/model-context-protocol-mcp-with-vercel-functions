@@ -217,6 +217,19 @@ export function awaitingReview(videos: { review?: { status: string } }[]): numbe
   return videos.filter((v) => v.review?.status === "pending").length;
 }
 
+/**
+ * What Home says about this month's render allowance: once a fifth of it or less is left (at least the last render), how
+ * many are left and when it starts again (the 1st of next month, UTC, as the server counts); undefined with no allowance
+ * or plenty left.
+ */
+export function allowanceNotice(used: number, limit: number | null | undefined, now = Date.now()): { left: number; used: number; limit: number; resetsAt: string } | undefined {
+  if (!limit || limit <= 0) return undefined;
+  const left = Math.max(0, limit - used);
+  if (left > Math.max(1, Math.floor(limit / 5))) return undefined;
+  const d = new Date(now);
+  return { left, used, limit, resetsAt: new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1)).toISOString() };
+}
+
 /** When a trashed video is deleted for good, as an ISO instant; undefined for a video that is not in the trash. */
 export function purgeAt(video: { deletedAt?: string }): string | undefined {
   return video.deletedAt ? new Date(Date.parse(video.deletedAt) + TRASH_RETENTION_DAYS * 86_400_000).toISOString() : undefined;

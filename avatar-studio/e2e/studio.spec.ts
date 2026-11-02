@@ -9638,7 +9638,7 @@ test("home points out share links expiring within a week or expired, each line o
     const expiring = (await ids("expiring")).length;
     const expired = (await ids("expired")).length;
     await page.goto("/home");
-    const notice = page.getByRole("region", { name: "Videos to check" });
+    const notice = page.getByRole("region", { name: "Things to check" });
     await expect(notice).toContainText(expiring === 1 ? "1 share link expires within a week." : `${expiring} share links expire within a week.`);
     await expect(notice).toContainText(expired === 1 ? "1 share link has expired but is still on: visitors see that it has expired." : `${expired} share links have expired but are still on: visitors see that they have expired.`);
 
@@ -9649,7 +9649,7 @@ test("home points out share links expiring within a week or expired, each line o
     await expect(page.locator(`a[href="/videos/${gone.id}"]`)).toHaveCount(0);
 
     await page.goBack();
-    await page.getByRole("region", { name: "Videos to check" }).getByRole("link", { name: "Show expired links" }).click();
+    await page.getByRole("region", { name: "Things to check" }).getByRole("link", { name: "Show expired links" }).click();
     await expect(page).toHaveURL(/\/videos\?share=expired$/);
     await expect(page.getByLabel("Filter by share link")).toHaveValue("expired");
     await expect(page.locator(`a[href="/videos/${gone.id}"]`)).toContainText("Expired");
@@ -9672,7 +9672,7 @@ test("home points out share links expiring within a week or expired, each line o
     const byId = (id: string) => (real.videos as { id: string }[]).find((v) => v.id === id)!;
     await one([byId(soon.id), byId(gone.id)]);
     await page.goto("/home");
-    const single = page.getByRole("region", { name: "Videos to check" }).getByRole("listitem");
+    const single = page.getByRole("region", { name: "Things to check" }).getByRole("listitem");
     await expect(single).toHaveText(["1 share link expires within a week.Show expiring links", "1 share link has expired but is still on: visitors see that it has expired.Show expired links"]);
     await page.unroute("**/api/videos");
     await one([]);
@@ -9697,7 +9697,7 @@ test("home points out this week's failed renders, opening the library filtered t
     const list = [failed(now, "vid_failed_now"), failed(new Date(Date.now() - 8 * 86_400_000).toISOString(), "vid_failed_old"), failed(now, "vid_failed_retried"), { ...mine, id: "vid_retry", retryOf: "vid_failed_retried" }];
     await page.route("**/api/videos", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...real, videos: list }) }));
     await page.goto("/home");
-    const notice = page.getByRole("region", { name: "Videos to check" });
+    const notice = page.getByRole("region", { name: "Things to check" });
     await expect(notice.getByRole("listitem")).toHaveText(["1 render made in the last 7 days failed and has not been retried.Show failed renders"]);
     // The library asks the server for just those: the demo video is neither failed nor shown.
     const asked = page.waitForResponse((r) => /\/api\/videos\?/.test(r.url()) && new URL(r.url()).searchParams.get("status") === "failed" && new URL(r.url()).searchParams.get("created") === "7d");
@@ -9734,7 +9734,7 @@ test("home points out workspace videos waiting for review, opening the library f
     for (const v of [waiting, other]) await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
     expect((await page.request.post(`/api/videos/${waiting.id}/review`, { data: { action: "request" } })).status()).toBe(200);
     await page.goto("/home");
-    const notice = page.getByRole("region", { name: "Videos to check" });
+    const notice = page.getByRole("region", { name: "Things to check" });
     // The workspace's owner is the one to decide.
     await expect(notice.getByRole("listitem")).toHaveText(["1 video is waiting for your review.Show videos in review"]);
     await notice.getByRole("link", { name: "Show videos in review" }).click();
@@ -9757,6 +9757,37 @@ test("home points out workspace videos waiting for review, opening the library f
   } finally {
     await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
     if (ws) expect((await page.request.delete(`/api/workspaces/${ws.id}`)).status()).toBe(204);
+  }
+});
+
+test("home says when this month's renders are nearly or all used, linking to the plan and usage", async ({ page }) => {
+  const real = await (await page.request.get("/api/status")).json();
+  // The demo server has no allowance, so Home is shown one: first nearly used, then used up, then none.
+  let usage: { limit: number | null; used: number } = { limit: 20, used: 17 };
+  await page.route("**/api/status", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...real, renderLimitPerMonth: usage.limit, usage: { ...real.usage, rendersThisMonth: usage.used } }) }));
+  const line = page.getByRole("region", { name: "Things to check" }).getByTestId("allowance-notice");
+  await page.goto("/home");
+  await expect(line).toHaveText("3 renders left this month (17 of 20 used).See plan and usage");
+  usage = { limit: 20, used: 20 };
+  await page.reload();
+  // The date is written as the page writes it, in the browser's own language.
+  const reopens = await page.evaluate(() => {
+    const now = new Date();
+    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toLocaleDateString(undefined, { month: "long", day: "numeric", timeZone: "UTC" });
+  });
+  await expect(line).toHaveText(`This month's renders are used up (20 of 20); renders can start again on ${reopens} (UTC).See plan and usage`);
+  await line.getByRole("link", { name: "See plan and usage" }).click();
+  await expect(page).toHaveURL(/\/settings$/);
+  // Plenty left, or no allowance at all: nothing is said.
+  for (const u of [{ limit: 20, used: 15 }, { limit: null, used: 30 }]) {
+    usage = u;
+    const answered = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/status");
+    await page.goto("/home");
+    await answered;
+    // Home has drawn what the answer says once nothing more is loading.
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
+    await expect(line).toHaveCount(0);
   }
 });
 

@@ -1,12 +1,12 @@
 "use client";
 import Link from "next/link";
-import { AlertTriangle, Camera, ClipboardCheck, Clapperboard, Clock, Languages, Layers3, LayoutTemplate, MessageSquare, Sparkles, TimerOff, Wand2 } from "lucide-react";
+import { AlertTriangle, Camera, ClipboardCheck, Clapperboard, Clock, Gauge, Languages, Layers3, LayoutTemplate, MessageSquare, Sparkles, TimerOff, Wand2 } from "lucide-react";
 import { Insights } from "@/components/Insights";
 import { VideoCard } from "@/components/VideoCard";
 import { EmptyState, SectionTitle, Skeleton } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useWorkspaceRole } from "@/hooks/useCanEdit";
-import { awaitingReview, failedThisWeek, shareAttention } from "@/lib/client";
+import { allowanceNotice, awaitingReview, failedThisWeek, shareAttention } from "@/lib/client";
 import type { Video } from "@/lib/types";
 
 const QUICK = [
@@ -23,8 +23,13 @@ const QUICK = [
 export default function HomePage() {
   const { data, loading } = useApi<{ videos: Video[]; shareOrigin?: string }>("/api/videos");
   const recent = data?.videos.slice(0, 4) ?? [];
+  // This month's renders against the plan's allowance, once little or none of it is left.
+  const { data: status } = useApi<{ renderLimitPerMonth?: number | null; usage?: { rendersThisMonth: number } }>("/api/status");
+  const role = useWorkspaceRole()?.role;
+  // A workspace's viewers make no renders, so the allowance is not theirs to watch.
+  const allowance = status?.usage && role !== "viewer" ? allowanceNotice(status.usage.rendersThisMonth, status.renderLimitPerMonth) : undefined;
   // Only a workspace's owners decide a review; everyone else is told whose decision it waits on.
-  const decides = useWorkspaceRole()?.role === "owner";
+  const decides = role === "owner";
   // Videos waiting for a review decision, this week's failed renders, and links about to lapse or lapsed and still
   // handed out; each line opens the library filtered to those videos.
   const attention = data ? { ...shareAttention(data.videos), failed: failedThisWeek(data.videos), review: awaitingReview(data.videos) } : { expiring: 0, expired: 0, failed: 0, review: 0 };
@@ -33,9 +38,22 @@ export default function HomePage() {
     <>
       <SectionTitle title="Home" subtitle="What do you want to make today?" />
 
-      {(attention.expiring > 0 || attention.expired > 0 || attention.failed > 0 || attention.review > 0) && (
-        <section aria-label="Videos to check" data-testid="home-attention" className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+      {(allowance || attention.expiring > 0 || attention.expired > 0 || attention.failed > 0 || attention.review > 0) && (
+        <section aria-label="Things to check" data-testid="home-attention" className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <ul className="space-y-1.5">
+            {allowance && (
+              <li className="flex flex-wrap items-center gap-x-2" data-testid="allowance-notice">
+                <Gauge className="h-4 w-4 shrink-0" />
+                <span>
+                  {allowance.left === 0
+                    ? `This month's renders are used up (${allowance.used} of ${allowance.limit}); renders can start again on ${new Date(allowance.resetsAt).toLocaleDateString(undefined, { month: "long", day: "numeric", timeZone: "UTC" })} (UTC).`
+                    : `${allowance.left === 1 ? "1 render" : `${allowance.left} renders`} left this month (${allowance.used} of ${allowance.limit} used).`}
+                </span>
+                <Link href="/settings" className="font-medium underline hover:no-underline">
+                  See plan and usage
+                </Link>
+              </li>
+            )}
             {attention.review > 0 && (
               <li className="flex flex-wrap items-center gap-x-2">
                 <ClipboardCheck className="h-4 w-4 shrink-0" />

@@ -2,7 +2,7 @@
 // Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { awaitingReview, failedThisWeek, madeWithin } from "../client";
+import { allowanceNotice, awaitingReview, failedThisWeek, madeWithin } from "../client";
 import { filterVideos, videoQuerySchema } from "../services";
 import type { Video } from "../types";
 
@@ -48,5 +48,18 @@ describe("failed renders on Home", () => {
     assert.equal(awaitingReview([]), 0);
     const stored = videos.map((v) => ({ title: v.id, script: "", status: "completed", createdAt: new Date().toISOString(), ...v }) as unknown as Video);
     assert.deepEqual(filterVideos(stored, videoQuerySchema.parse({ review: "pending" })).map((v) => v.id).sort(), ["a", "b"]);
+  });
+
+  it("speaks of the render allowance once a fifth of it or less is left, with when it starts again", () => {
+    const now = Date.parse("2030-06-14T23:30:00Z");
+    assert.equal(allowanceNotice(5, null, now), undefined, "no allowance");
+    assert.equal(allowanceNotice(5, 0, now), undefined, "no allowance");
+    assert.equal(allowanceNotice(15, 20, now), undefined, "five of twenty left is more than a fifth");
+    assert.deepEqual(allowanceNotice(16, 20, now), { left: 4, used: 16, limit: 20, resetsAt: "2030-07-01T00:00:00.000Z" });
+    assert.deepEqual(allowanceNotice(25, 20, now), { left: 0, used: 25, limit: 20, resetsAt: "2030-07-01T00:00:00.000Z" }, "over the allowance (a plan moved down mid-month) reads as used up, with the real count");
+    assert.equal(allowanceNotice(1, 3, now), undefined, "a small allowance: two of three left");
+    assert.deepEqual(allowanceNotice(2, 3, now)?.left, 1, "the last render is always pointed out");
+    assert.equal(allowanceNotice(0, 3, now), undefined);
+    assert.equal(allowanceNotice(9, 10, Date.parse("2030-12-31T23:59:59Z"))?.resetsAt, "2031-01-01T00:00:00.000Z", "December runs into January");
   });
 });

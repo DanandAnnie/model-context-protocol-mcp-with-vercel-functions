@@ -120,6 +120,30 @@ export function shareState(video: { shareDisabled?: boolean; shareExpiresAt?: st
   return "live";
 }
 
+/** The longest a page waits before looking at its share links' times again. */
+export const SHARE_RECHECK_MAX_MS = 3_600_000;
+
+/**
+ * How long until the soonest of these videos' share links goes live or expires (from `now`, in ms, at most
+ * `SHARE_RECHECK_MAX_MS`), so a page can show the change when it happens; undefined when none of them is due to change.
+ * A coming expiry also counts each whole hour before it, when an "Expires in N hours" (or days) badge changes. A link
+ * switched off or a video in the trash changes only when someone changes it.
+ */
+export function nextShareChange(videos: Array<{ shareDisabled?: boolean; shareExpiresAt?: string; shareStartsAt?: string; deletedAt?: string }>, now = Date.now()): number | undefined {
+  let soonest: number | undefined;
+  for (const v of videos) {
+    if (v.shareDisabled || v.deletedAt) continue;
+    for (const iso of [v.shareStartsAt, v.shareExpiresAt]) {
+      const at = iso ? Date.parse(iso) : NaN;
+      if (!(at > now)) continue;
+      // An expiry's next whole hour before it, when its badge's count goes down (the badges round up).
+      const next = iso === v.shareExpiresAt ? now + ((at - now) % SHARE_RECHECK_MAX_MS || SHARE_RECHECK_MAX_MS) : at;
+      if (soonest === undefined || next < soonest) soonest = next;
+    }
+  }
+  return soonest === undefined ? undefined : Math.min(soonest - now, SHARE_RECHECK_MAX_MS);
+}
+
 /** Days within which a live link's coming expiry is pointed out on its library card. */
 export const EXPIRES_SOON_DAYS = 7;
 

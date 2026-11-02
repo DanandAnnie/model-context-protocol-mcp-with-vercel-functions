@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArchiveRestore, CheckSquare, Clapperboard, Clock, Copy, LayoutGrid, List, Download, FolderInput, KeyRound, MousePointerClick, QrCode, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
-import { api, clickSelect, folderFor, overSelection } from "@/lib/client";
+import { api, clickSelect, folderFor, nextShareChange, overSelection } from "@/lib/client";
 import { libraryKey } from "@/lib/shortcuts";
 import { isApple } from "@/components/QuickFind";
 import { VideoCard, VideoRow } from "@/components/VideoCard";
@@ -119,6 +119,24 @@ function VideosInner() {
   }, [path]);
   // The filtering, sorting, and paging happen on the server; the page only holds what it shows.
   const { data, loading, error, refetch } = useApi<VideoPage>(path, { pollMs: 6000, pollWhile: (d) => d.rendering > 0 });
+  // A shown video's link going live or expiring changes its card (Copy link, badges) with nothing to read from the
+  // server, so the page draws itself again then, rather than waiting for a reload; filtered by share link, the list
+  // itself may change (a link gone live no longer "Going live later"), so it is read again instead. A tab hidden for a
+  // while (or a computer asleep) holds its timers back, so the page looks again when it is shown.
+  const [shareTick, setShareTick] = useState(0);
+  const shareFiltered = share !== "all";
+  useEffect(() => {
+    const wait = nextShareChange(data?.videos ?? []);
+    if (wait === undefined) return;
+    const t = setTimeout(() => (shareFiltered ? void refetch() : setShareTick((n) => n + 1)), wait + 50);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, shareTick, shareFiltered]);
+  useEffect(() => {
+    const shown = () => document.visibilityState === "visible" && setShareTick((n) => n + 1);
+    document.addEventListener("visibilitychange", shown);
+    return () => document.removeEventListener("visibilitychange", shown);
+  }, []);
   // What a card's Copy link did, said once for the whole page rather than by each card; cleared first, so the same
   // words said again are heard again. A link that can no longer be sent means the list is out of date, so it is read again.
   const [cardNote, setCardNote] = useState("");

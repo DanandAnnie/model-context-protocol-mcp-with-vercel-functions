@@ -9506,6 +9506,8 @@ test("QR codes saves a zip of a QR code of each selected video's sendable share 
 
 test("a library card copies its video's share link in one click, when the link can be sent", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  // The page's clock, so a step below can move its time on without its timers firing.
+  await page.clock.install();
   const tag = Date.now().toString(36);
   const made = await page.request.post("/api/videos/batch", {
     data: { title: `Card ${tag}`, scriptTemplate: "Hello {name}.", csv: "name\nAda\nBo", avatarId: "stock_1", voiceId: "stock_voice_1" },
@@ -9549,18 +9551,75 @@ test("a library card copies its video's share link in one click, when the link c
   await expect(page.getByRole("button", { name: /^Copy link for / })).toHaveCount(0);
   await page.getByRole("button", { name: "Done selecting" }).click();
 
-  // A link that expires while the page stands open is not copied; the page says so and reads the list again.
+  // A link that expires while the page stands open loses its button then, without a reload.
   const expires = Date.now() + 6000;
   expect((await page.request.patch(`/api/videos/${live.id}`, { data: { shareExpiresAt: new Date(expires).toISOString() } })).status()).toBe(200);
   await page.reload();
   const button = page.getByRole("button", { name: `Copy link for ${live.title}`, exact: true });
   await expect(button).toBeVisible();
+  await expect(button).toHaveCount(0, { timeout: expires - Date.now() + 5000 });
+
+  // A link that expired before the page could draw itself again (a tab the browser held back) is still not copied when
+  // clicked: the page says so and reads the list again.
+  const later = Date.now() + 10 * 60_000;
+  expect((await page.request.patch(`/api/videos/${live.id}`, { data: { shareExpiresAt: new Date(later).toISOString() } })).status()).toBe(200);
+  await page.reload();
+  await expect(button).toBeVisible();
   await page.evaluate(() => navigator.clipboard.writeText("unchanged"));
-  await page.waitForTimeout(Math.max(0, expires - Date.now() + 500));
+  await page.clock.setSystemTime(later + 1000);
   await button.click();
   await expect(page.getByTestId("card-copy-note")).toHaveText(`The link for ${live.title} can no longer be sent; open the video to see why.`);
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("unchanged");
-  await expect(button).toHaveCount(0);
+});
+
+test("the library follows a shown video's share link going live and expiring, with no reload", async ({ page }) => {
+  const title = `Timed ${Date.now().toString(36)}`;
+  const v = { ...(await createVideoViaApi(page, title)), title };
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  const live = Date.now() + 12_000;
+  const ends = live + 10_000;
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareStartsAt: new Date(live).toISOString(), shareExpiresAt: new Date(ends).toISOString() } })).status()).toBe(200);
+  // Each list read is answered as it first was, so a poll (another video still rendering) cannot change the cards:
+  // only the page's own timer can.
+  const answers = new Map<string, string>();
+  await page.route("**/api/videos?*", async (route) => {
+    const url = route.request().url();
+    if (!answers.has(url)) answers.set(url, await (await route.fetch()).text());
+    await route.fulfill({ status: 200, contentType: "application/json", body: answers.get(url)! });
+  });
+  await page.goto("/videos");
+  await page.getByLabel("Search videos").fill(v.title);
+  const card = page.locator(`a[href="/videos/${v.id}"]`);
+  await expect(card).toContainText("Scheduled");
+  const copy = page.getByRole("button", { name: `Copy link for ${v.title}`, exact: true });
+  await expect(copy).toHaveCount(0);
+  // Nothing reloads the page from here on: the timer alone redraws it.
+  await page.evaluate(() => ((window as unknown as { marker: number }).marker = 1));
+  // It goes live: the card says so and offers its link.
+  await expect(copy).toBeVisible({ timeout: live - Date.now() + 5000 });
+  await expect(card).not.toContainText("Scheduled");
+  await expect(card).toContainText(/Expires in 1 hour/);
+  // It expires: the button goes and the card says so.
+  await expect(copy).toHaveCount(0, { timeout: ends - Date.now() + 5000 });
+  await expect(card).toContainText("Expired");
+  expect(await page.evaluate(() => (window as unknown as { marker?: number }).marker)).toBe(1);
+});
+
+test("filtered to links going live later, the library drops a video once its link goes live, with no reload", async ({ page }) => {
+  const title = `Soon ${Date.now().toString(36)}`;
+  const v = await createVideoViaApi(page, title);
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  const live = Date.now() + 12_000;
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareStartsAt: new Date(live).toISOString() } })).status()).toBe(200);
+  await page.goto("/videos");
+  await page.getByLabel("Filter by share link").selectOption("scheduled");
+  await page.getByLabel("Search videos").fill(title);
+  const card = page.locator(`a[href="/videos/${v.id}"]`);
+  await expect(card).toContainText("Scheduled");
+  // At go-live the list is read again, and the video no longer matches the filter.
+  await expect(card).toHaveCount(0, { timeout: live - Date.now() + 8000 });
+  await page.getByLabel("Filter by share link").selectOption("live");
+  await expect(card).toBeVisible();
 });
 
 test("the bulk bar never sends more than the 200 videos one action takes", async ({ page }) => {

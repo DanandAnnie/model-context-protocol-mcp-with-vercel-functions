@@ -1,7 +1,8 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { recordRequestActivity } from "@/lib/activity-request";
 import { publicOrigin } from "@/lib/config";
-import { requireEditor, requireOwner } from "@/lib/owner";
+import { requireEditor, requireOwner, userOrOwner } from "@/lib/owner";
+import { isWorkspaceId } from "@/lib/workspaces";
 import { createVideo, queryVideos, videoQuerySchema, videoRequestSchema } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +12,9 @@ export async function GET(req: Request) {
   try {
     const owner = await requireOwner();
     const query = videoQuerySchema.parse(Object.fromEntries(new URL(req.url).searchParams));
-    return json({ ...(await queryVideos(owner, query)), shareOrigin: publicOrigin(req) });
+    // Mentions only happen in a workspace, so only there is the reader looked up (a second session read) to count them.
+    const reader = isWorkspaceId(owner) ? (await userOrOwner(owner)).id : undefined;
+    return json({ ...(await queryVideos(owner, query, reader)), shareOrigin: publicOrigin(req) });
   } catch (err) {
     return errorResponse(err);
   }

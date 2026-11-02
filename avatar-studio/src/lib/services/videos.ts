@@ -31,7 +31,7 @@ import { bumpViewsByDay } from "../insights";
 import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneNameSchema, sceneTextSchema } from "./schemas";
 import { getBrandKit } from "./brand";
 import { pronunciationsFor, spokenCopy } from "../pronounce";
-import { clearComments, openCommentCounts } from "./comments";
+import { clearComments, commentCounts } from "./comments";
 import { clearVideoLeads } from "./leads";
 import { clearHighlights } from "./highlights";
 import { clearCleanups } from "./cleanups";
@@ -2100,8 +2100,11 @@ export const videoQuerySchema = z.object({
    * render was asked for), in the trash view too.
    */
   created: z.enum(["all", "7d", "30d", "90d"]).default("all"),
-  /** "open" lists only the videos with a review note no one has resolved yet (in the trash too). */
-  comments: z.enum(["all", "open"]).default("all"),
+  /**
+   * `open`: only the videos with a review thread no one has resolved yet; `mentions`: only those with an open thread that
+   * names the reader (in the trash too).
+   */
+  comments: z.enum(["all", "open", "mentions"]).default("all"),
   /** `true` lists only the starred videos (in the trash too, where a star is kept for when it is restored). */
   starred: z
     .string()
@@ -2134,6 +2137,8 @@ export interface VideoPage {
   trashed: number;
   /** Open (unresolved) review notes on the videos of this page that have any, by video id. */
   openComments: Record<string, number>;
+  /** Of those, the open threads that name the reader (`@email`), by video id; empty when the reader is not known. */
+  mentions: Record<string, number>;
   /** Where share links point (the public origin), for the cards' Copy link; set by the route. */
   shareOrigin?: string;
 }
@@ -2150,11 +2155,13 @@ const SORTERS: Record<VideoQuery["sort"], (a: Video, b: Video) => number> = {
 };
 
 /**
- * The videos matching `query`, sorted; `limit` is not applied here. `openComments` (from openCommentCounts) says which
- * videos have open notes, and the `comments` filter needs it: asked for without it, this throws rather than match nothing.
+ * The videos matching `query`, sorted; `limit` is not applied here. `openComments` and `mentions` (from commentCounts)
+ * say which videos have open notes, and which have open threads naming the reader; the `comments` filter needs the one
+ * it asks for: asked for without it, this throws rather than match nothing.
  */
-export function filterVideos(videos: Video[], query: VideoQuery, openComments?: Map<string, number>): Video[] {
+export function filterVideos(videos: Video[], query: VideoQuery, openComments?: Map<string, number>, mentions?: Map<string, number>): Video[] {
   if (query.comments === "open" && !openComments) throw new Error("filterVideos: the open comments filter needs the counts");
+  if (query.comments === "mentions" && !mentions) throw new Error("filterVideos: the mentions filter needs the counts");
   const needle = query.q.toLowerCase();
   // One clock for the whole list, so a link lapsing mid-filter cannot land in two states.
   const now = Date.now();
@@ -2163,6 +2170,7 @@ export function filterVideos(videos: Video[], query: VideoQuery, openComments?: 
       if (query.batch && v.batchId !== query.batch) return false;
       if (query.starred && !v.starred) return false;
       if (query.comments === "open" && !openComments!.get(v.id)) return false;
+      if (query.comments === "mentions" && !mentions!.get(v.id)) return false;
       if (query.created !== "all" && !madeWithin(v, query.created, now)) return false;
       if (query.review !== "all" && (v.review?.status ?? "none") !== query.review) return false;
       if (query.share !== "all" && !inShareFilter(v, query.share, now)) return false;
@@ -2185,15 +2193,16 @@ export function countFolders(videos: Video[]): Record<string, number> {
 
 /**
  * One page of the owner's library (in-flight renders refreshed first; see listVideos), or of the
- * trash with `query.trash`, where `sort: "newest"` orders by deletion time.
+ * trash with `query.trash`, where `sort: "newest"` orders by deletion time. `readerId`, the person asking, is who the
+ * mention counts (and the `mentions` filter) are for.
  */
-export async function queryVideos(ownerId: string = LOCAL_OWNER, query: VideoQuery): Promise<VideoPage> {
+export async function queryVideos(ownerId: string = LOCAL_OWNER, query: VideoQuery, readerId?: string): Promise<VideoPage> {
   // The open notes are counted while the videos load: a second read of the store, side by side rather than after.
-  const [split, openComments] = await Promise.all([loadVideos(ownerId), openCommentCounts(ownerId)]);
+  const [split, { open: openComments, mentions }] = await Promise.all([loadVideos(ownerId), commentCounts(ownerId, readerId)]);
   const live = query.trash ? split.live : await refreshPending(split.live);
   const all = query.trash ? split.trashed : live;
   const trashed = split.trashed.length;
-  const filtered = filterVideos(all, query, openComments);
+  const filtered = filterVideos(all, query, openComments, mentions);
   // The trash reads newest deletion first; `filterVideos` sorted by creation, so put the deletion order back.
   const matched = query.trash && query.sort === "newest" ? filtered.sort((a, b) => b.deletedAt!.localeCompare(a.deletedAt!) || b.createdAt.localeCompare(a.createdAt)) : filtered;
   const videos = query.limit ? matched.slice(0, query.limit) : matched;
@@ -2206,6 +2215,7 @@ export async function queryVideos(ownerId: string = LOCAL_OWNER, query: VideoQue
     folders: Array.from(new Set(all.map((v) => v.folder).filter((f): f is string => !!f))).sort(),
     folderCounts: countFolders(all),
     openComments: Object.fromEntries(videos.flatMap((v) => (openComments.has(v.id) ? [[v.id, openComments.get(v.id)!]] : []))),
+    mentions: Object.fromEntries(videos.flatMap((v) => (mentions.has(v.id) ? [[v.id, mentions.get(v.id)!]] : []))),
     // Renders in flight in the library, whichever view this is: the trash view must not poll for a trashed render.
     rendering: live.filter((v) => v.status === "processing" || v.status === "queued").length,
     trashed,

@@ -10428,6 +10428,55 @@ test("home counts the comments no one has resolved, opening the library filtered
   }
 });
 
+test("home names the open comments that mention you, opening the library filtered to them", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  let ws: { id: string } | undefined;
+  try {
+    ws = (await (await page.request.post("/api/workspaces", { data: { name: `Mentions ${tag}` } })).json()).workspace as { id: string };
+    expect((await page.request.post("/api/workspaces/switch", { data: { id: ws.id } })).status()).toBe(200);
+    const a = await createVideoViaApi(page, `Named ${tag}`);
+    // Demo mode has one user without an email, so no one can be mentioned for real: Home is told of two threads on one video.
+    let mentions: Record<string, number> = { [a.id]: 2 };
+    await page.route("**/api/videos", async (route) => {
+      const real = await (await route.fetch()).json();
+      await route.fulfill({ json: { ...real, openComments: {}, mentions } });
+    });
+    await page.goto("/home");
+    const line = page.getByTestId("mentions-notice");
+    await expect(line).toHaveText("2 open comments mention you, on 1 video.Show videos that mention you");
+    mentions = { [a.id]: 1 };
+    await page.reload();
+    await expect(line).toHaveText("1 open comment mentions you, on 1 video.Show videos that mention you");
+    await page.unroute("**/api/videos");
+    await line.getByRole("link", { name: "Show videos that mention you" }).click();
+    await expect(page).toHaveURL(/\/videos\?comments=mentions$/);
+    // The library asks for the filter, which here matches nothing, and says so; Open comments is the other choice, not both.
+    const toggle = page.getByTestId("mentions-toggle");
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("open-comments-toggle")).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByText("No open comment mentions you.")).toBeVisible();
+    await page.getByTestId("open-comments-toggle").click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByTestId("open-comments-toggle")).toHaveAttribute("aria-pressed", "true");
+    await toggle.click();
+    await expect(page.getByTestId("open-comments-toggle")).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByText("No open comment mentions you.")).toBeVisible();
+    await toggle.click();
+    await expect(page.locator(`a[href="/videos/${a.id}"]`)).toBeVisible();
+    // Outside a workspace the toggle is not offered, unless the address set it.
+    await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
+    await page.goto("/videos");
+    await expect(page.getByTestId("open-comments-toggle")).toBeVisible();
+    await expect(toggle).toHaveCount(0);
+    await page.goto("/videos?comments=mentions");
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect((await page.request.get("/api/videos?comments=mentions&limit=1")).status()).toBe(200);
+  } finally {
+    await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
+    if (ws) await page.request.delete(`/api/workspaces/${ws.id}`);
+  }
+});
+
 test("home says when this month's renders are nearly or all used, linking to the plan and usage", async ({ page }) => {
   const real = await (await page.request.get("/api/status")).json();
   // The demo server has no allowance, so Home is shown one: first nearly used, then used up, then none.

@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Camera, ClipboardCheck, Clapperboard, Clock, FilePenLine, Gauge, Languages, Layers3, LayoutTemplate, MessageSquare, Sparkles, TimerOff, Wand2 } from "lucide-react";
+import { AlertTriangle, AtSign, Camera, ClipboardCheck, Clapperboard, Clock, FilePenLine, Gauge, Languages, Layers3, LayoutTemplate, MessageSquare, Sparkles, TimerOff, Wand2 } from "lucide-react";
 import { Insights } from "@/components/Insights";
 import { VideoCard } from "@/components/VideoCard";
 import { EmptyState, SectionTitle, Skeleton } from "@/components/ui";
@@ -23,7 +23,7 @@ const QUICK = [
 ];
 
 export default function HomePage() {
-  const { data, loading } = useApi<{ videos: Video[]; shareOrigin?: string; openComments?: Record<string, number> }>("/api/videos");
+  const { data, loading } = useApi<{ videos: Video[]; shareOrigin?: string; openComments?: Record<string, number>; mentions?: Record<string, number> }>("/api/videos");
   const recent = data?.videos.slice(0, 4) ?? [];
   // This month's renders against the plan's allowance, once little or none of it is left.
   const { data: status } = useApi<{ renderLimitPerMonth?: number | null; usage?: { rendersThisMonth: number } }>("/api/status");
@@ -86,12 +86,14 @@ export default function HomePage() {
   const attention = data ? { ...shareAttention(data.videos), failed: failedThisWeek(data.videos), review: awaitingReview(data.videos) } : { expiring: 0, expired: 0, failed: 0, review: 0 };
   // Review notes no one has resolved yet, across the library (Home asks for every video, so the counts are for all of them).
   const comments = openCommentSummary(data?.openComments);
+  // Of those, the open threads that name the reader: what is waiting on them in particular.
+  const forYou = openCommentSummary(data?.mentions);
 
   return (
     <>
       <SectionTitle title="Home" subtitle="What do you want to make today?" />
 
-      {(allowance || attention.expiring > 0 || attention.expired > 0 || attention.failed > 0 || attention.review > 0 || comments.videos > 0) && (
+      {(allowance || attention.expiring > 0 || attention.expired > 0 || attention.failed > 0 || attention.review > 0 || comments.videos > 0 || forYou.videos > 0) && (
         <section aria-label="Things to check" data-testid="home-attention" className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <ul className="space-y-1.5">
             {allowance && (
@@ -116,6 +118,17 @@ export default function HomePage() {
                 </span>
                 <Link href="/videos?review=pending" className="font-medium underline hover:no-underline">
                   Show videos in review
+                </Link>
+              </li>
+            )}
+            {forYou.videos > 0 && (
+              <li className="flex flex-wrap items-center gap-x-2" data-testid="mentions-notice">
+                <AtSign className="h-4 w-4 shrink-0" />
+                <span>
+                  {forYou.notes === 1 ? "1 open comment mentions" : `${forYou.notes} open comments mention`} you, on {forYou.videos === 1 ? "1 video" : `${forYou.videos} videos`}.
+                </span>
+                <Link href="/videos?comments=mentions" className="font-medium underline hover:no-underline">
+                  Show videos that mention you
                 </Link>
               </li>
             )}

@@ -290,14 +290,32 @@ export async function resolveComment(videoId: string, commentId: string, resolve
 
 /** How many open (unresolved) threads each of the owner's videos has, by video id; a video with none is not listed. */
 export async function openCommentCounts(ownerId: string): Promise<Map<string, number>> {
-  const counts = new Map<string, number>();
+  return (await commentCounts(ownerId)).open;
+}
+
+/**
+ * Open threads by video id, and of those, the ones that name `userId` (`@email` in the note or any reply) as `mentions`:
+ * what is still waiting on that person. A thread counts once, by the note that starts it; its replies are part of it,
+ * and one whose note is gone counts alone. Without `userId`, `mentions` is empty. One read of the store for both.
+ */
+export async function commentCounts(ownerId: string, userId?: string): Promise<{ open: Map<string, number>; mentions: Map<string, number> }> {
+  const open = new Map<string, number>();
+  const mentions = new Map<string, number>();
   const all = await getStore().list<VideoComment>("comment", ownerId);
-  const ids = new Set(all.map((c) => c.id));
+  const byId = new Map(all.map((c) => [c.id, c]));
+  const startOf = (c: VideoComment) => (c.parentId && byId.get(c.parentId)) || c;
+  const named = new Set<string>();
   for (const c of all) {
-    // A thread counts once, by the note that starts it; its replies are part of it (one whose note is gone counts alone).
-    if (!c.resolvedAt && !(c.parentId && ids.has(c.parentId))) counts.set(c.videoId, (counts.get(c.videoId) ?? 0) + 1);
+    const start = startOf(c);
+    if (start.resolvedAt) continue;
+    if (start === c) open.set(c.videoId, (open.get(c.videoId) ?? 0) + 1);
+    if (userId && !named.has(start.id) && c.mentions?.some((m) => m.userId === userId)) named.add(start.id);
   }
-  return counts;
+  for (const id of named) {
+    const videoId = byId.get(id)!.videoId;
+    mentions.set(videoId, (mentions.get(videoId) ?? 0) + 1);
+  }
+  return { open, mentions };
 }
 
 /** Removes every comment on a video; part of deleting the video for good. */

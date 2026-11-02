@@ -9723,6 +9723,43 @@ test("home points out this week's failed renders, opening the library filtered t
   }
 });
 
+test("home points out workspace videos waiting for review, opening the library filtered to them", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  let ws: { id: string } | undefined;
+  try {
+    ws = (await (await page.request.post("/api/workspaces", { data: { name: `Reviews ${tag}` } })).json()).workspace as { id: string };
+    expect((await page.request.post("/api/workspaces/switch", { data: { id: ws.id } })).status()).toBe(200);
+    const waiting = await createVideoViaApi(page, `Waiting ${tag}`);
+    const other = await createVideoViaApi(page, `Not asked ${tag}`);
+    for (const v of [waiting, other]) await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+    expect((await page.request.post(`/api/videos/${waiting.id}/review`, { data: { action: "request" } })).status()).toBe(200);
+    await page.goto("/home");
+    const notice = page.getByRole("region", { name: "Videos to check" });
+    // The workspace's owner is the one to decide.
+    await expect(notice.getByRole("listitem")).toHaveText(["1 video is waiting for your review.Show videos in review"]);
+    await notice.getByRole("link", { name: "Show videos in review" }).click();
+    await expect(page).toHaveURL(/\/videos\?review=pending$/);
+    await expect(page.getByLabel("Filter by review")).toHaveValue("pending");
+    await expect(page.locator(`a[href="/videos/${waiting.id}"]`).getByTestId("review-badge")).toHaveText("In review");
+    await expect(page.locator(`a[href="/videos/${other.id}"]`)).toHaveCount(0);
+    // Once decided, it is no longer waiting, and Home says nothing.
+    expect((await page.request.post(`/api/videos/${waiting.id}/review`, { data: { action: "approve" } })).status()).toBe(200);
+    await page.goto("/home");
+    // The list has arrived once its recent videos show; only then is a missing notice proof of nothing to check.
+    await expect(page.locator(`a[href="/videos/${waiting.id}"]`)).toBeVisible();
+    await expect(page.getByTestId("home-attention")).toHaveCount(0);
+    // Back in the personal space, where there are no reviews, a review filter the address set still shows, to clear.
+    expect((await page.request.post("/api/workspaces/switch", { data: { id: "local" } })).status()).toBe(200);
+    await page.goto("/videos?review=pending");
+    await expect(page.getByLabel("Filter by review")).toHaveValue("pending");
+    await page.getByLabel("Filter by review").selectOption("all");
+    await expect(page.getByLabel("Filter by review")).toHaveCount(0);
+  } finally {
+    await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
+    if (ws) expect((await page.request.delete(`/api/workspaces/${ws.id}`)).status()).toBe(204);
+  }
+});
+
 test("the bulk bar never sends more than the 200 videos one action takes", async ({ page }) => {
   test.slow();
   const tag = `Over ${Date.now().toString(36)}`;

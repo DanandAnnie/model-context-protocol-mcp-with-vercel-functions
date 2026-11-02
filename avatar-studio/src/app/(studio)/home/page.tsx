@@ -1,11 +1,12 @@
 "use client";
 import Link from "next/link";
-import { AlertTriangle, Camera, Clapperboard, Clock, Languages, Layers3, LayoutTemplate, MessageSquare, Sparkles, TimerOff, Wand2 } from "lucide-react";
+import { AlertTriangle, Camera, ClipboardCheck, Clapperboard, Clock, Languages, Layers3, LayoutTemplate, MessageSquare, Sparkles, TimerOff, Wand2 } from "lucide-react";
 import { Insights } from "@/components/Insights";
 import { VideoCard } from "@/components/VideoCard";
 import { EmptyState, SectionTitle, Skeleton } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
-import { failedThisWeek, shareAttention } from "@/lib/client";
+import { useWorkspaceRole } from "@/hooks/useCanEdit";
+import { awaitingReview, failedThisWeek, shareAttention } from "@/lib/client";
 import type { Video } from "@/lib/types";
 
 const QUICK = [
@@ -22,17 +23,31 @@ const QUICK = [
 export default function HomePage() {
   const { data, loading } = useApi<{ videos: Video[]; shareOrigin?: string }>("/api/videos");
   const recent = data?.videos.slice(0, 4) ?? [];
-  // Links about to lapse, or lapsed and still handed out, and this week's failed renders; each line opens the library
-  // filtered to those videos.
-  const attention = data ? { ...shareAttention(data.videos), failed: failedThisWeek(data.videos) } : { expiring: 0, expired: 0, failed: 0 };
+  // Only a workspace's owners decide a review; everyone else is told whose decision it waits on.
+  const decides = useWorkspaceRole()?.role === "owner";
+  // Videos waiting for a review decision, this week's failed renders, and links about to lapse or lapsed and still
+  // handed out; each line opens the library filtered to those videos.
+  const attention = data ? { ...shareAttention(data.videos), failed: failedThisWeek(data.videos), review: awaitingReview(data.videos) } : { expiring: 0, expired: 0, failed: 0, review: 0 };
 
   return (
     <>
       <SectionTitle title="Home" subtitle="What do you want to make today?" />
 
-      {(attention.expiring > 0 || attention.expired > 0 || attention.failed > 0) && (
+      {(attention.expiring > 0 || attention.expired > 0 || attention.failed > 0 || attention.review > 0) && (
         <section aria-label="Videos to check" data-testid="home-attention" className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <ul className="space-y-1.5">
+            {attention.review > 0 && (
+              <li className="flex flex-wrap items-center gap-x-2">
+                <ClipboardCheck className="h-4 w-4 shrink-0" />
+                <span>
+                  {attention.review === 1 ? "1 video is waiting for " : `${attention.review} videos are waiting for `}
+                  {decides ? "your review" : "an owner's review"}.
+                </span>
+                <Link href="/videos?review=pending" className="font-medium underline hover:no-underline">
+                  Show videos in review
+                </Link>
+              </li>
+            )}
             {attention.failed > 0 && (
               <li className="flex flex-wrap items-center gap-x-2">
                 <AlertTriangle className="h-4 w-4 shrink-0" />

@@ -212,6 +212,11 @@ export function failedThisWeek(videos: { id: string; status: string; createdAt: 
   return videos.filter((v) => v.status === "failed" && madeWithin(v, "7d", now) && !retried.has(v.id)).length;
 }
 
+/** Videos waiting for a decision on their review (a workspace's "In review"), as the library's review filter lists them. */
+export function awaitingReview(videos: { review?: { status: string } }[]): number {
+  return videos.filter((v) => v.review?.status === "pending").length;
+}
+
 /** When a trashed video is deleted for good, as an ISO instant; undefined for a video that is not in the trash. */
 export function purgeAt(video: { deletedAt?: string }): string | undefined {
   return video.deletedAt ? new Date(Date.parse(video.deletedAt) + TRASH_RETENTION_DAYS * 86_400_000).toISOString() : undefined;

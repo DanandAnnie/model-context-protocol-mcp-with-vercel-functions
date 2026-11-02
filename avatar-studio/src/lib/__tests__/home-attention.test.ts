@@ -2,7 +2,7 @@
 // Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { failedThisWeek, madeWithin } from "../client";
+import { awaitingReview, failedThisWeek, madeWithin } from "../client";
 import { filterVideos, videoQuerySchema } from "../services";
 import type { Video } from "../types";
 
@@ -34,5 +34,19 @@ describe("failed renders on Home", () => {
     assert.equal(madeWithin({ createdAt: "2030-05-10T12:00:00Z" }, "30d", now), true);
     assert.equal(madeWithin({ createdAt: "2030-03-01T12:00:00Z" }, "90d", now), false);
     assert.equal(madeWithin({ createdAt: "" }, "90d", now), false);
+  });
+
+  it("counts the videos in review as the library's review filter lists them", () => {
+    const videos = [
+      { id: "a", review: { status: "pending" } },
+      { id: "b", review: { status: "pending" } },
+      { id: "c", review: { status: "approved" } },
+      { id: "d", review: { status: "changes" } },
+      { id: "e" },
+    ];
+    assert.equal(awaitingReview(videos), 2);
+    assert.equal(awaitingReview([]), 0);
+    const stored = videos.map((v) => ({ title: v.id, script: "", status: "completed", createdAt: new Date().toISOString(), ...v }) as unknown as Video);
+    assert.deepEqual(filterVideos(stored, videoQuerySchema.parse({ review: "pending" })).map((v) => v.id).sort(), ["a", "b"]);
   });
 });

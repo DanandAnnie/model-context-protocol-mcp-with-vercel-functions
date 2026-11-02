@@ -15,6 +15,7 @@ import { BULK_MAX, EMPTY_TRASH_MAX, LIBRARY_PAGE_MAX, MAX_FOLDER_NAME, MAX_RETRY
 
 const STATUSES: Array<"all" | VideoStatus> = ["all", "processing", "completed", "failed"];
 const CREATED_FILTERS = Object.keys(CREATED_WITHIN_DAYS) as (keyof typeof CREATED_WITHIN_DAYS)[];
+const REVIEW_FILTERS = ["pending", "approved", "changes", "none"] as const;
 
 /** A filter's value from the page's address when the library knows it, else "all". */
 function fromAddress<T extends string>(asked: string | null, known: readonly T[]): T | "all" {
@@ -54,9 +55,9 @@ function VideosInner() {
   const failedCount = Number(params.get("failed") ?? 0);
   const [q, setQ] = useState("");
   const [needle, setNeedle] = useState("");
-  // Home's notices open the library at `?share=`, `?status=`, and `?created=`, read again whenever the address changes
-  // (the sidebar's My videos goes back to every video); a value the library does not know is ignored.
-  const askedFilters = ["share", "status", "created"].map((k) => params.get(k) ?? "").join("\u0000");
+  // Home's notices open the library at `?share=`, `?status=`, `?created=`, and `?review=`, read again whenever the
+  // address changes (the sidebar's My videos goes back to every video); a value the library does not know is ignored.
+  const askedFilters = ["share", "status", "created", "review"].map((k) => params.get(k) ?? "").join("\u0000");
   const [status, setStatus] = useState<"all" | VideoStatus>(() => fromAddress(params.get("status"), STATUSES));
   const [folder, setFolder] = useState<string>("all"); // "all" | "unfiled" | folder name
   const [sort, setSort] = useState<SortKey>("newest");
@@ -67,7 +68,7 @@ function VideosInner() {
   const trashToggleRef = useRef<HTMLButtonElement>(null);
   // Set once the trash is emptied; the toggle takes the focus when it is enabled again, after the request.
   const focusTrashToggle = useRef(false);
-  const [review, setReview] = useState<VideoQuery["review"]>("all");
+  const [review, setReview] = useState<VideoQuery["review"]>(() => fromAddress(params.get("review"), REVIEW_FILTERS));
   // Share link state, as the cards' badges say; with the bulk go-live and expiry it finds a campaign's links to fix.
   const [share, setShare] = useState<VideoQuery["share"]>(() => fromAddress(params.get("share"), SHARE_FILTERS));
   // The trash is its own view of the same page: same search, status, and folder filters, different bulk actions.
@@ -82,6 +83,7 @@ function VideosInner() {
     setShare(fromAddress(params.get("share"), SHARE_FILTERS));
     setStatus(fromAddress(params.get("status"), STATUSES));
     setCreated(fromAddress(params.get("created"), CREATED_FILTERS));
+    setReview(fromAddress(params.get("review"), REVIEW_FILTERS));
   }
   // Cards or compact rows; remembered by this browser only (read after mounting, so the server render stays the grid).
   const [layout, setLayout] = useState<"grid" | "list">("grid");
@@ -1167,7 +1169,8 @@ function VideosInner() {
           >
             <Star className={`h-3 w-3 ${starred ? "fill-white" : ""}`} /> Starred
           </button>
-          {inWorkspace && (
+          {/* Shown outside a workspace too while the address set it (a link from Home, then a switch of space), so it can be cleared. */}
+          {(inWorkspace || review !== "all") && (
             <select aria-label="Filter by review" value={review} onChange={(e) => setReview(e.target.value as VideoQuery["review"])} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700">
               <option value="all">Any review state</option>
               <option value="pending">In review</option>

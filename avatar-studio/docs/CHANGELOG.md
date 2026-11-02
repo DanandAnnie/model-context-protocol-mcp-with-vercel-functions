@@ -1032,3 +1032,12 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     Left as they are:
     - A text save or a resolve that lands at the same moment as a reaction is still a `409` asking for a reload, as any two changes at once are.
     - Pills name the email a person had when they reacted, as a note names its author's.
+- Resolve all comments (`6b584ba`): with two or more open threads, the video page's comments card has a Resolve all button. It asks first ("Resolve all 3 open comments? Each can be reopened."), then marks the open threads it showed as done, by the person who pressed it. It says how many were resolved and how many are still open, and the focus goes to the resolved notes' toggle, or to the comment box when there is none. `POST /api/videos/:id/comments/resolve-all { ids }` takes the threads the caller was shown, 1 to 200, and returns `{ resolved, failed, open }`. Each thread is resolved as resolving it alone would be: its replies go with its note, and a reply whose note is gone counts as its own thread. An id that is no longer an open thread start is left alone. Up to eight are written at a time. A thread changed in the same moment, for example by a reaction, is read again and tried up to five times, and one that still fails is counted without stopping the rest. Unit tests cover the count, replies, a reply whose note is gone, a thread started since, an earlier resolver kept, the retry and its limit, a reaction at the same moment, another owner, and the schema. The e2e test says no to the question, then yes while a teammate posts a note, which stays open, and checks the API.
+  - An independent review found one blocking problem, now fixed. The request named no threads, so a note posted while the question was open would have been resolved, folded away unseen. The page now sends the threads it showed, and only those are resolved.
+  - Fixed from the optional findings:
+    - The announcement counts what is still open, from the server's answer.
+    - When there is no resolved toggle to take the focus, it goes to the comment box.
+    - Threads are written eight at a time, with a 60-second limit on the route.
+    - A thread that cannot be resolved is counted and shown as an error without stopping the others.
+    - The header wraps at phone width.
+    - A unit test forces the retry, and its limit, with a store that loses the race.

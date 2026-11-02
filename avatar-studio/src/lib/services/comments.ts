@@ -134,6 +134,24 @@ export async function deleteComment(videoId: string, commentId: string, ownerId:
   await getStore().remove("comment", commentId);
 }
 
+export const commentPatchSchema = z.object({ resolved: z.boolean() }).strict();
+
+/**
+ * Marks a note done, or open again. Anyone who can comment on the video may, as in a shared review: the
+ * person who acted on a note is often not the one who wrote it. Resolving a resolved note keeps who did it first.
+ */
+export async function resolveComment(videoId: string, commentId: string, resolved: boolean, ownerId: string = LOCAL_OWNER, user: User = { id: ownerId }): Promise<VideoComment> {
+  await ownedVideo(videoId, ownerId);
+  const comment = await getStore().get<VideoComment>("comment", commentId);
+  if (!comment || comment.videoId !== videoId || comment.ownerId !== ownerId) throw new NotFoundError("Comment not found");
+  if (resolved === !!comment.resolvedAt) return comment;
+  const { resolvedAt: _at, resolvedById: _by, resolvedByEmail: _email, ...open } = comment;
+  const next: VideoComment = resolved ? { ...open, resolvedAt: nowIso(), resolvedById: user.id, ...(user.email ? { resolvedByEmail: user.email } : {}) } : open;
+  // Only over the note read: one its author deleted meanwhile, or that went with its video, stays gone.
+  if (!(await getStore().putIf("comment", next, "createdAt", comment.createdAt))) throw new NotFoundError("Comment not found");
+  return next;
+}
+
 /** Removes every comment on a video; part of deleting the video for good. */
 export async function clearComments(videoId: string, ownerId: string): Promise<void> {
   const all = await getStore().list<VideoComment>("comment", ownerId);

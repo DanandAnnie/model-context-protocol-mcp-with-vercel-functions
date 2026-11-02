@@ -1481,6 +1481,10 @@ export interface VideoComment {
   /** Workspace members named as `@email` in the text; each is emailed a link to the video once. */
   mentions?: Array<{ userId: string; email: string }>;
   createdAt: string;
+  /** When the note was marked done, and by whom (their email when the account mode knows one); absent while it is open. */
+  resolvedAt?: string;
+  resolvedById?: string;
+  resolvedByEmail?: string;
 }
 
 /** Where a workspace video stands in review: awaiting an owner, approved, or sent back with changes. */

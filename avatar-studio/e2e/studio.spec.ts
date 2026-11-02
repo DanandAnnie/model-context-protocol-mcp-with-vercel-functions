@@ -3425,6 +3425,75 @@ test("the share page transcript plays the video from a line and marks the line b
   await expect(transcript.getByRole("button").first()).toHaveAttribute("aria-current", "true");
 });
 
+test("review comments are resolved, folded away, and reopened, from the keyboard", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Resolving ${Date.now().toString(36)}`);
+  const other = await createVideoViaApi(page, `Elsewhere ${Date.now().toString(36)}`);
+  const ids: string[] = [];
+  for (const text of ["First note.", "Second note.", "Third note."]) {
+    const res = await page.request.post(`/api/videos/${v.id}/comments`, { data: { text } });
+    expect(res.status()).toBe(201);
+    ids.push((await res.json()).comment.id);
+  }
+  expect((await page.request.patch(`/api/videos/${v.id}/comments/${ids[0]}`, { data: { resolved: "yes" } })).status()).toBe(400);
+  expect((await page.request.patch(`/api/videos/${other.id}/comments/${ids[0]}`, { data: { resolved: true } })).status()).toBe(404);
+
+  await page.goto(`/videos/${v.id}`);
+  const comments = page.getByTestId("comments");
+  const open = page.getByTestId("comment-list");
+  await expect(comments).toContainText("Comments · 3");
+  await expect(comments.getByRole("button", { name: /resolved$/ })).toHaveCount(0);
+  // Resolving a note folds it away and hands the focus to the next open note's Resolve.
+  await comments.getByRole("button", { name: "Resolve comment: Second note." }).focus();
+  await page.keyboard.press("Enter");
+  await expect(open).not.toContainText("Second note.");
+  await expect(comments).toContainText("Comments · 2 open, 1 resolved");
+  await expect(comments.getByRole("button", { name: "Resolve comment: Third note." })).toBeFocused();
+  const toggle = comments.getByRole("button", { name: "Show 1 resolved" });
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByTestId("resolved-comment-list")).toBeHidden();
+  await expect(comments.getByRole("status")).toHaveText("Comment resolved; 2 open");
+  await toggle.click();
+  await expect(comments.getByRole("button", { name: "Hide 1 resolved" })).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByTestId("resolved-comment-list")).toBeVisible();
+  await expect(page.getByTestId("resolved-comment-list")).toContainText("Second note.");
+  await expect(page.getByTestId("resolved-comment-list")).toContainText("Resolved by you");
+  // The last note in the list hands the focus back to the one before it, and the last open one to the toggle.
+  await comments.getByRole("button", { name: "Resolve comment: Third note." }).focus();
+  await page.keyboard.press("Enter");
+  await expect(comments.getByRole("button", { name: "Resolve comment: First note." })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(comments).toContainText("Every comment is resolved.");
+  await expect(open).toHaveCount(0);
+  await expect(comments.getByRole("button", { name: "Hide 3 resolved" })).toBeFocused();
+  await expect(comments).toContainText("Comments · 0 open, 3 resolved");
+  // The most recently resolved note is listed first; reopening one puts it back and focuses its Resolve.
+  await expect(page.getByTestId("resolved-comment-list").locator("li").first()).toContainText("First note.");
+  await comments.getByRole("button", { name: "Reopen comment: Second note." }).click();
+  await expect(open).toContainText("Second note.");
+  await expect(comments.getByRole("button", { name: "Resolve comment: Second note." })).toBeFocused();
+  await expect(comments.getByRole("status")).toHaveText("Comment reopened");
+  const stored = (await (await page.request.get(`/api/videos/${v.id}/comments`)).json()).comments as Array<{ text: string; resolvedAt?: string }>;
+  expect(stored.map((c) => [c.text, !!c.resolvedAt])).toEqual([["First note.", true], ["Second note.", false], ["Third note.", true]]);
+  // It holds across a reload, folded again, and a resolved note can still be deleted by its author.
+  await page.reload();
+  await expect(comments).toContainText("Comments · 1 open, 2 resolved");
+  await comments.getByRole("button", { name: "Show 2 resolved" }).click();
+  await page.getByTestId("resolved-comment-list").locator("li", { hasText: "Third note." }).getByRole("button", { name: "Delete comment" }).click();
+  await expect(comments).toContainText("Comments · 1 open, 1 resolved");
+  await expect(page.getByTestId("resolved-comment-list")).not.toContainText("Third note.");
+  // Reopening the last resolved note takes the toggle away; the next one resolved starts folded again.
+  await comments.getByRole("button", { name: "Reopen comment: First note." }).click();
+  await expect(comments.getByRole("button", { name: /resolved$/ })).toHaveCount(0);
+  await comments.getByRole("button", { name: "Resolve comment: First note." }).click();
+  await expect(comments.getByRole("button", { name: "Show 1 resolved" })).toHaveAttribute("aria-expanded", "false");
+  // A note deleted elsewhere drops out when resolving it fails, rather than keeping a button that always fails.
+  expect((await page.request.delete(`/api/videos/${v.id}/comments/${ids[1]}`)).status()).toBe(204);
+  await comments.getByRole("button", { name: "Resolve comment: Second note." }).click();
+  await expect(comments).toContainText("Comment not found");
+  await expect(comments.getByRole("button", { name: "Resolve comment: Second note." })).toHaveCount(0);
+  await expect(comments).toContainText("Comments · 0 open, 1 resolved");
+});
+
 test("share page offers a download only when the owner allows it", async ({ page }) => {
   const v = await createVideoViaApi(page, `Downloadable ${Date.now().toString(36)}`);
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");

@@ -163,6 +163,35 @@ export function shareExpiresSoon(video: { shareDisabled?: boolean; shareExpiresA
   return days <= EXPIRES_SOON_DAYS ? `Expires in ${days} ${days === 1 ? "day" : "days"}` : undefined;
 }
 
+/** The share states the library filters by: one of `shareState`'s, or "expiring" for a link `shareExpiresSoon` badges. */
+export const SHARE_FILTERS = ["live", "expiring", "scheduled", "off", "expired"] as const;
+
+export type ShareFilter = (typeof SHARE_FILTERS)[number];
+
+/**
+ * Whether a video's share link is in `share`, as the library's share filter reads it. A video in the trash is in none:
+ * its link answers "not found" whatever it was set to.
+ */
+export function inShareFilter(video: { shareDisabled?: boolean; shareExpiresAt?: string; shareStartsAt?: string; deletedAt?: string }, share: ShareFilter, now = Date.now()): boolean {
+  if (video.deletedAt) return false;
+  return share === "expiring" ? !!shareExpiresSoon(video, now) : shareState(video, now) === share;
+}
+
+/**
+ * How many of these videos' share links need a look: those expiring within `EXPIRES_SOON_DAYS`, and those that have
+ * expired while still switched on, so whoever has the link is told it expired. The library's "expiring" and "expired"
+ * share filters list the same videos, by the server's clock where this counts by `now` (the browser's, on Home).
+ */
+export function shareAttention(videos: { shareDisabled?: boolean; shareExpiresAt?: string; shareStartsAt?: string; deletedAt?: string }[], now = Date.now()): { expiring: number; expired: number } {
+  let expiring = 0;
+  let expired = 0;
+  for (const v of videos) {
+    if (inShareFilter(v, "expiring", now)) expiring++;
+    else if (inShareFilter(v, "expired", now)) expired++;
+  }
+  return { expiring, expired };
+}
+
 /** When a trashed video is deleted for good, as an ISO instant; undefined for a video that is not in the trash. */
 export function purgeAt(video: { deletedAt?: string }): string | undefined {
   return video.deletedAt ? new Date(Date.parse(video.deletedAt) + TRASH_RETENTION_DAYS * 86_400_000).toISOString() : undefined;

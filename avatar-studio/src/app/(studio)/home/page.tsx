@@ -1,10 +1,11 @@
 "use client";
 import Link from "next/link";
-import { Camera, Clapperboard, Languages, Layers3, LayoutTemplate, MessageSquare, Sparkles, Wand2 } from "lucide-react";
+import { Camera, Clapperboard, Clock, Languages, Layers3, LayoutTemplate, MessageSquare, Sparkles, TimerOff, Wand2 } from "lucide-react";
 import { Insights } from "@/components/Insights";
 import { VideoCard } from "@/components/VideoCard";
 import { EmptyState, SectionTitle, Skeleton } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
+import { shareAttention } from "@/lib/client";
 import type { Video } from "@/lib/types";
 
 const QUICK = [
@@ -21,10 +22,37 @@ const QUICK = [
 export default function HomePage() {
   const { data, loading } = useApi<{ videos: Video[]; shareOrigin?: string }>("/api/videos");
   const recent = data?.videos.slice(0, 4) ?? [];
+  // Links about to lapse, or lapsed and still handed out; each line opens the library filtered to those videos.
+  const attention = data ? shareAttention(data.videos) : { expiring: 0, expired: 0 };
 
   return (
     <>
       <SectionTitle title="Home" subtitle="What do you want to make today?" />
+
+      {(attention.expiring > 0 || attention.expired > 0) && (
+        <section aria-label="Share links to check" data-testid="share-attention" className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <ul className="space-y-1.5">
+            {attention.expiring > 0 && (
+              <li className="flex flex-wrap items-center gap-x-2">
+                <Clock className="h-4 w-4 shrink-0" />
+                <span>{attention.expiring === 1 ? "1 share link expires" : `${attention.expiring} share links expire`} within a week.</span>
+                <Link href="/videos?share=expiring" className="font-medium underline hover:no-underline">
+                  Show expiring links
+                </Link>
+              </li>
+            )}
+            {attention.expired > 0 && (
+              <li className="flex flex-wrap items-center gap-x-2">
+                <TimerOff className="h-4 w-4 shrink-0" />
+                <span>{attention.expired === 1 ? "1 share link has expired but is still on: visitors see that it has expired" : `${attention.expired} share links have expired but are still on: visitors see that they have expired`}.</span>
+                <Link href="/videos?share=expired" className="font-medium underline hover:no-underline">
+                  Show expired links
+                </Link>
+              </li>
+            )}
+          </ul>
+        </section>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {QUICK.map(({ href, icon: Icon, title, body, accent }) => (

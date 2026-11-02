@@ -6,10 +6,10 @@ import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import { getStore } from "../store";
 import { bulkVideoSchema, bulkVideos, createVideo, getVideo, recordView, updateVideo, videoPatchSchema, videoRequestSchema } from "../services";
-import { shareExpiresSoon, shareNotYet, shareOffline } from "../client";
+import { inShareFilter, shareAttention, shareExpiresSoon, shareNotYet, shareOffline } from "../client";
 import { getShareLock, shareCookieValue, shareUnlocked, verifySharePassword } from "../share-lock";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
-import { batchLinkRows } from "../services";
+import { batchLinkRows, filterVideos, videoQuerySchema } from "../services";
 import type { Video } from "../types";
 
 const OWNER = "user_go_live";
@@ -171,5 +171,34 @@ describe("share link go-live time", () => {
     assert.equal(shareExpiresSoon({ shareExpiresAt: at(86_400_000), shareDisabled: true }, now), undefined, "switched off");
     assert.equal(shareExpiresSoon({ shareExpiresAt: at(2 * 86_400_000), shareStartsAt: at(86_400_000) }, now), undefined, "not live yet");
     assert.equal(shareExpiresSoon({ shareExpiresAt: at(86_400_000), deletedAt: at(-1) }, now), undefined, "in the trash");
+  });
+
+  it("counts the links to check as the library's expiring and expired filters list them", () => {
+    const now = Date.parse("2030-06-01T12:00:00Z");
+    const at = (ms: number) => new Date(now + ms).toISOString();
+    const videos = [
+      { shareExpiresAt: at(2 * 86_400_000) },
+      { shareExpiresAt: at(3_600_000) },
+      { shareExpiresAt: at(8 * 86_400_000) },
+      { shareExpiresAt: at(-1) },
+      { shareExpiresAt: at(-86_400_000), shareDisabled: true },
+      { shareExpiresAt: at(86_400_000), shareDisabled: true },
+      { shareExpiresAt: at(86_400_000), deletedAt: at(-1) },
+      { shareExpiresAt: at(-1), deletedAt: at(-1) },
+      { shareExpiresAt: at(2 * 86_400_000), shareStartsAt: at(86_400_000) },
+      {},
+    ];
+    assert.deepEqual(shareAttention(videos, now), { expiring: 2, expired: 1 }, "off, in the trash, not live yet, and far off are left out");
+    assert.deepEqual(shareAttention([], now), { expiring: 0, expired: 0 });
+    // The server's filter, by its own clock: the same videos, as stored ones, with times counted from the real now.
+    const real = Date.now();
+    const stored = videos.map((v, i) => ({ id: `v${i}`, title: `V${i}`, createdAt: new Date(real).toISOString(), ...Object.fromEntries(Object.entries(v).map(([k, t]) => [k, typeof t === "string" ? new Date(Date.parse(t) - now + real).toISOString() : t])) }) as unknown as Video);
+    for (const share of ["expiring", "expired"] as const) {
+      assert.equal(filterVideos(stored, videoQuerySchema.parse({ share })).length, shareAttention(stored, real)[share], share);
+    }
+    assert.equal(inShareFilter({ shareExpiresAt: at(-1) }, "expired", now), true);
+    assert.equal(inShareFilter({ shareDisabled: true, deletedAt: at(-1) }, "off", now), false, "a trashed link is in no state");
+    assert.equal(inShareFilter({ shareStartsAt: at(1) }, "scheduled", now), true);
+    assert.equal(inShareFilter({}, "live", now), true);
   });
 });

@@ -25,7 +25,7 @@ import { listVoices } from "./voices";
 import { PUBLIC_ACCESS, owned, scheduleNotification, stripUndefined } from "./shared";
 import { SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, clearShareLock, setShareLock, shareUnlocked } from "../share-lock";
 import { clearCover, setCover } from "../cover";
-import { posterUrl, shareExpiresSoon, shareOffline, shareState } from "../client";
+import { SHARE_FILTERS, inShareFilter, posterUrl, shareOffline } from "../client";
 import { bumpViewsByDay } from "../insights";
 
 import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneNameSchema, sceneTextSchema } from "./schemas";
@@ -2083,7 +2083,7 @@ export const videoQuerySchema = z.object({
    * within the week the card counts down), "scheduled" (not live yet), "off" (switched off), or "expired"; whatever the
    * render's status. A trashed video is in none of them.
    */
-  share: z.enum(["all", "live", "expiring", "scheduled", "off", "expired"]).default("all"),
+  share: z.enum(["all", ...SHARE_FILTERS]).default("all"),
   /**
    * Only the videos made within the last 7, 30, or 90 days (rolling windows of 24-hour days, counted from when the
    * render was asked for), in the trash view too.
@@ -2148,8 +2148,7 @@ export function filterVideos(videos: Video[], query: VideoQuery): Video[] {
       // Written so an unreadable creation time (NaN) is in no window rather than in every one.
       if (query.created !== "all" && !(Date.parse(v.createdAt) >= now - CREATED_WITHIN_DAYS[query.created] * 86_400_000)) return false;
       if (query.review !== "all" && (v.review?.status ?? "none") !== query.review) return false;
-      // A trashed video's link answers "not found" whatever it was set to, so it is in no share state.
-      if (query.share !== "all" && (v.deletedAt || (query.share === "expiring" ? !shareExpiresSoon(v, now) : shareState(v, now) !== query.share))) return false;
+      if (query.share !== "all" && !inShareFilter(v, query.share, now)) return false;
       if (query.folder !== undefined && (v.folder ?? "") !== query.folder) return false;
       if (query.status === "processing" ? v.status !== "processing" && v.status !== "queued" : query.status !== "all" && v.status !== query.status) return false;
       return !needle || `${v.title} ${v.description ?? ""} ${stripPauses(v.script)} ${v.cinematic?.prompt ?? ""} ${v.directed?.prompt ?? ""} ${v.avatarName ?? ""} ${v.voiceName ?? ""}`.toLowerCase().includes(needle);

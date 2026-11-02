@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArchiveRestore, CheckSquare, Clapperboard, Clock, Copy, LayoutGrid, List, Download, FolderInput, KeyRound, MousePointerClick, QrCode, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
-import { api, clickSelect, folderFor, nextShareChange, overSelection } from "@/lib/client";
+import { SHARE_FILTERS, api, clickSelect, folderFor, nextShareChange, overSelection, type ShareFilter } from "@/lib/client";
 import { libraryKey } from "@/lib/shortcuts";
 import { isApple } from "@/components/QuickFind";
 import { VideoCard, VideoRow } from "@/components/VideoCard";
@@ -60,7 +60,16 @@ function VideosInner() {
   const focusTrashToggle = useRef(false);
   const [review, setReview] = useState<VideoQuery["review"]>("all");
   // Share link state, as the cards' badges say; with the bulk go-live and expiry it finds a campaign's links to fix.
-  const [share, setShare] = useState<VideoQuery["share"]>("all");
+  // Home's notice of links needing a look opens the library at `?share=`, read again whenever the address changes (the
+  // sidebar's My videos goes back to every link); a value the library does not know is ignored.
+  const askedShare = params.get("share");
+  const fromAddress = (asked: string | null): VideoQuery["share"] => (SHARE_FILTERS.includes(asked as ShareFilter) ? (asked as ShareFilter) : "all");
+  const [share, setShare] = useState<VideoQuery["share"]>(() => fromAddress(askedShare));
+  const [shareAsked, setShareAsked] = useState(askedShare);
+  if (askedShare !== shareAsked) {
+    setShareAsked(askedShare);
+    setShare(fromAddress(askedShare));
+  }
   // The trash is its own view of the same page: same search, status, and folder filters, different bulk actions.
   const [trash, setTrash] = useState(false);
   // Only the starred videos (in the trash view too, where a star is kept for when a video comes back).

@@ -9622,6 +9622,69 @@ test("filtered to links going live later, the library drops a video once its lin
   await expect(card).toBeVisible();
 });
 
+test("home points out share links expiring within a week or expired, each line opening the library filtered to them", async ({ page }) => {
+  const stamp = Date.now().toString(36);
+  const made: { id: string }[] = [];
+  try {
+    const soon = await createVideoViaApi(page, `Lapsing ${stamp}`);
+    made.push(soon);
+    const gone = await createVideoViaApi(page, `Lapsed ${stamp}`);
+    made.push(gone);
+    expect((await page.request.patch(`/api/videos/${soon.id}`, { data: { shareExpiresAt: new Date(Date.now() + 2 * 86_400_000).toISOString() } })).status()).toBe(200);
+    expect((await page.request.patch(`/api/videos/${gone.id}`, { data: { shareExpiresAt: new Date(Date.now() + 3_000).toISOString() } })).status()).toBe(200);
+    const ids = async (share: string) => ((await (await page.request.get(`/api/videos?share=${share}`)).json()).videos as { id: string }[]).map((v) => v.id);
+    await expect.poll(() => ids("expired"), { timeout: 15_000 }).toContain(gone.id);
+    // Other tests' videos may have links in either state too: the notice counts what the library's filters list.
+    const expiring = (await ids("expiring")).length;
+    const expired = (await ids("expired")).length;
+    await page.goto("/home");
+    const notice = page.getByRole("region", { name: "Share links to check" });
+    await expect(notice).toContainText(expiring === 1 ? "1 share link expires within a week." : `${expiring} share links expire within a week.`);
+    await expect(notice).toContainText(expired === 1 ? "1 share link has expired but is still on: visitors see that it has expired." : `${expired} share links have expired but are still on: visitors see that they have expired.`);
+
+    await notice.getByRole("link", { name: "Show expiring links" }).click();
+    await expect(page).toHaveURL(/\/videos\?share=expiring$/);
+    await expect(page.getByLabel("Filter by share link")).toHaveValue("expiring");
+    await expect(page.locator(`a[href="/videos/${soon.id}"]`)).toContainText(/Expires in 2 days/);
+    await expect(page.locator(`a[href="/videos/${gone.id}"]`)).toHaveCount(0);
+
+    await page.goBack();
+    await page.getByRole("region", { name: "Share links to check" }).getByRole("link", { name: "Show expired links" }).click();
+    await expect(page).toHaveURL(/\/videos\?share=expired$/);
+    await expect(page.getByLabel("Filter by share link")).toHaveValue("expired");
+    await expect(page.locator(`a[href="/videos/${gone.id}"]`)).toContainText("Expired");
+    await expect(page.locator(`a[href="/videos/${soon.id}"]`)).toHaveCount(0);
+
+    // A share state the library does not know is ignored rather than filtering everything out.
+    await page.goto("/videos?share=nonsense");
+    await expect(page.getByLabel("Filter by share link")).toHaveValue("all");
+    await expect(page.locator(`a[href="/videos/${soon.id}"]`)).toBeVisible();
+    // The sidebar's My videos, from a filtered view, shows every link again.
+    await page.goto("/videos?share=expired");
+    await expect(page.getByLabel("Filter by share link")).toHaveValue("expired");
+    await page.getByRole("link", { name: "My videos", exact: true }).filter({ visible: true }).first().click();
+    await expect(page).toHaveURL(/\/videos$/);
+    await expect(page.getByLabel("Filter by share link")).toHaveValue("all");
+
+    // Home's own list, answered here: one link of each kind reads in the singular, and none shows no notice.
+    const real = await (await page.request.get("/api/videos")).json();
+    const one = (list: unknown[]) => page.route("**/api/videos", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...real, videos: list }) }));
+    const byId = (id: string) => (real.videos as { id: string }[]).find((v) => v.id === id)!;
+    await one([byId(soon.id), byId(gone.id)]);
+    await page.goto("/home");
+    const single = page.getByRole("region", { name: "Share links to check" }).getByRole("listitem");
+    await expect(single).toHaveText(["1 share link expires within a week.Show expiring links", "1 share link has expired but is still on: visitors see that it has expired.Show expired links"]);
+    await page.unroute("**/api/videos");
+    await one([]);
+    await page.goto("/home");
+    await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
+    await expect(page.getByTestId("share-attention")).toHaveCount(0);
+  } finally {
+    // Switched off, neither link is counted on home for the tests after this one.
+    for (const v of made) await page.request.patch(`/api/videos/${v.id}`, { data: { shareDisabled: true } });
+  }
+});
+
 test("the bulk bar never sends more than the 200 videos one action takes", async ({ page }) => {
   test.slow();
   const tag = `Over ${Date.now().toString(36)}`;

@@ -1,18 +1,26 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState, type FocusEvent, type PointerEvent } from "react";
-import { Check, Clock, Copy, Film, LinkIcon, Lock, MessageSquare, Star, Trash2 } from "lucide-react";
+import { AtSign, Check, Clock, Copy, Film, LinkIcon, Lock, MessageSquare, Star, Trash2 } from "lucide-react";
 import { StatusBadge } from "./ui";
-import { CARD_PREVIEW_DELAY_MS, cardPreviewSrc, daysUntilPurge, formatDate, formatSeconds, posterUrl, sendableShareLink, shareExpired, shareExpiresSoon, shareNotYet, shareSummary } from "@/lib/client";
+import { CARD_PREVIEW_DELAY_MS, cardPreviewSrc, daysUntilPurge, formatDate, formatSeconds, openCommentsBadge, posterUrl, sendableShareLink, shareExpired, shareExpiresSoon, shareNotYet, shareSummary } from "@/lib/client";
 import { REVIEW_LABEL, type Video } from "@/lib/types";
 
-/** The count of review notes on a video no one has resolved yet, beside its title; nothing when there are none. */
-function OpenComments({ count }: { count?: number }) {
+/**
+ * The count of review notes on a video no one has resolved yet, beside its title; nothing when there are none. When
+ * some of those threads mention the reader (`mentions`), an @ says so, and the label counts them.
+ */
+function OpenComments({ count, mentions }: { count?: number; mentions?: number }) {
   if (!count) return null;
-  const label = `${count} open ${count === 1 ? "comment" : "comments"}`;
+  const { label, mentions: forYou } = openCommentsBadge(count, mentions);
   return (
-    <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-800" title={label} data-testid="open-comments-badge">
-      <MessageSquare className="h-3 w-3" aria-hidden />
+    <span
+      className={`inline-flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-medium ${forYou ? "bg-sky-800 text-white" : "bg-sky-50 text-sky-800"}`}
+      title={label}
+      data-testid="open-comments-badge"
+      data-mentions={forYou || undefined}
+    >
+      {forYou ? <AtSign className="h-3 w-3" aria-hidden /> : <MessageSquare className="h-3 w-3" aria-hidden />}
       <span aria-hidden>{count}</span>
       <span className="sr-only">{label}</span>
     </span>
@@ -111,7 +119,7 @@ function useCardPreview(src: string | undefined, element: string) {
   };
 }
 
-export function VideoCard({ video, selectable = false, selected = false, onToggle, shareOrigin, onCopyNote, openComments }: { video: Video; selectable?: boolean; selected?: boolean; onToggle?: (shift: boolean) => void; shareOrigin?: string; onCopyNote?: CardCopyNote; openComments?: number }) {
+export function VideoCard({ video, selectable = false, selected = false, onToggle, shareOrigin, onCopyNote, openComments, mentions }: { video: Video; selectable?: boolean; selected?: boolean; onToggle?: (shift: boolean) => void; shareOrigin?: string; onCopyNote?: CardCopyNote; openComments?: number; mentions?: number }) {
   const expiresSoon = shareExpiresSoon(video);
   const previewSrc = cardPreviewSrc(video);
   const { previewing, handlers } = useCardPreview(previewSrc, selectable ? "select" : shareOrigin ? "card" : "link");
@@ -215,7 +223,7 @@ export function VideoCard({ video, selectable = false, selected = false, onToggl
             </span>
           )}
           <div className="min-w-0 flex-1 truncate text-sm font-medium text-slate-900">{video.title}</div>
-          <OpenComments count={openComments} />
+          <OpenComments count={openComments} mentions={mentions} />
           {video.review && (
             <span
               data-testid="review-badge"
@@ -269,7 +277,7 @@ function shareTitle(video: Video): string | undefined {
 }
 
 /** The library's list layout: one compact row per video, with the card's status, badges, and details in a line. */
-export function VideoRow({ video, selectable = false, selected = false, onToggle, shareOrigin, onCopyNote, openComments }: { video: Video; selectable?: boolean; selected?: boolean; onToggle?: (shift: boolean) => void; shareOrigin?: string; onCopyNote?: CardCopyNote; openComments?: number }) {
+export function VideoRow({ video, selectable = false, selected = false, onToggle, shareOrigin, onCopyNote, openComments, mentions }: { video: Video; selectable?: boolean; selected?: boolean; onToggle?: (shift: boolean) => void; shareOrigin?: string; onCopyNote?: CardCopyNote; openComments?: number; mentions?: number }) {
   const share = shareSummary(video);
   const body = (
     <>
@@ -301,7 +309,7 @@ export function VideoRow({ video, selectable = false, selected = false, onToggle
             </span>
           )}
           <span className="truncate text-sm font-medium text-slate-900">{video.title}</span>
-          <OpenComments count={openComments} />
+          <OpenComments count={openComments} mentions={mentions} />
           {video.review && (
             <span data-testid="review-badge" className={`shrink-0 rounded-full px-1.5 py-0.5 text-[11px] font-medium ${reviewClass(video.review.status)}`}>
               {REVIEW_LABEL[video.review.status]}

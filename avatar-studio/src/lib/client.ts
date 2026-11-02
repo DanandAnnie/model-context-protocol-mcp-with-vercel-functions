@@ -240,6 +240,15 @@ export function openCommentSummary(counts: Record<string, number> | undefined): 
 }
 
 /**
+ * What a library card's open-comments badge says: the open notes, and of those how many mention the reader (never
+ * more than are open); `mentions` is how many it marks, 0 when none.
+ */
+export function openCommentsBadge(count: number, mentions?: number): { label: string; mentions: number } {
+  const forYou = mentions && mentions > 0 ? Math.min(mentions, count) : 0;
+  return { label: `${count} open ${count === 1 ? "comment" : "comments"}${forYou ? `, ${forYou} ${forYou === 1 ? "mentions" : "mention"} you` : ""}`, mentions: forYou };
+}
+
+/**
  * What Home says about this month's render allowance: once a fifth of it or less is left (at least the last render), how
  * many are left and when it starts again (the 1st of next month, UTC, as the server counts); undefined with no allowance
  * or plenty left.

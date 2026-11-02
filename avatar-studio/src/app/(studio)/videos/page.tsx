@@ -1460,13 +1460,13 @@ function VideosInner() {
           {layout === "list" ? (
             <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200" data-testid="video-list">
               {videos.map((v) => (
-                <VideoRow key={v.id} video={v} openComments={data?.openComments?.[v.id]} selectable={selecting} selected={selected.has(v.id)} onToggle={(shift) => busy === null && click(v.id, shift)} shareOrigin={data?.shareOrigin} onCopyNote={cardCopyNote} />
+                <VideoRow key={v.id} video={v} openComments={data?.openComments?.[v.id]} mentions={data?.mentions?.[v.id]} selectable={selecting} selected={selected.has(v.id)} onToggle={(shift) => busy === null && click(v.id, shift)} shareOrigin={data?.shareOrigin} onCopyNote={cardCopyNote} />
               ))}
             </div>
           ) : (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {videos.map((v) => (
-                <VideoCard key={v.id} video={v} openComments={data?.openComments?.[v.id]} selectable={selecting} selected={selected.has(v.id)} onToggle={(shift) => busy === null && click(v.id, shift)} shareOrigin={data?.shareOrigin} onCopyNote={cardCopyNote} />
+                <VideoCard key={v.id} video={v} openComments={data?.openComments?.[v.id]} mentions={data?.mentions?.[v.id]} selectable={selecting} selected={selected.has(v.id)} onToggle={(shift) => busy === null && click(v.id, shift)} shareOrigin={data?.shareOrigin} onCopyNote={cardCopyNote} />
               ))}
             </div>
           )}

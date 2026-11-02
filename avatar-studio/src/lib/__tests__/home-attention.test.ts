@@ -2,7 +2,7 @@
 // Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { allowanceNotice, awaitingReview, failedThisWeek, madeWithin, openCommentSummary } from "../client";
+import { allowanceNotice, awaitingReview, failedThisWeek, madeWithin, openCommentSummary, openCommentsBadge } from "../client";
 import { filterVideos, videoQuerySchema } from "../services";
 import type { Video } from "../types";
 
@@ -70,5 +70,15 @@ describe("openCommentSummary", () => {
     assert.deepEqual(openCommentSummary({ a: 0 }), { videos: 0, notes: 0 }, "a zero is not a video with notes");
     assert.deepEqual(openCommentSummary({}), { videos: 0, notes: 0 });
     assert.deepEqual(openCommentSummary(undefined), { videos: 0, notes: 0 }, "before the library answers");
+  });
+});
+
+describe("openCommentsBadge", () => {
+  it("counts the open notes and, of those, the ones that mention the reader", () => {
+    assert.deepEqual(openCommentsBadge(1), { label: "1 open comment", mentions: 0 });
+    assert.deepEqual(openCommentsBadge(3, 0), { label: "3 open comments", mentions: 0 });
+    assert.deepEqual(openCommentsBadge(3, 1), { label: "3 open comments, 1 mentions you", mentions: 1 });
+    assert.deepEqual(openCommentsBadge(3, 2), { label: "3 open comments, 2 mention you", mentions: 2 });
+    assert.deepEqual(openCommentsBadge(1, 4), { label: "1 open comment, 1 mentions you", mentions: 1 }, "never more than are open");
   });
 });

@@ -10428,7 +10428,7 @@ test("home counts the comments no one has resolved, opening the library filtered
   }
 });
 
-test("home names the open comments that mention you, opening the library filtered to them", async ({ page }) => {
+test("home names the open comments that mention you, opening the library filtered to them, where their cards are marked", async ({ page }) => {
   const tag = Date.now().toString(36);
   let ws: { id: string } | undefined;
   try {
@@ -10463,6 +10463,21 @@ test("home names the open comments that mention you, opening the library filtere
     await expect(page.getByText("No open comment mentions you.")).toBeVisible();
     await toggle.click();
     await expect(page.locator(`a[href="/videos/${a.id}"]`)).toBeVisible();
+    // A card whose open comments mention the reader carries an @ on its badge, and says how many mention them.
+    await page.route("**/api/videos?*", async (route) => {
+      const real = await (await route.fetch()).json();
+      await route.fulfill({ json: { ...real, openComments: { ...real.openComments, [a.id]: 3 }, mentions: { [a.id]: 2 } } });
+    });
+    // The address still asks for Mentions me (Home's link), so the library is opened afresh at every video.
+    await page.goto("/videos");
+    const badge = page.getByTestId("open-comments-badge").and(page.locator("[data-mentions]"));
+    await expect(badge).toHaveAttribute("data-mentions", "2");
+    await expect(badge).toHaveAttribute("title", "3 open comments, 2 mention you");
+    await expect(badge.locator(".sr-only")).toHaveText("3 open comments, 2 mention you");
+    await page.unroute("**/api/videos?*");
+    await page.goto("/videos");
+    await expect(page.locator(`a[href="/videos/${a.id}"]`).first()).toBeVisible();
+    await expect(page.locator("[data-mentions]")).toHaveCount(0);
     // Outside a workspace the toggle is not offered, unless the address set it.
     await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
     await page.goto("/videos");

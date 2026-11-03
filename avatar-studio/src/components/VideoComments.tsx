@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { Check, CheckCheck, ChevronDown, Copy, CornerDownRight, Download, Link2, MessageSquare, Pencil, RotateCcw, SmilePlus, Trash2 } from "lucide-react";
 import { Button, Card, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
@@ -8,7 +8,7 @@ import { formatTimestamp } from "@/lib/text";
 import { refocusIfLost } from "@/lib/focus";
 import { isSubmitKey } from "@/lib/shortcuts";
 import { isApple } from "@/components/QuickFind";
-import { COMMENT_ORDER_KEY, COMMENT_REACTIONS, REACTION_NAMES, commentOrderFrom, commentsAsText, filterThreads, orderThreads, repliesByThread, splitComments, threadLink, type CommentFilter, type CommentOrder, type CommentReaction, type ReactionView } from "@/lib/comment-list";
+import { COMMENT_ORDER_KEY, COMMENT_REACTIONS, REACTION_NAMES, commentMarkers, commentOrderFrom, commentsAsText, filterThreads, orderThreads, repliesByThread, splitComments, threadLink, type CommentFilter, type CommentOrder, type CommentReaction, type ReactionView } from "@/lib/comment-list";
 import type { VideoComment, WorkspaceRole } from "@/lib/types";
 
 /**
@@ -47,17 +47,23 @@ export function VideoComments({ videoId, title, player }: { videoId: string; tit
   // playback re-renders only this card; and the moment taken when the box was ticked, which playing on keeps.
   const [playerTime, setPlayerTime] = useState<number | null>(null);
   const [pinAt, setPinAt] = useState<number | null>(null);
+  // The video's length once the player knows it, to place the pinned threads along it.
+  const [playerLength, setPlayerLength] = useState<number | null>(null);
   const hasPlayer = !!player;
   useEffect(() => {
     const el = player?.current;
     if (!el) {
       setPlayerTime(null);
       setPinAt(null);
+      setPlayerLength(null);
       return;
     }
-    const read = () => setPlayerTime(Math.floor(el.currentTime));
+    const read = () => {
+      setPlayerTime(Math.floor(el.currentTime));
+      setPlayerLength(Number.isFinite(el.duration) && el.duration > 0 ? el.duration : null);
+    };
     read();
-    const events = ["timeupdate", "seeked", "loadedmetadata"] as const;
+    const events = ["timeupdate", "seeked", "loadedmetadata", "durationchange"] as const;
     for (const e of events) el.addEventListener(e, read);
     return () => {
       for (const e of events) el.removeEventListener(e, read);
@@ -116,6 +122,38 @@ export function VideoComments({ videoId, title, player }: { videoId: string; tit
   if (filter !== "all" && open.length === 0) setFilter("all");
   const shown = filterThreads(open, replies, myId ? filter : "all", myId);
   const filterSelect = useRef<HTMLSelectElement>(null);
+  // The threads shown that are pinned to a moment, as marks along the video that move the player there. Marks are
+  // kept 24 pixels apart, a size a finger can press, by measuring the strip; until it is measured, 8% of it.
+  const [stripWidth, setStripWidth] = useState(0);
+  const measureStrip = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return;
+    const read = () => setStripWidth(el.clientWidth);
+    read();
+    const observer = new ResizeObserver(read);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  const markers = playerTime !== null && playerLength ? commentMarkers(shown, playerLength, stripWidth > 0 ? (24 / stripWidth) * 100 : 8) : [];
+  // One tab stop for the strip: the arrow keys, Home, and End move between its marks.
+  const [markerAt, setMarkerAt] = useState(0);
+  const activeMarker = Math.min(markerAt, Math.max(0, markers.length - 1));
+  function markerKey(e: KeyboardEvent<HTMLButtonElement>, i: number) {
+    const next = { ArrowRight: i + 1, ArrowDown: i + 1, ArrowLeft: i - 1, ArrowUp: i - 1, Home: 0, End: markers.length - 1 }[e.key];
+    if (next === undefined) return;
+    e.preventDefault();
+    const to = Math.min(markers.length - 1, Math.max(0, next));
+    setMarkerAt(to);
+    e.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>("[data-testid=comment-marker]")[to]?.focus();
+  }
+  const markerName = (m: (typeof markers)[number]) =>
+    `${formatTimestamp(m.fromSec)}${formatTimestamp(m.toSec) !== formatTimestamp(m.fromSec) ? ` to ${formatTimestamp(m.toSec)}` : ""}: ${m.ids.length} ${m.ids.length === 1 ? "comment" : "comments"}`;
+  const markerHint = (m: (typeof markers)[number]) => {
+    const texts = m.ids.slice(0, 3).flatMap((id) => {
+      const c = shown.find((t) => t.id === id);
+      return c ? [excerpt(c)] : [];
+    });
+    return `${texts.join(" · ")}${m.ids.length > 3 ? ` (and ${m.ids.length - 3} more)` : ""}`;
+  };
   function chooseFilter(next: CommentFilter) {
     setFilter(next);
     const count = filterThreads(open, replies, next, myId).length;
@@ -757,6 +795,36 @@ export function VideoComments({ videoId, title, player }: { videoId: string; tit
         <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="comment-link-gone">
           {LINK_GONE}
         </p>
+      )}
+      {markers.length > 0 && playerLength && (
+        <div className="mt-3" data-testid="comment-markers">
+          <p className="text-xs text-slate-500" aria-hidden>
+            Along the video
+          </p>
+          <div ref={measureStrip} role="group" aria-label="Comments along the video" className="relative mx-3 mt-1 h-6">
+            <div aria-hidden className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 overflow-hidden rounded-full bg-slate-200">
+              <div className="h-full bg-brand-200" style={{ width: `${Math.min(100, ((playerTime ?? 0) / playerLength) * 100)}%` }} />
+            </div>
+            {markers.map((m, i) => (
+              <button
+                key={m.ids[0]}
+                type="button"
+                tabIndex={i === activeMarker ? 0 : -1}
+                onClick={() => seek(m.fromSec)}
+                onFocus={() => setMarkerAt(i)}
+                onKeyDown={(e) => markerKey(e, i)}
+                aria-label={markerName(m)}
+                title={markerHint(m)}
+                data-testid="comment-marker"
+                data-at={m.fromSec}
+                style={{ left: `${m.pct}%` }}
+                className="group absolute top-1/2 flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-600"
+              >
+                <span aria-hidden className="h-3.5 w-3.5 rounded-full border-2 border-white bg-brand-600 shadow-sm group-hover:scale-125" />
+              </button>
+            ))}
+          </div>
+        </div>
       )}
       {/* With two or more open and one of them pinned to a moment, they can be listed in the video's order. */}
       {open.length > 1 && open.some((c) => c.atSec !== undefined) && (

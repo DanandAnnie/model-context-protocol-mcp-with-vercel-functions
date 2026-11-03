@@ -36,6 +36,29 @@ export function orderThreads<T extends Pick<VideoComment, "atSec">>(threads: T[]
   return threads.map((c, i) => ({ c, i })).sort((a, b) => at(a.c) - at(b.c) || a.i - b.i).map(({ c }) => c);
 }
 
+/** A mark on the strip along the video: the threads pinned at or just after one moment, where it sits as a percentage. */
+export type CommentMarker = { fromSec: number; toSec: number; pct: number; ids: string[] };
+
+/**
+ * Marks for the threads pinned to a moment, earliest first, placed along a video `durationSec` long. Threads at the
+ * same moment, or closer than `minGapPct` of the length to a mark's first moment, share that mark, so marks stay apart
+ * enough to press; a mark's moment is its earliest. A moment past the end sits at the end. Without a length there is nothing to place.
+ */
+export function commentMarkers<T extends Pick<VideoComment, "id" | "atSec">>(threads: T[], durationSec: number, minGapPct = 2): CommentMarker[] {
+  if (!Number.isFinite(durationSec) || durationSec <= 0) return [];
+  const pinned = orderThreads(threads.filter((c) => c.atSec !== undefined), "moment");
+  const out: CommentMarker[] = [];
+  for (const c of pinned) {
+    const pct = Math.min(100, Math.max(0, (c.atSec! / durationSec) * 100));
+    const last = out[out.length - 1];
+    if (last && (c.atSec === last.fromSec || pct - last.pct < minGapPct)) {
+      last.toSec = c.atSec!;
+      last.ids.push(c.id);
+    } else out.push({ fromSec: c.atSec!, toSec: c.atSec!, pct, ids: [c.id] });
+  }
+  return out;
+}
+
 /** Which open threads are shown in a workspace: all, those naming the reader, or those the reader wrote in. */
 export type CommentFilter = "all" | "mentions" | "mine";
 

@@ -3876,6 +3876,66 @@ test("a video's open comments list by their moment in the video, an order the br
   await expect(rows.first()).toContainText("About the whole video.");
 });
 
+test("a video's pinned comments are marked along the video, and a mark moves the player there", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Marks ${Date.now().toString(36)}`);
+  // Notes are pinned to a moment once the render has finished.
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  const post = async (text: string, atSec?: number) => expect((await page.request.post(`/api/videos/${v.id}/comments`, { data: { text, atSec } })).status()).toBe(201);
+  await post("About the whole video.");
+  await page.goto(`/videos/${v.id}`);
+  const comments = page.getByTestId("comments");
+  const player = page.getByTestId("video-player");
+  // A note on the whole video has no moment to mark, even once the player knows the video's length.
+  await expect(comments.getByTestId("comment-list")).toContainText("About the whole video.");
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.duration)).toBeGreaterThan(8);
+  await expect(comments.getByTestId("comment-markers")).toHaveCount(0);
+  await post("Cut the pause here.", 8);
+  await post("Brighter title card.", 2);
+  await post("Louder music.", 2);
+  await page.reload();
+  const marks = comments.getByRole("group", { name: "Comments along the video" }).getByRole("button");
+  await expect(marks).toHaveCount(2);
+  // Earliest first; the notes at one moment share its mark, which names the first of them.
+  await expect(marks.nth(0)).toHaveAccessibleName("0:02: 2 comments");
+  await expect(marks.nth(0)).toHaveAttribute("title", "Brighter title card. · Louder music.");
+  await expect(marks.nth(1)).toHaveAccessibleName("0:08: 1 comment");
+  await expect(marks.nth(1)).toHaveAttribute("title", "Cut the pause here.");
+  // In order, and far enough apart to press, at a phone's width too.
+  const apart = async () => {
+    const [a, b] = await Promise.all([marks.nth(0).boundingBox(), marks.nth(1).boundingBox()]);
+    expect(a!.width).toBeGreaterThanOrEqual(24);
+    expect(a!.x + a!.width).toBeLessThanOrEqual(b!.x);
+  };
+  await apart();
+  await page.setViewportSize({ width: 360, height: 800 });
+  await expect(marks).toHaveCount(2);
+  await apart();
+  await page.setViewportSize({ width: 1280, height: 720 });
+  // A mark moves the player to its moment, from the mouse or the keyboard.
+  await marks.nth(1).click();
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.currentTime)).toBe(8);
+  await expect(player).toBeFocused();
+  // The strip is one tab stop, the mark last used, the arrow keys moving along it.
+  await expect(marks.nth(1)).toHaveAttribute("tabindex", "0");
+  await expect(marks.nth(0)).toHaveAttribute("tabindex", "-1");
+  await marks.nth(1).focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect(marks.nth(0)).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(marks.nth(1)).toBeFocused();
+  await page.keyboard.press("Home");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.currentTime)).toBe(2);
+  // Resolving the notes at a moment takes its mark away, and the last mark takes the strip with it.
+  await comments.getByRole("button", { name: "Resolve comment: Cut the pause here." }).click();
+  await expect(marks).toHaveCount(1);
+  await comments.getByRole("button", { name: "Resolve comment: Brighter title card." }).click();
+  await expect(marks.nth(0)).toHaveAccessibleName("0:02: 1 comment");
+  await comments.getByRole("button", { name: "Resolve comment: Louder music." }).click();
+  await expect(comments.getByTestId("comment-markers")).toHaveCount(0);
+  await expect(comments.getByTestId("comment-list")).toContainText("About the whole video.");
+});
+
 test("in a workspace, a video's open comments narrow to those that mention you or that you wrote in", async ({ page }) => {
   const tag = Date.now().toString(36);
   const ws = (await (await page.request.post("/api/workspaces", { data: { name: `Filter ${tag}` } })).json()).workspace as { id: string };

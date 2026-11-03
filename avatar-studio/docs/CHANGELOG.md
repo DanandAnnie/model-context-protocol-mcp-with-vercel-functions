@@ -1087,3 +1087,25 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
   - Left as it is:
     - The count is not announced to a screen reader, though it can be read in place.
     - A new reply in a resolved thread is marked in that thread but not counted.
+- C to comment at the player's moment (`b6ce88b`): on a video's page, pressing C outside a text box or form pauses the player and pins the new comment to that moment, with "Pin to m:ss in the video" ticked. The cursor then goes to the comment box. A screen reader hears "Paused at 0:04; the note will be pinned there". Before the video is finished, C only moves to the comment box. It follows the rules of the other single-key shortcuts:
+  - Caps Lock counts.
+  - On other keyboard layouts, the key where C sits counts.
+  - Shift, Ctrl, ⌘, Alt, a held key, or an input method does not trigger it.
+  - It is off when single-key shortcuts are turned off in the Keyboard shortcuts dialog, which now lists it.
+
+  `isCommentKey` has unit tests. The e2e test checks:
+  - playing, pausing, and the pinned note;
+  - typing a C in the box;
+  - the shortcut turned off;
+  - an open reply form;
+  - Caps Lock.
+  - An independent review found three blocking problems, now fixed:
+    - C acted behind the open menu drawer on a phone, leaving the drawer open over the page. It now does nothing while the drawer is open.
+    - C did nothing with Caps Lock on.
+    - C pressed on a reply's or an edit's buttons, or on an open menu such as In another language, moved away and left that form or menu open behind. C is now left alone inside a form or an open menu.
+  - Fixed from the optional findings:
+    - A screen reader is told the player paused and where the note will be pinned.
+    - The comment box lists C among its keys.
+    - Before the player has loaded the video, C does not pin to 0:00.
+    - The README says what C does before the video is finished.
+    - The e2e test formats the moment as the page does.

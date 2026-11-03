@@ -3484,6 +3484,8 @@ test("the avatars page says how many videos each presenter is in, links to them,
   expect((await page.request.delete(`/api/videos/${trashed.id}`)).status()).toBe(200);
   await createVideoViaApi(page, `${tag} hidden`, { avatarId: "stock_2", script: undefined, scenes: [{ script: "Opening.", background: bg }, { script: "Picture only.", background: { type: "image", value: "https://example.com/b.jpg" }, avatarId: used.id, hidePresenter: true }] });
   await createVideoViaApi(page, `${tag} single`, { avatarId: single.id });
+  // In no video, but first by name: so "most used" and "name" order these four differently.
+  expect((await page.request.post("/api/avatars", { data: { name: `Aaron ${tag}`, imageUrl: "https://example.com/p.jpg" } })).status()).toBe(201);
   await page.goto("/avatars");
   const link = page.locator(`[data-avatar-videos="${used.id}"]`);
   await expect(link).toHaveText("In 2 videos");
@@ -3496,6 +3498,16 @@ test("the avatars page says how many videos each presenter is in, links to them,
   await expect(page.locator(`[data-avatar-others="${single.id}"]`)).toHaveCount(0);
   // A presenter in no video has no link.
   await expect(page.getByRole("img", { name: `Unused ${tag}` })).toBeVisible();
+  // Sorted: newest first as listed, by name, or the most used first.
+  const order = async () => (await page.getByTestId("avatar-library").locator("img").evaluateAll((els) => els.map((e) => (e as HTMLImageElement).alt))).filter((n) => n.endsWith(tag));
+  await expect.poll(order).toEqual([`Aaron ${tag}`, `Single ${tag}`, `Unused ${tag}`, `Counted ${tag}`]);
+  const sort = page.getByLabel("Sort avatars");
+  // Straight from the listed order to the most used: two videos, one, then the unused newest first.
+  await sort.selectOption("used");
+  await expect.poll(order).toEqual([`Counted ${tag}`, `Single ${tag}`, `Aaron ${tag}`, `Unused ${tag}`]);
+  await sort.selectOption("name");
+  await expect.poll(order).toEqual([`Aaron ${tag}`, `Counted ${tag}`, `Single ${tag}`, `Unused ${tag}`]);
+  await sort.selectOption("default");
   await expect(page.locator(`[data-avatar-videos="${unused.id}"]`)).toHaveCount(0);
   // The presenters no video needs can be listed alone, to tidy up; and the ones some video does.
   const useFilter = page.getByLabel("Use in videos");
@@ -3602,6 +3614,14 @@ test("library filters by voice, and the Voices page says how many videos each vo
     await expect(link).toHaveText("In 1 video");
     await expect(link).toHaveAccessibleName(`In 1 video: show the videos in Counted ${tag} in the library`);
     await expect(page.locator('[data-voice-videos="stock_voice_2"]')).toHaveText("In 2 videos");
+    // Sorted by name, or with the most used first: James is in two videos, the clone and Emma in one each.
+    const voiceOrder = async () => (await page.getByTestId("voice-list").locator("[data-voice-id]").evaluateAll((els) => els.map((e) => e.getAttribute("data-voice-id")))).filter((id) => id === own.id || id === "stock_voice_1" || id === "stock_voice_2");
+    const voiceSort = page.getByLabel("Sort voices");
+    await voiceSort.selectOption("name");
+    await expect.poll(voiceOrder).toEqual([own.id, "stock_voice_1", "stock_voice_2"]);
+    await voiceSort.selectOption("used");
+    await expect.poll(voiceOrder).toEqual(["stock_voice_2", own.id, "stock_voice_1"]);
+    await voiceSort.selectOption("default");
     // And what else uses each one under the count: counted, the line opens to name each template.
     const others = page.locator(`[data-voice-others="${own.id}"]`);
     await expect(others.locator("summary")).toHaveText("Used by 2 templates");

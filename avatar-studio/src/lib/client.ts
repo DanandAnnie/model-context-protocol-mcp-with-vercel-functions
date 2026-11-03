@@ -387,6 +387,19 @@ export function withoutLibraryFilters(search: string): string | null {
 /** The Avatars and Voices pages' "Use in videos" filter: either, only those some video needs, or only those none does. */
 export type UseFilter = "all" | "used" | "unused";
 
+export type PresenterSort = "default" | "used" | "name";
+
+/**
+ * Orders the Avatars or Voices page: as listed ("default"), most videos first by the counts the "In N videos" links
+ * show ("used"; ties and uncounted ones keep the listed order), or by name A–Z ("name", ignoring case and reading
+ * numbers as numbers, so "Ava 2" comes before "Ava 10"). A new array; the given one is left as it is.
+ */
+export function sortPresenters<T extends { id: string; name: string }>(items: T[], sort: PresenterSort, inVideos: ReadonlyMap<string, number>): T[] {
+  if (sort === "default") return items;
+  const byName = (a: T, b: T) => a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true });
+  return [...items].sort(sort === "name" ? byName : (a, b) => (inVideos.get(b.id) ?? 0) - (inVideos.get(a.id) ?? 0));
+}
+
 /**
  * Whether a presenter or voice passes the use filter, by how many videos (library and trash, see the list's `needs`)
  * need it (only videos are counted, not interactive presenters, templates, or the brand kit). A count read off an object is read as its own entry only, so an id like "constructor" is not the prototype.

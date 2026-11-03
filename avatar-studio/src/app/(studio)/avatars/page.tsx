@@ -1,6 +1,6 @@
 "use client";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Camera, Pencil, Shirt, Trash2, Upload, Users, Video as VideoIcon } from "lucide-react";
 import { AvatarTile } from "@/components/AvatarPicker";
 import { FavoriteStar } from "@/components/FavoriteStar";
@@ -14,7 +14,7 @@ import { DigitalTwins } from "@/components/DigitalTwins";
 import { lookJobTitle } from "@/lib/look-packs";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
-import { api, passesUse, type UseFilter } from "@/lib/client";
+import { api, passesUse, type UseFilter, sortPresenters, type PresenterSort } from "@/lib/client";
 import type { Avatar, ProviderStatus, ShootJob, Voice } from "@/lib/types";
 import type { VideoPage } from "@/lib/services/videos";
 import type { OtherUses } from "@/lib/services/usage";
@@ -48,7 +48,7 @@ function AvatarsInner() {
   // What besides videos names each one (interactive presenters, templates, the brand kit), for a "Used by" line
   // under each and the same warning.
   const { data: otherUses, error: otherUsesError } = useApi<OtherUses>("/api/usage");
-  const inVideos = new Map((library?.presenters ?? []).map((p) => [p.id, p.count]));
+  const inVideos = useMemo(() => new Map((library?.presenters ?? []).map((p) => [p.id, p.count])), [library]);
   const voices = voiceData?.voices ?? [];
   const { data: packData, setData: setPackData, refetch: refetchPacks } = useApi<{ lookPacks: LookPack[]; available: boolean; described?: boolean }>("/api/look-packs");
   const packs = packData?.lookPacks ?? [];
@@ -134,20 +134,20 @@ function AvatarsInner() {
   // Presenters by whether any video, in the library or the trash, still needs them. Only videos are counted: an
   // interactive presenter, a saved template, or the brand kit may still name one no video needs.
   const [use, setUse] = useState<UseFilter>("all");
+  // As listed with favourites first, most used in the library's videos (the "In N videos" counts), or by name.
+  const [sort, setSort] = useState<PresenterSort>("default");
   const [q, setQ] = useState("");
   const [actionErr, setActionErr] = useState<string | null>(null);
   const genders = (["female", "male", "neutral"] as const).filter((g) => (data?.avatars ?? []).some((a) => a.gender === g));
   const needle = q.trim().toLowerCase();
   const favorites = useFavorites();
-  const avatars = favoritesFirst(
-    (data?.avatars ?? []).filter((a) => {
-      if (filter === "custom" ? a.source !== "custom" : filter === "library" && a.source === "custom") return false;
-      if (gender !== "all" && a.gender !== gender) return false;
-      if (!passesUse(library?.needs.avatars, a.id, use)) return false;
-      return !needle || [a.name, ...(a.tags ?? [])].join(" ").toLowerCase().includes(needle);
-    }),
-    favorites.avatarIds,
-  );
+  const matching = (data?.avatars ?? []).filter((a) => {
+    if (filter === "custom" ? a.source !== "custom" : filter === "library" && a.source === "custom") return false;
+    if (gender !== "all" && a.gender !== gender) return false;
+    if (!passesUse(library?.needs.avatars, a.id, use)) return false;
+    return !needle || [a.name, ...(a.tags ?? [])].join(" ").toLowerCase().includes(needle);
+  });
+  const avatars = sort === "default" ? favoritesFirst(matching, favorites.avatarIds) : sortPresenters(matching, sort, inVideos);
 
   async function rename(a: Avatar) {
     const answer = window.prompt("Avatar name", a.name);
@@ -246,6 +246,11 @@ function AvatarsInner() {
           <option value="all">Any use</option>
           <option value="used">Used by videos</option>
           <option value="unused">Not used by any video</option>
+        </select>
+        <select aria-label="Sort avatars" value={sort} onChange={(e) => setSort(e.target.value as PresenterSort)} title={library ? "Most used counts the library's videos each presenter is in, the numbers under each; the trash is not counted" : libraryError ? "Could not count the videos that use each presenter, so Most used is not offered; reload to try again" : "Counting the videos that use each presenter"} className={`${inputClass} w-auto py-1 text-xs`}>
+          <option value="default">Favourites first</option>
+          <option value="used" disabled={!library}>Most used in the library</option>
+          <option value="name">Name A–Z</option>
         </select>
         {genders.length > 1 && (
           <select aria-label="Gender" value={gender} onChange={(e) => setGender(e.target.value as typeof gender)} className={`${inputClass} w-auto py-1 text-xs`}>

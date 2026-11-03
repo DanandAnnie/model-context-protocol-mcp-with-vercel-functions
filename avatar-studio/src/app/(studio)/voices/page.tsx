@@ -3,7 +3,7 @@ import { useMemo, useRef, useState } from "react";
 import { Mic2, Pencil, Trash2 } from "lucide-react";
 import { VoiceCloner } from "@/components/VoiceCloner";
 import { VoiceDesigner } from "@/components/VoiceDesigner";
-import { api, passesUse, type UseFilter } from "@/lib/client";
+import { api, passesUse, sortPresenters, type PresenterSort, type UseFilter } from "@/lib/client";
 import { VoiceRow } from "@/components/VoicePicker";
 import { EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
@@ -36,7 +36,7 @@ export default function VoicesPage() {
   // What besides videos names each one (interactive presenters, templates, the brand kit), for a "Used by" line
   // under each and the same warning.
   const { data: otherUses, error: otherUsesError } = useApi<OtherUses>("/api/usage");
-  const inVideos = new Map((library?.voices ?? []).map((p) => [p.id, p.count]));
+  const inVideos = useMemo(() => new Map((library?.voices ?? []).map((p) => [p.id, p.count])), [library]);
   const videosText = (n: number) => (n === 1 ? "1 video" : `${n} videos`);
   const [actionErr, setActionErr] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -93,6 +93,8 @@ export default function VoicesPage() {
   // Voices by whether any video, in the library or the trash, still needs them. Only videos are counted: an interactive
   // presenter, a saved template, the brand kit, or a presenter's default voice may still name one no video needs.
   const [use, setUse] = useState<UseFilter>("all");
+  // As listed with favourites first, most used in the library's videos (the "In N videos" counts), or by name.
+  const [sort, setSort] = useState<PresenterSort>("default");
   // Languages offered by the current voice provider, named for people ("en-GB" → "British English").
   const languages = useMemo(() => {
     const seen = new Map<string, string>();
@@ -111,8 +113,8 @@ export default function VoicesPage() {
       if (!passesUse(library?.needs.voices, v.id, use)) return false;
       return !needle || [v.name, v.language, v.gender, ...(v.tags ?? [])].filter(Boolean).join(" ").toLowerCase().includes(needle);
     });
-    return favoritesFirst(matching, favorites.voiceIds);
-  }, [data, q, language, gender, use, library, favorites.voiceIds]);
+    return sort === "default" ? favoritesFirst(matching, favorites.voiceIds) : sortPresenters(matching, sort, inVideos);
+  }, [data, q, language, gender, use, sort, library, inVideos, favorites.voiceIds]);
 
   return (
     <>
@@ -137,6 +139,11 @@ export default function VoicesPage() {
             <option value="all">Any use</option>
             <option value="used">Used by videos</option>
             <option value="unused">Not used by any video</option>
+          </select>
+          <select aria-label="Sort voices" value={sort} onChange={(e) => setSort(e.target.value as PresenterSort)} title={library ? "Most used counts the library's videos each voice is in, the numbers under each; the trash is not counted" : libraryError ? "Could not count the videos that use each voice, so Most used is not offered; reload to try again" : "Counting the videos that use each voice"} className={`${inputClass} w-auto`}>
+            <option value="default">Favourites first</option>
+            <option value="used" disabled={!library}>Most used in the library</option>
+            <option value="name">Name A–Z</option>
           </select>
           {languages.length > 1 && (
             <select aria-label="Language" value={language} onChange={(e) => setLanguage(e.target.value)} className={`${inputClass} w-auto`}>
@@ -169,7 +176,7 @@ export default function VoicesPage() {
         // Columns that can shrink below their content, so a long voice name truncates rather than pushing the page sideways.
         <div className="grid grid-cols-1 gap-2 md:grid-cols-2" data-testid="voice-list">
           {voices.map((v) => (
-            <div key={v.id} className="min-w-0">
+            <div key={v.id} className="min-w-0" data-voice-id={v.id}>
               <VoiceRow
                 voice={v}
                 playing={playingId === v.id}

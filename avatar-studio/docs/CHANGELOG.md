@@ -1161,3 +1161,14 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The API docs say exactly which presenters a video shows.
     - The tests cover a trashed video, template and directed videos, and the link. The e2e test no longer relies on the default presenter.
   - Two existing e2e tests checked the empty state's wording, which now names the presenter filter, and were updated to match.
+- Presenters' video counts on the Avatars page (`45f2163`): each presenter that appears in a library video says how many, under its tile, as "In 4 videos". The count links to the library filtered by that presenter (`/videos?presenter=<id>`). The counts are the library's own presenter counts from `GET /api/videos`, so they match what the link shows: trashed videos, HeyGen template videos, and scenes that hide the presenter are not counted. Deleting a presenter that is in videos says so first, and says that rendered videos keep it but that retrying or copying one needs another presenter. While the counts are still loading, or could not be read, the prompt says the presenter may be in videos. The e2e test covers:
+  - the counts, singular and plural, with a trashed video and a hidden-presenter scene left out;
+  - the link and its accessible name;
+  - both delete prompts, with the counts known and still loading;
+  - the library the link opens.
+  - An independent review found nothing blocking.
+  - Fixed from the optional findings:
+    - The delete prompt no longer calls a presenter unused before the counts arrive.
+    - The link's accessible name starts with its visible text, and the link uses the page's brand colour.
+    - The e2e test covers what is not counted, the singular form, and the prompt while counting. It no longer depends on the order of two videos made in the same second.
+  - Left as it is: the page asks the library list route for its counts, which also refreshes in-flight renders, as the library itself does. A counts-only route can come later if the cost shows.

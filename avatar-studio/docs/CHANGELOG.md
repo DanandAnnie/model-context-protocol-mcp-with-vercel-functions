@@ -1276,3 +1276,19 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The selects sized to their content are capped at their row (the library's folder select at 14rem, as its presenter and voice selects are), so a long name cannot push a phone-width page sideways.
     - The Avatars search box keeps its 220px.
     - The new test asserts each measure on its own.
+- Filter the workspace activity feed by area (`fc6c99e`). The Activity card on the Workspace page has a Show select with these choices:
+  - Everything
+  - Videos and batches
+  - Reviews
+  - Members
+  - API keys
+  - Brand kit
+  - Shared presenters
+  - Presenter and voice replaces
+
+  `GET /api/activity` takes `?area=` (`videos`, `reviews`, `members`, `keys`, `brand`, `presenters`, or `replaces`). It filters before applying the limit, so 30 events of one area are listed even when other activity is newer. Any other value is a `400`. The answer echoes the area, so the page shows a list only under the filter it was fetched for, and switching never flashes the previous list.
+  - A filter with nothing in it says so ("Nothing under “API keys” yet. The feed keeps the last 200 events.").
+  - Once a filter is picked, a status line tells screen readers how many events it shows, Everything included.
+  - Each event kind maps to its area in `src/lib/activity-text.ts`, typed over every kind, so a new kind does not compile until it is given an area.
+  - The card's description now lists everything the feed records: deletions for good, batches, reviews, and replaces were missing.
+  - An independent review found one blocking bug. The members, invites, and roles actions refetch the feed when they finish. If the filter was changed while one of them ran, that refetch fetched the old filter, and the list was dropped as not matching, leaving the feed blank. Those actions now refetch whichever filter is shown when they finish. Fixed from the optional findings: the empty-filter wording no longer suggests 200 events exist, switching back to Everything is announced too, and a doc comment is corrected.

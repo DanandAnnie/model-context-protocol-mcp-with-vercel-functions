@@ -6,7 +6,7 @@ import { Activity, Check, Copy, Download, Link2, Trash2, UserMinus } from "lucid
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
-import { ACTIVITY_AREAS, ACTIVITY_AREA_LABELS, activityFilterPhrase, activitySeenKey, activitySeenMark, describeActivity, newActivityIds, parseActivityArea, type ActivityArea } from "@/lib/activity-text";
+import { ACTIVITY_AREAS, ACTIVITY_AREA_LABELS, activityFilterPhrase, activitySeenKey, activitySeenMark, describeActivity, newActivityCount, newActivityIds, parseActivityArea, type ActivityArea } from "@/lib/activity-text";
 import { readSeenMark } from "@/lib/comment-list";
 import { roleArticle } from "@/lib/roles";
 import type { ActivityEvent, WorkspaceRole } from "@/lib/types";
@@ -64,6 +64,15 @@ export default function WorkspacePage() {
       // Not kept: the same lines are new next time too.
     }
   }, [seenKey, events, area, actor, seen?.key, data?.personalId]);
+  // A link to /workspace#activity (Home's notice) arrives before the card exists; bring it into view once it does.
+  const scrolledToActivity = useRef(false);
+  useEffect(() => {
+    if (scrolledToActivity.current || !events || window.location.hash !== "#activity") return;
+    scrolledToActivity.current = true;
+    const card = document.getElementById("activity");
+    card?.scrollIntoView({ block: "start" });
+    card?.querySelector<HTMLElement>("h3")?.focus({ preventScroll: true });
+  }, [events]);
   const whoPhrase = actor ? (people.find((p) => p.id === actor)?.phrase ?? null) : null;
   // An action that ends after the filter changed refetches the filter shown now, not the one it began under.
   const refetchActivity = useRef(activity.refetch);
@@ -292,9 +301,9 @@ export default function WorkspacePage() {
           </div>
         )}
       </div>
-      <Card className="mt-6 p-5" data-testid="activity-feed">
+      <Card id="activity" className="mt-6 scroll-mt-6 p-5" data-testid="activity-feed">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+          <h3 tabIndex={-1} className="flex items-center gap-2 text-sm font-semibold text-slate-900 focus:outline-none">
             <Activity className="h-4 w-4 text-slate-500" aria-hidden /> Activity
           </h3>
           <div className="flex flex-wrap items-center gap-2">
@@ -359,7 +368,7 @@ export default function WorkspacePage() {
         {fresh.size > 0 && (
           <p className="mt-2 text-xs font-medium text-sky-800" data-testid="activity-new-count">
             {/* Only the newest 30 lines load: when every one is new, there may be more. */}
-            {fresh.size === events?.length && fresh.size >= 30 ? `${fresh.size}+` : fresh.size} new since your last visit
+            {newActivityCount(fresh.size, events?.length ?? 0, 30)} new since your last visit
           </p>
         )}
         {events && events.length > 0 && (

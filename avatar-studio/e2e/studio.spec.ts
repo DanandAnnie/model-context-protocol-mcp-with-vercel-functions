@@ -6480,19 +6480,36 @@ test("workspaces: create, switch, isolate content, invite, join, leave, delete",
     // feed has been shown with it. A teammate's event is added to the feed's answer, as open mode has one person.
     await expect(feed.getByTestId("activity-new")).toHaveCount(0);
     const teammate = { id: "act_e2e_teammate", ownerId: ws.id, kind: "member.joined", actorId: "u-ann", actorEmail: "ann@example.com", createdAt: new Date(Date.now() + 60_000).toISOString() };
-    await page.route("**/api/activity?limit=30", async (route) => {
+    const feedUrl = (url: URL) => url.pathname === "/api/activity" && url.searchParams.get("limit") === "30" && !url.searchParams.has("area") && !url.searchParams.has("actor");
+    await page.route(feedUrl, async (route) => {
       const body = (await (await route.fetch()).json()) as { events: unknown[] };
       return route.fulfill({ json: { ...body, events: [teammate, ...body.events] } });
     });
+    // Home says so, and leaves the mark alone, so the line is still New when its link opens the feed.
+    await page.goto("/home");
+    const activityNotice = page.getByTestId("new-activity-notice");
+    await expect(activityNotice).toHaveText("1 new in the workspace's activity since you last opened it.Open activity");
     await page.reload();
+    await expect(activityNotice).toBeVisible();
+    await activityNotice.getByRole("link", { name: "Open activity" }).click();
+    await page.waitForURL(/\/workspace#activity$/);
     await expect(feed.getByText("ann@example.com joined the workspace")).toBeVisible();
+    // The link lands on the feed, though the card is drawn only once the workspace has loaded.
+    await expect(feed).toBeInViewport();
+    await expect(feed.getByRole("heading", { name: "Activity" })).toBeFocused();
     await expect(feed.getByTestId("activity-new")).toHaveCount(1);
     await expect(feed.locator("li", { has: page.getByTestId("activity-new") })).toContainText("ann@example.com joined the workspace");
     await expect(feed.getByTestId("activity-new-count")).toHaveText("1 new since your last visit");
     await page.reload();
     await expect(feed.getByText("ann@example.com joined the workspace")).toBeVisible();
     await expect(feed.getByTestId("activity-new")).toHaveCount(0);
-    await page.unroute("**/api/activity?limit=30");
+    // Seen in the feed, the line leaves Home too.
+    await page.goto("/home");
+    await expect(page.locator("[data-activity-checked]")).toBeAttached();
+    await expect(activityNotice).toHaveCount(0);
+    await page.goto("/workspace");
+    await expect(feed.getByText("ann@example.com joined the workspace")).toBeVisible();
+    await page.unroute(feedUrl);
     // The injected line left this browser's mark a minute ahead; clear it so nothing later is hidden by it.
     await page.evaluate((key) => window.localStorage.removeItem(key), `avatar-studio:activity-seen:local:${ws.id}`);
 

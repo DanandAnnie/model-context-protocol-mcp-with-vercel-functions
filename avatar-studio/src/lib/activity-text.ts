@@ -172,3 +172,17 @@ export function activitySeenMark(events: Array<Pick<ActivityEvent, "actorId" | "
   for (const e of events) if (e.actorId !== viewerId) newest = Math.max(newest, Date.parse(e.createdAt) || Number.NEGATIVE_INFINITY);
   return new Date(Number.isFinite(newest) ? newest : 0).toISOString();
 }
+
+/**
+ * How many events are new, as the feed and Home say it: the count, or "30+" when every one of the `limit` loaded is
+ * new, as more may wait beyond them. Empty when none is.
+ */
+export function newActivityCount(fresh: number, loaded: number, limit: number): string {
+  if (fresh <= 0) return "";
+  return fresh === loaded && loaded >= limit ? `${fresh}+` : String(fresh);
+}
+
+/** Home's line for teammate activity new since the feed was last shown here, e.g. "3 new in the workspace's activity since you last opened it". */
+export function newActivityLine(count: string): string {
+  return `${count} new in the workspace's activity since you last opened it`;
+}

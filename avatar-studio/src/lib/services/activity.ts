@@ -23,6 +23,8 @@ export const activityQuerySchema = z.object({
   actor: z.string().trim().min(1).max(200).optional(),
   /** `csv` downloads every kept event of the area (the limit is not applied) as a spreadsheet. */
   format: z.enum(["csv"]).optional(),
+  /** `0` leaves out `links` (an empty map), for a caller that only counts events, such as Home. */
+  links: z.enum(["0", "1"]).optional(),
 });
 
 declare global {

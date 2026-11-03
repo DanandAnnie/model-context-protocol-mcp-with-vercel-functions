@@ -1,16 +1,17 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, AtSign, BellDot, Camera, ClipboardCheck, Clapperboard, Clock, FilePenLine, Gauge, Languages, Layers3, LayoutTemplate, MessageSquare, Sparkles, TimerOff, Wand2 } from "lucide-react";
+import { Activity, AlertTriangle, AtSign, BellDot, Camera, ClipboardCheck, Clapperboard, Clock, FilePenLine, Gauge, Languages, Layers3, LayoutTemplate, MessageSquare, Sparkles, TimerOff, Wand2 } from "lucide-react";
 import { Insights } from "@/components/Insights";
 import { VideoCard } from "@/components/VideoCard";
 import { EmptyState, SectionTitle, Skeleton } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useWorkspaceRole } from "@/hooks/useCanEdit";
 import { allowanceNotice, awaitingReview, failedThisWeek, openCommentSummary, shareAttention } from "@/lib/client";
+import { ACTIVITY_SEEN_PREFIX, activitySeenKey, newActivityCount, newActivityIds, newActivityLine } from "@/lib/activity-text";
 import { COMMENTS_SEEN_PREFIX, freshVideoIds, markCommentsSeen, readSeenMark } from "@/lib/comment-list";
 import { draftKeyFor, draftSummary, type DraftSummary } from "@/lib/editor-draft";
-import type { Video } from "@/lib/types";
+import type { ActivityEvent, Video } from "@/lib/types";
 
 const QUICK = [
   { href: "/create", icon: Clapperboard, title: "Avatar video", body: "Script + avatar + voice. The core workflow.", accent: "bg-brand-600" },
@@ -94,7 +95,7 @@ export default function HomePage() {
   const [marksTick, setMarksTick] = useState(0);
   useEffect(() => {
     const bump = () => setMarksTick((n) => n + 1);
-    const onStorage = (e: StorageEvent) => (e.key === null || e.key.startsWith(COMMENTS_SEEN_PREFIX)) && bump();
+    const onStorage = (e: StorageEvent) => (e.key === null || e.key.startsWith(COMMENTS_SEEN_PREFIX) || e.key.startsWith(ACTIVITY_SEEN_PREFIX)) && bump();
     const onShow = () => document.visibilityState === "visible" && bump();
     window.addEventListener("storage", onStorage);
     window.addEventListener("pageshow", bump);
@@ -113,6 +114,25 @@ export default function HomePage() {
     // marksTick: read the marks again; the data alone does not change when one is kept.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, marksTick]);
+  // In a workspace, what teammates did since the reader last saw its whole Activity feed in this browser (the mark the
+  // Workspace page keeps); Home only reads the mark, so the badges are still there when the feed is opened.
+  const workspaceId = space?.workspaceId ?? null;
+  const feed = useApi<{ events: ActivityEvent[] }>(workspaceId ? "/api/activity?limit=30&links=0" : null);
+  // Asked again when the tab comes back to the front, so updates made meanwhile are counted.
+  const refetchFeed = feed.refetch;
+  useEffect(() => {
+    if (!workspaceId) return;
+    const again = () => document.visibilityState === "visible" && void refetchFeed();
+    document.addEventListener("visibilitychange", again);
+    return () => document.removeEventListener("visibilitychange", again);
+  }, [workspaceId, refetchFeed]);
+  const newActivity = useMemo(() => {
+    if (!workspaceId || !space || !feed.data) return "";
+    const fresh = newActivityIds(feed.data.events, readSeenMark(activitySeenKey(space.userId, workspaceId)), space.userId);
+    return newActivityCount(fresh.size, feed.data.events.length, 30);
+    // marksTick: read the mark again when the feed is shown in another tab.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feed.data, workspaceId, space?.userId, marksTick]);
   // Marks every one of them read here, as opening each would, then says so where the line was.
   const [freshNote, setFreshNote] = useState("");
   function markFreshRead() {
@@ -135,7 +155,7 @@ export default function HomePage() {
     <>
       <SectionTitle title="Home" subtitle="What do you want to make today?" />
 
-      {(allowance || attention.expiring > 0 || attention.expired > 0 || attention.failed > 0 || attention.review > 0 || comments.videos > 0 || forYou.videos > 0 || fresh.length > 0) && (
+      {(allowance || attention.expiring > 0 || attention.expired > 0 || attention.failed > 0 || attention.review > 0 || comments.videos > 0 || forYou.videos > 0 || fresh.length > 0 || newActivity !== "") && (
         <section aria-label="Things to check" data-testid="home-attention" className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <ul className="space-y-1.5">
             {allowance && (
@@ -190,6 +210,15 @@ export default function HomePage() {
                 <button type="button" onClick={markFreshRead} aria-label="Mark the new comments on these videos as read" className="font-medium underline hover:no-underline">
                   Mark as read
                 </button>
+              </li>
+            )}
+            {newActivity !== "" && (
+              <li className="flex flex-wrap items-center gap-x-2" data-testid="new-activity-notice">
+                <Activity className="h-4 w-4 shrink-0" />
+                <span>{newActivityLine(newActivity)}.</span>
+                <Link href="/workspace#activity" className="font-medium underline hover:no-underline">
+                  Open activity
+                </Link>
               </li>
             )}
             {forYou.videos > 0 && (
@@ -271,7 +300,8 @@ export default function HomePage() {
         {freshNote}
       </p>
 
-      <div ref={quickRef} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      {/* Set once the workspace's activity has been read, so a check can tell "nothing new" from "not read yet". */}
+      <div ref={quickRef} data-activity-checked={workspaceId && feed.data ? "true" : undefined} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {QUICK.map(({ href, icon: Icon, title, body, accent }) => (
           <Link key={title} href={href} className="rounded-xl border border-slate-200 bg-white p-5 transition hover:border-slate-300 hover:shadow-sm">
             <span className={`flex h-10 w-10 items-center justify-center rounded-lg text-white ${accent}`}>

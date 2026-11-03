@@ -24,11 +24,11 @@ export async function GET(req: Request) {
         },
       });
     }
-    const { limit, area, actor } = activityQuerySchema.parse(params);
+    const { limit, area, actor, links } = activityQuerySchema.parse(params);
     // The filters are echoed so a page can tell which filters a list it holds answers.
     const events = await listActivity(owner, limit, area, actor);
     // `links` says where each line leads, for the events whose video, presenter, key, or kit is still here.
-    return json({ events, links: await activityLinks(owner, events), area: area ?? null, actor: actor ?? null });
+    return json({ events, links: links === "0" ? {} : await activityLinks(owner, events), area: area ?? null, actor: actor ?? null });
   } catch (err) {
     return errorResponse(err);
   }

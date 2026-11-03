@@ -930,6 +930,13 @@ describe("activity feed", () => {
     assert.equal(activitySeenMark(events, "u-dan", "2026-11-04T00:00:00.000Z"), "2026-11-04T00:00:00.000Z", "a later mark from another tab stays");
     assert.equal(activitySeenMark([], "u-dan", null), new Date(0).toISOString(), "nothing yet: every later teammate event is new");
     assert.equal(activitySeenKey("u-dan", "ws_1"), "avatar-studio:activity-seen:u-dan:ws_1");
+    const { newActivityCount, newActivityLine } = await import("../activity-text");
+    assert.equal(newActivityCount(0, 12, 30), "", "none new: nothing to say");
+    assert.equal(newActivityCount(3, 12, 30), "3");
+    assert.equal(newActivityCount(12, 12, 30), "12", "every line new, but fewer than the limit loaded: that is all of them");
+    assert.equal(newActivityCount(30, 30, 30), "30+", "every one of a full page new: there may be more");
+    assert.equal(newActivityLine("1"), "1 new in the workspace's activity since you last opened it");
+    assert.equal(newActivityLine("30+"), "30+ new in the workspace's activity since you last opened it");
   });
   it("links a line to what it is about while that is still in the owner's space", async () => {
     const { recordActivity, listActivity, activityLinks } = await import("../services/activity");

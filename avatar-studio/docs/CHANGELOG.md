@@ -1172,3 +1172,24 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The link's accessible name starts with its visible text, and the link uses the page's brand colour.
     - The e2e test covers what is not counted, the singular form, and the prompt while counting. It no longer depends on the order of two videos made in the same second.
   - Left as it is: the page asks the library list route for its counts, which also refreshes in-flight renders, as the library itself does. A counts-only route can come later if the cost shows.
+- Filter the library by voice, with voice counts on the Voices page (`36b398c`). This works like the presenter filter.
+  - **API and library picker:** `GET /api/videos` and the analytics CSV take `voice=<voice id>`. The library has a "Filter by voice" picker, which also reads `?voice=` from its address. A video matches when it speaks in that voice: as its own voice where a scene speaks in it, or as a scene's own voice. Scenes lip-synced to a recording, scenes of nothing but pauses, and cinematic shots speak in none. A HeyGen template video speaks in the voices its voice slots were given.
+  - **Counts:** the list returns `voices`, counted and named like `presenters`.
+  - **Video page:** the Voice row links to the filtered library.
+  - **Voices page:** each voice in use says "In N videos", linked to the filtered library.
+  - **Delete warnings:** the list also returns `needs`. It counts, across the library and the trash together, how many videos a retry or copy would ask for each presenter and voice. Those are the video's own and every scene's, whether or not a scene shows or speaks in them, plus a cinematic shot's presenters and a template's slots. Deleting a voice, or a presenter on the Avatars page, now warns with these counts.
+  - **Shared rules:** the rules live in `src/lib/presenters.ts` (`videoPresenters`, `videoVoices`, `videoNeeds`).
+  - **Tests:** unit tests cover the rules, the counts, the trash, templates, and silent and recorded scenes. The e2e test covers:
+    - the picker, the address, and the CSV;
+    - the video page link;
+    - the Voices page counts and link;
+    - the delete prompt with a trashed video counted.
+  - An independent review found two blocking problems, both fixed:
+    - **Delete prompts counted too few videos.** They counted only videos a voice was heard in, so a retry or copy of a video that still named the voice could fail with no warning. That covered a video whose every scene had its own voice, and videos in the trash. The same held for presenters on the Avatars page. Both prompts now count every video that needs the voice or presenter.
+    - **Template videos were left out.** A HeyGen template video was never counted, though its slots can hold one of your voices or presenters. Their slots now count, for the filters as well as the warnings, and the docs say so.
+  - Fixed from the optional findings:
+    - A scene of nothing but pauses does not count as speaking.
+    - The video page's link names the voice or presenter it opens when that is not the one its row shows.
+    - The tests cover a trashed video, template slots, silent scenes, and the needs counts.
+  - Two existing e2e tests check the empty state's wording, which now names the voice filter, and were updated to match.
+  - Left as they are: the pickers' counts are of the whole view, whatever the other filters, as the folder counts are. The e2e test does not make a recorded scene, which needs an uploaded clip; the unit tests cover it.

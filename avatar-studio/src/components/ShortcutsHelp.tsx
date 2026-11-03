@@ -127,7 +127,7 @@ export function ShortcutsHelp() {
             />
             <span>
               Single-key shortcuts
-              <span className="block text-xs text-slate-500">Keys pressed on their own, such as “/” in My videos. Turn them off if you use speech input or they get in your way; this browser remembers.</span>
+              <span className="block text-xs text-slate-500">Keys pressed on their own, such as “/” in My videos and “C” on a video’s page. Turn them off if you use speech input or they get in your way; this browser remembers.</span>
             </span>
           </label>
         </div>

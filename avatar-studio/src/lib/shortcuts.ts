@@ -93,6 +93,21 @@ export function isSearchKey(
   return state.enabled && e.key === "/" && !modified && !e.repeat && !e.isComposing && e.keyCode !== 229 && !state.editable;
 }
 
+/**
+ * Whether a key press is C to write a comment on a video page: "c" (or "C" with Caps Lock on), or the key where C is
+ * on a layout that types another letter there (Cyrillic "с", say), with no Shift, Ctrl, ⌘, or Alt, where it would not
+ * be typed into text, while the single-key shortcuts are on, not held down, and not part of composing text with an
+ * input method.
+ */
+export function isCommentKey(
+  e: Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "repeat" | "isComposing" | "keyCode">,
+  state: { editable: boolean; enabled: boolean },
+): boolean {
+  const c = e.key.toLowerCase() === "c" || (e.code === "KeyC" && e.key.length === 1 && !/[a-z]/i.test(e.key));
+  const modified = e.metaKey || e.ctrlKey || e.altKey || e.shiftKey;
+  return state.enabled && c && !modified && !e.repeat && !e.isComposing && e.keyCode !== 229 && !state.editable;
+}
+
 /** The studio's shortcuts, with the keys as this computer has them: each entry is one or more ways to press it. */
 export function shortcutGroups(apple: boolean): Array<{ title: string; shortcuts: Shortcut[] }> {
   const mod = apple ? "⌘" : "Ctrl";
@@ -121,6 +136,7 @@ export function shortcutGroups(apple: boolean): Array<{ title: string; shortcuts
       title: "In a video's comments",
       shortcuts: [
         { keys: [[mod, "Enter"]], does: "Post a comment or reply, or save an edit" },
+        { keys: [["C"]], does: "Write a comment, pinned to the moment the player is at, which pauses there (outside a text box)" },
         { keys: [["Esc"]], does: "Cancel a reply or an edit" },
       ],
     },

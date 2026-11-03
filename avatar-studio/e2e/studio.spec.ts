@@ -3936,6 +3936,62 @@ test("a video's pinned comments are marked along the video, and a mark moves the
   await expect(comments.getByTestId("comment-list")).toContainText("About the whole video.");
 });
 
+test("C on a video page starts a comment pinned to the moment the player is at, pausing it there", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Press C ${Date.now().toString(36)}`);
+  // Notes are pinned to a moment once the render has finished.
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  await page.goto(`/videos/${v.id}`);
+  const player = page.getByTestId("video-player");
+  const comments = page.getByTestId("comments");
+  const box = page.getByLabel("New comment");
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.duration)).toBeGreaterThan(5);
+  // Playing, from the player itself.
+  await player.evaluate(async (el: HTMLVideoElement) => {
+    el.muted = true;
+    el.currentTime = 4;
+    await el.play();
+  });
+  await player.focus();
+  await page.keyboard.press("c");
+  await expect(box).toBeFocused();
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.paused)).toBe(true);
+  const at = Math.floor(await player.evaluate((el: HTMLVideoElement) => el.currentTime));
+  const moment = `0:${String(at).padStart(2, "0")}`;
+  const pin = comments.getByRole("checkbox", { name: `Pin to ${moment} in the video` });
+  await expect(pin).toBeChecked();
+  // A screen reader is told the player paused, and where the note will be pinned.
+  await expect(comments.getByRole("status")).toHaveText(`Paused at ${moment}; the note will be pinned there`);
+  // In the box, C is a letter like any other.
+  await page.keyboard.type("Cut cold open.");
+  await expect(box).toHaveValue("Cut cold open.");
+  await box.press("Control+Enter");
+  await expect(comments.getByTestId("comment-list")).toContainText(`${moment}Cut cold open.`);
+  const listed = (await (await page.request.get(`/api/videos/${v.id}/comments`)).json()).comments as Array<{ atSec?: number }>;
+  expect(listed.map((c) => c.atSec)).toEqual([at]);
+  // With single-key shortcuts turned off, C does nothing.
+  await page.evaluate(() => localStorage.setItem("avatar-studio:single-key-shortcuts", "off"));
+  await page.reload();
+  await expect(comments.getByTestId("comment-list")).toContainText("Cut cold open.");
+  await player.focus();
+  await page.keyboard.press("c");
+  await expect(player).toBeFocused();
+  await expect(box).not.toBeFocused();
+  // On again: from inside an open reply form, C is left to it, and the reply stays where it was.
+  await page.evaluate(() => localStorage.removeItem("avatar-studio:single-key-shortcuts"));
+  await page.reload();
+  await comments.getByRole("button", { name: "Reply to comment: Cut cold open." }).click();
+  const cancel = comments.getByRole("button", { name: "Cancel" });
+  await cancel.focus();
+  await page.keyboard.press("c");
+  await expect(cancel).toBeFocused();
+  await expect(box).not.toBeFocused();
+  await cancel.click();
+  // Caps Lock gives a capital C with no Shift, which still counts.
+  await player.focus();
+  await page.evaluate(() => document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "C", code: "KeyC", bubbles: true, cancelable: true })));
+  await expect(box).toBeFocused();
+});
+
 test("comments a teammate wrote since this browser last opened the video are marked new, for that visit", async ({ page }) => {
   const v = await createVideoViaApi(page, `New ${Date.now().toString(36)}`);
   const post = async (text: string, parentId?: string) => {

@@ -2,11 +2,12 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { Check, CheckCheck, ChevronDown, Copy, CornerDownRight, Download, Link2, MessageSquare, Pencil, RotateCcw, SmilePlus, Trash2 } from "lucide-react";
 import { Button, Card, inputClass } from "@/components/ui";
+import { useMobileNav } from "@/components/MobileNav";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
 import { formatTimestamp } from "@/lib/text";
 import { refocusIfLost } from "@/lib/focus";
-import { isSubmitKey } from "@/lib/shortcuts";
+import { isCommentKey, isSubmitKey, readSingleKeyShortcuts, typesText } from "@/lib/shortcuts";
 import { isApple } from "@/components/QuickFind";
 import { COMMENT_ORDER_KEY, COMMENT_REACTIONS, REACTION_NAMES, commentMarkers, commentOrderFrom, commentsAsText, commentsSeenKey, filterThreads, newSince, orderThreads, repliesByThread, seenMark, splitComments, threadLink, type CommentFilter, type CommentOrder, type CommentReaction, type ReactionView } from "@/lib/comment-list";
 import type { VideoComment, WorkspaceRole } from "@/lib/types";
@@ -197,6 +198,32 @@ export function VideoComments({ videoId, title, player }: { videoId: string; tit
 
   // After posting or deleting, the focus goes to the comment box: the button pressed is disabled or gone.
   const box = useRef<HTMLTextAreaElement>(null);
+  // C, outside a text box, starts a note: the player pauses, the note is pinned to that moment, and the box takes the
+  // focus. Not while the menu drawer, a dialog, or an open menu is over the page, nor from inside a form, such as a reply
+  // or an edit being written, which would be left open behind. Without a finished video, it only goes to the box.
+  const { open: navOpen } = useMobileNav();
+  const navOpenRef = useRef(navOpen);
+  navOpenRef.current = navOpen;
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.defaultPrevented || navOpenRef.current || document.querySelector("dialog[open]") || !box.current) return;
+      const target = e.target instanceof HTMLElement ? e.target : null;
+      if (target?.closest("form, details[open]")) return;
+      if (!isCommentKey(e, { editable: typesText(target), enabled: readSingleKeyShortcuts() })) return;
+      e.preventDefault();
+      const el = player?.current;
+      // Before the video's first frame is known, there is no moment to pin.
+      if (el && el.readyState >= 1) {
+        el.pause();
+        const at = Math.floor(el.currentTime);
+        setPinAt(at);
+        announce(`Paused at ${formatTimestamp(at)}; the note will be pinned there`);
+      }
+      box.current.focus();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [player]);
   async function post() {
     const text = draft.trim();
     if (!text || busy) return;
@@ -962,7 +989,7 @@ export function VideoComments({ videoId, title, player }: { videoId: string; tit
           // Read-only while posting, as the reply and edit boxes are, so the next note is not typed only to be cleared.
           readOnly={busy}
           onKeyDown={submitOnModEnter}
-          aria-keyshortcuts="Control+Enter Meta+Enter"
+          aria-keyshortcuts="C Control+Enter Meta+Enter"
           rows={2} maxLength={1000} placeholder={teammates.length ? "Leave a note for the team; type @ and a teammate's email to notify them" : "Leave a note for the team"} className={inputClass} />
         {teammates.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500" data-testid="mention-suggestions">

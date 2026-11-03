@@ -2,7 +2,7 @@
 // Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { isShortcutsKey, isSubmitKey, shortcutGroups } from "../shortcuts";
+import { isCommentKey, isShortcutsKey, isSubmitKey, shortcutGroups } from "../shortcuts";
 
 const press = (over: Partial<Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">>) => ({ key: "/", code: "Slash", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...over });
 
@@ -64,5 +64,33 @@ describe("keyboard shortcuts", () => {
       assert.deepEqual(list.find((s) => s.does.startsWith("Go to the scene before or after"))!.keys, [["←"], ["→"]]);
       assert.deepEqual(list.find((s) => s.does.startsWith("Go to the first or last scene"))!.keys, [["Home"], ["End"]]);
     }
+  });
+});
+
+describe("isCommentKey", () => {
+  const c = (over: Partial<Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "repeat" | "isComposing" | "keyCode">> = {}) => ({
+    key: "c", code: "KeyC", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, repeat: false, isComposing: false, keyCode: 67, ...over,
+  });
+  const on = { editable: false, enabled: true };
+
+  it("is C on its own, where it would not be typed, on any layout", () => {
+    assert.equal(isCommentKey(c(), on), true);
+    assert.equal(isCommentKey(c({ key: "C" }), on), true, "with Caps Lock on, which gives a capital without Shift");
+    assert.equal(isCommentKey(c({ code: "KeyJ" }), on), true, "a layout that types c elsewhere (Dvorak)");
+    assert.equal(isCommentKey(c({ key: "с" }), on), true, "the C key on a Cyrillic layout");
+    assert.equal(isCommentKey(c({ key: "j", code: "KeyC" }), on), false, "the C key where a layout types another Latin letter");
+  });
+
+  it("leaves C to text, to a key with Shift, Ctrl, ⌘, or Alt, to a held key, to an input method, and to a reader who turned single keys off", () => {
+    assert.equal(isCommentKey(c(), { editable: true, enabled: true }), false);
+    assert.equal(isCommentKey(c(), { editable: false, enabled: false }), false);
+    for (const over of [{ shiftKey: true, key: "C" }, { ctrlKey: true }, { metaKey: true }, { altKey: true }, { repeat: true }, { isComposing: true }, { keyCode: 229 }]) {
+      assert.equal(isCommentKey(c(over), on), false, JSON.stringify(over));
+    }
+  });
+
+  it("is listed with the comments' shortcuts", () => {
+    const listed = shortcutGroups(false).find((g) => g.title === "In a video's comments")!.shortcuts;
+    assert.deepEqual(listed.find((s) => s.does.startsWith("Write a comment"))!.keys, [["C"]]);
   });
 });

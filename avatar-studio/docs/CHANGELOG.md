@@ -1128,3 +1128,10 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The e2e test lets go of requests the page drops, and removes its fakes when it ends.
     - A unit test checks that the reader's own reply does not move the time.
   - Left as it is: a comment written in the very millisecond of the mark is not new, on the video page or in the library.
+- New comments on Home (`b580830`): in a workspace, Home's Things to check names the videos a teammate wrote in since you last opened them in this browser, newest first, as in "New comments since you last looked, on Launch teaser, Q3 recap and Onboarding." Each title links to its video. Past three, the rest are counted, as in "and 2 other videos", which links to the library's open comments. Each title tells a screen reader why it is listed ("(new comments)"). It uses the same marks as the video page's New pills and the library's dots, now worked out by one shared helper, `freshVideoIds`, which has unit tests. The e2e test extends the library one to Home: it checks which videos are named, follows a link, and checks that, once opened, the video is no longer named.
+  - An independent review found nothing blocking. Fixed from its optional findings:
+    - Long titles wrap rather than running out of the box on a phone.
+    - The count of other videos is a link.
+    - Each title carries its reason for a screen reader's links list.
+    - The e2e test's last check waits for Home's videos to arrive, and goes back with the browser's Back.
+  - Left as it is: a video opened in another tab stays named on a Home page already open until it is loaded again.

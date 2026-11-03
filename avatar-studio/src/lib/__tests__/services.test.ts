@@ -952,6 +952,19 @@ describe("activity feed", () => {
     const table = parseCsv(toCsv(ACTIVITY_CSV_COLUMNS, rows));
     assert.deepEqual(table.columns, ACTIVITY_CSV_COLUMNS);
     assert.equal(table.rows[0].what_happened, rows[0].what_happened, "a sentence starting with a name is not altered");
+    // One person's events, alone or within an area; the owner id itself stands for scripts with an API key.
+    assert.deepEqual((await listActivity("ws_area", 50, undefined, "ws_area")).map((e) => e.kind), ["apikey.created"]);
+    assert.deepEqual((await listActivity("ws_area", 50, "videos", "u-dan")).map((e) => e.kind), ["batch.created", "video.created"]);
+    assert.deepEqual((await listActivity("ws_area", 1, undefined, "u-dan")).map((e) => e.kind), ["usage.replaced"], "the limit counts the person's events");
+    assert.deepEqual(await listActivity("ws_area", 50, "keys", "u-dan"), []);
+    assert.deepEqual(await listActivity("ws_area", 50, undefined, "u-nobody"), []);
+    const { activityFilterPhrase } = await import("../activity-text");
+    assert.equal(activityFilterPhrase(null, null), "");
+    assert.equal(activityFilterPhrase("reviews", null), " under Reviews");
+    assert.equal(activityFilterPhrase("reviews", "ann@example.com", true), " under “Reviews” by ann@example.com");
+    assert.equal(activityFilterPhrase(null, "you"), " by you");
+    assert.equal(activityQuerySchema.parse({ actor: " u-dan " }).actor, "u-dan");
+    assert.throws(() => activityQuerySchema.parse({ actor: "" }));
     assert.equal(activityQuerySchema.parse({ format: "csv" }).format, "csv");
     assert.throws(() => activityQuerySchema.parse({ format: "json" }));
   });

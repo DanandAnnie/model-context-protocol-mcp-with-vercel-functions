@@ -6402,7 +6402,7 @@ test("workspaces: create, switch, isolate content, invite, join, leave, delete",
     await page.reload();
     await expect(feed.getByText(`You moved "Team video ${tag}" to the trash`)).toBeVisible();
     // The feed shows one area at a time: keys have none here, videos list both lines, and Everything is back.
-    const show = feed.getByLabel("Show activity");
+    const show = feed.getByLabel("Activity area");
     await expect(feed.getByRole("status")).toHaveText("", { useInnerText: true });
     await expect(show.locator("option")).toHaveText(["Everything", "Videos and batches", "Reviews", "Members", "API keys", "Brand kit", "Shared presenters", "Presenter and voice replaces"]);
     await show.selectOption({ label: "API keys" });
@@ -6414,7 +6414,7 @@ test("workspaces: create, switch, isolate content, invite, join, leave, delete",
     await expect(feed.locator("ol > li")).toHaveCount(2);
     await expect(feed.getByRole("status")).toHaveText("2 events shown under Videos and batches");
     // The CSV follows the filter: the two video lines, newest first, worded as the feed words them for anyone.
-    const csvLink = feed.getByRole("link", { name: "Download CSV of Videos and batches activity" });
+    const csvLink = feed.getByRole("link", { name: "Download CSV of the activity shown under Videos and batches" });
     await expect(csvLink).toHaveAttribute("href", "/api/activity?format=csv&area=videos");
     const csvRes = await page.request.get("/api/activity?format=csv&area=videos");
     expect(csvRes.headers()["content-disposition"]).toMatch(/^attachment; filename="activity-videos-\d{4}-\d\d-\d\d\.csv"$/);
@@ -6425,6 +6425,43 @@ test("workspaces: create, switch, isolate content, invite, join, leave, delete",
     expect(parseCsv(await (await page.request.get("/api/activity?format=csv&area=keys")).text()).rows).toEqual([]);
     expect((await page.request.get("/api/activity?format=csv&area=videos&limit=500")).status(), "a CSV takes no limit").toBe(200);
     expect((await page.request.get("/api/activity?format=csv&area=nope")).status()).toBe(400);
+    // Who did it: you made both lines; no script with an API key made any, here or under Videos and batches.
+    const who = feed.getByLabel("Activity by");
+    await expect(who.locator("option")).toHaveText(["Anyone", "You", "Scripts with an API key"]);
+    await who.selectOption({ label: "You" });
+    await expect(feed.getByRole("status")).toHaveText("2 events shown under Videos and batches by you");
+    await expect(feed.getByRole("link", { name: "Download CSV of the activity shown under Videos and batches by you" })).toHaveAttribute("href", "/api/activity?format=csv&area=videos&actor=local");
+    await who.selectOption({ label: "Scripts with an API key" });
+    await expect(feed.getByText("Nothing under “Videos and batches” by a script with an API key yet. The feed keeps the last 200 events.")).toBeVisible();
+    await expect(feed.getByTestId("activity-csv")).toHaveCount(0);
+    const byKey = (await (await page.request.get(`/api/activity?actor=${ws.id}`)).json()) as { events: unknown[]; actor: string | null };
+    expect(byKey).toEqual({ events: [], area: null, actor: ws.id });
+    const mineCsv = await page.request.get("/api/activity?format=csv&actor=local");
+    expect(mineCsv.headers()["content-disposition"]).toMatch(/filename="activity-all-by-local-\d{4}-\d\d-\d\d\.csv"/);
+    expect(parseCsv(await mineCsv.text()).rows.map((r) => r.kind)).toEqual(["video.trashed", "video.created"]);
+    expect((await page.request.get(`/api/activity?format=csv&actor=${ws.id}`)).headers()["content-disposition"]).toContain(`activity-all-by-api-key-`);
+    // A pick that no longer names a member (here, the workspace's members as another tab sees them after a removal)
+    // stops filtering: the select, the list, and the wording all go back to Anyone together.
+    await page.route("**/api/workspaces", async (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      const body = (await (await route.fetch()).json()) as { workspaces: Array<{ id: string; members: unknown[] }> };
+      for (const w of body.workspaces) if (w.id === ws.id) w.members = [];
+      return route.fulfill({ json: body });
+    });
+    await who.selectOption({ label: "You" });
+    await expect(feed.getByRole("status")).toHaveText("2 events shown under Videos and batches by you");
+    // Any action on the page refetches the workspace; a rename to the same name is the quietest one.
+    await page.getByRole("button", { name: "Rename" }).click();
+    await page.getByLabel("Workspace name").fill(`Team ${tag}`);
+    await page.getByLabel("Workspace name").press("Enter");
+    await expect(who).toHaveValue("");
+    await expect(feed.getByRole("status")).toHaveText("2 events shown under Videos and batches");
+    await expect(feed.getByRole("link", { name: "Download CSV of the activity shown under Videos and batches" })).toHaveAttribute("href", "/api/activity?format=csv&area=videos");
+    await page.unroute("**/api/workspaces");
+    await page.reload();
+    await show.selectOption({ label: "Videos and batches" });
+    await who.selectOption({ label: "Scripts with an API key" });
+    await who.selectOption({ label: "Anyone" });
     await show.selectOption({ label: "Everything" });
     await expect(feed.getByText(`You created "Team video ${tag}"`)).toBeVisible();
     await expect(feed.getByRole("status")).toHaveText("2 events shown");

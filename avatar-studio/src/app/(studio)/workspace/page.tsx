@@ -5,7 +5,7 @@ import { Activity, Check, Copy, Download, Link2, Trash2, UserMinus } from "lucid
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
-import { ACTIVITY_AREAS, ACTIVITY_AREA_LABELS, describeActivity, parseActivityArea, type ActivityArea } from "@/lib/activity-text";
+import { ACTIVITY_AREAS, ACTIVITY_AREA_LABELS, activityFilterPhrase, describeActivity, parseActivityArea, type ActivityArea } from "@/lib/activity-text";
 import { roleArticle } from "@/lib/roles";
 import type { ActivityEvent, WorkspaceRole } from "@/lib/types";
 
@@ -28,9 +28,24 @@ export default function WorkspacePage() {
   const { data, loading, error, refetch } = useApi<Summary>("/api/workspaces");
   const ws = data?.workspaces.find((w) => w.id === data.activeId) ?? null;
   const [area, setArea] = useState<ActivityArea | null>(null);
-  const activity = useApi<{ events: ActivityEvent[]; area: ActivityArea | null }>(ws ? `/api/activity?limit=30${area ? `&area=${area}` : ""}` : null);
-  // A list is shown only under the filter it was fetched for, so switching never flashes the previous one.
-  const events = activity.data && (activity.data.area ?? null) === area ? activity.data.events : null;
+  // Whose events were picked: a member's user id, or the workspace id for scripts with an API key.
+  const [picked, setPicked] = useState<string | null>(null);
+  // The people the Who select offers, as it names them and as the feed's lines speak of them. A member with no
+  // email is named by their id, as in the member list above, so two of them can be told apart.
+  const people = ws
+    ? [
+        ...ws.members.map((m) => ({ id: m.userId, option: m.you ? "You" : (m.email ?? m.userId), phrase: m.you ? "you" : (m.email ?? m.userId) })),
+        { id: ws.id, option: "Scripts with an API key", phrase: "a script with an API key" },
+      ]
+    : [];
+  // The person in effect: one who has since left (or a pick from another workspace) no longer filters, so the
+  // select, the list, the wording, and the download never disagree. Their events stay under Anyone.
+  const actor = picked && people.some((p) => p.id === picked) ? picked : null;
+  const filterQuery = `${area ? `&area=${area}` : ""}${actor ? `&actor=${encodeURIComponent(actor)}` : ""}`;
+  const activity = useApi<{ events: ActivityEvent[]; area: ActivityArea | null; actor: string | null }>(ws ? `/api/activity?limit=30${filterQuery}` : null);
+  // A list is shown only under the filters it was fetched for, so switching never flashes the previous one.
+  const events = activity.data && (activity.data.area ?? null) === area && (activity.data.actor ?? null) === actor ? activity.data.events : null;
+  const whoPhrase = actor ? (people.find((p) => p.id === actor)?.phrase ?? null) : null;
   // An action that ends after the filter changed refetches the filter shown now, not the one it began under.
   const refetchActivity = useRef(activity.refetch);
   useEffect(() => {
@@ -267,17 +282,33 @@ export default function WorkspacePage() {
             {/* Every kept event under the filter shown, as a spreadsheet to hand on or keep. */}
             {events && events.length > 0 && (
               <a
-                href={`/api/activity?format=csv${area ? `&area=${area}` : ""}`}
+                href={`/api/activity?format=csv${filterQuery}`}
                 download
                 data-testid="activity-csv"
-                aria-label={area ? `Download CSV of ${ACTIVITY_AREA_LABELS[area]} activity` : "Download CSV of all activity"}
+                aria-label={area || whoPhrase ? `Download CSV of the activity shown${activityFilterPhrase(area, whoPhrase)}` : "Download CSV of all activity"}
                 className="inline-flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800"
               >
                 <Download className="h-3.5 w-3.5" aria-hidden /> Download CSV
               </a>
             )}
             <select
-              aria-label="Show activity"
+              aria-label="Activity by"
+              className={`${inputClass} w-auto max-w-[14rem]`}
+              value={actor ?? ""}
+              onChange={(e) => {
+                setPicked(e.target.value || null);
+                setFiltered(true);
+              }}
+            >
+              <option value="">Anyone</option>
+              {people.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.option}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Activity area"
               className={`${inputClass} w-auto max-w-full`}
               value={area ?? ""}
               onChange={(e) => {
@@ -299,11 +330,11 @@ export default function WorkspacePage() {
         </p>
         <ErrorBanner message={activity.error} />
         <p className="sr-only" role="status">
-          {filtered && events ? `${events.length === 0 ? "No" : events.length} ${events.length === 1 ? "event" : "events"} shown${area ? ` under ${ACTIVITY_AREA_LABELS[area]}` : ""}` : ""}
+          {filtered && events ? `${events.length === 0 ? "No" : events.length} ${events.length === 1 ? "event" : "events"} shown${activityFilterPhrase(area, whoPhrase)}` : ""}
         </p>
         {events && events.length === 0 && (
           <p className="mt-3 text-sm text-slate-500">
-            {area ? `Nothing under “${ACTIVITY_AREA_LABELS[area]}” yet. The feed keeps the last 200 events.` : "Nothing yet. Activity shows up here as the team works."}
+            {area || actor ? `Nothing${activityFilterPhrase(area, whoPhrase, true)} yet. The feed keeps the last 200 events.` : "Nothing yet. Activity shows up here as the team works."}
           </p>
         )}
         {events && events.length > 0 && (

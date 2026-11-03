@@ -16,6 +16,8 @@ export const activityQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(MAX_ACTIVITY).default(50),
   /** Only this part of the feed: videos, reviews, members, keys, brand, presenters, or replaces. */
   area: z.enum(ACTIVITY_AREAS).optional(),
+  /** Only the events this person did: a member's user id, or the owner id itself for scripts with an API key. */
+  actor: z.string().trim().min(1).max(200).optional(),
   /** `csv` downloads every kept event of the area (the limit is not applied) as a spreadsheet. */
   format: z.enum(["csv"]).optional(),
 });
@@ -75,10 +77,10 @@ export async function recordActivity(ownerId: string, actor: User, kind: Activit
   }
 }
 
-/** The owner's events, newest first; with an area, only that area's, up to `limit` of them. */
-export async function listActivity(ownerId: string, limit: number = 50, area?: ActivityArea): Promise<ActivityEvent[]> {
+/** The owner's events, newest first; with an area or a person, only the events matching both, up to `limit` of them. */
+export async function listActivity(ownerId: string, limit: number = 50, area?: ActivityArea, actorId?: string): Promise<ActivityEvent[]> {
   const all = sorted(await getStore().list<ActivityEvent>("activity", ownerId));
-  return (area ? all.filter((e) => activityArea(e.kind) === area) : all).slice(0, limit);
+  return all.filter((e) => (!area || activityArea(e.kind) === area) && (!actorId || e.actorId === actorId)).slice(0, limit);
 }
 
 function sorted(events: ActivityEvent[]): ActivityEvent[] {

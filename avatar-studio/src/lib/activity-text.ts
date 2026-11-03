@@ -52,6 +52,15 @@ export function parseActivityArea(value: string | null | undefined): ActivityAre
   return (ACTIVITY_AREAS as readonly string[]).includes(value ?? "") ? (value as ActivityArea) : null;
 }
 
+/**
+ * The words naming a filtered view of the feed, e.g. ` under “Reviews” by ann@example.com`: the area as the Show
+ * select names it (quoted when `quote` is set) and the person as the Who select describes them. Empty for neither.
+ */
+export function activityFilterPhrase(area: ActivityArea | null, who: string | null, quote = false): string {
+  const label = area ? ACTIVITY_AREA_LABELS[area] : null;
+  return `${label ? ` under ${quote ? `“${label}”` : label}` : ""}${who ? ` by ${who}` : ""}`;
+}
+
 /** Who did it, from the viewer's point of view. */
 export function activityActor(e: Pick<ActivityEvent, "actorId" | "actorEmail" | "ownerId">, viewerId?: string): string {
   if (viewerId && e.actorId === viewerId) return "You";

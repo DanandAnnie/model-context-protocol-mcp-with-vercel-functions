@@ -1335,3 +1335,13 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - A screen reader hears "New:" before the line rather than after its time.
     - The doc comment says that events made with an API key count as a teammate's.
     - The e2e test clears the mark it moved ahead.
+- Home says when the workspace has new activity (`909bed3`). In a workspace, Home's Things to check reads the Activity feed's newest 30 lines and the reader's mark from 260. It counts what teammates (or scripts with an API key) did since the reader last saw the whole feed in this browser, for example "3 new in the workspace's activity since you last opened it", or "30+" when every line loaded is new. An Open activity link opens the Workspace page at its Activity card (`/workspace#activity`).
+  - Home only reads the mark, so the lines are still marked New when the feed is opened. Opening the feed moves the mark, and the Home line goes.
+  - Home reads the mark again when the feed is opened in another tab. When the tab comes back to the front, it reads the mark and asks for the feed again.
+  - Home asks for `?links=0`, which leaves out the link checks it does not use.
+  - A first visit, a personal space, or storage that cannot be read shows no line.
+  - The count's wording comes from `newActivityCount` and `newActivityLine` in `src/lib/activity-text.ts`, shared with the feed's own count.
+  - An independent review found two blocking problems.
+    - The link landed at the top of the Workspace page rather than its feed, because the card is drawn only once the workspace has loaded. The page now brings the card into view and focuses its heading once it is there, and the e2e test checks both.
+    - The test's "the line has gone" check could pass before Home had read the feed. Home now marks when it has, and the test waits for that.
+  - Also from its optional findings: the lighter request, the refresh on returning to the tab, wording that says what was last opened, and a cleanup in the test that the feed could no longer undo.

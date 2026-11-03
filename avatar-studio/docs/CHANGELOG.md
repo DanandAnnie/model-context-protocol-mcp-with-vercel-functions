@@ -1259,3 +1259,9 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - No entry in the activity feed.
     - A visitor's turn that saves an interactive presenter's counters in the moment between that read and the write can still be written over, or can write the old presenter back. Those counter writes are not conditional anywhere yet.
     - A photo avatar renamed in that same moment can lose the rename, since avatars carry no `updatedAt` to check.
+- A replace is recorded in the activity feed (`0a901cb`). One that changed something adds a `usage.replaced` event to the workspace's feed, for example: `Dana replaced "Ava" with "Ben" in 2 templates and the brand kit`. The event stores the old and new names (`subject`, `replacement`), the old id (`subjectId`), and what changed (`replaced: { kind, agents, templates, brand, avatars }`). The sentence is worded from those counts when the feed is shown. A name the server cannot find is left out, and the feed says "a deleted presenter" or "a deleted voice" in its place. A replace that changes nothing records nothing. `describeActivity` words it and has unit tests: the full sentence, an API-key caller, every kind at once, and a deleted old one. The e2e test checks the event after a replace, and that a second replace finding nothing left records no new event.
+  - An independent review found one blocking problem, now fixed: the first version stored what changed as text cut at 80 characters, so a voice replace touching every kind of thing ended mid-word in the feed. The counts are stored instead.
+  - Fixed from the optional findings:
+    - The old presenter's or voice's id is no longer shown in place of a missing name.
+    - The kind is stored, so the feed can say which was deleted.
+  - Left as it is: the route looks the names up again after the replace (one more lookup each, with no effect on what was changed).

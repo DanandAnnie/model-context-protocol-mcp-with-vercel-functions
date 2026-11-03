@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArchiveRestore, AtSign, Captions, ImageIcon, CheckSquare, FileText, Clapperboard, Clock, Copy, LayoutGrid, List, Download, FolderInput, KeyRound, MousePointerClick, QrCode, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, MessageSquare, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
-import { CREATED_WITHIN_DAYS, SHARE_FILTERS, api, clickSelect, folderFor, nextShareChange, overSelection } from "@/lib/client";
+import { CREATED_WITHIN_DAYS, LIBRARY_FILTER_PARAMS, SHARE_FILTERS, api, clickSelect, folderFor, nextShareChange, overSelection, withoutLibraryFilters } from "@/lib/client";
 import { isSearchKey, libraryKey, readSingleKeyShortcuts, typesText } from "@/lib/shortcuts";
 import { useMobileNav } from "@/components/MobileNav";
 import { fileToCover } from "@/lib/image-upload";
@@ -68,7 +68,7 @@ function VideosInner() {
   // the video page's presenter and voice links at `?presenter=` (an avatar id) and `?voice=` (a voice id), read
   // too), again whenever the address changes (the sidebar's My videos goes back to every video); a value the library does
   // not know is ignored.
-  const askedFilters = ["share", "status", "created", "review", "comments", "presenter", "voice"].map((k) => params.get(k) ?? "").join("\u0000");
+  const askedFilters = LIBRARY_FILTER_PARAMS.map((k) => params.get(k) ?? "").join("\u0000");
   const [status, setStatus] = useState<"all" | VideoStatus>(() => fromAddress(params.get("status"), STATUSES));
   const [folder, setFolder] = useState<string>("all"); // "all" | "unfiled" | folder name
   // Only the videos one presenter appears in, by avatar id: "all" for any.
@@ -202,6 +202,33 @@ function VideosInner() {
   const toggledOn = [starred && "Starred", commentFilter === "open" && "Open comments", commentFilter === "mentions" && "Mentions me"].filter((t): t is string => !!t);
   // Whether a filter other than Starred, Open comments, and Mentions me narrows the list, for the empty state's advice.
   const narrowed = !!needle || status !== "all" || folder !== "all" || presenter !== "all" || voice !== "all" || review !== "all" || share !== "all" || created !== "all" || !!batch;
+  // Any filter at all, a search being typed included: what Clear filters takes back. The sort, the layout, and the trash
+  // view are not filters, so they stay.
+  const filtersOn = narrowed || toggledOn.length > 0 || q.trim() !== "";
+  const [filterNote, setFilterNote] = useState("");
+  function clearFilters() {
+    setQ("");
+    setNeedle("");
+    setStatus("all");
+    setFolder("all");
+    setPresenter("all");
+    setVoice("all");
+    setReview("all");
+    setShare("all");
+    setCreated("all");
+    setStarred(false);
+    setCommentFilter("all");
+    // Filters the address asked for (Home's notices, the video page's links, a batch) leave it too, so a reload or the
+    // back button does not bring them back unasked.
+    // Written to the history at once (Next keeps the page's search params in step with it), rather than through the
+    // router, which would leave the old address, and a batch's results, in place until its navigation settles.
+    const rest = withoutLibraryFilters(params.toString());
+    if (rest !== null) window.history.replaceState(null, "", `${window.location.pathname}${rest}`);
+    // Cleared first, so the same words said again are heard again; the search box is where the next filter starts.
+    setFilterNote("");
+    requestAnimationFrame(() => setFilterNote("Filters cleared"));
+    searchRef.current?.focus();
+  }
 
   // Multi-select: move the chosen videos to a folder or delete them in one request.
   const [selecting, setSelecting] = useState(false);
@@ -1435,6 +1462,14 @@ function VideosInner() {
             <option value="30d">Made in the last 30 days</option>
             <option value="90d">Made in the last 90 days</option>
           </select>
+          {filtersOn && (
+            <button type="button" onClick={clearFilters} data-testid="clear-filters" title="Show every video again: the search and every filter back to their start" className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-slate-100">
+              <X className="h-3.5 w-3.5" aria-hidden /> Clear filters
+            </button>
+          )}
+          <span role="status" className="sr-only" data-testid="filter-note">
+            {filterNote}
+          </span>
           {/* Rounded children rather than a clipping parent, so a focus ring shows whole. */}
           <span className="inline-flex rounded-full border border-slate-200 bg-white" role="group" aria-label="Layout">
             <button type="button" onClick={() => chooseLayout("grid")} aria-pressed={layout === "grid"} title="Grid" className={`rounded-l-full px-2 py-1 ${layout === "grid" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}>
@@ -1481,6 +1516,15 @@ function VideosInner() {
         <EmptyState
           icon={trash ? <Trash2 className="h-8 w-8" /> : <Clapperboard className="h-8 w-8" />}
           title={trash ? (trashed ? "No trashed videos match" : "The trash is empty") : hasAny ? "No videos match" : "No videos yet"}
+          // Where the filters hide every video, the way back is one step.
+          action={
+            // Only where clearing shows something: the library's count leaves out the trash, and the trash's leaves out the library.
+            filtersOn && (trash ? trashed > 0 : (data?.total ?? 0) > 0) ? (
+              <Button variant="secondary" onClick={clearFilters} data-testid="empty-clear-filters">
+                <X className="h-4 w-4" aria-hidden /> Clear filters
+              </Button>
+            ) : undefined
+          }
           body={
             trash
               ? // Trashed videos the filters hide are still counted on the toggle, so say what hides them.

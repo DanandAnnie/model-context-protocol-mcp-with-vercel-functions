@@ -3596,6 +3596,55 @@ test("library filters by voice, and the Voices page says how many videos each vo
   }
 });
 
+test("Clear filters puts the library's search and every filter back, takes them off the address, and says so", async ({ page }) => {
+  const tag = `clearcheck${Date.now().toString(36)}`;
+  // Two presenters and two voices, so the library offers both pickers whatever else it holds.
+  await createVideoViaApi(page, `${tag} one`, { avatarId: "stock_5", voiceId: "stock_voice_1" });
+  await createVideoViaApi(page, `${tag} two`, { avatarId: "stock_2", voiceId: "stock_voice_2" });
+  // Opened as a link opens it, with a batch, a presenter, a voice, and a status, plus filters chosen here.
+  await page.goto("/videos?batch=batch_nothing&presenter=stock_5&voice=stock_voice_1&status=completed&ref=kept");
+  const clear = page.getByTestId("clear-filters");
+  await expect(clear).toBeVisible();
+  await page.getByPlaceholder(/Search title/).fill(`${tag} nothing like it`);
+  await page.getByTestId("starred-toggle").click();
+  await page.getByLabel("Filter by date made").selectOption("7d");
+  await page.getByLabel("Sort videos").selectOption("title");
+  await expect(page.getByText("No videos match")).toBeVisible();
+  // The empty state offers the way back too; either button does the same.
+  await page.getByTestId("empty-clear-filters").click();
+  // The filters leave the address at once; what is not a filter stays.
+  await expect(page).toHaveURL(/\/videos\?ref=kept$/);
+  await expect(page.getByPlaceholder(/Search title/)).toHaveValue("");
+  await expect(page.getByPlaceholder(/Search title/)).toBeFocused();
+  await expect(page.getByTestId("filter-note")).toHaveText("Filters cleared");
+  await expect(page.getByTestId("starred-toggle")).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByLabel("Filter by date made")).toHaveValue("all");
+  await expect(page.getByLabel("Filter by presenter")).toHaveValue("all");
+  await expect(page.getByLabel("Filter by voice")).toHaveValue("all");
+  // The sort is not a filter, so it stays; with nothing to clear the button is gone.
+  await expect(page.getByLabel("Sort videos")).toHaveValue("title");
+  await expect(clear).toHaveCount(0);
+  await expect(page.getByText("No videos match")).toHaveCount(0);
+  // A reload does not bring the address's filters back.
+  await page.reload();
+  await expect(page.getByLabel("Filter by presenter")).toHaveValue("all");
+  // Typing a search shows it again, and the top button clears that too, said again as it is done again.
+  await page.getByPlaceholder(/Search title/).fill(tag);
+  await expect(page.locator("a[href^='/videos/vid_'] .truncate")).toHaveText([`${tag} two`, `${tag} one`]);
+  await page.getByLabel("Filter by presenter").selectOption("stock_5");
+  await expect(page.locator("a[href^='/videos/vid_'] .truncate")).toHaveText([`${tag} one`]);
+  await clear.click();
+  await expect(page.getByPlaceholder(/Search title/)).toHaveValue("");
+  await expect(page.getByLabel("Filter by presenter")).toHaveValue("all");
+  await expect(page.getByTestId("filter-note")).toHaveText("Filters cleared");
+  await expect(clear).toHaveCount(0);
+  // The trash view is not a filter: clearing there keeps it.
+  await page.getByTestId("trash-toggle").click();
+  await page.getByPlaceholder(/Search title/).fill(`${tag} nothing in the trash`);
+  await clear.click();
+  await expect(page.getByTestId("trash-toggle")).toHaveAttribute("aria-pressed", "true");
+});
+
 test("the share page transcript plays the video from a line and marks the line being spoken", async ({ page }) => {
   const v = await createVideoViaApi(page, `Transcript ${Date.now().toString(36)}`, { script: "First we open the doors. [pause 1s] Then the team walks you through every room. Finally we hand over the keys." });
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");

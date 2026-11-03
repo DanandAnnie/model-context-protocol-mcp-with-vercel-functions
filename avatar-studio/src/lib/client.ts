@@ -368,3 +368,18 @@ export function shareSummary(video: { shareDisabled?: boolean; shareExpiresAt?: 
   const notes = [state, video.shareLocked ? "Password" : undefined].filter(Boolean);
   return notes.length ? notes.join(" · ") : undefined;
 }
+
+/** The library address's filter parameters (the ones the library reads, and a batch's results), which Clear filters takes off. */
+export const LIBRARY_FILTER_PARAMS = ["batch", "skipped", "failed", "share", "status", "created", "review", "comments", "presenter", "voice"] as const;
+
+/**
+ * The library address's query without its filter parameters, as "?…" or "" when nothing else is left, or null when it
+ * has none to take off (so the address need not change).
+ */
+export function withoutLibraryFilters(search: string): string | null {
+  const params = new URLSearchParams(search);
+  if (!LIBRARY_FILTER_PARAMS.some((k) => params.has(k))) return null;
+  for (const k of LIBRARY_FILTER_PARAMS) params.delete(k);
+  const rest = params.toString();
+  return rest ? `?${rest}` : "";
+}

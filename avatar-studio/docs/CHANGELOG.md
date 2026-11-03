@@ -1212,3 +1212,12 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - With a filter or search on and nothing matching, the Avatars page says "No avatars match" rather than inviting a first avatar.
     - The select's title says the counts cover the library and the trash, which the "In N videos" links (library only) do not.
   - Left as it is: "Not used by any video" lists library presenters and stock voices too, which cannot be deleted. The filter is about use, and those are worth seeing there as well.
+- Delete warnings name what else uses a presenter or voice (`019ad2d`): before deleting a photo avatar or a cloned voice, the Avatars and Voices pages now name the interactive presenters, saved templates (including any scene's presenter or voice), and brand kit defaults that use it, and for a voice the photo avatars that speak with it by default, beside the count of videos a retry or copy would need. `GET /api/usage` returns these per id, and `collectOtherUses` in `src/lib/services/usage.ts` builds them, listing each use once per thing that names it. `describeOtherUses` in `src/lib/presenters.ts` writes the sentence ("a and b", or "a, b, and c"): one of a kind by name, more than one as a count ("2 templates"). Unit tests cover both, and the e2e test for the Avatars page checks the prompt names an interactive presenter.
+  - An independent review found one blocking problem, now fixed. The first version listed the owner's photo avatars with `listAvatars`, which also asks the video renderer for its library on every page load. The service now reads the owner's photo avatars from the store, which is all it needs.
+  - Fixed from the optional findings:
+    - With no video using it, the prompt says "It is used by", not "It is also used by".
+    - When the other uses could not be read, or have not arrived yet, the prompt says interactive presenters, templates, and the brand kit could not be checked, rather than implying none use it.
+    - A photo avatar's default voice is named as such ("the photo avatar “Ana” (as its default voice)").
+    - Viewers, who cannot delete, do not fetch the other uses.
+    - The unit tests also cover the two-item join, the plural photo-avatar wording, and a voice named only in a template scene.
+  - Left as it is: the other uses are read once when the page opens, so a presenter or template made in another tab shows up after a reload. The videos count works the same way.

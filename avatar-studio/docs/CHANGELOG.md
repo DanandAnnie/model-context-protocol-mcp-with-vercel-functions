@@ -1292,3 +1292,15 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
   - Each event kind maps to its area in `src/lib/activity-text.ts`, typed over every kind, so a new kind does not compile until it is given an area.
   - The card's description now lists everything the feed records: deletions for good, batches, reviews, and replaces were missing.
   - An independent review found one blocking bug. The members, invites, and roles actions refetch the feed when they finish. If the filter was changed while one of them ran, that refetch fetched the old filter, and the list was dropped as not matching, leaving the feed blank. Those actions now refetch whichever filter is shown when they finish. Fixed from the optional findings: the empty-filter wording no longer suggests 200 events exist, switching back to Everything is announced too, and a doc comment is corrected.
+- Download the workspace activity feed as a CSV (`6f982c9`). The Activity card on the Workspace page has a Download CSV link beside its Show select. It downloads every kept event under the filter shown (up to 200), not just the 30 on the page. `GET /api/activity?format=csv` (with `&area=` when a filter is on) answers `activity-<area or all>-<date>.csv`, which has these columns:
+  - `when`: the stored ISO time
+  - `who`: the email, or "A member" / "A script with an API key"
+  - `area`: as the Show select names it
+  - `kind`
+  - `what_happened`: the feed's sentence, worded for no one in particular so the file reads the same for whoever downloads it
+
+  The rows come from `activityRows` in `src/lib/activity-text.ts`, beside the feed's own wording. A cell a spreadsheet would read as a formula is defused by `toCsv`, as for the other downloads. The link is left out while the filter shows nothing, and its name says which filter it downloads ("Download CSV of Videos and batches activity").
+  - An independent review found nothing blocking. Fixed from its optional findings:
+    - A CSV request no longer checks `limit`, which it never applies, so `?format=csv&limit=500` downloads instead of answering `400`.
+    - The docs say the file holds every kept event under the filter, not only the 30 the card lists.
+    - The docs also note that a personal account's events all name "A script with an API key" (its actor is the owner itself), as its JSON feed does.

@@ -5,6 +5,8 @@ import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName, getScriptProvider } from "../providers";
 import { getStore } from "../store";
 import { BULK_MAX, SHARE_CTA_LABEL_MAX, SHARE_CTA_URL_MAX, EMPTY_TRASH_MAX, EMPTY_WATCH, LIBRARY_PAGE_MAX, MAX_FOLDER_NAME, RESTORE_ALL_MAX, MAX_AGENT_MESSAGE, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
+import { videoPresenters } from "../presenters";
+export { videoPresenters };
 import type { AgentMessage, AudioClip, Avatar, Backdrop, Background, CaptionCue, DirectedMedia, DirectedScene, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
 import { buildCues } from "../captions";
 import { captionDurationSec, sceneBoundsMs, videoChapters, type Timed } from "../chapters";
@@ -2107,6 +2109,11 @@ export const videoQuerySchema = z.object({
    * names the reader (in the trash too).
    */
   comments: z.enum(["all", "open", "mentions"]).default("all"),
+  /**
+   * Only the videos a presenter appears in, by avatar id: the video's own presenter, any scene's, or one in a cinematic
+   * shot (see videoPresenters), in the trash too.
+   */
+  presenter: z.string().trim().min(1).max(120).optional(),
   /** `true` lists only the starred videos (in the trash too, where a star is kept for when it is restored). */
   starred: z
     .string()
@@ -2122,6 +2129,13 @@ export const videoQuerySchema = z.object({
 });
 export type VideoQuery = z.infer<typeof videoQuerySchema>;
 
+/** A presenter of the library's videos, for the presenter filter. */
+export interface PresenterCount {
+  id: string;
+  name: string;
+  count: number;
+}
+
 export interface VideoPage {
   videos: Video[];
   /** Matches for the query, before `limit`. */
@@ -2133,6 +2147,11 @@ export interface VideoPage {
   folders: string[];
   /** How many videos each folder holds, in this view (the library or the trash), whatever the other filters; `""` is unfiled. */
   folderCounts: Record<string, number>;
+  /**
+   * The presenters appearing in this view's videos (the library or the trash), whatever the other filters: each with
+   * its name as the newest such video gave it and how many videos it is in, ordered by name.
+   */
+  presenters: PresenterCount[];
   /** Renders still in flight, across the whole library. */
   rendering: number;
   /** Videos in the trash, so the library can offer the view. */
@@ -2205,10 +2224,31 @@ export function filterVideos(
       if (query.review !== "all" && (v.review?.status ?? "none") !== query.review) return false;
       if (query.share !== "all" && !inShareFilter(v, query.share, now)) return false;
       if (query.folder !== undefined && (v.folder ?? "") !== query.folder) return false;
+      if (query.presenter !== undefined && !videoPresenters(v).some((p) => p.id === query.presenter)) return false;
       if (query.status === "processing" ? v.status !== "processing" && v.status !== "queued" : query.status !== "all" && v.status !== query.status) return false;
       return !needle || `${v.title} ${v.description ?? ""} ${stripPauses(v.script)} ${v.cinematic?.prompt ?? ""} ${v.directed?.prompt ?? ""} ${v.avatarName ?? ""} ${v.voiceName ?? ""}`.toLowerCase().includes(needle);
     })
     .sort(query.sort === "commented" ? byLastComment(lastComment!) : SORTERS[query.sort]);
+}
+
+/**
+ * Each presenter of `videos` with how many of them it appears in, ordered by name (then id). Its name is the one the
+ * newest of those videos gave it, since a presenter renamed later is named so in the videos made since; a presenter no
+ * video named is listed with an empty name for the caller to word.
+ */
+export function countPresenters(videos: Video[]): PresenterCount[] {
+  const counts = new Map<string, PresenterCount & { at: string }>();
+  for (const v of videos) {
+    for (const p of videoPresenters(v)) {
+      const known = counts.get(p.id);
+      if (!known) counts.set(p.id, { ...p, count: 1, at: v.createdAt });
+      else {
+        known.count += 1;
+        if (p.name && (v.createdAt > known.at || !known.name)) Object.assign(known, { name: p.name, at: v.createdAt });
+      }
+    }
+  }
+  return Array.from(counts.values(), ({ at: _at, ...p }) => p).sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 }
 
 /**
@@ -2244,6 +2284,7 @@ export async function queryVideos(ownerId: string = LOCAL_OWNER, query: VideoQue
     hasMore: videos.length < matched.length,
     folders: Array.from(new Set(all.map((v) => v.folder).filter((f): f is string => !!f))).sort(),
     folderCounts: countFolders(all),
+    presenters: countPresenters(all),
     openComments: Object.fromEntries(videos.flatMap((v) => (openComments.has(v.id) ? [[v.id, openComments.get(v.id)!]] : []))),
     mentions: Object.fromEntries(videos.flatMap((v) => (mentions.has(v.id) ? [[v.id, mentions.get(v.id)!]] : []))),
     latestComment: Object.fromEntries(videos.flatMap((v) => (latest.has(v.id) ? [[v.id, latest.get(v.id)!]] : []))),

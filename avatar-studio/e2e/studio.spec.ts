@@ -3418,6 +3418,56 @@ test("library sorts by date, title, views, latest view, length, and recent comme
   await byComments(["Zulu sortcheck", "Alpha sortcheck"]);
 });
 
+test("library filters by presenter, in any scene, from its picker, the address, and the video page", async ({ page }) => {
+  const tag = `prescheck${Date.now().toString(36)}`;
+  const bg = { type: "color", value: "#0f172a" };
+  // Priya alone, Marcus with Priya in a second scene, and Marcus alone.
+  const priya = await createVideoViaApi(page, `${tag} Priya`, { avatarId: "stock_5" });
+  await createVideoViaApi(page, `${tag} Both`, { avatarId: "stock_2", script: undefined, scenes: [{ script: "Marcus opens.", background: bg }, { script: "Priya closes.", background: bg, avatarId: "stock_5" }] });
+  const marcus = await createVideoViaApi(page, `${tag} Marcus`, { avatarId: "stock_2" });
+  const titles = page.locator("a[href^='/videos/vid_'] .truncate");
+  await page.goto("/videos");
+  await page.getByPlaceholder(/Search title/).fill(tag);
+  await expect(titles).toHaveCount(3);
+  const picker = page.getByLabel("Filter by presenter");
+  // Each presenter with how many videos it is in, whatever the search.
+  const priyaCount = ((await (await page.request.get("/api/videos?limit=1")).json()).presenters as { id: string; name: string; count: number }[]).find((p) => p.id === "stock_5")!;
+  expect(priyaCount.name).toBe("Priya Nair");
+  await expect(picker.locator("option[value='stock_5']")).toHaveText(`Priya Nair (${priyaCount.count})`);
+  await picker.selectOption("stock_5");
+  await expect(titles).toHaveText([`${tag} Both`, `${tag} Priya`]);
+  await picker.selectOption("stock_2");
+  await expect(titles).toHaveText([`${tag} Marcus`, `${tag} Both`]);
+  // The analytics download follows it.
+  const csv = await (await page.request.get(`/api/videos/analytics?q=${tag}&presenter=stock_5`)).text();
+  expect(csv).toContain(`${tag} Priya`);
+  expect(csv).not.toContain(`${tag} Marcus`);
+  expect((await page.request.get("/api/videos?presenter=")).status()).toBe(400);
+  await picker.selectOption("all");
+  await expect(titles).toHaveCount(3);
+  // The video page's presenter row opens the library at that presenter.
+  await page.goto(`/videos/${priya.id}`);
+  await page.getByRole("link", { name: "Other videos with Priya Nair" }).click();
+  await expect(page).toHaveURL(/\/videos\?presenter=stock_5$/);
+  await expect(picker).toHaveValue("stock_5");
+  await page.getByPlaceholder(/Search title/).fill(tag);
+  await expect(titles).toHaveText([`${tag} Both`, `${tag} Priya`]);
+  // A video whose scenes all have presenters of their own links to the first of them.
+  const others = await createVideoViaApi(page, `${tag} Others`, { avatarId: "stock_2", script: undefined, scenes: [{ script: "Priya only.", background: bg, avatarId: "stock_5" }] });
+  await page.goto(`/videos/${others.id}`);
+  await expect(page.getByRole("link", { name: "Other videos with Priya Nair" })).toHaveAttribute("href", "/videos?presenter=stock_5");
+  await page.goto(`/videos/${marcus.id}`);
+  await expect(page.getByRole("link", { name: "Other videos with Marcus Hill" })).toHaveAttribute("href", "/videos?presenter=stock_2");
+  // A presenter no video shows is still offered while chosen, so the way back is there.
+  await page.goto("/videos?presenter=stock_nobody");
+  await expect(picker).toHaveValue("stock_nobody");
+  await expect(picker.locator("option[value='stock_nobody']")).toHaveText("This presenter (0)");
+  await expect(page.getByText("No videos match")).toBeVisible();
+  await expect(page.getByText(/Try a different search, status, folder, presenter/)).toBeVisible();
+  await picker.selectOption("all");
+  await expect(page.getByText("No videos match")).toHaveCount(0);
+});
+
 test("the share page transcript plays the video from a line and marks the line being spoken", async ({ page }) => {
   const v = await createVideoViaApi(page, `Transcript ${Date.now().toString(36)}`, { script: "First we open the doors. [pause 1s] Then the team walks you through every room. Finally we hand over the keys." });
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
@@ -3599,7 +3649,7 @@ test("the library counts each video's open comments and can show only the videos
   await expect(page.getByTestId("open-comments-toggle")).toHaveAttribute("aria-pressed", "true");
   await page.getByLabel("Search videos").fill(tag);
   await expect(notedCard).toHaveCount(0);
-  await expect(page.getByText("Try a different search, status, folder, date, share link, or turn off Open comments.")).toBeVisible();
+  await expect(page.getByText("Try a different search, status, folder, presenter, date, share link, or turn off Open comments.")).toBeVisible();
   await page.getByTestId("open-comments-toggle").click();
   await expect(notedCard).toBeVisible();
   await expect(notedCard.getByTestId("open-comments-badge")).toHaveCount(0);
@@ -9632,7 +9682,7 @@ test("videos are starred from their page or in bulk, and the library filters by 
   expect((await a11y("main")).violations.map((v) => v.id)).toEqual([]);
   // With a search that hides every starred video, the empty state points at the filters rather than at starring.
   await page.getByLabel("Search videos").fill(`${tag} nothing like it`);
-  await expect(page.getByText("Try a different search, status, folder, date, share link, or turn off Starred.")).toBeVisible();
+  await expect(page.getByText("Try a different search, status, folder, presenter, date, share link, or turn off Starred.")).toBeVisible();
   await page.getByLabel("Search videos").fill(tag);
   await expect(card(one.id)).toBeVisible();
   // Starring in bulk from the whole library, then taking both stars off from the filtered view.

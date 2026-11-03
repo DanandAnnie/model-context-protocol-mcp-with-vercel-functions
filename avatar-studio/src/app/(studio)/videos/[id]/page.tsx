@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { videoPresenters } from "@/lib/presenters";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ArchiveRestore, ArrowLeft, Captions, Check, Clock, Code2, Copy, Download, Eye, Film, FolderOpen, Languages, LayoutTemplate, Link2, Lock, Mail, Pencil, RotateCcw, Sparkles, Star, Trash2 } from "lucide-react";
@@ -1187,10 +1188,20 @@ export default function VideoDetailPage() {
                   )}
                   {!video.studioTemplate && !described && (
                   <>
-                  <Row label="Avatar">
+                  <Row label="Avatar" wrap>
                     {video.scenes?.length && video.scenes.every((sc) => sc.hidePresenter)
                       ? "None: every scene shows its picture or video"
                       : `${video.avatarName ?? video.avatarId}${video.scenes?.some((sc) => sc.hidePresenter) ? " (not in every scene)" : ""}`}
+                    {/* The library's presenter filter, by the rule it filters with: the video's own presenter where a scene shows it, else the first one shown. */}
+                    {(() => {
+                      const shown = videoPresenters(video);
+                      const target = shown.find((p) => p.id === video.avatarId) ?? shown[0];
+                      return target ? (
+                        <Link href={`/videos?presenter=${encodeURIComponent(target.id)}`} aria-label={`Other videos with ${target.name || "this presenter"}`} className="ml-2 whitespace-nowrap text-xs font-medium text-indigo-700 hover:underline">
+                          Other videos
+                        </Link>
+                      ) : null;
+                    })()}
                   </Row>
                   <Row label="Voice">
                     {video.scenes?.length && video.scenes.every((sc) => sc.audioId)

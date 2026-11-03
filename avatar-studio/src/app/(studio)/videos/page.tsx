@@ -38,6 +38,9 @@ const withCount = (n: number) => ` (${n})`;
 /** A folder's count, read as the folder's own entry only: a folder named "constructor" is not the object's prototype. */
 const countOf = (counts: Record<string, number>, folder: string) => (Object.hasOwn(counts, folder) && typeof counts[folder] === "number" ? counts[folder] : 0);
 
+/** The presenter filter the address asks for (`?presenter=<avatar id>`), or "all"; a blank one is no filter. */
+const presenterFrom = (asked: string | null) => asked?.trim().slice(0, 120) || "all";
+
 /** A time as a datetime-local field holds it: the browser's local date and time, to the minute. */
 function localMinute(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -61,12 +64,15 @@ function VideosInner() {
   const failedCount = Number(params.get("failed") ?? 0);
   const [q, setQ] = useState("");
   const [needle, setNeedle] = useState("");
-  // Home's notices open the library at `?share=`, `?status=`, `?created=`, `?review=`, and `?comments=` (`open` or `mentions`), read
+  // Home's notices open the library at `?share=`, `?status=`, `?created=`, `?review=`, and `?comments=` (`open` or `mentions`), and
+  // the video page's presenter link at `?presenter=` (an avatar id), read
   // too), again whenever the address changes (the sidebar's My videos goes back to every video); a value the library does
   // not know is ignored.
-  const askedFilters = ["share", "status", "created", "review", "comments"].map((k) => params.get(k) ?? "").join("\u0000");
+  const askedFilters = ["share", "status", "created", "review", "comments", "presenter"].map((k) => params.get(k) ?? "").join("\u0000");
   const [status, setStatus] = useState<"all" | VideoStatus>(() => fromAddress(params.get("status"), STATUSES));
   const [folder, setFolder] = useState<string>("all"); // "all" | "unfiled" | folder name
+  // Only the videos one presenter appears in, by avatar id: "all" for any.
+  const [presenter, setPresenter] = useState<string>(() => presenterFrom(params.get("presenter")));
   const [sort, setSort] = useState<SortKey>("newest");
   // Reviews exist only in a workspace, so the filter shows there.
   const inWorkspace = !!useWorkspaceRole()?.workspaceId;
@@ -95,6 +101,7 @@ function VideosInner() {
     setCreated(fromAddress(params.get("created"), CREATED_FILTERS));
     setReview(fromAddress(params.get("review"), REVIEW_FILTERS));
     setCommentFilter(commentFilterFrom(params.get("comments")));
+    setPresenter(presenterFrom(params.get("presenter")));
   }
   // Cards or compact rows; remembered by this browser only (read after mounting, so the server render stays the grid).
   const [layout, setLayout] = useState<"grid" | "list">("grid");
@@ -120,7 +127,7 @@ function VideosInner() {
   }, [q]);
   // "Show more" extends the page for the current filters only: a new filter starts again
   // from the first page in the same render, with no extra request for the old extent.
-  const filterKey = [needle, status, folder, batch ?? "", sort, trash ? "trash" : "", review, share, starred ? "starred" : "", commentFilter === "all" ? "" : commentFilter, created].join("\u0000");
+  const filterKey = [needle, status, folder, batch ?? "", sort, trash ? "trash" : "", review, share, starred ? "starred" : "", commentFilter === "all" ? "" : commentFilter, created, presenter].join("\u0000");
   const [extent, setExtent] = useState({ key: filterKey, limit: PAGE });
   const limit = extent.key === filterKey ? extent.limit : PAGE;
   const path = useMemo(() => {
@@ -137,8 +144,9 @@ function VideosInner() {
     if (starred) params.set("starred", "1");
     if (commentFilter !== "all") params.set("comments", commentFilter);
     if (created !== "all") params.set("created", created);
+    if (presenter !== "all") params.set("presenter", presenter);
     return `/api/videos?${params}`;
-  }, [limit, needle, status, folder, batch, sort, trash, review, share, starred, commentFilter, created]);
+  }, [limit, needle, status, folder, batch, sort, trash, review, share, starred, commentFilter, created, presenter]);
   // The share analytics of what the library shows now, every match rather than the page loaded, in the same order.
   const analyticsHref = useMemo(() => {
     const params = new URLSearchParams(path.split("?")[1]);
@@ -181,13 +189,14 @@ function VideosInner() {
   const videos = data?.videos ?? [];
   const folders = data?.folders ?? [];
   const folderCounts = data?.folderCounts ?? {};
+  const presenters = data?.presenters ?? [];
   const hasAny = (data?.total ?? 0) > 0 || (data?.trashed ?? 0) > 0;
   const trashed = data?.trashed ?? 0;
   const remaining = data ? data.matched - videos.length : 0;
   // The on/off filters an empty list names, so the way back is said.
   const toggledOn = [starred && "Starred", commentFilter === "open" && "Open comments", commentFilter === "mentions" && "Mentions me"].filter((t): t is string => !!t);
   // Whether a filter other than Starred, Open comments, and Mentions me narrows the list, for the empty state's advice.
-  const narrowed = !!needle || status !== "all" || folder !== "all" || review !== "all" || share !== "all" || created !== "all" || !!batch;
+  const narrowed = !!needle || status !== "all" || folder !== "all" || presenter !== "all" || review !== "all" || share !== "all" || created !== "all" || !!batch;
 
   // Multi-select: move the chosen videos to a folder or delete them in one request.
   const [selecting, setSelecting] = useState(false);
@@ -375,7 +384,7 @@ function VideosInner() {
     setCoverDraft(null);
     coverPick.current += 1;
     setCoverReading(false);
-  }, [q, status, folder, batch, sort, trash, review, share, starred, commentFilter, created]);
+  }, [q, status, folder, batch, sort, trash, review, share, starred, commentFilter, created, presenter]);
   // The last purge empties both views; leave the trash so the "No videos yet" state (and the filter bar) comes back.
   useEffect(() => {
     if (trash && data && data.total === 0 && data.trashed === 0) setTrash(false);
@@ -1152,6 +1161,20 @@ function VideosInner() {
               ))}
             </select>
           )}
+          {/* Offered once the videos in this view have more than one presenter, or while one is chosen (from the address, say). */}
+          {(presenters.length > 1 || presenter !== "all") && (
+            <select aria-label="Filter by presenter" value={presenter} onChange={(e) => setPresenter(e.target.value)} className={`${inputClass} w-auto max-w-[14rem]`}>
+              <option value="all">Any presenter</option>
+              {presenters.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name || "Unnamed presenter"}
+                  {withCount(p.count)}
+                </option>
+              ))}
+              {/* One chosen that no video in this view shows: counted as none once the list says so, not while it loads. */}
+              {presenter !== "all" && !presenters.some((p) => p.id === presenter) && <option value={presenter}>{data ? `This presenter${withCount(0)}` : "Chosen presenter"}</option>}
+            </select>
+          )}
           {folder !== "all" && folder !== "unfiled" && !trash && (
             <span className="flex gap-1" data-testid="folder-actions">
               <button type="button" onClick={() => manageFolder(false)} disabled={folderBusy} aria-label="Rename folder" title="Rename this folder" className="rounded p-1.5 text-slate-500 hover:bg-slate-100 disabled:opacity-50">
@@ -1444,7 +1467,7 @@ function VideosInner() {
             trash
               ? // Trashed videos the filters hide are still counted on the toggle, so say what hides them.
                 trashed && (narrowed || toggledOn.length > 0)
-                ? `Try a different search, status, folder, or date${toggledOn.length ? `, or turn off ${toggledOn.join(" and ")}` : ""}.`
+                ? `Try a different search, status, folder, presenter, or date${toggledOn.length ? `, or turn off ${toggledOn.join(" and ")}` : ""}.`
                 : `Deleted videos wait here for ${TRASH_RETENTION_DAYS} days before they are removed for good.`
               : hasAny
                 ? !narrowed && toggledOn.length === 1
@@ -1453,7 +1476,7 @@ function VideosInner() {
                     : commentFilter === "mentions"
                       ? "No open comment mentions you."
                       : "No video has an open comment."
-                  : `Try a different search, status, folder, date, ${toggledOn.length ? `share link, or turn off ${toggledOn.join(" and ")}` : "or share link"}.`
+                  : `Try a different search, status, folder, presenter, date, ${toggledOn.length ? `share link, or turn off ${toggledOn.join(" and ")}` : "or share link"}.`
                 : "Your rendered videos will show up here."
           }
         />

@@ -12,6 +12,7 @@ export * from "./agents";
 export * from "./video-agent";
 export * from "./account";
 export * from "./videos";
+export * from "./usage";
 export * from "./batches";
 export * from "./translations";
 export * from "./language-copy";

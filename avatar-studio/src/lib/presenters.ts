@@ -73,3 +73,28 @@ export function videoNeeds(v: Video): { avatars: string[]; voices: string[] } {
   const voices = new Set([v.voiceId, ...(v.scenes ?? []).map((sc) => sc.voiceId)].filter((id): id is string => !!id));
   return { avatars: [...avatars], voices: [...voices] };
 }
+
+/** One thing besides a video that names a presenter or voice (see services/usage.ts), as a person would call it. */
+export interface OtherUse {
+  kind: "agent" | "template" | "brand" | "avatar";
+  /** The interactive presenter's, template's, or avatar's name; empty for the brand kit. */
+  name: string;
+}
+
+const KIND_ONE: Record<OtherUse["kind"], (name: string) => string> = {
+  agent: (n) => `the interactive presenter “${n}”`,
+  template: (n) => `the template “${n}”`,
+  brand: () => "the brand kit",
+  avatar: (n) => `the photo avatar “${n}” (as its default voice)`,
+};
+const KIND_MANY: Record<OtherUse["kind"], string> = { agent: "interactive presenters", template: "templates", brand: "brand kits", avatar: "photo avatars (as their default voice)" };
+
+/** The other uses in words, for a delete's warning: one of a kind by name, more as a count; empty when there are none. */
+export function describeOtherUses(uses: OtherUse[] | undefined): string {
+  if (!uses?.length) return "";
+  const kinds = (["agent", "template", "brand", "avatar"] as const).flatMap((kind) => {
+    const of = uses.filter((u) => u.kind === kind);
+    return of.length === 0 ? [] : [of.length === 1 ? KIND_ONE[kind](of[0].name) : `${of.length} ${KIND_MANY[kind]}`];
+  });
+  return kinds.length <= 1 ? kinds.join("") : kinds.length === 2 ? kinds.join(" and ") : `${kinds.slice(0, -1).join(", ")}, and ${kinds[kinds.length - 1]}`;
+}

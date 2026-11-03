@@ -14,6 +14,8 @@ import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { languageLabel } from "@/lib/language";
 import type { ProviderStatus, Voice } from "@/lib/types";
 import type { VideoPage } from "@/lib/services/videos";
+import type { OtherUses } from "@/lib/services/usage";
+import { describeOtherUses } from "@/lib/presenters";
 import Link from "next/link";
 
 /** How many videos need an id, read as the id's own entry only (an id like "constructor" is not the object's prototype). */
@@ -30,6 +32,9 @@ export default function VoicesPage() {
   // How many of the library's videos speak in each voice (the library's own counts; the trash is not counted), for the
   // "In N videos" link under each voice and the warning before one is deleted.
   const { data: library, error: libraryError, refetch: refetchLibrary } = useApi<VideoPage>("/api/videos?limit=1");
+  // What besides videos names each one (interactive presenters, templates, the brand kit), for the same warning.
+  // Viewers cannot delete, so they do not ask.
+  const { data: otherUses, error: otherUsesError } = useApi<OtherUses>(canEdit === false ? null : "/api/usage");
   const inVideos = new Map((library?.voices ?? []).map((p) => [p.id, p.count]));
   const videosText = (n: number) => (n === 1 ? "1 video" : `${n} videos`);
   const [actionErr, setActionErr] = useState<string | null>(null);
@@ -57,7 +62,15 @@ export default function VoicesPage() {
       : used
         ? ` ${videosText(used)} in your library or trash use it: ${after}`
         : " Videos already rendered keep their audio.";
-    if (!window.confirm(`Delete "${v.name}"?${warning}`)) return;
+    // Besides videos: interactive presenters, templates, the brand kit, a photo avatar's default voice.
+    const others = describeOtherUses(otherUses && Object.hasOwn(otherUses.voices, v.id) ? otherUses.voices[v.id] : undefined);
+    // "Also" only after a count of videos; and unread, the prompt says it could not check rather than nothing.
+    const also = others
+      ? ` It is ${used || !library ? "also " : ""}used by ${others}, which would need another voice.`
+      : otherUses
+        ? ""
+        : ` (Interactive presenters, templates, and the brand kit could not be checked${otherUsesError ? "" : " yet"}.)`;
+    if (!window.confirm(`Delete "${v.name}"?${warning}${also}`)) return;
     setActionErr(null);
     try {
       await api(`/api/voices/${v.id}`, { method: "DELETE" });

@@ -3475,6 +3475,9 @@ test("the avatars page says how many videos each presenter is in, links to them,
   const unused = (await (await page.request.post("/api/avatars", { data: { name: `Unused ${tag}`, imageUrl: "https://example.com/p.jpg" } })).json()).avatar as { id: string };
   const single = (await (await page.request.post("/api/avatars", { data: { name: `Single ${tag}`, imageUrl: "https://example.com/p.jpg" } })).json()).avatar as { id: string };
   await createVideoViaApi(page, `${tag} own`, { avatarId: used.id });
+  // An interactive presenter names it too, which no video count shows.
+  const desk = await page.request.post("/api/agents", { data: { name: `Desk ${tag}`, avatarId: used.id } });
+  expect(desk.status()).toBe(201);
   await createVideoViaApi(page, `${tag} scene`, { avatarId: "stock_2", script: undefined, scenes: [{ script: "Opening.", background: bg }, { script: "Closing.", background: bg, avatarId: used.id }] });
   // Neither a trashed video nor a scene that hides the presenter counts.
   const trashed = await createVideoViaApi(page, `${tag} trashed`, { avatarId: used.id });
@@ -3511,7 +3514,7 @@ test("the avatars page says how many videos each presenter is in, links to them,
   await page.locator(`[data-avatar-controls="${used.id}"]`).getByRole("button", { name: "Delete avatar" }).click();
   // Shown in two videos, but needed by three: a retry or copy of the trashed one asks for it too (a scene that hides the
   // presenter is kept without one, so that video does not).
-  await expect.poll(() => asked).toBe(`Delete avatar "Counted ${tag}"? 3 videos in your library or trash use it: rendered videos keep it, but retrying or copying one needs another presenter.`);
+  await expect.poll(() => asked).toBe(`Delete avatar "Counted ${tag}"? 3 videos in your library or trash use it: rendered videos keep it, but retrying or copying one needs another presenter. It is also used by the interactive presenter “Desk ${tag}”, which would need another presenter.`);
   expect((await page.request.get(`/api/avatars/${used.id}`)).status()).toBe(200);
   // One not in a video is asked about plainly.
   page.once("dialog", (d) => {

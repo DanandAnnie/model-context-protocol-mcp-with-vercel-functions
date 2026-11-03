@@ -17,6 +17,8 @@ import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { api, passesUse, type UseFilter } from "@/lib/client";
 import type { Avatar, ProviderStatus, ShootJob, Voice } from "@/lib/types";
 import type { VideoPage } from "@/lib/services/videos";
+import type { OtherUses } from "@/lib/services/usage";
+import { describeOtherUses } from "@/lib/presenters";
 import Link from "next/link";
 
 /** How many videos need an id, read as the id's own entry only (an id like "constructor" is not the object's prototype). */
@@ -42,6 +44,9 @@ function AvatarsInner() {
   // How many of the library's videos each presenter is in (the library's own presenter counts; the trash is not
   // counted), for the "In N videos" link on its tile and the warning before it is deleted.
   const { data: library, error: libraryError, refetch: refetchLibrary } = useApi<VideoPage>("/api/videos?limit=1");
+  // What besides videos names each one (interactive presenters, templates, the brand kit), for the same warning.
+  // Viewers cannot delete, so they do not ask.
+  const { data: otherUses, error: otherUsesError } = useApi<OtherUses>(canEdit === false ? null : "/api/usage");
   const inVideos = new Map((library?.presenters ?? []).map((p) => [p.id, p.count]));
   const voices = voiceData?.voices ?? [];
   const { data: packData, setData: setPackData, refetch: refetchPacks } = useApi<{ lookPacks: LookPack[]; available: boolean; described?: boolean }>("/api/look-packs");
@@ -177,7 +182,15 @@ function AvatarsInner() {
       : used
         ? ` ${used === 1 ? "1 video" : `${used} videos`} in your library or trash use it: ${after}`
         : "";
-    if (!confirm(`Delete avatar "${a.name}"?${warning}`)) return;
+    // Besides videos: interactive presenters, templates, the brand kit, a photo avatar's default voice.
+    const others = describeOtherUses(otherUses && Object.hasOwn(otherUses.avatars, a.id) ? otherUses.avatars[a.id] : undefined);
+    // "Also" only after a count of videos; and unread, the prompt says it could not check rather than nothing.
+    const also = others
+      ? ` It is ${used || !library ? "also " : ""}used by ${others}, which would need another presenter.`
+      : otherUses
+        ? ""
+        : ` (Interactive presenters, templates, and the brand kit could not be checked${otherUsesError ? "" : " yet"}.)`;
+    if (!confirm(`Delete avatar "${a.name}"?${warning}${also}`)) return;
     const mine = avatars.filter((x) => x.source === "custom");
     const next = mine[mine.indexOf(a) + 1] ?? mine[mine.indexOf(a) - 1];
     try {

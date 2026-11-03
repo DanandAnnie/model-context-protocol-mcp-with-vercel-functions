@@ -917,6 +917,20 @@ describe("translated subtitles", () => {
 });
 
 describe("activity feed", () => {
+  it("marks teammates' events newer than the last visit as new, and keeps the mark moving forward", async () => {
+    const { newActivityIds, activitySeenMark, activitySeenKey } = await import("../activity-text");
+    const ev = (id: string, actorId: string, createdAt: string) => ({ id, actorId, createdAt });
+    const events = [ev("e3", "u-ann", "2026-11-03T10:00:03.000Z"), ev("e2", "u-dan", "2026-11-03T10:00:02.000Z"), ev("e1", "u-ann", "2026-11-03T10:00:01.000Z")];
+    assert.deepEqual([...newActivityIds(events, null, "u-dan")], [], "a first visit has nothing new");
+    assert.deepEqual([...newActivityIds(events, "2026-11-03T10:00:01.000Z", "u-dan")], ["e3"], "after the mark, by someone else; the mark's own millisecond is not new");
+    assert.deepEqual([...newActivityIds(events, "2026-11-03T09:00:00.000Z", "u-dan")], ["e3", "e1"], "the reader's own are never new");
+    assert.deepEqual([...newActivityIds(events, "not a date", "u-dan")], []);
+    assert.equal(activitySeenMark(events, "u-dan", null), "2026-11-03T10:00:03.000Z", "the newest teammate event");
+    assert.equal(activitySeenMark(events, "u-ann", null), "2026-11-03T10:00:02.000Z", "your own are passed over");
+    assert.equal(activitySeenMark(events, "u-dan", "2026-11-04T00:00:00.000Z"), "2026-11-04T00:00:00.000Z", "a later mark from another tab stays");
+    assert.equal(activitySeenMark([], "u-dan", null), new Date(0).toISOString(), "nothing yet: every later teammate event is new");
+    assert.equal(activitySeenKey("u-dan", "ws_1"), "avatar-studio:activity-seen:u-dan:ws_1");
+  });
   it("links a line to what it is about while that is still in the owner's space", async () => {
     const { recordActivity, listActivity, activityLinks } = await import("../services/activity");
     const { getStore } = await import("../store");

@@ -6476,6 +6476,25 @@ test("workspaces: create, switch, isolate content, invite, join, leave, delete",
     await expect(feed.getByRole("status")).toHaveText("2 events shown");
     expect((await page.request.get("/api/activity?area=everything")).status()).toBe(400);
     expect((await (await page.request.get("/api/activity?area=keys")).json()).area).toBe("keys");
+    // New since the last visit: your own lines never are; a teammate's line after the mark is, once, until the
+    // feed has been shown with it. A teammate's event is added to the feed's answer, as open mode has one person.
+    await expect(feed.getByTestId("activity-new")).toHaveCount(0);
+    const teammate = { id: "act_e2e_teammate", ownerId: ws.id, kind: "member.joined", actorId: "u-ann", actorEmail: "ann@example.com", createdAt: new Date(Date.now() + 60_000).toISOString() };
+    await page.route("**/api/activity?limit=30", async (route) => {
+      const body = (await (await route.fetch()).json()) as { events: unknown[] };
+      return route.fulfill({ json: { ...body, events: [teammate, ...body.events] } });
+    });
+    await page.reload();
+    await expect(feed.getByText("ann@example.com joined the workspace")).toBeVisible();
+    await expect(feed.getByTestId("activity-new")).toHaveCount(1);
+    await expect(feed.locator("li", { has: page.getByTestId("activity-new") })).toContainText("ann@example.com joined the workspace");
+    await expect(feed.getByTestId("activity-new-count")).toHaveText("1 new since your last visit");
+    await page.reload();
+    await expect(feed.getByText("ann@example.com joined the workspace")).toBeVisible();
+    await expect(feed.getByTestId("activity-new")).toHaveCount(0);
+    await page.unroute("**/api/activity?limit=30");
+    // The injected line left this browser's mark a minute ahead; clear it so nothing later is hidden by it.
+    await page.evaluate((key) => window.localStorage.removeItem(key), `avatar-studio:activity-seen:local:${ws.id}`);
 
     // Back to personal: the team video is gone, the personal one is back.
     await page.getByLabel("Workspace").selectOption({ label: "Personal" });

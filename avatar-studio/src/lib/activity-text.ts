@@ -140,3 +140,35 @@ export function activityRows(events: ActivityEvent[]): Array<Record<string, stri
     what_happened: describeActivity(e),
   }));
 }
+
+/** Where this browser keeps, per reader and space, the time of the newest teammate event shown when the feed was last opened. */
+export const ACTIVITY_SEEN_PREFIX = "avatar-studio:activity-seen:";
+
+/** The key for one reader's mark in one workspace, so people sharing a browser each keep their own. */
+export function activitySeenKey(userId: string, ownerId: string): string {
+  return `${ACTIVITY_SEEN_PREFIX}${userId}:${ownerId}`;
+}
+
+/**
+ * The events someone other than `viewerId` did after `seenAt`, the mark kept when the feed was last opened here. With
+ * no mark (a first visit, or storage that cannot be read) nothing is new; the reader's own events are never new, and
+ * one in the very millisecond of the mark is not new either. Events made with an API key carry the space's own id,
+ * not a person's, so they count as a teammate's, including those from the reader's own scripts.
+ */
+export function newActivityIds(events: Array<Pick<ActivityEvent, "id" | "actorId" | "createdAt">>, seenAt: string | null, viewerId: string | undefined): Set<string> {
+  const since = seenAt === null ? Number.NaN : Date.parse(seenAt);
+  if (Number.isNaN(since)) return new Set();
+  return new Set(events.filter((e) => e.actorId !== viewerId && Date.parse(e.createdAt) > since).map((e) => e.id));
+}
+
+/**
+ * The mark to keep once the whole feed is shown: the newest event a teammate did, by the server's clock, or the mark
+ * already kept when that is later (the feed opened in another tab), so the mark never moves back. With neither, the
+ * start of time, so every later teammate event is new.
+ */
+export function activitySeenMark(events: Array<Pick<ActivityEvent, "actorId" | "createdAt">>, viewerId: string | undefined, before: string | null): string {
+  let newest = before === null ? Number.NEGATIVE_INFINITY : Date.parse(before);
+  if (Number.isNaN(newest)) newest = Number.NEGATIVE_INFINITY;
+  for (const e of events) if (e.actorId !== viewerId) newest = Math.max(newest, Date.parse(e.createdAt) || Number.NEGATIVE_INFINITY);
+  return new Date(Number.isFinite(newest) ? newest : 0).toISOString();
+}

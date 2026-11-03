@@ -6,7 +6,8 @@ import { Activity, Check, Copy, Download, Link2, Trash2, UserMinus } from "lucid
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
-import { ACTIVITY_AREAS, ACTIVITY_AREA_LABELS, activityFilterPhrase, describeActivity, parseActivityArea, type ActivityArea } from "@/lib/activity-text";
+import { ACTIVITY_AREAS, ACTIVITY_AREA_LABELS, activityFilterPhrase, activitySeenKey, activitySeenMark, describeActivity, newActivityIds, parseActivityArea, type ActivityArea } from "@/lib/activity-text";
+import { readSeenMark } from "@/lib/comment-list";
 import { roleArticle } from "@/lib/roles";
 import type { ActivityEvent, WorkspaceRole } from "@/lib/types";
 
@@ -46,6 +47,23 @@ export default function WorkspacePage() {
   const activity = useApi<{ events: ActivityEvent[]; links?: Record<string, string>; area: ActivityArea | null; actor: string | null }>(ws ? `/api/activity?limit=30${filterQuery}` : null);
   // A list is shown only under the filters it was fetched for, so switching never flashes the previous one.
   const events = activity.data && (activity.data.area ?? null) === area && (activity.data.actor ?? null) === actor ? activity.data.events : null;
+  // What is new since this browser last showed this reader the whole feed of this workspace: the mark is read once
+  // per workspace and kept for the visit, so the New badges stay while the page is open, then moved forward below.
+  const seenKey = ws && data ? activitySeenKey(data.personalId, ws.id) : null;
+  const [seen, setSeen] = useState<{ key: string; at: string | null } | null>(null);
+  useEffect(() => {
+    if (seenKey && seen?.key !== seenKey) setSeen({ key: seenKey, at: readSeenMark(seenKey) });
+  }, [seenKey, seen?.key]);
+  const fresh = seen && seen.key === seenKey && events ? newActivityIds(events, seen.at, data?.personalId) : new Set<string>();
+  useEffect(() => {
+    // Only the unfiltered feed moves the mark: a filtered one leaves out events that are still unseen.
+    if (!seenKey || !events || area || actor || seen?.key !== seenKey) return;
+    try {
+      window.localStorage.setItem(seenKey, activitySeenMark(events, data?.personalId, readSeenMark(seenKey)));
+    } catch {
+      // Not kept: the same lines are new next time too.
+    }
+  }, [seenKey, events, area, actor, seen?.key, data?.personalId]);
   const whoPhrase = actor ? (people.find((p) => p.id === actor)?.phrase ?? null) : null;
   // An action that ends after the filter changed refetches the filter shown now, not the one it began under.
   const refetchActivity = useRef(activity.refetch);
@@ -338,10 +356,18 @@ export default function WorkspacePage() {
             {area || actor ? `Nothing${activityFilterPhrase(area, whoPhrase, true)} yet. The feed keeps the last 200 events.` : "Nothing yet. Activity shows up here as the team works."}
           </p>
         )}
+        {fresh.size > 0 && (
+          <p className="mt-2 text-xs font-medium text-sky-800" data-testid="activity-new-count">
+            {/* Only the newest 30 lines load: when every one is new, there may be more. */}
+            {fresh.size === events?.length && fresh.size >= 30 ? `${fresh.size}+` : fresh.size} new since your last visit
+          </p>
+        )}
         {events && events.length > 0 && (
           <ol className="mt-3 divide-y divide-slate-100 text-sm">
             {events.map((e) => (
               <li key={e.id} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2">
+                {/* Read before the sentence; the pill beside the time is for the eye. */}
+                {fresh.has(e.id) && <span className="sr-only">New: </span>}
                 {activity.data?.links?.[e.id] ? (
                   // The sentence itself is the link, so its name says where it goes ("You created “Launch”").
                   <Link href={activity.data.links[e.id]} className="min-w-0 break-words text-slate-800 underline decoration-slate-500 underline-offset-2 hover:text-brand-700 hover:decoration-brand-500">
@@ -350,9 +376,16 @@ export default function WorkspacePage() {
                 ) : (
                   <span className="min-w-0 break-words text-slate-800">{describeActivity(e, data?.personalId)}</span>
                 )}
-                <time dateTime={e.createdAt} className="shrink-0 text-xs text-slate-500">
-                  {formatDate(e.createdAt)}
-                </time>
+                <span className="flex shrink-0 items-center gap-2">
+                  {fresh.has(e.id) && (
+                    <span aria-hidden className="rounded bg-sky-100 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-sky-800" data-testid="activity-new">
+                      New
+                    </span>
+                  )}
+                  <time dateTime={e.createdAt} className="text-xs text-slate-500">
+                    {formatDate(e.createdAt)}
+                  </time>
+                </span>
               </li>
             ))}
           </ol>

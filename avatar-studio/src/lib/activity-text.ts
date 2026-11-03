@@ -186,3 +186,18 @@ export function newActivityCount(fresh: number, loaded: number, limit: number): 
 export function newActivityLine(count: string): string {
   return `${count} new in the workspace's activity since you last opened it`;
 }
+
+/** How many events the feed shows at first and adds with each Show more. */
+export const ACTIVITY_PAGE = 30;
+/** How many events an owner keeps; the feed can show them all. */
+export const ACTIVITY_KEPT = 200;
+
+/** The feed's next length after Show more: another page, up to every event kept. */
+export function nextActivityLimit(limit: number): number {
+  return Math.min(limit + ACTIVITY_PAGE, ACTIVITY_KEPT);
+}
+
+/** Whether Show more can bring more: the last answer filled the length asked for, and that is short of all kept. */
+export function canShowMoreActivity(shown: number, limit: number): boolean {
+  return shown >= limit && limit < ACTIVITY_KEPT;
+}

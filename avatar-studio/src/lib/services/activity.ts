@@ -1,7 +1,7 @@
 // Activity feed: what the people in an account or workspace did, newest first. Written by the API
 // routes (which know who made the request) and read by the Workspace page and the account export.
 import { z } from "zod";
-import { ACTIVITY_AREAS, activityArea, type ActivityArea } from "../activity-text";
+import { ACTIVITY_AREAS, ACTIVITY_KEPT, activityArea, type ActivityArea } from "../activity-text";
 import { newId } from "../ids";
 import { LOCAL_OWNER } from "../owner-id";
 import { getStore, type ItemKind } from "../store";
@@ -11,7 +11,7 @@ import type { ActivityEvent, ActivityKind } from "../types";
 import type { User } from "../workspaces";
 
 /** How many events an owner keeps; older ones go when a new one is recorded. */
-export const MAX_ACTIVITY = 200;
+export const MAX_ACTIVITY = ACTIVITY_KEPT;
 /** How long a subject label may be in the feed. */
 const MAX_SUBJECT = 80;
 

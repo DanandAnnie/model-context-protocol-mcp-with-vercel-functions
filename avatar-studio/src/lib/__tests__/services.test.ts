@@ -937,6 +937,14 @@ describe("activity feed", () => {
     assert.equal(newActivityCount(30, 30, 30), "30+", "every one of a full page new: there may be more");
     assert.equal(newActivityLine("1"), "1 new in the workspace's activity since you last opened it");
     assert.equal(newActivityLine("30+"), "30+ new in the workspace's activity since you last opened it");
+    const { nextActivityLimit, canShowMoreActivity, ACTIVITY_KEPT } = await import("../activity-text");
+    const { MAX_ACTIVITY } = await import("../services/activity");
+    assert.equal(ACTIVITY_KEPT, MAX_ACTIVITY, "the feed can show every event the server keeps");
+    assert.equal(nextActivityLimit(30), 60);
+    assert.equal(nextActivityLimit(180), 200, "never past what is kept");
+    assert.equal(canShowMoreActivity(30, 30), true, "a full page: there may be more");
+    assert.equal(canShowMoreActivity(12, 30), false, "fewer than asked: that is all");
+    assert.equal(canShowMoreActivity(200, 200), false, "everything kept is shown");
   });
   it("links a line to what it is about while that is still in the owner's space", async () => {
     const { recordActivity, listActivity, activityLinks } = await import("../services/activity");

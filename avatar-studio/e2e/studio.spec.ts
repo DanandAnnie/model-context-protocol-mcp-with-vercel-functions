@@ -6444,7 +6444,7 @@ test("workspaces: create, switch, isolate content, invite, join, leave, delete",
     await expect(feed.getByText("Nothing under “Videos and batches” by a script with an API key yet. The feed keeps the last 200 events.")).toBeVisible();
     await expect(feed.getByTestId("activity-csv")).toHaveCount(0);
     const byKey = (await (await page.request.get(`/api/activity?actor=${ws.id}`)).json()) as { events: unknown[]; actor: string | null };
-    expect(byKey).toEqual({ events: [], links: {}, area: null, actor: ws.id });
+    expect(byKey).toEqual({ events: [], links: {}, area: null, actor: ws.id, limit: 50 });
     const mineCsv = await page.request.get("/api/activity?format=csv&actor=local");
     expect(mineCsv.headers()["content-disposition"]).toMatch(/filename="activity-all-by-local-\d{4}-\d\d-\d\d\.csv"/);
     expect(parseCsv(await mineCsv.text()).rows.map((r) => r.kind)).toEqual(["video.trashed", "video.created"]);
@@ -6521,6 +6521,59 @@ test("workspaces: create, switch, isolate content, invite, join, leave, delete",
     expect(mine.some((v) => v.id === personal.id)).toBe(true);
     expect(mine.some((v) => v.id === team.id)).toBe(false);
   } finally {
+    await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
+    expect((await page.request.delete(`/api/workspaces/${ws.id}`)).status()).toBe(204);
+  }
+});
+
+test("the workspace activity feed shows more, a page at a time, up to all kept", async ({ page }) => {
+  const created = await page.request.post("/api/workspaces", { data: { name: `Feed ${Date.now().toString(36)}` } });
+  expect(created.status()).toBe(201);
+  const ws = (await created.json()).workspace as { id: string };
+  try {
+    expect((await page.request.post("/api/workspaces/switch", { data: { id: ws.id } })).status()).toBe(200);
+    // 45 events by you, newest first, answered as the server would for the length and filters asked.
+    const all = Array.from({ length: 45 }, (_, i) => ({ id: `act_more_${i}`, ownerId: ws.id, kind: "video.created", actorId: "local", subject: `Clip ${45 - i}`, createdAt: new Date(Date.now() - i * 1000).toISOString() }));
+    const asked: string[] = [];
+    await page.route((url) => url.pathname === "/api/activity", async (route) => {
+      const url = new URL(route.request().url());
+      asked.push(url.search);
+      const limit = Number(url.searchParams.get("limit"));
+      const area = url.searchParams.get("area");
+      const events = area && area !== "videos" ? [] : all.slice(0, limit);
+      // The longer list takes a moment, so the page has to show the shorter one, and its busy button, meanwhile.
+      if (limit > 30) await new Promise((r) => setTimeout(r, 400));
+      return route.fulfill({ json: { events, links: {}, area, actor: url.searchParams.get("actor"), limit } });
+    });
+    await page.goto("/workspace");
+    const feed = page.getByTestId("activity-feed");
+    await expect(feed.locator("ol > li")).toHaveCount(30);
+    await expect(feed.getByText("Showing the newest 30.")).toBeVisible();
+    const showMore = feed.getByRole("button", { name: "Show more" });
+    await showMore.focus();
+    await page.keyboard.press("Enter");
+    // While the longer list loads, the 30 stay and the button stays, busy, with the focus on it.
+    await expect(showMore).toHaveAttribute("aria-disabled", "true");
+    await expect(showMore).toBeFocused();
+    await expect(feed.locator("ol > li")).toHaveCount(30);
+    await expect(feed.locator("ol > li")).toHaveCount(45);
+    await expect(feed.getByRole("status")).toHaveText("45 events shown");
+    // Fewer came back than were asked for: that is all of them, so the button goes.
+    await expect(feed.getByRole("button", { name: "Show more" })).toHaveCount(0);
+    expect(asked).toEqual(["?limit=30", "?limit=60"]);
+    await expect(feed.getByText('You created "Clip 1"')).toBeVisible();
+    // A new filter starts again at one page, in one request.
+    const before = asked.length;
+    await feed.getByLabel("Activity area").selectOption({ label: "Videos and batches" });
+    await expect(feed.getByRole("button", { name: "Show more" })).toBeVisible();
+    await expect(feed.locator("ol > li")).toHaveCount(30);
+    expect(asked.slice(before)).toEqual(["?limit=30&area=videos"]);
+    // Back to Everything starts over at one page too.
+    await feed.getByLabel("Activity area").selectOption({ label: "Everything" });
+    await expect(feed.locator("ol > li")).toHaveCount(30);
+    expect(asked.at(-1)).toBe("?limit=30");
+  } finally {
+    await page.unrouteAll();
     await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
     expect((await page.request.delete(`/api/workspaces/${ws.id}`)).status()).toBe(204);
   }

@@ -6,7 +6,7 @@ import { Activity, Check, Copy, Download, Link2, Trash2, UserMinus } from "lucid
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
-import { ACTIVITY_AREAS, ACTIVITY_AREA_LABELS, activityFilterPhrase, activitySeenKey, activitySeenMark, describeActivity, newActivityCount, newActivityIds, parseActivityArea, type ActivityArea } from "@/lib/activity-text";
+import { ACTIVITY_AREAS, ACTIVITY_AREA_LABELS, ACTIVITY_PAGE, activityFilterPhrase, canShowMoreActivity, nextActivityLimit, activitySeenKey, activitySeenMark, describeActivity, newActivityCount, newActivityIds, parseActivityArea, type ActivityArea } from "@/lib/activity-text";
 import { readSeenMark } from "@/lib/comment-list";
 import { roleArticle } from "@/lib/roles";
 import type { ActivityEvent, WorkspaceRole } from "@/lib/types";
@@ -44,9 +44,17 @@ export default function WorkspacePage() {
   // select, the list, the wording, and the download never disagree. Their events stay under Anyone.
   const actor = picked && people.some((p) => p.id === picked) ? picked : null;
   const filterQuery = `${area ? `&area=${area}` : ""}${actor ? `&actor=${encodeURIComponent(actor)}` : ""}`;
-  const activity = useApi<{ events: ActivityEvent[]; links?: Record<string, string>; area: ActivityArea | null; actor: string | null }>(ws ? `/api/activity?limit=30${filterQuery}` : null);
+  // How many lines are asked for: a page at first, another with each Show more; a new filter starts over.
+  // Kept with the filters it was asked under, so a change of filter asks for one page only, in one request; picking a
+  // filter (even the one shown before) starts over.
+  const [more, setMore] = useState<{ filters: string; limit: number } | null>(null);
+  const limit = more && more.filters === filterQuery ? more.limit : ACTIVITY_PAGE;
+  const activity = useApi<{ events: ActivityEvent[]; links?: Record<string, string>; area: ActivityArea | null; actor: string | null; limit?: number }>(ws ? `/api/activity?limit=${limit}${filterQuery}` : null);
   // A list is shown only under the filters it was fetched for, so switching never flashes the previous one.
   const events = activity.data && (activity.data.area ?? null) === area && (activity.data.actor ?? null) === actor ? activity.data.events : null;
+  // The length the list shown was answered for (the server echoes it): while a longer one loads, the button and the
+  // "30+" count go by the list on screen, so Show more stays where it is, busy, with the focus on it.
+  const shownLimit = events ? (activity.data?.limit ?? limit) : limit;
   // What is new since this browser last showed this reader the whole feed of this workspace: the mark is read once
   // per workspace and kept for the visit, so the New badges stay while the page is open, then moved forward below.
   const seenKey = ws && data ? activitySeenKey(data.personalId, ws.id) : null;
@@ -325,6 +333,7 @@ export default function WorkspacePage() {
               value={actor ?? ""}
               onChange={(e) => {
                 setPicked(e.target.value || null);
+                setMore(null);
                 setFiltered(true);
               }}
             >
@@ -341,6 +350,7 @@ export default function WorkspacePage() {
               value={area ?? ""}
               onChange={(e) => {
                 setArea(parseActivityArea(e.target.value));
+                setMore(null);
                 setFiltered(true);
               }}
             >
@@ -368,7 +378,7 @@ export default function WorkspacePage() {
         {fresh.size > 0 && (
           <p className="mt-2 text-xs font-medium text-sky-800" data-testid="activity-new-count">
             {/* Only the newest 30 lines load: when every one is new, there may be more. */}
-            {newActivityCount(fresh.size, events?.length ?? 0, 30)} new since your last visit
+            {newActivityCount(fresh.size, events?.length ?? 0, shownLimit)} new since your last visit
           </p>
         )}
         {events && events.length > 0 && (
@@ -398,6 +408,24 @@ export default function WorkspacePage() {
               </li>
             ))}
           </ol>
+        )}
+        {events && canShowMoreActivity(events.length, shownLimit) && (
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <Button
+              variant="secondary"
+              loading={activity.loading}
+              aria-describedby="activity-shown"
+              onClick={() => {
+                setMore({ filters: filterQuery, limit: nextActivityLimit(shownLimit) });
+                setFiltered(true);
+              }}
+            >
+              Show more
+            </Button>
+            <span id="activity-shown" className="text-xs text-slate-500">
+              Showing the newest {events.length}.
+            </span>
+          </div>
         )}
       </Card>
     </>

@@ -1193,3 +1193,14 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The tests cover a trashed video, template slots, silent scenes, and the needs counts.
   - Two existing e2e tests check the empty state's wording, which now names the voice filter, and were updated to match.
   - Left as they are: the pickers' counts are of the whole view, whatever the other filters, as the folder counts are. The e2e test does not make a recorded scene, which needs an uploaded clip; the unit tests cover it.
+- Clear filters in the library (`29a74a7`): one button puts the search and every filter back. It covers status, folder, presenter, voice, review, share link, date made, Starred, and Open comments or Mentions me. The button shows beside the filters while any is on, and in the empty state when the filters hide every video, but only where clearing them would show some. The sort, the layout, and the trash view are not filters, so they stay. The filters the address asked for leave the address too, so a reload or the back button does not bring them back. That covers Home's notices, the video page's presenter and voice links, and a batch's results. The address is rewritten in the history at once, which Next keeps the page's search params in step with, and anything in it that is not a filter is kept. The clear is announced ("Filters cleared"), and the keyboard goes to the search box. `withoutLibraryFilters` and `LIBRARY_FILTER_PARAMS` in `src/lib/client.ts` hold the address's filter parameters, which the page also re-reads them by, and have unit tests. The e2e test covers:
+  - arriving with a batch, a presenter, a voice, and a status in the address;
+  - adding a search, Starred, and a date;
+  - clearing from the empty state, then from the bar after a search and a presenter;
+  - the address, the focus, the announcement said again, the sort kept, a reload, and the trash view kept.
+  - An independent review found nothing blocking.
+  - Fixed from the optional findings:
+    - The empty state's button shows only where clearing shows videos, not when every video is in the trash.
+    - The address changes at once, rather than after a router navigation that left a batch's filter, its banner, and the button in place for a moment, or could undo a filter picked meanwhile.
+    - The page re-reads its address filters from the same list Clear filters takes off, so the two cannot drift apart.
+    - The e2e test makes its own two presenters and voices, so the pickers show whatever else the library holds. It also covers a batch link, a second clear, and the trash view.

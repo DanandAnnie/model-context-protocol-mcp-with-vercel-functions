@@ -917,6 +917,19 @@ describe("translated subtitles", () => {
 });
 
 describe("activity feed", () => {
+  it("says when each person last did something, from every kept event", async () => {
+    const { recordActivity, lastActiveByActor, activityQuerySchema } = await import("../services/activity");
+    const first = await recordActivity("ws_last", { id: "u-dan" }, "video.created", { subject: "One" });
+    const ann = await recordActivity("ws_last", { id: "u-ann" }, "member.joined");
+    const latest = await recordActivity("ws_last", { id: "u-dan" }, "video.trashed", { subject: "One" });
+    await recordActivity("ws_last_other", { id: "u-zed" }, "brand.removed");
+    const last = await lastActiveByActor("ws_last");
+    assert.deepEqual(last, { "u-dan": latest!.createdAt, "u-ann": ann!.createdAt }, "the newest per person, this space only");
+    assert.ok(first!.createdAt < latest!.createdAt);
+    assert.deepEqual(await lastActiveByActor("ws_nobody"), {});
+    assert.equal(activityQuerySchema.parse({ summary: "1" }).summary, "1");
+    assert.throws(() => activityQuerySchema.parse({ summary: "yes" }));
+  });
   it("marks teammates' events newer than the last visit as new, and keeps the mark moving forward", async () => {
     const { newActivityIds, activitySeenMark, activitySeenKey } = await import("../activity-text");
     const ev = (id: string, actorId: string, createdAt: string) => ({ id, actorId, createdAt });

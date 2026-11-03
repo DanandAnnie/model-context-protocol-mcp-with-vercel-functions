@@ -2,7 +2,7 @@ import { errorResponse, json } from "@/lib/api-utils";
 import { requireOwner } from "@/lib/owner";
 import { ACTIVITY_CSV_COLUMNS, activityRows } from "@/lib/activity-text";
 import { toCsv } from "@/lib/csv";
-import { MAX_ACTIVITY, activityLinks, activityQuerySchema, listActivity } from "@/lib/services";
+import { MAX_ACTIVITY, activityLinks, activityQuerySchema, lastActiveByActor, listActivity } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +11,11 @@ export async function GET(req: Request) {
   try {
     const owner = await requireOwner();
     const params = Object.fromEntries(new URL(req.url).searchParams);
+    // `?summary=1`: when each person last did something here, for the member list; the other parameters do not apply.
+    if (params.summary !== undefined) {
+      activityQuerySchema.pick({ summary: true }).parse(params);
+      return json({ lastActive: await lastActiveByActor(owner) });
+    }
     if (params.format === "csv") {
       // The download holds every kept event of the area, so a limit is not applied (nor checked).
       const { area, actor } = activityQuerySchema.omit({ limit: true }).parse(params);

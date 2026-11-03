@@ -6,7 +6,7 @@ import { Activity, Check, Copy, Download, Link2, Trash2, UserMinus } from "lucid
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
-import { ACTIVITY_AREAS, ACTIVITY_AREA_LABELS, ACTIVITY_PAGE, activityFilterPhrase, canShowMoreActivity, nextActivityLimit, activitySeenKey, activitySeenMark, describeActivity, newActivityCount, newActivityIds, parseActivityArea, type ActivityArea } from "@/lib/activity-text";
+import { ACTIVITY_AREAS, ACTIVITY_AREA_LABELS, ACTIVITY_KEPT, ACTIVITY_PAGE, activityFilterPhrase, canShowMoreActivity, nextActivityLimit, activitySeenKey, activitySeenMark, describeActivity, newActivityCount, newActivityIds, parseActivityArea, type ActivityArea } from "@/lib/activity-text";
 import { readSeenMark } from "@/lib/comment-list";
 import { roleArticle } from "@/lib/roles";
 import type { ActivityEvent, WorkspaceRole } from "@/lib/types";
@@ -49,6 +49,8 @@ export default function WorkspacePage() {
   // filter (even the one shown before) starts over.
   const [more, setMore] = useState<{ filters: string; limit: number } | null>(null);
   const limit = more && more.filters === filterQuery ? more.limit : ACTIVITY_PAGE;
+  // When each member last did something here, from every kept event, for the member list.
+  const lastActive = useApi<{ lastActive: Record<string, string> }>(ws ? "/api/activity?summary=1" : null);
   const activity = useApi<{ events: ActivityEvent[]; links?: Record<string, string>; area: ActivityArea | null; actor: string | null; limit?: number }>(ws ? `/api/activity?limit=${limit}${filterQuery}` : null);
   // A list is shown only under the filters it was fetched for, so switching never flashes the previous one.
   const events = activity.data && (activity.data.area ?? null) === area && (activity.data.actor ?? null) === actor ? activity.data.events : null;
@@ -103,7 +105,7 @@ export default function WorkspacePage() {
     setErr(null);
     try {
       await fn();
-      await Promise.all([refetch(), refetchActivity.current()]);
+      await Promise.all([refetch(), refetchActivity.current(), lastActive.refetch()]);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Something went wrong");
     } finally {
@@ -226,7 +228,15 @@ export default function WorkspacePage() {
                   {m.email ?? m.userId}
                   {m.you && <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-xs font-normal text-slate-600">you</span>}
                 </div>
-                <div className="text-xs text-slate-500">joined {formatDate(m.joinedAt)}</div>
+                <div className="text-xs text-slate-500">
+                  joined {formatDate(m.joinedAt)}
+                  {lastActive.data?.lastActive && (
+                    <span data-testid="member-last-active">
+                      {" · "}
+                      {lastActive.data.lastActive[m.userId] ? `last active ${formatDate(lastActive.data.lastActive[m.userId])}` : `no activity in the last ${ACTIVITY_KEPT} events`}
+                    </span>
+                  )}
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 {isOwner ? (

@@ -23,6 +23,8 @@ export const activityQuerySchema = z.object({
   actor: z.string().trim().min(1).max(200).optional(),
   /** `csv` downloads every kept event of the area (the limit is not applied) as a spreadsheet. */
   format: z.enum(["csv"]).optional(),
+  /** `1` answers `{ lastActive }` instead of events: when each person last did something here, from every kept event. */
+  summary: z.enum(["1"]).optional(),
   /** `0` leaves out `links` (an empty map), for a caller that only counts events, such as Home. */
   links: z.enum(["0", "1"]).optional(),
 });
@@ -86,6 +88,18 @@ export async function recordActivity(ownerId: string, actor: User, kind: Activit
 export async function listActivity(ownerId: string, limit: number = 50, area?: ActivityArea, actorId?: string): Promise<ActivityEvent[]> {
   const all = sorted(await getStore().list<ActivityEvent>("activity", ownerId));
   return all.filter((e) => (!area || activityArea(e.kind) === area) && (!actorId || e.actorId === actorId)).slice(0, limit);
+}
+
+/**
+ * When each person last did something in this space, keyed by actor id (the owner id itself for requests made with an
+ * API key), from every event kept. Someone with nothing in the kept events is left out.
+ */
+export async function lastActiveByActor(ownerId: string): Promise<Record<string, string>> {
+  const last: Record<string, string> = {};
+  for (const e of await getStore().list<ActivityEvent>("activity", ownerId)) {
+    if (!last[e.actorId] || e.createdAt > last[e.actorId]) last[e.actorId] = e.createdAt;
+  }
+  return last;
 }
 
 function sorted(events: ActivityEvent[]): ActivityEvent[] {

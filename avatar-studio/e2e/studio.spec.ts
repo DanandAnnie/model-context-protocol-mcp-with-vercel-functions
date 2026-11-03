@@ -6375,6 +6375,13 @@ test("workspaces: create, switch, isolate content, invite, join, leave, delete",
     await page.goto("/workspace");
     const feed = page.getByTestId("activity-feed");
     await expect(feed.getByText(`You created "Team video ${tag}"`)).toBeVisible();
+    // The member list says when each member last did something here: you, just now, by creating that video.
+    const lastActiveData = (await (await page.request.get("/api/activity?summary=1")).json()) as { lastActive: Record<string, string> };
+    expect(Object.keys(lastActiveData.lastActive)).toEqual(["local"]);
+    // The summary answers on its own, whatever else is asked.
+    expect((await (await page.request.get("/api/activity?summary=1&format=csv&limit=500")).json()).lastActive).toEqual(lastActiveData.lastActive);
+    expect((await page.request.get("/api/activity?summary=yes")).status()).toBe(400);
+    await expect(page.getByTestId("member-last-active")).toHaveText(/^ · last active /);
     await expect(page.getByRole("option", { name: /Viewer: watch and comment only/ })).toBeAttached();
     expect((await page.request.post(`/api/workspaces/${ws.id}/invites`, { data: { role: "viewer" } })).status()).toBe(201);
     await page.getByRole("button", { name: "Create invite link" }).click();
@@ -6537,6 +6544,8 @@ test("the workspace activity feed shows more, a page at a time, up to all kept",
     const asked: string[] = [];
     await page.route((url) => url.pathname === "/api/activity", async (route) => {
       const url = new URL(route.request().url());
+      // The member list's summary is answered as the server would, and not counted with the feed's requests.
+      if (url.searchParams.get("summary") === "1") return route.fulfill({ json: { lastActive: { local: all[0].createdAt } } });
       asked.push(url.search);
       const limit = Number(url.searchParams.get("limit"));
       const area = url.searchParams.get("area");

@@ -3,7 +3,7 @@ import { useMemo, useRef, useState } from "react";
 import { Mic2, Pencil, Trash2 } from "lucide-react";
 import { VoiceCloner } from "@/components/VoiceCloner";
 import { VoiceDesigner } from "@/components/VoiceDesigner";
-import { api } from "@/lib/client";
+import { api, passesUse, type UseFilter } from "@/lib/client";
 import { VoiceRow } from "@/components/VoicePicker";
 import { EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
@@ -76,6 +76,9 @@ export default function VoicesPage() {
 
   const [language, setLanguage] = useState("all");
   const [gender, setGender] = useState<"all" | NonNullable<Voice["gender"]>>("all");
+  // Voices by whether any video, in the library or the trash, still needs them. Only videos are counted: an interactive
+  // presenter, a saved template, the brand kit, or a presenter's default voice may still name one no video needs.
+  const [use, setUse] = useState<UseFilter>("all");
   // Languages offered by the current voice provider, named for people ("en-GB" → "British English").
   const languages = useMemo(() => {
     const seen = new Map<string, string>();
@@ -91,10 +94,11 @@ export default function VoicesPage() {
     const matching = all.filter((v) => {
       if (language !== "all" && v.language !== language) return false;
       if (gender !== "all" && v.gender !== gender) return false;
+      if (!passesUse(library?.needs.voices, v.id, use)) return false;
       return !needle || [v.name, v.language, v.gender, ...(v.tags ?? [])].filter(Boolean).join(" ").toLowerCase().includes(needle);
     });
     return favoritesFirst(matching, favorites.voiceIds);
-  }, [data, q, language, gender, favorites.voiceIds]);
+  }, [data, q, language, gender, use, library, favorites.voiceIds]);
 
   return (
     <>
@@ -113,8 +117,13 @@ export default function VoicesPage() {
         <input ref={searchRef} aria-label="Search voices" className={inputClass} placeholder="Search by name, language, or style" value={q} onChange={(e) => setQ(e.target.value)} />
         <input aria-label="Sample text to speak" className={inputClass} value={sample} onChange={(e) => setSample(e.target.value)} placeholder="Sample text to speak" />
       </div>
-      {(languages.length > 1 || genders.length > 1) && (
+      {(languages.length > 1 || genders.length > 1 || !!library || !!libraryError) && (
         <div className="mb-5 flex flex-wrap items-center gap-2">
+          <select aria-label="Use in videos" value={use} onChange={(e) => setUse(e.target.value as UseFilter)} disabled={!library} title={library ? "Counts the videos, in the library and the trash, a retry or copy of which would ask for each voice; interactive presenters, templates, and the brand kit are not counted" : libraryError ? "Could not count the videos that use each voice; reload to try again" : "Counting the videos that use each voice"} className={`${inputClass} w-auto`}>
+            <option value="all">Any use</option>
+            <option value="used">Used by videos</option>
+            <option value="unused">Not used by any video</option>
+          </select>
           {languages.length > 1 && (
             <select aria-label="Language" value={language} onChange={(e) => setLanguage(e.target.value)} className={`${inputClass} w-auto`}>
               <option value="all">All languages</option>

@@ -383,3 +383,18 @@ export function withoutLibraryFilters(search: string): string | null {
   const rest = params.toString();
   return rest ? `?${rest}` : "";
 }
+
+/** The Avatars and Voices pages' "Use in videos" filter: either, only those some video needs, or only those none does. */
+export type UseFilter = "all" | "used" | "unused";
+
+/**
+ * Whether a presenter or voice passes the use filter, by how many videos (library and trash, see the list's `needs`)
+ * need it (only videos are counted, not interactive presenters, templates, or the brand kit). A count read off an object is read as its own entry only, so an id like "constructor" is not the prototype.
+ */
+export function passesUse(counts: Record<string, number> | undefined, id: string, use: UseFilter): boolean {
+  if (use === "all") return true;
+  // Counts not read yet say nothing: never list everything as unused for want of them.
+  if (!counts) return false;
+  const needed = counts && Object.hasOwn(counts, id) && typeof counts[id] === "number" ? counts[id] : 0;
+  return (needed > 0) === (use === "used");
+}

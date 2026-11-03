@@ -14,7 +14,7 @@ import { DigitalTwins } from "@/components/DigitalTwins";
 import { lookJobTitle } from "@/lib/look-packs";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
-import { api } from "@/lib/client";
+import { api, passesUse, type UseFilter } from "@/lib/client";
 import type { Avatar, ProviderStatus, ShootJob, Voice } from "@/lib/types";
 import type { VideoPage } from "@/lib/services/videos";
 import Link from "next/link";
@@ -125,6 +125,9 @@ function AvatarsInner() {
   };
   const [filter, setFilter] = useState<"all" | "custom" | "library">("all");
   const [gender, setGender] = useState<"all" | NonNullable<Avatar["gender"]>>("all");
+  // Presenters by whether any video, in the library or the trash, still needs them. Only videos are counted: an
+  // interactive presenter, a saved template, or the brand kit may still name one no video needs.
+  const [use, setUse] = useState<UseFilter>("all");
   const [q, setQ] = useState("");
   const [actionErr, setActionErr] = useState<string | null>(null);
   const genders = (["female", "male", "neutral"] as const).filter((g) => (data?.avatars ?? []).some((a) => a.gender === g));
@@ -134,6 +137,7 @@ function AvatarsInner() {
     (data?.avatars ?? []).filter((a) => {
       if (filter === "custom" ? a.source !== "custom" : filter === "library" && a.source === "custom") return false;
       if (gender !== "all" && a.gender !== gender) return false;
+      if (!passesUse(library?.needs.avatars, a.id, use)) return false;
       return !needle || [a.name, ...(a.tags ?? [])].join(" ").toLowerCase().includes(needle);
     }),
     favorites.avatarIds,
@@ -224,6 +228,11 @@ function AvatarsInner() {
             {f === "all" ? "All" : f === "library" ? "Library" : "My avatars"}
           </button>
         ))}
+        <select aria-label="Use in videos" value={use} onChange={(e) => setUse(e.target.value as UseFilter)} disabled={!library} title={library ? "Counts the videos, in the library and the trash, a retry or copy of which would ask for each presenter; interactive presenters, templates, and the brand kit are not counted" : libraryError ? "Could not count the videos that use each presenter; reload to try again" : "Counting the videos that use each presenter"} className={`${inputClass} w-auto py-1 text-xs`}>
+          <option value="all">Any use</option>
+          <option value="used">Used by videos</option>
+          <option value="unused">Not used by any video</option>
+        </select>
         {genders.length > 1 && (
           <select aria-label="Gender" value={gender} onChange={(e) => setGender(e.target.value as typeof gender)} className={`${inputClass} w-auto py-1 text-xs`}>
             <option value="all">Any gender</option>
@@ -278,7 +287,11 @@ function AvatarsInner() {
           ))}
         </div>
       ) : avatars.length === 0 ? (
-        <EmptyState icon={<Users className="h-8 w-8" />} title="No avatars here" body="Create a photo avatar from a portrait to get started." />
+        <EmptyState
+          icon={<Users className="h-8 w-8" />}
+          title={filter !== "all" || gender !== "all" || use !== "all" || needle ? "No avatars match" : "No avatars here"}
+          body={filter !== "all" || gender !== "all" || use !== "all" || needle ? "Try another search or filter." : "Create a photo avatar from a portrait to get started."}
+        />
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" data-testid="avatar-library">
           {avatars.map((a) => (

@@ -3489,6 +3489,19 @@ test("the avatars page says how many videos each presenter is in, links to them,
   // A presenter in no video has no link.
   await expect(page.getByRole("img", { name: `Unused ${tag}` })).toBeVisible();
   await expect(page.locator(`[data-avatar-videos="${unused.id}"]`)).toHaveCount(0);
+  // The presenters no video needs can be listed alone, to tidy up; and the ones some video does.
+  const useFilter = page.getByLabel("Use in videos");
+  await useFilter.selectOption("unused");
+  await expect(page.getByRole("img", { name: `Unused ${tag}` })).toBeVisible();
+  await expect(page.getByRole("img", { name: `Counted ${tag}` })).toHaveCount(0);
+  await useFilter.selectOption("used");
+  await expect(page.getByRole("img", { name: `Counted ${tag}` })).toBeVisible();
+  await expect(page.getByRole("img", { name: `Unused ${tag}` })).toHaveCount(0);
+  // With the filter on and nothing matching, the page says so rather than inviting a first avatar.
+  await page.getByLabel("Search avatars").fill(`${tag} matches none`);
+  await expect(page.getByText("No avatars match")).toBeVisible();
+  await page.getByLabel("Search avatars").fill("");
+  await useFilter.selectOption("all");
   // Deleting a presenter in use says so first; dismissed, nothing is deleted.
   let asked = "";
   page.once("dialog", (d) => {
@@ -3579,6 +3592,17 @@ test("library filters by voice, and the Voices page says how many videos each vo
     await expect(link).toHaveText("In 1 video");
     await expect(link).toHaveAccessibleName(`In 1 video: show the videos in Counted ${tag} in the library`);
     await expect(page.locator('[data-voice-videos="stock_voice_2"]')).toHaveText("In 2 videos");
+    // Only the voices some video needs, or only those none does.
+    const useFilter = page.getByLabel("Use in videos");
+    await useFilter.selectOption("used");
+    await expect(page.getByRole("button", { name: `Delete Counted ${tag}` })).toBeVisible();
+    await page.getByLabel("Search voices").fill("Olivia");
+    await expect(page.getByText("No voices match")).toBeVisible();
+    await useFilter.selectOption("unused");
+    await expect(page.getByText("No voices match")).toHaveCount(0);
+    await page.getByLabel("Search voices").fill("");
+    await expect(page.getByRole("button", { name: `Delete Counted ${tag}` })).toHaveCount(0);
+    await useFilter.selectOption("all");
     // Deleting a voice in use says so first; dismissed, nothing is deleted.
     let asked = "";
     page.once("dialog", (d) => {

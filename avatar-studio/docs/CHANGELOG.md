@@ -1265,3 +1265,14 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The old presenter's or voice's id is no longer shown in place of a missing name.
     - The kind is stored, so the feed can say which was deleted.
   - Left as it is: the route looks the names up again after the replace (one more lookup each, with no effect on what was changed).
+- Fix: sizes given to a text field or select now take effect (`bdbec26`). `inputClass` was a string of Tailwind utilities beginning with `w-full py-2 text-sm`, and about 80 controls appended their own size (`w-auto`, `w-40`, `py-1`, `text-2xl`). Which of two conflicting utilities won came down to the order Tailwind wrote them out, so `w-full`, `py-2`, `text-sm`, and the grey border always won. As a result:
+  - The filter selects on the Avatars, Voices, and library pages each stretched across their own row.
+  - Fixed-width fields filled theirs.
+  - The brand kit's red border for an invalid colour never showed.
+
+  The shared look is now the `.field` class in `src/app/globals.css`, in Tailwind's components layer, so a utility given beside it always wins. Filter rows now sit in one line, compact controls are compact, and the invalid-colour border shows. The two places that worked around this by string-replacing `w-full` now append their width. The e2e test for the Avatars page checks that its filters share a row and are sized to their content. Found while taking screenshots of the Avatars page.
+  - An independent review found nothing blocking. Fixed from its optional findings:
+    - The bulk go-live and expiry date field is a little wider, as the video page's own date fields are, so its time and calendar icon are not clipped.
+    - The selects sized to their content are capped at their row (the library's folder select at 14rem, as its presenter and voice selects are), so a long name cannot push a phone-width page sideways.
+    - The Avatars search box keeps its 220px.
+    - The new test asserts each measure on its own.

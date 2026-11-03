@@ -2,7 +2,8 @@
 // Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { NOTHING_SEEN, commentsSeenKey, newSince, seenMark } from "../comment-list";
+import { NOTHING_SEEN, commentsSeenKey, hasNewComments, newSince, seenMark } from "../comment-list";
+import { openCommentsBadge } from "../client";
 
 const notes = [
   { id: "old", createdAt: "2026-11-01T10:00:00.000Z" },
@@ -56,5 +57,27 @@ describe("commentsSeenKey", () => {
     assert.equal(commentsSeenKey("u1", "vid_a"), "avatar-studio:comments-seen:u1:vid_a");
     assert.notEqual(commentsSeenKey("u1", "vid_a"), commentsSeenKey("u2", "vid_a"));
     assert.notEqual(commentsSeenKey("u1", "vid_a"), commentsSeenKey("u1", "vid_b"));
+  });
+});
+
+describe("hasNewComments", () => {
+  it("is true when someone else wrote after the mark this browser kept, as the library's cards show", () => {
+    assert.equal(hasNewComments("2026-11-03T10:00:00.001Z", "2026-11-03T10:00:00.000Z"), true);
+    assert.equal(hasNewComments("2026-11-03T10:00:00.000Z", "2026-11-03T10:00:00.000Z"), false);
+    assert.equal(hasNewComments("2026-11-03T09:00:00.000Z", "2026-11-03T10:00:00.000Z"), false);
+    assert.equal(hasNewComments("2026-11-03T09:00:00.000Z", NOTHING_SEEN), true, "seen with no comments, so the first one is new");
+  });
+
+  it("is false for a video never opened here, with nothing written by others, or with a time it cannot read", () => {
+    assert.equal(hasNewComments("2026-11-03T10:00:00.000Z", null), false);
+    assert.equal(hasNewComments(undefined, "2026-11-03T10:00:00.000Z"), false);
+    assert.equal(hasNewComments("soon", "2026-11-03T10:00:00.000Z"), false);
+    assert.equal(hasNewComments("2026-11-03T10:00:00.000Z", "yesterday"), false);
+  });
+
+  it("is said by the card's badge", () => {
+    assert.equal(openCommentsBadge(2, 0, true).label, "2 open comments; new since you last opened it");
+    assert.equal(openCommentsBadge(2, 1, true).label, "2 open comments, 1 mentions you; new since you last opened it");
+    assert.equal(openCommentsBadge(1).label, "1 open comment");
   });
 });

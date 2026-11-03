@@ -48,6 +48,32 @@ describe("comments that mention the reader", () => {
     assert.deepEqual(Object.fromEntries((await commentCounts(ws.id, bob.id)).mentions), { [a.id]: 2, [b.id]: 1 });
   });
 
+  it("says when someone other than the reader last wrote in an open thread, for the library to mark what is new", async () => {
+    const { ws, a, b, c } = await team();
+    const t1 = await addComment(a.id, say("The intro"), ws.id, alice);
+    const reply = await addComment(a.id, say("Fixed it", t1.id), ws.id, bob);
+    await addComment(a.id, say("Thanks"), ws.id, alice);
+    const t2 = await addComment(b.id, say("The cut"), ws.id, alice);
+    await resolveComment(b.id, t2.id, true, ws.id, carol);
+    await addComment(c.id, say("My own note"), ws.id, bob);
+    const forAlice = await commentCounts(ws.id, alice.id);
+    // On a, bob's reply is the newest someone else wrote; alice's later note is her own. b's thread is resolved.
+    assert.deepEqual(Object.fromEntries(forAlice.latest), { [a.id]: reply.createdAt, [c.id]: (await getStore().list<{ videoId: string; createdAt: string }>("comment", ws.id)).find((x) => x.videoId === c.id)!.createdAt });
+    // For bob, alice's newest note on a counts, and his own note on c does not.
+    const forBob = await commentCounts(ws.id, bob.id);
+    assert.deepEqual([...forBob.latest.keys()].sort(), [a.id]);
+    assert.ok(Date.parse(forBob.latest.get(a.id)!) >= Date.parse(reply.createdAt));
+    assert.deepEqual(Object.fromEntries((await commentCounts(ws.id)).latest), {}, "no reader, nothing to compare");
+    // The reader's own reply after a teammate's does not move it.
+    await addComment(a.id, say("Looks right now", t1.id), ws.id, alice);
+    assert.equal((await commentCounts(ws.id, alice.id)).latest.get(a.id), reply.createdAt);
+    // The library's page carries them, with the reader's id.
+    const page = await queryVideos(ws.id, videoQuerySchema.parse({}), alice.id);
+    assert.equal(page.you, alice.id);
+    assert.deepEqual(page.latestComment, Object.fromEntries(forAlice.latest));
+    assert.equal((await queryVideos(ws.id, videoQuerySchema.parse({}))).you, undefined);
+  });
+
   it("a reply whose note is gone still counts on its own", async () => {
     const { ws, a } = await team();
     const t = await addComment(a.id, say("A note"), ws.id, alice);

@@ -8,20 +8,24 @@ import { REVIEW_LABEL, type Video } from "@/lib/types";
 
 /**
  * The count of review notes on a video no one has resolved yet, beside its title; nothing when there are none. When
- * some of those threads mention the reader (`mentions`), an @ says so, and the label counts them.
+ * some of those threads mention the reader (`mentions`), an @ says so, and the label counts them. A dot marks comments
+ * new since the reader last opened the video (`fresh`).
  */
-function OpenComments({ count, mentions }: { count?: number; mentions?: number }) {
+function OpenComments({ count, mentions, fresh = false }: { count?: number; mentions?: number; fresh?: boolean }) {
   if (!count) return null;
-  const { label, mentions: forYou } = openCommentsBadge(count, mentions);
+  const { label, mentions: forYou } = openCommentsBadge(count, mentions, fresh);
   return (
     <span
       className={`inline-flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-medium ${forYou ? "bg-sky-800 text-white" : "bg-sky-50 text-sky-800"}`}
       title={label}
       data-testid="open-comments-badge"
       data-mentions={forYou || undefined}
+      data-fresh={fresh || undefined}
     >
       {forYou ? <AtSign className="h-3 w-3" aria-hidden /> : <MessageSquare className="h-3 w-3" aria-hidden />}
       <span aria-hidden>{count}</span>
+      {/* A shade that stands out from either badge: darker on the light one, lighter on the dark one. */}
+      {fresh && <span aria-hidden className={`ml-0.5 h-1.5 w-1.5 rounded-full ${forYou ? "bg-amber-400" : "bg-amber-700"}`} />}
       <span className="sr-only">{label}</span>
     </span>
   );
@@ -119,7 +123,7 @@ function useCardPreview(src: string | undefined, element: string) {
   };
 }
 
-export function VideoCard({ video, selectable = false, selected = false, onToggle, shareOrigin, onCopyNote, openComments, mentions }: { video: Video; selectable?: boolean; selected?: boolean; onToggle?: (shift: boolean) => void; shareOrigin?: string; onCopyNote?: CardCopyNote; openComments?: number; mentions?: number }) {
+export function VideoCard({ video, selectable = false, selected = false, onToggle, shareOrigin, onCopyNote, openComments, mentions, freshComments }: { video: Video; selectable?: boolean; selected?: boolean; onToggle?: (shift: boolean) => void; shareOrigin?: string; onCopyNote?: CardCopyNote; openComments?: number; mentions?: number; freshComments?: boolean }) {
   const expiresSoon = shareExpiresSoon(video);
   const previewSrc = cardPreviewSrc(video);
   const { previewing, handlers } = useCardPreview(previewSrc, selectable ? "select" : shareOrigin ? "card" : "link");
@@ -223,7 +227,7 @@ export function VideoCard({ video, selectable = false, selected = false, onToggl
             </span>
           )}
           <div className="min-w-0 flex-1 truncate text-sm font-medium text-slate-900">{video.title}</div>
-          <OpenComments count={openComments} mentions={mentions} />
+          <OpenComments count={openComments} mentions={mentions} fresh={freshComments} />
           {video.review && (
             <span
               data-testid="review-badge"
@@ -277,7 +281,7 @@ function shareTitle(video: Video): string | undefined {
 }
 
 /** The library's list layout: one compact row per video, with the card's status, badges, and details in a line. */
-export function VideoRow({ video, selectable = false, selected = false, onToggle, shareOrigin, onCopyNote, openComments, mentions }: { video: Video; selectable?: boolean; selected?: boolean; onToggle?: (shift: boolean) => void; shareOrigin?: string; onCopyNote?: CardCopyNote; openComments?: number; mentions?: number }) {
+export function VideoRow({ video, selectable = false, selected = false, onToggle, shareOrigin, onCopyNote, openComments, mentions, freshComments }: { video: Video; selectable?: boolean; selected?: boolean; onToggle?: (shift: boolean) => void; shareOrigin?: string; onCopyNote?: CardCopyNote; openComments?: number; mentions?: number; freshComments?: boolean }) {
   const share = shareSummary(video);
   const body = (
     <>
@@ -309,7 +313,7 @@ export function VideoRow({ video, selectable = false, selected = false, onToggle
             </span>
           )}
           <span className="truncate text-sm font-medium text-slate-900">{video.title}</span>
-          <OpenComments count={openComments} mentions={mentions} />
+          <OpenComments count={openComments} mentions={mentions} fresh={freshComments} />
           {video.review && (
             <span data-testid="review-badge" className={`shrink-0 rounded-full px-1.5 py-0.5 text-[11px] font-medium ${reviewClass(video.review.status)}`}>
               {REVIEW_LABEL[video.review.status]}

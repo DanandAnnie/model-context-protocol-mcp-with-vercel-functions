@@ -2139,6 +2139,10 @@ export interface VideoPage {
   openComments: Record<string, number>;
   /** Of those, the open threads that name the reader (`@email`), by video id; empty when the reader is not known. */
   mentions: Record<string, number>;
+  /** When someone other than the reader last wrote in an open thread, by video id; empty when the reader is not known. */
+  latestComment: Record<string, string>;
+  /** The reader's user id, which the browser keys what each person has read by; absent when the reader is not known. */
+  you?: string;
   /** Where share links point (the public origin), for the cards' Copy link; set by the route. */
   shareOrigin?: string;
 }
@@ -2198,7 +2202,7 @@ export function countFolders(videos: Video[]): Record<string, number> {
  */
 export async function queryVideos(ownerId: string = LOCAL_OWNER, query: VideoQuery, readerId?: string): Promise<VideoPage> {
   // The open notes are counted while the videos load: a second read of the store, side by side rather than after.
-  const [split, { open: openComments, mentions }] = await Promise.all([loadVideos(ownerId), commentCounts(ownerId, readerId)]);
+  const [split, { open: openComments, mentions, latest }] = await Promise.all([loadVideos(ownerId), commentCounts(ownerId, readerId)]);
   const live = query.trash ? split.live : await refreshPending(split.live);
   const all = query.trash ? split.trashed : live;
   const trashed = split.trashed.length;
@@ -2216,6 +2220,8 @@ export async function queryVideos(ownerId: string = LOCAL_OWNER, query: VideoQue
     folderCounts: countFolders(all),
     openComments: Object.fromEntries(videos.flatMap((v) => (openComments.has(v.id) ? [[v.id, openComments.get(v.id)!]] : []))),
     mentions: Object.fromEntries(videos.flatMap((v) => (mentions.has(v.id) ? [[v.id, mentions.get(v.id)!]] : []))),
+    latestComment: Object.fromEntries(videos.flatMap((v) => (latest.has(v.id) ? [[v.id, latest.get(v.id)!]] : []))),
+    ...(readerId ? { you: readerId } : {}),
     // Renders in flight in the library, whichever view this is: the trash view must not poll for a trashed render.
     rendering: live.filter((v) => v.status === "processing" || v.status === "queued").length,
     trashed,

@@ -11,6 +11,7 @@ import { isApple } from "@/components/QuickFind";
 import { VideoCard, VideoRow } from "@/components/VideoCard";
 import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
+import { commentsSeenKey, hasNewComments } from "@/lib/comment-list";
 import { useCanEdit, useWorkspaceRole } from "@/hooks/useCanEdit";
 import type { VideoPage, VideoQuery } from "@/lib/services/videos";
 import { BULK_MAX, EMPTY_TRASH_MAX, LIBRARY_PAGE_MAX, MAX_FOLDER_NAME, MAX_RETRY_AT_ONCE, RESTORE_ALL_MAX, SHARE_CTA_LABEL_MAX, SHARE_CTA_URL_MAX, SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, TRASH_RETENTION_DAYS, type VideoStatus } from "@/lib/types";
@@ -148,6 +149,23 @@ function VideosInner() {
   }, [path]);
   // The filtering, sorting, and paging happen on the server; the page only holds what it shows.
   const { data, loading, error, refetch } = useApi<VideoPage>(path, { pollMs: 6000, pollWhile: (d) => d.rendering > 0 });
+  // Videos whose comments are new since the reader last opened them here: what someone else last wrote, against the mark
+  // each video page keeps in this browser. Worked out with the page's data, which only ever arrives in the browser.
+  const freshComments = useMemo(() => {
+    const fresh = new Set<string>();
+    const you = data?.you;
+    if (!you) return fresh;
+    for (const [id, at] of Object.entries(data?.latestComment ?? {})) {
+      let seen: string | null = null;
+      try {
+        seen = window.localStorage.getItem(commentsSeenKey(you, id));
+      } catch {
+        // Storage blocked: nothing is marked new.
+      }
+      if (hasNewComments(at, seen)) fresh.add(id);
+    }
+    return fresh;
+  }, [data]);
   // A shown video's link going live or expiring changes its card (Copy link, badges) with nothing to read from the
   // server, so the page draws itself again then, rather than waiting for a reload; filtered by share link, the list
   // itself may change (a link gone live no longer "Going live later"), so it is read again instead. A tab hidden for a
@@ -1460,13 +1478,13 @@ function VideosInner() {
           {layout === "list" ? (
             <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200" data-testid="video-list">
               {videos.map((v) => (
-                <VideoRow key={v.id} video={v} openComments={data?.openComments?.[v.id]} mentions={data?.mentions?.[v.id]} selectable={selecting} selected={selected.has(v.id)} onToggle={(shift) => busy === null && click(v.id, shift)} shareOrigin={data?.shareOrigin} onCopyNote={cardCopyNote} />
+                <VideoRow key={v.id} video={v} openComments={data?.openComments?.[v.id]} mentions={data?.mentions?.[v.id]} freshComments={freshComments.has(v.id)} selectable={selecting} selected={selected.has(v.id)} onToggle={(shift) => busy === null && click(v.id, shift)} shareOrigin={data?.shareOrigin} onCopyNote={cardCopyNote} />
               ))}
             </div>
           ) : (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {videos.map((v) => (
-                <VideoCard key={v.id} video={v} openComments={data?.openComments?.[v.id]} mentions={data?.mentions?.[v.id]} selectable={selecting} selected={selected.has(v.id)} onToggle={(shift) => busy === null && click(v.id, shift)} shareOrigin={data?.shareOrigin} onCopyNote={cardCopyNote} />
+                <VideoCard key={v.id} video={v} openComments={data?.openComments?.[v.id]} mentions={data?.mentions?.[v.id]} freshComments={freshComments.has(v.id)} selectable={selecting} selected={selected.has(v.id)} onToggle={(shift) => busy === null && click(v.id, shift)} shareOrigin={data?.shareOrigin} onCopyNote={cardCopyNote} />
               ))}
             </div>
           )}

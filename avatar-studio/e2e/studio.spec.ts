@@ -3582,6 +3582,77 @@ test("the library counts each video's open comments and can show only the videos
   await expect(notedCard.getByTestId("open-comments-badge")).toHaveCount(0);
 });
 
+test("the library marks the videos whose comments are new since you last opened them in this browser", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  // Only a workspace has others writing, so only there does the library say who is reading.
+  const ws = (await (await page.request.post("/api/workspaces", { data: { name: `Fresh ${tag}` } })).json()).workspace as { id: string };
+  expect((await page.request.post("/api/workspaces/switch", { data: { id: ws.id } })).status()).toBe(200);
+  try {
+    const [v, w, x] = [await createVideoViaApi(page, `Seen ${tag}`), await createVideoViaApi(page, `Fresh ${tag}`), await createVideoViaApi(page, `Unopened ${tag}`)];
+    const post = (id: string, text: string) => page.request.post(`/api/videos/${id}/comments`, { data: { text } });
+    for (const id of [v.id, w.id, x.id]) expect((await post(id, "First.")).status()).toBe(201);
+    // Demo mode has one person, so a teammate is played by the page's data: on these videos every note is theirs, on the
+    // video page and in what the library says they last wrote.
+    const ours = new Set([v.id, w.id, x.id]);
+    // A request the page drops while it is answered (leaving for another page) is let go. The server's own rule, others'
+    // notes in open threads only, is the unit tests'; here each video's newest note stands in for it.
+    await page.route(/\/api\/videos\/[^/]+\/comments$/, async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      try {
+        const real = await (await route.fetch()).json();
+        await route.fulfill({ json: { ...real, comments: (real.comments as Array<Record<string, unknown>>).map((c) => ({ ...c, authorId: "u-teammate", mine: false })) } });
+      } catch {
+        // Dropped by the page.
+      }
+    });
+    await page.route(/\/api\/videos(\?|$)/, async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      try {
+        const real = await (await route.fetch()).json();
+        const latestComment = { ...real.latestComment };
+        for (const id of ours) {
+          const list = (await (await page.request.get(`/api/videos/${id}/comments`)).json()).comments as Array<{ createdAt: string }>;
+          latestComment[id] = list.map((c) => c.createdAt).sort().at(-1);
+        }
+        await route.fulfill({ json: { ...real, latestComment } });
+      } catch {
+        // Dropped by the page.
+      }
+    });
+    const open = async (id: string) => {
+      await page.goto(`/videos/${id}`);
+      await expect(page.getByTestId("comments")).toHaveAttribute("data-seen-read", "true");
+    };
+    await open(v.id);
+    await open(w.id);
+    expect((await post(w.id, "Second.")).status()).toBe(201);
+    await page.goto("/videos");
+    await page.getByLabel("Search videos").fill(tag);
+    const badge = (id: string) => page.locator(`a[href="/videos/${id}"]`).getByTestId("open-comments-badge");
+    // Written in since it was opened: marked, and said whole to a screen reader.
+    await expect(badge(w.id)).toHaveAttribute("data-fresh", "true");
+    await expect(badge(w.id)).toHaveAttribute("title", "2 open comments; new since you last opened it");
+    await expect(page.locator(`a[href="/videos/${w.id}"]`)).toHaveAccessibleName(/new since you last opened it/);
+    // Opened since the last note, or never opened in this browser: not marked.
+    await expect(badge(v.id)).not.toHaveAttribute("data-fresh", /.*/);
+    await expect(badge(x.id)).not.toHaveAttribute("data-fresh", /.*/);
+    // Opening it clears the mark; a note written on another video after it was opened marks that one.
+    await open(w.id);
+    expect((await post(v.id, "Second.")).status()).toBe(201);
+    await page.goto("/videos");
+    await page.getByLabel("Search videos").fill(tag);
+    await expect(badge(v.id)).toHaveAttribute("data-fresh", "true");
+    await expect(badge(w.id)).not.toHaveAttribute("data-fresh", /.*/);
+    // The list layout marks it too.
+    await page.getByRole("button", { name: "List" }).click();
+    await expect(page.getByTestId("video-row").filter({ hasText: `Seen ${tag}` }).getByTestId("open-comments-badge")).toHaveAttribute("data-fresh", "true");
+  } finally {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    // The active space is the account's, so the next test starts in the personal one again.
+    await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
+  }
+});
+
 test("a review comment is answered in a thread that is downloaded, resolved, and deleted with it", async ({ page }) => {
   const v = await createVideoViaApi(page, `Thread ${Date.now().toString(36)}`);
   const note = (await (await page.request.post(`/api/videos/${v.id}/comments`, { data: { text: "Tighten the intro." } })).json()).comment;

@@ -241,11 +241,15 @@ export function openCommentSummary(counts: Record<string, number> | undefined): 
 
 /**
  * What a library card's open-comments badge says: the open notes, and of those how many mention the reader (never
- * more than are open); `mentions` is how many it marks, 0 when none.
+ * more than are open), and when `fresh`, that some are new since the reader last opened the video; `mentions` is how
+ * many it marks, 0 when none.
  */
-export function openCommentsBadge(count: number, mentions?: number): { label: string; mentions: number } {
+export function openCommentsBadge(count: number, mentions?: number, fresh = false): { label: string; mentions: number } {
   const forYou = mentions && mentions > 0 ? Math.min(mentions, count) : 0;
-  return { label: `${count} open ${count === 1 ? "comment" : "comments"}${forYou ? `, ${forYou} ${forYou === 1 ? "mentions" : "mention"} you` : ""}`, mentions: forYou };
+  return {
+    label: `${count} open ${count === 1 ? "comment" : "comments"}${forYou ? `, ${forYou} ${forYou === 1 ? "mentions" : "mention"} you` : ""}${fresh ? "; new since you last opened it" : ""}`,
+    mentions: forYou,
+  };
 }
 
 /**

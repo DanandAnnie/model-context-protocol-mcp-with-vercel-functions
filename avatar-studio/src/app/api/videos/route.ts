@@ -13,7 +13,9 @@ export async function GET(req: Request) {
     const owner = await requireOwner();
     const query = videoQuerySchema.parse(Object.fromEntries(new URL(req.url).searchParams));
     // Mentions only happen in a workspace, so only there is the reader looked up (a second session read) to count them.
-    const reader = isWorkspaceId(owner) ? (await userOrOwner(owner)).id : undefined;
+    // A key with no session stands for the workspace itself, which names no one and has read nothing.
+    const found = isWorkspaceId(owner) ? (await userOrOwner(owner)).id : undefined;
+    const reader = found && found !== owner ? found : undefined;
     return json({ ...(await queryVideos(owner, query, reader)), shareOrigin: publicOrigin(req) });
   } catch (err) {
     return errorResponse(err);

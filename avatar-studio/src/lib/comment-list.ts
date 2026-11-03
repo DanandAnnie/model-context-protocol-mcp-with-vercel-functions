@@ -67,6 +67,18 @@ export function commentsSeenKey(userId: string, videoId: string): string {
   return `${COMMENTS_SEEN_PREFIX}${userId}:${videoId}`;
 }
 
+/**
+ * Whether a video has comments new to this reader: someone else last wrote in an open thread (`latest`, from the
+ * library) after the mark this browser kept when the reader last opened the video. A video never opened here has no
+ * mark and nothing new, as on its page. As there, a comment written in the very millisecond of the mark is not new.
+ */
+export function hasNewComments(latest: string | undefined, seenAt: string | null): boolean {
+  if (!latest || seenAt === null) return false;
+  const at = Date.parse(latest);
+  const since = Date.parse(seenAt);
+  return !Number.isNaN(at) && !Number.isNaN(since) && at > since;
+}
+
 /** The mark kept for a video with no comments yet: before any could be written, so every later one is new. */
 export const NOTHING_SEEN = new Date(0).toISOString();
 

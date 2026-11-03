@@ -401,11 +401,14 @@ export async function openCommentCounts(ownerId: string): Promise<Map<string, nu
 /**
  * Open threads by video id, and of those, the ones that name `userId` (`@email` in the note or any reply) as `mentions`:
  * what is still waiting on that person. A thread counts once, by the note that starts it; its replies are part of it,
- * and one whose note is gone counts alone. Without `userId`, `mentions` is empty. One read of the store for both.
+ * and one whose note is gone counts alone. `latest` is when someone other than `userId` last wrote in an open thread
+ * (a note or a reply), by video id, for the library to say what is new since the reader last looked. Without `userId`,
+ * `mentions` and `latest` are empty. One read of the store for all three.
  */
-export async function commentCounts(ownerId: string, userId?: string): Promise<{ open: Map<string, number>; mentions: Map<string, number> }> {
+export async function commentCounts(ownerId: string, userId?: string): Promise<{ open: Map<string, number>; mentions: Map<string, number>; latest: Map<string, string> }> {
   const open = new Map<string, number>();
   const mentions = new Map<string, number>();
+  const latest = new Map<string, string>();
   const all = await getStore().list<VideoComment>("comment", ownerId);
   const byId = new Map(all.map((c) => [c.id, c]));
   const startOf = (c: VideoComment) => (c.parentId && byId.get(c.parentId)) || c;
@@ -415,12 +418,15 @@ export async function commentCounts(ownerId: string, userId?: string): Promise<{
     if (start.resolvedAt) continue;
     if (start === c) open.set(c.videoId, (open.get(c.videoId) ?? 0) + 1);
     if (userId && !named.has(start.id) && c.mentions?.some((m) => m.userId === userId)) named.add(start.id);
+    const at = Date.parse(c.createdAt);
+    // The newest wins; the first readable one stands in until then.
+    if (userId && c.authorId !== userId && !Number.isNaN(at) && !(Date.parse(latest.get(c.videoId) ?? "") >= at)) latest.set(c.videoId, c.createdAt);
   }
   for (const id of named) {
     const videoId = byId.get(id)!.videoId;
     mentions.set(videoId, (mentions.get(videoId) ?? 0) + 1);
   }
-  return { open, mentions };
+  return { open, mentions, latest };
 }
 
 /** Removes every comment on a video; part of deleting the video for good. */

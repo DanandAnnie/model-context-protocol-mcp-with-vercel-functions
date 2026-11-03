@@ -16,6 +16,8 @@ export const activityQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(MAX_ACTIVITY).default(50),
   /** Only this part of the feed: videos, reviews, members, keys, brand, presenters, or replaces. */
   area: z.enum(ACTIVITY_AREAS).optional(),
+  /** `csv` downloads every kept event of the area (the limit is not applied) as a spreadsheet. */
+  format: z.enum(["csv"]).optional(),
 });
 
 declare global {

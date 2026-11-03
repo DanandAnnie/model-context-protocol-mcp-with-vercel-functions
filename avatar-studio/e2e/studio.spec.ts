@@ -6409,9 +6409,22 @@ test("workspaces: create, switch, isolate content, invite, join, leave, delete",
     await expect(feed.getByText("Nothing under “API keys” yet. The feed keeps the last 200 events.")).toBeVisible();
     await expect(feed.getByText(`You created "Team video ${tag}"`)).toHaveCount(0);
     await expect(feed.getByRole("status")).toHaveText("No events shown under API keys");
+    await expect(feed.getByTestId("activity-csv")).toHaveCount(0);
     await show.selectOption({ label: "Videos and batches" });
     await expect(feed.locator("ol > li")).toHaveCount(2);
     await expect(feed.getByRole("status")).toHaveText("2 events shown under Videos and batches");
+    // The CSV follows the filter: the two video lines, newest first, worded as the feed words them for anyone.
+    const csvLink = feed.getByRole("link", { name: "Download CSV of Videos and batches activity" });
+    await expect(csvLink).toHaveAttribute("href", "/api/activity?format=csv&area=videos");
+    const csvRes = await page.request.get("/api/activity?format=csv&area=videos");
+    expect(csvRes.headers()["content-disposition"]).toMatch(/^attachment; filename="activity-videos-\d{4}-\d\d-\d\d\.csv"$/);
+    const csv = parseCsv(await csvRes.text());
+    expect(csv.columns).toEqual(["when", "who", "area", "kind", "what_happened"]);
+    expect(csv.rows.map((r) => [r.kind, r.area])).toEqual([["video.trashed", "Videos and batches"], ["video.created", "Videos and batches"]]);
+    expect(csv.rows[1].what_happened).toContain(`created "Team video ${tag}"`);
+    expect(parseCsv(await (await page.request.get("/api/activity?format=csv&area=keys")).text()).rows).toEqual([]);
+    expect((await page.request.get("/api/activity?format=csv&area=videos&limit=500")).status(), "a CSV takes no limit").toBe(200);
+    expect((await page.request.get("/api/activity?format=csv&area=nope")).status()).toBe(400);
     await show.selectOption({ label: "Everything" });
     await expect(feed.getByText(`You created "Team video ${tag}"`)).toBeVisible();
     await expect(feed.getByRole("status")).toHaveText("2 events shown");

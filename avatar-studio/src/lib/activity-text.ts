@@ -113,3 +113,21 @@ export function describeActivity(e: ActivityEvent, viewerId?: string): string {
     }
   }
 }
+
+/** The columns of the feed's CSV download. */
+export const ACTIVITY_CSV_COLUMNS = ["when", "who", "area", "kind", "what_happened"];
+
+/**
+ * The feed as spreadsheet rows, newest first as given: the time as stored (ISO, sortable), who did it, the
+ * area the Show filter names it under, the stored kind, and the sentence the feed shows, worded for no one
+ * in particular so the file reads the same for whoever downloads it.
+ */
+export function activityRows(events: ActivityEvent[]): Array<Record<string, string>> {
+  return events.map((e) => ({
+    when: e.createdAt,
+    who: activityActor(e),
+    area: ACTIVITY_AREA_LABELS[activityArea(e.kind)],
+    kind: e.kind,
+    what_happened: describeActivity(e),
+  }));
+}

@@ -1,7 +1,7 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Activity, Check, Copy, Link2, Trash2, UserMinus } from "lucide-react";
+import { Activity, Check, Copy, Download, Link2, Trash2, UserMinus } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
@@ -263,17 +263,36 @@ export default function WorkspacePage() {
           <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
             <Activity className="h-4 w-4 text-slate-500" aria-hidden /> Activity
           </h3>
-          <select aria-label="Show activity" className={`${inputClass} w-auto max-w-full`} value={area ?? ""} onChange={(e) => {
-              setArea(parseActivityArea(e.target.value));
-              setFiltered(true);
-            }}>
-            <option value="">Everything</option>
-            {ACTIVITY_AREAS.map((a) => (
-              <option key={a} value={a}>
-                {ACTIVITY_AREA_LABELS[a]}
-              </option>
-            ))}
-          </select>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Every kept event under the filter shown, as a spreadsheet to hand on or keep. */}
+            {events && events.length > 0 && (
+              <a
+                href={`/api/activity?format=csv${area ? `&area=${area}` : ""}`}
+                download
+                data-testid="activity-csv"
+                aria-label={area ? `Download CSV of ${ACTIVITY_AREA_LABELS[area]} activity` : "Download CSV of all activity"}
+                className="inline-flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+              >
+                <Download className="h-3.5 w-3.5" aria-hidden /> Download CSV
+              </a>
+            )}
+            <select
+              aria-label="Show activity"
+              className={`${inputClass} w-auto max-w-full`}
+              value={area ?? ""}
+              onChange={(e) => {
+                setArea(parseActivityArea(e.target.value));
+                setFiltered(true);
+              }}
+            >
+              <option value="">Everything</option>
+              {ACTIVITY_AREAS.map((a) => (
+                <option key={a} value={a}>
+                  {ACTIVITY_AREA_LABELS[a]}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
         <p className="mt-1 text-xs text-slate-500">
           What the team did here: videos made, trashed, restored, and deleted for good, batches, reviews and approvals, members, keys, the brand kit, shared presenters, and presenters or voices replaced. The last 200 events are kept.

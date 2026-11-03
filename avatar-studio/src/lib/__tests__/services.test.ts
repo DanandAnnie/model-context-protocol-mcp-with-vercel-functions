@@ -918,7 +918,7 @@ describe("translated subtitles", () => {
 
 describe("activity feed", () => {
   it("lists one area of the feed at a time, up to the limit of that area's events", async () => {
-    const { recordActivity, listActivity } = await import("../services/activity");
+    const { recordActivity, listActivity, activityQuerySchema } = await import("../services/activity");
     const { activityArea, parseActivityArea, ACTIVITY_AREAS, ACTIVITY_AREA_LABELS } = await import("../activity-text");
     const dan = { id: "u-dan", email: "dan@example.com" };
     await recordActivity("ws_area", dan, "video.created", { subject: "One" });
@@ -941,6 +941,19 @@ describe("activity feed", () => {
     assert.equal(parseActivityArea("toString"), null);
     assert.equal(parseActivityArea(""), null);
     assert.equal(parseActivityArea(undefined), null);
+    // The CSV download: one row per event, worded for no one in particular, a formula-like name defused.
+    const { activityRows, ACTIVITY_CSV_COLUMNS } = await import("../activity-text");
+    const { toCsv, parseCsv } = await import("../csv");
+    await recordActivity("ws_area", { id: "ws_area" }, "apikey.created", { subject: "=HYPERLINK(1)" });
+    const rows = activityRows(await listActivity("ws_area", 2));
+    assert.deepEqual(rows[0], { when: rows[0].when, who: "A script with an API key", area: "API keys", kind: "apikey.created", what_happened: "A script with an API key created the API key \"=HYPERLINK(1)\"" });
+    assert.match(rows[0].when, /^\d{4}-\d\d-\d\dT/);
+    assert.deepEqual({ ...rows[1], when: "" }, { when: "", who: "dan@example.com", area: "Presenter and voice replaces", kind: "usage.replaced", what_happened: 'dan@example.com replaced "Ava" with "Ben" in 1 interactive presenter' });
+    const table = parseCsv(toCsv(ACTIVITY_CSV_COLUMNS, rows));
+    assert.deepEqual(table.columns, ACTIVITY_CSV_COLUMNS);
+    assert.equal(table.rows[0].what_happened, rows[0].what_happened, "a sentence starting with a name is not altered");
+    assert.equal(activityQuerySchema.parse({ format: "csv" }).format, "csv");
+    assert.throws(() => activityQuerySchema.parse({ format: "json" }));
   });
 
   it("records who did what, newest first, keeps the last 200, and never fails the request", async () => {

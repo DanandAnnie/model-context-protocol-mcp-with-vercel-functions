@@ -3496,7 +3496,9 @@ test("the avatars page says how many videos each presenter is in, links to them,
     void d.dismiss();
   });
   await page.locator(`[data-avatar-controls="${used.id}"]`).getByRole("button", { name: "Delete avatar" }).click();
-  await expect.poll(() => asked).toBe(`Delete avatar "Counted ${tag}"? It is in 2 videos in your library: rendered videos keep it, but retrying or copying one needs another presenter.`);
+  // Shown in two videos, but needed by three: a retry or copy of the trashed one asks for it too (a scene that hides the
+  // presenter is kept without one, so that video does not).
+  await expect.poll(() => asked).toBe(`Delete avatar "Counted ${tag}"? 3 videos in your library or trash use it: rendered videos keep it, but retrying or copying one needs another presenter.`);
   expect((await page.request.get(`/api/avatars/${used.id}`)).status()).toBe(200);
   // One not in a video is asked about plainly.
   page.once("dialog", (d) => {
@@ -3525,10 +3527,72 @@ test("the avatars page says how many videos each presenter is in, links to them,
       void d.dismiss();
     });
     await page.locator(`[data-avatar-controls="${single.id}"]`).getByRole("button", { name: "Delete avatar" }).click();
-    await expect.poll(() => asked).toBe(`Delete avatar "Single ${tag}"? It may be in videos in your library (still counting): rendered videos keep it, but retrying or copying one needs another presenter.`);
+    await expect.poll(() => asked).toBe(`Delete avatar "Single ${tag}"? It may be used by videos in your library (still counting): rendered videos keep it, but retrying or copying one needs another presenter.`);
     await expect(page.locator(`[data-avatar-videos="${single.id}"]`)).toHaveCount(0);
   } finally {
     await page.unroute("**/api/videos?limit=1");
+  }
+});
+
+test("library filters by voice, and the Voices page says how many videos each voice is in and warns before a delete", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const bg = { type: "color", value: "#0f172a" };
+  // A space of its own, so the voice cloned here is not counted against the account's others.
+  const ws = (await (await page.request.post("/api/workspaces", { data: { name: `Voices ${tag}` } })).json()).workspace as { id: string };
+  expect((await page.request.post("/api/workspaces/switch", { data: { id: ws.id } })).status()).toBe(200);
+  try {
+    const sample = "data:audio/webm;base64," + Buffer.from("a voice to count").toString("base64");
+    const own = (await (await page.request.post("/api/voices/clone", { data: { name: `Counted ${tag}`, samples: [sample] } })).json()).voice as { id: string; name: string };
+    // James alone, James with the cloned voice in a second scene, and Emma alone; a trashed video in the cloned voice is
+    // not in the library, but a retry of it would still ask for the voice.
+    await createVideoViaApi(page, `${tag} James`, { voiceId: "stock_voice_2" });
+    const trashed = await createVideoViaApi(page, `${tag} Trashed`, { voiceId: own.id });
+    expect((await page.request.delete(`/api/videos/${trashed.id}`)).status()).toBe(200);
+    const both = await createVideoViaApi(page, `${tag} Both`, { voiceId: "stock_voice_2", script: undefined, scenes: [{ script: "James opens.", background: bg }, { script: "The clone closes.", background: bg, voiceId: own.id }] });
+    const emma = await createVideoViaApi(page, `${tag} Emma`, { voiceId: "stock_voice_1" });
+    const titles = page.locator("a[href^='/videos/vid_'] .truncate");
+    await page.goto("/videos");
+    await page.getByPlaceholder(/Search title/).fill(tag);
+    await expect(titles).toHaveCount(3);
+    const picker = page.getByLabel("Filter by voice");
+    await expect(picker.locator(`option[value="${own.id}"]`)).toHaveText(`Counted ${tag} (1)`);
+    await expect(picker.locator("option[value='stock_voice_2']")).toHaveText("James (2)");
+    await picker.selectOption("stock_voice_2");
+    await expect(titles).toHaveCount(2);
+    expect((await titles.allTextContents()).sort()).toEqual([`${tag} Both`, `${tag} James`]);
+    await picker.selectOption(own.id);
+    await expect(titles).toHaveText([`${tag} Both`]);
+    const csv = await (await page.request.get(`/api/videos/analytics?q=${tag}&voice=stock_voice_1`)).text();
+    expect(csv).toContain(`${tag} Emma`);
+    expect(csv).not.toContain(`${tag} James`);
+    expect((await page.request.get("/api/videos?voice=")).status()).toBe(400);
+    // The video page's voice row opens the library at that voice.
+    await page.goto(`/videos/${emma.id}`);
+    await page.getByRole("link", { name: "Other videos in Emma" }).click();
+    await expect(page).toHaveURL(/\/videos\?voice=stock_voice_1$/);
+    await expect(picker).toHaveValue("stock_voice_1");
+    await page.goto(`/videos/${both.id}`);
+    await expect(page.getByRole("link", { name: "Other videos in James" })).toHaveAttribute("href", "/videos?voice=stock_voice_2");
+    // The Voices page counts each voice's videos and links to them.
+    await page.goto("/voices");
+    const link = page.locator(`[data-voice-videos="${own.id}"]`);
+    await expect(link).toHaveText("In 1 video");
+    await expect(link).toHaveAccessibleName(`In 1 video: show the videos in Counted ${tag} in the library`);
+    await expect(page.locator('[data-voice-videos="stock_voice_2"]')).toHaveText("In 2 videos");
+    // Deleting a voice in use says so first; dismissed, nothing is deleted.
+    let asked = "";
+    page.once("dialog", (d) => {
+      asked = d.message();
+      void d.dismiss();
+    });
+    await page.getByRole("button", { name: `Delete Counted ${tag}` }).click();
+    await expect.poll(() => asked).toBe(`Delete "Counted ${tag}"? 2 videos in your library or trash use it: videos already rendered keep their audio, but retrying or copying one needs another voice.`);
+    expect(((await (await page.request.get("/api/voices")).json()).voices as { id: string }[]).some((v) => v.id === own.id)).toBe(true);
+    await link.click();
+    await expect(page).toHaveURL(new RegExp(`/videos\\?voice=${own.id}$`));
+    await expect(titles).toHaveText([`${tag} Both`]);
+  } finally {
+    await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
   }
 });
 
@@ -3713,7 +3777,7 @@ test("the library counts each video's open comments and can show only the videos
   await expect(page.getByTestId("open-comments-toggle")).toHaveAttribute("aria-pressed", "true");
   await page.getByLabel("Search videos").fill(tag);
   await expect(notedCard).toHaveCount(0);
-  await expect(page.getByText("Try a different search, status, folder, presenter, date, share link, or turn off Open comments.")).toBeVisible();
+  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, share link, or turn off Open comments.")).toBeVisible();
   await page.getByTestId("open-comments-toggle").click();
   await expect(notedCard).toBeVisible();
   await expect(notedCard.getByTestId("open-comments-badge")).toHaveCount(0);
@@ -9746,7 +9810,7 @@ test("videos are starred from their page or in bulk, and the library filters by 
   expect((await a11y("main")).violations.map((v) => v.id)).toEqual([]);
   // With a search that hides every starred video, the empty state points at the filters rather than at starring.
   await page.getByLabel("Search videos").fill(`${tag} nothing like it`);
-  await expect(page.getByText("Try a different search, status, folder, presenter, date, share link, or turn off Starred.")).toBeVisible();
+  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, share link, or turn off Starred.")).toBeVisible();
   await page.getByLabel("Search videos").fill(tag);
   await expect(card(one.id)).toBeVisible();
   // Starring in bulk from the whole library, then taking both stars off from the filtered view.

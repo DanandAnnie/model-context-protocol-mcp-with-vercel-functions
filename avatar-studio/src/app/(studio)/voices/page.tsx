@@ -13,6 +13,11 @@ import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { languageLabel } from "@/lib/language";
 import type { ProviderStatus, Voice } from "@/lib/types";
+import type { VideoPage } from "@/lib/services/videos";
+import Link from "next/link";
+
+/** How many videos need an id, read as the id's own entry only (an id like "constructor" is not the object's prototype). */
+const neededBy = (counts: Record<string, number> | undefined, id: string) => (counts && Object.hasOwn(counts, id) && typeof counts[id] === "number" ? counts[id] : 0);
 
 const GENDERS: Array<NonNullable<Voice["gender"]>> = ["female", "male", "neutral"];
 
@@ -22,6 +27,11 @@ export default function VoicesPage() {
   const canEdit = useCanEdit();
   const { data, loading, error, refetch } = useApi<{ voices: Voice[]; own?: { count: number; limit: number } }>("/api/voices");
   const { data: status } = useApi<ProviderStatus>("/api/status");
+  // How many of the library's videos speak in each voice (the library's own counts; the trash is not counted), for the
+  // "In N videos" link under each voice and the warning before one is deleted.
+  const { data: library, error: libraryError, refetch: refetchLibrary } = useApi<VideoPage>("/api/videos?limit=1");
+  const inVideos = new Map((library?.voices ?? []).map((p) => [p.id, p.count]));
+  const videosText = (n: number) => (n === 1 ? "1 video" : `${n} videos`);
   const [actionErr, setActionErr] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   async function renameVoice(v: Voice) {
@@ -38,11 +48,21 @@ export default function VoicesPage() {
     }
   }
   async function removeVoice(v: Voice) {
-    if (!window.confirm(`Delete "${v.name}"? Videos already rendered keep their audio.`)) return;
+    // Every video a retry or copy of which would ask for it, the trash included, not only those that speak in it.
+    const used = neededBy(library?.needs.voices, v.id);
+    const after = "videos already rendered keep their audio, but retrying or copying one needs another voice.";
+    // Before the counts arrive (or when they could not be read), the prompt cannot say it is unused.
+    const warning = !library
+      ? ` It may be used by videos in your library${libraryError ? "" : " (still counting)"}: ${after}`
+      : used
+        ? ` ${videosText(used)} in your library or trash use it: ${after}`
+        : " Videos already rendered keep their audio.";
+    if (!window.confirm(`Delete "${v.name}"?${warning}`)) return;
     setActionErr(null);
     try {
       await api(`/api/voices/${v.id}`, { method: "DELETE" });
       await refetch();
+      void refetchLibrary();
       // The row and its buttons are gone; the focus goes to the search above the list.
       searchRef.current?.focus();
     } catch (e) {
@@ -160,6 +180,16 @@ export default function VoicesPage() {
                   ) : undefined
                 }
               />
+              {(inVideos.get(v.id) ?? 0) > 0 && (
+                <Link
+                  href={`/videos?voice=${encodeURIComponent(v.id)}`}
+                  aria-label={`In ${videosText(inVideos.get(v.id)!)}: show the videos in ${v.name} in the library`}
+                  className="ml-1 mt-1 inline-block text-xs font-medium text-brand-700 hover:underline"
+                  data-voice-videos={v.id}
+                >
+                  In {videosText(inVideos.get(v.id)!)}
+                </Link>
+              )}
             </div>
           ))}
         </div>

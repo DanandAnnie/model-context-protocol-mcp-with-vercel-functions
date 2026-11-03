@@ -19,6 +19,9 @@ import type { Avatar, ProviderStatus, ShootJob, Voice } from "@/lib/types";
 import type { VideoPage } from "@/lib/services/videos";
 import Link from "next/link";
 
+/** How many videos need an id, read as the id's own entry only (an id like "constructor" is not the object's prototype). */
+const neededBy = (counts: Record<string, number> | undefined, id: string) => (counts && Object.hasOwn(counts, id) && typeof counts[id] === "number" ? counts[id] : 0);
+
 /** A photo of one of the account's photo shoots, chosen as a new photo avatar's portrait. */
 type ShootPortrait = { shootId: string; photo: number; url: string; title: string };
 
@@ -161,13 +164,14 @@ function AvatarsInner() {
   }
 
   async function remove(a: Avatar) {
-    const used = inVideos.get(a.id) ?? 0;
+    // Every video a retry or copy of which would ask for it, the trash included, not only those it is seen in.
+    const used = neededBy(library?.needs.avatars, a.id);
     const after = "rendered videos keep it, but retrying or copying one needs another presenter.";
     // Before the counts arrive (or when they could not be read), the prompt cannot say it is unused.
     const warning = !library
-      ? ` It may be in videos in your library${libraryError ? "" : " (still counting)"}: ${after}`
+      ? ` It may be used by videos in your library${libraryError ? "" : " (still counting)"}: ${after}`
       : used
-        ? ` It is in ${used === 1 ? "1 video" : `${used} videos`} in your library: ${after}`
+        ? ` ${used === 1 ? "1 video" : `${used} videos`} in your library or trash use it: ${after}`
         : "";
     if (!confirm(`Delete avatar "${a.name}"?${warning}`)) return;
     const mine = avatars.filter((x) => x.source === "custom");

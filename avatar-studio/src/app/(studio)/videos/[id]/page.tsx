@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { videoPresenters } from "@/lib/presenters";
+import { videoPresenters, videoVoices } from "@/lib/presenters";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ArchiveRestore, ArrowLeft, Captions, Check, Clock, Code2, Copy, Download, Eye, Film, FolderOpen, Languages, LayoutTemplate, Link2, Lock, Mail, Pencil, RotateCcw, Sparkles, Star, Trash2 } from "lucide-react";
@@ -1198,15 +1198,26 @@ export default function VideoDetailPage() {
                       const target = shown.find((p) => p.id === video.avatarId) ?? shown[0];
                       return target ? (
                         <Link href={`/videos?presenter=${encodeURIComponent(target.id)}`} aria-label={`Other videos with ${target.name || "this presenter"}`} className="ml-2 whitespace-nowrap text-xs font-medium text-indigo-700 hover:underline">
-                          Other videos
+                          {/* Named when it is not the presenter the row names, so the link says where it goes. */}
+                          {target.id === video.avatarId ? "Other videos" : `Other videos with ${target.name || "this presenter"}`}
                         </Link>
                       ) : null;
                     })()}
                   </Row>
-                  <Row label="Voice">
+                  <Row label="Voice" wrap>
                     {video.scenes?.length && video.scenes.every((sc) => sc.audioId)
                       ? `Recorded audio${video.scenes.length === 1 && video.scenes[0].audioName ? ` (${video.scenes[0].audioName})` : ""}`
                       : `${video.voiceName ?? video.voiceId}${video.scenes?.some((sc) => sc.audioId) ? ", plus recorded audio" : ""}`}
+                    {/* The library's voice filter, by the rule it filters with, as for the presenter above. */}
+                    {(() => {
+                      const spoken = videoVoices(video);
+                      const target = spoken.find((p) => p.id === video.voiceId) ?? spoken[0];
+                      return target ? (
+                        <Link href={`/videos?voice=${encodeURIComponent(target.id)}`} aria-label={`Other videos in ${target.name || "this voice"}`} className="ml-2 whitespace-nowrap text-xs font-medium text-indigo-700 hover:underline">
+                          {target.id === video.voiceId ? "Other videos" : `Other videos in ${target.name || "this voice"}`}
+                        </Link>
+                      ) : null;
+                    })()}
                   </Row>
                   </>
                   )}

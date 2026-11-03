@@ -1323,3 +1323,15 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - A failed store read is logged and leaves the line unlinked, and the test covers that too.
     - A brand kit counts only when it names this owner, as the Brand page reads it.
     - The link underline is darker, so a linked line stands out without hovering.
+- New activity since your last visit (`0443d48`). The workspace Activity card puts a New badge on each line a teammate (or a script with an API key) did since this browser last showed the reader the whole feed, with "N new since your last visit" above the list.
+  - **Your own lines:** never new.
+  - **First visit:** nothing is new.
+  - **Per person and workspace:** this browser keeps a mark for each reader in each workspace (`avatar-studio:activity-seen:<user>:<workspace>`). It is read once per visit, so the badges stay while the page is open.
+  - **Moving the mark:** only the unfiltered feed moves it forward, because a filtered view leaves out events that are still unseen. It moves to the newest teammate event shown, by the server's clock, and never back, even when the feed is open in another tab.
+  - **Storage:** a browser that refuses storage shows nothing new, and the feed still works.
+  - **Code:** `newActivityIds` and `activitySeenMark` in `src/lib/activity-text.ts`, beside the feed's wording.
+  - An independent review found nothing blocking. Fixed from its optional findings:
+    - When every one of the 30 lines loaded is new, the count says "30+".
+    - A screen reader hears "New:" before the line rather than after its time.
+    - The doc comment says that events made with an API key count as a teammate's.
+    - The e2e test clears the mark it moved ahead.

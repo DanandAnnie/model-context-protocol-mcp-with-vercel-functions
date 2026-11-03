@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
-import { Check, CheckCheck, ChevronDown, CornerDownRight, Download, Link2, MessageSquare, Pencil, RotateCcw, SmilePlus, Trash2 } from "lucide-react";
+import { Check, CheckCheck, ChevronDown, Copy, CornerDownRight, Download, Link2, MessageSquare, Pencil, RotateCcw, SmilePlus, Trash2 } from "lucide-react";
 import { Button, Card, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
@@ -8,7 +8,7 @@ import { formatTimestamp } from "@/lib/text";
 import { refocusIfLost } from "@/lib/focus";
 import { isSubmitKey } from "@/lib/shortcuts";
 import { isApple } from "@/components/QuickFind";
-import { COMMENT_ORDER_KEY, COMMENT_REACTIONS, REACTION_NAMES, commentOrderFrom, filterThreads, orderThreads, repliesByThread, splitComments, threadLink, type CommentFilter, type CommentOrder, type CommentReaction, type ReactionView } from "@/lib/comment-list";
+import { COMMENT_ORDER_KEY, COMMENT_REACTIONS, REACTION_NAMES, commentOrderFrom, commentsAsText, filterThreads, orderThreads, repliesByThread, splitComments, threadLink, type CommentFilter, type CommentOrder, type CommentReaction, type ReactionView } from "@/lib/comment-list";
 import type { VideoComment, WorkspaceRole } from "@/lib/types";
 
 /**
@@ -40,7 +40,7 @@ interface WorkspaceSummary {
  * resolved notes fold away under the open ones and can be reopened. Authors edit and delete their own notes. A note
  * that starts a thread can be answered; replies sit under it and are resolved, reopened, and deleted with it.
  */
-export function VideoComments({ videoId, player }: { videoId: string; player?: RefObject<HTMLVideoElement | null> }) {
+export function VideoComments({ videoId, title, player }: { videoId: string; title: string; player?: RefObject<HTMLVideoElement | null> }) {
   const { data, error: loadErr, refetch } = useApi<{ comments: Note[] }>(`/api/videos/${videoId}/comments`);
   const [draft, setDraft] = useState("");
   // The player's time in whole seconds (null without a player), followed here rather than on the page so
@@ -422,6 +422,32 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
       setReacting(null);
     }
   }
+  // The open threads shown, in the order shown, as plain text for a chat or an email; a tick for two seconds after.
+  // Without a clipboard (a page served over plain http, say, or permission refused) the text is shown in a box,
+  // selected, to copy by hand: a prompt would flatten its lines into one.
+  const [copiedText, setCopiedText] = useState(false);
+  const [textToCopy, setTextToCopy] = useState<string | null>(null);
+  const copiedTextTimer = useRef<number | undefined>(undefined);
+  const copyTextButton = useRef<HTMLButtonElement>(null);
+  function closeTextToCopy() {
+    setTextToCopy(null);
+    copyTextButton.current?.focus();
+  }
+  useEffect(() => () => window.clearTimeout(copiedTextTimer.current), []);
+  async function copyAsText() {
+    const text = commentsAsText(title, shown, replies, formatTimestamp, myId);
+    try {
+      await navigator.clipboard.writeText(text);
+      setTextToCopy(null);
+      setCopiedText(true);
+      announce(`${shown.length} ${shown.length === 1 ? "comment" : "comments"} copied as text`);
+      window.clearTimeout(copiedTextTimer.current);
+      copiedTextTimer.current = window.setTimeout(() => setCopiedText(false), 2000);
+    } catch {
+      setTextToCopy(text);
+      announce("Could not copy; the text is selected below to copy by hand");
+    }
+  }
   const excerpt = (c: VideoComment) => c.text.slice(0, 60);
   // A note and, for one that starts a thread, its replies and the way to answer it (open threads only).
   const row = (c: Note, action: ReactNode, reply = false): ReactNode => (
@@ -684,6 +710,12 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
               <CheckCheck className="h-3.5 w-3.5" aria-hidden /> Resolve all
             </button>
           )}
+          {/* The open threads shown, as text to paste into a chat or an email. */}
+          {shown.length > 0 && (
+            <button ref={copyTextButton} type="button" onClick={() => void copyAsText()} data-testid="comments-copy-text" title="Copy the open comments shown, as text for a chat or an email" className="inline-flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800">
+              {copiedText ? <Check className="h-3.5 w-3.5 text-emerald-600" aria-hidden /> : <Copy className="h-3.5 w-3.5" aria-hidden />} Copy as text
+            </button>
+          )}
           {/* Every note and reply, open or resolved, as a spreadsheet to hand on. */}
           {comments.length > 0 && (
             <a href={`/api/videos/${encodeURIComponent(videoId)}/comments?format=csv`} download data-testid="comments-csv" aria-label="Download comments as CSV" className="inline-flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800">
@@ -693,6 +725,33 @@ export function VideoComments({ videoId, player }: { videoId: string; player?: R
         </div>
       </div>
       <p className="mt-1 text-xs text-slate-500">Notes for you and your workspace; viewers of the share page never see them.</p>
+      {textToCopy !== null && (
+        <div className="mt-2 space-y-1.5" data-testid="comments-text-fallback">
+          <textarea
+            readOnly
+            autoFocus
+            aria-label="Comments as text, to copy"
+            value={textToCopy}
+            onFocus={(e) => e.currentTarget.select()}
+            onKeyDown={(e) => {
+              if (e.key !== "Escape") return;
+              e.preventDefault();
+              e.stopPropagation();
+              closeTextToCopy();
+            }}
+            rows={Math.min(12, textToCopy.split("\n").length)}
+            className={`${inputClass} font-mono text-xs`}
+          />
+          <Button
+            type="button"
+            variant="secondary"
+            className="px-3 py-1 text-xs"
+            onClick={closeTextToCopy}
+          >
+            Done
+          </Button>
+        </div>
+      )}
       {/* Said to a screen reader through the card's status line, which is there from the start. */}
       {linkedGone && (
         <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="comment-link-gone">

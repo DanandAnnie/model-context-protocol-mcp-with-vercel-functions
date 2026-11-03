@@ -3946,6 +3946,46 @@ test("in a workspace, a video's open comments narrow to those that mention you o
   }
 });
 
+test("a video's open comments are copied as text to paste into a chat, in the order shown", async ({ page }) => {
+  const title = `Copy notes ${Date.now().toString(36)}`;
+  const v = await createVideoViaApi(page, title);
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  const post = async (data: Record<string, unknown>) => (await (await page.request.post(`/api/videos/${v.id}/comments`, { data })).json()).comment as { id: string };
+  const intro = await post({ text: "Tighten the intro." });
+  await post({ text: "On it.", parentId: intro.id });
+  await post({ text: "Cut the pause here.", atSec: 4 });
+  const done = await post({ text: "Typo in the title." });
+  await page.request.patch(`/api/videos/${v.id}/comments/${done.id}`, { data: { resolved: true } });
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto(`/videos/${v.id}`);
+  const comments = page.getByTestId("comments");
+  await comments.getByRole("button", { name: "Copy as text" }).click();
+  // Only the open threads, numbered as listed, a pinned one with its moment, replies under their note.
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+    [`Comments on “${title}” (2 comments)`, "", "1. Tighten the intro. (you)", "   ↳ On it. (you)", "2. [0:04] Cut the pause here. (you)"].join("\n"),
+  );
+  await expect(comments.getByRole("status")).toHaveText("2 comments copied as text");
+  // In the video's order, the pinned one comes first.
+  await comments.getByRole("combobox", { name: "Order" }).selectOption("moment");
+  await comments.getByRole("button", { name: "Copy as text" }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain("1. [0:04] Cut the pause here. (you)\n2. Tighten the intro. (you)");
+  await comments.getByRole("combobox", { name: "Order" }).selectOption("written");
+  // Without a clipboard the text is shown, selected, to copy by hand, its lines kept; Done closes it, back on the button.
+  await page.evaluate(() => {
+    navigator.clipboard.writeText = () => Promise.reject(new Error("blocked"));
+  });
+  const copy = comments.getByRole("button", { name: "Copy as text" });
+  await copy.click();
+  const box = comments.getByRole("textbox", { name: "Comments as text, to copy" });
+  await expect(box).toBeFocused();
+  expect(await box.inputValue()).toBe([`Comments on “${title}” (2 comments)`, "", "1. Tighten the intro. (you)", "   ↳ On it. (you)", "2. [0:04] Cut the pause here. (you)"].join("\n"));
+  expect(await box.evaluate((el: HTMLTextAreaElement) => [el.selectionStart, el.selectionEnd])).toEqual([0, (await box.inputValue()).length]);
+  await expect(comments.getByRole("status")).toHaveText("Could not copy; the text is selected below to copy by hand");
+  await comments.getByRole("button", { name: "Done" }).click();
+  await expect(box).toHaveCount(0);
+  await expect(copy).toBeFocused();
+});
+
 test("share page offers a download only when the owner allows it", async ({ page }) => {
   const v = await createVideoViaApi(page, `Downloadable ${Date.now().toString(36)}`);
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");

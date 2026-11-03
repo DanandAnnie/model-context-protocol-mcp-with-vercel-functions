@@ -55,6 +55,34 @@ export function filterThreads<T extends Pick<VideoComment, "id" | "authorId" | "
   return threads.filter((t) => keeps(t) || (replies.get(t.id) ?? []).some(keeps));
 }
 
+/**
+ * Threads as plain text to paste into a chat or an email: a heading with the video's title and how many threads,
+ * then each thread numbered in the order given, its moment first when it is pinned to one, and who wrote it, with
+ * its replies indented under it. A writer is named by email; one the account mode knows no email for is "you" when
+ * it is the person copying, `you` (or there is no one else to be, without `you`), else "a teammate". A note of several
+ * lines keeps them, indented past the thread's number, its blank lines left blank.
+ */
+export function commentsAsText<T extends Pick<VideoComment, "id" | "text" | "atSec" | "authorId" | "authorEmail">>(
+  title: string,
+  threads: T[],
+  replies: Map<string, T[]>,
+  formatAt: (sec: number) => string,
+  you?: string,
+): string {
+  const who = (c: T) => c.authorEmail ?? (!you || c.authorId === you ? "you" : "a teammate");
+  const block = (lead: string, c: T, indent: string) => {
+    const [first, ...rest] = `${c.text} (${who(c)})`.split(/\r?\n/);
+    return [`${lead}${first}`, ...rest.map((line) => (line.trim() ? `${indent}${line}` : ""))].join("\n");
+  };
+  const lines = threads.map((t, i) => {
+    const lead = `${i + 1}. ${t.atSec !== undefined ? `[${formatAt(t.atSec)}] ` : ""}`;
+    const indent = " ".repeat(`${i + 1}. `.length);
+    return [block(lead, t, indent), ...(replies.get(t.id) ?? []).map((r) => block(`${indent}↳ `, r, `${indent}  `))].join("\n");
+  });
+  const count = `${threads.length} ${threads.length === 1 ? "comment" : "comments"}`;
+  return [`Comments on “${title}” (${count})`, "", ...lines].join("\n");
+}
+
 /** Each thread's replies, oldest first, by the id of the note they answer. */
 export function repliesByThread<T extends Pick<VideoComment, "parentId" | "createdAt">>(comments: T[]): Map<string, T[]> {
   const out = new Map<string, T[]>();

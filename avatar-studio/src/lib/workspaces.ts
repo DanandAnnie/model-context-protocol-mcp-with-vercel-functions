@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { revokeApiKeysFor } from "./api-keys";
 import { deleteNotifySettings } from "./notifications";
-import { NotFoundError, ValidationError } from "./errors";
+import { LimitError, NotFoundError, ValidationError } from "./errors";
 import { assertNoRenewingPlan } from "./billing";
 import { newId, nowIso } from "./ids";
 import { getStore } from "./store";
@@ -14,6 +14,8 @@ export const WORKSPACE_COOKIE = "studio_workspace";
 export const MAX_WORKSPACES_PER_USER = 20;
 export const MAX_MEMBERS = 50;
 const INVITE_TTL_MS = 7 * 86_400_000;
+/** How long a resent invite waits before it can be resent again, so the route cannot be used to flood an inbox. */
+export const RESEND_COOLDOWN_MS = 5 * 60_000;
 
 export const workspaceNameSchema = z.object({ name: z.string().trim().min(1).max(60) });
 export const inviteSchema = z.object({ email: z.string().trim().email().max(200).optional(), role: roleSchema.default("editor") });
@@ -136,6 +138,26 @@ export async function revokeInvite(id: string, token: string, user: User): Promi
   await requireRole(id, user, ["owner"]);
   const invite = await getStore().get<WorkspaceInvite>("invite", token);
   if (invite && invite.ownerId === id) await getStore().remove("invite", token);
+}
+
+/**
+ * Gives a pending invite a fresh expiry, the full 7 days from now, keeping its token, address and
+ * role, so a resent email or a re-shared link works for another week. An invite that has already
+ * expired reads as not found, the same as on the join page; create a new one instead. A second
+ * resend within RESEND_COOLDOWN_MS is refused, since each one can send an email.
+ */
+export async function renewInvite(id: string, token: string, user: User): Promise<WorkspaceInvite> {
+  await requireRole(id, user, ["owner"]);
+  const invite = token && token.length <= 64 ? await getStore().get<WorkspaceInvite>("invite", token) : null;
+  if (!invite || invite.ownerId !== id || Date.parse(invite.expiresAt) <= Date.now()) throw new NotFoundError("Invite not found or already expired");
+  if (invite.renewedAt && Date.now() - Date.parse(invite.renewedAt) < RESEND_COOLDOWN_MS) {
+    throw new LimitError("This invite was resent a few minutes ago; try again later");
+  }
+  const now = Date.now();
+  const next: WorkspaceInvite = { ...invite, expiresAt: new Date(now + INVITE_TTL_MS).toISOString(), renewedAt: new Date(now).toISOString() };
+  // Only over the record read: an invite accepted or revoked meanwhile stays gone rather than coming back for a week.
+  if (!(await getStore().putIf("invite", next, "expiresAt", invite.expiresAt))) throw new NotFoundError("Invite not found or already expired");
+  return next;
 }
 
 /** Looks an invite up by token (for the join page): one get. Expired invites read as not found. */

@@ -96,6 +96,9 @@ export default function WorkspacePage() {
   const [link, setLink] = useState<string | null>(null);
   const [mailNote, setMailNote] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  // The invite last resent or renewed, and what the status line says about it (cleared first so a repeat is heard again).
+  const [resent, setResent] = useState<{ token: string; text: string } | null>(null);
+  const [inviteStatus, setInviteStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [name, setName] = useState<string | null>(null);
@@ -120,6 +123,29 @@ export default function WorkspacePage() {
       setLink(res.url);
       setMailNote(res.emailed ? `Invite emailed to ${email}.` : res.emailError ? `Email failed (${res.emailError}); share the link instead.` : email ? "Email sending is not configured; share the link." : null);
       setEmail("");
+    });
+  }
+
+  /** Resends a pending invite: a fresh 7-day expiry on the same link, and the email again when it names an address. */
+  async function resend(i: { token: string; email?: string }) {
+    // aria-disabled rather than disabled while busy, so the focused button keeps the focus.
+    if (!ws || busy) return;
+    setInviteStatus("");
+    await run(async () => {
+      const res = await api<{ url: string; emailed: boolean; emailError?: string; invite: { expiresAt: string } }>(`/api/workspaces/${ws.id}/invites/${i.token}`, { method: "POST" });
+      const until = `The link now expires ${formatDate(res.invite.expiresAt)}.`;
+      setLink(res.url);
+      setCopied(false);
+      const note = res.emailed
+        ? `Invite emailed to ${i.email} again. ${until}`
+        : res.emailError
+          ? `Email failed (${res.emailError}); share the link instead. ${until}`
+          : i.email
+            ? `Email sending is not configured; share the link. ${until}`
+            : `Link renewed. ${until}`;
+      setMailNote(note);
+      setResent({ token: i.token, text: res.emailed ? "Sent again" : "Renewed" });
+      setInviteStatus(note);
     });
   }
 
@@ -302,15 +328,35 @@ export default function WorkspacePage() {
             {ws.invites.length > 0 && (
               <Card className="p-5">
                 <h3 className="text-sm font-semibold text-slate-900">Pending invites</h3>
+                <p className="sr-only" role="status" data-testid="invite-status">
+                  {inviteStatus}
+                </p>
                 <ul className="mt-2 divide-y divide-slate-100 text-xs">
                   {ws.invites.map((i) => (
                     <li key={i.token} className="flex items-center justify-between gap-2 py-2">
                       <span className="truncate text-slate-700">
                         {i.email ?? "Link invite"} · {i.role} · expires {formatDate(i.expiresAt)}
+                        {resent?.token === i.token && (
+                          <span className="ml-1 font-medium text-emerald-700" data-testid="invite-resent">
+                            · {resent.text}
+                          </span>
+                        )}
                       </span>
-                      <button type="button" disabled={busy} onClick={() => run(async () => { await api(`/api/workspaces/${ws.id}/invites/${i.token}`, { method: "DELETE" }); })} className="text-slate-500 hover:text-rose-700">
-                        Revoke
-                      </button>
+                      <span className="flex shrink-0 items-center gap-3">
+                        <button
+                          type="button"
+                          aria-disabled={busy}
+                          onClick={() => resend(i)}
+                          aria-label={`${i.email ? `Resend the invite to ${i.email}` : `Renew the ${i.role} link invite`}, expiring ${formatDate(i.expiresAt)}`}
+                          title={i.email ? "Email it again, with a fresh 7-day expiry" : "A fresh 7-day expiry for the same link"}
+                          className="text-slate-500 hover:text-indigo-700 aria-disabled:cursor-wait aria-disabled:opacity-60"
+                        >
+                          {i.email ? "Resend" : "Renew"}
+                        </button>
+                        <button type="button" disabled={busy} onClick={() => run(async () => { await api(`/api/workspaces/${ws.id}/invites/${i.token}`, { method: "DELETE" }); })} className="text-slate-500 hover:text-rose-700">
+                          Revoke
+                        </button>
+                      </span>
                     </li>
                   ))}
                 </ul>

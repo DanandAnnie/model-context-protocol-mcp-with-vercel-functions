@@ -6533,6 +6533,62 @@ test("workspaces: create, switch, isolate content, invite, join, leave, delete",
   }
 });
 
+test("pending workspace invites can be resent or renewed: same link, a fresh week", async ({ page }) => {
+  const created = await page.request.post("/api/workspaces", { data: { name: `Invites ${Date.now().toString(36)}` } });
+  expect(created.status()).toBe(201);
+  const ws = (await created.json()).workspace as { id: string };
+  try {
+    expect((await page.request.post("/api/workspaces/switch", { data: { id: ws.id } })).status()).toBe(200);
+    type Sent = { invite: { token: string; email?: string; role: string; expiresAt: string }; url: string; emailed: boolean; emailError?: string };
+    const emailed = (await (await page.request.post(`/api/workspaces/${ws.id}/invites`, { data: { email: "dan@example.com", role: "viewer" } })).json()) as Sent;
+    const linkOnly = (await (await page.request.post(`/api/workspaces/${ws.id}/invites`, { data: { role: "editor" } })).json()) as Sent;
+
+    await page.goto("/workspace");
+    const pending = page.locator("li", { hasText: "dan@example.com · viewer" });
+    await expect(pending).toBeVisible();
+    // Resending the emailed invite keeps its link; email is not set up here, so it says to share the link.
+    const resent = page.waitForResponse((r) => r.request().method() === "POST" && r.url().endsWith(`/invites/${emailed.invite.token}`));
+    const resendButton = page.getByRole("button", { name: /^Resend the invite to dan@example\.com, expiring / });
+    await resendButton.click();
+    const body = (await (await resent).json()) as Sent;
+    expect(body.url).toBe(emailed.url);
+    expect(body.emailed).toBe(false);
+    expect(body.emailError).toBeUndefined();
+    expect({ token: body.invite.token, email: body.invite.email, role: body.invite.role }).toEqual({ token: emailed.invite.token, email: "dan@example.com", role: "viewer" });
+    expect(Date.parse(body.invite.expiresAt)).toBeGreaterThanOrEqual(Date.parse(emailed.invite.expiresAt));
+    const box = page.getByTestId("invite-link");
+    await expect(box.locator("code")).toHaveText(emailed.url);
+    await expect(box).toContainText("Email sending is not configured; share the link. The link now expires ");
+    await expect(box.getByRole("button", { name: "Copy link" })).toBeVisible();
+    // Said beside the row too, announced in a status line, and the focus stays on the button.
+    await expect(pending.getByTestId("invite-resent")).toHaveText("· Renewed");
+    await expect(page.getByTestId("invite-status")).toHaveText(/^Email sending is not configured; share the link\. The link now expires /);
+    await expect(resendButton).toBeFocused();
+    // A second resend straight away waits: each one can send an email.
+    const tooSoon = await page.request.post(`/api/workspaces/${ws.id}/invites/${emailed.invite.token}`);
+    expect(tooSoon.status()).toBe(429);
+    expect((await tooSoon.json()).error).toMatch(/resent a few minutes ago/);
+
+    // A link invite has no address to email: its button renews it, and says so.
+    await page.getByRole("button", { name: /^Renew the editor link invite, expiring / }).click();
+    await expect(box.locator("code")).toHaveText(linkOnly.url);
+    await expect(box).toContainText("Link renewed. The link now expires ");
+    await expect(box).not.toContainText("Email sending");
+    await expect(page.locator("li", { hasText: "Link invite · editor" }).getByTestId("invite-resent")).toHaveText("· Renewed");
+    await expect(pending.getByTestId("invite-resent")).toHaveCount(0);
+
+    // Only this space's pending invites: not a made-up token, and not one revoked.
+    expect((await page.request.post(`/api/workspaces/${ws.id}/invites/not-a-token`)).status()).toBe(404);
+    expect((await page.request.delete(`/api/workspaces/${ws.id}/invites/${linkOnly.invite.token}`)).status()).toBe(204);
+    expect((await page.request.post(`/api/workspaces/${ws.id}/invites/${linkOnly.invite.token}`)).status()).toBe(404);
+    // The renewed link still joins.
+    expect((await page.request.get(`/api/invites/${emailed.invite.token}`)).status()).toBe(200);
+  } finally {
+    await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
+    expect((await page.request.delete(`/api/workspaces/${ws.id}`)).status()).toBe(204);
+  }
+});
+
 test("the workspace activity feed shows more, a page at a time, up to all kept", async ({ page }) => {
   const created = await page.request.post("/api/workspaces", { data: { name: `Feed ${Date.now().toString(36)}` } });
   expect(created.status()).toBe(201);

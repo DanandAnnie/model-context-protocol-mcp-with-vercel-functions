@@ -60,7 +60,9 @@ import { createHmac } from "node:crypto";
 import { parseCsv, toCsv } from "../csv";
 import { conversationMatches } from "../transcripts";
 import { ANALYTICS_COLUMNS, analyticsRows, bumpViewsByDay, computeInsights, finishRateOf, viewsInLast, viewsPerDay } from "../insights";
-import { acceptInvite, canEdit, canManageAccount, createInvite, createWorkspace, deleteWorkspace, findInvite, inviteSchema, listWorkspaces, removeMember, revokeInvite, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
+import { acceptInvite, canEdit, canManageAccount, createInvite, createWorkspace, deleteWorkspace, findInvite, inviteSchema, listWorkspaces, removeMember, RESEND_COOLDOWN_MS, renewInvite, revokeInvite, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
+import { deliverInvite } from "../invite-mail";
+import { LimitError as InviteLimitError } from "../errors";
 import { roleArticle, roleCanEdit, roleSchema } from "../roles";
 import { framingFor, isPhotoAvatar, type Video } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
@@ -2621,6 +2623,88 @@ describe("workspaces", () => {
     await assert.rejects(deleteWorkspace(ws.id, bob), /not found/);
     await deleteWorkspace(ws.id, alice);
     assert.deepEqual(await listWorkspaces(alice.id), []);
+  });
+
+  it("renews a pending invite: same link, a fresh 7 days, owners only, never an expired or another space's invite", async () => {
+    const ws = await createWorkspace("Renew", alice);
+    const other = await createWorkspace("Elsewhere", alice);
+    const inv = await createInvite(ws.id, { email: "dan@example.com", role: "viewer" }, alice);
+    const store = globalThis.__avatarStudioStore!;
+    // A day left on the link: renewing puts it back to the full week, keeping the token, address and role.
+    await store.put("invite", { ...inv, expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
+    const before = Date.now();
+    const renewed = await renewInvite(ws.id, inv.token, alice);
+    const left = Date.parse(renewed.expiresAt) - before;
+    assert.ok(left >= 7 * 86_400_000 - 1000 && left <= 7 * 86_400_000 + 1000, `expires a week out (${left} ms)`);
+    assert.deepEqual({ token: renewed.token, email: renewed.email, role: renewed.role, createdAt: renewed.createdAt }, { token: inv.token, email: inv.email, role: inv.role, createdAt: inv.createdAt });
+    assert.equal((await findInvite(inv.token))?.invite.expiresAt, renewed.expiresAt, "the stored invite carries the new expiry");
+    assert.equal(renewed.renewedAt !== undefined && Date.parse(renewed.renewedAt) >= before, true, "the resend is stamped");
+
+    // Each resend can send an email, so a second one waits out the cooldown; after it, it goes again.
+    await assert.rejects(renewInvite(ws.id, inv.token, alice), (e: unknown) => e instanceof InviteLimitError && /resent a few minutes ago/.test(e.message));
+    await store.put("invite", { ...renewed, renewedAt: new Date(Date.now() - RESEND_COOLDOWN_MS - 1000).toISOString() });
+    const again = await renewInvite(ws.id, inv.token, alice);
+    assert.ok(Date.parse(again.renewedAt!) > Date.now() - 5000, "renewed once the cooldown passed");
+
+    // An invite accepted or revoked between the read and the write stays gone: it never comes back for a week.
+    const raced = await createInvite(ws.id, { role: "editor" }, alice);
+    const realGet = store.get.bind(store);
+    store.get = (async (kind: string, id: string) => {
+      const row = await realGet(kind as never, id);
+      if (kind === "invite" && id === raced.token) await store.remove("invite", id);
+      return row;
+    }) as typeof store.get;
+    try {
+      await assert.rejects(renewInvite(ws.id, raced.token, alice), /Invite not found/);
+    } finally {
+      store.get = realGet;
+    }
+    assert.equal(await store.get("invite", raced.token), null, "the used invite is not written back");
+
+    // Owners only: an editor is refused, a stranger does not see the space.
+    const join = await createInvite(ws.id, { role: "editor" }, alice);
+    await acceptInvite(join.token, bob);
+    await assert.rejects(renewInvite(ws.id, inv.token, bob), /Only workspace owners/);
+    await assert.rejects(renewInvite(ws.id, inv.token, { id: "eve" }), /Workspace not found/);
+    // Not another space's invite, a made-up or over-long token, a revoked invite, or one already expired.
+    await assert.rejects(renewInvite(other.id, inv.token, alice), /Invite not found or already expired/);
+    await assert.rejects(renewInvite(ws.id, "nope", alice), /Invite not found/);
+    await assert.rejects(renewInvite(ws.id, "x".repeat(65), alice), /Invite not found/);
+    const gone = await createInvite(ws.id, { role: "editor" }, alice);
+    await revokeInvite(ws.id, gone.token, alice);
+    await assert.rejects(renewInvite(ws.id, gone.token, alice), /Invite not found/);
+    await store.put("invite", { ...again, renewedAt: undefined, expiresAt: new Date(Date.now() - 1000).toISOString() });
+    await assert.rejects(renewInvite(ws.id, inv.token, alice), /already expired/);
+    assert.equal(Date.parse((await store.get<{ expiresAt: string }>("invite", inv.token))!.expiresAt) < Date.now(), true, "a refused renew writes nothing");
+  });
+
+  it("delivers an invite: the link on the request's origin, emailed only with an address and a sending provider", async () => {
+    const ws = await createWorkspace("Mail", alice);
+    const req = new Request("https://studio.example.com/api/workspaces/x/invites", { method: "POST" });
+    const withEmail = await createInvite(ws.id, { email: "dan@example.com", role: "editor" }, alice);
+    const linkOnly = await createInvite(ws.id, { role: "editor" }, alice);
+    const mock = new MockEmailProvider();
+    setEmailProvider(mock);
+    try {
+      // The mock does not deliver: nothing is sent, and no error is claimed.
+      assert.deepEqual(await deliverInvite(req, withEmail, alice), { url: `https://studio.example.com/invite/${withEmail.token}`, emailed: false });
+      assert.equal(mock.sent.length, 0);
+      mock.delivers = true;
+      assert.deepEqual(await deliverInvite(req, linkOnly, alice), { url: `https://studio.example.com/invite/${linkOnly.token}`, emailed: false }, "no address, no email");
+      assert.equal(mock.sent.length, 0);
+      const sent = await deliverInvite(req, withEmail, alice);
+      assert.equal(sent.emailed, true);
+      assert.equal(mock.sent.length, 1);
+      assert.equal(mock.sent[0].to, "dan@example.com");
+      assert.match(mock.sent[0].text, /alice@example.com invited you to join the "Mail" workspace/);
+      assert.ok(mock.sent[0].text.includes(sent.url), "the email carries the same link");
+      mock.send = async () => {
+        throw new Error("mailbox unavailable");
+      };
+      assert.deepEqual(await deliverInvite(req, withEmail, alice), { url: sent.url, emailed: false, emailError: "mailbox unavailable" });
+    } finally {
+      setEmailProvider(undefined);
+    }
   });
 
   it("revokes a departing member's workspace keys and every key on deletion", async () => {

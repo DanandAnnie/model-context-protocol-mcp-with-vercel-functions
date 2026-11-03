@@ -1374,6 +1374,8 @@ export interface WorkspaceInvite {
   role: WorkspaceRole;
   createdAt: string;
   expiresAt: string;
+  /** When it was last resent or renewed; a second resend waits RESEND_COOLDOWN_MS after it. */
+  renewedAt?: string;
 }
 
 /** One per (workspace, user), owned by the user, so "my workspaces" is an indexed list. */

@@ -1068,3 +1068,9 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - Blank lines inside a note stay blank.
     - The title is required.
   - The unit and e2e tests cover each of these.
+- Comments along the video (`d5ec4bd`): when the open threads shown include some pinned to a moment, the video page's comments card shows a strip under its heading. It holds one mark per moment, placed along the video's length, and a line for how far the player has got. Pressing a mark moves the player to that moment. A mark is named by its moment and how many comments it holds, as in "0:02: 2 comments", and hovering shows their first words. Threads at the same moment, or too close to press apart, share a mark at the earliest of them. Marks are kept at least 24 pixels apart, measured on the strip itself, so they can be pressed at a phone's width. The strip follows the threads shown: a workspace's Show filter narrows it, a resolved thread leaves it, and it goes when no thread shown is pinned. It is one tab stop: the arrow keys, Home, and End move between the marks, and Enter moves the player. `commentMarkers` has unit tests. The e2e test checks the names, the spacing on a phone, the mouse and the keys, and resolving.
+  - An independent review found one blocking problem, now fixed. Marks were grouped at 2% of the length, only 6 or 7 pixels on the card, so neighbouring 14-pixel dots overlapped and were hard to press. The gap is now 24 pixels of the strip as measured, and each mark can be pressed over 24 pixels around its dot.
+  - Fixed from the optional findings:
+    - The strip is one tab stop rather than one per mark.
+    - A mark's hint lists the first words of up to three of its comments.
+    - The e2e test waits for the player to know the video's length before checking that a note on the whole video has no mark.

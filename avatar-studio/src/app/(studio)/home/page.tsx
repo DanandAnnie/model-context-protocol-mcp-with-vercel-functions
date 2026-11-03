@@ -1,13 +1,14 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, AtSign, Camera, ClipboardCheck, Clapperboard, Clock, FilePenLine, Gauge, Languages, Layers3, LayoutTemplate, MessageSquare, Sparkles, TimerOff, Wand2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, AtSign, BellDot, Camera, ClipboardCheck, Clapperboard, Clock, FilePenLine, Gauge, Languages, Layers3, LayoutTemplate, MessageSquare, Sparkles, TimerOff, Wand2 } from "lucide-react";
 import { Insights } from "@/components/Insights";
 import { VideoCard } from "@/components/VideoCard";
 import { EmptyState, SectionTitle, Skeleton } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useWorkspaceRole } from "@/hooks/useCanEdit";
 import { allowanceNotice, awaitingReview, failedThisWeek, openCommentSummary, shareAttention } from "@/lib/client";
+import { freshVideoIds, readSeenMark } from "@/lib/comment-list";
 import { draftKeyFor, draftSummary, type DraftSummary } from "@/lib/editor-draft";
 import type { Video } from "@/lib/types";
 
@@ -23,7 +24,7 @@ const QUICK = [
 ];
 
 export default function HomePage() {
-  const { data, loading } = useApi<{ videos: Video[]; shareOrigin?: string; openComments?: Record<string, number>; mentions?: Record<string, number> }>("/api/videos");
+  const { data, loading } = useApi<{ videos: Video[]; shareOrigin?: string; openComments?: Record<string, number>; mentions?: Record<string, number>; latestComment?: Record<string, string>; you?: string }>("/api/videos");
   const recent = data?.videos.slice(0, 4) ?? [];
   // This month's renders against the plan's allowance, once little or none of it is left.
   const { data: status } = useApi<{ renderLimitPerMonth?: number | null; usage?: { rendersThisMonth: number } }>("/api/status");
@@ -88,12 +89,17 @@ export default function HomePage() {
   const comments = openCommentSummary(data?.openComments);
   // Of those, the open threads that name the reader: what is waiting on them in particular.
   const forYou = openCommentSummary(data?.mentions);
+  // The videos a teammate wrote in since the reader last opened them in this browser, newest first; the first three by name.
+  const fresh = useMemo(() => {
+    const byId = new Map((data?.videos ?? []).map((v) => [v.id, v]));
+    return freshVideoIds(data?.latestComment, data?.you, readSeenMark).flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []));
+  }, [data]);
 
   return (
     <>
       <SectionTitle title="Home" subtitle="What do you want to make today?" />
 
-      {(allowance || attention.expiring > 0 || attention.expired > 0 || attention.failed > 0 || attention.review > 0 || comments.videos > 0 || forYou.videos > 0) && (
+      {(allowance || attention.expiring > 0 || attention.expired > 0 || attention.failed > 0 || attention.review > 0 || comments.videos > 0 || forYou.videos > 0 || fresh.length > 0) && (
         <section aria-label="Things to check" data-testid="home-attention" className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <ul className="space-y-1.5">
             {allowance && (
@@ -119,6 +125,32 @@ export default function HomePage() {
                 <Link href="/videos?review=pending" className="font-medium underline hover:no-underline">
                   Show videos in review
                 </Link>
+              </li>
+            )}
+            {fresh.length > 0 && (
+              <li className="flex flex-wrap items-center gap-x-2" data-testid="fresh-comments-notice">
+                <BellDot className="h-4 w-4 shrink-0" />
+                <span>
+                  New comments since you last looked, on{" "}
+                  {fresh.slice(0, 3).map((v, i, shown) => (
+                    <span key={v.id}>
+                      <Link href={`/videos/${v.id}`} className="break-words font-medium underline hover:no-underline">
+                        {v.title}
+                        <span className="sr-only"> (new comments)</span>
+                      </Link>
+                      {i < shown.length - 1 ? (i === shown.length - 2 && fresh.length <= 3 ? " and " : ", ") : ""}
+                    </span>
+                  ))}
+                  {fresh.length > 3 && (
+                    <>
+                      {" and "}
+                      <Link href="/videos?comments=open" className="font-medium underline hover:no-underline">
+                        {fresh.length - 3} {fresh.length - 3 === 1 ? "other video" : "other videos"}
+                      </Link>
+                    </>
+                  )}
+                  .
+                </span>
               </li>
             )}
             {forYou.videos > 0 && (

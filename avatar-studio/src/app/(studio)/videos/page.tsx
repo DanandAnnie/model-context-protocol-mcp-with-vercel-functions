@@ -11,7 +11,7 @@ import { isApple } from "@/components/QuickFind";
 import { VideoCard, VideoRow } from "@/components/VideoCard";
 import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
-import { commentsSeenKey, hasNewComments } from "@/lib/comment-list";
+import { freshVideoIds, readSeenMark } from "@/lib/comment-list";
 import { useCanEdit, useWorkspaceRole } from "@/hooks/useCanEdit";
 import type { VideoPage, VideoQuery } from "@/lib/services/videos";
 import { BULK_MAX, EMPTY_TRASH_MAX, LIBRARY_PAGE_MAX, MAX_FOLDER_NAME, MAX_RETRY_AT_ONCE, RESTORE_ALL_MAX, SHARE_CTA_LABEL_MAX, SHARE_CTA_URL_MAX, SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, TRASH_RETENTION_DAYS, type VideoStatus } from "@/lib/types";
@@ -151,21 +151,7 @@ function VideosInner() {
   const { data, loading, error, refetch } = useApi<VideoPage>(path, { pollMs: 6000, pollWhile: (d) => d.rendering > 0 });
   // Videos whose comments are new since the reader last opened them here: what someone else last wrote, against the mark
   // each video page keeps in this browser. Worked out with the page's data, which only ever arrives in the browser.
-  const freshComments = useMemo(() => {
-    const fresh = new Set<string>();
-    const you = data?.you;
-    if (!you) return fresh;
-    for (const [id, at] of Object.entries(data?.latestComment ?? {})) {
-      let seen: string | null = null;
-      try {
-        seen = window.localStorage.getItem(commentsSeenKey(you, id));
-      } catch {
-        // Storage blocked: nothing is marked new.
-      }
-      if (hasNewComments(at, seen)) fresh.add(id);
-    }
-    return fresh;
-  }, [data]);
+  const freshComments = useMemo(() => new Set(freshVideoIds(data?.latestComment, data?.you, readSeenMark)), [data]);
   // A shown video's link going live or expiring changes its card (Copy link, badges) with nothing to read from the
   // server, so the page draws itself again then, rather than waiting for a reload; filtered by share link, the list
   // itself may change (a link gone live no longer "Going live later"), so it is read again instead. A tab hidden for a

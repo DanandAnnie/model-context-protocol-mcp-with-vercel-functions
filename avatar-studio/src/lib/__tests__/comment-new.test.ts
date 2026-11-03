@@ -2,7 +2,7 @@
 // Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { NOTHING_SEEN, commentsSeenKey, hasNewComments, newSince, seenMark } from "../comment-list";
+import { NOTHING_SEEN, commentsSeenKey, freshVideoIds, hasNewComments, newSince, seenMark } from "../comment-list";
 import { openCommentsBadge } from "../client";
 
 const notes = [
@@ -79,5 +79,28 @@ describe("hasNewComments", () => {
     assert.equal(openCommentsBadge(2, 0, true).label, "2 open comments; new since you last opened it");
     assert.equal(openCommentsBadge(2, 1, true).label, "2 open comments, 1 mentions you; new since you last opened it");
     assert.equal(openCommentsBadge(1).label, "1 open comment");
+  });
+});
+
+describe("freshVideoIds", () => {
+  const marks: Record<string, string> = {
+    [commentsSeenKey("u1", "a")]: "2026-11-03T10:00:00.000Z",
+    [commentsSeenKey("u1", "b")]: "2026-11-03T10:00:00.000Z",
+    [commentsSeenKey("u1", "c")]: "2026-11-03T12:00:00.000Z",
+    [commentsSeenKey("u2", "d")]: "2026-11-01T00:00:00.000Z",
+  };
+  const read = (key: string) => marks[key] ?? null;
+  const latest = { a: "2026-11-03T11:00:00.000Z", b: "2026-11-03T13:00:00.000Z", c: "2026-11-03T11:30:00.000Z", d: "2026-11-03T09:00:00.000Z" };
+
+  it("lists the videos written in since this reader's mark, newest first", () => {
+    // c was opened after its newest note; d was only opened by someone else here, so this reader has no mark for it.
+    assert.deepEqual(freshVideoIds(latest, "u1", read), ["b", "a"]);
+    assert.deepEqual(freshVideoIds(latest, "u2", read), ["d"]);
+  });
+
+  it("lists none without a reader or a library to read", () => {
+    assert.deepEqual(freshVideoIds(latest, undefined, read), []);
+    assert.deepEqual(freshVideoIds(undefined, "u1", read), []);
+    assert.deepEqual(freshVideoIds(latest, "u1", () => null), [], "a browser that kept no marks has nothing new");
   });
 });

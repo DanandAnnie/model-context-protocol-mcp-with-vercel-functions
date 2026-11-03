@@ -3582,7 +3582,7 @@ test("the library counts each video's open comments and can show only the videos
   await expect(notedCard.getByTestId("open-comments-badge")).toHaveCount(0);
 });
 
-test("the library marks the videos whose comments are new since you last opened them in this browser", async ({ page }) => {
+test("the library and Home mark the videos whose comments are new since you last opened them in this browser", async ({ page }) => {
   const tag = Date.now().toString(36);
   // Only a workspace has others writing, so only there does the library say who is reading.
   const ws = (await (await page.request.post("/api/workspaces", { data: { name: `Fresh ${tag}` } })).json()).workspace as { id: string };
@@ -3646,6 +3646,18 @@ test("the library marks the videos whose comments are new since you last opened 
     // The list layout marks it too.
     await page.getByRole("button", { name: "List" }).click();
     await expect(page.getByTestId("video-row").filter({ hasText: `Seen ${tag}` }).getByTestId("open-comments-badge")).toHaveAttribute("data-fresh", "true");
+    // Home names it among the things to check, linking to it; the videos opened since, or never opened here, are not named.
+    await page.goto("/home");
+    const notice = page.getByTestId("fresh-comments-notice");
+    // Each title says, to a screen reader reading the links on their own, why it is there.
+    await expect(notice).toHaveText(`New comments since you last looked, on Seen ${tag} (new comments).`);
+    await notice.getByRole("link", { name: `Seen ${tag} (new comments)` }).click();
+    await expect(page).toHaveURL(new RegExp(`/videos/${v.id}$`));
+    await expect(page.getByTestId("comments")).toHaveAttribute("data-seen-read", "true");
+    // Opened, it is not new any more: back on Home once its videos are in (their open comments say so), it is not named.
+    await page.goBack();
+    await expect(page.getByTestId("open-comments-notice")).toBeVisible();
+    await expect(notice).toHaveCount(0);
   } finally {
     await page.unrouteAll({ behavior: "ignoreErrors" });
     // The active space is the account's, so the next test starts in the personal one again.

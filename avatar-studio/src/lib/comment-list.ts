@@ -79,6 +79,27 @@ export function hasNewComments(latest: string | undefined, seenAt: string | null
   return !Number.isNaN(at) && !Number.isNaN(since) && at > since;
 }
 
+/**
+ * The videos with comments new to the reader `you`, newest first: those whose `latest` (from the library) is later than
+ * the mark `readMark` gives for their key, as the library's cards and Home show them. None without a reader.
+ */
+export function freshVideoIds(latest: Record<string, string> | undefined, you: string | undefined, readMark: (key: string) => string | null): string[] {
+  if (!you || !latest) return [];
+  return Object.entries(latest)
+    .filter(([id, at]) => hasNewComments(at, readMark(commentsSeenKey(you, id))))
+    .sort((a, b) => Date.parse(b[1]) - Date.parse(a[1]))
+    .map(([id]) => id);
+}
+
+/** A mark read from this browser's storage, or none when the storage cannot be read (a private window, say). */
+export function readSeenMark(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
 /** The mark kept for a video with no comments yet: before any could be written, so every later one is new. */
 export const NOTHING_SEEN = new Date(0).toISOString();
 

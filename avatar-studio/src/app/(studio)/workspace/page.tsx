@@ -1,11 +1,11 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Activity, Check, Copy, Link2, Trash2, UserMinus } from "lucide-react";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
-import { describeActivity } from "@/lib/activity-text";
+import { ACTIVITY_AREAS, ACTIVITY_AREA_LABELS, describeActivity, parseActivityArea, type ActivityArea } from "@/lib/activity-text";
 import { roleArticle } from "@/lib/roles";
 import type { ActivityEvent, WorkspaceRole } from "@/lib/types";
 
@@ -27,7 +27,17 @@ export default function WorkspacePage() {
   const router = useRouter();
   const { data, loading, error, refetch } = useApi<Summary>("/api/workspaces");
   const ws = data?.workspaces.find((w) => w.id === data.activeId) ?? null;
-  const activity = useApi<{ events: ActivityEvent[] }>(ws ? "/api/activity?limit=30" : null);
+  const [area, setArea] = useState<ActivityArea | null>(null);
+  const activity = useApi<{ events: ActivityEvent[]; area: ActivityArea | null }>(ws ? `/api/activity?limit=30${area ? `&area=${area}` : ""}` : null);
+  // A list is shown only under the filter it was fetched for, so switching never flashes the previous one.
+  const events = activity.data && (activity.data.area ?? null) === area ? activity.data.events : null;
+  // An action that ends after the filter changed refetches the filter shown now, not the one it began under.
+  const refetchActivity = useRef(activity.refetch);
+  useEffect(() => {
+    refetchActivity.current = activity.refetch;
+  }, [activity.refetch]);
+  // Set once the reader picks a filter, so the count is announced for Everything too but not on first load.
+  const [filtered, setFiltered] = useState(false);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<WorkspaceRole>("editor");
   const [link, setLink] = useState<string | null>(null);
@@ -42,7 +52,7 @@ export default function WorkspacePage() {
     setErr(null);
     try {
       await fn();
-      await Promise.all([refetch(), activity.refetch()]);
+      await Promise.all([refetch(), refetchActivity.current()]);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Something went wrong");
     } finally {
@@ -249,15 +259,37 @@ export default function WorkspacePage() {
         )}
       </div>
       <Card className="mt-6 p-5" data-testid="activity-feed">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-          <Activity className="h-4 w-4 text-slate-500" aria-hidden /> Activity
-        </h3>
-        <p className="mt-1 text-xs text-slate-500">What the team did here: videos created, trashed, and restored, members, keys, the brand kit, and shared presenters. The last 200 events are kept.</p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+            <Activity className="h-4 w-4 text-slate-500" aria-hidden /> Activity
+          </h3>
+          <select aria-label="Show activity" className={`${inputClass} w-auto max-w-full`} value={area ?? ""} onChange={(e) => {
+              setArea(parseActivityArea(e.target.value));
+              setFiltered(true);
+            }}>
+            <option value="">Everything</option>
+            {ACTIVITY_AREAS.map((a) => (
+              <option key={a} value={a}>
+                {ACTIVITY_AREA_LABELS[a]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <p className="mt-1 text-xs text-slate-500">
+          What the team did here: videos made, trashed, restored, and deleted for good, batches, reviews and approvals, members, keys, the brand kit, shared presenters, and presenters or voices replaced. The last 200 events are kept.
+        </p>
         <ErrorBanner message={activity.error} />
-        {activity.data && activity.data.events.length === 0 && <p className="mt-3 text-sm text-slate-500">Nothing yet. Activity shows up here as the team works.</p>}
-        {activity.data && activity.data.events.length > 0 && (
+        <p className="sr-only" role="status">
+          {filtered && events ? `${events.length === 0 ? "No" : events.length} ${events.length === 1 ? "event" : "events"} shown${area ? ` under ${ACTIVITY_AREA_LABELS[area]}` : ""}` : ""}
+        </p>
+        {events && events.length === 0 && (
+          <p className="mt-3 text-sm text-slate-500">
+            {area ? `Nothing under “${ACTIVITY_AREA_LABELS[area]}” yet. The feed keeps the last 200 events.` : "Nothing yet. Activity shows up here as the team works."}
+          </p>
+        )}
+        {events && events.length > 0 && (
           <ol className="mt-3 divide-y divide-slate-100 text-sm">
-            {activity.data.events.map((e) => (
+            {events.map((e) => (
               <li key={e.id} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2">
                 <span className="min-w-0 break-words text-slate-800">{describeActivity(e, data?.personalId)}</span>
                 <time dateTime={e.createdAt} className="shrink-0 text-xs text-slate-500">

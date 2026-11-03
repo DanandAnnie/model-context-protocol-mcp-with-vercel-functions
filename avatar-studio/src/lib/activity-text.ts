@@ -1,7 +1,56 @@
 // Sentences for the activity feed. Shared by the Workspace page and its tests; no server imports.
 import { describeReplaced } from "./presenters";
 import { roleArticle } from "./roles";
-import type { ActivityEvent } from "./types";
+import type { ActivityEvent, ActivityKind } from "./types";
+
+/** The parts of the feed a reader can show on their own, in the order the filter lists them. */
+export const ACTIVITY_AREAS = ["videos", "reviews", "members", "keys", "brand", "presenters", "replaces"] as const;
+export type ActivityArea = (typeof ACTIVITY_AREAS)[number];
+
+/** How the filter names each area. */
+export const ACTIVITY_AREA_LABELS: Record<ActivityArea, string> = {
+  videos: "Videos and batches",
+  reviews: "Reviews",
+  members: "Members",
+  keys: "API keys",
+  brand: "Brand kit",
+  presenters: "Shared presenters",
+  replaces: "Presenter and voice replaces",
+};
+
+// A Record over every kind, so a new kind does not compile until it is given an area.
+const AREA_OF_KIND: Record<ActivityKind, ActivityArea> = {
+  "video.created": "videos",
+  "video.trashed": "videos",
+  "video.restored": "videos",
+  "video.purged": "videos",
+  "batch.created": "videos",
+  "video.review_requested": "reviews",
+  "video.approved": "reviews",
+  "video.changes_requested": "reviews",
+  "member.joined": "members",
+  "member.left": "members",
+  "member.removed": "members",
+  "member.role": "members",
+  "apikey.created": "keys",
+  "apikey.revoked": "keys",
+  "brand.saved": "brand",
+  "brand.removed": "brand",
+  "agent.created": "presenters",
+  "agent.duplicated": "presenters",
+  "agent.deleted": "presenters",
+  "usage.replaced": "replaces",
+};
+
+/** The area an event's kind belongs to. */
+export function activityArea(kind: ActivityKind): ActivityArea {
+  return AREA_OF_KIND[kind];
+}
+
+/** The area a select value names, or none for Everything or a value that is not an area. */
+export function parseActivityArea(value: string | null | undefined): ActivityArea | null {
+  return (ACTIVITY_AREAS as readonly string[]).includes(value ?? "") ? (value as ActivityArea) : null;
+}
 
 /** Who did it, from the viewer's point of view. */
 export function activityActor(e: Pick<ActivityEvent, "actorId" | "actorEmail" | "ownerId">, viewerId?: string): string {

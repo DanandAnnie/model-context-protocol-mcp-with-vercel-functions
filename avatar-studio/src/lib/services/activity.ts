@@ -1,6 +1,7 @@
 // Activity feed: what the people in an account or workspace did, newest first. Written by the API
 // routes (which know who made the request) and read by the Workspace page and the account export.
 import { z } from "zod";
+import { ACTIVITY_AREAS, activityArea, type ActivityArea } from "../activity-text";
 import { newId } from "../ids";
 import { getStore } from "../store";
 import type { ActivityEvent, ActivityKind } from "../types";
@@ -11,7 +12,11 @@ export const MAX_ACTIVITY = 200;
 /** How long a subject label may be in the feed. */
 const MAX_SUBJECT = 80;
 
-export const activityQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(MAX_ACTIVITY).default(50) });
+export const activityQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(MAX_ACTIVITY).default(50),
+  /** Only this part of the feed: videos, reviews, members, keys, brand, presenters, or replaces. */
+  area: z.enum(ACTIVITY_AREAS).optional(),
+});
 
 declare global {
   // eslint-disable-next-line no-var
@@ -68,9 +73,10 @@ export async function recordActivity(ownerId: string, actor: User, kind: Activit
   }
 }
 
-/** The owner's events, newest first. */
-export async function listActivity(ownerId: string, limit: number = 50): Promise<ActivityEvent[]> {
-  return sorted(await getStore().list<ActivityEvent>("activity", ownerId)).slice(0, limit);
+/** The owner's events, newest first; with an area, only that area's, up to `limit` of them. */
+export async function listActivity(ownerId: string, limit: number = 50, area?: ActivityArea): Promise<ActivityEvent[]> {
+  const all = sorted(await getStore().list<ActivityEvent>("activity", ownerId));
+  return (area ? all.filter((e) => activityArea(e.kind) === area) : all).slice(0, limit);
 }
 
 function sorted(events: ActivityEvent[]): ActivityEvent[] {

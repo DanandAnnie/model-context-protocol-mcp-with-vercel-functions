@@ -917,6 +917,32 @@ describe("translated subtitles", () => {
 });
 
 describe("activity feed", () => {
+  it("lists one area of the feed at a time, up to the limit of that area's events", async () => {
+    const { recordActivity, listActivity } = await import("../services/activity");
+    const { activityArea, parseActivityArea, ACTIVITY_AREAS, ACTIVITY_AREA_LABELS } = await import("../activity-text");
+    const dan = { id: "u-dan", email: "dan@example.com" };
+    await recordActivity("ws_area", dan, "video.created", { subject: "One" });
+    await recordActivity("ws_area", dan, "member.role", { subject: "ann@example.com", role: "viewer" });
+    await recordActivity("ws_area", dan, "batch.created", { subject: "Batch", count: 2 });
+    await recordActivity("ws_area", dan, "video.approved", { subject: "One" });
+    await recordActivity("ws_area", dan, "usage.replaced", { subject: "Ava", replacement: "Ben", replaced: { kind: "avatar", agents: 1, templates: 0, brand: false, avatars: 0 } });
+    assert.deepEqual((await listActivity("ws_area", 50, "videos")).map((e) => e.kind), ["batch.created", "video.created"], "videos and batches, newest first");
+    assert.deepEqual((await listActivity("ws_area", 1, "videos")).map((e) => e.kind), ["batch.created"], "the limit counts the area's events");
+    assert.deepEqual((await listActivity("ws_area", 50, "reviews")).map((e) => e.kind), ["video.approved"]);
+    assert.deepEqual((await listActivity("ws_area", 50, "replaces")).map((e) => e.kind), ["usage.replaced"]);
+    assert.deepEqual(await listActivity("ws_area", 50, "keys"), []);
+    assert.equal((await listActivity("ws_area")).length, 5, "no area lists everything");
+    // Every area has a label, and kinds map where the filter names them.
+    assert.deepEqual(Object.keys(ACTIVITY_AREA_LABELS), [...ACTIVITY_AREAS]);
+    assert.equal(activityArea("agent.duplicated"), "presenters");
+    assert.equal(activityArea("apikey.revoked"), "keys");
+    assert.equal(activityArea("video.purged"), "videos");
+    assert.equal(parseActivityArea("brand"), "brand");
+    assert.equal(parseActivityArea("toString"), null);
+    assert.equal(parseActivityArea(""), null);
+    assert.equal(parseActivityArea(undefined), null);
+  });
+
   it("records who did what, newest first, keeps the last 200, and never fails the request", async () => {
     const { recordActivity, listActivity, activityQuerySchema, MAX_ACTIVITY } = await import("../services/activity");
     const { describeActivity, activityActor } = await import("../activity-text");
@@ -950,6 +976,8 @@ describe("activity feed", () => {
     assert.equal(capped[0].subject, `v${MAX_ACTIVITY + 4}`, "the newest is kept");
     assert.equal(activityQuerySchema.parse({}).limit, 50);
     assert.throws(() => activityQuerySchema.parse({ limit: "500" }));
+    assert.equal(activityQuerySchema.parse({ area: "members" }).area, "members");
+    assert.throws(() => activityQuerySchema.parse({ area: "everything" }), "an unknown area is refused");
     // The feed is part of the export and never breaks the work it describes.
     assert.equal((await exportOwnerData("ws_feed")).activity.length, 4);
     const { getStore } = await import("../store");

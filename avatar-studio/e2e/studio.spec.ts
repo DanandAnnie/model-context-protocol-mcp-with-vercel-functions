@@ -6401,6 +6401,22 @@ test("workspaces: create, switch, isolate content, invite, join, leave, delete",
     expect(events[0].subject).toBe(`Team video ${tag}`);
     await page.reload();
     await expect(feed.getByText(`You moved "Team video ${tag}" to the trash`)).toBeVisible();
+    // The feed shows one area at a time: keys have none here, videos list both lines, and Everything is back.
+    const show = feed.getByLabel("Show activity");
+    await expect(feed.getByRole("status")).toHaveText("", { useInnerText: true });
+    await expect(show.locator("option")).toHaveText(["Everything", "Videos and batches", "Reviews", "Members", "API keys", "Brand kit", "Shared presenters", "Presenter and voice replaces"]);
+    await show.selectOption({ label: "API keys" });
+    await expect(feed.getByText("Nothing under “API keys” yet. The feed keeps the last 200 events.")).toBeVisible();
+    await expect(feed.getByText(`You created "Team video ${tag}"`)).toHaveCount(0);
+    await expect(feed.getByRole("status")).toHaveText("No events shown under API keys");
+    await show.selectOption({ label: "Videos and batches" });
+    await expect(feed.locator("ol > li")).toHaveCount(2);
+    await expect(feed.getByRole("status")).toHaveText("2 events shown under Videos and batches");
+    await show.selectOption({ label: "Everything" });
+    await expect(feed.getByText(`You created "Team video ${tag}"`)).toBeVisible();
+    await expect(feed.getByRole("status")).toHaveText("2 events shown");
+    expect((await page.request.get("/api/activity?area=everything")).status()).toBe(400);
+    expect((await (await page.request.get("/api/activity?area=keys")).json()).area).toBe("keys");
 
     // Back to personal: the team video is gone, the personal one is back.
     await page.getByLabel("Workspace").selectOption({ label: "Personal" });

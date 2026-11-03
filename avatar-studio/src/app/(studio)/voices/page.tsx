@@ -3,12 +3,13 @@ import { useMemo, useRef, useState } from "react";
 import { Mic2, Pencil, Trash2 } from "lucide-react";
 import { VoiceCloner } from "@/components/VoiceCloner";
 import { VoiceDesigner } from "@/components/VoiceDesigner";
-import { api, passesUse, sortPresenters, type PresenterSort, type UseFilter } from "@/lib/client";
+import { api, passesUse, shownPresenterSort, sortPresenters, type PresenterSort, type UseFilter } from "@/lib/client";
 import { VoiceRow } from "@/components/VoicePicker";
 import { EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
+import { usePresenterSort } from "@/hooks/usePresenterSort";
 import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { languageLabel } from "@/lib/language";
@@ -93,8 +94,9 @@ export default function VoicesPage() {
   // Voices by whether any video, in the library or the trash, still needs them. Only videos are counted: an interactive
   // presenter, a saved template, the brand kit, or a presenter's default voice may still name one no video needs.
   const [use, setUse] = useState<UseFilter>("all");
-  // As listed with favourites first, most used in the library's videos (the "In N videos" counts), or by name.
-  const [sort, setSort] = useState<PresenterSort>("default");
+  // As listed with favourites first, most used in the library's videos (the "In N videos" counts), or by name;
+  // remembered in this browser.
+  const [sort, setSort] = usePresenterSort("avatar-studio:voices-sort");
   // Languages offered by the current voice provider, named for people ("en-GB" → "British English").
   const languages = useMemo(() => {
     const seen = new Map<string, string>();
@@ -104,6 +106,7 @@ export default function VoicesPage() {
   const genders = useMemo(() => GENDERS.filter((g) => (data?.voices ?? []).some((v) => v.gender === g)), [data]);
 
   const favorites = useFavorites();
+  const shownSort = shownPresenterSort(sort, !!library);
   const voices = useMemo(() => {
     const all = data?.voices ?? [];
     const needle = q.trim().toLowerCase();
@@ -113,8 +116,8 @@ export default function VoicesPage() {
       if (!passesUse(library?.needs.voices, v.id, use)) return false;
       return !needle || [v.name, v.language, v.gender, ...(v.tags ?? [])].filter(Boolean).join(" ").toLowerCase().includes(needle);
     });
-    return sort === "default" ? favoritesFirst(matching, favorites.voiceIds) : sortPresenters(matching, sort, inVideos);
-  }, [data, q, language, gender, use, sort, library, inVideos, favorites.voiceIds]);
+    return shownSort === "default" ? favoritesFirst(matching, favorites.voiceIds) : sortPresenters(matching, shownSort, inVideos);
+  }, [data, q, language, gender, use, shownSort, library, inVideos, favorites.voiceIds]);
 
   return (
     <>
@@ -140,7 +143,7 @@ export default function VoicesPage() {
             <option value="used">Used by videos</option>
             <option value="unused">Not used by any video</option>
           </select>
-          <select aria-label="Sort voices" value={sort} onChange={(e) => setSort(e.target.value as PresenterSort)} title={library ? "Most used counts the library's videos each voice is in, the numbers under each; the trash is not counted" : libraryError ? "Could not count the videos that use each voice, so Most used is not offered; reload to try again" : "Counting the videos that use each voice"} className={`${inputClass} w-auto`}>
+          <select aria-label="Sort voices" value={shownSort} onChange={(e) => setSort(e.target.value as PresenterSort)} title={library ? "Most used counts the library's videos each voice is in, the numbers under each; the trash is not counted" : libraryError ? "Could not count the videos that use each voice, so Most used is not offered; reload to try again" : "Counting the videos that use each voice"} className={`${inputClass} w-auto`}>
             <option value="default">Favourites first</option>
             <option value="used" disabled={!library}>Most used in the library</option>
             <option value="name">Name A–Z</option>

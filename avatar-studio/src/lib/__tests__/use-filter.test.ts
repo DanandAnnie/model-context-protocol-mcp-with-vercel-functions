@@ -2,7 +2,7 @@
 // Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { passesUse, sortPresenters } from "../client";
+import { parsePresenterSort, passesUse, shownPresenterSort, sortPresenters } from "../client";
 
 describe("passesUse", () => {
   const counts = { anna: 2, ben: 0, constructor: 1 };
@@ -46,5 +46,23 @@ describe("sortPresenters", () => {
   });
   it("sorts by name ignoring case, reading numbers as numbers", () => {
     assert.deepEqual(sortPresenters(items, "name", inVideos).map((x) => x.name), ["Ava 2", "ava 10", "Ben", "Cleo"]);
+  });
+});
+
+describe("parsePresenterSort", () => {
+  it("reads back a stored sort, and anything else as the default", () => {
+    assert.equal(parsePresenterSort("used"), "used");
+    assert.equal(parsePresenterSort("name"), "name");
+    assert.equal(parsePresenterSort("default"), "default");
+    for (const raw of [null, undefined, "", "Name", "newest"]) assert.equal(parsePresenterSort(raw), "default");
+  });
+});
+
+describe("shownPresenterSort", () => {
+  it("shows a remembered Most used only once the counts are read", () => {
+    assert.equal(shownPresenterSort("used", false), "default");
+    assert.equal(shownPresenterSort("used", true), "used");
+    assert.equal(shownPresenterSort("name", false), "name");
+    assert.equal(shownPresenterSort("default", true), "default");
   });
 });

@@ -3507,6 +3507,10 @@ test("the avatars page says how many videos each presenter is in, links to them,
   await expect.poll(order).toEqual([`Counted ${tag}`, `Single ${tag}`, `Aaron ${tag}`, `Unused ${tag}`]);
   await sort.selectOption("name");
   await expect.poll(order).toEqual([`Aaron ${tag}`, `Counted ${tag}`, `Single ${tag}`, `Unused ${tag}`]);
+  // This browser remembers the choice.
+  await page.reload();
+  await expect(sort).toHaveValue("name");
+  await expect.poll(order).toEqual([`Aaron ${tag}`, `Counted ${tag}`, `Single ${tag}`, `Unused ${tag}`]);
   await sort.selectOption("default");
   await expect(page.locator(`[data-avatar-videos="${unused.id}"]`)).toHaveCount(0);
   // The presenters no video needs can be listed alone, to tidy up; and the ones some video does.
@@ -3553,8 +3557,12 @@ test("the avatars page says how many videos each presenter is in, links to them,
   await page.route("**/api/videos?limit=1", () => {
     // Never answered: the counts stay unknown.
   });
+  // A remembered Most used waits for the counts: until then the page shows, and says, favourites first.
+  await page.evaluate(() => window.localStorage.setItem("avatar-studio:avatars-sort", "used"));
   try {
     await page.goto("/avatars");
+    await expect(page.getByLabel("Sort avatars")).toHaveValue("default");
+    await expect(page.getByLabel("Sort avatars").locator('option[value="used"]')).toBeDisabled();
     page.once("dialog", (d) => {
       asked = d.message();
       void d.dismiss();
@@ -3620,6 +3628,10 @@ test("library filters by voice, and the Voices page says how many videos each vo
     await voiceSort.selectOption("name");
     await expect.poll(voiceOrder).toEqual([own.id, "stock_voice_1", "stock_voice_2"]);
     await voiceSort.selectOption("used");
+    await expect.poll(voiceOrder).toEqual(["stock_voice_2", own.id, "stock_voice_1"]);
+    // Remembered in this browser, and applied once the counts arrive.
+    await page.reload();
+    await expect(voiceSort).toHaveValue("used");
     await expect.poll(voiceOrder).toEqual(["stock_voice_2", own.id, "stock_voice_1"]);
     await voiceSort.selectOption("default");
     // And what else uses each one under the count: counted, the line opens to name each template.

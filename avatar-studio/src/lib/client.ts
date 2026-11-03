@@ -390,6 +390,19 @@ export type UseFilter = "all" | "used" | "unused";
 export type PresenterSort = "default" | "used" | "name";
 
 /**
+ * The sort a page can show now: a remembered "used" waits for the counts (favourites first until they arrive, or for
+ * good if they could not be read), so the list never claims an order it cannot give. The remembered choice is kept.
+ */
+export function shownPresenterSort(sort: PresenterSort, countsReady: boolean): PresenterSort {
+  return sort === "used" && !countsReady ? "default" : sort;
+}
+
+/** A stored sort read back: one of the three, or the default for anything else (nothing stored, an old or edited value). */
+export function parsePresenterSort(raw: string | null | undefined): PresenterSort {
+  return raw === "used" || raw === "name" ? raw : "default";
+}
+
+/**
  * Orders the Avatars or Voices page: as listed ("default"), most videos first by the counts the "In N videos" links
  * show ("used"; ties and uncounted ones keep the listed order), or by name A–Z ("name", ignoring case and reading
  * numbers as numbers, so "Ava 2" comes before "Ava 10"). A new array; the given one is left as it is.

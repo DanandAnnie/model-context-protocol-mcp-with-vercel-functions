@@ -269,7 +269,7 @@ function AvatarsInner() {
             ))}
           </select>
         )}
-        <input aria-label="Search avatars" className={`${inputClass} w-auto max-w-[220px] py-1 text-xs`} placeholder="Search by name or style" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input aria-label="Search avatars" className={`${inputClass} w-[220px] max-w-full py-1 text-xs`} placeholder="Search by name or style" value={q} onChange={(e) => setQ(e.target.value)} />
         {data && <span className="text-xs text-slate-500">{avatars.length} of {data.avatars.length}</span>}
       </div>
 

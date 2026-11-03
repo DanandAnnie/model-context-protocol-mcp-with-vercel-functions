@@ -233,7 +233,7 @@ export default function AssetsPage() {
       {(clipsApi.data || picturesApi.data) && (
         <div className="mb-5 flex flex-wrap items-center gap-3">
           <input type="search" aria-label="Search assets" aria-describedby="assets-matches" className={`${inputClass} max-w-sm`} placeholder="Search by name or by what a clip says" value={q} onChange={(e) => search(e.target.value)} />
-          <select aria-label="Sort assets" value={sort} onChange={(e) => sortBy(e.target.value as AssetSort)} className={inputClass.replace("w-full", "w-auto")}>
+          <select aria-label="Sort assets" value={sort} onChange={(e) => sortBy(e.target.value as AssetSort)} className={`${inputClass} w-auto`}>
             {ASSET_SORTS.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}

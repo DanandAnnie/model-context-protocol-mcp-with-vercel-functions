@@ -46,7 +46,7 @@ function readSeconds(draft: string): number | null | "invalid" {
 /** A list of names as read aloud: "A", "A and B", "A, B and C". */
 const listed = (names: string[]) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`);
 /** The small "plays at" field: the form's input, a tenth of its width. */
-const timeInputClass = inputClass.replace("w-full", "w-20");
+const timeInputClass = `${inputClass} w-20`;
 
 /**
  * "Music": a track of the renderer's music catalog, found by describing it, mixed under a finished library video and

@@ -1088,7 +1088,7 @@ function VideosInner() {
         <input
           type="datetime-local"
           aria-label={golive ? "Go-live time for the selected videos" : "Expiry for the selected videos"}
-          className={`${inputClass} w-48 py-1 text-xs`}
+          className={`${inputClass} w-52 py-1 text-xs`}
           value={timeDraft}
           min={localMinute(new Date())}
           onChange={(e) => {
@@ -1181,7 +1181,7 @@ function VideosInner() {
             onBlur={() => (slashHeld.current = false)}
           />
           {folders.length > 0 && (
-            <select aria-label="Folder" value={folder} onChange={(e) => setFolder(e.target.value)} className={`${inputClass} w-auto`}>
+            <select aria-label="Folder" value={folder} onChange={(e) => setFolder(e.target.value)} className={`${inputClass} w-auto max-w-[14rem]`}>
               {/* Each with how many videos it holds in this view, whatever the other filters, so an empty pick is not a surprise. */}
               <option value="all">All folders{withCount(trash ? trashed : (data?.total ?? 0))}</option>
               <option value="unfiled">Unfiled{withCount(countOf(folderCounts, ""))}</option>

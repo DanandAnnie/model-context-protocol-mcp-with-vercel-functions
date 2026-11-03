@@ -2136,7 +2136,7 @@ function CreateInner() {
             {scenes.length > 1 && (
               <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="scene-presenter">
                 <span className="font-medium">Scene {activeIdx + 1} {active.hidePresenter ? "voice" : "presenter"}</span>
-                {!active.hidePresenter && <select aria-label="Scene avatar" className={`${inputClass} w-auto py-1 text-xs`} value={active.avatarId ?? ""} onChange={(e) => {
+                {!active.hidePresenter && <select aria-label="Scene avatar" className={`${inputClass} w-auto max-w-full py-1 text-xs`} value={active.avatarId ?? ""} onChange={(e) => {
                   const picked = avatarData?.avatars.find((a) => a.id === e.target.value);
                   // A presenter's default voice comes along unless the scene already has a voice of its own.
                   const voiceId = picked?.defaultVoiceId && !active.voiceId && voiceData?.voices.some((v) => v.id === picked.defaultVoiceId) ? picked.defaultVoiceId : active.voiceId;
@@ -2158,7 +2158,7 @@ function CreateInner() {
                   </select>
                 )}
                 {!active.audioId && (
-                  <select aria-label="Scene voice" className={`${inputClass} w-auto py-1 text-xs`} value={active.voiceId ?? ""} onChange={(e) => updateScene(activeIdx, { voiceId: e.target.value || undefined })}>
+                  <select aria-label="Scene voice" className={`${inputClass} w-auto max-w-full py-1 text-xs`} value={active.voiceId ?? ""} onChange={(e) => updateScene(activeIdx, { voiceId: e.target.value || undefined })}>
                     <option value="">{voice ? `Video voice (${voice.name})` : "Video voice"}</option>
                     {(voiceData?.voices ?? []).map((v) => (
                       <option key={v.id} value={v.id}>{v.name}</option>

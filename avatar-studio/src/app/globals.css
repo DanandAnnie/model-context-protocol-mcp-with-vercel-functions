@@ -18,6 +18,13 @@
   color-scheme: light;
 }
 
+/* inputClass (components/ui.tsx): in the components layer, so utilities given beside it override it. */
+@layer components {
+  .field {
+    @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-500 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100;
+  }
+}
+
 html,
 body {
   height: 100%;

@@ -173,7 +173,7 @@ export function ConversationImport({
               <span className="min-w-24 font-medium text-slate-800">
                 {s} <span className="font-normal text-slate-500">· {plural(turnsBy(s), "scene")}</span>
               </span>
-              <select aria-label={`${s}'s presenter`} className={`${inputClass} w-auto py-1 text-xs`} value={cast[i].avatarId} onChange={(e) => choose(s, { avatarId: e.target.value })}>
+              <select aria-label={`${s}'s presenter`} className={`${inputClass} w-auto max-w-full py-1 text-xs`} value={cast[i].avatarId} onChange={(e) => choose(s, { avatarId: e.target.value })}>
                 <option value="">{videoAvatar ? `Video avatar (${videoAvatar.name})` : "Video avatar"}</option>
                 {avatars.map((a) => (
                   <option key={a.id} value={a.id}>
@@ -181,7 +181,7 @@ export function ConversationImport({
                   </option>
                 ))}
               </select>
-              <select aria-label={`${s}'s voice`} className={`${inputClass} w-auto py-1 text-xs`} value={cast[i].voiceId} onChange={(e) => choose(s, { voiceId: e.target.value })}>
+              <select aria-label={`${s}'s voice`} className={`${inputClass} w-auto max-w-full py-1 text-xs`} value={cast[i].voiceId} onChange={(e) => choose(s, { voiceId: e.target.value })}>
                 <option value="">{videoVoice ? `Video voice (${videoVoice.name})` : "Video voice"}</option>
                 {voices.map((v) => (
                   <option key={v.id} value={v.id}>

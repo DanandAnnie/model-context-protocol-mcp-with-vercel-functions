@@ -3502,6 +3502,12 @@ test("the avatars page says how many videos each presenter is in, links to them,
   const order = async () => (await page.getByTestId("avatar-library").locator("img").evaluateAll((els) => els.map((e) => (e as HTMLImageElement).alt))).filter((n) => n.endsWith(tag));
   await expect.poll(order).toEqual([`Aaron ${tag}`, `Single ${tag}`, `Unused ${tag}`, `Counted ${tag}`]);
   const sort = page.getByLabel("Sort avatars");
+  // The filters size to their content and share a row, rather than each stretching across it.
+  const useBox = (await page.getByLabel("Use in videos").boundingBox())!;
+  const sortBox = (await sort.boundingBox())!;
+  expect(Math.abs(useBox.y - sortBox.y)).toBeLessThan(2);
+  expect(useBox.width).toBeLessThan(400);
+  expect(sortBox.width).toBeLessThan(400);
   // Straight from the listed order to the most used: two videos, one, then the unused newest first.
   await sort.selectOption("used");
   await expect.poll(order).toEqual([`Counted ${tag}`, `Single ${tag}`, `Aaron ${tag}`, `Unused ${tag}`]);

@@ -71,8 +71,13 @@ export function Field({ label, hint, hintId, children }: { label: string; hint?:
   );
 }
 
-export const inputClass =
-  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-500 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100";
+/**
+ * The look of every text field and select: the `.field` class in globals.css (full width, regular size). It sits in
+ * Tailwind's components layer, so a utility given beside it (`w-auto`, `w-40`, `py-1`, `text-xs`) always wins, as
+ * `${inputClass} w-auto` means; as plain utilities, which of two conflicting ones won came down to the order Tailwind
+ * wrote them out, and `w-full` beat `w-auto`, stretching every filter select across its row.
+ */
+export const inputClass = "field";
 
 const STATUS_STYLES: Record<VideoStatus, string> = {
   queued: "bg-slate-100 text-slate-700",

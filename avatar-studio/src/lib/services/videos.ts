@@ -2085,8 +2085,10 @@ export const videoQuerySchema = z.object({
   /**
    * `viewed` puts the latest counted viewer visit first (share page or embed; the studio's own visits do not count) and
    * `length` the longest render; a video never viewed (for `viewed`) or not yet timed (for `length`) comes last.
+   * `commented` puts the newest note or reply first, by anyone in any thread, resolved ones too; a video without
+   * comments comes last. Every order breaks ties newest made first.
    */
-  sort: z.enum(["newest", "oldest", "title", "views", "viewed", "length"]).default("newest"),
+  sort: z.enum(["newest", "oldest", "title", "views", "viewed", "length", "commented"]).default("newest"),
   /** Review state in a workspace: "pending" (awaiting an owner), "approved", "changes", or "none" (never asked). */
   review: z.enum(["all", "pending", "approved", "changes", "none"]).default("all"),
   /**
@@ -2158,16 +2160,38 @@ const SORTERS: Record<VideoQuery["sort"], (a: Video, b: Video) => number> = {
   viewed: (a, b) => (Date.parse(b.lastViewedAt ?? "") || 0) - (Date.parse(a.lastViewedAt ?? "") || 0) || b.createdAt.localeCompare(a.createdAt),
   // A render with no length yet (still rendering, or failed) comes after every timed one.
   length: (a, b) => (b.durationSec ?? -1) - (a.durationSec ?? -1) || b.createdAt.localeCompare(a.createdAt),
+  // Ordered by the comment times filterVideos is given (see byLastComment); on its own, newest made first.
+  commented: (a, b) => b.createdAt.localeCompare(a.createdAt),
 };
+
+/** Videos with the newest comment first, by `lastAt` (from commentCounts); those with none after, newest made first. */
+function byLastComment(lastAt: Map<string, string>) {
+  const at = (v: Video) => {
+    const t = Date.parse(lastAt.get(v.id) ?? "");
+    return Number.isNaN(t) ? Number.NEGATIVE_INFINITY : t;
+  };
+  return (a: Video, b: Video) => {
+    const [x, y] = [at(a), at(b)];
+    return x === y ? b.createdAt.localeCompare(a.createdAt) : y > x ? 1 : -1;
+  };
+}
 
 /**
  * The videos matching `query`, sorted; `limit` is not applied here. `openComments` and `mentions` (from commentCounts)
  * say which videos have open notes, and which have open threads naming the reader; the `comments` filter needs the one
- * it asks for: asked for without it, this throws rather than match nothing.
+ * it asks for: asked for without it, this throws rather than match nothing. `lastComment` (commentCounts' `lastAt`) is
+ * what the Recent comments order sorts by, and is needed for it in the same way.
  */
-export function filterVideos(videos: Video[], query: VideoQuery, openComments?: Map<string, number>, mentions?: Map<string, number>): Video[] {
+export function filterVideos(
+  videos: Video[],
+  query: VideoQuery,
+  openComments?: Map<string, number>,
+  mentions?: Map<string, number>,
+  lastComment?: Map<string, string>,
+): Video[] {
   if (query.comments === "open" && !openComments) throw new Error("filterVideos: the open comments filter needs the counts");
   if (query.comments === "mentions" && !mentions) throw new Error("filterVideos: the mentions filter needs the counts");
+  if (query.sort === "commented" && !lastComment) throw new Error("filterVideos: the recent comments order needs the comment times");
   const needle = query.q.toLowerCase();
   // One clock for the whole list, so a link lapsing mid-filter cannot land in two states.
   const now = Date.now();
@@ -2184,7 +2208,7 @@ export function filterVideos(videos: Video[], query: VideoQuery, openComments?: 
       if (query.status === "processing" ? v.status !== "processing" && v.status !== "queued" : query.status !== "all" && v.status !== query.status) return false;
       return !needle || `${v.title} ${v.description ?? ""} ${stripPauses(v.script)} ${v.cinematic?.prompt ?? ""} ${v.directed?.prompt ?? ""} ${v.avatarName ?? ""} ${v.voiceName ?? ""}`.toLowerCase().includes(needle);
     })
-    .sort(SORTERS[query.sort]);
+    .sort(query.sort === "commented" ? byLastComment(lastComment!) : SORTERS[query.sort]);
 }
 
 /**
@@ -2204,11 +2228,11 @@ export function countFolders(videos: Video[]): Record<string, number> {
  */
 export async function queryVideos(ownerId: string = LOCAL_OWNER, query: VideoQuery, readerId?: string): Promise<VideoPage> {
   // The open notes are counted while the videos load: a second read of the store, side by side rather than after.
-  const [split, { open: openComments, mentions, latest, latestAny }] = await Promise.all([loadVideos(ownerId), commentCounts(ownerId, readerId)]);
+  const [split, { open: openComments, mentions, latest, latestAny, lastAt }] = await Promise.all([loadVideos(ownerId), commentCounts(ownerId, readerId)]);
   const live = query.trash ? split.live : await refreshPending(split.live);
   const all = query.trash ? split.trashed : live;
   const trashed = split.trashed.length;
-  const filtered = filterVideos(all, query, openComments, mentions);
+  const filtered = filterVideos(all, query, openComments, mentions, lastAt);
   // The trash reads newest deletion first; `filterVideos` sorted by creation, so put the deletion order back.
   const matched = query.trash && query.sort === "newest" ? filtered.sort((a, b) => b.deletedAt!.localeCompare(a.deletedAt!) || b.createdAt.localeCompare(a.createdAt)) : filtered;
   const videos = query.limit ? matched.slice(0, query.limit) : matched;

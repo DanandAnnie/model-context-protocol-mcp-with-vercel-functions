@@ -404,16 +404,18 @@ export async function openCommentCounts(ownerId: string): Promise<Map<string, nu
  * and one whose note is gone counts alone. `latest` is when someone other than `userId` last wrote in an open thread
  * (a note or a reply), by video id, for the library to say what is new since the reader last looked; `latestAny` the
  * same in any thread, resolved ones too, which is the mark the video page keeps once it has shown them. Without
- * `userId`, `mentions`, `latest`, and `latestAny` are empty. One read of the store for all of them.
+ * `userId`, `mentions`, `latest`, and `latestAny` are empty. `lastAt` is when anyone, the reader too, last wrote a note
+ * or a reply on each video, in any thread: the library's Recent comments order. One read of the store for all of them.
  */
 export async function commentCounts(
   ownerId: string,
   userId?: string,
-): Promise<{ open: Map<string, number>; mentions: Map<string, number>; latest: Map<string, string>; latestAny: Map<string, string> }> {
+): Promise<{ open: Map<string, number>; mentions: Map<string, number>; latest: Map<string, string>; latestAny: Map<string, string>; lastAt: Map<string, string> }> {
   const open = new Map<string, number>();
   const mentions = new Map<string, number>();
   const latest = new Map<string, string>();
   const latestAny = new Map<string, string>();
+  const lastAt = new Map<string, string>();
   // The newest wins; the first readable one stands in until then.
   const newer = (map: Map<string, string>, c: VideoComment, at: number) => {
     if (!(Date.parse(map.get(c.videoId) ?? "") >= at)) map.set(c.videoId, c.createdAt);
@@ -426,6 +428,7 @@ export async function commentCounts(
     const start = startOf(c);
     const at = Date.parse(c.createdAt);
     const others = !!userId && c.authorId !== userId && !Number.isNaN(at);
+    if (!Number.isNaN(at)) newer(lastAt, c, at);
     if (others) newer(latestAny, c, at);
     if (start.resolvedAt) continue;
     if (start === c) open.set(c.videoId, (open.get(c.videoId) ?? 0) + 1);
@@ -436,7 +439,7 @@ export async function commentCounts(
     const videoId = byId.get(id)!.videoId;
     mentions.set(videoId, (mentions.get(videoId) ?? 0) + 1);
   }
-  return { open, mentions, latest, latestAny };
+  return { open, mentions, latest, latestAny, lastAt };
 }
 
 /** Removes every comment on a video; part of deleting the video for good. */

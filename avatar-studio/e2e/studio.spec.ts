@@ -3356,7 +3356,7 @@ test("captions, share page, rename, and library filters", async ({ page }) => {
   await expect(page.locator("button[title='Rename']")).toHaveText("Renamed video");
 });
 
-test("library sorts by date, title, views, latest view, and length", async ({ page }) => {
+test("library sorts by date, title, views, latest view, length, and recent comments", async ({ page }) => {
   // The older one has much the longer script, so the length sort has an order to show.
   const older = await createVideoViaApi(page, "Zulu sortcheck", { script: Array.from({ length: 12 }, (_, i) => `This is sentence number ${i + 1} of a longer tour.`).join(" ") });
   const newer = await createVideoViaApi(page, "Alpha sortcheck");
@@ -3393,6 +3393,29 @@ test("library sorts by date, title, views, latest view, and length", async ({ pa
   await page.getByLabel("Sort videos").selectOption("length");
   await expect(titles.first()).toHaveText("Zulu sortcheck");
   expect((await page.request.get("/api/videos?sort=random")).status()).toBe(400);
+  // Recent comments puts the video last written about first, whoever wrote, so a note on the older one lifts it.
+  await page.getByLabel("Sort videos").selectOption("title");
+  await expect(titles.first()).toHaveText("Alpha sortcheck");
+  const trim = await page.request.post(`/api/videos/${older.id}/comments`, { data: { text: "Trim the ending." } });
+  expect(trim.status()).toBe(201);
+  const trimId = ((await trim.json()).comment as { id: string }).id;
+  const byComments = async (expected: string[]) => {
+    await page.reload();
+    await page.getByPlaceholder(/Search title/).fill("sortcheck");
+    await page.getByLabel("Sort videos").selectOption("commented");
+    await expect(titles).toHaveText(expected);
+    // The analytics download follows the order chosen, here too where it is not the newest-made order.
+    const csv = await (await page.request.get("/api/videos/analytics?q=sortcheck&sort=commented")).text();
+    const [first, second] = expected.map((t) => csv.indexOf(t));
+    expect(first).toBeGreaterThan(-1);
+    expect(first).toBeLessThan(second);
+  };
+  await byComments(["Zulu sortcheck", "Alpha sortcheck"]);
+  expect((await page.request.post(`/api/videos/${newer.id}/comments`, { data: { text: "Brighter intro." } })).status()).toBe(201);
+  await byComments(["Alpha sortcheck", "Zulu sortcheck"]);
+  // A reply counts as much as a note, so answering the older video's thread lifts it again.
+  expect((await page.request.post(`/api/videos/${older.id}/comments`, { data: { text: "Trimmed.", parentId: trimId } })).status()).toBe(201);
+  await byComments(["Zulu sortcheck", "Alpha sortcheck"]);
 });
 
 test("the share page transcript plays the video from a line and marks the line being spoken", async ({ page }) => {

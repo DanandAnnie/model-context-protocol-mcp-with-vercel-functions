@@ -21,8 +21,8 @@ export async function GET(req: Request) {
     const query = videoQuerySchema.omit({ limit: true }).parse(Object.fromEntries(new URL(req.url).searchParams));
     // A trashed video's share link answers "not found", so it has no share analytics to give.
     if (query.trash) throw new ValidationError("The trash has no share analytics; restore the videos first");
-    const counts = query.comments === "all" ? undefined : await commentCounts(owner, isWorkspaceId(owner) ? (await userOrOwner(owner)).id : undefined);
-    const videos = filterVideos(await listVideos(owner, false), query, counts?.open, counts?.mentions);
+    const counts = query.comments === "all" && query.sort !== "commented" ? undefined : await commentCounts(owner, isWorkspaceId(owner) ? (await userOrOwner(owner)).id : undefined);
+    const videos = filterVideos(await listVideos(owner, false), query, counts?.open, counts?.mentions, counts?.lastAt);
     const origin = publicOrigin(req);
     return new Response(toCsv([...ANALYTICS_COLUMNS], analyticsRows(videos, origin)), {
       headers: {

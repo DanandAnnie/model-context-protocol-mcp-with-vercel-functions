@@ -1418,6 +1418,7 @@ function VideosInner() {
             <option value="views">Most viewed</option>
             <option value="viewed">Latest viewer visit</option>
             <option value="length">Longest first</option>
+            <option value="commented">Recent comments</option>
           </select>
         </div>
       )}

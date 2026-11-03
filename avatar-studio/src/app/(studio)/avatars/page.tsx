@@ -16,6 +16,8 @@ import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { api } from "@/lib/client";
 import type { Avatar, ProviderStatus, ShootJob, Voice } from "@/lib/types";
+import type { VideoPage } from "@/lib/services/videos";
+import Link from "next/link";
 
 /** A photo of one of the account's photo shoots, chosen as a new photo avatar's portrait. */
 type ShootPortrait = { shootId: string; photo: number; url: string; title: string };
@@ -34,6 +36,10 @@ function AvatarsInner() {
   const { data, loading, error, refetch } = useApi<{ avatars: Avatar[] }>("/api/avatars");
   const { data: voiceData } = useApi<{ voices: Voice[] }>("/api/voices");
   const { data: status } = useApi<ProviderStatus>("/api/status");
+  // How many of the library's videos each presenter is in (the library's own presenter counts; the trash is not
+  // counted), for the "In N videos" link on its tile and the warning before it is deleted.
+  const { data: library, error: libraryError, refetch: refetchLibrary } = useApi<VideoPage>("/api/videos?limit=1");
+  const inVideos = new Map((library?.presenters ?? []).map((p) => [p.id, p.count]));
   const voices = voiceData?.voices ?? [];
   const { data: packData, setData: setPackData, refetch: refetchPacks } = useApi<{ lookPacks: LookPack[]; available: boolean; described?: boolean }>("/api/look-packs");
   const packs = packData?.lookPacks ?? [];
@@ -155,7 +161,15 @@ function AvatarsInner() {
   }
 
   async function remove(a: Avatar) {
-    if (!confirm(`Delete avatar "${a.name}"?`)) return;
+    const used = inVideos.get(a.id) ?? 0;
+    const after = "rendered videos keep it, but retrying or copying one needs another presenter.";
+    // Before the counts arrive (or when they could not be read), the prompt cannot say it is unused.
+    const warning = !library
+      ? ` It may be in videos in your library${libraryError ? "" : " (still counting)"}: ${after}`
+      : used
+        ? ` It is in ${used === 1 ? "1 video" : `${used} videos`} in your library: ${after}`
+        : "";
+    if (!confirm(`Delete avatar "${a.name}"?${warning}`)) return;
     const mine = avatars.filter((x) => x.source === "custom");
     const next = mine[mine.indexOf(a) + 1] ?? mine[mine.indexOf(a) - 1];
     try {
@@ -164,6 +178,7 @@ function AvatarsInner() {
       // A new-looks panel open for this avatar has nothing left to dress.
       if (looksFor?.id === a.id) setLooksFor(null);
       refetch();
+      void refetchLibrary();
       // Focus moves to the next photo avatar's first control, or to the page's own button, rather than being lost.
       focusAfterRender(() => (next ? document.querySelector<HTMLElement>(`[data-avatar-controls="${CSS.escape(next.id)}"] button`) : null) ?? newButton.current);
     } catch (e) {
@@ -265,6 +280,16 @@ function AvatarsInner() {
           {avatars.map((a) => (
             <div key={a.id} className="relative">
               <AvatarTile avatar={a} />
+              {(inVideos.get(a.id) ?? 0) > 0 && (
+                <Link
+                  href={`/videos?presenter=${encodeURIComponent(a.id)}`}
+                  aria-label={`In ${inVideos.get(a.id) === 1 ? "1 video" : `${inVideos.get(a.id)} videos`}: show ${a.name}'s videos in the library`}
+                  className="mt-1 inline-block text-xs font-medium text-brand-700 hover:underline"
+                  data-avatar-videos={a.id}
+                >
+                  In {inVideos.get(a.id) === 1 ? "1 video" : `${inVideos.get(a.id)} videos`}
+                </Link>
+              )}
               {favorites.canToggle && (
                 <FavoriteStar name={a.name} on={favorites.avatarIds.has(a.id)} onToggle={() => favorites.toggle("avatar", a.id)} className="absolute left-2 top-2" />
               )}

@@ -3468,6 +3468,70 @@ test("library filters by presenter, in any scene, from its picker, the address, 
   await expect(page.getByText("No videos match")).toHaveCount(0);
 });
 
+test("the avatars page says how many videos each presenter is in, links to them, and warns before a delete", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const bg = { type: "color", value: "#0f172a" };
+  const used = (await (await page.request.post("/api/avatars", { data: { name: `Counted ${tag}`, imageUrl: "https://example.com/p.jpg" } })).json()).avatar as { id: string };
+  const unused = (await (await page.request.post("/api/avatars", { data: { name: `Unused ${tag}`, imageUrl: "https://example.com/p.jpg" } })).json()).avatar as { id: string };
+  const single = (await (await page.request.post("/api/avatars", { data: { name: `Single ${tag}`, imageUrl: "https://example.com/p.jpg" } })).json()).avatar as { id: string };
+  await createVideoViaApi(page, `${tag} own`, { avatarId: used.id });
+  await createVideoViaApi(page, `${tag} scene`, { avatarId: "stock_2", script: undefined, scenes: [{ script: "Opening.", background: bg }, { script: "Closing.", background: bg, avatarId: used.id }] });
+  // Neither a trashed video nor a scene that hides the presenter counts.
+  const trashed = await createVideoViaApi(page, `${tag} trashed`, { avatarId: used.id });
+  expect((await page.request.delete(`/api/videos/${trashed.id}`)).status()).toBe(200);
+  await createVideoViaApi(page, `${tag} hidden`, { avatarId: "stock_2", script: undefined, scenes: [{ script: "Opening.", background: bg }, { script: "Picture only.", background: { type: "image", value: "https://example.com/b.jpg" }, avatarId: used.id, hidePresenter: true }] });
+  await createVideoViaApi(page, `${tag} single`, { avatarId: single.id });
+  await page.goto("/avatars");
+  const link = page.locator(`[data-avatar-videos="${used.id}"]`);
+  await expect(link).toHaveText("In 2 videos");
+  await expect(link).toHaveAccessibleName(`In 2 videos: show Counted ${tag}'s videos in the library`);
+  await expect(page.locator(`[data-avatar-videos="${single.id}"]`)).toHaveText("In 1 video");
+  // A presenter in no video has no link.
+  await expect(page.getByRole("img", { name: `Unused ${tag}` })).toBeVisible();
+  await expect(page.locator(`[data-avatar-videos="${unused.id}"]`)).toHaveCount(0);
+  // Deleting a presenter in use says so first; dismissed, nothing is deleted.
+  let asked = "";
+  page.once("dialog", (d) => {
+    asked = d.message();
+    void d.dismiss();
+  });
+  await page.locator(`[data-avatar-controls="${used.id}"]`).getByRole("button", { name: "Delete avatar" }).click();
+  await expect.poll(() => asked).toBe(`Delete avatar "Counted ${tag}"? It is in 2 videos in your library: rendered videos keep it, but retrying or copying one needs another presenter.`);
+  expect((await page.request.get(`/api/avatars/${used.id}`)).status()).toBe(200);
+  // One not in a video is asked about plainly.
+  page.once("dialog", (d) => {
+    asked = d.message();
+    void d.accept();
+  });
+  await page.locator(`[data-avatar-controls="${unused.id}"]`).getByRole("button", { name: "Delete avatar" }).click();
+  await expect.poll(() => asked).toBe(`Delete avatar "Unused ${tag}"?`);
+  await expect(page.getByRole("img", { name: `Unused ${tag}` })).toHaveCount(0);
+  // The link opens the library at the presenter.
+  await link.click();
+  await expect(page).toHaveURL(new RegExp(`/videos\\?presenter=${used.id}$`));
+  await expect(page.getByLabel("Filter by presenter")).toHaveValue(used.id);
+  await page.getByPlaceholder(/Search title/).fill(tag);
+  const shown = page.locator("a[href^='/videos/vid_'] .truncate");
+  await expect(shown).toHaveCount(2);
+  expect((await shown.allTextContents()).sort()).toEqual([`${tag} own`, `${tag} scene`]);
+  // Until the library has been counted, a delete cannot say a presenter is unused.
+  await page.route("**/api/videos?limit=1", () => {
+    // Never answered: the counts stay unknown.
+  });
+  try {
+    await page.goto("/avatars");
+    page.once("dialog", (d) => {
+      asked = d.message();
+      void d.dismiss();
+    });
+    await page.locator(`[data-avatar-controls="${single.id}"]`).getByRole("button", { name: "Delete avatar" }).click();
+    await expect.poll(() => asked).toBe(`Delete avatar "Single ${tag}"? It may be in videos in your library (still counting): rendered videos keep it, but retrying or copying one needs another presenter.`);
+    await expect(page.locator(`[data-avatar-videos="${single.id}"]`)).toHaveCount(0);
+  } finally {
+    await page.unroute("**/api/videos?limit=1");
+  }
+});
+
 test("the share page transcript plays the video from a line and marks the line being spoken", async ({ page }) => {
   const v = await createVideoViaApi(page, `Transcript ${Date.now().toString(36)}`, { script: "First we open the doors. [pause 1s] Then the team walks you through every room. Finally we hand over the keys." });
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");

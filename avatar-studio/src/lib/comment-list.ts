@@ -91,6 +91,33 @@ export function freshVideoIds(latest: Record<string, string> | undefined, you: s
     .map(([id]) => id);
 }
 
+/**
+ * Marks the comments on `ids` as read for `you`: each video's mark becomes the newest someone else wrote in any of its
+ * threads (`latest`, the library's `latestAnyComment`), as opening it would; a later mark already kept (from a video
+ * opened in another tab, say) stays. Returns how many marks were kept; none where the browser's storage refuses them.
+ */
+export function markCommentsSeen(
+  ids: string[],
+  latest: Record<string, string>,
+  you: string,
+  write: (key: string, value: string) => void,
+  read: (key: string) => string | null = () => null,
+): number {
+  let kept = 0;
+  for (const id of ids) {
+    if (!latest[id]) continue;
+    const key = commentsSeenKey(you, id);
+    try {
+      const before = read(key);
+      if (!(before !== null && Date.parse(before) > Date.parse(latest[id]))) write(key, latest[id]);
+      kept++;
+    } catch {
+      // Not kept: it stays new.
+    }
+  }
+  return kept;
+}
+
 /** A mark read from this browser's storage, or none when the storage cannot be read (a private window, say). */
 export function readSeenMark(key: string): string | null {
   try {

@@ -64,6 +64,16 @@ describe("comments that mention the reader", () => {
     assert.deepEqual([...forBob.latest.keys()].sort(), [a.id]);
     assert.ok(Date.parse(forBob.latest.get(a.id)!) >= Date.parse(reply.createdAt));
     assert.deepEqual(Object.fromEntries((await commentCounts(ws.id)).latest), {}, "no reader, nothing to compare");
+    // latestAny is the same in any thread, resolved ones too: b's resolved thread counts there, and a reply in it later on.
+    assert.equal(forAlice.latestAny.get(b.id), undefined, "alice wrote b's note herself");
+    const late = await addComment(a.id, say("Second look"), ws.id, bob);
+    await resolveComment(a.id, late.id, true, ws.id, carol);
+    const afterResolve = await commentCounts(ws.id, alice.id);
+    assert.equal(afterResolve.latest.get(a.id), reply.createdAt, "a resolved thread is not counted as open");
+    assert.equal(afterResolve.latestAny.get(a.id), late.createdAt, "but it is in what opening the video marks");
+    assert.deepEqual((await queryVideos(ws.id, videoQuerySchema.parse({}), alice.id)).latestAnyComment[a.id], late.createdAt);
+    await resolveComment(a.id, late.id, false, ws.id, carol);
+    await getStore().remove("comment", late.id);
     // The reader's own reply after a teammate's does not move it.
     await addComment(a.id, say("Looks right now", t1.id), ws.id, alice);
     assert.equal((await commentCounts(ws.id, alice.id)).latest.get(a.id), reply.createdAt);

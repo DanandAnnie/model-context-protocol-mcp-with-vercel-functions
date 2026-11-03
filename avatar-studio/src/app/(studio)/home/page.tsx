@@ -8,7 +8,7 @@ import { EmptyState, SectionTitle, Skeleton } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useWorkspaceRole } from "@/hooks/useCanEdit";
 import { allowanceNotice, awaitingReview, failedThisWeek, openCommentSummary, shareAttention } from "@/lib/client";
-import { freshVideoIds, readSeenMark } from "@/lib/comment-list";
+import { COMMENTS_SEEN_PREFIX, freshVideoIds, markCommentsSeen, readSeenMark } from "@/lib/comment-list";
 import { draftKeyFor, draftSummary, type DraftSummary } from "@/lib/editor-draft";
 import type { Video } from "@/lib/types";
 
@@ -24,7 +24,7 @@ const QUICK = [
 ];
 
 export default function HomePage() {
-  const { data, loading } = useApi<{ videos: Video[]; shareOrigin?: string; openComments?: Record<string, number>; mentions?: Record<string, number>; latestComment?: Record<string, string>; you?: string }>("/api/videos");
+  const { data, loading } = useApi<{ videos: Video[]; shareOrigin?: string; openComments?: Record<string, number>; mentions?: Record<string, number>; latestComment?: Record<string, string>; latestAnyComment?: Record<string, string>; you?: string }>("/api/videos");
   const recent = data?.videos.slice(0, 4) ?? [];
   // This month's renders against the plan's allowance, once little or none of it is left.
   const { data: status } = useApi<{ renderLimitPerMonth?: number | null; usage?: { rendersThisMonth: number } }>("/api/status");
@@ -90,10 +90,46 @@ export default function HomePage() {
   // Of those, the open threads that name the reader: what is waiting on them in particular.
   const forYou = openCommentSummary(data?.mentions);
   // The videos a teammate wrote in since the reader last opened them in this browser, newest first; the first three by name.
+  // Read again when a video page in another tab keeps a mark, and when this tab comes back to the front.
+  const [marksTick, setMarksTick] = useState(0);
+  useEffect(() => {
+    const bump = () => setMarksTick((n) => n + 1);
+    const onStorage = (e: StorageEvent) => (e.key === null || e.key.startsWith(COMMENTS_SEEN_PREFIX)) && bump();
+    const onShow = () => document.visibilityState === "visible" && bump();
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("pageshow", bump);
+    window.addEventListener("focus", bump);
+    document.addEventListener("visibilitychange", onShow);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("pageshow", bump);
+      window.removeEventListener("focus", bump);
+      document.removeEventListener("visibilitychange", onShow);
+    };
+  }, []);
   const fresh = useMemo(() => {
     const byId = new Map((data?.videos ?? []).map((v) => [v.id, v]));
     return freshVideoIds(data?.latestComment, data?.you, readSeenMark).flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []));
-  }, [data]);
+    // marksTick: read the marks again; the data alone does not change when one is kept.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, marksTick]);
+  // Marks every one of them read here, as opening each would, then says so where the line was.
+  const [freshNote, setFreshNote] = useState("");
+  function markFreshRead() {
+    if (!data?.you || !data.latestComment) return;
+    // The mark opening each video keeps: its newest comment by others in any thread, not only the open ones listed here.
+    const marks = { ...data.latestComment, ...data.latestAnyComment };
+    const kept = markCommentsSeen(fresh.map((v) => v.id), marks, data.you, (key, value) => window.localStorage.setItem(key, value), readSeenMark);
+    setMarksTick((n) => n + 1);
+    // Cleared first, so the same words a second time are still spoken.
+    setFreshNote("");
+    const note = kept ? `Marked ${kept === 1 ? "1 video's" : `${kept} videos'`} comments as read.` : "Could not mark them as read in this browser.";
+    requestAnimationFrame(() => {
+      setFreshNote(note);
+      // The line goes once every one is marked, so the keyboard moves on; while some are left, it stays on the button.
+      if (kept === fresh.length) quickRef.current?.querySelector<HTMLAnchorElement>("a")?.focus();
+    });
+  }
 
   return (
     <>
@@ -151,6 +187,9 @@ export default function HomePage() {
                   )}
                   .
                 </span>
+                <button type="button" onClick={markFreshRead} aria-label="Mark the new comments on these videos as read" className="font-medium underline hover:no-underline">
+                  Mark as read
+                </button>
               </li>
             )}
             {forYou.videos > 0 && (
@@ -228,6 +267,8 @@ export default function HomePage() {
 
       <p role="status" className="sr-only">
         {draftNote}
+        {draftNote && freshNote ? " " : ""}
+        {freshNote}
       </p>
 
       <div ref={quickRef} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">

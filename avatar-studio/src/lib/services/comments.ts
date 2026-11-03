@@ -402,31 +402,41 @@ export async function openCommentCounts(ownerId: string): Promise<Map<string, nu
  * Open threads by video id, and of those, the ones that name `userId` (`@email` in the note or any reply) as `mentions`:
  * what is still waiting on that person. A thread counts once, by the note that starts it; its replies are part of it,
  * and one whose note is gone counts alone. `latest` is when someone other than `userId` last wrote in an open thread
- * (a note or a reply), by video id, for the library to say what is new since the reader last looked. Without `userId`,
- * `mentions` and `latest` are empty. One read of the store for all three.
+ * (a note or a reply), by video id, for the library to say what is new since the reader last looked; `latestAny` the
+ * same in any thread, resolved ones too, which is the mark the video page keeps once it has shown them. Without
+ * `userId`, `mentions`, `latest`, and `latestAny` are empty. One read of the store for all of them.
  */
-export async function commentCounts(ownerId: string, userId?: string): Promise<{ open: Map<string, number>; mentions: Map<string, number>; latest: Map<string, string> }> {
+export async function commentCounts(
+  ownerId: string,
+  userId?: string,
+): Promise<{ open: Map<string, number>; mentions: Map<string, number>; latest: Map<string, string>; latestAny: Map<string, string> }> {
   const open = new Map<string, number>();
   const mentions = new Map<string, number>();
   const latest = new Map<string, string>();
+  const latestAny = new Map<string, string>();
+  // The newest wins; the first readable one stands in until then.
+  const newer = (map: Map<string, string>, c: VideoComment, at: number) => {
+    if (!(Date.parse(map.get(c.videoId) ?? "") >= at)) map.set(c.videoId, c.createdAt);
+  };
   const all = await getStore().list<VideoComment>("comment", ownerId);
   const byId = new Map(all.map((c) => [c.id, c]));
   const startOf = (c: VideoComment) => (c.parentId && byId.get(c.parentId)) || c;
   const named = new Set<string>();
   for (const c of all) {
     const start = startOf(c);
+    const at = Date.parse(c.createdAt);
+    const others = !!userId && c.authorId !== userId && !Number.isNaN(at);
+    if (others) newer(latestAny, c, at);
     if (start.resolvedAt) continue;
     if (start === c) open.set(c.videoId, (open.get(c.videoId) ?? 0) + 1);
     if (userId && !named.has(start.id) && c.mentions?.some((m) => m.userId === userId)) named.add(start.id);
-    const at = Date.parse(c.createdAt);
-    // The newest wins; the first readable one stands in until then.
-    if (userId && c.authorId !== userId && !Number.isNaN(at) && !(Date.parse(latest.get(c.videoId) ?? "") >= at)) latest.set(c.videoId, c.createdAt);
+    if (others) newer(latest, c, at);
   }
   for (const id of named) {
     const videoId = byId.get(id)!.videoId;
     mentions.set(videoId, (mentions.get(videoId) ?? 0) + 1);
   }
-  return { open, mentions, latest };
+  return { open, mentions, latest, latestAny };
 }
 
 /** Removes every comment on a video; part of deleting the video for good. */

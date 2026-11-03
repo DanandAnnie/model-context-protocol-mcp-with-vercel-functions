@@ -2,7 +2,7 @@
 // Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { NOTHING_SEEN, commentsSeenKey, freshVideoIds, hasNewComments, newSince, seenMark } from "../comment-list";
+import { NOTHING_SEEN, commentsSeenKey, freshVideoIds, hasNewComments, markCommentsSeen, newSince, seenMark } from "../comment-list";
 import { openCommentsBadge } from "../client";
 
 const notes = [
@@ -102,5 +102,25 @@ describe("freshVideoIds", () => {
     assert.deepEqual(freshVideoIds(latest, undefined, read), []);
     assert.deepEqual(freshVideoIds(undefined, "u1", read), []);
     assert.deepEqual(freshVideoIds(latest, "u1", () => null), [], "a browser that kept no marks has nothing new");
+  });
+});
+
+describe("markCommentsSeen", () => {
+  it("keeps each video's newest comment as its mark, so none of them is new any more", () => {
+    const store: Record<string, string> = {};
+    const latest = { a: "2026-11-03T11:00:00.000Z", b: "2026-11-03T13:00:00.000Z" };
+    assert.equal(markCommentsSeen(["a", "b", "gone"], latest, "u1", (k, v) => (store[k] = v)), 2, "a video with no time is left alone");
+    assert.deepEqual(store, { [commentsSeenKey("u1", "a")]: latest.a, [commentsSeenKey("u1", "b")]: latest.b });
+    assert.deepEqual(freshVideoIds(latest, "u1", (k) => store[k] ?? null), []);
+  });
+
+  it("keeps a later mark already there, as from a video opened in another tab", () => {
+    const store: Record<string, string> = { [commentsSeenKey("u1", "a")]: "2026-11-03T12:00:00.000Z" };
+    assert.equal(markCommentsSeen(["a"], { a: "2026-11-03T11:00:00.000Z" }, "u1", (k, v) => (store[k] = v), (k) => store[k] ?? null), 1);
+    assert.equal(store[commentsSeenKey("u1", "a")], "2026-11-03T12:00:00.000Z");
+  });
+
+  it("counts none kept where the browser will not store them", () => {
+    assert.equal(markCommentsSeen(["a"], { a: "2026-11-03T11:00:00.000Z" }, "u1", () => { throw new Error("quota"); }), 0);
   });
 });

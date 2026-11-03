@@ -3596,7 +3596,8 @@ test("the library and Home mark the videos whose comments are new since you last
     const ours = new Set([v.id, w.id, x.id]);
     // A request the page drops while it is answered (leaving for another page) is let go. The server's own rule, others'
     // notes in open threads only, is the unit tests'; here each video's newest note stands in for it.
-    await page.route(/\/api\/videos\/[^/]+\/comments$/, async (route) => {
+    // On the browser's every tab, as a video opened in another one reads them too.
+    await page.context().route(/\/api\/videos\/[^/]+\/comments$/, async (route) => {
       if (route.request().method() !== "GET") return route.fallback();
       try {
         const real = await (await route.fetch()).json();
@@ -3614,7 +3615,7 @@ test("the library and Home mark the videos whose comments are new since you last
           const list = (await (await page.request.get(`/api/videos/${id}/comments`)).json()).comments as Array<{ createdAt: string }>;
           latestComment[id] = list.map((c) => c.createdAt).sort().at(-1);
         }
-        await route.fulfill({ json: { ...real, latestComment } });
+        await route.fulfill({ json: { ...real, latestComment, latestAnyComment: latestComment } });
       } catch {
         // Dropped by the page.
       }
@@ -3650,7 +3651,7 @@ test("the library and Home mark the videos whose comments are new since you last
     await page.goto("/home");
     const notice = page.getByTestId("fresh-comments-notice");
     // Each title says, to a screen reader reading the links on their own, why it is there.
-    await expect(notice).toHaveText(`New comments since you last looked, on Seen ${tag} (new comments).`);
+    await expect(notice).toHaveText(`New comments since you last looked, on Seen ${tag} (new comments).Mark as read`);
     await notice.getByRole("link", { name: `Seen ${tag} (new comments)` }).click();
     await expect(page).toHaveURL(new RegExp(`/videos/${v.id}$`));
     await expect(page.getByTestId("comments")).toHaveAttribute("data-seen-read", "true");
@@ -3658,8 +3659,30 @@ test("the library and Home mark the videos whose comments are new since you last
     await page.goBack();
     await expect(page.getByTestId("open-comments-notice")).toBeVisible();
     await expect(notice).toHaveCount(0);
+    // Written in again: opened in another tab, Home here drops it when it comes back to the front.
+    expect((await post(v.id, "Third.")).status()).toBe(201);
+    expect((await post(w.id, "Second, again.")).status()).toBe(201);
+    await page.reload();
+    await expect(notice).toHaveText(`New comments since you last looked, on Fresh ${tag} (new comments) and Seen ${tag} (new comments).Mark as read`);
+    const other = await page.context().newPage();
+    await other.goto(`/videos/${v.id}`);
+    await expect(other.getByTestId("comments")).toHaveAttribute("data-seen-read", "true");
+    await other.close();
+    await page.bringToFront();
+    // The other tab's mark reaches this one as a storage event; coming back to the front reads the marks again too.
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(notice).toHaveText(`New comments since you last looked, on Fresh ${tag} (new comments).Mark as read`);
+    // Mark as read clears the rest at once, says so, and hands the keyboard on to the first quick action.
+    await notice.getByRole("button", { name: "Mark the new comments on these videos as read" }).click();
+    await expect(notice).toHaveCount(0);
+    await expect(page.getByRole("link", { name: /^Avatar video/ })).toBeFocused();
+    await expect(page.getByRole("status").filter({ hasText: "Marked 1 video's comments as read." })).toHaveCount(1);
+    await page.reload();
+    await expect(page.getByTestId("open-comments-notice")).toBeVisible();
+    await expect(notice).toHaveCount(0);
   } finally {
     await page.unrouteAll({ behavior: "ignoreErrors" });
+    await page.context().unrouteAll({ behavior: "ignoreErrors" });
     // The active space is the account's, so the next test starts in the personal one again.
     await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
   }

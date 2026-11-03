@@ -1244,3 +1244,18 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
   - An independent review found nothing blocking.
   - Fixed from the optional findings: a remembered "Most used" is shown only once the counts arrive. Until then, or for good if they cannot be read, the page lists and names favourites first, while the stored choice is kept. `shownPresenterSort` holds that rule and has a unit test, and the e2e test that holds back the counts checks it.
   - Left as it is: the choice is per browser, not per workspace, as the library's layout is.
+- Replace a presenter or voice everywhere else it is used (`0087839`). Under the "Used by" line on the Avatars and Voices pages, editors get a Replace… control: pick another presenter or voice and confirm, and every interactive presenter, saved template (its own presenter or voice and each scene's), the brand kit's default, and, for a voice, every photo avatar's default voice switches to it. Videos already made are left as they are, and the library's counts still show them. A note says what changed, and the focus moves to it. `POST /api/usage/replace` (`{ kind, from, to }`, editors only) does the work through `replaceUses` in `src/lib/services/usage.ts`. It looks up the new presenter or voice once, before writing anything: 404 for an unknown presenter, 400 for an unknown voice or one replaced with itself. An interactive presenter takes the new presenter's name and picture, or the new voice's language. Each record is written only while it still names the old presenter or voice, conditionally on its `updatedAt` and read fresh just before the write. So an edit landing meanwhile is kept, and a record deleted meanwhile stays deleted. `replaceInTemplate` and `replaceInAgent` hold the rewrite rules and have unit tests, and a service test runs a presenter replace and a voice replace against the memory store. The e2e test replaces a photo avatar in an interactive presenter and a template, checks the confirmation, the focus, and the server's refusals, and checks that a viewer gets no Replace.
+  - An independent review found three blocking problems, all now fixed:
+    - One interactive presenter whose other voice or presenter had been deleted stopped the whole replace part-way, with an error naming neither. The replacement is now looked up once and each presenter is switched on its own fields, so that case is switched too, and a unit test covers it.
+    - Records were written from the list read at the start with a plain write, which could overwrite an edit made meanwhile and bring back a deleted template or brand kit. Writes are now conditional and retried on a conflict, as the background-image delete's are.
+    - The focus was lost when the control closed. It now moves to the choice on open, back to the button on Cancel, and to the note after a replace.
+  - A second review of those fixes found nothing blocking. Fixed from the optional findings of both reviews:
+    - The note is always on the page, so a screen reader hears it change.
+    - Cancel clears the choice and any error.
+    - The "Used by" lines are read again after a failed replace too.
+    - Records are read fresh just before each write.
+    - The focus goes back to the choice when a replace fails.
+  - Left as it is:
+    - No entry in the activity feed.
+    - A visitor's turn that saves an interactive presenter's counters in the moment between that read and the write can still be written over, or can write the old presenter back. Those counter writes are not conditional anywhere yet.
+    - A photo avatar renamed in that same moment can lose the rename, since avatars carry no `updatedAt` to check.

@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Activity, Check, Copy, Download, Link2, Trash2, UserMinus } from "lucide-react";
@@ -42,7 +43,7 @@ export default function WorkspacePage() {
   // select, the list, the wording, and the download never disagree. Their events stay under Anyone.
   const actor = picked && people.some((p) => p.id === picked) ? picked : null;
   const filterQuery = `${area ? `&area=${area}` : ""}${actor ? `&actor=${encodeURIComponent(actor)}` : ""}`;
-  const activity = useApi<{ events: ActivityEvent[]; area: ActivityArea | null; actor: string | null }>(ws ? `/api/activity?limit=30${filterQuery}` : null);
+  const activity = useApi<{ events: ActivityEvent[]; links?: Record<string, string>; area: ActivityArea | null; actor: string | null }>(ws ? `/api/activity?limit=30${filterQuery}` : null);
   // A list is shown only under the filters it was fetched for, so switching never flashes the previous one.
   const events = activity.data && (activity.data.area ?? null) === area && (activity.data.actor ?? null) === actor ? activity.data.events : null;
   const whoPhrase = actor ? (people.find((p) => p.id === actor)?.phrase ?? null) : null;
@@ -341,7 +342,14 @@ export default function WorkspacePage() {
           <ol className="mt-3 divide-y divide-slate-100 text-sm">
             {events.map((e) => (
               <li key={e.id} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2">
-                <span className="min-w-0 break-words text-slate-800">{describeActivity(e, data?.personalId)}</span>
+                {activity.data?.links?.[e.id] ? (
+                  // The sentence itself is the link, so its name says where it goes ("You created “Launch”").
+                  <Link href={activity.data.links[e.id]} className="min-w-0 break-words text-slate-800 underline decoration-slate-500 underline-offset-2 hover:text-brand-700 hover:decoration-brand-500">
+                    {describeActivity(e, data?.personalId)}
+                  </Link>
+                ) : (
+                  <span className="min-w-0 break-words text-slate-800">{describeActivity(e, data?.personalId)}</span>
+                )}
                 <time dateTime={e.createdAt} className="shrink-0 text-xs text-slate-500">
                   {formatDate(e.createdAt)}
                 </time>

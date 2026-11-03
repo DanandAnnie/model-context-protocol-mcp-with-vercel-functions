@@ -2,7 +2,7 @@ import { errorResponse, json } from "@/lib/api-utils";
 import { requireOwner } from "@/lib/owner";
 import { ACTIVITY_CSV_COLUMNS, activityRows } from "@/lib/activity-text";
 import { toCsv } from "@/lib/csv";
-import { MAX_ACTIVITY, activityQuerySchema, listActivity } from "@/lib/services";
+import { MAX_ACTIVITY, activityLinks, activityQuerySchema, listActivity } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +26,9 @@ export async function GET(req: Request) {
     }
     const { limit, area, actor } = activityQuerySchema.parse(params);
     // The filters are echoed so a page can tell which filters a list it holds answers.
-    return json({ events: await listActivity(owner, limit, area, actor), area: area ?? null, actor: actor ?? null });
+    const events = await listActivity(owner, limit, area, actor);
+    // `links` says where each line leads, for the events whose video, presenter, key, or kit is still here.
+    return json({ events, links: await activityLinks(owner, events), area: area ?? null, actor: actor ?? null });
   } catch (err) {
     return errorResponse(err);
   }

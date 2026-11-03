@@ -3,7 +3,10 @@
 import { z } from "zod";
 import { ACTIVITY_AREAS, activityArea, type ActivityArea } from "../activity-text";
 import { newId } from "../ids";
-import { getStore } from "../store";
+import { LOCAL_OWNER } from "../owner-id";
+import { getStore, type ItemKind } from "../store";
+import type { Video } from "../types";
+import { purgeDue } from "./videos";
 import type { ActivityEvent, ActivityKind } from "../types";
 import type { User } from "../workspaces";
 
@@ -85,4 +88,63 @@ export async function listActivity(ownerId: string, limit: number = 50, area?: A
 
 function sorted(events: ActivityEvent[]): ActivityEvent[] {
   return [...events].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+}
+
+/** How many lines' links are checked at the same time. */
+const LINK_CHECKS_AT_ONCE = 10;
+
+/** The kinds whose subject is a video, and so link to its page while it is still kept (the trash included). */
+const VIDEO_KINDS = new Set<ActivityKind>(["video.created", "video.trashed", "video.restored", "video.review_requested", "video.approved", "video.changes_requested"]);
+
+/**
+ * Where each event's line leads, keyed by event id: a video's page, the shared presenters, the API keys, the
+ * brand kit, or the Avatars or Voices page for a replace. Only for what still exists in this owner's space, so a
+ * line never leads to a page that says "not found"; a bulk action, a member, or a thing since deleted has none.
+ */
+export async function activityLinks(ownerId: string, events: ActivityEvent[]): Promise<Record<string, string>> {
+  const store = getStore();
+  const now = Date.now();
+  const checked = new Map<string, Promise<boolean>>();
+  const exists = (kind: ItemKind, id: string): Promise<boolean> => {
+    const key = `${kind}:${id}`;
+    if (!checked.has(key)) {
+      checked.set(
+        key,
+        store
+          .get<{ ownerId?: string }>(kind, id)
+          .then((item) => {
+            if (!item) return false;
+            // A brand kit is the owner's only when it says so, as the Brand page reads it; other records follow
+            // the store's rule that one with no owner belongs to the local owner.
+            if ((kind === "brand" ? item.ownerId : (item.ownerId ?? LOCAL_OWNER)) !== ownerId) return false;
+            // A video past its time in the trash answers "not found" until a listing deletes it.
+            return kind !== "video" || !purgeDue(item as Video, now);
+          })
+          .catch((err) => {
+            console.error(`activity link check for ${kind} ${id} failed:`, err);
+            return false;
+          }),
+      );
+    }
+    return checked.get(key)!;
+  };
+  const linkFor = async (e: ActivityEvent): Promise<string | null> => {
+    if (VIDEO_KINDS.has(e.kind)) return e.subjectId && (await exists("video", e.subjectId)) ? `/videos/${encodeURIComponent(e.subjectId)}` : null;
+    if (e.kind === "agent.created" || e.kind === "agent.duplicated") return e.subjectId && (await exists("agent", e.subjectId)) ? "/interactive" : null;
+    if (e.kind === "apikey.created") return e.subjectId && (await exists("apikey", e.subjectId)) ? "/settings" : null;
+    if (e.kind === "brand.saved") return (await exists("brand", `brand_${ownerId}`)) ? "/brand" : null;
+    if (e.kind === "usage.replaced") return e.replaced?.kind === "voice" ? "/voices" : e.replaced?.kind === "avatar" ? "/avatars" : null;
+    return null;
+  };
+  const links: Record<string, string> = {};
+  // A few lines at a time, so a long page does not send the store a burst of reads at once.
+  for (let i = 0; i < events.length; i += LINK_CHECKS_AT_ONCE) {
+    await Promise.all(
+      events.slice(i, i + LINK_CHECKS_AT_ONCE).map(async (e) => {
+        const href = await linkFor(e);
+        if (href) links[e.id] = href;
+      }),
+    );
+  }
+  return links;
 }

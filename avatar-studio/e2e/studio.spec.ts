@@ -6401,6 +6401,15 @@ test("workspaces: create, switch, isolate content, invite, join, leave, delete",
     expect(events[0].subject).toBe(`Team video ${tag}`);
     await page.reload();
     await expect(feed.getByText(`You moved "Team video ${tag}" to the trash`)).toBeVisible();
+    // A line leads to what it is about while it is kept: the trashed video's page still opens, with its trash banner.
+    const trashedLine = feed.getByRole("link", { name: `You moved "Team video ${tag}" to the trash` });
+    await expect(trashedLine).toHaveAttribute("href", `/videos/${team.id}`);
+    await expect(feed.getByRole("link", { name: `You created "Team video ${tag}"` })).toHaveAttribute("href", `/videos/${team.id}`);
+    const linked = (await (await page.request.get("/api/activity?limit=5")).json()) as { events: Array<{ id: string }>; links: Record<string, string> };
+    expect(linked.events.map((e) => linked.links[e.id])).toEqual([`/videos/${team.id}`, `/videos/${team.id}`]);
+    await trashedLine.click();
+    await expect(page.getByTestId("trash-banner")).toBeVisible();
+    await page.goBack();
     // The feed shows one area at a time: keys have none here, videos list both lines, and Everything is back.
     const show = feed.getByLabel("Activity area");
     await expect(feed.getByRole("status")).toHaveText("", { useInnerText: true });
@@ -6435,7 +6444,7 @@ test("workspaces: create, switch, isolate content, invite, join, leave, delete",
     await expect(feed.getByText("Nothing under “Videos and batches” by a script with an API key yet. The feed keeps the last 200 events.")).toBeVisible();
     await expect(feed.getByTestId("activity-csv")).toHaveCount(0);
     const byKey = (await (await page.request.get(`/api/activity?actor=${ws.id}`)).json()) as { events: unknown[]; actor: string | null };
-    expect(byKey).toEqual({ events: [], area: null, actor: ws.id });
+    expect(byKey).toEqual({ events: [], links: {}, area: null, actor: ws.id });
     const mineCsv = await page.request.get("/api/activity?format=csv&actor=local");
     expect(mineCsv.headers()["content-disposition"]).toMatch(/filename="activity-all-by-local-\d{4}-\d\d-\d\d\.csv"/);
     expect(parseCsv(await mineCsv.text()).rows.map((r) => r.kind)).toEqual(["video.trashed", "video.created"]);

@@ -917,6 +917,54 @@ describe("translated subtitles", () => {
 });
 
 describe("activity feed", () => {
+  it("links a line to what it is about while that is still in the owner's space", async () => {
+    const { recordActivity, listActivity, activityLinks } = await import("../services/activity");
+    const { getStore } = await import("../store");
+    const store = getStore();
+    const dan = { id: "u-dan" };
+    await store.put("video", { id: "vid_here", ownerId: "ws_links", status: "completed" });
+    await store.put("video", { id: "vid_trashed", ownerId: "ws_links", status: "completed", deletedAt: new Date().toISOString() });
+    await store.put("video", { id: "vid_elsewhere", ownerId: "ws_other_links", status: "completed" });
+    await store.put("agent", { id: "agt_here", ownerId: "ws_links", name: "Ava" });
+    await store.put("apikey", { id: "key_here", ownerId: "ws_links", name: "CI" });
+    await store.put("brand", { id: "brand_ws_links", ownerId: "ws_links" });
+    await store.put("video", { id: "vid_overdue", ownerId: "ws_links", status: "completed", deletedAt: new Date(Date.now() - 31 * 86_400_000).toISOString() });
+    await store.put("video", { id: "vid_legacy", status: "completed" });
+    const made = [
+      await recordActivity("ws_links", dan, "video.created", { subject: "Here", subjectId: "vid_here" }),
+      await recordActivity("ws_links", dan, "video.trashed", { subject: "Trashed", subjectId: "vid_trashed" }),
+      await recordActivity("ws_links", dan, "video.approved", { subject: "Gone", subjectId: "vid_gone" }),
+      await recordActivity("ws_links", dan, "video.created", { subject: "Not ours", subjectId: "vid_elsewhere" }),
+      await recordActivity("ws_links", dan, "video.trashed", { count: 3 }),
+      await recordActivity("ws_links", dan, "agent.created", { subject: "Ava", subjectId: "agt_here" }),
+      await recordActivity("ws_links", dan, "agent.deleted", { subject: "Old", subjectId: "agt_old" }),
+      await recordActivity("ws_links", dan, "apikey.created", { subject: "CI", subjectId: "key_here" }),
+      await recordActivity("ws_links", dan, "apikey.created", { subject: "Revoked", subjectId: "key_gone" }),
+      await recordActivity("ws_links", dan, "brand.saved", { subject: "Acme" }),
+      await recordActivity("ws_links", dan, "usage.replaced", { subject: "Ava", replaced: { kind: "voice", agents: 1, templates: 0, brand: false, avatars: 0 } }),
+      await recordActivity("ws_links", dan, "member.removed", { subject: "ann@example.com", subjectId: "u-ann" }),
+      await recordActivity("ws_links", dan, "video.trashed", { subject: "Overdue", subjectId: "vid_overdue" }),
+      await recordActivity("ws_links", dan, "video.created", { subject: "Legacy", subjectId: "vid_legacy" }),
+    ];
+    const ids = made.map((e) => e!.id);
+    const links = await activityLinks("ws_links", await listActivity("ws_links", 50));
+    assert.deepEqual(
+      ids.map((id) => links[id] ?? null),
+      ["/videos/vid_here", "/videos/vid_trashed", null, null, null, "/interactive", null, "/settings", null, "/brand", "/voices", null, null, null],
+      "only what still exists here; a trashed video keeps its page until its time in the trash is up; another owner's video (a legacy one with no owner is the local owner's) and bulk actions have none",
+    );
+    await store.remove("brand", "brand_ws_links");
+    assert.equal((await activityLinks("ws_links", await listActivity("ws_links", 50)))[ids[9]], undefined, "a removed brand kit stops linking");
+    assert.deepEqual(await activityLinks("ws_links", []), {});
+    // A store that fails leaves the lines unlinked rather than failing the feed.
+    const recent = await listActivity("ws_links", 3);
+    globalThis.__avatarStudioStore = { ...store, get: async () => { throw new Error("store down"); } } as typeof store;
+    try {
+      assert.deepEqual(await activityLinks("ws_links", recent), {});
+    } finally {
+      globalThis.__avatarStudioStore = store;
+    }
+  });
   it("lists one area of the feed at a time, up to the limit of that area's events", async () => {
     const { recordActivity, listActivity, activityQuerySchema } = await import("../services/activity");
     const { activityArea, parseActivityArea, ACTIVITY_AREAS, ACTIVITY_AREA_LABELS } = await import("../activity-text");

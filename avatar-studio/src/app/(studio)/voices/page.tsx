@@ -10,13 +10,14 @@ import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { usePresenterSort } from "@/hooks/usePresenterSort";
+import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { useVoicePreview } from "@/hooks/useVoicePreview";
 import { languageLabel } from "@/lib/language";
 import type { ProviderStatus, Voice } from "@/lib/types";
 import type { VideoPage } from "@/lib/services/videos";
-import type { OtherUses } from "@/lib/services/usage";
-import { describeOtherUses, usesOf } from "@/lib/presenters";
+import type { OtherUses, ReplacedUses } from "@/lib/services/usage";
+import { describeOtherUses, describeReplaced, usesOf } from "@/lib/presenters";
 import { OtherUsesLine } from "@/components/OtherUsesLine";
 import Link from "next/link";
 
@@ -36,7 +37,10 @@ export default function VoicesPage() {
   const { data: library, error: libraryError, refetch: refetchLibrary } = useApi<VideoPage>("/api/videos?limit=1");
   // What besides videos names each one (interactive presenters, templates, the brand kit), for a "Used by" line
   // under each and the same warning.
-  const { data: otherUses, error: otherUsesError } = useApi<OtherUses>("/api/usage");
+  const { data: otherUses, error: otherUsesError, refetch: refetchOtherUses } = useApi<OtherUses>("/api/usage");
+  // What the last Replace changed, said once it is saved.
+  const [replaced, setReplaced] = useState<string | null>(null);
+  const focusAfterRender = useFocusAfterRender();
   const inVideos = useMemo(() => new Map((library?.voices ?? []).map((p) => [p.id, p.count])), [library]);
   const videosText = (n: number) => (n === 1 ? "1 video" : `${n} videos`);
   const [actionErr, setActionErr] = useState<string | null>(null);
@@ -124,6 +128,10 @@ export default function VoicesPage() {
       <SectionTitle title="Voices" subtitle="Preview any voice with your own sample text, clone your own, or design one from a description." />
       {canEdit === false && <ViewOnlyNotice what="clone, design, or change voices" />}
       <ErrorBanner message={error ?? previewErr ?? actionErr} />
+      {/* Always on the page, so a screen reader hears the note when its words change; focused after a replace. */}
+      <p role="status" tabIndex={-1} className={replaced ? "mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800" : "sr-only"} data-replaced>
+        {replaced ?? ""}
+      </p>
       {/* Shown once the role is known: a viewer never sees them while the workspace is still loading. */}
       {/* And once the provider is known, as it decides how samples are sent. */}
       {canEdit === true && status && (
@@ -223,7 +231,26 @@ export default function VoicesPage() {
                   In {videosText(inVideos.get(v.id)!)}
                 </Link>
               )}
-              <OtherUsesLine uses={usesOf(otherUses?.voices, v.id)} marker={{ "data-voice-others": v.id }} />
+              <OtherUsesLine
+                uses={usesOf(otherUses?.voices, v.id)}
+                marker={{ "data-voice-others": v.id }}
+                replace={
+                  canEdit === true
+                    ? {
+                        name: v.name,
+                        options: (data?.voices ?? []).filter((o) => o.id !== v.id).map((o) => ({ id: o.id, name: o.name })),
+                        onReplace: async (to) => {
+                          setReplaced(null);
+                          // The lines are read again either way, so a replace that failed part-way shows what it did change.
+                          const res = await api<{ replaced: ReplacedUses }>("/api/usage/replace", { method: "POST", body: JSON.stringify({ kind: "voice", from: v.id, to: to.id }) }).finally(() => void refetchOtherUses());
+                          const what = describeReplaced(res.replaced);
+                          setReplaced(what ? `“${to.name}” now stands in for “${v.name}” in ${what}. Videos already made are not changed.` : `Nothing else used “${v.name}” any more, so nothing was changed.`);
+                          focusAfterRender(() => document.querySelector<HTMLElement>("[data-replaced]"));
+                        },
+                      }
+                    : undefined
+                }
+              />
             </div>
           ))}
         </div>

@@ -108,3 +108,15 @@ export function usesOf(byId: Record<string, OtherUse[]> | undefined, id: string)
 export function nameOtherUses(uses: OtherUse[] | undefined): string[] {
   return (uses ?? []).map((u) => KIND_ONE[u.kind](u.name));
 }
+
+/** What a replace changed, in words ("1 interactive presenter and 2 templates"), for the note after it; empty for nothing. */
+export function describeReplaced(r: { agents: number; templates: number; brand: boolean; avatars: number }): string {
+  const parts = [
+    r.agents ? (r.agents === 1 ? "1 interactive presenter" : `${r.agents} interactive presenters`) : "",
+    r.templates ? (r.templates === 1 ? "1 template" : `${r.templates} templates`) : "",
+    r.brand ? "the brand kit" : "",
+    r.avatars ? (r.avatars === 1 ? "1 photo avatar's default voice" : `${r.avatars} photo avatars' default voice`) : "",
+  ].filter(Boolean);
+  if (parts.length <= 1) return parts[0] ?? "";
+  return parts.length === 2 ? parts.join(" and ") : `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
+}

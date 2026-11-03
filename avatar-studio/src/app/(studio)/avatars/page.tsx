@@ -18,8 +18,8 @@ import { favoritesFirst, useFavorites } from "@/hooks/useFavorites";
 import { api, passesUse, type UseFilter, shownPresenterSort, sortPresenters, type PresenterSort } from "@/lib/client";
 import type { Avatar, ProviderStatus, ShootJob, Voice } from "@/lib/types";
 import type { VideoPage } from "@/lib/services/videos";
-import type { OtherUses } from "@/lib/services/usage";
-import { describeOtherUses, usesOf } from "@/lib/presenters";
+import type { OtherUses, ReplacedUses } from "@/lib/services/usage";
+import { describeOtherUses, describeReplaced, usesOf } from "@/lib/presenters";
 import { OtherUsesLine } from "@/components/OtherUsesLine";
 import Link from "next/link";
 
@@ -48,7 +48,9 @@ function AvatarsInner() {
   const { data: library, error: libraryError, refetch: refetchLibrary } = useApi<VideoPage>("/api/videos?limit=1");
   // What besides videos names each one (interactive presenters, templates, the brand kit), for a "Used by" line
   // under each and the same warning.
-  const { data: otherUses, error: otherUsesError } = useApi<OtherUses>("/api/usage");
+  const { data: otherUses, error: otherUsesError, refetch: refetchOtherUses } = useApi<OtherUses>("/api/usage");
+  // What the last Replace changed, said once it is saved.
+  const [replaced, setReplaced] = useState<string | null>(null);
   const inVideos = useMemo(() => new Map((library?.presenters ?? []).map((p) => [p.id, p.count])), [library]);
   const voices = voiceData?.voices ?? [];
   const { data: packData, setData: setPackData, refetch: refetchPacks } = useApi<{ lookPacks: LookPack[]; available: boolean; described?: boolean }>("/api/look-packs");
@@ -234,6 +236,10 @@ function AvatarsInner() {
       />
       {canEdit === false && <ViewOnlyNotice what="add or change avatars" />}
       <ErrorBanner message={error ?? actionErr} />
+      {/* Always on the page, so a screen reader hears the note when its words change; focused after a replace. */}
+      <p role="status" tabIndex={-1} className={replaced ? "mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800" : "sr-only"} data-replaced>
+        {replaced ?? ""}
+      </p>
 
       <div className="mb-5 flex flex-wrap items-center gap-2">
         {(["all", "library", "custom"] as const).map((f) => (
@@ -329,7 +335,26 @@ function AvatarsInner() {
                   In {inVideos.get(a.id) === 1 ? "1 video" : `${inVideos.get(a.id)} videos`}
                 </Link>
               )}
-              <OtherUsesLine uses={usesOf(otherUses?.avatars, a.id)} marker={{ "data-avatar-others": a.id }} />
+              <OtherUsesLine
+                uses={usesOf(otherUses?.avatars, a.id)}
+                marker={{ "data-avatar-others": a.id }}
+                replace={
+                  canEdit === true
+                    ? {
+                        name: a.name,
+                        options: (data?.avatars ?? []).filter((o) => o.id !== a.id).map((o) => ({ id: o.id, name: o.name })),
+                        onReplace: async (to) => {
+                          setReplaced(null);
+                          // The lines are read again either way, so a replace that failed part-way shows what it did change.
+                          const res = await api<{ replaced: ReplacedUses }>("/api/usage/replace", { method: "POST", body: JSON.stringify({ kind: "avatar", from: a.id, to: to.id }) }).finally(() => void refetchOtherUses());
+                          const what = describeReplaced(res.replaced);
+                          setReplaced(what ? `“${to.name}” now stands in for “${a.name}” in ${what}. Videos already made are not changed.` : `Nothing else used “${a.name}” any more, so nothing was changed.`);
+                          focusAfterRender(() => document.querySelector<HTMLElement>("[data-replaced]"));
+                        },
+                      }
+                    : undefined
+                }
+              />
               {favorites.canToggle && (
                 <FavoriteStar name={a.name} on={favorites.avatarIds.has(a.id)} onToggle={() => favorites.toggle("avatar", a.id)} className="absolute left-2 top-2" />
               )}

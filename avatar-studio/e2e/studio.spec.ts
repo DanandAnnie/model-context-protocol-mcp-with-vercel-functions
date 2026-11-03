@@ -3575,6 +3575,67 @@ test("the avatars page says how many videos each presenter is in, links to them,
   }
 });
 
+test("Replace switches every interactive presenter and template from one presenter to another, leaving videos as made", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const bg = { type: "color", value: "#0f172a" };
+  const from = (await (await page.request.post("/api/avatars", { data: { name: `Old ${tag}`, imageUrl: "https://example.com/p.jpg" } })).json()).avatar as { id: string };
+  const to = (await (await page.request.post("/api/avatars", { data: { name: `New ${tag}`, imageUrl: "https://example.com/p.jpg" } })).json()).avatar as { id: string };
+  const agent = (await (await page.request.post("/api/agents", { data: { name: `Desk ${tag}`, avatarId: from.id } })).json()).agent as { id: string };
+  const video = await createVideoViaApi(page, `${tag} swap`, { avatarId: "stock_2", script: undefined, scenes: [{ script: "Opening.", background: bg }, { script: "Closing.", background: bg, avatarId: from.id }] });
+  const made = await page.request.post("/api/templates", { data: { fromVideoId: video.id, title: `Swap ${tag}` } });
+  expect(made.status()).toBe(201);
+  const template = (await made.json()).template as { id: string };
+  // The server refuses a replace with itself, or with a presenter it cannot find.
+  expect((await page.request.post("/api/usage/replace", { data: { kind: "avatar", from: from.id, to: from.id } })).status()).toBe(400);
+  expect((await page.request.post("/api/usage/replace", { data: { kind: "avatar", from: from.id, to: "avatar_nowhere" } })).status()).toBe(404);
+  expect((await page.request.post("/api/usage/replace", { data: { kind: "voice", from: "stock_voice_1", to: "voice_nowhere" } })).status()).toBe(400);
+  await page.goto("/avatars");
+  const others = page.locator(`[data-avatar-others="${from.id}"]`);
+  const named = `Used by the interactive presenter “Desk ${tag}” and the template “Swap ${tag}”`;
+  await expect(others).toHaveText(named);
+  const opener = page.getByRole("button", { name: `Replace Old ${tag} in what uses it` });
+  // Opening puts the focus on the choice; Cancel gives it back to the button, with the choice cleared.
+  await opener.click();
+  await expect(page.getByLabel(`Use instead of Old ${tag}`)).toBeFocused();
+  await page.getByLabel(`Use instead of Old ${tag}`).selectOption(to.id);
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(opener).toBeFocused();
+  await opener.click();
+  await expect(page.getByLabel(`Use instead of Old ${tag}`)).toHaveValue("");
+  await page.getByLabel(`Use instead of Old ${tag}`).selectOption(to.id);
+  // Asked first; dismissed, nothing changes.
+  let asked = "";
+  page.once("dialog", (d) => {
+    asked = d.message();
+    void d.dismiss();
+  });
+  await page.getByRole("button", { name: "Replace", exact: true }).click();
+  await expect.poll(() => asked).toBe(`Use “New ${tag}” instead of “Old ${tag}” in the interactive presenter “Desk ${tag}” and the template “Swap ${tag}”? Videos already made are not changed.`);
+  expect(((await (await page.request.get(`/api/agents/${agent.id}`)).json()).agent as { avatarId: string }).avatarId).toBe(from.id);
+  page.once("dialog", (d) => void d.accept());
+  await page.getByRole("button", { name: "Replace", exact: true }).click();
+  await expect(page.locator("[data-replaced]")).toHaveText(`“New ${tag}” now stands in for “Old ${tag}” in 1 interactive presenter and 1 template. Videos already made are not changed.`);
+  // The control goes with the line, so the focus moves to the note.
+  await expect(page.locator("[data-replaced]")).toBeFocused();
+  await expect(others).toHaveCount(0);
+  await expect(page.locator(`[data-avatar-others="${to.id}"]`)).toHaveText(named);
+  // The interactive presenter shows the new presenter's name; the template's scene uses it; the video is as it was made.
+  const after = (await (await page.request.get(`/api/agents/${agent.id}`)).json()).agent as { avatarId: string; avatarName: string };
+  expect(after).toMatchObject({ avatarId: to.id, avatarName: `New ${tag}` });
+  const scenes = ((await (await page.request.get(`/api/templates/${template.id}`)).json()).template as { scenes: Array<{ avatarId?: string }> }).scenes;
+  expect(scenes.map((sc) => sc.avatarId)).toEqual([undefined, to.id]);
+  await expect(page.locator(`[data-avatar-videos="${from.id}"]`)).toHaveText("In 1 video");
+  // A viewer gets no Replace.
+  await page.route("**/api/workspaces", (route) =>
+    route.request().method() === "GET"
+      ? route.fulfill({ json: { personalId: "demo-user", activeId: "ws_view", workspaces: [{ id: "ws_view", name: "Read only team", role: "viewer", members: [] }] } })
+      : route.continue(),
+  );
+  await page.goto("/avatars");
+  await expect(page.locator(`[data-avatar-others="${to.id}"]`)).toHaveText(named);
+  await expect(page.getByRole("button", { name: `Replace New ${tag} in what uses it` })).toHaveCount(0);
+});
+
 test("library filters by voice, and the Voices page says how many videos each voice is in and warns before a delete", async ({ page }) => {
   const tag = Date.now().toString(36);
   const bg = { type: "color", value: "#0f172a" };

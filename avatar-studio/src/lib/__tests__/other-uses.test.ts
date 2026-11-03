@@ -2,8 +2,8 @@
 // Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { collectOtherUses, describeOtherUses } from "../services";
-import { nameOtherUses, usesOf, type OtherUse } from "../presenters";
+import { collectOtherUses, describeOtherUses, replaceInTemplate } from "../services";
+import { describeReplaced, nameOtherUses, usesOf, type OtherUse } from "../presenters";
 import type { Agent, Avatar, BrandKit, VideoTemplate } from "../types";
 
 const agent = (name: string, avatarId: string, voiceId?: string) => ({ id: name, ownerId: "o", name, avatarId, voiceId, avatarName: "", avatarImageUrl: "", instructions: "" }) as unknown as Agent;
@@ -59,5 +59,32 @@ describe("usesOf and nameOtherUses", () => {
     assert.equal(describeOtherUses(usesOf(byId, "anna")), "2 templates and the brand kit");
     assert.deepEqual(nameOtherUses(usesOf(byId, "anna")), ["the template “Welcome”", "the template “Promo”", "the brand kit"]);
     assert.deepEqual(nameOtherUses(undefined), []);
+  });
+});
+
+describe("replaceInTemplate", () => {
+  const bg = { type: "color", value: "#fff" } as VideoTemplate["scenes"][number]["background"];
+  it("switches the template's own presenter and every scene's, leaving the rest", () => {
+    const t = template("Welcome", { avatarId: "anna", voiceId: "emma", scenes: [{ script: "Hi", background: bg, avatarId: "anna" }, { script: "Bye", background: bg, avatarId: "ben", voiceId: "emma" }] as VideoTemplate["scenes"] });
+    const next = replaceInTemplate(t, "avatar", "anna", "cleo")!;
+    assert.equal(next.avatarId, "cleo");
+    assert.deepEqual(next.scenes.map((sc) => sc.avatarId), ["cleo", "ben"]);
+    assert.equal(next.voiceId, "emma");
+    assert.equal(t.avatarId, "anna", "the original is left as it was");
+  });
+  it("switches a voice named only in a scene, and returns null when nothing names it", () => {
+    const t = template("Promo", { voiceId: "james", scenes: [{ script: "Hi", background: bg, voiceId: "emma" }] as VideoTemplate["scenes"] });
+    const next = replaceInTemplate(t, "voice", "emma", "olivia")!;
+    assert.equal(next.voiceId, "james");
+    assert.equal(next.scenes[0].voiceId, "olivia");
+    assert.equal(replaceInTemplate(t, "voice", "nobody", "olivia"), null);
+  });
+});
+
+describe("describeReplaced", () => {
+  it("says what a replace changed, and nothing when it changed nothing", () => {
+    assert.equal(describeReplaced({ agents: 1, templates: 2, brand: false, avatars: 0 }), "1 interactive presenter and 2 templates");
+    assert.equal(describeReplaced({ agents: 0, templates: 1, brand: true, avatars: 2 }), "1 template, the brand kit, and 2 photo avatars' default voice");
+    assert.equal(describeReplaced({ agents: 0, templates: 0, brand: false, avatars: 0 }), "");
   });
 });

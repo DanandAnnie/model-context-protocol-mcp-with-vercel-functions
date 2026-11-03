@@ -1221,3 +1221,12 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - Viewers, who cannot delete, do not fetch the other uses.
     - The unit tests also cover the two-item join, the plural photo-avatar wording, and a voice named only in a template scene.
   - Left as it is: the other uses are read once when the page opens, so a presenter or template made in another tab shows up after a reload. The videos count works the same way.
+- "Used by" under each presenter and voice (`86521f3`): the Avatars and Voices pages now show, under each tile's "In N videos" link, the interactive presenters, saved templates, brand kit defaults, and (for a voice) photo avatars that use it, from the same `GET /api/usage` the delete warnings read. One of a kind is named in the line ("Used by the interactive presenter “Front desk”"); when a kind is counted ("Used by 2 templates"), the line opens to list every name. `OtherUsesLine` in `src/components/OtherUsesLine.tsx` renders it, and `usesOf` and `nameOtherUses` in `src/lib/presenters.ts` read and name the uses, with unit tests. Workspace viewers now read the uses too: the interactive presenters, templates, brand kit, and photo avatars they name are already theirs to read. The e2e tests check a named line on the Avatars page, a counted line that opens to two template names on the Voices page, and the line as a viewer sees it.
+  - An independent review found nothing blocking.
+  - Fixed from the optional findings:
+    - A counted line first carried the names in a `title`, out of reach by keyboard, touch, or screen reader. It now opens to list them.
+    - A long name wraps inside the tile rather than widening the grid column.
+    - The line keeps the same gap whether or not a video count sits above it.
+    - The usage route's and service's comments say the pages show the line, not only a delete warning.
+    - The e2e tests also cover the counted line, the viewer's view, and the Avatars page's single-use line.
+  - Left as it is: the brand kit is named as "the brand kit", without saying whether as the default presenter or voice. The page already says which: a presenter on the Avatars page, a voice on the Voices page.

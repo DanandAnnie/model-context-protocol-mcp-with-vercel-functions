@@ -8,7 +8,7 @@ import { formatTimestamp } from "@/lib/text";
 import { refocusIfLost } from "@/lib/focus";
 import { isSubmitKey } from "@/lib/shortcuts";
 import { isApple } from "@/components/QuickFind";
-import { COMMENT_ORDER_KEY, COMMENT_REACTIONS, REACTION_NAMES, commentMarkers, commentOrderFrom, commentsAsText, filterThreads, orderThreads, repliesByThread, splitComments, threadLink, type CommentFilter, type CommentOrder, type CommentReaction, type ReactionView } from "@/lib/comment-list";
+import { COMMENT_ORDER_KEY, COMMENT_REACTIONS, REACTION_NAMES, commentMarkers, commentOrderFrom, commentsAsText, commentsSeenKey, filterThreads, newSince, orderThreads, repliesByThread, seenMark, splitComments, threadLink, type CommentFilter, type CommentOrder, type CommentReaction, type ReactionView } from "@/lib/comment-list";
 import type { VideoComment, WorkspaceRole } from "@/lib/types";
 
 /**
@@ -41,7 +41,7 @@ interface WorkspaceSummary {
  * that starts a thread can be answered; replies sit under it and are resolved, reopened, and deleted with it.
  */
 export function VideoComments({ videoId, title, player }: { videoId: string; title: string; player?: RefObject<HTMLVideoElement | null> }) {
-  const { data, error: loadErr, refetch } = useApi<{ comments: Note[] }>(`/api/videos/${videoId}/comments`);
+  const { data, error: loadErr, refetch } = useApi<{ comments: Note[]; you?: string }>(`/api/videos/${videoId}/comments`);
   const [draft, setDraft] = useState("");
   // The player's time in whole seconds (null without a player), followed here rather than on the page so
   // playback re-renders only this card; and the moment taken when the box was ticked, which playing on keeps.
@@ -99,6 +99,31 @@ export function VideoComments({ videoId, title, player }: { videoId: string; tit
   const open = orderThreads(split.open, order);
   const resolved = split.resolved;
   const replies = repliesByThread(comments);
+  // What others wrote since this reader last opened the page in this browser. The mark kept is read once, for this
+  // visit (undefined until then), and moved on to the newest comment shown each time the comments load, so the next
+  // visit starts from here. The page is keyed by the video, so a new video starts over.
+  const [seenBefore, setSeenBefore] = useState<string | null | undefined>(undefined);
+  const seenRead = useRef(false);
+  useEffect(() => {
+    if (!data?.you) return;
+    const key = commentsSeenKey(data.you, videoId);
+    if (!seenRead.current) {
+      seenRead.current = true;
+      let before: string | null = null;
+      try {
+        before = window.localStorage.getItem(key);
+      } catch {
+        // Storage blocked (a private window, say): nothing is marked new.
+      }
+      setSeenBefore(before);
+    }
+    try {
+      window.localStorage.setItem(key, seenMark(data.comments));
+    } catch {
+      // Not kept, so the next visit has nothing to compare with either.
+    }
+  }, [data, videoId]);
+  const fresh = newSince(comments, seenBefore ?? null);
   const [showResolved, setShowResolved] = useState(false);
   // With nothing resolved the toggle goes, so the next note resolved starts folded again.
   if (showResolved && resolved.length === 0) setShowResolved(false);
@@ -121,6 +146,10 @@ export function VideoComments({ videoId, title, player }: { videoId: string; tit
   // With nothing open the select goes, and so does the filter, so the next note posted is not hidden by it.
   if (filter !== "all" && open.length === 0) setFilter("all");
   const shown = filterThreads(open, replies, myId ? filter : "all", myId);
+  // New ones counted in the threads shown: a reply goes with its note, and one whose note is gone stands alone.
+  const shownIds = new Set(shown.map((c) => c.id));
+  const threadOf = (c: Note) => (c.parentId && shownIds.has(c.parentId) ? c.parentId : c.id);
+  const freshShown = comments.filter((c) => fresh.has(c.id) && shownIds.has(threadOf(c))).length;
   const filterSelect = useRef<HTMLSelectElement>(null);
   // The threads shown that are pinned to a moment, as marks along the video that move the player there. Marks are
   // kept 24 pixels apart, a size a finger can press, by measuring the strip; until it is measured, 8% of it.
@@ -502,6 +531,14 @@ export function VideoComments({ videoId, title, player }: { videoId: string; tit
       <div className="min-w-0">
         <div className="text-xs text-slate-500">
           {c.authorEmail ?? "You"} · {formatDate(c.createdAt)}
+          {fresh.has(c.id) && (
+            <>
+            {" "}
+            <span className="ml-1 rounded bg-sky-100 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-sky-800" data-testid="comment-new">
+              New
+            </span>
+            </>
+          )}
           {c.editedAt && (
             <span title={`Edited ${formatDate(c.editedAt)}`} data-testid="comment-edited">
               {" "}
@@ -735,7 +772,7 @@ export function VideoComments({ videoId, title, player }: { videoId: string; tit
   const actionClass = "inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 aria-disabled:opacity-50";
 
   return (
-    <Card className="p-4" data-testid="comments">
+    <Card className="p-4" data-testid="comments" data-seen-read={seenBefore !== undefined || undefined}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
           <MessageSquare className="h-4 w-4 text-slate-400" /> Comments
@@ -763,6 +800,11 @@ export function VideoComments({ videoId, title, player }: { videoId: string; tit
         </div>
       </div>
       <p className="mt-1 text-xs text-slate-500">Notes for you and your workspace; viewers of the share page never see them.</p>
+      {freshShown > 0 && (
+        <p className="mt-1 text-xs font-medium text-sky-800" data-testid="comments-new">
+          {freshShown} new since you last opened this video
+        </p>
+      )}
       {textToCopy !== null && (
         <div className="mt-2 space-y-1.5" data-testid="comments-text-fallback">
           <textarea

@@ -1563,7 +1563,7 @@ export default function VideoDetailPage() {
               {video.directed?.review && video.agentSessionId && !video.deletedAt && canEdit !== null && <AgentConversation video={video} canEdit={canEdit === true} onAnswered={() => void refetch()} />}
               {video.directed && video.agentSessionId && video.status === "completed" && !video.deletedAt && canEdit === true && <DirectedSceneEdits video={video} />}
               <ReviewPanel video={video} onChange={(next) => setData({ video: next })} />
-              <VideoComments videoId={video.id} title={video.title} player={video.status === "completed" && video.videoUrl ? player : undefined} />
+              <VideoComments key={video.id} videoId={video.id} title={video.title} player={video.status === "completed" && video.videoUrl ? player : undefined} />
             </div>
           </div>
         </>

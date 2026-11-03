@@ -3936,6 +3936,63 @@ test("a video's pinned comments are marked along the video, and a mark moves the
   await expect(comments.getByTestId("comment-list")).toContainText("About the whole video.");
 });
 
+test("comments a teammate wrote since this browser last opened the video are marked new, for that visit", async ({ page }) => {
+  const v = await createVideoViaApi(page, `New ${Date.now().toString(36)}`);
+  const post = async (text: string, parentId?: string) => {
+    const res = await page.request.post(`/api/videos/${v.id}/comments`, { data: { text, parentId } });
+    expect(res.status()).toBe(201);
+    return (await res.json()).comment as { id: string };
+  };
+  const first = await post("Logo is too small.");
+  // Demo mode has one person, so a teammate is played by the page's data: every note but "Mine." is theirs.
+  await page.route(/\/api\/videos\/[^/]+\/comments$/, async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const real = await (await route.fetch()).json();
+    const comments = (real.comments as Array<{ text: string; mine: boolean }>).map((c) => (c.text === "Mine." ? c : { ...c, authorId: "u-teammate", mine: false }));
+    await route.fulfill({ json: { ...real, comments } });
+  });
+  const comments = page.getByTestId("comments");
+  const rows = comments.getByTestId("comment-list").locator("> li");
+  // A first visit has nothing to compare with, so nothing is new (once the page has read what this browser kept).
+  await page.goto(`/videos/${v.id}`);
+  await expect(comments).toHaveAttribute("data-seen-read", "true");
+  await expect(rows).toHaveText([/Logo is too small\./]);
+  await expect(comments.getByTestId("comment-new")).toHaveCount(0);
+  await expect(comments.getByTestId("comments-new")).toHaveCount(0);
+  // Written while away: a note, a reply under the first one, and one of the reader's own.
+  await post("Music is loud.");
+  await post("Agreed, bigger.", first.id);
+  await post("Mine.");
+  await page.reload();
+  await expect(comments).toHaveAttribute("data-seen-read", "true");
+  await expect(comments.getByTestId("comments-new")).toHaveText("2 new since you last opened this video");
+  await expect(rows.filter({ hasText: "Music is loud." }).getByTestId("comment-new")).toHaveText("New");
+  await expect(comments.getByTestId("comment-reply").filter({ hasText: "Agreed, bigger." }).getByTestId("comment-new")).toBeVisible();
+  await expect(rows.filter({ hasText: "Mine." }).getByTestId("comment-new")).toHaveCount(0);
+  await expect(comments.getByTestId("comment-new")).toHaveCount(2);
+  // A resolved thread's news is not counted as open.
+  await comments.getByRole("button", { name: "Resolve comment: Music is loud." }).click();
+  await expect(comments.getByTestId("comments-new")).toHaveText("1 new since you last opened this video");
+  // The next visit starts from what was shown.
+  await page.reload();
+  await expect(comments).toHaveAttribute("data-seen-read", "true");
+  await expect(rows.first()).toContainText("Logo is too small.");
+  await expect(comments.getByTestId("comment-new")).toHaveCount(0);
+  await expect(comments.getByTestId("comments-new")).toHaveCount(0);
+  // A video seen with no comments yet: the first one written after is new, whatever the browser's clock says.
+  // The browser's clock runs an hour ahead here, as a badly set computer's might.
+  const w = await createVideoViaApi(page, `New too ${Date.now().toString(36)}`);
+  await page.clock.install({ time: new Date(Date.now() + 3_600_000) });
+  await page.goto(`/videos/${w.id}`);
+  await expect(comments).toHaveAttribute("data-seen-read", "true");
+  await expect(comments.getByTestId("comment-list")).toHaveCount(0);
+  expect((await page.request.post(`/api/videos/${w.id}/comments`, { data: { text: "First note." } })).status()).toBe(201);
+  await page.reload();
+  await expect(comments).toHaveAttribute("data-seen-read", "true");
+  await expect(rows.filter({ hasText: "First note." }).getByTestId("comment-new")).toBeVisible();
+  await expect(comments.getByTestId("comments-new")).toHaveText("1 new since you last opened this video");
+});
+
 test("in a workspace, a video's open comments narrow to those that mention you or that you wrote in", async ({ page }) => {
   const tag = Date.now().toString(36);
   const ws = (await (await page.request.post("/api/workspaces", { data: { name: `Filter ${tag}` } })).json()).workspace as { id: string };

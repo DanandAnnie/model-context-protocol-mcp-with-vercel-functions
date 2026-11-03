@@ -24,7 +24,9 @@ export async function GET(req: Request, ctx: Ctx) {
         },
       });
     }
-    return json({ comments: markMine(comments, (await userOrOwner(owner)).id) });
+    // `you` names the caller, so a browser shared by several people keeps what each has read apart.
+    const you = (await userOrOwner(owner)).id;
+    return json({ comments: markMine(comments, you), you });
   } catch (err) {
     return errorResponse(err);
   }

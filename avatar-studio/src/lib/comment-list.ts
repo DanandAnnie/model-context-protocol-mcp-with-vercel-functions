@@ -59,6 +59,38 @@ export function commentMarkers<T extends Pick<VideoComment, "id" | "atSec">>(thr
   return out;
 }
 
+/** Where this browser keeps, per reader and video, how far its comments had been read: the newest one written when last opened. */
+export const COMMENTS_SEEN_PREFIX = "avatar-studio:comments-seen:";
+
+/** The key for one reader's mark on one video, so people sharing a browser each keep their own. */
+export function commentsSeenKey(userId: string, videoId: string): string {
+  return `${COMMENTS_SEEN_PREFIX}${userId}:${videoId}`;
+}
+
+/** The mark kept for a video with no comments yet: before any could be written, so every later one is new. */
+export const NOTHING_SEEN = new Date(0).toISOString();
+
+/**
+ * The notes and replies someone else wrote after `seenAt`, the mark kept when the page was last opened. With no mark
+ * (a first visit) nothing is new, as nothing has been read before to compare with; the reader's own are never new.
+ */
+export function newSince<T extends Pick<VideoComment, "id" | "createdAt"> & { mine?: boolean }>(comments: T[], seenAt: string | null): Set<string> {
+  const since = seenAt === null ? Number.NaN : Date.parse(seenAt);
+  if (Number.isNaN(since)) return new Set();
+  return new Set(comments.filter((c) => !c.mine && Date.parse(c.createdAt) > since).map((c) => c.id));
+}
+
+/**
+ * The mark to keep once the comments are shown: when the newest someone else wrote was written, by the server's clock
+ * so a browser's own clock cannot hide or repeat one. The reader's own are passed over, so one stamped just after a
+ * teammate's that was saved later cannot hide it. With none, `NOTHING_SEEN`, so the first one written later is new.
+ */
+export function seenMark(comments: Array<Pick<VideoComment, "createdAt"> & { mine?: boolean }>): string {
+  let newest = Number.NEGATIVE_INFINITY;
+  for (const c of comments) if (!c.mine) newest = Math.max(newest, Date.parse(c.createdAt) || Number.NEGATIVE_INFINITY);
+  return Number.isFinite(newest) ? new Date(newest).toISOString() : NOTHING_SEEN;
+}
+
 /** Which open threads are shown in a workspace: all, those naming the reader, or those the reader wrote in. */
 export type CommentFilter = "all" | "mentions" | "mine";
 

@@ -1310,3 +1310,16 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
   - **Wording:** the empty note, the screen-reader count, and the download link's name all name both filters, from one helper (`activityFilterPhrase`). For example: "Nothing under “Videos and batches” by a script with an API key yet.", "2 events shown under Videos and batches by you".
   - **Former members:** someone who has left drops out of the list, and their events stay under Anyone.
   - An independent review found one blocking bug. A pick of someone who then left (or was removed) kept filtering while the select fell back to showing Anyone, so the list, the wording, and the download disagreed with the control. The person in effect is now derived from the current members, so all four go back to Anyone together. The e2e test drives that case through a refetch that drops the member. Also fixed from its optional findings: members without an email are told apart, the two selects have distinct names, the person shows in the file name, and the README wording says either filter works alone.
+- Lines in the workspace activity feed link to what they are about (`1093d3f`). `GET /api/activity` now answers `links`, keyed by event id, for the events whose subject is still in the space. Each one leads here:
+  - a video made, trashed, restored, sent for review, approved, or sent back: its page (`/videos/<id>`), including a video in the trash while it can still be restored, whose page has its restore banner
+  - a shared presenter made or copied: Interactive
+  - a key still in use: Settings
+  - a kit still kept: Brand kit
+  - a replace: Avatars or Voices
+
+  A bulk action, a member, or a thing since deleted (another space's video included) has no link, so a line never leads to "not found". Each record is checked once per answer, whatever the number of lines about it (`activityLinks` in `src/lib/services/activity.ts`). The sentence itself is the link, so its name says where it goes.
+  - An independent review found one blocking bug. A video whose time in the trash was up, but which no listing had deleted yet, still got a link, and its page answers "not found". Such a video now gets no link, and the unit test covers it. Also fixed from its optional findings:
+    - The checks run ten lines at a time instead of all at once.
+    - A failed store read is logged and leaves the line unlinked, and the test covers that too.
+    - A brand kit counts only when it names this owner, as the Brand page reads it.
+    - The link underline is darker, so a linked line stands out without hovering.

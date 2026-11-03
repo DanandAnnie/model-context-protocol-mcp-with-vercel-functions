@@ -1135,3 +1135,15 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - Each title carries its reason for a screen reader's links list.
     - The e2e test's last check waits for Home's videos to arrive, and goes back with the browser's Back.
   - Left as it is: a video opened in another tab stays named on a Home page already open until it is loaded again.
+- Mark new comments as read from Home (`b2b5810`): Home's line of videos with new comments has a Mark as read button. It marks every video on the line as read in this browser, past the three named too, as opening each would, then says so to a screen reader and moves the keyboard to the first quick action. The line also follows a video opened in another tab: Home reads the marks again when one changes, and when the tab comes back to the front. To do this, `GET /api/videos` also returns `latestAnyComment`: for the videos in `latestComment`, when someone other than the reader last wrote in any of their threads, resolved ones too. That is the mark opening the video keeps. `markCommentsSeen` has unit tests, and so has the new count in `commentCounts`. The e2e test does the following:
+  - opens a video in a second tab and checks that Home drops it;
+  - uses the button, and checks the focus and the announcement;
+  - reloads, and checks that the line stays gone.
+  - An independent review found one blocking problem, now fixed. The button marked each video with the newest note in its open threads, which opening the video does not. A reply written later in a resolved thread then came back as new on the video page, and the video came back on Home once that thread was reopened. It now keeps the same mark as opening the video.
+  - Fixed from the optional findings:
+    - A later mark already kept, from a video opened in another tab say, is not overwritten.
+    - The keyboard moves on only when every video was marked. Otherwise it stays on the button.
+    - The same announcement twice is spoken twice.
+    - The button's name says what it marks.
+    - The e2e test checks the focus, and removes its fakes on every tab when it ends.
+  - Left as it is: Home does not load its videos again when the tab comes back, so a video written in since Home was loaded appears on the next load.

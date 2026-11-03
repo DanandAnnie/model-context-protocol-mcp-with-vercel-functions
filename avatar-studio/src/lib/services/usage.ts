@@ -1,6 +1,6 @@
 // What else, besides videos, names each presenter and voice: interactive presenters, saved templates, the brand kit's
-// defaults, and a photo avatar's default voice. The Avatars and Voices pages warn with these before a delete, beside
-// the videos the library's `needs` counts.
+// defaults, and a photo avatar's default voice. The Avatars and Voices pages show these as a "Used by" line under each
+// and warn with them before a delete, beside the videos the library's `needs` counts.
 import { LOCAL_OWNER } from "../owner-id";
 import type { Agent, Avatar, BrandKit, VideoTemplate } from "../types";
 import { listAgents } from "./agents";

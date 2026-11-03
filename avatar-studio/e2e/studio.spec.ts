@@ -3489,6 +3489,11 @@ test("the avatars page says how many videos each presenter is in, links to them,
   await expect(link).toHaveText("In 2 videos");
   await expect(link).toHaveAccessibleName(`In 2 videos: show Counted ${tag}'s videos in the library`);
   await expect(page.locator(`[data-avatar-videos="${single.id}"]`)).toHaveText("In 1 video");
+  // What else uses it is named under the count, in the line itself when there is one of a kind; a presenter nothing
+  // else uses has no such line.
+  await expect(page.locator(`[data-avatar-others="${used.id}"]`)).toHaveText(`Used by the interactive presenter “Desk ${tag}”`);
+  await expect(page.locator(`[data-avatar-others="${used.id}"] summary`)).toHaveCount(0);
+  await expect(page.locator(`[data-avatar-others="${single.id}"]`)).toHaveCount(0);
   // A presenter in no video has no link.
   await expect(page.getByRole("img", { name: `Unused ${tag}` })).toBeVisible();
   await expect(page.locator(`[data-avatar-videos="${unused.id}"]`)).toHaveCount(0);
@@ -3566,6 +3571,8 @@ test("library filters by voice, and the Voices page says how many videos each vo
     expect((await page.request.delete(`/api/videos/${trashed.id}`)).status()).toBe(200);
     const both = await createVideoViaApi(page, `${tag} Both`, { voiceId: "stock_voice_2", script: undefined, scenes: [{ script: "James opens.", background: bg }, { script: "The clone closes.", background: bg, voiceId: own.id }] });
     const emma = await createVideoViaApi(page, `${tag} Emma`, { voiceId: "stock_voice_1" });
+    // Two templates made from the two-voice video name the cloned voice in their second scene.
+    for (const title of [`Promo ${tag}`, `Recap ${tag}`]) expect((await page.request.post("/api/templates", { data: { fromVideoId: both.id, title } })).status()).toBe(201);
     const titles = page.locator("a[href^='/videos/vid_'] .truncate");
     await page.goto("/videos");
     await page.getByPlaceholder(/Search title/).fill(tag);
@@ -3595,6 +3602,14 @@ test("library filters by voice, and the Voices page says how many videos each vo
     await expect(link).toHaveText("In 1 video");
     await expect(link).toHaveAccessibleName(`In 1 video: show the videos in Counted ${tag} in the library`);
     await expect(page.locator('[data-voice-videos="stock_voice_2"]')).toHaveText("In 2 videos");
+    // And what else uses each one under the count: counted, the line opens to name each template.
+    const others = page.locator(`[data-voice-others="${own.id}"]`);
+    await expect(others.locator("summary")).toHaveText("Used by 2 templates");
+    await expect(others.getByRole("listitem").first()).toBeHidden();
+    await others.locator("summary").click();
+    await expect(others.getByRole("listitem").first()).toBeVisible();
+    expect((await others.getByRole("listitem").allTextContents()).sort()).toEqual([`the template “Promo ${tag}”`, `the template “Recap ${tag}”`]);
+    await expect(page.locator('[data-voice-others="stock_voice_1"]')).toHaveCount(0);
     // Only the voices some video needs, or only those none does.
     const useFilter = page.getByLabel("Use in videos");
     await useFilter.selectOption("used");
@@ -3613,7 +3628,7 @@ test("library filters by voice, and the Voices page says how many videos each vo
       void d.dismiss();
     });
     await page.getByRole("button", { name: `Delete Counted ${tag}` }).click();
-    await expect.poll(() => asked).toBe(`Delete "Counted ${tag}"? 2 videos in your library or trash use it: videos already rendered keep their audio, but retrying or copying one needs another voice.`);
+    await expect.poll(() => asked).toBe(`Delete "Counted ${tag}"? 2 videos in your library or trash use it: videos already rendered keep their audio, but retrying or copying one needs another voice. It is also used by 2 templates, which would need another voice.`);
     expect(((await (await page.request.get("/api/voices")).json()).voices as { id: string }[]).some((v) => v.id === own.id)).toBe(true);
     await link.click();
     await expect(page).toHaveURL(new RegExp(`/videos\\?voice=${own.id}$`));
@@ -6345,10 +6360,14 @@ test("a workspace viewer sees view-only notices instead of create controls", asy
   // A voice of the space's own is listed for the viewer, without rename or delete.
   const sample = "data:audio/webm;base64," + Buffer.from("viewer sees this voice").toString("base64");
   const own = (await (await page.request.post("/api/voices/clone", { data: { name: `Viewer hears ${Date.now().toString(36)}`, samples: [sample] } })).json()).voice as { id: string; name: string };
+  // An interactive presenter speaking in it is named to the viewer too, who can read the presenters anyway.
+  const speaker = (await (await page.request.post("/api/agents", { data: { name: `Viewer desk ${Date.now().toString(36)}`, avatarId: "stock_2", voiceId: own.id } })).json()).agent as { id: string; name: string };
   await page.goto("/voices");
   await expect(page.getByTestId("voice-cloner")).toHaveCount(0);
   await expect(page.getByTestId("view-only")).toBeVisible();
   await expect(page.getByText(own.name, { exact: true })).toBeVisible();
+  await expect(page.locator(`[data-voice-others="${own.id}"]`)).toHaveText(`Used by the interactive presenter “${speaker.name}”`);
+  expect((await page.request.delete(`/api/agents/${speaker.id}`)).ok()).toBe(true);
   await expect(page.getByRole("button", { name: `Rename ${own.name}` })).toHaveCount(0);
   await expect(page.getByRole("button", { name: `Delete ${own.name}` })).toHaveCount(0);
   expect((await page.request.delete(`/api/voices/${own.id}`)).status()).toBe(204);

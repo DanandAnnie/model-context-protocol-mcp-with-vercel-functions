@@ -18,7 +18,8 @@ import { api, passesUse, type UseFilter } from "@/lib/client";
 import type { Avatar, ProviderStatus, ShootJob, Voice } from "@/lib/types";
 import type { VideoPage } from "@/lib/services/videos";
 import type { OtherUses } from "@/lib/services/usage";
-import { describeOtherUses } from "@/lib/presenters";
+import { describeOtherUses, usesOf } from "@/lib/presenters";
+import { OtherUsesLine } from "@/components/OtherUsesLine";
 import Link from "next/link";
 
 /** How many videos need an id, read as the id's own entry only (an id like "constructor" is not the object's prototype). */
@@ -44,9 +45,9 @@ function AvatarsInner() {
   // How many of the library's videos each presenter is in (the library's own presenter counts; the trash is not
   // counted), for the "In N videos" link on its tile and the warning before it is deleted.
   const { data: library, error: libraryError, refetch: refetchLibrary } = useApi<VideoPage>("/api/videos?limit=1");
-  // What besides videos names each one (interactive presenters, templates, the brand kit), for the same warning.
-  // Viewers cannot delete, so they do not ask.
-  const { data: otherUses, error: otherUsesError } = useApi<OtherUses>(canEdit === false ? null : "/api/usage");
+  // What besides videos names each one (interactive presenters, templates, the brand kit), for a "Used by" line
+  // under each and the same warning.
+  const { data: otherUses, error: otherUsesError } = useApi<OtherUses>("/api/usage");
   const inVideos = new Map((library?.presenters ?? []).map((p) => [p.id, p.count]));
   const voices = voiceData?.voices ?? [];
   const { data: packData, setData: setPackData, refetch: refetchPacks } = useApi<{ lookPacks: LookPack[]; available: boolean; described?: boolean }>("/api/look-packs");
@@ -183,7 +184,7 @@ function AvatarsInner() {
         ? ` ${used === 1 ? "1 video" : `${used} videos`} in your library or trash use it: ${after}`
         : "";
     // Besides videos: interactive presenters, templates, the brand kit, a photo avatar's default voice.
-    const others = describeOtherUses(otherUses && Object.hasOwn(otherUses.avatars, a.id) ? otherUses.avatars[a.id] : undefined);
+    const others = describeOtherUses(usesOf(otherUses?.avatars, a.id));
     // "Also" only after a count of videos; and unread, the prompt says it could not check rather than nothing.
     const also = others
       ? ` It is ${used || !library ? "also " : ""}used by ${others}, which would need another presenter.`
@@ -308,7 +309,7 @@ function AvatarsInner() {
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" data-testid="avatar-library">
           {avatars.map((a) => (
-            <div key={a.id} className="relative">
+            <div key={a.id} className="relative min-w-0">
               <AvatarTile avatar={a} />
               {(inVideos.get(a.id) ?? 0) > 0 && (
                 <Link
@@ -320,6 +321,7 @@ function AvatarsInner() {
                   In {inVideos.get(a.id) === 1 ? "1 video" : `${inVideos.get(a.id)} videos`}
                 </Link>
               )}
+              <OtherUsesLine uses={usesOf(otherUses?.avatars, a.id)} marker={{ "data-avatar-others": a.id }} />
               {favorites.canToggle && (
                 <FavoriteStar name={a.name} on={favorites.avatarIds.has(a.id)} onToggle={() => favorites.toggle("avatar", a.id)} className="absolute left-2 top-2" />
               )}

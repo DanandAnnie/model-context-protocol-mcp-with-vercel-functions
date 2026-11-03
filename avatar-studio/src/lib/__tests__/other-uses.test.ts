@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { collectOtherUses, describeOtherUses } from "../services";
+import { nameOtherUses, usesOf, type OtherUse } from "../presenters";
 import type { Agent, Avatar, BrandKit, VideoTemplate } from "../types";
 
 const agent = (name: string, avatarId: string, voiceId?: string) => ({ id: name, ownerId: "o", name, avatarId, voiceId, avatarName: "", avatarImageUrl: "", instructions: "" }) as unknown as Agent;
@@ -47,5 +48,16 @@ describe("describeOtherUses", () => {
       describeOtherUses([{ kind: "agent", name: "A" }, { kind: "agent", name: "B" }, { kind: "template", name: "Welcome" }, { kind: "brand", name: "" }, { kind: "avatar", name: "Me" }]),
       "2 interactive presenters, the template “Welcome”, the brand kit, and the photo avatar “Me” (as its default voice)",
     );
+  });
+});
+
+describe("usesOf and nameOtherUses", () => {
+  it("reads an id's own entry only, and names every use for the list under a counted line", () => {
+    const byId = { anna: [{ kind: "template", name: "Welcome" }, { kind: "template", name: "Promo" }, { kind: "brand", name: "" }] } as Record<string, OtherUse[]>;
+    assert.equal(usesOf(byId, "constructor"), undefined);
+    assert.equal(usesOf(undefined, "anna"), undefined);
+    assert.equal(describeOtherUses(usesOf(byId, "anna")), "2 templates and the brand kit");
+    assert.deepEqual(nameOtherUses(usesOf(byId, "anna")), ["the template “Welcome”", "the template “Promo”", "the brand kit"]);
+    assert.deepEqual(nameOtherUses(undefined), []);
   });
 });

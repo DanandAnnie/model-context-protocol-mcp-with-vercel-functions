@@ -98,3 +98,13 @@ export function describeOtherUses(uses: OtherUse[] | undefined): string {
   });
   return kinds.length <= 1 ? kinds.join("") : kinds.length === 2 ? kinds.join(" and ") : `${kinds.slice(0, -1).join(", ")}, and ${kinds[kinds.length - 1]}`;
 }
+
+/** One id's other uses from a by-id map (its own entry only: an id like "constructor" is not the object's prototype). */
+export function usesOf(byId: Record<string, OtherUse[]> | undefined, id: string): OtherUse[] | undefined {
+  return byId && Object.hasOwn(byId, id) ? byId[id] : undefined;
+}
+
+/** Every other use by name, one entry each, for the list under a line that counts them (describeOtherUses). */
+export function nameOtherUses(uses: OtherUse[] | undefined): string[] {
+  return (uses ?? []).map((u) => KIND_ONE[u.kind](u.name));
+}

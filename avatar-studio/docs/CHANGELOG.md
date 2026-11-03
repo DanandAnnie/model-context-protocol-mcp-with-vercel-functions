@@ -1147,3 +1147,9 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The button's name says what it marks.
     - The e2e test checks the focus, and removes its fakes on every tab when it ends.
   - Left as it is: Home does not load its videos again when the tab comes back, so a video written in since Home was loaded appears on the next load.
+- Sort the library by recent comments (`80ea277`): the library's sort menu has Recent comments, `sort=commented` on `GET /api/videos` and on the analytics CSV. The video with the newest note or reply comes first, whoever wrote it and in any thread, resolved ones too. Videos without comments come after, newest made first, as do videos commented at the same moment. `commentCounts` now also returns `lastAt`, the newest comment time on each video, which only orders the list and is never sent. The analytics route reads the comment times when this sort is asked for, so the CSV keeps the library's order. Unit tests cover the order, ties, unreadable times, and replies and resolved threads. The e2e test comments on each video in turn, and checks the library and the CSV each time.
+  - An independent review found nothing blocking.
+  - Fixed from the optional findings:
+    - The e2e test now checks orders that differ from newest made: right after the older video's note, and after a reply on its thread. Both the library and the CSV are checked each time.
+    - A comment dated at the epoch counts as a comment. Only a time that cannot be read counts as none, and a unit test covers both.
+    - The query schema's comment describes the new sort.

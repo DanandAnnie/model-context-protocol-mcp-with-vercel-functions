@@ -1109,3 +1109,22 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - Before the player has loaded the video, C does not pin to 0:00.
     - The README says what C does before the video is finished.
     - The e2e test formats the moment as the page does.
+- New comments in the library (`c97ca47`): in a workspace, a library card's or row's open-comments badge has a dot when a teammate has written in its open threads since you last opened the video in this browser. A screen reader hears it with the count, as in "2 open comments; new since you last opened it".
+  - It uses the same mark as the video page's New pills: what each person has read, per video, kept in this browser.
+  - A video never opened here is not marked, and nor is a note of your own.
+  - Opening the video clears the dot.
+  - `GET /api/videos` now also returns `latestComment`, when someone other than the reader last wrote a note or a reply in an open thread on each video, and `you`, the reader's user id. Both are sent only in a workspace, and only to a signed-in person.
+
+  `commentCounts`' new `latest`, `hasNewComments`, and the badge's label have unit tests. The e2e test runs in a workspace with a teammate played by the page's data, and checks:
+  - a video written in since it was opened;
+  - one opened since;
+  - one never opened;
+  - clearing the dot;
+  - the list layout.
+  - An independent review found one blocking problem, now fixed. The dot's amber was too faint on the light badge to be seen. It is now darker there, and lighter on the dark badge of comments that mention you.
+  - Fixed from the optional findings:
+    - A request with an API key and no session stands for the workspace itself, so it gets neither field rather than every comment as new.
+    - The dots are worked out with the page's data instead of a render later, so a card does not shift when they appear.
+    - The e2e test lets go of requests the page drops, and removes its fakes when it ends.
+    - A unit test checks that the reader's own reply does not move the time.
+  - Left as it is: a comment written in the very millisecond of the mark is not new, on the video page or in the library.

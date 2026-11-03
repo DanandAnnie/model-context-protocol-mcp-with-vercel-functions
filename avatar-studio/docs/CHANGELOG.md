@@ -1059,3 +1059,12 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - Resolve all's title names the comments shown.
   - Left as it is: a reply or edit form on a thread that the filter hides keeps its draft until the thread is shown again.
   - The e2e test covers each of these.
+- Comments as text (`651c3c7`): the video page's comments card has a Copy as text button. It puts the open threads on the clipboard as plain text, ready to paste into a chat or an email. Only the threads shown are copied, in the order shown, after a workspace's Show filter. The text opens with a heading naming the video and how many threads there are. Each thread is numbered, with its moment first when it is pinned to one and who wrote it after it (by email, or "you" or "a teammate" when the account mode knows none), and its replies are indented under it. A note of several lines keeps them under its first. A tick and the screen-reader line "2 comments copied as text" confirm the copy. Where the clipboard is unavailable, the text is shown in a box, already selected, to copy by hand; Done or Escape closes it. `commentsAsText` has unit tests covering the layout, replies, a note of several lines, and ten threads or more. The e2e test reads the clipboard in both orders.
+  - An independent review found one blocking problem, now fixed. Without a clipboard, for example on a page served over plain http, the text was offered in a prompt, which collapses its lines into one. It is now shown in a box with its lines kept, and a screen reader is told to copy it from there.
+  - Fixed from the optional findings:
+    - A teammate's note with no email is written as "a teammate", not "you".
+    - The title is set in curly quotes, so quotes in it read cleanly.
+    - Windows line breaks in a note come out as plain ones.
+    - Blank lines inside a note stay blank.
+    - The title is required.
+  - The unit and e2e tests cover each of these.

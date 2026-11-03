@@ -1,4 +1,5 @@
 // Sentences for the activity feed. Shared by the Workspace page and its tests; no server imports.
+import { describeReplaced } from "./presenters";
 import { roleArticle } from "./roles";
 import type { ActivityEvent } from "./types";
 
@@ -55,5 +56,11 @@ export function describeActivity(e: ActivityEvent, viewerId?: string): string {
       return `${who} approved ${what || "a video"}`;
     case "video.changes_requested":
       return `${who} asked for changes to ${what || "a video"}`;
+    case "usage.replaced": {
+      // Worded here from the counts, so the sentence is never cut short; a name the server could not find is left out.
+      const thing = e.replaced?.kind === "voice" ? "voice" : e.replaced?.kind === "avatar" ? "presenter" : "presenter or voice";
+      const changed = e.replaced ? describeReplaced(e.replaced) : "";
+      return `${who} replaced ${what || `a deleted ${thing}`} with ${e.replacement ? `"${e.replacement}"` : `another ${thing}`}${changed ? ` in ${changed}` : ""}`;
+    }
   }
 }

@@ -34,6 +34,8 @@ export interface ActivityDetails {
   subjectId?: string;
   count?: number;
   role?: string;
+  replacement?: string;
+  replaced?: ActivityEvent["replaced"];
 }
 
 /**
@@ -52,6 +54,8 @@ export async function recordActivity(ownerId: string, actor: User, kind: Activit
       ...(details.subjectId ? { subjectId: details.subjectId } : {}),
       ...(details.count !== undefined ? { count: details.count } : {}),
       ...(details.role ? { role: details.role } : {}),
+      ...(details.replacement ? { replacement: Array.from(details.replacement.trim()).slice(0, MAX_SUBJECT).join("") } : {}),
+      ...(details.replaced ? { replaced: { kind: details.replaced.kind, agents: details.replaced.agents, templates: details.replaced.templates, brand: details.replaced.brand, avatars: details.replaced.avatars } } : {}),
       createdAt: stamp(),
     };
     await getStore().put("activity", event);

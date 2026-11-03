@@ -1535,7 +1535,8 @@ export type ActivityKind =
   | "agent.duplicated"
   | "video.review_requested"
   | "video.approved"
-  | "video.changes_requested";
+  | "video.changes_requested"
+  | "usage.replaced";
 
 export interface ActivityEvent {
   id: string;
@@ -1552,6 +1553,10 @@ export interface ActivityEvent {
   count?: number;
   /** For a role change, the new role. */
   role?: string;
+  /** For a replace, the presenter or voice put in the place of `subject`. */
+  replacement?: string;
+  /** For a replace, whether a presenter or a voice was replaced, and how many of each kind of thing were changed. */
+  replaced?: { kind: "avatar" | "voice"; agents: number; templates: number; brand: boolean; avatars: number };
   createdAt: string;
 }
 

@@ -3625,6 +3625,14 @@ test("Replace switches every interactive presenter and template from one present
   const scenes = ((await (await page.request.get(`/api/templates/${template.id}`)).json()).template as { scenes: Array<{ avatarId?: string }> }).scenes;
   expect(scenes.map((sc) => sc.avatarId)).toEqual([undefined, to.id]);
   await expect(page.locator(`[data-avatar-videos="${from.id}"]`)).toHaveText("In 1 video");
+  // The activity feed records it with both names; the refused replaces above recorded nothing.
+  const feed = (await (await page.request.get("/api/activity?limit=20")).json()).events as Array<{ kind: string; subject?: string; subjectId?: string; replacement?: string; replaced?: unknown }>;
+  const entries = feed.filter((e) => e.kind === "usage.replaced" && e.subjectId === from.id);
+  expect(entries).toEqual([expect.objectContaining({ subject: `Old ${tag}`, replacement: `New ${tag}`, replaced: { kind: "avatar", agents: 1, templates: 1, brand: false, avatars: 0 } })]);
+  // A replace that finds nothing left to change records nothing.
+  expect((await page.request.post("/api/usage/replace", { data: { kind: "avatar", from: from.id, to: to.id } })).status()).toBe(200);
+  const again = (await (await page.request.get("/api/activity?limit=20")).json()).events as Array<{ kind: string; subjectId?: string }>;
+  expect(again.filter((e) => e.kind === "usage.replaced" && e.subjectId === from.id)).toHaveLength(1);
   // A viewer gets no Replace.
   await page.route("**/api/workspaces", (route) =>
     route.request().method() === "GET"

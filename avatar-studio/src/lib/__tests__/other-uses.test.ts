@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { collectOtherUses, describeOtherUses, replaceInTemplate } from "../services";
 import { describeReplaced, nameOtherUses, usesOf, type OtherUse } from "../presenters";
-import type { Agent, Avatar, BrandKit, VideoTemplate } from "../types";
+import { describeActivity } from "../activity-text";
+import type { ActivityEvent, Agent, Avatar, BrandKit, VideoTemplate } from "../types";
 
 const agent = (name: string, avatarId: string, voiceId?: string) => ({ id: name, ownerId: "o", name, avatarId, voiceId, avatarName: "", avatarImageUrl: "", instructions: "" }) as unknown as Agent;
 const template = (title: string, patch: Partial<VideoTemplate>) => ({ id: title, title, scenes: [], aspect: "16:9", captions: false, speed: 1, ...patch }) as VideoTemplate;
@@ -86,5 +87,22 @@ describe("describeReplaced", () => {
     assert.equal(describeReplaced({ agents: 1, templates: 2, brand: false, avatars: 0 }), "1 interactive presenter and 2 templates");
     assert.equal(describeReplaced({ agents: 0, templates: 1, brand: true, avatars: 2 }), "1 template, the brand kit, and 2 photo avatars' default voice");
     assert.equal(describeReplaced({ agents: 0, templates: 0, brand: false, avatars: 0 }), "");
+  });
+});
+
+describe("the activity feed's replace entry", () => {
+  const e = { id: "act_1", ownerId: "ws_1", kind: "usage.replaced", actorId: "u_1", actorEmail: "dana@example.com", subject: "Ava", replacement: "Ben", replaced: { kind: "avatar", agents: 0, templates: 2, brand: true, avatars: 0 }, createdAt: "2026-11-03T00:00:00.000Z" } as ActivityEvent;
+  it("names both and what changed", () => {
+    assert.equal(describeActivity(e), `dana@example.com replaced "Ava" with "Ben" in 2 templates and the brand kit`);
+    assert.equal(describeActivity(e, "u_1"), `You replaced "Ava" with "Ben" in 2 templates and the brand kit`);
+    assert.equal(describeActivity({ ...e, actorId: "ws_1", actorEmail: undefined }), `A script with an API key replaced "Ava" with "Ben" in 2 templates and the brand kit`);
+  });
+  it("says every kind that changed in full, however long", () => {
+    const all = { ...e, kind: "usage.replaced", replaced: { kind: "voice", agents: 12, templates: 34, brand: true, avatars: 5 } } as ActivityEvent;
+    assert.match(describeActivity(all), / in 12 interactive presenters, 34 templates, the brand kit, and 5 photo avatars' default voice$/);
+  });
+  it("says a deleted presenter or voice when its name could not be found", () => {
+    assert.equal(describeActivity({ ...e, subject: undefined }), `dana@example.com replaced a deleted presenter with "Ben" in 2 templates and the brand kit`);
+    assert.equal(describeActivity({ ...e, subject: undefined, replacement: undefined, replaced: { ...e.replaced!, kind: "voice" } }), `dana@example.com replaced a deleted voice with another voice in 2 templates and the brand kit`);
   });
 });

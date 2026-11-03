@@ -1240,3 +1240,7 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
   - Left as it is:
     - The other two sorts do not keep favourites first, since a sort the person picks should lead.
     - On the Voices page, the Sort select shows with the other filters once the library has answered.
+- The Avatars and Voices pages remember their sort (`c92fc75`): the Sort select's choice is kept in this browser, as the library keeps its layout, and read back on the next visit. `usePresenterSort` in `src/hooks/usePresenterSort.ts` reads and writes it, and `parsePresenterSort` in `src/lib/client.ts` reads anything it does not know as the default order. Where storage is blocked, the choice holds for the visit. The e2e tests reload each page and find the sort kept.
+  - An independent review found nothing blocking.
+  - Fixed from the optional findings: a remembered "Most used" is shown only once the counts arrive. Until then, or for good if they cannot be read, the page lists and names favourites first, while the stored choice is kept. `shownPresenterSort` holds that rule and has a unit test, and the e2e test that holds back the counts checks it.
+  - Left as it is: the choice is per browser, not per workspace, as the library's layout is.

@@ -1074,3 +1074,16 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The strip is one tab stop rather than one per mark.
     - A mark's hint lists the first words of up to three of its comments.
     - The e2e test waits for the player to know the video's length before checking that a note on the whole video has no mark.
+- Comments new since your last visit (`9ae4f7f`): the video page's comments card marks the notes and replies a teammate wrote since you last opened that video in this browser with a New pill, and says how many there are in the threads shown ("2 new since you last opened this video"). Your own are never new. On a first visit nothing is new, since there is nothing to compare with. The marks hold for the whole visit, and the next visit starts from the newest comment shown. What has been read is kept per person and per video, so people who share a browser each keep their own. `GET /api/videos/:id/comments` now also returns `you`, the caller's user id, for this. `newSince`, `seenMark`, and `commentsSeenKey` have unit tests. The e2e test plays a teammate through the page's data and checks a first visit, a note and a reply written while away, your own note, resolving, the next visit, and a video seen with no comments while the browser's clock runs an hour ahead.
+  - An independent review found three blocking problems, now fixed:
+    - A video seen with no comments kept the browser's own time, so a browser clock running ahead could hide a teammate's first note. It now keeps a mark from before any comment, so the first one written later is new.
+    - The mark was shared by everyone who signed in on the same browser, so one person's visit could hide comments from the next. It is now kept per person, by the user id the comments come with.
+    - The e2e test could check for no New pills before the page had read its mark, so it passed without testing anything. The card now says when the mark has been read, and the test waits for that.
+  - Fixed from the optional findings:
+    - The count follows a workspace's Show filter, counting only the threads shown.
+    - The pill is set apart from the date, so a screen reader does not run them together.
+    - Your own notes no longer set the mark, so a teammate's note saved just after yours is still new next time.
+    - The comments card starts over when the page moves to another video.
+  - Left as it is:
+    - The count is not announced to a screen reader, though it can be read in place.
+    - A new reply in a resolved thread is marked in that thread but not counted.

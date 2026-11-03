@@ -1230,3 +1230,13 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The usage route's and service's comments say the pages show the line, not only a delete warning.
     - The e2e tests also cover the counted line, the viewer's view, and the Avatars page's single-use line.
   - Left as it is: the brand kit is named as "the brand kit", without saying whether as the default presenter or voice. The page already says which: a presenter on the Avatars page, a voice on the Voices page.
+- Sort the Avatars and Voices pages (`df98655`): a Sort select beside the filters lists presenters and voices with favourites first (the order they had before, and still the default), the most used in the library first (by the same counts the "In N videos" links show; ties keep the listed order), or by name A–Z (ignoring case, and reading numbers as numbers, so "Ava 2" comes before "Ava 10"). The sort applies after the search and filters. `sortPresenters` in `src/lib/client.ts` holds the rule and has unit tests. "Most used" is offered once the counts arrive, and the select's title says when they could not be read. The e2e tests sort both pages each way.
+  - An independent review found nothing blocking.
+  - Fixed from the optional findings:
+    - The option says "Most used in the library", since it counts the library's videos only, not the trash the Use in videos filter also counts.
+    - The select's title says what Most used counts, or why it is not offered.
+    - The Avatars test adds a presenter in no video whose name sorts first, so "most used" and "name" give different orders and the test tells them apart.
+    - Each page builds its counts once per answer from the library, rather than on every render.
+  - Left as it is:
+    - The other two sorts do not keep favourites first, since a sort the person picks should lead.
+    - On the Voices page, the Sort select shows with the other filters once the library has answered.

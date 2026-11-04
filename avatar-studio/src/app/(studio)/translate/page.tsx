@@ -1,7 +1,7 @@
 "use client";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useRef, useState } from "react";
-import { Check, Languages, RotateCcw, Trash2 } from "lucide-react";
+import { Check, CopyPlus, Languages, RotateCcw, Trash2 } from "lucide-react";
 import { refocusIfLost } from "@/lib/focus";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
@@ -180,6 +180,33 @@ function TranslateInner() {
     }
   }
 
+  // The form is filled from a dub, so the same video goes into more languages without setting it all up again.
+  const languagePicker = useRef<HTMLDivElement>(null);
+  function dubAgain(t: Translation) {
+    // Not while the form, or this list, is busy: what finishes then would undo the filling or take the focus away.
+    if (submitting || retrying || deleting) return;
+    setErr(null);
+    setSource(t.sourceVideoUrl);
+    // A dub made with others in one go is titled "<title> (<language>)"; the form takes the title it was given. A title
+    // the page made up itself ("Translation to German") is left out, so the new dub gets one naming its own language.
+    const suffix = ` (${t.targetLanguage})`;
+    const given = t.title.endsWith(suffix) ? t.title.slice(0, -suffix.length) : t.title;
+    setTitle(given === "Translation" || given === `Translation to ${t.targetLanguage}` ? "" : given);
+    setLipSync(!t.audioOnly);
+    setSpeakers(t.speakers ?? 0);
+    setQuality(t.quality ?? "speed");
+    setRemoveMusic(!!t.removeMusic);
+    setEnhanceSpeech(!!t.enhanceSpeech);
+    setProofread(!!t.proofread);
+    // A dub that kept brand terms or fixed translations followed the glossary; one with none may still have asked
+    // (the kit had none for it), so the form's own choice stays then.
+    if (t.glossary?.length || t.forcedTranslations?.length) setKeepGlossary(true);
+    // The languages are left to pick: this dub's own one is already made.
+    setLanguages([]);
+    setListNote(`The form has the video and settings of ${t.title}. Pick the languages to dub it into.`);
+    focusAfterRender(() => languagePicker.current?.querySelector<HTMLInputElement>(`input[type="checkbox"]:not(:disabled):not([data-language="${CSS.escape(t.targetLanguage)}"])`) ?? sourceInput.current);
+  }
+
   const filterNote = found.length > 0 && shown.length === 0 ? TRANSLATION_FILTERS.find((f) => f.value === statusFilter)?.none : undefined;
   // Cards a search leaves out are hidden rather than removed, so corrections being proofread in one are kept.
   const shownIds = new Set(shown.map((t) => t.id));
@@ -199,12 +226,12 @@ function TranslateInner() {
               <legend className="mb-1.5 block text-sm font-medium text-slate-700">
                 Target languages <span className="font-normal text-slate-500">· {languages.length} of up to {MAX_LANGUAGES}, one dub each</span>
               </legend>
-              <div className="flex flex-wrap gap-1.5" data-testid="target-languages">
+              <div ref={languagePicker} className="flex flex-wrap gap-1.5" data-testid="target-languages">
                 {(data?.languages ?? ["Spanish"]).map((l) => {
                   const on = languages.includes(l);
                   return (
                     <label key={l} className={`cursor-pointer rounded-full border px-2.5 py-1 text-xs font-medium has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-brand-500 ${on ? "border-brand-500 bg-brand-50 text-brand-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"} ${!on && languages.length >= MAX_LANGUAGES ? "cursor-not-allowed opacity-50" : ""}`}>
-                      <input type="checkbox" className="sr-only" checked={on} disabled={!on && languages.length >= MAX_LANGUAGES} onChange={() => toggle(l)} />
+                      <input type="checkbox" className="sr-only" data-language={l} checked={on} disabled={!on && languages.length >= MAX_LANGUAGES} onChange={() => toggle(l)} />
                       {l}
                     </label>
                   );
@@ -348,6 +375,11 @@ function TranslateInner() {
                         <span className="inline-flex shrink-0 items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">Ready to proofread</span>
                       ) : (
                         <StatusBadge status={t.status} />
+                      )}
+                      {canEdit !== false && (
+                        <button type="button" onClick={() => dubAgain(t)} aria-disabled={submitting || !!retrying || !!deleting || undefined} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-brand-700 aria-disabled:opacity-50" aria-label={`Dub ${t.title} into another language`} title="Dub into another language">
+                          <CopyPlus className="h-4 w-4" aria-hidden />
+                        </button>
                       )}
                       {canEdit !== false && t.status === "failed" && (
                         <button type="button" onClick={() => retry(t)} data-translation-retry={t.id} aria-disabled={!!retrying || !!deleting || undefined} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-brand-700 aria-disabled:opacity-50" aria-label={`Try ${t.title} again`} title="Try again">

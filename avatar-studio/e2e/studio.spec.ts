@@ -7574,6 +7574,47 @@ test("a failed dub is tried again with the same settings, in its place", async (
   expect(axe.violations.map((x) => x.id)).toEqual([]);
 });
 
+test("a dub's video and settings fill the form to dub it into another language", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const source = `https://cdn.example.com/${tag}.mp4`;
+  const made = await page.request.post("/api/translate", { data: { title: `Walk ${tag}`, sourceVideoUrl: source, targetLanguages: ["French", "German"], audioOnly: true, speakers: 2, quality: "precision", removeMusic: true, enhanceSpeech: true } });
+  expect(made.status()).toBe(201);
+  await page.goto("/translate");
+  await page.getByRole("searchbox", { name: "Search translations" }).fill(tag);
+  await page.getByRole("button", { name: `Dub Walk ${tag} (German) into another language` }).click();
+  await expect(page.getByPlaceholder("https://…/video.mp4")).toHaveValue(source);
+  // The title it was given, not the one with its language.
+  await expect(page.getByLabel("Title (optional)")).toHaveValue(`Walk ${tag}`);
+  await expect(page.getByLabel("Lip-sync the dub")).not.toBeChecked();
+  await expect(page.getByLabel("Speakers")).toHaveValue("2");
+  await expect(page.getByLabel("Quality")).toHaveValue("precision");
+  await expect(page.getByLabel("Remove background music")).toBeChecked();
+  await expect(page.getByLabel("Enhance speech")).toBeChecked();
+  await expect(page.getByLabel("Proofread the lines first")).not.toBeChecked();
+  // The languages are left to pick, and the focus is there to pick them (not on the language already made).
+  const langs = page.getByTestId("target-languages");
+  await expect(langs.locator("input:checked")).toHaveCount(0);
+  await expect(langs.locator("input:focus")).toHaveCount(1);
+  expect(await langs.locator("input:focus").getAttribute("data-language")).not.toBe("German");
+  await expect(page.getByRole("button", { name: "Translate video" })).toBeDisabled();
+  await expect(page.getByRole("status").filter({ hasText: `The form has the video and settings of Walk ${tag} (German).` })).toHaveCount(1);
+  await langs.getByText("Italian", { exact: true }).click();
+  await page.getByRole("button", { name: "Translate video" }).click();
+  const italian = page.locator('[data-testid="translation"]:visible').filter({ hasText: "→ Italian" });
+  await expect(italian.getByTestId("translation-title")).toHaveText(`Walk ${tag}`);
+  await expect(italian.getByTestId("translation-meta")).toContainText("→ Italian · voice only · 2 speakers · precision · no music · enhanced speech");
+  // A dub titled by the page ("Translation to Spanish") leaves the title to the new one, which names its own language.
+  const plainSource = `https://${tag}.example.com/plain.mp4`;
+  expect((await page.request.post("/api/translate", { data: { title: "Translation to Spanish", sourceVideoUrl: plainSource, targetLanguage: "Spanish" } })).status()).toBe(201);
+  await page.reload();
+  await page.getByRole("searchbox", { name: "Search translations" }).fill(`${tag}.example.com`);
+  await page.getByRole("button", { name: "Dub Translation to Spanish into another language" }).click();
+  await expect(page.getByLabel("Title (optional)")).toHaveValue("");
+  await expect(page.getByPlaceholder("https://…/video.mp4")).toHaveValue(plainSource);
+  const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(axe.violations.map((x) => x.id)).toEqual([]);
+});
+
 test("one video is dubbed into several languages in one go", async ({ page }) => {
   const tag = Date.now().toString(36);
   await page.goto("/translate");

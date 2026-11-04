@@ -6893,6 +6893,93 @@ test("workspace invites are in the activity feed, with invitees' addresses for o
   }
 });
 
+test("the Workspace page finds a member or invite by email once there are enough to look through", async ({ page }) => {
+  const created = await page.request.post("/api/workspaces", { data: { name: `Find people ${Date.now().toString(36)}` } });
+  expect(created.status()).toBe(201);
+  const ws = (await created.json()).workspace as { id: string };
+  try {
+    expect((await page.request.post("/api/workspaces/switch", { data: { id: ws.id } })).status()).toBe(200);
+    // One member and nothing else: no Find box.
+    await page.goto("/workspace");
+    await expect(page.getByTestId("seats")).toBeVisible();
+    await expect(page.getByTestId("people-search")).toHaveCount(0);
+
+    // Five pending invites and one lapsed invite (shown as the server would list it) make seven people to look through.
+    expect((await page.request.post(`/api/workspaces/${ws.id}/invites`, { data: { emails: ["ana@example.com", "ben@example.com", "cal@example.com", "dan@other.org"], role: "viewer" } })).status()).toBe(201);
+    expect((await page.request.post(`/api/workspaces/${ws.id}/invites`, { data: { role: "editor" } })).status()).toBe(201);
+    await page.route("**/api/workspaces", async (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      const res = await route.fetch();
+      const body = (await res.json()) as { workspaces: Array<{ id: string; expiredInvites?: unknown[] }> };
+      for (const w of body.workspaces) if (w.id === ws.id) w.expiredInvites = [{ token: "tok_lapsed_e2e", email: "eve@example.com", role: "viewer", expiresAt: new Date(Date.now() - 86_400_000).toISOString() }];
+      await route.fulfill({ response: res, json: body });
+    });
+    await page.reload();
+    const find = page.getByRole("searchbox", { name: "Find a member or invite" });
+    const found = page.getByTestId("people-found");
+    const pending = page.locator("li").filter({ has: page.getByTestId("invite-role") });
+    const expired = page.getByTestId("expired-invites").locator("li");
+    await expect(pending).toHaveCount(5);
+    await expect(found).toHaveText("");
+
+    // By address, in every list at once; the member here (open mode has no email) is listed by id and does not match.
+    await find.fill("EXAMPLE.com ");
+    await expect(pending).toHaveCount(3);
+    await expect(expired).toHaveCount(1);
+    await expect(page.getByText("No member matches “EXAMPLE.com”.")).toBeVisible();
+    await expect(found).toHaveText("0 of 1 member, 3 of 5 pending invites, and 1 of 1 expired invite match “EXAMPLE.com”.");
+    // A link invite is found as "Link invite"; the lists that have no match say so.
+    await find.fill("link");
+    await expect(pending).toHaveCount(1);
+    await expect(pending.first()).toContainText("Link invite");
+    await expect(page.getByText("No expired invite matches “link”.")).toBeVisible();
+    await expect(found).toHaveText("0 of 1 member, 1 of 5 pending invites, and 0 of 1 expired invite match “link”.");
+    await find.fill("zzz");
+    await expect(found).toHaveText("No member or invite matches “zzz”.");
+    await expect(page.getByText("No pending invite matches “zzz”.")).toBeVisible();
+    // Escape clears the box and brings every row back; the focus stays in the box.
+    await find.press("Escape");
+    await expect(find).toHaveValue("");
+    await expect(find).toBeFocused();
+    await expect(pending).toHaveCount(5);
+    await expect(expired).toHaveCount(1);
+    await expect(found).toHaveText("");
+    // A member is found by the id they are listed by, and Clear empties the box too.
+    await find.fill("loc");
+    await expect(page.getByRole("combobox", { name: "Role for local" })).toBeVisible();
+    await expect(pending).toHaveCount(0);
+    await expect(found).toHaveText("1 of 1 member, 0 of 5 pending invites, and 0 of 1 expired invite match “loc”.");
+    // Clear from the keyboard: the button goes with the search, and the focus goes back to the box.
+    await page.getByRole("button", { name: "Clear", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(find).toHaveValue("");
+    await expect(find).toBeFocused();
+    await expect(pending).toHaveCount(5);
+
+    // Revoking while searching can take the workspace below six; the box stays (with what was typed) until it is
+    // cleared, rather than vanishing under the search and coming back later holding it.
+    await find.fill("ana");
+    await pending.first().getByRole("button", { name: "Revoke" }).click();
+    await expect(page.getByText("No pending invite matches “ana”.")).toBeVisible();
+    await find.fill("ben");
+    await pending.first().getByRole("button", { name: "Revoke" }).click();
+    await expect(page.getByText("No pending invite matches “ben”.")).toBeVisible();
+    await expect(find).toHaveValue("ben");
+    await expect(found).toHaveText("No member or invite matches “ben”.");
+    // An invite made while searching clears the search, so the new invite shows on Pending invites.
+    await page.getByLabel("Email addresses (optional)").fill("zed@example.com");
+    await page.getByTestId("create-invite").click();
+    await expect(page.getByTestId("invite-link")).toBeVisible();
+    await expect(find).toHaveValue("");
+    await expect(page.locator("li", { hasText: "zed@example.com" }).getByTestId("invite-role")).toBeVisible();
+    await expect(pending).toHaveCount(4);
+  } finally {
+    await page.unroute("**/api/workspaces");
+    await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
+    expect((await page.request.delete(`/api/workspaces/${ws.id}`)).status()).toBe(204);
+  }
+});
+
 test("the workspace activity feed shows more, a page at a time, up to all kept", async ({ page }) => {
   const created = await page.request.post("/api/workspaces", { data: { name: `Feed ${Date.now().toString(36)}` } });
   expect(created.status()).toBe(201);

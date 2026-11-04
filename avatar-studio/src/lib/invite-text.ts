@@ -69,3 +69,42 @@ export function seatLine(seats: Seats): string {
   if (seats.pending) parts.push(count(seats.pending, "pending invite", "pending invites"));
   return `${used} of ${seats.max} seats used: ${parts.join(" and ")}.`;
 }
+
+/** A workspace with this many members and invites (pending or expired) gets a Find box above its member list. */
+export const PEOPLE_SEARCH_FROM = 6;
+
+/**
+ * Whether a member or invite matches what was typed into Find: the text it is listed by (an address, a member's id
+ * when there is no address, or "Link invite"), ignoring case and spaces around the query. An empty query matches all.
+ */
+export function personMatches(query: string, listedAs: string): boolean {
+  const q = query.trim().toLowerCase();
+  return !q || listedAs.toLowerCase().includes(q);
+}
+
+/** How many of each list a Find shows, for the status line: [shown, of]. A list with none at all is left out. */
+export interface PeopleMatches {
+  members: [number, number];
+  pending: [number, number];
+  expired: [number, number];
+}
+
+/**
+ * "2 of 12 members and 1 of 3 pending invites match “ann”.", or "No member or invite matches “zed”."; a reader who
+ * is not an owner sees no invites, so `invites: false` says "No member matches" instead.
+ */
+export function peopleMatchLine(m: PeopleMatches, query: string, { invites = true }: { invites?: boolean } = {}): string {
+  const q = `“${query.trim()}”`;
+  if (m.members[0] + m.pending[0] + m.expired[0] === 0) return `No ${invites ? "member or invite" : "member"} matches ${q}.`;
+  const parts: string[] = [];
+  const add = ([shown, of]: [number, number], one: string, many: string) => {
+    if (of > 0) parts.push(`${shown} of ${count(of, one, many)}`);
+  };
+  add(m.members, "member", "members");
+  add(m.pending, "pending invite", "pending invites");
+  add(m.expired, "expired invite", "expired invites");
+  const listed = list(parts);
+  // "1 of 12 members matches", but "0 of 1 member and 1 of 3 pending invites match": the verb follows what is listed.
+  const one = parts.length === 1 && m.members[0] + m.pending[0] + m.expired[0] === 1;
+  return `${listed} ${one ? "matches" : "match"} ${q}.`;
+}

@@ -8,7 +8,7 @@ import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
 import { ACTIVITY_AREAS, ACTIVITY_AREA_LABELS, ACTIVITY_KEPT, ACTIVITY_PAGE, activityFilterPhrase, canShowMoreActivity, nextActivityLimit, activitySeenKey, activitySeenMark, describeActivity, newActivityCount, newActivityIds, parseActivityArea, type ActivityArea } from "@/lib/activity-text";
 import { readSeenMark } from "@/lib/comment-list";
-import { EXPIRED_INVITE_DAYS, bulkInviteSummary, seatLine, seatsLeft, splitEmails, type BulkInviteAnswer, type Seats } from "@/lib/invite-text";
+import { EXPIRED_INVITE_DAYS, PEOPLE_SEARCH_FROM, bulkInviteSummary, peopleMatchLine, personMatches, seatLine, seatsLeft, splitEmails, type BulkInviteAnswer, type Seats } from "@/lib/invite-text";
 import { roleArticle } from "@/lib/roles";
 import type { ActivityEvent, WorkspaceRole } from "@/lib/types";
 
@@ -120,6 +120,9 @@ export default function WorkspacePage() {
   // What the last batch of invites did, and which pending invite's link was just copied.
   const [batchNote, setBatchNote] = useState<string | null>(null);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  // What is typed into Find, over members and invites (the box shows once the workspace has PEOPLE_SEARCH_FROM of them).
+  const [findText, setFindText] = useState("");
+  const findBox = useRef<HTMLInputElement>(null);
   // A pending invite's role while its change is being saved, by token.
   const [pendingRole, setPendingRole] = useState<Record<string, WorkspaceRole>>({});
   const [busy, setBusy] = useState(false);
@@ -154,6 +157,8 @@ export default function WorkspacePage() {
         setBatchNote(note);
         setInviteStatus(note);
         setEmail("");
+        // The new invites are on Pending invites, which a search could hide.
+        setFindText("");
       });
       return;
     }
@@ -162,6 +167,7 @@ export default function WorkspacePage() {
       setLink(res.url);
       setMailNote(res.emailed ? `Invite emailed to ${emails[0]}.` : res.emailError ? `Email failed (${res.emailError}); share the link instead.` : emails[0] ? "Email sending is not configured; share the link." : null);
       setEmail("");
+      setFindText("");
     });
   }
 
@@ -283,6 +289,16 @@ export default function WorkspacePage() {
   const pasted = splitEmails(email);
   // Repeats are skipped by the server, so they take no seat.
   const pastedUnique = new Set(pasted.map((e) => e.toLowerCase())).size;
+  // Find: each list as filtered by what is typed; the box shows once there are enough people to look through.
+  const expiredAll = ws.expiredInvites ?? [];
+  // Kept while something is typed, so the box never vanishes under a search (or comes back holding an old one).
+  const searchable = ws.members.length + ws.invites.length + expiredAll.length >= PEOPLE_SEARCH_FROM || findText !== "";
+  const finding = searchable && findText.trim() !== "";
+  const shownMembers = finding ? ws.members.filter((m) => personMatches(findText, m.email ?? m.userId)) : ws.members;
+  const shownInvites = finding ? ws.invites.filter((i) => personMatches(findText, i.email ?? "Link invite")) : ws.invites;
+  const shownExpired = finding ? expiredAll.filter((i) => personMatches(findText, i.email ?? "Link invite")) : expiredAll;
+  const noneFound = <T,>(shown: T[], what: string) =>
+    finding && shown.length === 0 ? <p className="py-2 text-xs text-slate-500">No {what} matches “{findText.trim()}”.</p> : null;
 
   return (
     <>
@@ -357,9 +373,49 @@ export default function WorkspacePage() {
         }
       />
       <ErrorBanner message={error ?? err} />
+      {searchable && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <input
+            ref={findBox}
+            type="search"
+            value={findText}
+            onChange={(e) => setFindText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && findText) {
+                e.preventDefault();
+                setFindText("");
+              }
+            }}
+            placeholder={isOwner ? "Find a member or invite by email" : "Find a member by email"}
+            aria-label={isOwner ? "Find a member or invite" : "Find a member"}
+            aria-describedby="people-found"
+            autoComplete="off"
+            spellCheck={false}
+            className={`${inputClass} max-w-sm`}
+            data-testid="people-search"
+          />
+          {finding && (
+            <button
+              type="button"
+              onClick={() => {
+                // The button goes with the search, so the focus goes back to the box rather than to the page.
+                setFindText("");
+                findBox.current?.focus();
+              }}
+              className="text-xs font-medium text-slate-500 hover:text-slate-900"
+            >
+              Clear
+            </button>
+          )}
+          <p id="people-found" className="sr-only" role="status" data-testid="people-found">
+            {finding ? peopleMatchLine({ members: [shownMembers.length, ws.members.length], pending: [shownInvites.length, ws.invites.length], expired: [shownExpired.length, expiredAll.length] }, findText, { invites: isOwner }) : ""}
+          </p>
+        </div>
+      )}
       <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
         <Card className="divide-y divide-slate-100">
-          {ws.members.map((m) => (
+          {finding && shownMembers.length === 0 && <p className="px-5 py-3 text-sm text-slate-500">No member matches “{findText.trim()}”.</p>}
+          {shownMembers.map((m) => (
             <div key={m.userId} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium text-slate-900">
@@ -477,8 +533,9 @@ export default function WorkspacePage() {
             {ws.invites.length > 0 && (
               <Card className="p-5">
                 <h3 className="text-sm font-semibold text-slate-900">Pending invites</h3>
-                <ul className="mt-2 divide-y divide-slate-100 text-xs">
-                  {ws.invites.map((i) => (
+                {noneFound(shownInvites, "pending invite")}
+                <ul hidden={shownInvites.length === 0} className="mt-2 divide-y divide-slate-100 text-xs">
+                  {shownInvites.map((i) => (
                     <li key={i.token} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 py-2">
                       {/* Only the address truncates: the select sits outside it, so a long address never clips it. */}
                       <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1 text-slate-700">
@@ -538,8 +595,9 @@ export default function WorkspacePage() {
               <Card className="p-5" data-testid="expired-invites">
                 <h3 className="text-sm font-semibold text-slate-900">Expired invites</h3>
                 <p className="mt-1 text-xs text-slate-500">Links that lapsed in the last {EXPIRED_INVITE_DAYS} days. Invite again sends a new link; the old one stays dead.</p>
-                <ul className="mt-2 divide-y divide-slate-100 text-xs">
-                  {ws.expiredInvites!.map((i, n, all) => (
+                {noneFound(shownExpired, "expired invite")}
+                <ul hidden={shownExpired.length === 0} className="mt-2 divide-y divide-slate-100 text-xs">
+                  {shownExpired.map((i, n, all) => (
                     <li key={i.token} className="flex items-center justify-between gap-2 py-2">
                       <span className="truncate text-slate-500">
                         {i.email ?? "Link invite"} · {i.role} · expired {formatDate(i.expiresAt)}

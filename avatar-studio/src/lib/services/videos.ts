@@ -27,7 +27,7 @@ import { listVoices } from "./voices";
 import { PUBLIC_ACCESS, owned, scheduleNotification, stripUndefined } from "./shared";
 import { SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, clearShareLock, setShareLock, shareUnlocked } from "../share-lock";
 import { clearCover, readCover, setCover } from "../cover";
-import { SHAPE_FILTERS, SHARE_FILTERS, inShape, inShareFilter, madeWithin, posterUrl, shareOffline } from "../client";
+import { LENGTH_FILTERS, SHAPE_FILTERS, SHARE_FILTERS, inLength, inShape, inShareFilter, madeWithin, posterUrl, shareOffline } from "../client";
 import { bumpViewsByDay } from "../insights";
 
 import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneNameSchema, sceneTextSchema } from "./schemas";
@@ -2050,7 +2050,14 @@ export async function applyAvatarWebhook(providerName: string, body: unknown): P
   if (!video) return null;
   // Found by its own id, it is still following the agent's session: from now on it follows the render the webhook names
   // (a failure names none worth following).
-  const update: Partial<Video> = !byJob && parsed.providerJobId && parsed.update.status !== "failed" ? { ...parsed.update, providerJobId: parsed.providerJobId } : parsed.update;
+  const moved: Partial<Video> = !byJob && parsed.providerJobId && parsed.update.status !== "failed" ? { ...parsed.update, providerJobId: parsed.providerJobId } : parsed.update;
+  // A completion that leaves out the length or poster is checked with the renderer first, once, while the video is still
+  // waiting on it (a repeated delivery asks nothing). The webhook's own fields win; only the missing ones are added.
+  const jobId = moved.providerJobId ?? video.providerJobId;
+  const needsLength = video.durationSec === undefined && moved.durationSec === undefined;
+  const needsPoster = !video.thumbnailUrl && !moved.thumbnailUrl;
+  const details = moved.status === "completed" && isPending(video) && jobId && (needsLength || needsPoster) ? await finishedDetails(providerName, jobId) : {};
+  const update: Partial<Video> = { ...(needsLength ? { durationSec: details.durationSec } : {}), ...(needsPoster ? { thumbnailUrl: details.thumbnailUrl } : {}), ...moved };
   // A late or repeated terminal webhook must not overwrite a recorded outcome (and the counts
   // that landed on it since), nor announce the completion twice. The record is read again under the
   // video's lock, so an edit, review, or beacon that landed after the lookup is kept.
@@ -2071,6 +2078,34 @@ export async function applyAvatarWebhook(providerName: string, body: unknown): P
   // the next look.
   if (!byJob && result.before && result.next.status === "processing" && result.next.providerJobId !== result.before.providerJobId) return refreshStatus(result.next);
   return result.next;
+}
+
+/** How long a webhook waits on the renderer for what its completion event left out, before recording it without. */
+const WEBHOOK_DETAILS_MS = 8_000;
+
+/**
+ * The running time and poster of a render a completion webhook finished, which HeyGen's success event and D-ID's
+ * callback leave out, asked of the renderer once so the one write that records the completion carries them (and the
+ * notifications sent after it). Never throws: a check that fails, is slow, or finds the render not finished gives nothing.
+ */
+async function finishedDetails(providerName: string, providerJobId: string): Promise<Partial<Video>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const status = await Promise.race([
+      getAvatarProviderByName(providerName).getStatus(providerJobId),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("timed out")), WEBHOOK_DETAILS_MS);
+      }),
+    ]);
+    if (status.status !== "completed") return {};
+    const length = typeof status.durationSec === "number" && Number.isFinite(status.durationSec) && status.durationSec > 0 ? status.durationSec : undefined;
+    return stripUndefined({ durationSec: length, thumbnailUrl: status.thumbnailUrl });
+  } catch (err) {
+    console.error(`could not read the length of render ${providerJobId} after its webhook:`, err);
+    return {};
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2106,6 +2141,11 @@ export const videoQuerySchema = z.object({
   created: z.enum(["all", "7d", "30d", "90d"]).default("all"),
   /** Only the videos made in one shape: `landscape` (16:9), `portrait` (9:16), or `square` (1:1), in the trash too. */
   shape: z.enum(["all", ...SHAPE_FILTERS]).default("all"),
+  /**
+   * Only the videos of one running time: `short` (under a minute), `medium` (one to three minutes), or `long` (over three),
+   * in the trash too. Only a completed render has a running time, so a video still rendering, or one that failed, is in none of them.
+   */
+  length: z.enum(["all", ...LENGTH_FILTERS]).default("all"),
   /**
    * `open`: only the videos with a review thread no one has resolved yet; `mentions`: only those with an open thread that
    * names the reader (in the trash too).
@@ -2165,6 +2205,11 @@ export interface VideoPage {
   needs: { avatars: Record<string, number>; voices: Record<string, number> };
   /** Renders still in flight, across the whole library. */
   rendering: number;
+  /**
+   * With a length filter, the renders in flight that match everything else the query asks for: they have no running time
+   * yet, so the filter leaves them out until they finish. 0 without a length filter, and in the trash view.
+   */
+  lengthPending: number;
   /** Videos in the trash, so the library can offer the view. */
   trashed: number;
   /** Open (unresolved) review notes on the videos of this page that have any, by video id. */
@@ -2233,6 +2278,7 @@ export function filterVideos(
       if (query.comments === "mentions" && !mentions!.get(v.id)) return false;
       if (query.created !== "all" && !madeWithin(v, query.created, now)) return false;
       if (query.shape !== "all" && !inShape(v, query.shape)) return false;
+      if (query.length !== "all" && !inLength(v, query.length)) return false;
       if (query.review !== "all" && (v.review?.status ?? "none") !== query.review) return false;
       if (query.share !== "all" && !inShareFilter(v, query.share, now)) return false;
       if (query.folder !== undefined && (v.folder ?? "") !== query.folder) return false;
@@ -2320,6 +2366,7 @@ export async function queryVideos(ownerId: string = LOCAL_OWNER, query: VideoQue
     ...(readerId ? { you: readerId } : {}),
     // Renders in flight in the library, whichever view this is: the trash view must not poll for a trashed render.
     rendering: live.filter((v) => v.status === "processing" || v.status === "queued").length,
+    lengthPending: query.length === "all" || query.trash ? 0 : filterVideos(all, { ...query, length: "all" }, openComments, mentions, lastAt).filter((v) => v.status === "processing" || v.status === "queued").length,
     trashed,
   };
 }

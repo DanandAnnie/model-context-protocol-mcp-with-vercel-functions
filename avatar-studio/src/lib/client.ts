@@ -217,6 +217,21 @@ export function inShape(video: { aspect?: string }, shape: keyof typeof SHAPE_AS
   return (video.aspect ?? "16:9") === SHAPE_ASPECT[shape];
 }
 
+/** The library's length filter, by a finished video's running time: under a minute, one to three minutes, over three. */
+export const LENGTH_FILTERS = ["short", "medium", "long"] as const;
+export type LengthFilter = (typeof LENGTH_FILTERS)[number];
+
+/**
+ * Whether a finished video's running time is in a length: `short` under 60 seconds, `medium` 60 to 180 seconds, `long`
+ * over 180. Only a completed render has a running time, so a video still rendering, or one that failed, is in no length.
+ */
+export function inLength(video: { status?: string; durationSec?: number }, length: LengthFilter): boolean {
+  if (video.status !== "completed" || typeof video.durationSec !== "number" || !Number.isFinite(video.durationSec) || video.durationSec <= 0) return false;
+  // Judged by the time a card shows, so a video reading "3m 00s" is never under Over 3 minutes.
+  const d = shownSeconds(video.durationSec);
+  return length === "short" ? d < 60 : length === "medium" ? d >= 60 && d <= 180 : d > 180;
+}
+
 export type CreatedWithin = keyof typeof CREATED_WITHIN_DAYS;
 
 /** Whether a video was made within `created` of `now`; an unreadable creation time (NaN) is in no window. */
@@ -360,9 +375,19 @@ export function isDarkHex(hex: string): boolean {
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.5;
 }
 
+/**
+ * A running time as formatSeconds shows it: to a tenth of a second under a minute (a silent scene's 1.5 seconds), to
+ * the nearest second from a minute up (a renderer's 180.4 seconds reads 3m 00s).
+ */
+export function shownSeconds(total: number): number {
+  const tenths = Math.round(total * 10) / 10;
+  return tenths >= 60 ? Math.round(total) : tenths;
+}
+
 export function formatSeconds(total: number): string {
-  const m = Math.floor(total / 60);
-  const s = total % 60;
+  const whole = shownSeconds(total);
+  const m = Math.floor(whole / 60);
+  const s = whole % 60;
   return m > 0 ? `${m}m ${s.toString().padStart(2, "0")}s` : `${s}s`;
 }
 
@@ -379,7 +404,7 @@ export function shareSummary(video: { shareDisabled?: boolean; shareExpiresAt?: 
 }
 
 /** The library address's filter parameters (the ones the library reads, and a batch's results), which Clear filters takes off. */
-export const LIBRARY_FILTER_PARAMS = ["batch", "skipped", "failed", "share", "status", "created", "review", "comments", "presenter", "voice", "shape"] as const;
+export const LIBRARY_FILTER_PARAMS = ["batch", "skipped", "failed", "share", "status", "created", "review", "comments", "presenter", "voice", "shape", "length"] as const;
 
 /**
  * The library address's query without its filter parameters, as "?…" or "" when nothing else is left, or null when it

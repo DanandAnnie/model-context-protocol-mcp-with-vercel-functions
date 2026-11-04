@@ -3975,7 +3975,7 @@ test("the library counts each video's open comments and can show only the videos
   await expect(page.getByTestId("open-comments-toggle")).toHaveAttribute("aria-pressed", "true");
   await page.getByLabel("Search videos").fill(tag);
   await expect(notedCard).toHaveCount(0);
-  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, shape, share link, or turn off Open comments.")).toBeVisible();
+  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, shape, length, share link, or turn off Open comments.")).toBeVisible();
   await page.getByTestId("open-comments-toggle").click();
   await expect(notedCard).toBeVisible();
   await expect(notedCard.getByTestId("open-comments-badge")).toHaveCount(0);
@@ -10749,7 +10749,7 @@ test("videos are starred from their page or in bulk, and the library filters by 
   expect((await a11y("main")).violations.map((v) => v.id)).toEqual([]);
   // With a search that hides every starred video, the empty state points at the filters rather than at starring.
   await page.getByLabel("Search videos").fill(`${tag} nothing like it`);
-  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, shape, share link, or turn off Starred.")).toBeVisible();
+  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, shape, length, share link, or turn off Starred.")).toBeVisible();
   await page.getByLabel("Search videos").fill(tag);
   await expect(card(one.id)).toBeVisible();
   // Starring in bulk from the whole library, then taking both stars off from the filtered view.
@@ -10831,7 +10831,7 @@ test("the library filters by shape: landscape, portrait, or square", async ({ pa
   await expect(card(tall)).toHaveCount(0);
   // A shape that hides every match is named in the empty state's advice.
   await page.getByLabel("Search videos").fill(`Tall ${tag}`);
-  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, shape, or share link.")).toBeVisible();
+  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, shape, length, or share link.")).toBeVisible();
   // Clear filters takes the shape back to any, and off the address.
   await page.getByTestId("clear-filters").click();
   await expect(filter.locator("option:checked")).toHaveText("Any shape");
@@ -10840,6 +10840,61 @@ test("the library filters by shape: landscape, portrait, or square", async ({ pa
   await expect(card(wide)).toBeVisible();
   await expect(card(tall)).toBeVisible();
   await expect(card(box)).toBeVisible();
+  const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(axe.violations.map((v) => v.id)).toEqual([]);
+});
+
+test("the library filters by length: under a minute, one to three minutes, or over three", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  // The demo renderer times a script by its words at the voice's speed: about 5 seconds, 72 seconds, and 216 seconds.
+  const sentences = (n: number) => Array.from({ length: n }, (_, i) => `This is sentence number ${i + 1} of a longer tour.`).join(" ");
+  const short = await createVideoViaApi(page, `Brief ${tag}`);
+  const medium = await createVideoViaApi(page, `Middle ${tag}`, { script: sentences(20) });
+  const long = await createVideoViaApi(page, `Lengthy ${tag}`, { script: sentences(30), speed: 0.5 });
+  for (const v of [short, medium, long]) await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  // The server filters, so the API answers the same as the page; a number of seconds is not a length name.
+  const ask = async (length: string) => (await (await page.request.get(`/api/videos?q=${tag}&length=${length}`)).json()) as { videos: { id: string }[]; lengthPending: number };
+  const listed = async (length: string) => (await ask(length)).videos.map((v) => v.id);
+  expect(await listed("short")).toEqual([short.id]);
+  expect(await listed("medium")).toEqual([medium.id]);
+  expect(await listed("long")).toEqual([long.id]);
+  expect((await ask("short")).lengthPending).toBe(0);
+  expect((await page.request.get("/api/videos?length=60")).status()).toBe(400);
+  // The analytics CSV follows the filter too.
+  const csv = parseCsv(await (await page.request.get(`/api/videos/analytics?q=${tag}&length=long`)).text());
+  expect(csv.rows.map((r) => r.title)).toEqual([`Lengthy ${tag}`]);
+
+  // A render still running (the demo renderer takes 12 seconds) has no length yet: it is under Any length only, and the
+  // library says a length filter leaves it out.
+  // The address can ask for a length, as for the other filters.
+  const rendering = await createVideoViaApi(page, `Rendering ${tag}`);
+  await page.goto(`/videos?length=medium`);
+  const filter = page.getByLabel("Filter by length");
+  await expect(filter.locator("option:checked")).toHaveText("1 to 3 minutes");
+  await page.getByLabel("Search videos").fill(tag);
+  await expect(page.getByTestId("length-note")).toHaveText("1 video still rendering is left out until it finishes.");
+  const pending = await ask("short");
+  expect(pending.videos.map((v) => v.id)).toEqual([short.id]);
+  expect(pending.lengthPending).toBe(1);
+  expect(await listed("all")).toContain(rendering.id);
+  const card = (v: { id: string }) => page.locator(`a[href="/videos/${v.id}"]`);
+  await expect(card(medium)).toBeVisible();
+  await expect(card(short)).toHaveCount(0);
+  await expect(card(long)).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /^Download analytics/ })).toHaveAttribute("href", /length=medium/);
+  await filter.selectOption("short");
+  await expect(card(short)).toBeVisible();
+  await expect(card(medium)).toHaveCount(0);
+  // A length that hides every match is named in the empty state's advice.
+  await page.getByLabel("Search videos").fill(`Lengthy ${tag}`);
+  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, shape, length, or share link.")).toBeVisible();
+  // Clear filters takes the length back to any, and off the address.
+  await page.getByTestId("clear-filters").click();
+  await expect(filter.locator("option:checked")).toHaveText("Any length");
+  await expect(page).not.toHaveURL(/length=/);
+  await expect(page.getByTestId("length-note")).toHaveCount(0);
+  await page.getByLabel("Search videos").fill(tag);
+  for (const v of [short, medium, long, rendering]) await expect(card(v)).toBeVisible();
   const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
   expect(axe.violations.map((v) => v.id)).toEqual([]);
 });

@@ -244,17 +244,24 @@ async function refreshTranslation(item: Translation): Promise<Translation> {
     if (item.status !== "completed") return item;
     // A finished job whose links could not be renewed waits a full period before the next try, unless another
     // request renewed it meanwhile.
-    const current = (await getStore().get<Translation>("translation", item.id)) ?? item;
-    return current.updatedAt === item.updatedAt ? getStore().put("translation", { ...current, updatedAt: nowIso() }) : current;
+    const current = await getStore().get<Translation>("translation", item.id);
+    // Deleted meanwhile: nothing is written back, so a delete is never undone by a poll.
+    if (!current) return item;
+    if (current.updatedAt !== item.updatedAt) return current;
+    const waited: Translation = { ...current, updatedAt: after(current.updatedAt) };
+    return (await getStore().putIf("translation", waited, "updatedAt", current.updatedAt)) ? waited : ((await getStore().get<Translation>("translation", item.id)) ?? item);
   }
-  const current = (await getStore().get<Translation>("translation", item.id)) ?? item;
+  const current = await getStore().get<Translation>("translation", item.id);
+  if (!current) return item;
   if (current.updatedAt !== item.updatedAt) return current;
   if (current.status === "completed" && update.status !== "completed") return current;
   // A job the provider does not know yet may simply be new (or the provider briefly wrong): only an old one is gone.
   if (update.error === TRANSLATION_GONE && Date.now() - Date.parse(current.dubStartedAt ?? current.createdAt) < GONE_AFTER_MS) return current;
   if (running(current) && update.status === current.status) return current;
-  const next: Translation = { ...current, ...stripUndefined(update), updatedAt: nowIso() };
-  return getStore().put("translation", next);
+  const next: Translation = { ...current, ...stripUndefined(update), updatedAt: after(current.updatedAt) };
+  // Written only over the row as it was read: a callback or a delete landing meanwhile wins.
+  if (await getStore().putIf("translation", next, "updatedAt", current.updatedAt)) return next;
+  return (await getStore().get<Translation>("translation", item.id)) ?? item;
 }
 
 export async function listTranslations(ownerId: string = LOCAL_OWNER): Promise<Translation[]> {
@@ -284,6 +291,20 @@ export async function listTranslations(ownerId: string = LOCAL_OWNER): Promise<T
 export async function getTranslation(id: string, ownerId: string = LOCAL_OWNER): Promise<Translation> {
   const item = owned(await getStore().get<Translation>("translation", id), ownerId, `Translation ${id}`);
   return shown(due(item) ? await refreshTranslation(item) : item);
+}
+
+export const translationIdSchema = z.string().regex(/^tr_[A-Za-z0-9_-]{1,64}$/, "Unknown translation");
+
+/**
+ * Forgets one translation. A dub still being made carries on at the provider and is simply no longer followed (its
+ * webhook finds no job); a proofread's lines link stops working with it.
+ */
+export async function deleteTranslation(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
+  const item = owned(await getStore().get<Translation>("translation", translationIdSchema.parse(id)), ownerId, `Translation ${id}`);
+  // A dub being started is waited for: the provider may be taking it on, and its answer is written to this job.
+  if (item.proofreadStage === "dubbing" && !stuck(item)) throw new ConflictError("This dub is being started; delete it once it shows as processing");
+  await getStore().remove("translation", item.id);
+  lastChecked.delete(item.id);
 }
 
 /** Corrected proofread lines: one text per line the provider translated, in order (the timing stays as translated). */
@@ -326,6 +347,30 @@ export async function saveProofreadLines(id: string, input: z.infer<typeof proof
  * instances) only one reaches the provider. When the provider refuses, the lines open again and the job carries the
  * error, so it can be tried again; once the provider has accepted, the lines never reopen.
  */
+/**
+ * Writes what became of a claimed dub start, only over the claim itself: a job deleted meanwhile (possible once a
+ * start has hung long enough to free the lines) stays deleted, with the provider's job id logged when there is one.
+ * A retry after a write that landed without saying so finds its own result and keeps it.
+ */
+async function writeClaimed(claimed: Translation, next: Translation, providerJobId?: string): Promise<Translation> {
+  if (await getStore().putIf("translation", next, "updatedAt", claimed.updatedAt)) return next;
+  const current = await getStore().get<Translation>("translation", claimed.id);
+  // A retry finds its own write by its timestamp, or (once a poll has moved the dub on) by the provider's job id.
+  if (current && (current.updatedAt === next.updatedAt || (providerJobId && current.providerJobId === providerJobId))) return current;
+  if (!current) {
+    if (providerJobId) console.error(`proofread dub ${providerJobId} started for ${claimed.id}, which was deleted meanwhile`);
+    throw new NotFoundError(`Translation ${claimed.id} was deleted while its dub was being started`);
+  }
+  // Changed by someone else after a hung start freed the lines: an accepted dub is still recorded over it, since the
+  // provider is making it; anything else leaves the newer row as it is.
+  if (!providerJobId) return current;
+  if (current.providerJobId) console.error(`proofread dub ${current.providerJobId} for ${claimed.id} is replaced by ${providerJobId}, a later start of the same lines`);
+  const over: Translation = { ...next, updatedAt: after(current.updatedAt) };
+  if (await getStore().putIf("translation", over, "updatedAt", current.updatedAt)) return over;
+  console.error(`proofread dub ${providerJobId} started for ${claimed.id}, but the job changed meanwhile and could not be recorded`);
+  return (await getStore().get<Translation>("translation", claimed.id)) ?? current;
+}
+
 export async function dubProofread(id: string, input: z.infer<typeof proofreadLinesSchema> | undefined, ownerId: string = LOCAL_OWNER): Promise<Translation> {
   const item = owned(await getStore().get<Translation>("translation", id), ownerId, `Translation ${id}`);
   const cues = corrected(item, input);
@@ -346,9 +391,9 @@ export async function dubProofread(id: string, input: z.infer<typeof proofreadLi
       // The provider may have started the dub without saying so: the lines stay claimed, and open again (with a
       // warning to check the provider first) only once a start would have shown up.
       const error = `The dubbing provider did not answer (${reason}), so the dub may have started. If it does not appear, the lines open again in two minutes.`;
-      return shown(await getStore().put("translation", { ...claimed, error, updatedAt: after(claimed.updatedAt) }));
+      return shown(await writeClaimed(claimed, { ...claimed, error, updatedAt: after(claimed.updatedAt) }));
     }
-    return shown(await getStore().put("translation", { ...claimed, proofreadStage: "ready", error: `The dub could not be started: ${reason}`, updatedAt: after(claimed.updatedAt) }));
+    return shown(await writeClaimed(claimed, { ...claimed, proofreadStage: "ready", error: `The dub could not be started: ${reason}`, updatedAt: after(claimed.updatedAt) }));
   }
   const { proofreadStage: _stage, error: _error, ...rest } = claimed;
   const now = nowIso();
@@ -357,8 +402,9 @@ export async function dubProofread(id: string, input: z.infer<typeof proofreadLi
   // (still claimed) open again after two minutes with the warning to check the provider first.
   for (let attempt = 1; ; attempt++) {
     try {
-      return shown(await getStore().put("translation", started));
+      return shown(await writeClaimed(claimed, started, providerJobId));
     } catch (err) {
+      if (err instanceof NotFoundError) throw err;
       if (attempt >= 3) {
         console.error(`proofread dub ${providerJobId} started for ${id} but could not be recorded:`, err);
         throw new Error(`The dub started (provider job ${providerJobId}) but could not be recorded; it is in your provider account`);
@@ -406,6 +452,13 @@ export async function applyTranslationWebhook(providerName: string, body: unknow
       console.error(`translation status after webhook failed for ${item.id}:`, err);
     }
   }
-  const next: Translation = { ...item, ...stripUndefined(update), updatedAt: nowIso() };
-  return getStore().put("translation", next);
+  // Written over the row as it was read, read again when something landed meanwhile; a job deleted meanwhile stays gone.
+  let current: Translation | null = item;
+  for (let attempt = 0; attempt < 3 && current; attempt++) {
+    if (current.status === "completed" || (current.status === "failed" && update.status === "failed")) return current;
+    const next: Translation = { ...current, ...stripUndefined(update), updatedAt: after(current.updatedAt) };
+    if (await getStore().putIf("translation", next, "updatedAt", current.updatedAt)) return next;
+    current = await getStore().get<Translation>("translation", item.id);
+  }
+  return current;
 }

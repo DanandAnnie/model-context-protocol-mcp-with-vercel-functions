@@ -7489,6 +7489,51 @@ test("the translations list is filtered by where each dub is, with counts", asyn
   expect(axe.violations.map((x) => x.id)).toEqual([]);
 });
 
+test("a translation is deleted from the list, and the focus moves to the next one", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const made = await page.request.post("/api/translate", { data: { title: `Drop ${tag}`, sourceVideoUrl: "https://cdn.example.com/a.mp4", targetLanguages: ["German", "French"] } });
+  expect(made.status()).toBe(201);
+  const [first] = (await made.json()).translations as Array<{ id: string; title: string }>;
+  await page.goto("/translate");
+  await page.getByRole("searchbox", { name: "Search translations" }).fill(tag);
+  const titles = () => page.locator('[data-testid="translation"]:visible [data-testid="translation-title"]').allTextContents();
+  await expect.poll(async () => (await titles()).sort()).toEqual([`Drop ${tag} (French)`, `Drop ${tag} (German)`]);
+  const shownTitles = await titles();
+  // Cancelling the question keeps it, and sends nothing.
+  const deletes: string[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "DELETE") deletes.push(r.url());
+  });
+  let asked = "";
+  page.once("dialog", (d) => {
+    asked = d.message();
+    void d.dismiss();
+  });
+  await page.getByRole("button", { name: `Delete ${shownTitles[0]}` }).click();
+  await expect.poll(() => asked).toContain(`Delete “${shownTitles[0]}”?`);
+  await page.reload();
+  await page.getByRole("searchbox", { name: "Search translations" }).fill(tag);
+  await expect.poll(titles).toEqual(shownTitles);
+  expect(deletes).toEqual([]);
+  page.once("dialog", (d) => void d.accept());
+  await page.getByRole("button", { name: `Delete ${shownTitles[0]}` }).click();
+  await expect.poll(titles).toEqual([shownTitles[1]]);
+  await expect(page.getByRole("button", { name: `Delete ${shownTitles[1]}` })).toBeFocused();
+  await expect(page.getByRole("status").filter({ hasText: `Deleted ${shownTitles[0]}.` })).toHaveCount(1);
+  // The last one sends the focus to the list's heading.
+  page.once("dialog", (d) => void d.accept());
+  await page.getByRole("button", { name: `Delete ${shownTitles[1]}` }).click();
+  await expect.poll(titles).toEqual([]);
+  await expect(page.getByRole("heading", { name: "Translations" })).toBeFocused();
+  await page.reload();
+  await page.getByRole("searchbox", { name: "Search translations" }).fill(tag);
+  await expect.poll(titles).toEqual([]);
+  // The API: gone is not found, and an id that is not a translation's is refused.
+  expect((await page.request.delete(`/api/translate/${first.id}`)).status()).toBe(404);
+  expect((await page.request.delete("/api/translate/vid_123")).status()).toBe(400);
+  expect(deletes).toHaveLength(2);
+});
+
 test("one video is dubbed into several languages in one go", async ({ page }) => {
   const tag = Date.now().toString(36);
   await page.goto("/translate");

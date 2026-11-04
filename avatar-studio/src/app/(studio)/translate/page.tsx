@@ -1,11 +1,12 @@
 "use client";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useRef, useState } from "react";
-import { Check, Languages } from "lucide-react";
+import { Check, Languages, Trash2 } from "lucide-react";
 import { refocusIfLost } from "@/lib/focus";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
+import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { ListSearch, useListSearch } from "@/components/ListSearch";
 import { ApiError, api, formatDate } from "@/lib/client";
@@ -32,7 +33,7 @@ export default function TranslatePage() {
 function TranslateInner() {
   const canEdit = useCanEdit();
   const params = useSearchParams();
-  const { data, error, refetch } = useApi<{ translations: Translation[]; languages: string[] }>("/api/translate", {
+  const { data, error, refetch, setData } = useApi<{ translations: Translation[]; languages: string[] }>("/api/translate", {
     pollMs: 6000,
     pollWhile: (d) => d.translations.some(moving),
   });
@@ -62,6 +63,14 @@ function TranslateInner() {
   // And by where each dub is: in progress, ready to proofread, finished, or failed.
   const [statusFilter, setStatusFilter] = useState<TranslationFilter>("all");
   const statusSelect = useRef<HTMLSelectElement>(null);
+  const listHeading = useRef<HTMLHeadingElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const focusAfterRender = useFocusAfterRender();
+  // What happened to the list (a delete), read out to screen readers; errors from it show above the list.
+  const [listNote, setListNote] = useState<string | null>(null);
+  const [listErr, setListErr] = useState<string | null>(null);
+  // The translation being deleted: the Delete buttons wait for it, so a second click does not ask (and send) again.
+  const [deleting, setDeleting] = useState<string | null>(null);
   const filterBy = (f: TranslationFilter) => {
     setStatusFilter(f);
     // What was pinned stays in view until a filter changes, as with the search.
@@ -98,6 +107,46 @@ function TranslateInner() {
   // The counts beside each status are of what the search finds, so they say what picking one would show.
   const counts = translationCounts(found);
   const shown = statusFilter === "all" ? found : found.filter((t) => search.isPinned(t.id) || translationState(t) === statusFilter);
+  async function remove(t: Translation) {
+    if (deleting) return;
+    const lose =
+      t.status === "completed"
+        ? "The dubbed video and its subtitle links go with it."
+        : t.proofreadStage === "ready"
+          ? "Its translated lines and any corrections go with it."
+          : moving(t)
+            ? "The dub is no longer followed here, though the provider may finish it."
+            : "";
+    if (!window.confirm(`Delete “${t.title}”? ${lose}`.trim())) return;
+    setListErr(null);
+    setListNote(null);
+    const at = shown.indexOf(t);
+    const next = shown[at + 1] ?? shown[at - 1];
+    // Kept in view under the current search and filter while the delete is sent, so the focus has somewhere to go.
+    if (next) search.pin(next.id);
+    setDeleting(t.id);
+    const drop = () => setData((prev) => (prev ? { ...prev, translations: prev.translations.filter((x) => x.id !== t.id) } : prev));
+    try {
+      await api(`/api/translate/${t.id}`, { method: "DELETE" });
+      drop();
+      setListNote(`Deleted ${t.title}.`);
+    } catch (e) {
+      if (!(e instanceof ApiError && e.status === 404)) {
+        setDeleting(null);
+        setListErr(e instanceof Error ? e.message : "The translation could not be deleted");
+        return;
+      }
+      // Deleted already (another tab or editor): the list catches up.
+      drop();
+      setListNote(`${t.title} was already deleted.`);
+    }
+    setDeleting(null);
+    refetch();
+    // The focus moves to the next translation's Delete, or to the list's heading (also when that one went meanwhile),
+    // rather than being lost with the button.
+    focusAfterRender(() => (next ? listRef.current?.querySelector<HTMLElement>(`[data-translation-delete="${next.id}"]:not([hidden] *)`) : null) ?? listHeading.current);
+  }
+
   const filterNote = found.length > 0 && shown.length === 0 ? TRANSLATION_FILTERS.find((f) => f.value === statusFilter)?.none : undefined;
   // Cards a search leaves out are hidden rather than removed, so corrections being proofread in one are kept.
   const shownIds = new Set(shown.map((t) => t.id));
@@ -201,7 +250,17 @@ function TranslateInner() {
         </Card>
 
         <div>
-          <h2 className="mb-3 text-sm font-semibold text-slate-900">Translations</h2>
+          <h2 ref={listHeading} tabIndex={-1} className="mb-3 text-sm font-semibold text-slate-900 focus:outline-none">
+            Translations
+          </h2>
+          <p role="status" className="sr-only">
+            {listNote}
+          </p>
+          {listErr && (
+            <div className="mb-3">
+              <ErrorBanner message={listErr} />
+            </div>
+          )}
           {data && (items.length > 0 || search.q) && (
             <ListSearch search={search} label="Search translations" placeholder="Search by title, language, or site" maxLength={200} shown={shown.length} found={found.length} filtered={statusFilter !== "all"} total={items.length} noun="translations">
               {(items.length > 1 || statusFilter !== "all") && (
@@ -230,7 +289,7 @@ function TranslateInner() {
           {!data ? null : items.length === 0 ? (
             <EmptyState icon={<Languages className="h-8 w-8" />} title="No translations yet" body="Submit a video on the left to get started." />
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-3" ref={listRef}>
               {items.map((t) => (
                 <Card key={t.id} className="p-4" data-testid="translation" hidden={!shownIds.has(t.id)}>
                   <div className="flex items-start justify-between gap-3">
@@ -251,11 +310,18 @@ function TranslateInner() {
                       {t.proofreadStage === "dubbing" && <div className="mt-1 text-xs text-slate-500">Starting the dub…</div>}
                       {t.error && <div className="mt-1 text-xs text-rose-600">{t.error}</div>}
                     </div>
-                    {t.proofreadStage === "ready" ? (
-                      <span className="inline-flex shrink-0 items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">Ready to proofread</span>
-                    ) : (
-                      <StatusBadge status={t.status} />
-                    )}
+                    <div className="flex shrink-0 items-center gap-1">
+                      {t.proofreadStage === "ready" ? (
+                        <span className="inline-flex shrink-0 items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">Ready to proofread</span>
+                      ) : (
+                        <StatusBadge status={t.status} />
+                      )}
+                      {canEdit !== false && (
+                        <button type="button" onClick={() => remove(t)} data-translation-delete={t.id} aria-disabled={!!deleting || undefined} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-rose-600 aria-disabled:opacity-50" aria-label={`Delete ${t.title}`} title="Delete">
+                          <Trash2 className="h-4 w-4" aria-hidden />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   {t.proofreadStage === "ready" && t.proofreadCues && <Proofread key={t.id} translation={t} canEdit={canEdit !== false} onChange={refetch} onPin={() => search.pin(t.id)} />}
                   {t.status === "completed" && t.videoUrl && <video src={t.videoUrl} controls className="mt-3 w-full rounded-lg bg-black" />}

@@ -140,15 +140,18 @@ describe("multi-language translation", () => {
     assert.equal((await listTranslations("u-g")).find((t) => t.id === "tr_older")?.status, "completed", "the job not yet asked about goes first");
     // A store that fails while refreshing leaves the listing as stored instead of failing it.
     await getStore().put("translation", job("tr_fresh", "2026-02-01T00:00:00Z", `mock_tr_${Date.now() - 60_000}`));
-    const store = getStore() as unknown as { put: (...a: unknown[]) => Promise<unknown> };
+    // Every way of writing fails: a refresh writes only over the row as it read it (putIf).
+    const store = getStore() as unknown as { put: (...a: unknown[]) => Promise<unknown>; putIf: (...a: unknown[]) => Promise<unknown> };
     const put = store.put.bind(store);
-    store.put = async () => {
+    const putIf = store.putIf.bind(store);
+    store.put = store.putIf = async () => {
       throw new Error("store down");
     };
     try {
       assert.equal((await listTranslations("u-g")).find((t) => t.id === "tr_fresh")?.status, "processing");
     } finally {
       store.put = put;
+      store.putIf = putIf;
     }
   });
 

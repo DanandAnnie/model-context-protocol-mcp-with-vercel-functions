@@ -2,12 +2,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Copy, Layers3, RotateCcw, Upload } from "lucide-react";
+import { Copy, Layers3, QrCode, RotateCcw, Upload } from "lucide-react";
 import { Button, Card, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
-import { api, formatDate } from "@/lib/client";
+import { BATCH_NOTHING_TO_SEND, api, formatDate } from "@/lib/client";
 import type { BatchSummary } from "@/lib/services/batches";
 import { decodeScript, legacyEncodingFor } from "@/lib/script-import";
 import { restoredCaptionStyle } from "@/lib/caption-style";
@@ -76,9 +76,11 @@ export default function BatchPage() {
   // Batches made before, newest first, to find one's videos again or send its links; asked again while renders are
   // being made, so the counts move as they finish.
   const { data: batchData, refetch: refetchBatches } = useApi<{ batches: BatchSummary[] }>("/api/videos/batch", { pollMs: 8000, pollWhile: (d) => d.batches.some((b) => b.making > 0) });
-  const [retrying, setRetrying] = useState<string | null>(null);
-  const [copying, setCopying] = useState<string | null>(null);
-  /** What the last Retry failed or Copy links did, said under that batch. */
+  // One action at a time across the list (Retry failed, Copy links, QR codes), since they share the note under a batch.
+  const [batchBusy, setBatchBusy] = useState<{ batchId: string; action: "retry" | "copy" | "qr" } | null>(null);
+  const retrying = batchBusy?.action === "retry" ? batchBusy.batchId : null;
+  const busyWith = (batchId: string, action: "retry" | "copy" | "qr") => batchBusy?.batchId === batchId && batchBusy.action === action;
+  /** What the last Retry failed, Copy links, or QR codes did, said under that batch. */
   const [batchNote, setBatchNote] = useState<{ batchId: string; text: string; error?: boolean } | null>(null);
   const focusNote = useRef<string | null>(null);
   const brandApplied = useRef(false);
@@ -104,11 +106,11 @@ export default function BatchPage() {
   /** Start a batch's failed renders again with the same settings, up to the most one request takes, and say what happened. */
   async function retryBatch(b: BatchSummary) {
     const ids = b.failedIds.slice(0, MAX_RETRY_AT_ONCE);
-    if (!ids.length || retrying || copying) return;
+    if (!ids.length || batchBusy) return;
     const over = b.failedIds.length - ids.length;
     const what = ids.length === 1 ? "1 failed render" : `${ids.length} failed renders`;
     if (!window.confirm(`Start ${what} of “${b.title}” again with the same settings?${over ? ` Only the first ${MAX_RETRY_AT_ONCE} are started now; retry again for the other ${over}.` : ""} Each counts toward this month's renders.`)) return;
-    setRetrying(b.batchId);
+    setBatchBusy({ batchId: b.batchId, action: "retry" });
     setBatchNote(null);
     try {
       const r = await api<{ started: Array<{ from: string; id: string }>; failedAgain: Array<{ from: string; id?: string; reason: string }>; skipped: Array<{ id: string; code: string }>; missing: string[] }>("/api/videos/retry", { method: "POST", body: JSON.stringify({ ids }) });
@@ -135,7 +137,7 @@ export default function BatchPage() {
       // The button goes once the batch has no failed render left, so focus is held for the note (moved there below).
       focusNote.current = b.batchId;
       await refetchBatches();
-      setRetrying(null);
+      setBatchBusy(null);
     }
   }
   // After a retry, a batch left with no failed render has lost its button; its note, which says what happened, takes focus.
@@ -148,9 +150,8 @@ export default function BatchPage() {
   }, [batchData, retrying]);
   /** Put a batch's links that can be sent now on the clipboard, one a line in the CSV's order, and say how many were left out. */
   async function copyBatchLinks(b: BatchSummary) {
-    // One note per batch says what the last action did, so a copy and a retry wait for each other.
-    if (copying || retrying) return;
-    setCopying(b.batchId);
+    if (batchBusy) return;
+    setBatchBusy({ batchId: b.batchId, action: "copy" });
     setBatchNote(null);
     const counts = { links: 0, unsendable: 0 };
     // Fetched inside the clipboard write rather than before it, so a browser that only lets a click copy at once (Safari)
@@ -163,7 +164,7 @@ export default function BatchPage() {
         if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? "Could not copy the links");
         counts.links = Number(res.headers.get("X-Links") ?? 0);
         counts.unsendable = Number(res.headers.get("X-Unsendable") ?? 0);
-        if (!counts.links) throw new Error("None of this batch's videos has a link that can be sent yet: each is still rendering, failed, or has its share link switched off, expired, or not live until later.");
+        if (!counts.links) throw new Error(BATCH_NOTHING_TO_SEND);
         return res.text();
       });
     try {
@@ -185,7 +186,35 @@ export default function BatchPage() {
       );
       setBatchNote({ batchId: b.batchId, text: failed ?? "The browser did not let the page copy to the clipboard; Download links gives the same links as a file.", error: true });
     } finally {
-      setCopying(null);
+      setBatchBusy(null);
+    }
+  }
+  /** Save a zip of a QR code for each of a batch's links that can be sent now, for printing, and say how many were left out. */
+  async function saveBatchQr(b: BatchSummary) {
+    if (batchBusy) return;
+    setBatchBusy({ batchId: b.batchId, action: "qr" });
+    setBatchNote(null);
+    try {
+      const res = await fetch(`/api/videos/batch/${encodeURIComponent(b.batchId)}?format=qr`).catch(() => {
+        throw new Error("Could not reach the server to save the QR codes");
+      });
+      if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? "Could not save the QR codes");
+      const links = Number(res.headers.get("X-Links") ?? 0);
+      const unsendable = Number(res.headers.get("X-Unsendable") ?? 0);
+      const url = URL.createObjectURL(await res.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? "qr-codes.zip";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      const left = unsendable ? `; left out: ${unsendable} ${unsendable === 1 ? "has" : "have"} no link that can be sent yet` : "";
+      setBatchNote({ batchId: b.batchId, text: `Saved ${links} QR ${links === 1 ? "code" : "codes"}${left}.` });
+    } catch (e) {
+      setBatchNote({ batchId: b.batchId, text: e instanceof Error ? e.message : "Could not save the QR codes", error: true });
+    } finally {
+      setBatchBusy(null);
     }
   }
   /** A presenter picked by hand brings its own voice, when it has one. */
@@ -452,7 +481,7 @@ export default function BatchPage() {
       {!!batchData?.batches.length && (
         <Card className="mt-6 p-4">
           <h2 className="text-sm font-semibold text-slate-900">Recent batches</h2>
-          <p className="mt-1 text-xs text-slate-500">Counted one video per recipient (a retried row once): open a batch&apos;s videos in the library, copy the links that can be sent now, or download them all for a mail merge.</p>
+          <p className="mt-1 text-xs text-slate-500">Counted one video per recipient (a retried row once): open a batch&apos;s videos in the library, copy the links that can be sent now or save their QR codes for print, or download them all for a mail merge.</p>
           <ul className="mt-3 divide-y divide-slate-100" data-testid="recent-batches">
             {batchData.batches.map((b) => (
               <li key={b.batchId} className="flex flex-wrap items-center justify-between gap-2 py-2.5" data-testid="recent-batch">
@@ -468,13 +497,18 @@ export default function BatchPage() {
                 </div>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                   {b.failed > 0 && canEdit !== false && (
-                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void retryBatch(b)} disabled={(retrying !== null && retrying !== b.batchId) || copying !== null} loading={retrying === b.batchId} aria-label={`Retry failed (${b.failed}) in ${b.title}, started ${formatDate(b.startedAt)}`} title={`Start this batch's failed renders again with the same settings, up to ${MAX_RETRY_AT_ONCE} at a time; each counts toward this month's renders`}>
+                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void retryBatch(b)} disabled={batchBusy !== null && !busyWith(b.batchId, "retry")} loading={busyWith(b.batchId, "retry")} aria-label={`Retry failed (${b.failed}) in ${b.title}, started ${formatDate(b.startedAt)}`} title={`Start this batch's failed renders again with the same settings, up to ${MAX_RETRY_AT_ONCE} at a time; each counts toward this month's renders`}>
                       <RotateCcw className="h-3.5 w-3.5" /> Retry failed ({b.failed})
                     </Button>
                   )}
                   {b.ready > 0 && (
-                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void copyBatchLinks(b)} disabled={(copying !== null && copying !== b.batchId) || retrying !== null} loading={copying === b.batchId} aria-label={`Copy links of ${b.title}, started ${formatDate(b.startedAt)}`} title="Copy this batch's share links that can be sent now, one a line in the CSV's order">
+                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void copyBatchLinks(b)} disabled={batchBusy !== null && !busyWith(b.batchId, "copy")} loading={busyWith(b.batchId, "copy")} aria-label={`Copy links of ${b.title}, started ${formatDate(b.startedAt)}`} title="Copy this batch's share links that can be sent now, one a line in the CSV's order">
                       <Copy className="h-3.5 w-3.5" /> Copy links
+                    </Button>
+                  )}
+                  {b.ready > 0 && (
+                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void saveBatchQr(b)} disabled={batchBusy !== null && !busyWith(b.batchId, "qr")} loading={busyWith(b.batchId, "qr")} aria-label={`QR codes of ${b.title}, started ${formatDate(b.startedAt)}`} title="Save a zip of a QR code for each of this batch's links that can be sent now, for printing">
+                      <QrCode className="h-3.5 w-3.5" /> QR codes
                     </Button>
                   )}
                   <a href={`/api/videos/batch/${encodeURIComponent(b.batchId)}`} download className="text-xs font-medium text-brand-700 hover:underline" aria-label={`Download links of ${b.title}, started ${formatDate(b.startedAt)}`}>

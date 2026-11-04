@@ -347,11 +347,11 @@ export function selectionLinkText(rows: Array<{ share_link?: string | number }>)
 }
 
 /**
- * A QR code of each of those rows' links a viewer can open now, as SVG files named after the videos (in the order given,
+ * A QR code of each of those rows' links (a selection's, or a batch's) a viewer can open now, as SVG files named after the videos (in the order given,
  * no two names alike), for printing several at once, and how many rows had no link to draw.
  */
-export function selectionQrFiles(rows: ReturnType<typeof selectionLinkRows>): { files: Array<{ name: string; svg: string }>; links: number; unsendable: number } {
-  const sendable = rows.flatMap((r) => (r.share_link ? [{ title: r.title ?? "", link: r.share_link }] : []));
+export function selectionQrFiles(rows: Array<{ title?: string | number; share_link?: string | number }>): { files: Array<{ name: string; svg: string }>; links: number; unsendable: number } {
+  const sendable = rows.flatMap((r) => (r.share_link ? [{ title: String(r.title ?? ""), link: String(r.share_link) }] : []));
   const names = qrFileNames(sendable.map((r) => r.title));
   const files = sendable.map((r, i) => ({ name: names[i], svg: qrSvg(r.link, qrWording("share", r.title).title) }));
   return { files, links: files.length, unsendable: rows.length - files.length };

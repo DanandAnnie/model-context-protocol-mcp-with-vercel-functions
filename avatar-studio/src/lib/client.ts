@@ -114,6 +114,9 @@ export function shareOffline(video: { shareDisabled?: boolean; shareExpiresAt?: 
   return !!video.shareDisabled || !!video.deletedAt || shareExpired(video, now) || shareNotYet(video, now);
 }
 
+/** Why a batch gave no links to copy or QR codes to save: its links CSV has no reason column, so the reasons are said here. */
+export const BATCH_NOTHING_TO_SEND = "None of this batch's videos has a link that can be sent yet: each is still rendering, failed, or has its share link switched off, expired, or not live until later.";
+
 /**
  * A video's share link when a viewer can open it now (rendered, out of the trash, switched on, live, not expired) on
  * `origin`, else undefined; a password or an email gate does not stop it being sent.

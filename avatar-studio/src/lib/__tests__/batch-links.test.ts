@@ -4,10 +4,11 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import { getStore } from "../store";
-import { BATCH_LINK_COLUMNS, batchLinkRows, batchRequestSchema, batchVideos, createBatch, retryVideo, selectionLinkText } from "../services";
+import { BATCH_LINK_COLUMNS, batchLinkRows, batchRequestSchema, batchVideos, createBatch, retryVideo, selectionLinkText, selectionQrFiles } from "../services";
 import { NotFoundError } from "../errors";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import { parseCsv, toCsv } from "../csv";
+import { qrSvg, qrWording } from "../qr";
 import type { Video } from "../types";
 
 const OWNER = "user_batch_links";
@@ -104,5 +105,10 @@ describe("batch links", () => {
       "https://studio.example",
     );
     assert.deepEqual(selectionLinkText(more), { text: "https://studio.example/share/h2", links: 1, unsendable: 3 });
+    // The same links as QR codes, one SVG each, named after the videos.
+    const qr = selectionQrFiles(rows);
+    assert.deepEqual([qr.files.map((f) => f.name), qr.links, qr.unsendable], [["qr-Hi – a.svg", "qr-Hi – c.svg"], 2, 2]);
+    // Each file is the code of that video's own link.
+    assert.deepEqual(qr.files.map((f) => f.svg), ["a", "c"].map((id) => qrSvg(`https://studio.example/share/${id}`, qrWording("share", `Hi – ${id}`).title)));
   });
 });

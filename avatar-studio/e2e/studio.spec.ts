@@ -5802,7 +5802,7 @@ test("Retry failed on a recent batch starts its failed renders again and says wh
   expect(axe.violations.map((x) => x.id)).toEqual([]);
 });
 
-test("Copy links on a recent batch copies its sendable share links in the CSV's order", async ({ page, context }) => {
+test("Copy links and QR codes on a recent batch give its sendable share links in the CSV's order", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const tag = Date.now().toString(36);
   const made = await page.request.post("/api/videos/batch", {
@@ -5828,10 +5828,28 @@ test("Copy links on a recent batch copies its sendable share links in the CSV's 
   await expect(copy).toBeFocused();
   const origin = new URL(page.url()).origin;
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe([videos[0].id, videos[2].id].map((id) => `${origin}/share/${id}`).join("\n"));
-  // With no link left that can be sent, the note says so instead of copying nothing.
+  // QR codes saves a zip of one SVG a sendable link, named after the videos; the headers count both.
+  const qrRes = await page.request.get(`/api/videos/batch/${batchId}?format=qr`);
+  expect([qrRes.status(), qrRes.headers()["x-links"], qrRes.headers()["x-unsendable"], qrRes.headers()["content-type"]]).toEqual([200, "2", "1", "application/zip"]);
+  const qr = row.getByRole("button", { name: new RegExp(`^QR codes of Copy batch ${tag}, started `) });
+  const download = page.waitForEvent("download");
+  await qr.click();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe(`qr-codes-${batchId}.zip`);
+  await expect(row.getByTestId("recent-batch-note")).toHaveText("Saved 2 QR codes; left out: 1 has no link that can be sent yet.");
+  await expect(qr).toBeFocused();
+  const entries = unzipSync(new Uint8Array(await readFile((await file.path())!)));
+  expect(Object.keys(entries).sort()).toEqual([`qr-Copy batch ${tag} – Ada.svg`, `qr-Copy batch ${tag} – Cy.svg`]);
+  expect(strFromU8(entries[`qr-Copy batch ${tag} – Ada.svg`])).toContain(`<title>Scan to watch “Copy batch ${tag} – Ada”</title>`);
+  // With no link left that can be sent, the note says so instead of copying or saving nothing.
   for (const v of [videos[0], videos[2]]) expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareDisabled: true } })).status()).toBe(200);
+  expect((await page.request.get(`/api/videos/batch/${batchId}?format=qr`)).status()).toBe(409);
+  expect((await page.request.get("/api/videos/batch/batch_nope?format=qr")).status()).toBe(404);
   await copy.click();
   await expect(row.getByTestId("recent-batch-note")).toHaveText(/^None of this batch's videos has a link that can be sent yet/);
+  await expect(row.getByTestId("recent-batch-note")).toHaveClass(/text-red-700/);
+  await qr.click();
+  await expect(row.getByTestId("recent-batch-note")).toHaveText(/^None of this batch's videos has a link that can be sent yet: each is still rendering, failed, or has its share link switched off/);
   await expect(row.getByTestId("recent-batch-note")).toHaveClass(/text-red-700/);
   const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
   expect(axe.violations.map((x) => x.id)).toEqual([]);

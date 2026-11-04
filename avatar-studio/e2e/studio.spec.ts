@@ -7444,6 +7444,51 @@ test("the translations list is searched by title, language, or the source video'
   expect(axe.violations.map((x) => x.id)).toEqual([]);
 });
 
+test("the translations list is filtered by where each dub is, with counts", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  expect((await page.request.post("/api/translate", { data: { title: `Moving ${tag}`, sourceVideoUrl: "https://cdn.example.com/a.mp4", targetLanguage: "German" } })).status()).toBe(201);
+  expect((await page.request.post("/api/translate", { data: { title: `Lines ${tag}`, sourceVideoUrl: "https://cdn.example.com/b.mp4", targetLanguage: "French", proofread: true } })).status()).toBe(201);
+  await page.goto("/translate");
+  await page.getByRole("searchbox", { name: "Search translations" }).fill(tag);
+  const cards = page.getByTestId("translation");
+  const titles = () => page.locator('[data-testid="translation"]:visible [data-testid="translation-title"]').allTextContents();
+  await expect.poll(async () => (await titles()).sort()).toEqual([`Lines ${tag}`, `Moving ${tag}`]);
+  const show = page.getByRole("combobox", { name: "Show translations" });
+  // The counts are of what the search finds.
+  await expect(show.locator("option").first()).toHaveText("All (2)");
+  await expect(cards.filter({ hasText: `Lines ${tag}` }).getByText("Ready to proofread")).toBeVisible({ timeout: 20_000 });
+  await expect(show.locator('option[value="proofread"]')).toHaveText("Ready to proofread (1)");
+  await show.selectOption("proofread");
+  await expect.poll(titles).toEqual([`Lines ${tag}`]);
+  // Nothing failed: the list says so and offers the way back.
+  await expect(show.locator('option[value="failed"]')).toHaveText("Failed (0)");
+  await show.selectOption("failed");
+  await expect.poll(titles).toEqual([]);
+  await expect(page.getByText("None of these translations have failed.")).toBeVisible();
+  // The count follows the filter too, so it is read out when the filter changes.
+  await expect(page.getByTestId("list-matches")).toHaveText(/^0 of \d+ translations$/);
+  await page.getByRole("button", { name: "Show all" }).click();
+  await expect(show).toHaveValue("all");
+  await expect(show).toBeFocused();
+  await expect.poll(async () => (await titles()).sort()).toEqual([`Lines ${tag}`, `Moving ${tag}`]);
+  // A dub started under a filter it does not meet stays in view until the filter changes.
+  await show.selectOption("failed");
+  await page.getByPlaceholder("https://…/video.mp4").fill("https://cdn.example.com/c.mp4");
+  await page.getByLabel("Title (optional)").fill(`Started ${tag}`);
+  await page.getByRole("button", { name: "Translate video" }).click();
+  await expect.poll(titles).toEqual([`Started ${tag}`]);
+  await show.selectOption("proofread");
+  await expect.poll(titles).toEqual([`Lines ${tag}`]);
+  // Approving the lines moves the dub on to being made; it stays in view under the filter it no longer meets.
+  const lines = cards.filter({ hasText: `Lines ${tag}` });
+  await lines.getByRole("button", { name: "Approve and dub" }).click();
+  await expect(lines.getByTestId("proofread")).toHaveCount(0);
+  await expect(lines).toBeVisible();
+  await expect(show.locator('option[value="proofread"]')).toHaveText("Ready to proofread (0)");
+  const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(axe.violations.map((x) => x.id)).toEqual([]);
+});
+
 test("one video is dubbed into several languages in one go", async ({ page }) => {
   const tag = Date.now().toString(36);
   await page.goto("/translate");

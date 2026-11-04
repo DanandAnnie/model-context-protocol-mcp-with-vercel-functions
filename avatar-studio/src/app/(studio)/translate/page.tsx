@@ -9,6 +9,7 @@ import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { ListSearch, useListSearch } from "@/components/ListSearch";
 import { ApiError, api, formatDate } from "@/lib/client";
+import { TRANSLATION_FILTERS, translationCounts, translationFilterFrom, translationState, translationTexts, type TranslationFilter } from "@/lib/translation-filter";
 import { MAX_TRANSLATION_SPEAKERS, type BrandKit, type Translation, type TranslationQuality } from "@/lib/types";
 
 /** A job worth polling for: lines being translated or a dub running, but not lines waiting on someone to read them. */
@@ -16,17 +17,6 @@ const moving = (t: Translation) => (t.status === "processing" || t.status === "q
 
 /** A line's start as m:ss. */
 const at = (ms: number) => `${Math.floor(ms / 60_000)}:${String(Math.floor((ms % 60_000) / 1000)).padStart(2, "0")}`;
-
-/** What the search looks through for a translation: its title, its language, and the site its source video is on. */
-function translationTexts(t: Translation): string[] {
-  let host = "";
-  try {
-    host = new URL(t.sourceVideoUrl).hostname;
-  } catch {
-    // A source that does not parse is not searched by site.
-  }
-  return [t.title, t.targetLanguage, host];
-}
 
 /** Matches the server's limit per request. */
 const MAX_LANGUAGES = 5;
@@ -69,6 +59,14 @@ function TranslateInner() {
 
   // A search over the translations below: by title, language, or the source video's site.
   const search = useListSearch();
+  // And by where each dub is: in progress, ready to proofread, finished, or failed.
+  const [statusFilter, setStatusFilter] = useState<TranslationFilter>("all");
+  const statusSelect = useRef<HTMLSelectElement>(null);
+  const filterBy = (f: TranslationFilter) => {
+    setStatusFilter(f);
+    // What was pinned stays in view until a filter changes, as with the search.
+    search.unpin();
+  };
   // Once a dub starts the form is cleared and its button disabled; the focus moves to the URL field for the next one.
   const sourceInput = useRef<HTMLInputElement>(null);
   async function submit() {
@@ -96,7 +94,11 @@ function TranslateInner() {
   }
 
   const items = data?.translations ?? [];
-  const shown = items.filter((t) => search.matches(t.id, ...translationTexts(t)));
+  const found = items.filter((t) => search.matches(t.id, ...translationTexts(t)));
+  // The counts beside each status are of what the search finds, so they say what picking one would show.
+  const counts = translationCounts(found);
+  const shown = statusFilter === "all" ? found : found.filter((t) => search.isPinned(t.id) || translationState(t) === statusFilter);
+  const filterNote = found.length > 0 && shown.length === 0 ? TRANSLATION_FILTERS.find((f) => f.value === statusFilter)?.none : undefined;
   // Cards a search leaves out are hidden rather than removed, so corrections being proofread in one are kept.
   const shownIds = new Set(shown.map((t) => t.id));
 
@@ -200,7 +202,31 @@ function TranslateInner() {
 
         <div>
           <h2 className="mb-3 text-sm font-semibold text-slate-900">Translations</h2>
-          {data && (items.length > 0 || search.q) && <ListSearch search={search} label="Search translations" placeholder="Search by title, language, or site" maxLength={200} shown={shown.length} total={items.length} noun="translations" />}
+          {data && (items.length > 0 || search.q) && (
+            <ListSearch search={search} label="Search translations" placeholder="Search by title, language, or site" maxLength={200} shown={shown.length} found={found.length} filtered={statusFilter !== "all"} total={items.length} noun="translations">
+              {(items.length > 1 || statusFilter !== "all") && (
+                <select ref={statusSelect} aria-label="Show translations" value={statusFilter} onChange={(e) => filterBy(translationFilterFrom(e.target.value))} data-testid="translation-status-filter" className={`${inputClass} w-auto`}>
+                  {TRANSLATION_FILTERS.map((f) => (
+                    <option key={f.value} value={f.value}>
+                      {f.label} ({counts[f.value]})
+                    </option>
+                  ))}
+                </select>
+              )}
+            </ListSearch>
+          )}
+          {filterNote && (
+            <p className="mb-3 text-sm text-slate-600">
+              {filterNote}{" "}
+              <button type="button" className="font-medium text-brand-700 underline" onClick={() => {
+                  filterBy("all");
+                  // The button goes with the note; the focus moves to the filter it reset.
+                  statusSelect.current?.focus();
+                }}>
+                Show all
+              </button>
+            </p>
+          )}
           {!data ? null : items.length === 0 ? (
             <EmptyState icon={<Languages className="h-8 w-8" />} title="No translations yet" body="Submit a video on the left to get started." />
           ) : (
@@ -231,7 +257,7 @@ function TranslateInner() {
                       <StatusBadge status={t.status} />
                     )}
                   </div>
-                  {t.proofreadStage === "ready" && t.proofreadCues && <Proofread key={t.id} translation={t} canEdit={canEdit !== false} onChange={refetch} />}
+                  {t.proofreadStage === "ready" && t.proofreadCues && <Proofread key={t.id} translation={t} canEdit={canEdit !== false} onChange={refetch} onPin={() => search.pin(t.id)} />}
                   {t.status === "completed" && t.videoUrl && <video src={t.videoUrl} controls className="mt-3 w-full rounded-lg bg-black" />}
                   {t.status === "completed" && (t.captionUrls?.srt || t.captionUrls?.vtt) && (
                     <div className="mt-2 flex flex-wrap gap-3 text-xs" data-testid="translation-captions">
@@ -259,7 +285,7 @@ function TranslateInner() {
 }
 
 /** The translated lines of a proofread dub, to correct and then dub. Each line keeps its timing; only the words change. */
-function Proofread({ translation, canEdit, onChange }: { translation: Translation; canEdit: boolean; onChange: () => void }) {
+function Proofread({ translation, canEdit, onChange, onPin }: { translation: Translation; canEdit: boolean; onChange: () => void; onPin: () => void }) {
   const cues = translation.proofreadCues ?? [];
   const [lines, setLines] = useState(() => cues.map((c) => c.text));
   const [busy, setBusy] = useState<"save" | "dub" | null>(null);
@@ -274,6 +300,8 @@ function Proofread({ translation, canEdit, onChange }: { translation: Translatio
     setBusy(kind);
     setErr(null);
     setSaved(false);
+    // Approved lines move the dub on to being made; it stays in view (and the focus in it) whatever the list shows.
+    onPin();
     try {
       const body = JSON.stringify({ lines: lines.map((l) => l.trim()), basedOn });
       if (kind === "save") {
@@ -303,7 +331,7 @@ function Proofread({ translation, canEdit, onChange }: { translation: Translatio
       <ol className="max-h-96 space-y-2 overflow-y-auto pr-1">
         {cues.map((c, i) => (
           <li key={i} className="flex items-start gap-2">
-            <span className="w-10 shrink-0 pt-2 text-right text-xs tabular-nums text-slate-400">{at(c.startMs)}</span>
+            <span className="w-10 shrink-0 pt-2 text-right text-xs tabular-nums text-slate-500">{at(c.startMs)}</span>
             <textarea
               aria-label={`Line ${i + 1}`}
               className={`${inputClass} min-h-[2.5rem] flex-1 resize-y`}

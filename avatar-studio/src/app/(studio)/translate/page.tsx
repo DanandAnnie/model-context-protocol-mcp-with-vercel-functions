@@ -1,6 +1,6 @@
 "use client";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { Check, CopyPlus, Languages, RotateCcw, Trash2 } from "lucide-react";
 import { refocusIfLost } from "@/lib/focus";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
@@ -10,7 +10,7 @@ import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { ListSearch, useListSearch } from "@/components/ListSearch";
 import { ApiError, api, formatDate } from "@/lib/client";
-import { TRANSLATION_FILTERS, translationCounts, translationFilterFrom, translationState, translationTexts, type TranslationFilter } from "@/lib/translation-filter";
+import { TRANSLATION_FILTERS, TRANSLATION_SORTS, TRANSLATION_SORT_KEY, sortTranslations, translationCounts, translationFilterFrom, translationSortFrom, translationState, translationTexts, type TranslationFilter, type TranslationSort } from "@/lib/translation-filter";
 import { MAX_TRANSLATION_SPEAKERS, type BrandKit, type Translation, type TranslationQuality } from "@/lib/types";
 
 /** A job worth polling for: lines being translated or a dub running, but not lines waiting on someone to read them. */
@@ -104,7 +104,26 @@ function TranslateInner() {
     }
   }
 
-  const items = data?.translations ?? [];
+  // The list's order, remembered by this browser; read after the first render so the server's markup still matches.
+  const [sort, setSort] = useState<TranslationSort>("newest");
+  useEffect(() => {
+    try {
+      const saved = translationSortFrom(window.localStorage.getItem(TRANSLATION_SORT_KEY));
+      if (saved !== "newest") setSort(saved);
+    } catch {
+      // Storage blocked (a private window, say): newest first it is.
+    }
+  }, []);
+  const sortBy = (next: TranslationSort) => {
+    setSort(next);
+    setListNote(`Sorted: ${TRANSLATION_SORTS.find((o) => o.value === next)?.label ?? next}.`);
+    try {
+      window.localStorage.setItem(TRANSLATION_SORT_KEY, next);
+    } catch {
+      // Not remembered, but the order holds for this visit.
+    }
+  };
+  const items = sortTranslations(data?.translations ?? [], sort);
   const found = items.filter((t) => search.matches(t.id, ...translationTexts(t)));
   // The counts beside each status are of what the search finds, so they say what picking one would show.
   const counts = translationCounts(found);
@@ -157,7 +176,8 @@ function TranslateInner() {
     setRetrying(t.id);
     try {
       const { translation: next } = await api<{ translation: Translation }>(`/api/translate/${t.id}/retry`, { method: "POST" });
-      // The new dub takes the failed one's place, and stays in view whatever the search or filter says.
+      // The new dub takes the failed one's card, and stays in view whatever the search or filter says (being new, it
+      // sorts as just started, so under "Oldest first" it moves to the end).
       search.pin(next.id);
       setData((prev) => (prev ? { ...prev, translations: prev.translations.map((x) => (x.id === t.id ? next : x)) } : prev));
       setListNote(
@@ -323,6 +343,15 @@ function TranslateInner() {
           )}
           {data && (items.length > 0 || search.q) && (
             <ListSearch search={search} label="Search translations" placeholder="Search by title, language, or site" maxLength={200} shown={shown.length} found={found.length} filtered={statusFilter !== "all"} total={items.length} noun="translations">
+              {items.length > 1 && (
+                <select aria-label="Sort translations" value={sort} onChange={(e) => sortBy(translationSortFrom(e.target.value))} data-testid="translation-sort" className={`${inputClass} w-auto`}>
+                  {TRANSLATION_SORTS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              )}
               {(items.length > 1 || statusFilter !== "all") && (
                 <select ref={statusSelect} aria-label="Show translations" value={statusFilter} onChange={(e) => filterBy(translationFilterFrom(e.target.value))} data-testid="translation-status-filter" className={`${inputClass} w-auto`}>
                   {TRANSLATION_FILTERS.map((f) => (

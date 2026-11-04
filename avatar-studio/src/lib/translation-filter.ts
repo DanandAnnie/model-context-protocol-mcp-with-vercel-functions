@@ -44,3 +44,44 @@ export function translationTexts(t: Pick<Translation, "title" | "targetLanguage"
   }
   return [t.title, t.targetLanguage, host];
 }
+
+export type TranslationSort = "newest" | "oldest" | "title" | "language";
+
+export const TRANSLATION_SORTS: ReadonlyArray<{ value: TranslationSort; label: string }> = [
+  { value: "newest", label: "Newest first" },
+  { value: "oldest", label: "Oldest first" },
+  { value: "title", label: "Title A–Z" },
+  { value: "language", label: "Language A–Z" },
+];
+
+/** Where this browser keeps the Video translate list's sort. */
+export const TRANSLATION_SORT_KEY = "avatar-studio:translations-sort";
+
+/** A sort remembered by this browser (or typed anywhere): one of the sorts, or newest first for anything else. */
+export function translationSortFrom(value: string | null | undefined): TranslationSort {
+  return TRANSLATION_SORTS.some((o) => o.value === value) ? (value as TranslationSort) : "newest";
+}
+
+type Sortable = Pick<Translation, "id" | "title" | "targetLanguage" | "createdAt">;
+
+/**
+ * The translations in `sort` order. Newest and oldest go by when each was started (ISO times, which order as text).
+ * Titles and languages compare as the person's language reads them (`locale`, the browser's by default), with digits
+ * by value ("Part 2" before "Part 10"), ignoring case and accents; a language's dubs go by title. Anything still equal
+ * goes newest first, and dubs started in the same moment (one request's languages) keep the order they came in, so the
+ * order is the same on every render.
+ */
+export function sortTranslations<T extends Sortable>(items: ReadonlyArray<T>, sort: TranslationSort, locale?: string): T[] {
+  const collator = new Intl.Collator(locale, { numeric: true, sensitivity: "base" });
+  const at = new Map(items.map((t, i) => [t.id, i]));
+  const byTime = (a: T, b: T) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0);
+  const asGiven = (a: T, b: T) => at.get(a.id)! - at.get(b.id)!;
+  const newest = (a: T, b: T) => byTime(b, a) || asGiven(a, b);
+  const compare: Record<TranslationSort, (a: T, b: T) => number> = {
+    newest,
+    oldest: (a, b) => byTime(a, b) || asGiven(a, b),
+    title: (a, b) => collator.compare(a.title, b.title) || newest(a, b),
+    language: (a, b) => collator.compare(a.targetLanguage, b.targetLanguage) || collator.compare(a.title, b.title) || newest(a, b),
+  };
+  return [...items].sort(compare[sort]);
+}

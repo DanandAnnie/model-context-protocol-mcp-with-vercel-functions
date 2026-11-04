@@ -7615,6 +7615,34 @@ test("a dub's video and settings fill the form to dub it into another language",
   expect(axe.violations.map((x) => x.id)).toEqual([]);
 });
 
+test("the translations list is sorted by start, title, or language, and the sort is remembered", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  // Started one after another: Beta in French, then Alpha in German, then Gamma in Italian.
+  for (const [title, language] of [["Beta", "French"], ["Alpha", "German"], ["Gamma", "Italian"]]) {
+    expect((await page.request.post("/api/translate", { data: { title: `${title} ${tag}`, sourceVideoUrl: "https://cdn.example.com/s.mp4", targetLanguage: language } })).status()).toBe(201);
+  }
+  await page.goto("/translate");
+  await page.getByRole("searchbox", { name: "Search translations" }).fill(tag);
+  const titles = () => page.locator('[data-testid="translation"]:visible [data-testid="translation-title"]').allTextContents();
+  const sortSelect = page.getByRole("combobox", { name: "Sort translations" });
+  await expect(sortSelect).toHaveValue("newest");
+  await expect.poll(titles).toEqual([`Gamma ${tag}`, `Alpha ${tag}`, `Beta ${tag}`]);
+  await sortSelect.selectOption("oldest");
+  await expect.poll(titles).toEqual([`Beta ${tag}`, `Alpha ${tag}`, `Gamma ${tag}`]);
+  await sortSelect.selectOption("title");
+  await expect.poll(titles).toEqual([`Alpha ${tag}`, `Beta ${tag}`, `Gamma ${tag}`]);
+  // Remembered by this browser.
+  await page.reload();
+  await page.getByRole("searchbox", { name: "Search translations" }).fill(tag);
+  await expect(sortSelect).toHaveValue("title");
+  await expect.poll(titles).toEqual([`Alpha ${tag}`, `Beta ${tag}`, `Gamma ${tag}`]);
+  await sortSelect.selectOption("language");
+  await expect.poll(titles).toEqual([`Beta ${tag}`, `Alpha ${tag}`, `Gamma ${tag}`]);
+  await expect(page.getByRole("status").filter({ hasText: "Sorted: Language A–Z." })).toHaveCount(1);
+  const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(axe.violations.map((x) => x.id)).toEqual([]);
+});
+
 test("one video is dubbed into several languages in one go", async ({ page }) => {
   const tag = Date.now().toString(36);
   await page.goto("/translate");

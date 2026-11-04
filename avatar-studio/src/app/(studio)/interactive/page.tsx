@@ -1,5 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { AGENT_SORTS, AGENT_SORT_KEY, agentSearchTexts, agentSortFrom, agentsInSortOrder, rankAgents, type AgentSort } from "@/lib/agent-sort";
+import { inRankOrder } from "@/lib/asset-sort";
+import { foldTerm } from "@/lib/glossary";
 import { Check, Code2, Copy, CopyPlus, Link2, MessagesSquare, Pencil, QrCode, Sparkles, ThumbsDown, ThumbsUp, Trash2 } from "lucide-react";
 import { AvatarGrid } from "@/components/AvatarPicker";
 import { ChatPanel, type ChatTurn } from "@/components/ChatPanel";
@@ -87,6 +90,38 @@ export default function InteractivePage() {
   const { data: voiceData } = useApi<{ voices: Voice[] }>("/api/voices");
   const { data: status } = useApi<ProviderStatus>("/api/status");
   const { data: agentData, refetch: refetchAgents } = useApi<{ agents: Agent[]; shareOrigin?: string }>("/api/agents");
+  // The Shared presenters list can be searched and sorted. Its order is worked out when a sort is chosen and when the
+  // list first loads, and then held, so a visit counted, an edit, or a duplicate never moves a row out from under the
+  // person (a copy comes first); "Sort again" shows once the rows in view are out of order. The sort is remembered by
+  // this browser, read after the first render so the server's markup still matches.
+  const presenterSearch = useListSearch();
+  const [agentSort, setAgentSort] = useState<AgentSort>("newest");
+  const [agentSortRound, setAgentSortRound] = useState(0);
+  useEffect(() => {
+    try {
+      const saved = agentSortFrom(window.localStorage.getItem(AGENT_SORT_KEY));
+      if (saved !== "newest") {
+        setAgentSort(saved);
+        setAgentSortRound((n) => n + 1);
+      }
+    } catch {
+      // Storage blocked (a private window, say): newest first it is.
+    }
+  }, []);
+  const agentOrderKey = `${agentSort}:${agentSortRound}:${!!agentData}`;
+  const [agentOrder, setAgentOrder] = useState<{ key: string; rank: Map<string, number> } | null>(null);
+  if (agentOrder?.key !== agentOrderKey) setAgentOrder({ key: agentOrderKey, rank: rankAgents(agentData?.agents ?? [], agentSort) });
+  const allAgents = agentData?.agents ?? [];
+  const agentSortSelect = useRef<HTMLSelectElement>(null);
+  function sortAgentsBy(next: AgentSort) {
+    setAgentSort(next);
+    setAgentSortRound((n) => n + 1);
+    try {
+      window.localStorage.setItem(AGENT_SORT_KEY, next);
+    } catch {
+      // Not remembered, but the order still holds for this visit.
+    }
+  }
   /**
    * What this browser has shown of each presenter's visits, so a row says "New visits" once one starts after its
    * transcripts were last opened here; the first time a workspace's presenters are listed, what they had counts as seen.
@@ -149,6 +184,11 @@ export default function InteractivePage() {
   // A saved presenter loaded into the form: Save then changes it in place, so its link and embed keep working.
   const [editing, setEditing] = useState<Agent | null>(null);
   const editingRef = useRef<Agent | null>(null);
+  // The rows the search shows, in the held order; the one being edited stays in view whatever is typed. The count is
+  // of real matches only, not of rows kept in view because they were just saved, copied, or are being edited.
+  const shownAgents = inRankOrder(allAgents, agentOrder?.rank).filter((a) => editing?.id === a.id || presenterSearch.matches(a.id, ...agentSearchTexts(a)));
+  const agentMatches = presenterSearch.needle ? allAgents.filter((a) => presenterSearch.finds(foldTerm(agentSearchTexts(a).join("\n")))).length : 0;
+  const agentsOutOfOrder = !agentsInSortOrder(shownAgents, agentSort);
   editingRef.current = editing;
   // The form as the edit loaded it (what Save compares with), and the new presenter's draft to come back to.
   const loadedForm = useRef<FormState | null>(null);
@@ -595,6 +635,7 @@ export default function InteractivePage() {
           return;
         }
         ({ agent } = await api<{ agent: Agent }>(`/api/agents/${editedId}`, { method: "PATCH", body: JSON.stringify(patch) }));
+        presenterSearch.pin(agent.id);
         setSavedLink(`${linkOrigin()}/talk/${agent.id}`);
         // A second Edit while this one saved is left alone; only the edit that was saved is closed.
         if (editingRef.current?.id === editedId) leaveEdit();
@@ -604,6 +645,8 @@ export default function InteractivePage() {
           body: JSON.stringify({ name, avatarId: avatar.id, voiceId: voice?.id, instructions, language, isPublic: true, collectEmail, brandStyle, ...(greeting.trim() ? { greeting: greeting.trim() } : {}), ...(starterList.length ? { starters: starterList } : {}), ...(notes.trim() ? { notes: notes.trim() } : {}), ...(knowledgeUrl.trim() ? { knowledgeUrl: knowledgeUrl.trim() } : {}), ...(replyLimitValue ? { dailyReplyLimit: replyLimitValue } : {}), ...(siteList.length ? { allowedSites: siteList } : {}) }),
         }));
         setSavedLink(`${linkOrigin()}/talk/${agent.id}`);
+        // A new presenter stays in view in the list whatever its search says, as an edited one does.
+        presenterSearch.pin(agent.id);
         clearOwnFields();
       }
       await refetchAgents();
@@ -645,6 +688,7 @@ export default function InteractivePage() {
     setListNote(null);
     try {
       const { agent: made } = await api<{ agent: Agent }>(`/api/agents/${agent.id}/duplicate`, { method: "POST" });
+      presenterSearch.pin(made.id);
       await refetchAgents();
       setListNote({ text: `Saved a copy, "${made.name}", with its link off. Edit it, then turn its link on to share it.` });
     } catch (e) {
@@ -932,9 +976,49 @@ export default function InteractivePage() {
             {listNote && !listNote.error && <p className="mt-2 text-xs text-emerald-800" data-testid="agent-list-note">{listNote.text}</p>}
           </div>
           {listNote?.error && <div className="mt-2"><ErrorBanner message={listNote.text} /></div>}
+          {/* The search stays while anything is typed, so a search left on after deletes can always be cleared. */}
+          {(allAgents.length > 1 || presenterSearch.q !== "") && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <input
+                type="search"
+                aria-label="Search shared presenters"
+                aria-describedby="presenter-matches"
+                className={`${inputClass} max-w-xs`}
+                placeholder="Search names, presenters, and sites"
+                maxLength={200}
+                value={presenterSearch.q}
+                onChange={(e) => presenterSearch.search(e.target.value)}
+              />
+              {allAgents.length > 1 && (
+              <select ref={agentSortSelect} aria-label="Sort shared presenters" value={agentSort} onChange={(e) => sortAgentsBy(agentSortFrom(e.target.value))} data-testid="presenter-sort" className={`${inputClass} w-auto`}>
+                {AGENT_SORTS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              )}
+              {allAgents.length > 1 && agentsOutOfOrder && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    sortAgentsBy(agentSort);
+                    agentSortSelect.current?.focus();
+                  }}
+                  className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Sort again
+                </button>
+              )}
+              <span id="presenter-matches" role="status" className="text-xs text-slate-500" data-testid="presenter-matches">
+                {presenterSearch.needle ? `${agentMatches} of ${allAgents.length} shared presenters` : ""}
+              </span>
+            </div>
+          )}
           <ul className="mt-3 divide-y divide-slate-100" data-testid="agent-list">
             {agentData?.agents.length === 0 && <li className="py-3 text-xs text-slate-500">Nothing shared yet.</li>}
-            {agentData?.agents.map((a) => {
+            {allAgents.length > 0 && shownAgents.length === 0 && <li className="py-3 text-sm text-slate-600">No shared presenter matches “{presenterSearch.q.trim()}”.</li>}
+            {shownAgents.map((a) => {
               const url = typeof window === "undefined" ? `/talk/${a.id}` : `${linkOrigin()}/talk/${a.id}`;
               return (
                 <li key={a.id} className="flex flex-wrap items-center justify-between gap-2 py-3">

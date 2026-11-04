@@ -10899,6 +10899,55 @@ test("the library filters by shape: landscape, portrait, or square", async ({ pa
   expect(axe.violations.map((v) => v.id)).toEqual([]);
 });
 
+test("the Shared presenters list is searched and sorted, and the sort is remembered", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const ids: string[] = [];
+  try {
+    // Shared in this order, a few milliseconds apart: newest first is Bravo, Charlie, Alpha 10, Alpha 2.
+    for (const name of [`Alpha 2 ${tag}`, `Alpha 10 ${tag}`, `Charlie ${tag}`, `Bravo ${tag}`]) {
+      const made = await page.request.post("/api/agents", { data: { name, avatarId: "stock_1", ...(name.startsWith("Charlie") ? { greeting: `Welcome to the ${tag} bakery` } : {}) } });
+      expect(made.status()).toBe(201);
+      ids.push((await made.json()).agent.id);
+      await page.waitForTimeout(5);
+    }
+    await page.goto("/interactive");
+    const list = page.getByTestId("agent-list");
+    const order = async () => (await list.getByRole("button", { name: /^Duplicate / }).evaluateAll((els) => els.map((e) => e.getAttribute("aria-label") ?? ""))).map((l) => l.replace(/^Duplicate /, "").replace(` ${tag}`, ""));
+    const search = page.getByRole("searchbox", { name: "Search shared presenters" });
+    await search.fill(tag);
+    await expect(page.getByTestId("presenter-matches")).toHaveText(/^4 of \d+ shared presenters$/);
+    const sort = page.getByLabel("Sort shared presenters");
+    await expect(sort.locator("option:checked")).toHaveText("Newest first");
+    await expect.poll(order).toEqual(["Bravo", "Charlie", "Alpha 10", "Alpha 2"]);
+    await sort.selectOption("oldest");
+    await expect.poll(order).toEqual(["Alpha 2", "Alpha 10", "Charlie", "Bravo"]);
+    await sort.selectOption("name");
+    await expect.poll(order).toEqual(["Alpha 2", "Alpha 10", "Bravo", "Charlie"]);
+    // An opening line counts in the search; a search that finds nothing says so.
+    await search.fill(`${tag} bakery`);
+    await expect.poll(order).toEqual(["Charlie"]);
+    await expect(page.getByTestId("presenter-matches")).toHaveText(/^1 of \d+ shared presenters$/);
+    await search.fill(`nothing like ${tag}`);
+    await expect(list.getByText(`No shared presenter matches “nothing like ${tag}”.`)).toBeVisible();
+    // A delete while searching keeps the search, its box, and an honest count.
+    await search.fill(tag);
+    page.once("dialog", (d) => void d.accept());
+    await list.getByRole("button", { name: `Delete Charlie ${tag}`, exact: true }).click();
+    await expect.poll(order).toEqual(["Alpha 2", "Alpha 10", "Bravo"]);
+    await expect(page.getByTestId("presenter-matches")).toHaveText(/^3 of \d+ shared presenters$/);
+    await expect(search).toHaveValue(tag);
+    // The browser remembers the sort.
+    await page.reload();
+    await page.getByRole("searchbox", { name: "Search shared presenters" }).fill(tag);
+    await expect(sort.locator("option:checked")).toHaveText("Name A–Z");
+    await expect.poll(order).toEqual(["Alpha 2", "Alpha 10", "Bravo"]);
+    const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+    expect(axe.violations.map((x) => x.id)).toEqual([]);
+  } finally {
+    for (const id of ids) await page.request.delete(`/api/agents/${id}`);
+  }
+});
+
 test("the library filters by length: under a minute, one to three minutes, or over three", async ({ page }) => {
   const tag = Date.now().toString(36);
   // The demo renderer times a script by its words at the voice's speed: about 5 seconds, 72 seconds, and 216 seconds.

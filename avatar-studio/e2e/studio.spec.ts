@@ -6403,8 +6403,9 @@ test("workspaces: create, switch, isolate content, invite, join, leave, delete",
     // not a join and leaves no line; trashing the same video again changes nothing and leaves none either.
     expect((await page.request.delete(`/api/videos/${team.id}`)).status()).toBe(200);
     expect((await page.request.delete(`/api/videos/${team.id}`)).status()).toBe(200);
+    // The two invite links made above are in the feed too, between the video's lines.
     const events = (await (await page.request.get("/api/activity?limit=5")).json()).events as Array<{ kind: string; subject?: string }>;
-    expect(events.map((e) => e.kind)).toEqual(["video.trashed", "video.created"]);
+    expect(events.map((e) => e.kind)).toEqual(["video.trashed", "invite.sent", "invite.sent", "video.created"]);
     expect(events[0].subject).toBe(`Team video ${tag}`);
     await page.reload();
     await expect(feed.getByText(`You moved "Team video ${tag}" to the trash`)).toBeVisible();
@@ -6413,14 +6414,14 @@ test("workspaces: create, switch, isolate content, invite, join, leave, delete",
     await expect(trashedLine).toHaveAttribute("href", `/videos/${team.id}`);
     await expect(feed.getByRole("link", { name: `You created "Team video ${tag}"` })).toHaveAttribute("href", `/videos/${team.id}`);
     const linked = (await (await page.request.get("/api/activity?limit=5")).json()) as { events: Array<{ id: string }>; links: Record<string, string> };
-    expect(linked.events.map((e) => linked.links[e.id])).toEqual([`/videos/${team.id}`, `/videos/${team.id}`]);
+    expect(linked.events.map((e) => linked.links[e.id])).toEqual([`/videos/${team.id}`, undefined, undefined, `/videos/${team.id}`]);
     await trashedLine.click();
     await expect(page.getByTestId("trash-banner")).toBeVisible();
     await page.goBack();
     // The feed shows one area at a time: keys have none here, videos list both lines, and Everything is back.
     const show = feed.getByLabel("Activity area");
     await expect(feed.getByRole("status")).toHaveText("", { useInnerText: true });
-    await expect(show.locator("option")).toHaveText(["Everything", "Videos and batches", "Reviews", "Members", "API keys", "Brand kit", "Shared presenters", "Presenter and voice replaces"]);
+    await expect(show.locator("option")).toHaveText(["Everything", "Videos and batches", "Reviews", "Members and invites", "API keys", "Brand kit", "Shared presenters", "Presenter and voice replaces"]);
     await show.selectOption({ label: "API keys" });
     await expect(feed.getByText("Nothing under “API keys” yet. The feed keeps the last 200 events.")).toBeVisible();
     await expect(feed.getByText(`You created "Team video ${tag}"`)).toHaveCount(0);
@@ -6454,7 +6455,7 @@ test("workspaces: create, switch, isolate content, invite, join, leave, delete",
     expect(byKey).toEqual({ events: [], links: {}, area: null, actor: ws.id, limit: 50 });
     const mineCsv = await page.request.get("/api/activity?format=csv&actor=local");
     expect(mineCsv.headers()["content-disposition"]).toMatch(/filename="activity-all-by-local-\d{4}-\d\d-\d\d\.csv"/);
-    expect(parseCsv(await mineCsv.text()).rows.map((r) => r.kind)).toEqual(["video.trashed", "video.created"]);
+    expect(parseCsv(await mineCsv.text()).rows.map((r) => r.kind)).toEqual(["video.trashed", "invite.sent", "invite.sent", "video.created"]);
     expect((await page.request.get(`/api/activity?format=csv&actor=${ws.id}`)).headers()["content-disposition"]).toContain(`activity-all-by-api-key-`);
     // A pick that no longer names a member (here, the workspace's members as another tab sees them after a removal)
     // stops filtering: the select, the list, and the wording all go back to Anyone together.
@@ -6480,7 +6481,7 @@ test("workspaces: create, switch, isolate content, invite, join, leave, delete",
     await who.selectOption({ label: "Anyone" });
     await show.selectOption({ label: "Everything" });
     await expect(feed.getByText(`You created "Team video ${tag}"`)).toBeVisible();
-    await expect(feed.getByRole("status")).toHaveText("2 events shown");
+    await expect(feed.getByRole("status")).toHaveText("4 events shown");
     expect((await page.request.get("/api/activity?area=everything")).status()).toBe(400);
     expect((await (await page.request.get("/api/activity?area=keys")).json()).area).toBe("keys");
     // New since the last visit: your own lines never are; a teammate's line after the mark is, once, until the
@@ -6805,6 +6806,87 @@ test("a pending invite's role can be changed before it is accepted: same link, j
     expect((await page.request.patch(`/api/workspaces/${ws.id}/invites/not-a-token`, { data: { role: "viewer" } })).status()).toBe(404);
     expect((await page.request.delete(`/api/workspaces/${ws.id}/invites/${linkOnly.invite.token}`)).status()).toBe(204);
     expect((await page.request.patch(`/api/workspaces/${ws.id}/invites/${linkOnly.invite.token}`, { data: { role: "viewer" } })).status()).toBe(404);
+  } finally {
+    await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
+    expect((await page.request.delete(`/api/workspaces/${ws.id}`)).status()).toBe(204);
+  }
+});
+
+test("workspace invites are in the activity feed, with invitees' addresses for owners only", async ({ page, playwright }) => {
+  const created = await page.request.post("/api/workspaces", { data: { name: `Invite feed ${Date.now().toString(36)}` } });
+  expect(created.status()).toBe(201);
+  const ws = (await created.json()).workspace as { id: string };
+  try {
+    expect((await page.request.post("/api/workspaces/switch", { data: { id: ws.id } })).status()).toBe(200);
+    type Sent = { invite: { token: string } };
+    const dan = (await (await page.request.post(`/api/workspaces/${ws.id}/invites`, { data: { email: "dan@example.com", role: "viewer" } })).json()) as Sent;
+    expect((await page.request.post(`/api/workspaces/${ws.id}/invites/${dan.invite.token}`)).status()).toBe(200);
+    expect((await page.request.patch(`/api/workspaces/${ws.id}/invites/${dan.invite.token}`, { data: { role: "editor" } })).status()).toBe(200);
+    // Picking the role it already has changes nothing, and leaves no line.
+    expect((await page.request.patch(`/api/workspaces/${ws.id}/invites/${dan.invite.token}`, { data: { role: "editor" } })).status()).toBe(200);
+    expect((await page.request.delete(`/api/workspaces/${ws.id}/invites/${dan.invite.token}`)).status()).toBe(204);
+    // Revoking it again finds nothing to revoke, and leaves no second line.
+    expect((await page.request.delete(`/api/workspaces/${ws.id}/invites/${dan.invite.token}`)).status()).toBe(204);
+    expect((await page.request.post(`/api/workspaces/${ws.id}/invites`, { data: { emails: ["ana@example.com", "ben@example.com"], role: "viewer" } })).status()).toBe(201);
+    expect((await page.request.post(`/api/workspaces/${ws.id}/invites`, { data: { role: "owner" } })).status()).toBe(201);
+
+    type Ev = { kind: string; subject?: string; count?: number; role?: string };
+    const events = (await (await page.request.get("/api/activity?area=members")).json()).events as Ev[];
+    expect(events.map((e) => [e.kind, e.subject ?? null, e.count ?? null, e.role])).toEqual([
+      ["invite.sent", null, null, "owner"],
+      ["invite.sent", null, 2, "viewer"],
+      ["invite.revoked", "dan@example.com", null, "editor"],
+      ["invite.role", "dan@example.com", null, "editor"],
+      ["invite.resent", "dan@example.com", null, "viewer"],
+      ["invite.sent", "dan@example.com", null, "viewer"],
+    ]);
+
+    // The owner reads each line on the Workspace page, under Members and invites.
+    await page.goto("/workspace");
+    const feed = page.getByTestId("activity-feed");
+    await feed.getByLabel("Activity area").selectOption({ label: "Members and invites" });
+    await expect(feed.locator("ol > li")).toHaveText([
+      /^You made an owner invite link/,
+      /^You invited 2 people as viewers/,
+      /^You revoked the invite to "dan@example\.com"/,
+      /^You changed the invite to "dan@example\.com" to join as an editor/,
+      /^You renewed the invite to "dan@example\.com"/,
+      /^You invited "dan@example\.com" as a viewer/,
+    ]);
+
+    // A script with the workspace's API key is not an owner: it gets the lines without the address, in the feed and the CSV.
+    const key = await page.request.post("/api/keys", { data: { name: "Feed reader" } });
+    expect(key.status()).toBe(201);
+    const { key: made, secret } = (await key.json()) as { key: { id: string }; secret: string };
+    const script = await playwright.request.newContext({ baseURL: "http://localhost:3100", extraHTTPHeaders: { Authorization: `Bearer ${secret}` } });
+    try {
+      const asScript = await (await script.get("/api/activity?area=members")).text();
+      expect(asScript).not.toContain("dan@example.com");
+      expect((JSON.parse(asScript).events as Ev[]).map((e) => [e.kind, e.count ?? null])).toEqual([
+        ["invite.sent", null],
+        ["invite.sent", 2],
+        ["invite.revoked", 1],
+        ["invite.role", 1],
+        ["invite.resent", 1],
+        ["invite.sent", 1],
+      ]);
+      const csv = await (await script.get("/api/activity?format=csv&area=members")).text();
+      expect(csv).not.toContain("dan@example.com");
+      // The CSV is worded for no one in particular, so the owner who did it is "A member" (open mode has no emails).
+      expect(parseCsv(csv).rows.map((r) => r.what_happened)).toEqual([
+        "A member made an owner invite link",
+        "A member invited 2 people as viewers",
+        "A member revoked an invite",
+        "A member changed an invite to join as an editor",
+        "A member renewed an invite",
+        "A member invited 1 person as a viewer",
+      ]);
+    } finally {
+      await script.dispose();
+      await page.request.delete(`/api/keys/${made.id}`);
+    }
+    // The owner's own CSV keeps the address.
+    expect(await (await page.request.get("/api/activity?format=csv&area=members")).text()).toContain("dan@example.com");
   } finally {
     await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
     expect((await page.request.delete(`/api/workspaces/${ws.id}`)).status()).toBe(204);

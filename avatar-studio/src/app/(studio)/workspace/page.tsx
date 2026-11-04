@@ -629,7 +629,7 @@ export default function WorkspacePage() {
           </div>
         </div>
         <p className="mt-1 text-xs text-slate-500">
-          What the team did here: videos made, trashed, restored, and deleted for good, batches, reviews and approvals, members, keys, the brand kit, shared presenters, and presenters or voices replaced. The last 200 events are kept.
+          What the team did here: videos made, trashed, restored, and deleted for good, batches, reviews and approvals, members and invites, keys, the brand kit, shared presenters, and presenters or voices replaced. The last 200 events are kept.
         </p>
         <ErrorBanner message={activity.error} />
         <p className="sr-only" role="status">

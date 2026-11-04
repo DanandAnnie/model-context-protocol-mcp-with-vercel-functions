@@ -6,6 +6,8 @@ import { LOCAL_OWNER } from "../owner-id";
 import { assertNoRenewingPlan } from "../billing";
 import { ConflictError } from "../errors";
 import { madeLooksOf, rememberMadeLooks } from "./avatars";
+import { hideInviteAddresses } from "../activity-text";
+import type { ActivityEvent } from "../types";
 import { dropTwinVoice } from "./twins";
 import type { InstantVoice, MusicJob, TwinJob, VoiceChange } from "../types";
 import { dropMusicRender } from "./music";
@@ -22,7 +24,11 @@ const EXPORT_KINDS = OWNER_KINDS.filter((k) => k !== "cover") as Exclude<(typeof
 /** Everything stored under an owner id, for a data export. Secrets (key hashes, webhook secret) and cover image bytes are left out. */
 export type OwnerExport = { ownerId: string; exportedAt: string } & Record<(typeof EXPORT_KINDS)[number], Record<string, unknown>[]>;
 
-export async function exportOwnerData(ownerId: string = LOCAL_OWNER): Promise<OwnerExport> {
+/**
+ * `inviteAddresses: false` leaves pending invitees' addresses off the activity rows, for a workspace member who is
+ * not an owner (the export route decides, with seesInviteAddresses), as the feed itself does for them.
+ */
+export async function exportOwnerData(ownerId: string = LOCAL_OWNER, { inviteAddresses = true }: { inviteAddresses?: boolean } = {}): Promise<OwnerExport> {
   const out = {} as Record<(typeof EXPORT_KINDS)[number], Record<string, unknown>[]>;
   for (const kind of EXPORT_KINDS) {
     const items = await getStore().list<Record<string, unknown>>(kind, ownerId);
@@ -82,6 +88,7 @@ export async function exportOwnerData(ownerId: string = LOCAL_OWNER): Promise<Ow
       return copy;
     });
   }
+  if (!inviteAddresses) out.activity = hideInviteAddresses(out.activity as unknown as ActivityEvent[]) as unknown as Record<string, unknown>[];
   return { ownerId, exportedAt: nowIso(), ...out };
 }
 

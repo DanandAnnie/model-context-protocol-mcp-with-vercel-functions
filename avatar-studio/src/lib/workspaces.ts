@@ -51,6 +51,18 @@ export function canEdit(ws: Workspace | null, userId: string): boolean {
   return !ws || roleCanEdit(memberOf(ws, userId)?.role);
 }
 
+/**
+ * Whether a reader may see pending invitees' email addresses in a space's data (its activity feed, its export):
+ * always in a personal space; in a workspace only its owners, as on the Workspace page. `userId` is null for a
+ * script with an API key, which is not an owner. Someone who is no longer a member is not one either.
+ */
+export async function seesInviteAddresses(ownerId: string, userId: string | null): Promise<boolean> {
+  if (!isWorkspaceId(ownerId)) return true;
+  if (!userId) return false;
+  const ws = await workspaceForMember(ownerId, userId);
+  return !!ws && memberOf(ws, userId)?.role === "owner";
+}
+
 /** Account-level actions (wiping all data, billing) inside a workspace are for its owners only. */
 export function canManageAccount(ws: Workspace | null, userId: string): boolean {
   return !ws || memberOf(ws, userId)?.role === "owner";
@@ -211,10 +223,13 @@ export async function createInvites(
   return { invites, skipped };
 }
 
-export async function revokeInvite(id: string, token: string, user: User): Promise<void> {
+/** Revokes a pending invite, or dismisses an expired one; answers with the invite removed, if there was one. */
+export async function revokeInvite(id: string, token: string, user: User): Promise<WorkspaceInvite | null> {
   await requireRole(id, user, ["owner"]);
   const invite = await getStore().get<WorkspaceInvite>("invite", token);
-  if (invite && invite.ownerId === id) await getStore().remove("invite", token);
+  if (!invite || invite.ownerId !== id) return null;
+  await getStore().remove("invite", token);
+  return invite;
 }
 
 /**
@@ -246,14 +261,14 @@ export async function renewInvite(id: string, token: string, user: User): Promis
  * a full transaction: a resend read just before the change, or an accept at the same moment, can
  * still go ahead with the old role.
  */
-export async function setInviteRole(id: string, token: string, role: WorkspaceRole, user: User): Promise<WorkspaceInvite> {
+export async function setInviteRole(id: string, token: string, role: WorkspaceRole, user: User): Promise<{ invite: WorkspaceInvite; changed: boolean }> {
   await requireRole(id, user, ["owner"]);
   const invite = token && token.length <= 64 ? await getStore().get<WorkspaceInvite>("invite", token) : null;
   if (!invite || invite.ownerId !== id || Date.parse(invite.expiresAt) <= Date.now()) throw new NotFoundError("Invite not found or already expired");
-  if (invite.role === role) return invite;
+  if (invite.role === role) return { invite, changed: false };
   const next: WorkspaceInvite = { ...invite, role };
   if (!(await getStore().putIf("invite", next, "expiresAt", invite.expiresAt))) throw new NotFoundError("Invite not found or already expired");
-  return next;
+  return { invite: next, changed: true };
 }
 
 /**

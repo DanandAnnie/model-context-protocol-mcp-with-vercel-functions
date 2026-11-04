@@ -1528,6 +1528,10 @@ export type ActivityKind =
   | "member.left"
   | "member.removed"
   | "member.role"
+  | "invite.sent"
+  | "invite.resent"
+  | "invite.role"
+  | "invite.revoked"
   | "apikey.created"
   | "apikey.revoked"
   | "brand.saved"
@@ -1548,12 +1552,12 @@ export interface ActivityEvent {
   /** The person who did it; the owner id itself when a script with an API key did. */
   actorId: string;
   actorEmail?: string;
-  /** What it was done to: a video title, a member's email, a key or presenter name. */
+  /** What it was done to: a video title, a member's or invitee's email, a key or presenter name. */
   subject?: string;
   subjectId?: string;
   /** For bulk actions, how many items. */
   count?: number;
-  /** For a role change, the new role. */
+  /** For a role change, the new role; for an invite, the role it grants. */
   role?: string;
   /** For a replace, the presenter or voice put in the place of `subject`. */
   replacement?: string;

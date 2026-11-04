@@ -11,7 +11,7 @@ export type ActivityArea = (typeof ACTIVITY_AREAS)[number];
 export const ACTIVITY_AREA_LABELS: Record<ActivityArea, string> = {
   videos: "Videos and batches",
   reviews: "Reviews",
-  members: "Members",
+  members: "Members and invites",
   keys: "API keys",
   brand: "Brand kit",
   presenters: "Shared presenters",
@@ -32,6 +32,10 @@ const AREA_OF_KIND: Record<ActivityKind, ActivityArea> = {
   "member.left": "members",
   "member.removed": "members",
   "member.role": "members",
+  "invite.sent": "members",
+  "invite.resent": "members",
+  "invite.role": "members",
+  "invite.revoked": "members",
   "apikey.created": "keys",
   "apikey.revoked": "keys",
   "brand.saved": "brand",
@@ -94,6 +98,21 @@ export function describeActivity(e: ActivityEvent, viewerId?: string): string {
       return `${who} removed ${what || "a member"}`;
     case "member.role":
       return `${who} made ${what || "a member"} ${roleArticle(e.role)}`;
+    // An invite names its address (`subject`); with none it is a link invite, unless `count` says how many
+    // addressed invites it was (a batch, or one whose address is hidden from a reader who is not an owner).
+    case "invite.sent":
+      if (what) return `${who} invited ${what} as ${roleArticle(e.role)}`;
+      if (e.count !== undefined) return `${who} invited ${n} ${n === 1 ? "person" : "people"} as ${n === 1 ? roleArticle(e.role) : rolePlural(e.role)}`;
+      return `${who} made ${roleArticle(e.role)} invite link`;
+    // A resend always renews the link; it is emailed only when email is set up, so the line does not claim it was.
+    case "invite.resent":
+      if (what) return `${who} renewed the invite to ${what}`;
+      return e.count !== undefined ? `${who} renewed an invite` : `${who} renewed ${roleArticle(e.role)} invite link`;
+    case "invite.role":
+      return `${who} changed ${what ? `the invite to ${what}` : e.count !== undefined ? "an invite" : "an invite link"} to join as ${roleArticle(e.role)}`;
+    case "invite.revoked":
+      if (what) return `${who} revoked the invite to ${what}`;
+      return e.count !== undefined ? `${who} revoked an invite` : `${who} revoked ${roleArticle(e.role)} invite link`;
     case "apikey.created":
       return `${who} created the API key ${what}`.trimEnd();
     case "apikey.revoked":
@@ -121,6 +140,25 @@ export function describeActivity(e: ActivityEvent, viewerId?: string): string {
       return `${who} replaced ${what || `a deleted ${thing}`} with ${e.replacement ? `"${e.replacement}"` : `another ${thing}`}${changed ? ` in ${changed}` : ""}`;
     }
   }
+}
+
+/** A role in the plural, for a batch: "editors", "viewers", "owners". */
+function rolePlural(role: string | undefined): string {
+  return role === "owner" ? "owners" : role === "viewer" ? "viewers" : "editors";
+}
+
+const INVITE_KINDS = new Set<ActivityKind>(["invite.sent", "invite.resent", "invite.role", "invite.revoked"]);
+
+/**
+ * The feed as a reader who is not a workspace owner sees it: pending invitees' addresses are for owners
+ * only (as on the Workspace page), so an addressed invite reads as "an invite" or "1 person" instead.
+ */
+export function hideInviteAddresses(events: ActivityEvent[]): ActivityEvent[] {
+  return events.map((e) => {
+    if (!INVITE_KINDS.has(e.kind) || !e.subject) return e;
+    const { subject: _hidden, ...rest } = e;
+    return { ...rest, count: e.count ?? 1 };
+  });
 }
 
 /** The columns of the feed's CSV download. */

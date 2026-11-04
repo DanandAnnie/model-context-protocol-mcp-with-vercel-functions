@@ -1,6 +1,7 @@
 import { errorResponse } from "@/lib/api-utils";
-import { presentedApiKey, requireOwner } from "@/lib/owner";
+import { currentUser, presentedApiKey, requireOwner } from "@/lib/owner";
 import { exportOwnerData } from "@/lib/services";
+import { seesInviteAddresses } from "@/lib/workspaces";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +10,8 @@ export async function GET() {
   try {
     if (await presentedApiKey()) return new Response(JSON.stringify({ error: "Sign in to export data" }), { status: 403, headers: { "Content-Type": "application/json" } });
     const owner = await requireOwner();
-    const data = await exportOwnerData(owner);
+    // Any member may export the workspace; pending invitees' addresses in its activity stay for owners, as in the feed.
+    const data = await exportOwnerData(owner, { inviteAddresses: await seesInviteAddresses(owner, (await currentUser()).id) });
     return new Response(JSON.stringify(data, null, 2), {
       headers: {
         "Content-Type": "application/json; charset=utf-8",

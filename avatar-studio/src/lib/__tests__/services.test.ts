@@ -60,7 +60,7 @@ import { createHmac } from "node:crypto";
 import { parseCsv, toCsv } from "../csv";
 import { conversationMatches } from "../transcripts";
 import { ANALYTICS_COLUMNS, analyticsRows, bumpViewsByDay, computeInsights, finishRateOf, viewsInLast, viewsPerDay } from "../insights";
-import { EXPIRED_INVITE_DAYS, acceptInvite, bulkInviteSchema, reinviteExpired, canEdit, canManageAccount, createInvite, createInvites, createWorkspace, deleteWorkspace, findInvite, inviteSchema, listWorkspaces, removeMember, RESEND_COOLDOWN_MS, renewInvite, revokeInvite, setInviteRole, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
+import { EXPIRED_INVITE_DAYS, acceptInvite, bulkInviteSchema, reinviteExpired, canEdit, canManageAccount, createInvite, createInvites, createWorkspace, deleteWorkspace, findInvite, inviteSchema, listWorkspaces, removeMember, RESEND_COOLDOWN_MS, renewInvite, revokeInvite, seesInviteAddresses, setInviteRole, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
 import { deliverInvite } from "../invite-mail";
 import { bulkInviteSummary, seatLine, seatsLeft, splitEmails } from "../invite-text";
 import { LimitError as InviteLimitError } from "../errors";
@@ -2684,11 +2684,13 @@ describe("workspaces", () => {
     const other = await createWorkspace("Elsewhere", alice);
     const store = globalThis.__avatarStudioStore!;
     const inv = await createInvite(ws.id, { email: "dan@example.com", role: "editor" }, alice);
-    const changed = await setInviteRole(ws.id, inv.token, "viewer", alice);
+    const { invite: changed, changed: didChange } = await setInviteRole(ws.id, inv.token, "viewer", alice);
     assert.deepEqual({ ...changed }, { ...inv, role: "viewer" }, "only the role changes");
+    assert.equal(didChange, true);
     assert.equal((await findInvite(inv.token))?.invite.role, "viewer", "the stored invite carries the new role");
-    // The same role again is a no-op that still answers with the invite.
-    assert.equal((await setInviteRole(ws.id, inv.token, "viewer", alice)).role, "viewer");
+    // The same role again is a no-op that still answers with the invite, and says nothing changed.
+    const same = await setInviteRole(ws.id, inv.token, "viewer", alice);
+    assert.deepEqual([same.invite.role, same.changed], ["viewer", false]);
     // Whoever joins with the link joins with the role it grants now.
     const joined = await acceptInvite(inv.token, { id: "dan", email: "dan@example.com" });
     assert.equal(joined.members.find((m) => m.userId === "dan")?.role, "viewer");
@@ -2723,6 +2725,33 @@ describe("workspaces", () => {
     await store.put("invite", { ...link, expiresAt: new Date(Date.now() - 1000).toISOString() });
     await assert.rejects(setInviteRole(ws.id, link.token, "viewer", alice), /already expired/);
     assert.equal((await store.get<{ role: string }>("invite", link.token))?.role, "editor", "a refused change writes nothing");
+  });
+
+  it("shows pending invitees' addresses to workspace owners only, in the feed rule and the data export", async () => {
+    const { recordActivity } = await import("../services/activity");
+    const ws = await createWorkspace("Who sees invites", alice);
+    const join = await createInvite(ws.id, { role: "viewer" }, alice);
+    await acceptInvite(join.token, bob);
+    // Owners, and anyone in their own personal space, see them; an editor or viewer, a script (no user), or someone
+    // who is not (or no longer) a member does not.
+    assert.equal(await seesInviteAddresses(ws.id, alice.id), true);
+    assert.equal(await seesInviteAddresses(ws.id, bob.id), false);
+    assert.equal(await seesInviteAddresses(ws.id, null), false);
+    assert.equal(await seesInviteAddresses(ws.id, "eve"), false);
+    assert.equal(await seesInviteAddresses("bob", "bob"), true);
+    await setMemberRole(ws.id, bob.id, "editor", alice);
+    assert.equal(await seesInviteAddresses(ws.id, bob.id), false, "an editor is not an owner");
+    await setMemberRole(ws.id, bob.id, "owner", alice);
+    assert.equal(await seesInviteAddresses(ws.id, bob.id), true);
+    await setMemberRole(ws.id, bob.id, "viewer", alice);
+
+    // The export leaves the address off the activity rows for a reader who may not see it, as the feed does.
+    await recordActivity(ws.id, alice, "invite.sent", { subject: "dan@example.com", role: "viewer" });
+    const forOwner = await exportOwnerData(ws.id);
+    assert.equal(JSON.stringify(forOwner.activity).includes("dan@example.com"), true);
+    const forViewer = await exportOwnerData(ws.id, { inviteAddresses: await seesInviteAddresses(ws.id, bob.id) });
+    assert.equal(JSON.stringify(forViewer).includes("dan@example.com"), false);
+    assert.deepEqual(forViewer.activity.map((e) => [e.kind, e.subject ?? null, e.count ?? null]), [["invite.sent", null, 1]]);
   });
 
   it("invites several addresses at once: one link each, skipping members, pending invites, and repeats, with room checked first", async () => {

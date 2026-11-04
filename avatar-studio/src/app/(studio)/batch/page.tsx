@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Layers3, Upload } from "lucide-react";
+import { Layers3, RotateCcw, Upload } from "lucide-react";
 import { Button, Card, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
@@ -11,7 +11,7 @@ import { api, formatDate } from "@/lib/client";
 import type { BatchSummary } from "@/lib/services/batches";
 import { decodeScript, legacyEncodingFor } from "@/lib/script-import";
 import { restoredCaptionStyle } from "@/lib/caption-style";
-import { VOICE_EMOTIONS, isDefaultCaptionStyle, rendersOnAvatarV, type AspectRatio, type Avatar, type Background, type BrandKit, type CaptionStyle, type PhotoExpressiveness, type VoiceAccent, type AvatarEngine, type Resolution, type Voice, type VideoTemplate, type VoiceEmotion } from "@/lib/types";
+import { MAX_RETRY_AT_ONCE, VOICE_EMOTIONS, isDefaultCaptionStyle, rendersOnAvatarV, type AspectRatio, type Avatar, type Background, type BrandKit, type CaptionStyle, type PhotoExpressiveness, type VoiceAccent, type AvatarEngine, type Resolution, type Voice, type VideoTemplate, type VoiceEmotion } from "@/lib/types";
 
 const MAX_BATCH_SCRIPT = 5000;
 
@@ -73,8 +73,13 @@ export default function BatchPage() {
   // voice), format, quality, and captions; the server gives the rows the kit's background. A saved template wins.
   // Without a kit (or when it cannot be read) the first presenter and voice in the lists.
   const { data: brandData, error: brandError } = useApi<{ brand: BrandKit | null }>("/api/brand");
-  // Batches made before, newest first, to find one's videos again or send its links.
-  const { data: batchData } = useApi<{ batches: BatchSummary[] }>("/api/videos/batch");
+  // Batches made before, newest first, to find one's videos again or send its links; asked again while renders are
+  // being made, so the counts move as they finish.
+  const { data: batchData, refetch: refetchBatches } = useApi<{ batches: BatchSummary[] }>("/api/videos/batch", { pollMs: 8000, pollWhile: (d) => d.batches.some((b) => b.making > 0) });
+  const [retrying, setRetrying] = useState<string | null>(null);
+  /** What the last Retry failed did, said under that batch. */
+  const [retryNote, setRetryNote] = useState<{ batchId: string; text: string; error?: boolean } | null>(null);
+  const focusNote = useRef<string | null>(null);
   const brandApplied = useRef(false);
   // Settings changed by hand before the kit arrived keep the hand's choice.
   const touched = useRef(new Set<"aspect" | "resolution" | "captions">());
@@ -95,6 +100,51 @@ export default function BatchPage() {
     // A template brings its own caption style; otherwise the rows are captioned in the kit's.
     setCaptionStyle((prev) => prev ?? kitCaptionStyle(b));
   }, [brandData, brandError, avatarData, voiceData, startedFrom]);
+  /** Start a batch's failed renders again with the same settings, up to the most one request takes, and say what happened. */
+  async function retryBatch(b: BatchSummary) {
+    const ids = b.failedIds.slice(0, MAX_RETRY_AT_ONCE);
+    if (!ids.length || retrying) return;
+    const over = b.failedIds.length - ids.length;
+    const what = ids.length === 1 ? "1 failed render" : `${ids.length} failed renders`;
+    if (!window.confirm(`Start ${what} of “${b.title}” again with the same settings?${over ? ` Only the first ${MAX_RETRY_AT_ONCE} are started now; retry again for the other ${over}.` : ""} Each counts toward this month's renders.`)) return;
+    setRetrying(b.batchId);
+    setRetryNote(null);
+    try {
+      const r = await api<{ started: Array<{ from: string; id: string }>; failedAgain: Array<{ from: string; id?: string; reason: string }>; skipped: Array<{ id: string; code: string }>; missing: string[] }>("/api/videos/retry", { method: "POST", body: JSON.stringify({ ids }) });
+      const n = (k: number, one: string, many: string) => (k === 1 ? one : many.replace("#", String(k)));
+      const allowance = r.skipped.filter((x) => x.code === "allowance").length;
+      const notes: string[] = [];
+      notes.push(r.started.length ? `${n(r.started.length, "1 render was", "# renders were")} started again.` : "No render was started again.");
+      if (allowance) notes.push(`${n(allowance, "1 was", "# were")} not started: this month's render allowance is used up.`);
+      if (r.failedAgain.length) {
+        const reason = r.failedAgain[0].reason.replace(/\.$/, "");
+        notes.push(r.failedAgain.length === 1 ? `1 could not be started again: ${reason}.` : `${r.failedAgain.length} could not be started again (the first: ${reason}).`);
+      }
+      // Started again (by a teammate, say), trashed, or deleted since the list was read: the refreshed counts say where they are.
+      const gone = r.skipped.length - allowance + r.missing.length;
+      if (gone) notes.push(`${n(gone, "1 render was", "# renders were")} already started again or no longer failed.`);
+      // Past the allowance a second click starts nothing either, so only the cap's leftovers are pointed at.
+      if (over && !allowance) notes.push(`${over} more failed ${over === 1 ? "render was" : "renders were"} left for the next retry, as one retry starts up to ${MAX_RETRY_AT_ONCE}.`);
+      // Nothing started only reads as a problem when something stood in the way; renders already restarted are not one.
+      setRetryNote({ batchId: b.batchId, text: notes.join(" "), error: !r.started.length && (allowance > 0 || r.failedAgain.length > 0) });
+    } catch (e) {
+      setRetryNote({ batchId: b.batchId, text: e instanceof Error ? e.message : "Could not start the renders again", error: true });
+    } finally {
+      // Some may have started before a request failed; the list shows them, so the next click does not start them twice.
+      // The button goes once the batch has no failed render left, so focus is held for the note (moved there below).
+      focusNote.current = b.batchId;
+      await refetchBatches();
+      setRetrying(null);
+    }
+  }
+  // After a retry, a batch left with no failed render has lost its button; its note, which says what happened, takes focus.
+  useEffect(() => {
+    const id = focusNote.current;
+    if (!id || retrying) return;
+    focusNote.current = null;
+    if (batchData?.batches.find((x) => x.batchId === id)?.failed) return;
+    document.getElementById(`batch-note-${id}`)?.focus();
+  }, [batchData, retrying]);
   /** A presenter picked by hand brings its own voice, when it has one. */
   function pickAvatar(id: string) {
     setAvatarId(id);
@@ -373,9 +423,19 @@ export default function BatchPage() {
                     {b.failed ? ` · ${b.failed} failed` : ""} · started {formatDate(b.startedAt)}
                   </div>
                 </div>
-                <a href={`/api/videos/batch/${encodeURIComponent(b.batchId)}`} download className="shrink-0 text-xs font-medium text-brand-700 hover:underline" aria-label={`Download links of ${b.title}, started ${formatDate(b.startedAt)}`}>
-                  Download links
-                </a>
+                <div className="flex shrink-0 items-center gap-3">
+                  {b.failed > 0 && canEdit !== false && (
+                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void retryBatch(b)} disabled={retrying !== null && retrying !== b.batchId} loading={retrying === b.batchId} aria-label={`Retry failed (${b.failed}) in ${b.title}, started ${formatDate(b.startedAt)}`} title={`Start this batch's failed renders again with the same settings, up to ${MAX_RETRY_AT_ONCE} at a time; each counts toward this month's renders`}>
+                      <RotateCcw className="h-3.5 w-3.5" /> Retry failed ({b.failed})
+                    </Button>
+                  )}
+                  <a href={`/api/videos/batch/${encodeURIComponent(b.batchId)}`} download className="text-xs font-medium text-brand-700 hover:underline" aria-label={`Download links of ${b.title}, started ${formatDate(b.startedAt)}`}>
+                    Download links
+                  </a>
+                </div>
+                <p role="status" id={`batch-note-${b.batchId}`} tabIndex={-1} className={retryNote?.batchId === b.batchId ? `w-full text-xs ${retryNote.error ? "text-red-700" : "text-slate-600"}` : "sr-only"} data-testid="recent-batch-note">
+                  {retryNote?.batchId === b.batchId ? retryNote.text : ""}
+                </p>
               </li>
             ))}
           </ul>

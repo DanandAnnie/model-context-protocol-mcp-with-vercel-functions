@@ -5744,6 +5744,64 @@ test("the Batch page lists recent batches, each leading to its videos and its li
   expect(axe.violations.map((x) => x.id)).toEqual([]);
 });
 
+test("Retry failed on a recent batch starts its failed renders again and says what happened", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const make = async (title: string) => {
+    const made = await page.request.post("/api/videos/batch", {
+      data: { title, scriptTemplate: "Hello {name}.", csv: "name\nAna\nBen", avatarId: "stock_1", voiceId: "stock_voice_1" },
+    });
+    expect(made.status()).toBe(201);
+    return (await made.json()) as { batchId: string; videos: Array<{ id: string }> };
+  };
+  const { batchId, videos } = await make(`Retry batch ${tag}`);
+  await make(`Fine batch ${tag}`);
+  // The demo renderer never fails, so the list shows Ana's render as failed until the second retry; the first retry's
+  // answer is made up (one started), the second is the server's own.
+  const retried: string[][] = [];
+  await page.route("**/api/videos/batch", async (route) => {
+    // The page's preview is a PUT to the same address; only the list is changed.
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    const body = (await response.json()) as { batches: Array<{ batchId: string; failed: number; ready: number; making: number; failedIds: string[] }> };
+    for (const b of body.batches) if (b.batchId === batchId && retried.length < 2) Object.assign(b, { failed: 1, failedIds: [videos[0].id], ready: 1, making: 0 });
+    await route.fulfill({ response, json: body });
+  });
+  await page.route("**/api/videos/retry", async (route) => {
+    retried.push((route.request().postDataJSON() as { ids: string[] }).ids);
+    if (retried.length === 1) return route.fulfill({ json: { started: [{ from: videos[0].id, id: "vid_new" }], failedAgain: [], skipped: [], missing: [] } });
+    await route.continue();
+  });
+  const dialogs: string[] = [];
+  page.on("dialog", (d) => {
+    dialogs.push(d.message());
+    void d.accept();
+  });
+  await page.goto("/batch");
+  const row = page.getByTestId("recent-batch").filter({ hasText: `Retry batch ${tag}` });
+  await expect(row.getByTestId("recent-batch-counts")).toContainText("1 failed");
+  // Only a batch with failed renders offers it.
+  const fine = page.getByTestId("recent-batch").filter({ hasText: `Fine batch ${tag}` });
+  await expect(fine).toHaveCount(1);
+  await expect(fine.getByRole("button", { name: /^Retry failed/ })).toHaveCount(0);
+  const retry = row.getByRole("button", { name: new RegExp(`^Retry failed \\(1\\) in Retry batch ${tag}, started `) });
+  await retry.click();
+  await expect(row.getByTestId("recent-batch-note")).toHaveText("1 render was started again.");
+  expect(dialogs).toEqual([`Start 1 failed render of “Retry batch ${tag}” again with the same settings? Each counts toward this month's renders.`]);
+  // Still failed (as the list says), so the button stays, and keeps focus.
+  await expect(retry).toBeFocused();
+  // Now the server answers: the render is not a failed one, which is said plainly, not as an error.
+  await page.keyboard.press("Enter");
+  await expect(row.getByTestId("recent-batch-note")).toHaveText("No render was started again. 1 render was already started again or no longer failed.");
+  await expect(row.getByTestId("recent-batch-note")).not.toHaveClass(/text-red/);
+  expect(retried).toEqual([[videos[0].id], [videos[0].id]]);
+  // The list is read again, so the batch's counts are the server's: with nothing failed the button goes, and focus moves to the note.
+  await expect(row.getByTestId("recent-batch-counts")).not.toContainText("failed");
+  await expect(row.getByRole("button", { name: /^Retry failed/ })).toHaveCount(0);
+  await expect(row.getByTestId("recent-batch-note")).toBeFocused();
+  const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(axe.violations.map((x) => x.id)).toEqual([]);
+});
+
 test("personalized batch creates one video per CSV row", async ({ page }) => {
   await page.goto("/batch");
   await expect(page.getByText(/2 rows · columns: name, property, move_in/)).toBeVisible();

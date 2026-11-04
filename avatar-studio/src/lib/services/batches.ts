@@ -233,6 +233,11 @@ export interface BatchSummary {
   ready: number;
   making: number;
   failed: number;
+  /**
+   * The failed renders counted in `failed` (one per recipient, chosen as above), in the CSV's order, for
+   * Retry failed to start again; a failed render already started again is not among them, as its newer copy stands in.
+   */
+  failedIds: string[];
   /** When its first video was started. */
   startedAt: string;
 }
@@ -272,13 +277,15 @@ function batchTitle(kept: Video[]): string {
 export function batchSummaries(videos: Video[], limit = RECENT_BATCHES): BatchSummary[] {
   return recentBatchGroups(videos, limit).map(({ batchId, videos: all, startedAt }) => {
     const kept = keptBatchVideos(all);
+    const failed = kept.filter((v) => v.status === "failed");
     return {
       batchId,
       title: batchTitle(kept),
       videos: kept.length,
       ready: kept.filter((v) => v.status === "completed").length,
       making: kept.filter((v) => v.status === "queued" || v.status === "processing").length,
-      failed: kept.filter((v) => v.status === "failed").length,
+      failed: failed.length,
+      failedIds: failed.map((v) => v.id),
       startedAt,
     };
   });

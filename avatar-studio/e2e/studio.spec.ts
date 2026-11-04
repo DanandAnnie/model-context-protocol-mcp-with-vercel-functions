@@ -6639,6 +6639,62 @@ test("expired workspace invites are listed for owners, to invite again or dismis
   }
 });
 
+test("the Workspace page says how many seats are used, and stops inviting when none are left", async ({ page }) => {
+  const created = await page.request.post("/api/workspaces", { data: { name: `Seats ${Date.now().toString(36)}` } });
+  expect(created.status()).toBe(201);
+  const ws = (await created.json()).workspace as { id: string };
+  try {
+    expect((await page.request.post("/api/workspaces/switch", { data: { id: ws.id } })).status()).toBe(200);
+    await page.goto("/workspace");
+    const seats = page.getByTestId("seats");
+    await expect(seats).toHaveText("1 of 50 seats used: 1 member.");
+    // A pending invite holds a seat.
+    expect((await page.request.post(`/api/workspaces/${ws.id}/invites`, { data: { email: "dan@example.com", role: "viewer" } })).status()).toBe(201);
+    await page.reload();
+    await expect(seats).toHaveText("2 of 50 seats used: 1 member and 1 pending invite.");
+    const button = page.getByTestId("create-invite");
+    await expect(button).not.toHaveAttribute("aria-disabled", "true");
+
+    // Nearly full and full are answered as such (the server's own limit is covered by the unit tests).
+    let fake = { members: 47, pending: 0, max: 50 };
+    await page.route("**/api/workspaces", async (route) => {
+      const res = await route.fetch();
+      const body = (await res.json()) as { workspaces: Array<{ id: string; seats?: unknown }> };
+      for (const w of body.workspaces) if (w.id === ws.id) w.seats = fake;
+      await route.fulfill({ response: res, json: body });
+    });
+    await page.reload();
+    await expect(seats).toHaveText("47 of 50 seats used: 47 members. Room for 3 more.");
+    const box = page.getByLabel("Email addresses (optional)");
+    // A repeat takes no seat: three different addresses fit in three.
+    await box.fill("a@x.com, A@x.com, b@x.com, c@x.com");
+    await expect(page.getByTestId("seats-over")).toHaveCount(0);
+    await box.fill("a@x.com, b@x.com, c@x.com, d@x.com");
+    await expect(page.getByTestId("seats-over")).toHaveText("That is 4 addresses and there is room for 3 more; addresses that are members or already invited do not count.");
+    await expect(button).toHaveAttribute("aria-describedby", "seats-line seats-note");
+    await expect(button).not.toHaveAttribute("aria-disabled", "true");
+    fake = { members: 48, pending: 2, max: 50 };
+    await page.reload();
+    await expect(seats).toHaveText("50 of 50 seats used: 48 members and 2 pending invites. The workspace is full: remove a member or revoke a pending invite to invite someone.");
+    // Full: the button stays focusable (aria-disabled, so a keyboard user is not dropped) but does nothing.
+    await expect(button).toHaveAttribute("aria-disabled", "true");
+    await box.fill("e@x.com, f@x.com");
+    await expect(page.getByTestId("seats-over")).toHaveCount(0);
+    let posted = 0;
+    page.on("request", (r) => {
+      if (r.method() === "POST" && r.url().endsWith(`/api/workspaces/${ws.id}/invites`)) posted++;
+    });
+    await button.focus();
+    await page.keyboard.press("Enter");
+    await expect(button).toBeFocused();
+    expect(posted).toBe(0);
+  } finally {
+    await page.unroute("**/api/workspaces");
+    await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
+    expect((await page.request.delete(`/api/workspaces/${ws.id}`)).status()).toBe(204);
+  }
+});
+
 test("pending workspace invites can be resent or renewed: same link, a fresh week", async ({ page }) => {
   const created = await page.request.post("/api/workspaces", { data: { name: `Invites ${Date.now().toString(36)}` } });
   expect(created.status()).toBe(201);

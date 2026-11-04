@@ -8,7 +8,7 @@ import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
 import { ACTIVITY_AREAS, ACTIVITY_AREA_LABELS, ACTIVITY_KEPT, ACTIVITY_PAGE, activityFilterPhrase, canShowMoreActivity, nextActivityLimit, activitySeenKey, activitySeenMark, describeActivity, newActivityCount, newActivityIds, parseActivityArea, type ActivityArea } from "@/lib/activity-text";
 import { readSeenMark } from "@/lib/comment-list";
-import { EXPIRED_INVITE_DAYS, bulkInviteSummary, splitEmails, type BulkInviteAnswer } from "@/lib/invite-text";
+import { EXPIRED_INVITE_DAYS, bulkInviteSummary, seatLine, seatsLeft, splitEmails, type BulkInviteAnswer, type Seats } from "@/lib/invite-text";
 import { roleArticle } from "@/lib/roles";
 import type { ActivityEvent, WorkspaceRole } from "@/lib/types";
 
@@ -20,6 +20,8 @@ interface View {
   invites: Array<{ token: string; email?: string; role: WorkspaceRole; expiresAt: string }>;
   /** Invites that lapsed in the last 30 days, for owners to send again or dismiss. */
   expiredInvites?: Array<{ token: string; email?: string; role: WorkspaceRole; expiresAt: string }>;
+  /** Members and pending invites against the workspace's limit. */
+  seats?: Seats;
 }
 interface Summary {
   personalId: string;
@@ -102,6 +104,19 @@ export default function WorkspacePage() {
   // The invite last resent or renewed, and what the status line says about it (cleared first so a repeat is heard again).
   const [resent, setResent] = useState<{ token: string; text: string } | null>(null);
   const [inviteStatus, setInviteStatus] = useState("");
+  // Seats left for invites (members and pending invites against the limit); only owners get the count.
+  const left = ws?.seats ? seatsLeft(ws.seats) : Infinity;
+  const full = left === 0;
+  // Say so when the workspace fills or frees a seat, after whatever the last action said.
+  const wasFull = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (!ws?.seats) return;
+    if (wasFull.current !== null && wasFull.current !== full) {
+      const said = full ? "The workspace is now full." : "A seat is free again.";
+      setInviteStatus((s) => (s ? `${s} ${said}` : said));
+    }
+    wasFull.current = full;
+  }, [full, ws?.seats]);
   // What the last batch of invites did, and which pending invite's link was just copied.
   const [batchNote, setBatchNote] = useState<string | null>(null);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
@@ -123,7 +138,8 @@ export default function WorkspacePage() {
   }
 
   async function invite() {
-    if (!ws) return;
+    // aria-disabled rather than disabled when full, so the button that took the last seat keeps the focus.
+    if (!ws || full) return;
     const emails = splitEmails(email);
     setBatchNote(null);
     if (emails.length > 1) {
@@ -173,7 +189,7 @@ export default function WorkspacePage() {
 
   /** Sends an expired invite again: a new link with the same address and role, and the email when it names one. */
   async function inviteAgain(i: { token: string; email?: string; role: WorkspaceRole }) {
-    if (!ws || busy) return;
+    if (!ws || busy || full) return;
     setInviteStatus("");
     setBatchNote(null);
     await run(async () => {
@@ -247,6 +263,8 @@ export default function WorkspacePage() {
   }
   const isOwner = ws.role === "owner";
   const pasted = splitEmails(email);
+  // Repeats are skipped by the server, so they take no seat.
+  const pastedUnique = new Set(pasted.map((e) => e.toLowerCase())).size;
 
   return (
     <>
@@ -381,6 +399,16 @@ export default function WorkspacePage() {
                 {inviteStatus}
               </p>
               <p className="mt-1 text-xs text-slate-500">Creates a link that joins this workspace. Anyone with the link can use it, so send it privately. Links expire after 7 days.</p>
+              {ws.seats && (
+                <p className={`mt-2 text-xs ${left <= 5 ? "font-medium text-amber-800" : "text-slate-600"}`} id="seats-line" data-testid="seats">
+                  {seatLine(ws.seats)}{" "}
+                  {full
+                    ? "The workspace is full: remove a member or revoke a pending invite to invite someone."
+                    : left <= 5
+                      ? `Room for ${left} more.`
+                      : null}
+                </p>
+              )}
               <div className="mt-3 space-y-3">
                 <Field
                   label="Email addresses (optional)"
@@ -404,9 +432,14 @@ export default function WorkspacePage() {
                     <option value="owner">Owner: also manage members</option>
                   </select>
                 </Field>
-                <Button onClick={invite} loading={busy} data-testid="create-invite">
+                <Button onClick={invite} loading={busy} data-testid="create-invite" aria-disabled={full || undefined} aria-describedby={[ws.seats && "seats-line", !full && pastedUnique > left && "seats-note"].filter(Boolean).join(" ") || undefined}>
                   <Link2 className="h-4 w-4" /> {pasted.length > 1 ? `Invite ${pasted.length} people` : "Create invite link"}
                 </Button>
+                {!full && pastedUnique > left && (
+                  <p id="seats-note" className="text-xs text-amber-800" data-testid="seats-over">
+                    That is {pastedUnique} addresses and there is room for {left} more; addresses that are members or already invited do not count.
+                  </p>
+                )}
                 {batchNote && (
                   <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-medium text-emerald-900" data-testid="invite-batch">
                     {batchNote}
@@ -478,8 +511,9 @@ export default function WorkspacePage() {
                       <span className="flex shrink-0 items-center gap-3">
                         <button
                           type="button"
-                          aria-disabled={busy}
+                          aria-disabled={busy || full}
                           data-again={i.token}
+                          title={full ? "The workspace is full" : undefined}
                           onClick={() => inviteAgain(i)}
                           aria-label={`Invite again: ${i.email ?? `${i.role} link invite`}, expired ${formatDate(i.expiresAt)}`}
                           className="text-slate-500 hover:text-indigo-700 aria-disabled:cursor-wait aria-disabled:opacity-60"

@@ -62,7 +62,7 @@ import { conversationMatches } from "../transcripts";
 import { ANALYTICS_COLUMNS, analyticsRows, bumpViewsByDay, computeInsights, finishRateOf, viewsInLast, viewsPerDay } from "../insights";
 import { EXPIRED_INVITE_DAYS, acceptInvite, bulkInviteSchema, reinviteExpired, canEdit, canManageAccount, createInvite, createInvites, createWorkspace, deleteWorkspace, findInvite, inviteSchema, listWorkspaces, removeMember, RESEND_COOLDOWN_MS, renewInvite, revokeInvite, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
 import { deliverInvite } from "../invite-mail";
-import { bulkInviteSummary, splitEmails } from "../invite-text";
+import { bulkInviteSummary, seatLine, seatsLeft, splitEmails } from "../invite-text";
 import { LimitError as InviteLimitError } from "../errors";
 import { roleArticle, roleCanEdit, roleSchema } from "../roles";
 import { framingFor, isPhotoAvatar, type Video } from "../types";
@@ -2795,6 +2795,21 @@ describe("workspaces", () => {
     assert.equal((await workspaceView(ws, alice)).invites.filter((i) => i.email === "eve@example.com").length, 1);
     // A single invite draws on the allowance too.
     await assert.rejects(createInvite(ws.id, { email: "zed@example.com", role: "viewer" }, alice, () => false), (e: unknown) => e instanceof InviteLimitError);
+  });
+
+  it("counts seats: members and pending invites against the limit, owners seeing the pending ones", async () => {
+    const ws = await createWorkspace("Seats", alice);
+    await createInvite(ws.id, { email: "dan@example.com", role: "viewer" }, alice);
+    const join = await createInvite(ws.id, { role: "editor" }, alice);
+    await acceptInvite(join.token, bob);
+    const fresh = (await listWorkspaces(alice.id)).find((w) => w.id === ws.id)!;
+    assert.deepEqual((await workspaceView(fresh, alice)).seats, { members: 2, pending: 1, max: 50 });
+    assert.equal((await workspaceView(fresh, bob)).seats, undefined, "an editor, who sees no invites, gets no seat count");
+    assert.equal(seatsLeft({ members: 2, pending: 1, max: 50 }), 47);
+    assert.equal(seatsLeft({ members: 49, pending: 3, max: 50 }), 0, "never below none");
+    assert.equal(seatLine({ members: 2, pending: 1, max: 50 }), "3 of 50 seats used: 2 members and 1 pending invite.");
+    assert.equal(seatLine({ members: 1, pending: 0, max: 50 }), "1 of 50 seats used: 1 member.");
+    assert.equal(seatLine({ members: 48, pending: 2, max: 50 }), "50 of 50 seats used: 48 members and 2 pending invites.");
   });
 
   it("reads pasted addresses and sums up a batch", () => {

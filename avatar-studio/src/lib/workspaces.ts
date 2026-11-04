@@ -328,5 +328,7 @@ export async function workspaceView(ws: Workspace, user: User) {
     members: ws.members.map((m) => ({ userId: m.userId, email: m.email, role: m.role, joinedAt: m.joinedAt, you: m.userId === user.id })),
     invites: invites.map((i) => ({ token: i.token, email: i.email, role: i.role, expiresAt: i.expiresAt })),
     expiredInvites: expired.map((i) => ({ token: i.token, email: i.email, role: i.role, expiresAt: i.expiresAt })),
+    // Pending invites hold a seat until they are used or lapse; only owners, who see the invites, get the count.
+    seats: owner ? { members: ws.members.length, pending: invites.length, max: MAX_MEMBERS } : undefined,
   };
 }

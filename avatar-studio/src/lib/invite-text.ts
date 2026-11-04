@@ -48,3 +48,24 @@ export function bulkInviteSummary(answer: BulkInviteAnswer): string {
   if (answer.skipped.length) parts.push(`Skipped ${answer.skipped.map((s) => `${s.email} (${SKIP_WORDS[s.reason]})`).join(", ")}.`);
   return parts.join(" ");
 }
+
+export interface Seats {
+  members: number;
+  pending: number;
+  max: number;
+}
+
+/** Seats still free: the limit less members and pending invites (each pending invite holds one). */
+export function seatsLeft(seats: Seats): number {
+  return Math.max(0, seats.max - seats.members - seats.pending);
+}
+
+const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** "12 of 50 seats used: 10 members and 2 pending invites." */
+export function seatLine(seats: Seats): string {
+  const used = seats.members + seats.pending;
+  const parts = [count(seats.members, "member", "members")];
+  if (seats.pending) parts.push(count(seats.pending, "pending invite", "pending invites"));
+  return `${used} of ${seats.max} seats used: ${parts.join(" and ")}.`;
+}
